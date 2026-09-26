@@ -6,6 +6,7 @@
 
 {% block header_actions %}
   {{ page_header_actions([
+    {"label": "Start process", "type": "link", "href": "/processes/start?ticket_id=" ~ ticket.id},
     {"label": "Clock history", "type": "button", "attrs": {"data-ticket-page-clock-history": true}},
     {"label": "Audit Trail", "type": "button", "attrs": {"data-ticket-automation-history-open": true, "data-ticket-id": ticket.id}},
     {"label": "All tickets", "type": "link", "href": "/admin/tickets"}

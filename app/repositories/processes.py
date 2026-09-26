@@ -14,10 +14,13 @@ async def list_templates(company_id: int) -> list[dict[str, Any]]:
 
 
 async def get_template(company_id: int, template_id: int) -> dict[str, Any] | None:
-    return await db.fetch_one(
+    template = await db.fetch_one(
         "SELECT * FROM process_templates WHERE id = %s AND company_id = %s",
         (template_id, company_id),
     )
+    if template:
+        template["steps"] = await template_steps(template_id, int(template["current_version"]))
+    return template
 
 
 async def template_steps(template_id: int, version: int) -> list[dict[str, Any]]:
@@ -88,8 +91,33 @@ async def get_run(company_id: int, run_id: int) -> dict[str, Any] | None:
     return run
 
 
-async def list_runs(company_id: int) -> list[dict[str, Any]]:
-    return list(await db.fetch_all("SELECT * FROM process_runs WHERE company_id = %s ORDER BY started_at DESC, id DESC", (company_id,)) or [])
+async def list_runs(company_id: int, *, assignee_id: int | None = None) -> list[dict[str, Any]]:
+    sql = "SELECT pr.*, u.first_name AS assignee_first_name, u.last_name AS assignee_last_name FROM process_runs pr LEFT JOIN users u ON u.id = pr.assignee_id WHERE pr.company_id = %s"
+    params: tuple[Any, ...] = (company_id,)
+    if assignee_id is not None:
+        sql += " AND pr.assignee_id = %s"
+        params += (assignee_id,)
+    sql += " ORDER BY pr.started_at DESC, pr.id DESC"
+    runs = list(await db.fetch_all(sql, params) or [])
+    for run in runs:
+        run["assignee_name"] = " ".join(
+            part for part in (run.pop("assignee_first_name", None), run.pop("assignee_last_name", None)) if part
+        )
+    return runs
+
+
+async def list_assignees(company_id: int) -> list[dict[str, Any]]:
+    return list(await db.fetch_all(
+        "SELECT u.id, u.first_name, u.last_name, u.email FROM users u JOIN user_companies uc ON uc.user_id = u.id WHERE uc.company_id = %s ORDER BY u.first_name, u.last_name, u.id",
+        (company_id,),
+    ) or [])
+
+
+async def reassign_run(company_id: int, run_id: int, assignee_id: int | None) -> bool:
+    return await db.execute_rowcount(
+        "UPDATE process_runs SET assignee_id = %s WHERE id = %s AND company_id = %s",
+        (assignee_id, run_id, company_id),
+    ) == 1
 
 
 async def update_step(company_id: int, run_id: int, step_id: int, *, status: str,

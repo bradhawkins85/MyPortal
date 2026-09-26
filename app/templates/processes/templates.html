@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% block header_title %}Process templates{% endblock %}
+{% block title %}Process templates{% endblock %}
+{% block header_actions %}{{ page_header_actions([{"label": "New template", "type": "link", "href": "/processes/new"}, {"label": "Active runs", "type": "link", "href": "/processes"}]) }}{% endblock %}
+{% block content %}
+<section class="card card--panel" data-process-table>
+  <header class="card__header"><div><h2 class="card__title">Reusable procedures</h2><p class="card__subtitle">Publishing an edit creates a new version. Existing runs retain their immutable snapshot.</p></div></header>
+  <div class="card__body">
+    <div class="table-toolbar"><label class="form-group"><span class="form-label">Filter templates</span><input class="input" type="search" data-table-search placeholder="Search by name or description"></label></div>
+    <div class="table-responsive"><table class="table"><thead><tr><th><button class="button button--ghost button--small" data-sort="name">Name</button></th><th><button class="button button--ghost button--small" data-sort="version">Version</button></th><th>Status</th><th>Updated</th><th>Action</th></tr></thead><tbody>
+      {% for template in process_templates %}<tr data-search="{{ template.name }} {{ template.description or '' }}" data-name="{{ template.name | lower }}" data-version="{{ template.current_version }}"><td><strong>{{ template.name }}</strong><br><span class="text-muted">{{ template.description or 'No description' }}</span></td><td>v{{ template.current_version }}</td><td><span class="status status--{{ 'success' if template.is_active else 'neutral' }}">{{ 'Active' if template.is_active else 'Inactive' }}</span></td><td><span data-utc="{{ template.updated_at }}">{{ template.updated_at }}</span></td><td><a class="button button--ghost button--small" href="/processes/templates/{{ template.id }}">Edit</a></td></tr>
+      {% else %}<tr data-empty><td colspan="5"><div class="empty-state"><h3>No process templates</h3><p>Create a reusable ordered procedure to get started.</p>{% if can_write_processes %}<a class="button button--primary" href="/processes/new">Create template</a>{% endif %}</div></td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/processes.js') }}" defer></script>{% endblock %}

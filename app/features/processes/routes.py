@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, field_validator
 
 from app.api.dependencies.auth import get_current_session, get_current_user
@@ -13,6 +14,7 @@ from app.security.session import SessionData
 from app.services import audit as audit_service
 
 router = APIRouter(prefix="/api/processes", tags=["Processes"])
+web_router = APIRouter(tags=["Processes"])
 
 
 class StepInput(BaseModel):
@@ -51,7 +53,8 @@ class StepUpdate(BaseModel):
 
 
 class RunStatusUpdate(BaseModel):
-    status: Literal["pending", "in_progress", "completed", "cancelled"]
+    status: Literal["pending", "in_progress", "paused", "completed", "failed", "cancelled"]
+    assignee_id: int | None = Field(default=None, gt=0)
 
 
 async def access_context(
@@ -83,6 +86,14 @@ async def list_templates(context: tuple[dict, int, dict | None] = Depends(access
     return await repo.list_templates(context[1])
 
 
+@router.get("/templates/{template_id}", summary="Get the current editable template version")
+async def get_template(template_id: int, context: tuple[dict, int, dict | None] = Depends(access_context)):
+    template = await repo.get_template(context[1], template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Process template not found")
+    return template
+
+
 @router.post("/templates", status_code=status.HTTP_201_CREATED, summary="Create a versioned process template")
 async def create_template(payload: TemplateInput, request: Request,
                           context: tuple[dict, int, dict | None] = Depends(access_context)):
@@ -111,8 +122,9 @@ async def update_template(template_id: int, payload: TemplateInput, request: Req
 
 
 @router.get("/runs", summary="List execution runs for the active company")
-async def list_runs(context: tuple[dict, int, dict | None] = Depends(access_context)):
-    return await repo.list_runs(context[1])
+async def list_runs(assigned_to_me: bool = Query(False),
+                    context: tuple[dict, int, dict | None] = Depends(access_context)):
+    return await repo.list_runs(context[1], assignee_id=int(context[0]["id"]) if assigned_to_me else None)
 
 
 @router.post("/runs", status_code=status.HTTP_201_CREATED, summary="Start a run with an immutable step snapshot")
@@ -156,11 +168,81 @@ async def get_run(run_id: int, context: tuple[dict, int, dict | None] = Depends(
 async def update_run(run_id: int, payload: RunStatusUpdate, request: Request,
                      context: tuple[dict, int, dict | None] = Depends(access_context)):
     user, company_id = require_write(context)
+    if "assignee_id" in payload.model_fields_set:
+        if payload.assignee_id:
+            membership = await user_company_repo.get_user_company(payload.assignee_id, company_id)
+            if not membership:
+                raise HTTPException(status_code=422, detail="Assignee is not a member of the active company")
+        if not await repo.reassign_run(company_id, run_id, payload.assignee_id):
+            raise HTTPException(status_code=404, detail="Process run not found")
     if not await repo.update_run_status(company_id, run_id, payload.status, int(user["id"])):
         raise HTTPException(status_code=404, detail="Process run not found")
     await audit_service.record(action="process.run.update", request=request, user_id=int(user["id"]),
                                entity_type="process_run", entity_id=run_id, after={"status": payload.status})
     return await repo.get_run(company_id, run_id)
+
+
+async def _page_context(request: Request, context: tuple[dict, int, dict | None], **extra):
+    from app import main as main_module
+    user, company_id, membership = context
+    return await main_module._render_template(
+        extra.pop("template_name"), request, user,
+        extra={"can_write_processes": main_module._membership_menu_can(user, membership, "menu.assets", write=True),
+               "process_company_id": company_id, **extra},
+    )
+
+
+@web_router.get("/processes", response_class=HTMLResponse, summary="Process runs workspace")
+async def processes_page(request: Request, assigned: bool = Query(False),
+                         context: tuple[dict, int, dict | None] = Depends(access_context)):
+    return await _page_context(request, context, template_name="processes/index.html",
+                               title="Processes", assigned=assigned,
+                               runs=await repo.list_runs(context[1], assignee_id=int(context[0]["id"]) if assigned else None))
+
+
+@web_router.get("/processes/templates", response_class=HTMLResponse, summary="Process template library")
+async def templates_page(request: Request,
+                         context: tuple[dict, int, dict | None] = Depends(access_context)):
+    return await _page_context(request, context, template_name="processes/templates.html",
+                               title="Process templates", process_templates=await repo.list_templates(context[1]))
+
+
+@web_router.get("/processes/templates/{template_id}", response_class=HTMLResponse, summary="Edit process template")
+async def template_editor(request: Request, template_id: int,
+                          context: tuple[dict, int, dict | None] = Depends(access_context)):
+    template = await repo.get_template(context[1], template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Process template not found")
+    return await _page_context(request, context, template_name="processes/template_editor.html",
+                               title="Edit process template", process_template=template)
+
+
+@web_router.get("/processes/new", response_class=HTMLResponse, summary="Create process template")
+async def template_new(request: Request,
+                       context: tuple[dict, int, dict | None] = Depends(access_context)):
+    require_write(context)
+    return await _page_context(request, context, template_name="processes/template_editor.html",
+                               title="Create process template", process_template=None)
+
+
+@web_router.get("/processes/start", response_class=HTMLResponse, summary="Start a process run")
+async def start_page(request: Request, asset_id: int | None = Query(None, gt=0),
+                     ticket_id: int | None = Query(None, gt=0),
+                     context: tuple[dict, int, dict | None] = Depends(access_context)):
+    require_write(context)
+    return await _page_context(request, context, template_name="processes/start.html", title="Start process",
+                               templates=await repo.list_templates(context[1]), assignees=await repo.list_assignees(context[1]),
+                               asset_id=asset_id, ticket_id=ticket_id)
+
+
+@web_router.get("/processes/{run_id}", response_class=HTMLResponse, summary="Process run detail")
+async def run_page(request: Request, run_id: int,
+                   context: tuple[dict, int, dict | None] = Depends(access_context)):
+    run = await repo.get_run(context[1], run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Process run not found")
+    return await _page_context(request, context, template_name="processes/detail.html", title=run["template_name"],
+                               run=run, assignees=await repo.list_assignees(context[1]))
 
 
 @router.patch("/runs/{run_id}/steps/{step_id}", summary="Record step notes and completion attribution")
