@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, time, timezone
 from typing import Any
 
@@ -361,7 +362,10 @@ async def upsert_asset(
     tactical_asset_id: str | None = None,
     mac_address: str | None = None,
     match_name: bool = False,
-) -> int:
+    source: str | None = None,
+    source_external_id: str | None = None,
+    source_fields: list[str] | None = None,
+) -> int | None:
     sync_id = str(syncro_asset_id) if syncro_asset_id else None
     tactical_id = str(tactical_asset_id) if tactical_asset_id else None
     ram_value = _coerce_float(ram_gb)
@@ -372,7 +376,15 @@ async def upsert_asset(
     warranty_end_db = _to_mysql_date(warranty_end_date)
 
     row = None
-    if sync_id:
+    source_key = str(source_external_id or "").strip() or None
+    if source and source_key:
+        link = await db.fetch_one(
+            "SELECT asset_id FROM asset_source_records WHERE company_id = %s AND source = %s AND external_id = %s",
+            (company_id, source, source_key),
+        )
+        if link and link.get("asset_id"):
+            row = {"id": link["asset_id"]}
+    if not row and sync_id:
         row = await db.fetch_one(
             "SELECT id FROM assets WHERE company_id = %s AND syncro_asset_id = %s",
             (company_id, sync_id),
@@ -383,15 +395,31 @@ async def upsert_asset(
             (company_id, tactical_id),
         )
     if not row and serial_number:
-        row = await db.fetch_one(
+        candidates = await db.fetch_all(
             "SELECT id FROM assets WHERE company_id = %s AND serial_number = %s",
             (company_id, serial_number),
         )
+        if len(candidates or []) == 1:
+            row = candidates[0]
+        elif len(candidates or []) > 1 and source and source_key:
+            await _record_asset_source(
+                company_id, source, source_key, None, "quarantined", source_fields,
+                "Multiple assets share the supplied serial number",
+            )
+            return None
     if not row and match_name and name:
-        row = await db.fetch_one(
+        candidates = await db.fetch_all(
             "SELECT id FROM assets WHERE company_id = %s AND LOWER(name) = LOWER(%s)",
             (company_id, name),
         )
+        if len(candidates or []) == 1:
+            row = candidates[0]
+        elif len(candidates or []) > 1 and source and source_key:
+            await _record_asset_source(
+                company_id, source, source_key, None, "quarantined", source_fields,
+                "Multiple assets share the supplied name",
+            )
+            return None
 
     params = (
         name,
@@ -438,17 +466,17 @@ async def upsert_asset(
                 performance_score = %s,
                 warranty_status = %s,
                 warranty_end_date = %s,
-                syncro_asset_id = %s,
-                tactical_asset_id = %s,
+                syncro_asset_id = COALESCE(%s, syncro_asset_id),
+                tactical_asset_id = COALESCE(%s, tactical_asset_id),
                 serial_number = %s,
                 mac_address = %s
             WHERE id = %s
             """,
             params + (row["id"],),
         )
-        return int(row["id"])
+        asset_id = int(row["id"])
     else:
-        return await db.execute_returning_lastrowid(
+        asset_id = await db.execute_returning_lastrowid(
             """
             INSERT INTO assets (
                 company_id,
@@ -500,6 +528,54 @@ async def upsert_asset(
                 mac_address,
             ),
         )
+    if source and source_key:
+        await _record_asset_source(
+            company_id, source, source_key, asset_id, "active", source_fields, None
+        )
+    return asset_id
+
+
+async def _record_asset_source(
+    company_id: int,
+    source: str,
+    external_id: str,
+    asset_id: int | None,
+    status: str,
+    fields: list[str] | None,
+    error: str | None,
+) -> None:
+    """Persist provenance without putting integration state on the canonical asset."""
+    ownership = json.dumps(sorted(set(fields or [])))
+    existing = await db.fetch_one(
+        "SELECT id FROM asset_source_records WHERE company_id = %s AND source = %s AND external_id = %s",
+        (company_id, source, external_id),
+    )
+    if existing:
+        await db.execute(
+            "UPDATE asset_source_records SET asset_id = %s, status = %s, field_ownership_json = %s, last_seen_at = UTC_TIMESTAMP(), last_success_at = CASE WHEN %s = 'active' THEN UTC_TIMESTAMP() ELSE last_success_at END, last_error = %s WHERE id = %s",
+            (asset_id, status, ownership, status, error, existing["id"]),
+        )
+    else:
+        await db.execute(
+            "INSERT INTO asset_source_records (company_id, asset_id, source, external_id, status, field_ownership_json, last_seen_at, last_success_at, last_error) VALUES (%s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(), CASE WHEN %s = 'active' THEN UTC_TIMESTAMP() ELSE NULL END, %s)",
+            (company_id, asset_id, source, external_id, status, ownership, status, error),
+        )
+
+
+async def start_sync_run(company_id: int, source: str) -> int:
+    return await db.execute_returning_lastrowid(
+        "INSERT INTO integration_sync_runs (company_id, source) VALUES (%s, %s)",
+        (company_id, source),
+    )
+
+
+async def finish_sync_run(
+    run_id: int, *, processed: int = 0, error: str | None = None
+) -> None:
+    await db.execute(
+        "UPDATE integration_sync_runs SET status = %s, records_processed = %s, safe_error = %s, completed_at = UTC_TIMESTAMP() WHERE id = %s",
+        ("failed" if error else "succeeded", processed, (error or "")[:500] or None, run_id),
+    )
 
 
 async def count_active_assets(*, company_id: Any = None, since: Any = None) -> int:
