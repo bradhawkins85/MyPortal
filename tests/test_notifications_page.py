@@ -119,6 +119,7 @@ def patched_dependencies(monkeypatch):
             "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": 0},
             "notification_unread_count": 1,
             "plausible_config": {"enabled": False},
+            "module_enabled": {},
         }
         if extra:
             context.update(extra)
@@ -144,6 +145,9 @@ def test_notifications_page_returns_html(patched_dependencies):
     assert "Mark all as read" in response.text
     assert "Mark selected as read" in response.text
     assert "Exclude" in response.text
+    assert '<option value="all" selected>All notifications</option>' in response.text
+    assert '<option value="created_at" selected>Created</option>' in response.text
+    assert '<option value="25" selected>25 per page</option>' in response.text
 
 
 def test_notification_settings_page_returns_html(monkeypatch, patched_dependencies):
