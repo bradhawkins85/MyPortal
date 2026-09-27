@@ -89,6 +89,74 @@ def test_upgrade_prepares_revision_without_mutating_control_checkout():
     assert 'chown -R myportal:myportal "$PROJECT_ROOT"' not in SCRIPT
 
 
+def test_missing_deployed_release_plans_from_empty_tree_not_control_head(tmp_path):
+    function = SCRIPT[
+        SCRIPT.index("resolve_plan_base() {") : SCRIPT.index(
+            "\npublish_paths_without_worker_reload()"
+        )
+    ]
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+
+    result = subprocess.run(
+        ["bash", "-c", "set -Eeuo pipefail\n" + function + "\nresolve_plan_base ''"],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == subprocess.check_output(
+        ["git", "hash-object", "-t", "tree", "/dev/null"], cwd=repo, text=True
+    ).strip()
+    planning = SCRIPT[SCRIPT.index('PLAN_BASE=$(resolve_plan_base "$PREVIOUS_RELEASE")') :]
+    assert 'PLAN_BASE=$(resolve_plan_base "$PREVIOUS_RELEASE")' in planning
+    assert "git rev-parse 'HEAD^{commit}'" not in planning
+
+
+def test_valid_deployed_release_is_used_as_plan_base(tmp_path):
+    function = SCRIPT[
+        SCRIPT.index("resolve_plan_base() {") : SCRIPT.index(
+            "\npublish_paths_without_worker_reload()"
+        )
+    ]
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Upgrade Test"], cwd=repo, check=True
+    )
+    (repo / "tracked").write_text("fixture\n")
+    subprocess.run(["git", "add", "tracked"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=repo, check=True)
+    revision = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+    ).strip()
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -Eeuo pipefail\n" + function + '\nresolve_plan_base "/releases/$REVISION"',
+        ],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        env={**os.environ, "REVISION": revision},
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == revision
+
+
 def test_release_has_private_dependencies_and_shared_mutable_state():
     assert 'python3 -m venv "$staging"' in SCRIPT
     assert (
