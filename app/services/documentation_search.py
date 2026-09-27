@@ -17,7 +17,7 @@ from typing import Any
 from app.repositories import rag_index as rag_repo
 from app.services import company_access
 from app.services.rag_index import embedding_model, tokenise
-from app.services.rag_permissions import can_access_candidate
+from app.services.rag_permissions import can_access_current_candidate
 from app.services.rag_urls import canonical_source_url
 
 DOCUMENTATION_SOURCES = ("assets", "knowledge_base")
@@ -125,6 +125,7 @@ async def search_documentation(
     terms = tokenise(query_text)
     phrase = query_text.casefold()
     visible_rows: list[tuple[Mapping[str, Any], dict[str, Any]]] = []
+    authorisation_cache: dict[tuple[str, str], bool] = {}
     for source in requested:
         rows = await rag_repo.list_active_chunks(
             embedding_model=embedding_model(), source_types=[source], limit=10000
@@ -134,10 +135,15 @@ async def search_documentation(
             candidate = {
                 "permission_scope": _json_object(row.get("permission_scope_json")),
                 "company_id": row.get("company_id"),
+                "source_type": row.get("source_type"),
+                "source_id": row.get("source_id"),
             }
             # The ordering here is a security boundary: do not inspect chunk text,
             # calculate relevance, or count until its persisted ACL has passed.
-            if not can_access_candidate(candidate, user=user, memberships=resolved_memberships):
+            if not await can_access_current_candidate(
+                candidate, user=user, memberships=resolved_memberships,
+                cache=authorisation_cache,
+            ):
                 continue
             scope_companies = candidate["permission_scope"].get("company_ids") or []
             if effective_company is not None and scope_companies:

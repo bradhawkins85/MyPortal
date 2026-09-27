@@ -1,6 +1,6 @@
 import pytest
 
-from app.services import rag_index
+from app.services import rag_index, rag_permissions
 from app.services.rag_permissions import can_access_candidate
 
 
@@ -102,3 +102,47 @@ def test_every_indexed_source_type_has_an_explicit_policy(source_type, item):
 
 def test_unknown_index_source_has_no_policy():
     assert rag_index._permission_scope_for_source("new_sensitive_source", {}) is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_live_kb_role_audience_revocation_overrides_stale_index(monkeypatch):
+    async def article(_article_id):
+        return {"id": 44, "is_published": True, "permission_scope": "company"}
+
+    async def denied(*_args):
+        return False
+
+    monkeypatch.setattr(rag_permissions.kb_repo, "get_article_by_id", article)
+    monkeypatch.setattr(rag_permissions.audience_repo, "role_can_access", denied)
+    indexed = candidate(
+        {"version": 1, "visibility": "company", "company_ids": [7]}
+    ) | {"source_id": "44"}
+    membership = {"company_id": 7, "role_id": 3,
+                  "menu_permissions": {"content.knowledge_base": "read"}}
+
+    assert not await rag_permissions.can_access_current_candidate(
+        indexed, user={"id": 9}, memberships=[membership]
+    )
+
+
+@pytest.mark.anyio("asyncio")
+async def test_live_asset_role_audience_overrides_stale_index(monkeypatch):
+    async def asset(_asset_id):
+        return {"id": 55, "company_id": 7, "customer_visible": True}
+
+    async def denied(*_args):
+        return False
+
+    monkeypatch.setattr(rag_permissions.assets_repo, "get_asset_by_id", asset)
+    monkeypatch.setattr(rag_permissions.audience_repo, "role_can_access", denied)
+    indexed = {
+        "source_type": "assets", "source_id": "55",
+        "permission_scope": {"version": 1, "visibility": "company",
+                             "company_ids": [7], "required_any": ["can_manage_assets"]},
+    }
+    membership = {"company_id": 7, "role_id": 3, "can_manage_assets": True,
+                  "menu_permissions": {"content.assets": "read"}}
+
+    assert not await rag_permissions.can_access_current_candidate(
+        indexed, user={"id": 9}, memberships=[membership]
+    )
