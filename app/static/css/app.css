@@ -5759,7 +5759,7 @@ dialog.modal:not([open]) {
 
   /* Keep reference panels compact so replies and conversation remain the focus. */
   .management__body--ticket-detail-admin {
-    grid-template-columns: minmax(280px, 320px) minmax(360px, 3fr) minmax(0, 7fr);
+    grid-template-columns: clamp(18.5rem, 17vw, 21rem) minmax(30rem, 1fr) minmax(38rem, 1.25fr);
   }
 
   .management__body--ticket-detail-two-column {
@@ -10039,6 +10039,84 @@ a.service-card__ai-icon:hover {
 .ticket-reply-worklog > summary { cursor: pointer; color: #e2e8f0; font-weight: 650; }
 .ticket-reply-worklog > summary span { margin-left: 0.4rem; color: #cbd5e1; font-size: 0.8rem; font-weight: 400; }
 .ticket-reply-worklog[open] > summary { margin-bottom: 0.8rem; }
+
+/* Keep ticket context readable while giving the reply its own working area. */
+.management__body--ticket-detail-admin {
+  gap: 1rem;
+}
+
+.management__body--ticket-detail-admin .management__column,
+.management__body--ticket-detail-admin .management__column-group--main {
+  gap: 1rem;
+}
+
+.management__body--ticket-detail-admin .management__column--details .form-input,
+.management__body--ticket-detail-admin .management__column--details .form-textarea,
+.management__body--ticket-detail-admin .ticket-reply-form .form-input,
+.management__body--ticket-detail-admin .ticket-reply-form .form-textarea,
+.management__body--ticket-detail-admin .ticket-reply-form .rich-text-editor {
+  max-width: 100%;
+}
+
+.management__body--ticket-detail-admin .management__column--activity {
+  container: ticket-activity / inline-size;
+}
+
+.ticket-reply-compose-grid,
+.ticket-reply-extras,
+.ticket-reply-flags {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.ticket-reply-compose-grid > *,
+.ticket-reply-extras > * {
+  min-width: 0;
+}
+
+.ticket-reply-worklog__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 0.75rem 1rem;
+}
+
+.ticket-reply-worklog__fields > .form-grid {
+  grid-column: 1 / -1;
+}
+
+.ticket-reply-worklog__fields .form-help,
+.ticket-reply-extras .form-help {
+  display: block;
+  margin: 0.3rem 0 0;
+}
+
+.ticket-reply-composer .ticket-reply-form {
+  gap: 0.85rem;
+}
+
+.ticket-reply-composer .ticket-reply-actions {
+  margin-top: 0.25rem;
+}
+
+@media (min-width: 961px) and (max-width: 1799px) {
+  .management__body--ticket-detail-admin {
+    grid-template-columns: minmax(17.5rem, 19rem) minmax(0, 1fr);
+  }
+}
+
+@container ticket-activity (min-width: 65rem) {
+  .ticket-reply-compose-grid {
+    grid-template-columns: minmax(0, 1.35fr) minmax(20rem, 0.85fr);
+    align-items: start;
+    gap: 1.25rem;
+  }
+
+  .ticket-reply-message .rich-text-editor__surface,
+  .ticket-reply-message .rich-text-editor__fallback {
+    min-height: 19rem;
+  }
+}
 
 .form-checkbox-label {
   display: flex;
