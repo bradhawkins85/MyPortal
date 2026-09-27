@@ -10,6 +10,36 @@
 {% block content %}
 <section class="infrastructure-page" aria-describedby="rack-help">
   <p class="sr-only" id="rack-help">Rack space is divided into three width lanes. Choose a free slot to add equipment or reserve space. Choose an occupied slot to inspect or edit it. Full-depth items appear on both faces.</p>
+  <div class="rack-view-bar card card--panel" aria-label="Rack page view">
+    <div>
+      <span class="rack-view-bar__eyebrow">Workspace</span>
+      <strong>Choose your rack experience</strong>
+    </div>
+    <div class="rack-view-switch" role="group" aria-label="Choose rack page view">
+      <button class="rack-view-switch__option" type="button" data-rack-view="new" aria-pressed="true">New</button>
+      <button class="rack-view-switch__option" type="button" data-rack-view="old" aria-pressed="false">Old</button>
+    </div>
+  </div>
+  <section class="rack-workspace" data-rack-new-only aria-labelledby="rack-workspace-title">
+    <div class="rack-workspace__intro">
+      <div>
+        <span class="rack-workspace__kicker">Infrastructure overview</span>
+        <h2 id="rack-workspace-title">Your rack estate, at a glance</h2>
+        <p>Review capacity, jump directly to a cabinet, and manage every physical position from one focused workspace.</p>
+      </div>
+      {% if can_edit %}<button class="button button--primary" type="button" data-rack-create-open>+ Add rack</button>{% endif %}
+    </div>
+    <div class="rack-workspace__metrics" aria-label="Rack estate summary">
+      <div><span>Racks</span><strong>{{ racks|length }}</strong><small>documented cabinets</small></div>
+      <div><span>Equipment</span><strong>{{ equipment|length }}</strong><small>installed items</small></div>
+      <div><span>Reservations</span><strong>{{ reservations|length }}</strong><small>planned placements</small></div>
+      <div><span>Assets</span><strong>{{ assets|length }}</strong><small>available to link</small></div>
+    </div>
+    {% if racks %}<nav class="rack-workspace__nav" aria-label="Jump to a rack">
+      <span>Jump to</span>
+      {% for rack in racks %}<a href="#rack-{{ rack.id }}"><strong>{{ rack.name }}</strong><small>{{ rack.location or 'No location' }} · {{ rack.occupied_percent }}% installed</small></a>{% endfor %}
+    </nav>{% endif %}
+  </section>
   <div class="rack-gallery">
   {% for rack in racks %}
     <article class="rack card card--panel" id="rack-{{ rack.id }}" data-rack-id="{{ rack.id }}" data-rack-name="{{ rack.name }}" data-rack-units="{{ rack.unit_count }}">
