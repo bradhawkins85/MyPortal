@@ -9,6 +9,89 @@ from app.core.database import db
 ADDRESS_STATES = {"available", "reserved", "assigned", "dhcp", "deprecated"}
 
 
+def match_address_network(
+    address: str, networks: list[dict[str, Any]]
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Select the unique, most-specific network containing ``address``."""
+    try:
+        parsed = ipaddress.ip_address(str(address).strip())
+    except ValueError:
+        return None, "Invalid IP address"
+    matches: list[tuple[int, dict[str, Any]]] = []
+    for network in networks:
+        try:
+            parsed_network = ipaddress.ip_network(str(network["cidr"]), strict=False)
+        except (KeyError, ValueError):
+            continue
+        if parsed.version == parsed_network.version and parsed in parsed_network:
+            matches.append((parsed_network.prefixlen, network))
+    if not matches:
+        return None, "No company network contains this address"
+    best_prefix = max(prefix for prefix, _network in matches)
+    best = [network for prefix, network in matches if prefix == best_prefix]
+    if len(best) != 1:
+        return None, "Multiple equally specific networks match; review required"
+    return best[0], None
+
+
+async def preview_discovered_addresses(
+    company_id: int, devices: list[dict[str, Any]], *, use_wan: bool = False
+) -> list[dict[str, Any]]:
+    """Build an import preview without trusting client-supplied subnet choices."""
+    networks = list(await db.fetch_all(
+        "SELECT id,name,cidr FROM ip_networks WHERE company_id=%s ORDER BY name",
+        (company_id,),
+    ) or [])
+    previews = []
+    for device in devices:
+        candidate = device.get("wan_ip") if use_wan else device.get("ip_address")
+        network, reason = match_address_network(str(candidate or ""), networks)
+        previews.append({
+            "device": device,
+            "candidate": str(candidate or ""),
+            "network": network,
+            "reason": reason,
+            "source_url": f"/devices#discovered-device-{device['id']}",
+            "asset_url": f"/assets/{device['matched_asset_id']}" if device.get("matched_asset_id") else None,
+        })
+    return previews
+
+
+async def import_discovered_address(
+    company_id: int, device: dict[str, Any], *, use_wan: bool = False
+) -> dict[str, Any]:
+    """Idempotently document one discovery while preserving manual IPAM data."""
+    preview = (await preview_discovered_addresses(company_id, [device], use_wan=use_wan))[0]
+    if preview["reason"]:
+        return {"status": "skipped", "reason": preview["reason"], **preview}
+    parsed = str(ipaddress.ip_address(preview["candidate"]))
+    existing = await db.fetch_one(
+        """SELECT i.*, COUNT(d.id) AS dns_count
+           FROM ip_addresses i LEFT JOIN ip_dns_names d ON d.ip_address_id=i.id
+           WHERE i.company_id=%s AND i.address=%s GROUP BY i.id""",
+        (company_id, parsed),
+    )
+    asset_id = device.get("matched_asset_id")
+    if existing:
+        same_source = existing.get("source_network_device_id") == device.get("id")
+        same_asset = existing.get("asset_id") == asset_id
+        if not same_source or not same_asset:
+            return {"status": "conflict", "reason": "Address already has a different assignment or source", **preview}
+        return {"status": "updated", "record_id": existing["id"], **preview}
+    try:
+        record_id = await db.execute_returning_lastrowid(
+            """INSERT INTO ip_addresses
+               (company_id,network_id,address,state,asset_id,source_network_device_id)
+               VALUES (%s,%s,%s,'assigned',%s,%s)""",
+            (company_id, preview["network"]["id"], parsed, asset_id, device["id"]),
+        )
+    except Exception:
+        # The company/address unique key is the race-safe final guard. Re-read
+        # rather than overwriting whichever request or technician won.
+        return {"status": "conflict", "reason": "Address was documented concurrently; review required", **preview}
+    return {"status": "created", "record_id": record_id, **preview}
+
+
 async def get_record(table: str, company_id: int, record_id: int) -> dict[str, Any] | None:
     if table not in {"ip_networks", "racks"}:
         raise ValueError("Invalid infrastructure record type")
