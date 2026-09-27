@@ -1077,6 +1077,15 @@ app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), n
 
 
 @app.middleware("http")
+async def core_component_availability_guard(request: Request, call_next: Any) -> Response:
+    """Return 404 for routes owned by a deployment-disabled core component."""
+
+    if not get_component_availability().path_available(request.url.path):
+        return JSONResponse({"detail": "Not Found"}, status_code=status.HTTP_404_NOT_FOUND)
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def release_cache_headers(request: Request, call_next: Any) -> Response:
     """Keep documents/release metadata fresh and fingerprinted assets immutable."""
 
@@ -10732,11 +10741,23 @@ async def admin_feature_packs_page(
         key=lambda p: p["slug"],
     )
     plugins = await get_plugin_loader().list_admin_rows(feature_registry)
+    from app.core.core_components import CORE_COMPONENTS
+    core_components = [
+        {
+            "slug": component.slug,
+            "label": component.label,
+            "description": component.description,
+            "parent_pack": component.parent_pack,
+            "available": availability.feature_pack_available(component.slug),
+        }
+        for component in CORE_COMPONENTS
+    ]
 
     extra = {
         "title": "Feature packs",
         "packs": packs,
         "plugins": plugins,
+        "core_components": core_components,
     }
     return await _render_template(
         "admin/feature_packs.html", request, current_user, extra=extra

@@ -1,0 +1,141 @@
+"""Deployment kill switches for core components listed on the feature pack page."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+from fastapi.testclient import TestClient
+
+import app.main as main_module
+from app.core.config import Settings
+from app.core.core_components import CORE_COMPONENT_SLUGS, components_for_path
+from app.services.component_availability import (
+    ComponentAvailability,
+    configure_component_availability,
+)
+
+
+EXPECTED_SLUGS = {
+    "network_devices",
+    "ipam",
+    "racks",
+    "defender",
+    "office365",
+    "shared_credentials",
+    "backup_history",
+    "backup_summary",
+    "rag_index",
+    "ai_quality",
+    "ai_tag_synonyms",
+    "tray",
+}
+
+
+@pytest.fixture(autouse=True)
+def reset_availability():
+    yield
+    configure_component_availability(known_feature_packs=(), known_modules=())
+
+
+def test_registry_lists_every_requested_component():
+    assert set(CORE_COMPONENT_SLUGS) == EXPECTED_SLUGS
+
+
+def test_core_component_slugs_are_accepted_by_configuration():
+    policy = configure_component_availability(
+        disabled_feature_packs="ipam,tray",
+        known_feature_packs=("assets",),
+        known_modules=(),
+    )
+    assert not policy.feature_pack_available("ipam")
+    assert not policy.feature_pack_available("tray")
+    assert policy.feature_pack_available("racks")
+
+
+def test_settings_accept_core_component_slugs(monkeypatch):
+    monkeypatch.setenv("DISABLED_FEATURE_PACKS", "office365,rag_index")
+    settings = Settings()
+    assert settings.disabled_feature_packs == "office365,rag_index"
+
+
+def test_path_matching_is_segment_aware():
+    assert [c.slug for c in components_for_path("/devices")] == ["network_devices"]
+    assert {c.slug for c in components_for_path("/devices/ipam-import")} == {
+        "network_devices",
+        "ipam",
+    }
+    assert components_for_path("/devices-report") == ()
+    assert components_for_path("/tickets") == ()
+
+
+def test_disabled_component_blocks_only_its_paths():
+    policy = ComponentAvailability(disabled_feature_packs=frozenset({"defender"}))
+    assert not policy.path_available("/defender")
+    assert not policy.path_available("/api/tray/defender/status")
+    assert policy.path_available("/api/tray/heartbeat")
+    assert policy.path_available("/tickets")
+
+
+def test_parent_pack_disables_component():
+    policy = ComponentAvailability(disabled_feature_packs=frozenset({"assets"}))
+    assert not policy.feature_pack_available("racks")
+    assert not policy.path_available("/ipam")
+
+
+def test_middleware_returns_404_for_disabled_component(monkeypatch):
+    policy = ComponentAvailability(disabled_feature_packs=frozenset({"ai_quality"}))
+    monkeypatch.setattr(main_module, "get_component_availability", lambda: policy)
+    client = TestClient(main_module.app)
+    response = client.get("/admin/ai-quality", follow_redirects=False)
+    assert response.status_code == 404
+
+
+def _render_sidebar(monkeypatch, *disabled: str) -> str:
+    policy = ComponentAvailability(disabled_feature_packs=frozenset(disabled))
+    monkeypatch.setattr(main_module, "get_component_availability", lambda: policy)
+    request = SimpleNamespace(url=SimpleNamespace(path="/", query=""))
+    return main_module.templates.env.get_template("base.html").render(
+        request=request,
+        app_name="MyPortal",
+        current_user={"id": 1, "is_super_admin": True},
+        is_super_admin=True,
+        active_membership={},
+        active_company_id=1,
+        available_companies=[],
+        module_enabled={},
+        enabled_module_slugs=[],
+        matrix_chat_enabled=True,
+        can_access_m365_spam_purge=True,
+    )
+
+
+SIDEBAR_LINKS = (
+    "/devices",
+    "/ipam",
+    "/racks",
+    "/defender",
+    "/m365",
+    "/licenses",
+    "/shared-credentials",
+    "/admin/backup-jobs",
+    "/admin/backup-summary",
+    "/admin/rag",
+    "/admin/ai-quality",
+    "/admin/chat/ai-tag-synonyms",
+    "/admin/tray/configurations",
+)
+
+
+def test_sidebar_shows_core_components_by_default(monkeypatch):
+    body = _render_sidebar(monkeypatch)
+    for path in SIDEBAR_LINKS:
+        assert f'href="{path}"' in body, path
+
+
+def test_sidebar_hides_disabled_core_components(monkeypatch):
+    body = _render_sidebar(monkeypatch, *EXPECTED_SLUGS)
+    for path in SIDEBAR_LINKS:
+        assert f'href="{path}"' not in body, path
+    assert "Office 365" not in body
+    assert 'href="/m365/best-practices"' not in body

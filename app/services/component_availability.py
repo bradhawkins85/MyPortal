@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
+from app.core.core_components import CORE_COMPONENTS_BY_SLUG, components_for_path
 from app.core.module_capabilities import (
     feature_pack_for_module,
     module_for_feature_pack,
@@ -59,9 +60,23 @@ class ComponentAvailability:
     disabled_modules: frozenset[str] = frozenset()
 
     def feature_pack_available(self, slug: str) -> bool:
+        component = CORE_COMPONENTS_BY_SLUG.get(slug)
+        if component is not None:
+            return slug not in self.disabled_feature_packs and (
+                component.parent_pack is None
+                or self.feature_pack_available(component.parent_pack)
+            )
         owner = module_for_feature_pack(slug)
         return slug not in self.disabled_feature_packs and (
             owner is None or owner not in self.disabled_modules
+        )
+
+    def path_available(self, path: str) -> bool:
+        """Return False when *path* belongs to a disabled core component."""
+
+        return all(
+            self.feature_pack_available(component.slug)
+            for component in components_for_path(path)
         )
 
     def module_available(self, slug: str) -> bool:
@@ -108,7 +123,9 @@ def configure_component_availability(
 
     packs = frozenset(parse_slug_list(disabled_feature_packs))
     modules = frozenset(parse_slug_list(disabled_modules))
-    unknown_packs = sorted(packs - set(known_feature_packs))
+    unknown_packs = sorted(
+        packs - set(known_feature_packs) - set(CORE_COMPONENTS_BY_SLUG)
+    )
     unknown_modules = sorted(modules - set(known_modules))
     errors: list[str] = []
     if unknown_packs:

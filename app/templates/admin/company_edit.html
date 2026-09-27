@@ -11,6 +11,7 @@
   ]) }}
 {% endblock %}
 {% block content %}
+{% if feature_pack_available('shared_credentials') %}
 <section class="card card--panel" id="vault-rollout">
   <header class="card__header"><div><h2 class="card__title">Credential vault rollout</h2><p class="card__subtitle">Super-admin control for this company's encrypted credential vault.</p></div><span id="vault-status" class="badge">Checking…</span></header>
   <div class="card__body card__body--stacked">
@@ -75,6 +76,7 @@
   const review=new Date(Date.now()+90*86400000); document.getElementById('grant-review').value=review.toISOString().slice(0,16); loadVault();
 })();
 </script>
+{% endif %}
   <div class="company-edit-page" data-company-id="{{ company.id }}">
   <div class="admin-grid admin-grid--columns">
     <details class="card card--panel card-collapsible admin-grid__full" data-company-edit-section="general" open>

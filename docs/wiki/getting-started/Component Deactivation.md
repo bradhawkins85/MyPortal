@@ -71,6 +71,44 @@ configuration is intentionally retained.
 The runtime source of truth is the directories under `app/features/`; a new
 release may add slugs.
 
+### Core component slugs
+
+These sections are served by the core application or share a feature pack with
+other screens. They are disabled through the same `DISABLED_FEATURE_PACKS`
+variable. A disabled core component is removed from navigation and every URL
+under its prefixes returns 404. The **Admin → Feature packs** page lists each
+one with its current status.
+
+| Component | Slug | Route prefixes | Also disabled when |
+| --- | --- | --- | --- |
+| Network Devices | `network_devices` | `/devices`, `/network-scan` | pack `assets` is disabled |
+| IPAM | `ipam` | `/ipam`, `/devices/ipam-preview`, `/devices/ipam-import`, `/api/infrastructure/networks`, `/api/infrastructure/addresses` | pack `assets` is disabled |
+| Racks | `racks` | `/racks`, `/api/infrastructure/racks`, `/api/infrastructure/rack-equipment`, `/api/infrastructure/rack-reservations` | pack `assets` is disabled |
+| Windows Defender | `defender` | `/defender`, `/api/defender`, `/api/tray/defender` | — |
+| Office 365 (all sub menus) | `office365` | `/m365`, `/licenses`, `/api/licenses` | — |
+| Shared Credentials | `shared_credentials` | `/shared-credentials`, `/credential-share`, `/api/vault` | — |
+| Backup History | `backup_history` | `/admin/backup-jobs`, `/api/backup-jobs` | pack `backups` is disabled |
+| Backup Summary | `backup_summary` | `/admin/backup-summary` | pack `backups` is disabled |
+| RAG Index | `rag_index` | `/admin/rag`, `/rag`, `/api/rag` | — |
+| AI Quality | `ai_quality` | `/admin/ai-quality` | — |
+| AI Tag Synonyms | `ai_tag_synonyms` | `/admin/chat/ai-tag-synonyms`, `/chat/configuration` | — |
+| Tray Agent / Tray Settings | `tray` | `/admin/tray`, `/api/tray`, `/tray` | — |
+
+Disabling `tray` also stops the tray agent API, so installed tray agents cannot
+check in, and blocks the tray Defender endpoints. Disabling `office365` hides
+the Office 365 menu with all of its sub menus (Configuration, Best Practices,
+mailboxes, signatures, licenses, diagnostics, Out of Office and Spam Search &
+Purge). Prefixes are matched per path segment, so `/devices` does not match
+`/devices-report`.
+
+```dotenv
+DISABLED_FEATURE_PACKS=ipam,racks,defender,tray
+```
+
+Background jobs that rebuild the RAG index or sync Office 365 data are not
+controlled by these slugs; manage those under **Admin → Scheduled Tasks** or
+with the owning module (`m365-admin`, `m365-mail`).
+
 ### Valid module slugs
 
 `syncro`, `ollama`, `smtp`, `smtp2go`, `m365-direct-delivery`, `imap`,
