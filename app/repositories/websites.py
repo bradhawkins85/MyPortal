@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta
 from typing import Any
@@ -55,6 +56,19 @@ async def list_check_jobs(company_id: int, website_id: int, limit: int = 20) -> 
            WHERE j.website_id = %s AND w.company_id = %s
            ORDER BY j.id DESC LIMIT %s""",
         (website_id, company_id, limit),
+    ) or [])
+
+
+async def list_dns_changes(company_id: int, website_id: int, *, page: int = 1,
+                           page_size: int = 25) -> list[dict[str, Any]]:
+    """Return immutable events with tenant scoping enforced in the query."""
+    offset = (max(page, 1) - 1) * page_size
+    return list(await db.fetch_all(
+        """SELECT c.* FROM website_dns_changes c
+           INNER JOIN websites w ON w.id = c.website_id
+           WHERE c.company_id = %s AND c.website_id = %s AND w.company_id = %s
+           ORDER BY c.observed_at DESC, c.id DESC LIMIT %s OFFSET %s""",
+        (company_id, website_id, company_id, page_size, offset),
     ) or [])
 async def get_website_by_id(website_id: int) -> dict[str, Any] | None:
     return await db.fetch_one("SELECT * FROM websites WHERE id = %s", (website_id,))
@@ -208,20 +222,95 @@ async def job_health() -> dict[str, Any]:
             "oldest_ready_at": oldest and oldest.get("oldest_ready_at")}
 
 
+def _rrsets(snapshot: dict[str, Any] | None) -> dict[tuple[str, str], list[str]]:
+    return {(str(r["name"]).lower().rstrip(".") + ".", str(r["type"]).upper()):
+            sorted({str(v).strip() for v in r.get("values", [])})
+            for r in (snapshot or {}).get("records", [])}
+
+
+async def _record_dns_snapshot(website_id: int, checked_at: datetime,
+                               snapshot: dict[str, Any]) -> None:
+    website = await get_website_by_id(website_id)
+    if not website:
+        return
+    try:
+        before_snapshot = json.loads(website.get("dns_facts_json") or "null")
+    except (TypeError, json.JSONDecodeError):
+        before_snapshot = None
+    before, after = _rrsets(before_snapshot), _rrsets(snapshot)
+    # The first observation is a baseline, not a flood of artificial additions.
+    if before_snapshot is not None:
+        for key in sorted(set(before) | set(after)):
+            old, new = before.get(key), after.get(key)
+            if old == new:
+                continue
+            kind = "added" if old is None else "removed" if new is None else "modified"
+            material = json.dumps([website.get("dns_checked_at"), key, old, new],
+                                  separators=(",", ":"), sort_keys=True, default=str)
+            event_hash = hashlib.sha256(material.encode()).hexdigest()
+            try:
+                await db.execute(
+                    """INSERT INTO website_dns_changes
+                    (company_id, website_id, observed_at, source, coverage, record_name,
+                     record_type, change_kind, before_json, after_json, event_hash)
+                    SELECT company_id, id, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    FROM websites WHERE id = %s""",
+                    (checked_at, snapshot["source"], snapshot["coverage"], key[0], key[1], kind,
+                     json.dumps(old) if old is not None else None,
+                     json.dumps(new) if new is not None else None, event_hash, website_id),
+                )
+            except Exception as exc:
+                if "unique" not in str(exc).lower() and "duplicate" not in str(exc).lower():
+                    raise
+
+
 async def record_success(website_id: int, checked_at: datetime, http_status: int | None,
-                         certificate: dict[str, Any] | None, dns_facts: dict[str, Any] | None) -> None:
+                         certificate: dict[str, Any] | None, dns_facts: dict[str, Any] | None,
+                         registration: dict[str, Any] | None = None) -> None:
+    if dns_facts is not None:
+        await _record_dns_snapshot(website_id, checked_at, dns_facts)
     await db.execute(
         """UPDATE websites SET last_success_at = %s, last_http_status = %s,
         certificate_expires_at = COALESCE(%s, certificate_expires_at),
         certificate_expiry_source = COALESCE(%s, certificate_expiry_source),
         certificate_checked_at = COALESCE(%s, certificate_checked_at),
-        dns_facts_json = COALESCE(%s, dns_facts_json), dns_checked_at = COALESCE(%s, dns_checked_at)
+        certificate_facts_json = COALESCE(%s, certificate_facts_json),
+        certificate_status = COALESCE(%s, certificate_status),
+        dns_facts_json = COALESCE(%s, dns_facts_json), dns_checked_at = COALESCE(%s, dns_checked_at),
+        dns_source = COALESCE(%s, dns_source), dns_coverage = COALESCE(%s, dns_coverage),
+        registration_facts_json = COALESCE(%s, registration_facts_json),
+        registration_status = COALESCE(%s, registration_status),
+        domain_expires_at = COALESCE(%s, domain_expires_at),
+        domain_expiry_source = COALESCE(%s, domain_expiry_source),
+        domain_checked_at = COALESCE(%s, domain_checked_at)
         WHERE id = %s""",
         (checked_at, http_status, certificate and certificate.get("expires_at"),
          certificate and certificate.get("source"), checked_at if certificate else None,
+         json.dumps(certificate, default=str) if certificate else None,
+         certificate and certificate.get("status"),
          json.dumps(dns_facts) if dns_facts is not None else None,
-         checked_at if dns_facts is not None else None, website_id),
+         checked_at if dns_facts is not None else None,
+         dns_facts and dns_facts.get("source"), dns_facts and dns_facts.get("coverage"),
+         json.dumps(registration, default=str) if registration else None,
+         registration and registration.get("status"),
+         registration and registration.get("expires_at"),
+         registration and registration.get("source"), checked_at if registration else None,
+         website_id),
     )
+
+
+async def record_component_failure(website_id: int, component: str, checked_at: datetime,
+                                   message: str) -> None:
+    columns = {
+        "certificate": ("certificate_failure_at", "certificate_failure_message"),
+        "registration": ("registration_failure_at", "registration_failure_message"),
+        "dns": ("dns_failure_at", "dns_failure_message"),
+    }
+    if component not in columns:
+        raise ValueError("Unknown observation component")
+    at_column, message_column = columns[component]
+    await db.execute("UPDATE websites SET " + at_column + " = %s, " + message_column + " = %s WHERE id = %s",
+                     (checked_at, message[:500], website_id))
 
 
 async def record_failure(website_id: int, checked_at: datetime, message: str) -> None:
