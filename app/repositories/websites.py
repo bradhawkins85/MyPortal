@@ -233,9 +233,21 @@ async def enqueue_due(now: datetime, limit: int) -> int:
 async def claim_jobs(*, owner: str, now: datetime, lease_seconds: int, limit: int,
                      company_limit: int) -> list[dict[str, Any]]:
     lease_until = now + timedelta(seconds=lease_seconds)
+    # A worker may be terminated after claiming its final attempt.  Finalise
+    # those abandoned jobs before looking for more work so they cannot be
+    # reclaimed indefinitely (and display attempt counts such as 40/3).
+    await db.execute(
+        """UPDATE website_check_jobs SET status = 'failed', completed_at = %s,
+        lease_owner = NULL, lease_expires_at = NULL,
+        last_error = COALESCE(last_error, 'Website check timed out'), updated_at = %s
+        WHERE status = 'running' AND lease_expires_at < %s
+        AND attempt_count >= max_attempts""",
+        (now, now, now),
+    )
     candidates = await db.fetch_all(
         """SELECT j.*, w.company_id FROM website_check_jobs j JOIN websites w ON w.id = j.website_id
-        WHERE j.available_at <= %s AND (j.status = 'pending' OR (j.status = 'running' AND j.lease_expires_at < %s))
+        WHERE j.available_at <= %s AND j.attempt_count < j.max_attempts
+        AND (j.status = 'pending' OR (j.status = 'running' AND j.lease_expires_at < %s))
         ORDER BY j.available_at, j.id LIMIT %s""", (now, now, limit * max(company_limit, 1) * 2),
     ) or []
     claimed, company_counts = [], {}
@@ -247,7 +259,8 @@ async def claim_jobs(*, owner: str, now: datetime, lease_seconds: int, limit: in
             """UPDATE website_check_jobs SET status = 'running', lease_owner = %s,
             lease_expires_at = %s, started_at = COALESCE(started_at, %s),
             attempt_count = attempt_count + 1, updated_at = %s
-            WHERE id = %s AND (status = 'pending' OR (status = 'running' AND lease_expires_at < %s))""",
+            WHERE id = %s AND attempt_count < max_attempts
+            AND (status = 'pending' OR (status = 'running' AND lease_expires_at < %s))""",
             (owner, lease_until, now, now, candidate["id"], now),
         )
         if changed:

@@ -45,7 +45,7 @@ def test_failed_job_uses_backoff_without_erasing_observation(monkeypatch):
 def test_expired_lease_can_be_reclaimed(monkeypatch):
     candidate = {"id": 2, "website_id": 5, "company_id": 7}
     monkeypatch.setattr(websites.db, "fetch_all", AsyncMock(return_value=[candidate]))
-    monkeypatch.setattr(websites.db, "execute", AsyncMock(return_value=1))
+    monkeypatch.setattr(websites.db, "execute", AsyncMock(side_effect=[0, 1]))
     monkeypatch.setattr(websites.db, "fetch_one", AsyncMock(return_value=candidate | {"lease_owner": "new"}))
 
     claimed = asyncio.run(websites.claim_jobs(owner="new", now=datetime(2026, 1, 1),
@@ -55,6 +55,25 @@ def test_expired_lease_can_be_reclaimed(monkeypatch):
     update = websites.db.execute.await_args.args[0]
     assert "lease_expires_at < %s" in update
     assert "lease_owner = %s" in update
+
+
+def test_expired_final_attempt_is_failed_instead_of_reclaimed(monkeypatch):
+    execute = AsyncMock(return_value=1)
+    monkeypatch.setattr(websites.db, "execute", execute)
+    monkeypatch.setattr(websites.db, "fetch_all", AsyncMock(return_value=[]))
+
+    claimed = asyncio.run(websites.claim_jobs(
+        owner="new", now=datetime(2026, 1, 1), lease_seconds=60,
+        limit=1, company_limit=1,
+    ))
+
+    assert claimed == []
+    cleanup_query, cleanup_params = execute.await_args_list[0].args
+    assert "attempt_count >= max_attempts" in cleanup_query
+    assert "status = 'failed'" in cleanup_query
+    assert cleanup_params == (datetime(2026, 1, 1),) * 3
+    candidate_query = websites.db.fetch_all.await_args.args[0]
+    assert "j.attempt_count < j.max_attempts" in candidate_query
 
 
 def test_company_limit_bounds_claims(monkeypatch):
@@ -106,3 +125,31 @@ def test_dns_check_does_not_make_http_or_tls_observations(monkeypatch):
     website_monitoring.fetch_availability.assert_not_awaited()
     website_monitoring.inspect_certificate.assert_not_awaited()
     websites.record_dns_success.assert_awaited_once()
+
+
+def test_dns_rrsets_are_queried_concurrently(monkeypatch):
+    active = 0
+    peak = 0
+
+    class Answer:
+        def __iter__(self):
+            return iter([self])
+
+        def to_text(self):
+            return "192.0.2.1"
+
+    async def resolve(*_args, **_kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return Answer()
+
+    resolver = type("Resolver", (), {"resolve": resolve})()
+    monkeypatch.setattr(website_monitoring.dns.asyncresolver, "Resolver", lambda: resolver)
+
+    result = asyncio.run(website_monitoring.lookup_dns("www.example.com"))
+
+    assert peak > 1
+    assert len(result["records"]) == len(website_monitoring.DNS_TYPES) * 2

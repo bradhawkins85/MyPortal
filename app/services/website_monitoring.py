@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import ipaddress
 import socket
 import ssl
@@ -162,16 +161,27 @@ async def lookup_dns(host: str) -> dict[str, Any]:
     resolver = dns.asyncresolver.Resolver()
     resolver.timeout = CONNECT_TIMEOUT
     resolver.lifetime = TOTAL_TIMEOUT
-    records = []
-    for name in dict.fromkeys((host, apex)):
-        for record_type in DNS_TYPES:
-            try:
-                answer = await resolver.resolve(name, record_type, raise_on_no_answer=False, search=False)
-            except (dns.exception.DNSException, OSError):
-                continue
-            values = sorted({r.to_text().strip() for r in answer})
-            if values:
-                records.append({"name": name.lower() + ".", "type": record_type, "values": values})
+    async def query(name: str, record_type: str) -> dict[str, Any] | None:
+        try:
+            answer = await resolver.resolve(
+                name, record_type, raise_on_no_answer=False, search=False
+            )
+        except (dns.exception.DNSException, OSError):
+            return None
+        values = sorted({r.to_text().strip() for r in answer})
+        if not values:
+            return None
+        return {"name": name.lower() + ".", "type": record_type, "values": values}
+
+    # Query independent RRsets concurrently.  Running these serially could
+    # consume one resolver lifetime per type (minutes in the worst case), long
+    # enough for the job lease to expire and another instance to reclaim it.
+    observations = await asyncio.gather(*(
+        query(name, record_type)
+        for name in dict.fromkeys((host, apex))
+        for record_type in DNS_TYPES
+    ))
+    records = [record for record in observations if record is not None]
     return {"source": "recursive-dns", "coverage": "public lookup", "records": sorted(records, key=lambda r: (r["name"], r["type"]))}
 
 
