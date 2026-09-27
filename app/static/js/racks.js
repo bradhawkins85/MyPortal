@@ -24,6 +24,13 @@
     target?.scrollIntoView({ block: 'nearest' });
     target?.querySelector('button, a')?.focus();
   };
+  document.querySelectorAll('[data-rack-list-open]').forEach(button => button.addEventListener('click', () => {
+    const list = document.getElementById(button.dataset.rackListOpen);
+    if (!list) return;
+    list.open = true;
+    list.scrollIntoView({ block: 'nearest' });
+    list.querySelector('summary')?.focus();
+  }));
   const editEquipment = (id, trigger) => {
     const item = document.getElementById(`placement-${id}`);
     if (!editForm || !item) { focusListItem(`placement-${id}`); return; }
@@ -99,13 +106,16 @@
     const rack = document.querySelector(`[data-rack-id="${CSS.escape(form.elements.rack_id.value)}"]`);
     const invalid = !rack || lane + width - 1 > 3 || unit < 1 || height < 1 || unit + height - 1 > Number(rack?.dataset.rackUnits || 0);
     const faces = form.elements.depth_mode.value === 'full' ? ['front', 'rear'] : [form.elements.face.value];
-    let occupied = false;
-    if (rack && !invalid) {
-      for (let u = unit; u < unit + height; u += 1) for (let l = lane; l < lane + width; l += 1) {
-        occupied ||= faces.some(face => [...rack.querySelectorAll(`.rack-face:nth-of-type(${face === 'front' ? 1 : 2}) .rack__row`)]
-          .some(row => row.querySelector('.rack__unit-label')?.textContent === `${u}` && !row.querySelector(`.rack__slot:nth-child(${l})`)?.classList.contains('rack__slot--available')));
-      }
-    }
+    const occupied = !invalid && faces.some(face =>
+      [...rack.querySelectorAll(`.rack-face[data-face="${face}"] .rack__device`)].some(slot => {
+        const slotUnit = Number(slot.dataset.startUnit);
+        const slotHeight = Number(slot.dataset.unitHeight);
+        const slotLane = Number(slot.dataset.startLane);
+        const slotWidth = Number(slot.dataset.widthLanes);
+        return unit < slotUnit + slotHeight && unit + height > slotUnit &&
+          lane < slotLane + slotWidth && lane + width > slotLane;
+      })
+    );
     const conflict = invalid || occupied;
     preview.classList.toggle('rack-preview--conflict', conflict);
     preview.textContent = conflict ? 'This position is outside the rack or overlaps occupied or reserved space.' : `Available: U${unit}–${unit + height - 1}, lane ${lane}–${lane + width - 1}, ${form.elements.depth_mode.value === 'full' ? 'both faces' : form.elements.face.value + ' face'}.`;

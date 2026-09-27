@@ -14,7 +14,7 @@
   {% for rack in racks %}
     <article class="rack card card--panel" id="rack-{{ rack.id }}" data-rack-id="{{ rack.id }}" data-rack-name="{{ rack.name }}" data-rack-units="{{ rack.unit_count }}">
       <header class="rack__header">
-        <div><span class="rack__eyebrow">Rack overview</span><h2>{{ rack.name }}</h2><p>{% if rack.location %}{{ rack.location }} · {% endif %}{{ rack.unit_count }}U rack</p></div>
+        <div><h2>{{ rack.name }}</h2><p>{% if rack.location %}{{ rack.location }} · {% endif %}{{ rack.unit_count }}U rack</p></div>
         {% if can_edit %}<button class="button button--primary" type="button" data-rack-add="{{ rack.id }}">Add item</button>{% endif %}
       </header>
       <section class="rack-summary" aria-label="Rack details and capacity">
@@ -38,22 +38,74 @@
           {% if rack.power_capacity_watts and rack.has_recorded_power_draw %}<div class="capacity-meter capacity-meter--power"><div><span>Recorded power</span><strong>{{ rack.recorded_power_draw_watts }} / {{ rack.power_capacity_watts }} W</strong></div><progress value="{{ rack.recorded_power_draw_watts }}" max="{{ rack.power_capacity_watts }}">{{ rack.recorded_power_draw_watts }} watts</progress></div>{% endif %}
         </div></section>
       </section>
-      <div class="rack-diagram-heading"><div><h3>Rack elevations</h3><p>Choose a position to add or edit an item.</p></div><div class="rack-legend" aria-label="Diagram legend"><span><i class="legend-swatch legend-swatch--occupied"></i>Device</span><span><i class="legend-swatch legend-swatch--reserved"></i>Reserved</span><span><i class="legend-swatch legend-swatch--available"></i>Available</span></div></div>
+      <div class="rack-diagram-heading">
+        <div>
+          <h3>Rack elevation</h3>
+          <p>Select an installed item to inspect it, or an open unit to place equipment.</p>
+        </div>
+        <div class="rack-diagram-actions">
+          <div class="rack-legend" aria-label="Rack key">
+            <span><i class="legend-swatch legend-swatch--occupied" aria-hidden="true"></i>Equipment</span>
+            <span><i class="legend-swatch legend-swatch--reserved" aria-hidden="true"></i>Reserved</span>
+            <span><i class="legend-swatch legend-swatch--available" aria-hidden="true"></i>Open</span>
+          </div>
+          <button class="button button--small button--secondary" type="button" data-rack-list-open="rack-list-{{ rack.id }}">Item list</button>
+        </div>
+      </div>
       <div class="rack__faces">
       {% for face in ['front', 'rear'] %}
-        <section class="rack-face" aria-labelledby="rack-{{ rack.id }}-{{ face }}"><div class="rack-face__heading"><h4 id="rack-{{ rack.id }}-{{ face }}">{{ face|title }}</h4><span>{{ rack.unit_count }}U</span></div><div class="rack__units" role="grid" aria-label="{{ rack.name }} {{ face }} face">
-        {% for unit in range(rack.unit_count, 0, -1) %}
-          <div class="rack__row" role="row"><span class="rack__unit-label" role="rowheader">{{ unit }}</span><div class="rack__lanes">
-          {% for lane in [1,2,3] %}{% set ns = namespace(item=none, reservation=none) %}
-            {% for candidate in equipment %}{% if candidate.rack_id == rack.id and unit >= candidate.start_unit and unit < candidate.start_unit + candidate.unit_height and lane >= candidate.start_lane and lane < candidate.start_lane + candidate.width_lanes and (candidate.face == face or candidate.depth_mode == 'full') %}{% set ns.item = candidate %}{% endif %}{% endfor %}
-            {% for candidate in reservations %}{% if candidate.rack_id == rack.id and unit >= candidate.start_unit and unit < candidate.start_unit + candidate.unit_height and lane >= candidate.start_lane and lane < candidate.start_lane + candidate.width_lanes and (candidate.face == face or candidate.depth_mode == 'full') %}{% set ns.reservation = candidate %}{% endif %}{% endfor %}
-            {% if ns.item %}<button class="rack__slot rack__slot--occupied rack__slot--{{ ns.item.item_type }}" type="button" role="gridcell" data-inspect-placement="{{ ns.item.id }}" aria-label="{{ 'Edit' if can_edit else 'Inspect' }} {{ ns.item.name or ns.item.asset_name or 'Rack device' }}, {{ face }}, unit {{ unit }}, lane {{ lane }}"><span aria-hidden="true">{% if unit == ns.item.start_unit + ns.item.unit_height - 1 and lane == ns.item.start_lane %}<b>{{ ns.item.name or ns.item.asset_name or 'Rack device' }}</b><small>{{ ns.item.item_type|replace('_', ' ')|title }}</small>{% else %}<small class="rack__continuation">{{ ns.item.name or ns.item.asset_name or 'Device' }}</small>{% endif %}</span></button>
-            {% elif ns.reservation %}<button class="rack__slot rack__slot--reserved" type="button" role="gridcell" data-inspect-reservation="{{ ns.reservation.id }}" aria-label="{{ 'Edit' if can_edit else 'Inspect' }} reservation {{ ns.reservation.label or 'Reserved space' }}, {{ face }}, unit {{ unit }}, lane {{ lane }}"><span aria-hidden="true">{% if unit == ns.reservation.start_unit + ns.reservation.unit_height - 1 and lane == ns.reservation.start_lane %}<b>{{ ns.reservation.label or 'Reserved' }}</b><small>{{ ns.reservation.owner or 'Reserved space' }}</small>{% else %}<small class="rack__continuation">Reserved</small>{% endif %}</span></button>
-            {% else %}<button class="rack__slot rack__slot--available" type="button" role="gridcell" {% if not can_edit %}disabled{% endif %} data-place-open data-rack="{{ rack.id }}" data-rack-name="{{ rack.name }}" data-face="{{ face }}" data-unit="{{ unit }}" data-lane="{{ lane }}" aria-label="Add equipment or reservation in {{ rack.name }}, {{ face }}, unit {{ unit }}, lane {{ lane }}"><span aria-hidden="true">+</span></button>{% endif %}
-          {% endfor %}</div></div>
-        {% endfor %}</div></section>
-      {% endfor %}</div>
-      <details class="rack__details"><summary>Accessible list and actions</summary><div class="rack-list"><h3>Installed rack items</h3><ul>
+        <section class="rack-face" data-face="{{ face }}" aria-labelledby="rack-{{ rack.id }}-{{ face }}">
+          <div class="rack-face__heading">
+            <div><h4 id="rack-{{ rack.id }}-{{ face }}">{{ face|title }} elevation</h4><span>{{ rack.unit_count }}U · {{ (rack.numbering_direction or 'bottom-up')|replace('-', ' ') }}</span></div>
+            <span class="rack-face__orientation" aria-hidden="true">Top</span>
+          </div>
+          <div class="rack__viewport">
+            <div class="rack__chassis" style="--rack-units: {{ rack.unit_count }}">
+              <div class="rack__rail" aria-hidden="true">
+                {% for row in range(rack.unit_count) %}
+                  {% set unit = row + 1 if rack.numbering_direction == 'top-down' else rack.unit_count - row %}
+                  <span>{{ unit }}</span>
+                {% endfor %}
+              </div>
+              <div class="rack__grid" aria-label="{{ rack.name }} {{ face }} rack positions">
+                {% for row in range(rack.unit_count) %}
+                  {% set unit = row + 1 if rack.numbering_direction == 'top-down' else rack.unit_count - row %}
+                  {% for lane in [1, 2, 3] %}
+                    {% set ns = namespace(taken=false) %}
+                    {% for item in equipment %}
+                      {% if item.rack_id == rack.id and unit >= item.start_unit and unit < item.start_unit + item.unit_height and lane >= item.start_lane and lane < item.start_lane + item.width_lanes and (item.face == face or item.depth_mode == 'full') %}{% set ns.taken = true %}{% endif %}
+                    {% endfor %}
+                    {% for item in reservations %}
+                      {% if item.rack_id == rack.id and unit >= item.start_unit and unit < item.start_unit + item.unit_height and lane >= item.start_lane and lane < item.start_lane + item.width_lanes and (item.face == face or item.depth_mode == 'full') %}{% set ns.taken = true %}{% endif %}
+                    {% endfor %}
+                    {% if not ns.taken %}
+                      <button class="rack__open" type="button" style="grid-row: {{ row + 1 }}; grid-column: {{ lane }}" {% if not can_edit %}disabled{% endif %} data-place-open data-rack="{{ rack.id }}" data-rack-name="{{ rack.name }}" data-face="{{ face }}" data-unit="{{ unit }}" data-lane="{{ lane }}" aria-label="Add equipment or reservation in {{ rack.name }}, {{ face }}, unit {{ unit }}, lane {{ lane }}"><span aria-hidden="true">+</span></button>
+                    {% endif %}
+                  {% endfor %}
+                {% endfor %}
+                {% for item in equipment if item.rack_id == rack.id and (item.face == face or item.depth_mode == 'full') %}
+                  <button class="rack__device rack__device--{{ item.item_type }}" type="button" style="grid-row: {{ item.start_unit if rack.numbering_direction == 'top-down' else rack.unit_count - item.start_unit - item.unit_height + 2 }} / span {{ item.unit_height }}; grid-column: {{ item.start_lane }} / span {{ item.width_lanes }}" data-inspect-placement="{{ item.id }}" data-start-unit="{{ item.start_unit }}" data-unit-height="{{ item.unit_height }}" data-start-lane="{{ item.start_lane }}" data-width-lanes="{{ item.width_lanes }}" aria-label="{{ 'Edit' if can_edit else 'Inspect' }} {{ item.name or item.asset_name or 'Rack device' }}, {{ face }}, units {{ item.start_unit }} to {{ item.start_unit + item.unit_height - 1 }}, lanes {{ item.start_lane }} to {{ item.start_lane + item.width_lanes - 1 }}">
+                    <span class="rack__device-face"><span class="rack__device-indicator" aria-hidden="true"></span><span class="rack__device-copy"><strong>{{ item.name or item.asset_name or 'Rack device' }}</strong><small>{{ item.item_type|replace('_', ' ')|title }} · U{{ item.start_unit }}{% if item.unit_height > 1 %}–{{ item.start_unit + item.unit_height - 1 }}{% endif %}</small></span><span class="rack__device-detail" aria-hidden="true"></span></span>
+                  </button>
+                {% endfor %}
+                {% for item in reservations if item.rack_id == rack.id and (item.face == face or item.depth_mode == 'full') %}
+                  <button class="rack__device rack__device--reserved" type="button" style="grid-row: {{ item.start_unit if rack.numbering_direction == 'top-down' else rack.unit_count - item.start_unit - item.unit_height + 2 }} / span {{ item.unit_height }}; grid-column: {{ item.start_lane }} / span {{ item.width_lanes }}" data-inspect-reservation="{{ item.id }}" data-start-unit="{{ item.start_unit }}" data-unit-height="{{ item.unit_height }}" data-start-lane="{{ item.start_lane }}" data-width-lanes="{{ item.width_lanes }}" aria-label="{{ 'Edit' if can_edit else 'Inspect' }} reservation {{ item.label or 'Reserved space' }}, {{ face }}, units {{ item.start_unit }} to {{ item.start_unit + item.unit_height - 1 }}, lanes {{ item.start_lane }} to {{ item.start_lane + item.width_lanes - 1 }}">
+                    <span class="rack__device-face"><span class="rack__device-copy"><strong>{{ item.label or 'Reserved space' }}</strong><small>Reserved · U{{ item.start_unit }}{% if item.unit_height > 1 %}–{{ item.start_unit + item.unit_height - 1 }}{% endif %}</small></span></span>
+                  </button>
+                {% endfor %}
+              </div>
+              <div class="rack__rail rack__rail--right" aria-hidden="true">
+                {% for row in range(rack.unit_count) %}
+                  {% set unit = row + 1 if rack.numbering_direction == 'top-down' else rack.unit_count - row %}
+                  <span>{{ unit }}</span>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+        </section>
+      {% endfor %}
+      </div>
+      <details class="rack__details" id="rack-list-{{ rack.id }}"><summary>Item list and port links</summary><div class="rack-list"><h3>Installed rack items</h3><ul>
         {% for item in equipment if item.rack_id == rack.id %}<li id="placement-{{ item.id }}" data-item-name="{{ item.name or item.asset_name or 'Rack device' }}" data-item-type="{{ item.item_type }}" data-item-port-count="{{ item.port_count or 0 }}" data-item-asset="{{ item.asset_id or '' }}" data-item-power="{{ item.power_draw_watts if item.power_draw_watts is not none else '' }}" data-item-notes="{{ item.notes or '' }}" data-item-position="U{{ item.start_unit }}–{{ item.start_unit + item.unit_height - 1 }} · {{ item.face|title }}{{ ' and rear' if item.depth_mode == 'full' else '' }} · lanes {{ item.start_lane }}–{{ item.start_lane + item.width_lanes - 1 }}"><div><strong>{{ item.name or item.asset_name or 'Rack device' }}</strong><span>U{{ item.start_unit }}–{{ item.start_unit + item.unit_height - 1 }}, {{ item.face|title }}{{ ' and rear' if item.depth_mode == 'full' else '' }}, lanes {{ item.start_lane }}–{{ item.start_lane + item.width_lanes - 1 }}</span>{% if item.asset_name %}<small>Linked asset: <a href="/assets/{{ item.asset_id }}">{{ item.asset_name }}</a></small>{% endif %}{% if item.ports %}<div class="rack-ports" aria-label="{{ item.name }} port asset links">{% for port in item.ports %}<form method="post" action="/api/infrastructure/rack-equipment/{{ item.id }}/ports/{{ port.port_number }}" class="rack-port">{% include "partials/csrf.html" %}<label><span>Port {{ port.port_number }}{% if port.asset_name %} · {{ port.asset_name }}{% endif %}</span><select class="input" name="asset_id" aria-label="Asset linked to port {{ port.port_number }}" {% if not can_edit %}disabled{% endif %}><option value="">Not linked</option>{% for asset in assets %}<option value="{{ asset.id }}" {% if asset.id == port.asset_id %}selected{% endif %}>{{ asset.name }}</option>{% endfor %}</select></label>{% if can_edit %}<button class="button button--small button--secondary">Save</button>{% endif %}</form>{% endfor %}</div>{% endif %}</div>{% if can_edit %}<div class="rack-list__actions"><button class="button button--small button--secondary" type="button" data-edit-equipment="{{ item.id }}">Edit</button><form class="inline-form" method="post" action="/api/infrastructure/rack-equipment/{{ item.id }}/delete" data-confirm-remove="{{ item.name or item.asset_name or 'Rack device' }}">{% include "partials/csrf.html" %}<button class="button button--small button--danger" type="submit">Remove</button></form></div>{% endif %}</li>{% else %}<li>No rack items installed.</li>{% endfor %}</ul>
         <h3>Reservations</h3><ul>{% for item in reservations if item.rack_id == rack.id %}<li id="reservation-{{ item.id }}" data-reservation-label="{{ item.label or '' }}" data-reservation-owner="{{ item.owner or '' }}" data-reservation-notes="{{ item.notes or '' }}" data-reservation-position="U{{ item.start_unit }}–{{ item.start_unit + item.unit_height - 1 }} · {{ item.face|title }}{{ ' and rear' if item.depth_mode == 'full' else '' }}"><div><strong>{{ item.label or 'Reserved space' }}</strong><span>U{{ item.start_unit }}–{{ item.start_unit + item.unit_height - 1 }}, {{ item.face|title }}</span></div>{% if can_edit %}<div class="rack-list__actions"><button class="button button--small button--secondary" type="button" data-edit-reservation="{{ item.id }}">Edit</button><form class="inline-form" method="post" action="/api/infrastructure/rack-reservations/{{ item.id }}/delete" data-confirm-remove="{{ item.label or 'this reservation' }}">{% include "partials/csrf.html" %}<button class="button button--small button--danger" type="submit">Remove</button></form></div>{% endif %}</li>{% else %}<li>No space reserved.</li>{% endfor %}</ul></div></details>
     </article>
