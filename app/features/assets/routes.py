@@ -919,6 +919,7 @@ async def racks_page(request: Request):
     data["item_types"] = rack_item_types.ITEM_TYPES
     data["connectors"] = rack_item_types.CONNECTORS
     data["image_path"] = rack_item_types.image_path
+    data["port_catalog"] = rack_dashboard.port_catalog(data.get("equipment") or [])
     data["item_type_labels"] = {item_type.key: item_type.label for item_type in rack_item_types.ITEM_TYPES}
     for item in data.get("equipment") or []:
         item["item_type"] = rack_item_types.get(item.get("item_type")).key
@@ -947,7 +948,8 @@ def _rack_connections(form: Any, item_type: str) -> dict[str, Any]:
     """Parse connection counts and per-port links from a rack item form.
 
     Link fields are named ``port-<connector>-<ordinal>-asset`` (or ``-source``
-    for a power supply's feeding outlet) and ``port-<connector>-<ordinal>-label``.
+    for a power supply's feeding outlet), ``-peer`` for a specific remote port
+    (a network port, or the PSU an outlet feeds) and ``-label``.
     """
     catalogue = rack_item_types.get(item_type)
     counts: dict[str, int] = {}
@@ -965,11 +967,15 @@ def _rack_connections(form: Any, item_type: str) -> dict[str, Any]:
             label = _optional_text(form, prefix + "label")
             if target_raw is None and label is None:
                 continue
-            target_id = int(target_raw) if target_raw else None
+            # The device picker holds an asset id, or "item:<id>" for a rack
+            # item without an asset; the remote port is sent as "-peer".
+            target_id = int(target_raw) if target_raw and not str(target_raw).startswith("item:") else None
+            peer_raw = form.get(prefix + "peer") if connector in infrastructure_repo.PEER_TARGETS else None
             links.append(infrastructure_repo.PortLink(
                 connector, ordinal,
                 asset_id=target_id if target == "asset" else None, label=label,
-                source_port_id=target_id if target == "source" else None))
+                source_port_id=target_id if target == "source" else None,
+                peer_port_id=int(peer_raw) if peer_raw else None))
     return {"port_counts": counts, "port_links": links}
 
 

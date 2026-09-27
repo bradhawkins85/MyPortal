@@ -87,7 +87,8 @@ def _drawn_ports(item: Mapping[str, Any], rear: bool = False) -> list[dict[str, 
     if ports:
         drawn = [{"number": int(port["port_number"]), "connector": str(port.get("connector") or "data"),
                   "linked": (port.get("asset_id") is not None or bool(port.get("label"))
-                             or port.get("source_port_id") is not None)}
+                             or port.get("source_port_id") is not None
+                             or port.get("peer_port_id") is not None or bool(port.get("fed_items")))}
                  for port in ports]
     else:
         drawn = [{"number": 0, "connector": connector, "linked": False}
@@ -276,10 +277,38 @@ def edit_payload(item: Mapping[str, Any]) -> dict[str, Any]:
         "ports": [
             {"connector": str(port.get("connector") or "data"), "ordinal": int(port.get("ordinal") or 0),
              "asset_id": port.get("asset_id"), "label": port.get("label") or "",
-             "source_port_id": port.get("source_port_id")}
+             "source_port_id": port.get("source_port_id"), "id": port.get("id"),
+             "peer_port_id": port.get("peer_port_id"), "fed_port_id": port.get("fed_port_id")}
             for port in item.get("ports") or []
         ],
     }
+
+
+def port_catalog(equipment: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Every rack item's linkable ports, for choosing the remote end of a link.
+
+    Includes items in every rack of the company, with the asset each item is
+    linked to, so choosing an asset can offer that device's ports.
+    """
+    catalog = []
+    for item in equipment:
+        ports = [
+            {"id": port["id"], "connector": str(port.get("connector") or "data"),
+             "label": port.get("display_label") or "", "peer_port_id": port.get("peer_port_id"),
+             "source_port_id": port.get("source_port_id")}
+            for port in item.get("ports") or []
+            if str(port.get("connector") or "data") in {"data", "psu"} and port.get("id") is not None
+        ]
+        if not ports:
+            continue
+        catalog.append({
+            "id": item["id"],
+            "name": item.get("name") or item.get("asset_name") or rack_item_types.get(item.get("item_type")).label,
+            "rack": item.get("rack_name") or "",
+            "asset_id": item.get("asset_id"),
+            "ports": ports,
+        })
+    return catalog
 
 
 def estate_summary(racks: Sequence[Mapping[str, Any]], equipment: Sequence[Mapping[str, Any]],

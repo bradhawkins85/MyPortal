@@ -534,7 +534,8 @@ def connections_from_ports(ports: Iterable[Mapping], key: str, rear: bool) -> di
         connector = str(port.get("connector") or "data")
         if connector in grouped:
             grouped[connector].append(bool(port.get("asset_id") or port.get("label")
-                                           or port.get("source_port_id") or port.get("fed_items")))
+                                           or port.get("source_port_id") or port.get("peer_port_id")
+                                           or port.get("fed_items")))
     return grouped
 
 

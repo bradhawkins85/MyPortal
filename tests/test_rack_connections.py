@@ -36,7 +36,8 @@ def test_ups_is_placed_with_iec_and_three_pin_outlets(monkeypatch):
 
 def test_switch_port_links_record_assets_and_labels(monkeypatch):
     execute, _insert = _mock_db(
-        monkeypatch, fetch_one=[{"unit_count": 42}, None, None], fetch_all=[[{"id": 5}]])
+        monkeypatch, fetch_one=[{"unit_count": 42}, None, None],
+        fetch_all=[[{"id": 5}], [{"id": 101, "port_number": 1}, {"id": 103, "port_number": 3}]])
 
     asyncio.run(infrastructure.place_asset(
         1, 2, None, 10, 1, "front", None, item_type="switch", port_counts={"data": 3},
@@ -187,3 +188,96 @@ def test_migration_adds_connectors_labels_and_power_sources():
                    "power_source_port_id INT NULL", "power_source_label VARCHAR(191) NULL"):
         assert column in sql
     assert "DROP" not in sql.upper()
+
+
+def _peer_db(monkeypatch, targets, own_ports):
+    execute, _insert = _mock_db(monkeypatch, fetch_one=[{"id": 8, "rack_id": 2}],
+                                fetch_all=[own_ports, targets, own_ports])
+    return execute
+
+
+def test_network_port_links_to_a_remote_port_on_both_ends(monkeypatch):
+    own = [{"id": 11, "port_number": 1, "connector": "data"}, {"id": 12, "port_number": 2, "connector": "data"}]
+    execute = _peer_db(monkeypatch, [{"id": 90, "equipment_id": 20, "connector": "data"}], own)
+
+    asyncio.run(infrastructure.update_rack_equipment(
+        1, 8, "Web01", "server", None, None, None, port_counts={"data": 2, "psu": 0},
+        port_links=[infrastructure.PortLink("data", 1, asset_id=4, peer_port_id=90),
+                    infrastructure.PortLink("data", 2)]))
+
+    links = [params for _sql_text, params in _sql(execute, "UPDATE rack_equipment_ports SET asset_id")]
+    assert links[0][0] is None  # the port link replaces the bare asset link
+    sets = [params for _sql_text, params in _sql(execute, "SET peer_port_id=%s WHERE")]
+    assert sets == [(90, 1, 11), (11, 1, 90)]
+    clears = [params for _sql_text, params in _sql(execute, "SET peer_port_id=NULL WHERE company_id")]
+    assert (1, 11, 11) in clears and (1, 90, 90) in clears and (1, 12, 12) in clears
+
+
+def test_outlet_link_records_the_feed_on_the_remote_psu(monkeypatch):
+    own = [{"id": 31, "port_number": 1, "connector": "iec"}, {"id": 32, "port_number": 2, "connector": "psu"}]
+    execute = _peer_db(monkeypatch, [{"id": 77, "equipment_id": 20, "connector": "psu"}], own)
+
+    asyncio.run(infrastructure.update_rack_equipment(
+        1, 8, "PDU A", "pdu", None, None, None, port_counts={"iec": 1, "3pin": 0, "psu": 1},
+        port_links=[infrastructure.PortLink("iec", 1, asset_id=4, peer_port_id=77)]))
+
+    assert _sql(execute, "SET source_port_id=NULL WHERE company_id=%s AND source_port_id=%s")[0][1] == (1, 31)
+    assert _sql(execute, "SET source_port_id=%s WHERE company_id=%s AND id=%s")[0][1] == (31, 1, 77)
+
+
+@pytest.mark.parametrize(("connector", "target"), [("data", "psu"), ("iec", "data")])
+def test_remote_port_must_be_the_right_kind_on_another_item(monkeypatch, connector, target):
+    own = [{"id": 31, "port_number": 1, "connector": connector}]
+    _peer_db(monkeypatch, [{"id": 77, "equipment_id": 20, "connector": target}], own)
+    counts = {"data": 1, "psu": 0} if connector == "data" else {"iec": 1, "3pin": 0, "psu": 0}
+    with pytest.raises(ValueError, match="on another rack item"):
+        asyncio.run(infrastructure.update_rack_equipment(
+            1, 8, "Item", "server" if connector == "data" else "pdu", None, None, None,
+            port_counts=counts, port_links=[infrastructure.PortLink(connector, 1, peer_port_id=77)]))
+
+
+def test_removing_ports_clears_links_pointing_at_them(monkeypatch):
+    rows = [{"id": 1, "port_number": 1, "connector": "data"}, {"id": 2, "port_number": 2, "connector": "data"}]
+    execute, _insert = _mock_db(monkeypatch, fetch_all=[rows])
+    asyncio.run(infrastructure._sync_ports(1, 8, {"data": 1}))
+    assert _sql(execute, "SET peer_port_id=NULL WHERE peer_port_id IN")[0][1] == (2,)
+
+
+def test_form_parsing_reads_remote_ports_and_rack_items_without_assets():
+    from app.features.assets.routes import _rack_connections
+
+    parsed = _rack_connections({
+        "port_count_data": "2", "port_count_psu": "0",
+        "port-data-1-asset": "item:20", "port-data-1-peer": "90", "port-data-1-label": "",
+        "port-data-2-asset": "4", "port-data-2-peer": "", "port-data-2-label": "",
+    }, "server")
+    assert parsed["port_links"] == [
+        infrastructure.PortLink("data", 1, None, None, None, 90),
+        infrastructure.PortLink("data", 2, 4, None, None, None),
+    ]
+    kvm = _rack_connections({"port_count_kvm": "1", "port_count_data": "0", "port_count_psu": "0",
+                             "port-kvm-1-asset": "7", "port-kvm-1-peer": "90"}, "kvm")
+    assert kvm["port_links"] == [infrastructure.PortLink("kvm", 1, 7)]  # KVM devices link to assets only
+
+
+def test_port_catalog_lists_linkable_ports_with_the_items_asset():
+    from app.services import rack_dashboard
+
+    catalog = rack_dashboard.port_catalog([
+        {"id": 20, "name": "Core switch", "rack_name": "Main", "asset_id": 4, "item_type": "switch",
+         "ports": [{"id": 90, "connector": "data", "display_label": "Port 1", "peer_port_id": 11},
+                   {"id": 91, "connector": "psu", "display_label": "PSU 1", "source_port_id": None}]},
+        {"id": 21, "name": "Blank", "item_type": "shelf", "ports": []},
+        {"id": 22, "name": "PDU", "item_type": "pdu",
+         "ports": [{"id": 95, "connector": "iec", "display_label": "IEC 1"}]},
+    ])
+    assert [entry["id"] for entry in catalog] == [20]
+    assert catalog[0]["asset_id"] == 4
+    assert [port["label"] for port in catalog[0]["ports"]] == ["Port 1", "PSU 1"]
+
+
+def test_migration_437_adds_port_peers():
+    from pathlib import Path
+
+    sql = (Path(__file__).resolve().parents[1] / "migrations/437_rack_port_peers.sql").read_text()
+    assert sql.startswith("-- phase: expand") and "ADD COLUMN peer_port_id INT NULL" in sql

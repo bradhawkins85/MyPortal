@@ -222,6 +222,14 @@
   let items = [];
   try { items = JSON.parse(document.getElementById('rack-items-data')?.textContent || '[]'); } catch { items = []; }
   const itemsById = new Map(items.map(item => [String(item.id), item]));
+  // Every rack item's network ports and PSUs, for choosing the remote end of a link.
+  let catalog = [];
+  try { catalog = JSON.parse(document.getElementById('rack-port-catalog')?.textContent || '[]'); } catch { catalog = []; }
+  const catalogPorts = new Map();
+  catalog.forEach(entry => entry.ports.forEach(port => catalogPorts.set(String(port.id), { ...port, item: entry })));
+  // Which remote connector a port links to: network port to network port, outlet to PSU.
+  const peerConnector = { data: 'data', iec: 'psu', '3pin': 'psu' };
+  const deviceValueFor = (entry) => entry.asset_id ? String(entry.asset_id) : `item:${entry.id}`;
   const preview = form.querySelector('[data-placement-preview]');
   const map = form.querySelector('[data-placement-map]');
   const mapCaption = form.querySelector('[data-placement-map-caption]');
@@ -254,10 +262,31 @@
   const rememberLinks = () => {
     linksTable.querySelectorAll('[data-port-row]').forEach(row => {
       linkValues.set(row.dataset.portRow, {
-        asset: row.querySelector('select').value,
+        asset: row.querySelector('[data-link-target]').value,
+        peer: row.querySelector('[data-link-peer]')?.value || '',
         label: row.querySelector('input').value,
       });
     });
+  };
+  // Fill a remote-port picker with the matching ports on the chosen device.
+  const fillPeers = (peerSelect, key, deviceValue, current, autoPick) => {
+    const wanted = peerConnector[key];
+    const candidates = catalog.filter(entry => String(entry.id) !== String(editingId) && deviceValue !== '' &&
+      (deviceValue.startsWith('item:') ? `item:${entry.id}` === deviceValue : String(entry.asset_id) === deviceValue));
+    peerSelect.replaceChildren(new Option(wanted === 'psu' ? 'Choose the PSU it feeds' : 'Choose the remote port', ''));
+    const free = [];
+    candidates.forEach(entry => entry.ports.filter(port => port.connector === wanted).forEach(port => {
+      const taken = wanted === 'psu' ? port.source_port_id : port.peer_port_id;
+      const inUse = taken && String(port.id) !== String(current);
+      const option = new Option(`${candidates.length > 1 ? `${entry.name} · ` : ''}${port.label}${inUse ? ' (in use)' : ''}`, String(port.id));
+      peerSelect.append(option);
+      if (!inUse) free.push(String(port.id));
+    }));
+    const available = peerSelect.options.length > 1;
+    peerSelect.hidden = !available;
+    peerSelect.disabled = !available;
+    peerSelect.value = current && [...peerSelect.options].some(option => option.value === String(current)) ? String(current) : '';
+    if (!peerSelect.value && autoPick && free.length === 1) peerSelect.value = free[0];
   };
   const renderLinks = () => {
     rememberLinks();
@@ -277,20 +306,37 @@
         name.className = 'rack-port-link__name';
         name.setAttribute('role', 'rowheader');
         name.textContent = `${connectorLabels[key] || 'Port'} ${ordinal}`;
-        // A power supply is fed from another unit's outlet; other ports link to assets.
+        // A power supply is fed from another unit's outlet; other ports link to
+        // an asset or rack item, and network ports and outlets then pick the
+        // specific remote port (a network port, or the PSU the outlet feeds).
         const isPower = key === 'psu';
         const select = document.createElement('select');
         select.className = 'input input--small';
+        select.dataset.linkTarget = '';
         select.name = `port-${id}-${isPower ? 'source' : 'asset'}`;
-        select.setAttribute('aria-label', `${isPower ? 'Outlet feeding' : 'Asset on'} ${name.textContent}`);
+        select.setAttribute('aria-label', `${isPower ? 'Outlet feeding' : 'Device on'} ${name.textContent}`);
         select.append((isPower ? outletOptions : assetOptions).content.cloneNode(true));
         if (isPower) {
           select.querySelectorAll('option[data-equipment-id]').forEach(option => {
             if (editingId !== null && option.dataset.equipmentId === editingId) option.remove();
           });
+        } else if (!peerConnector[key]) {
+          // KVM device ports link to an asset only.
+          select.querySelector('optgroup[data-rack-items]')?.remove();
         }
         select.value = saved.asset;
         if (select.value !== saved.asset) select.value = '';
+        let peer = null;
+        if (peerConnector[key]) {
+          peer = document.createElement('select');
+          peer.className = 'input input--small';
+          peer.dataset.linkPeer = '';
+          peer.name = `port-${id}-peer`;
+          peer.setAttribute('aria-label', `${peerConnector[key] === 'psu' ? 'PSU fed by' : 'Remote port for'} ${name.textContent}`);
+          fillPeers(peer, key, select.value, saved.peer, false);
+          select.addEventListener('change', () => fillPeers(peer, key, select.value, '', true));
+          row.classList.add('rack-port-link--peer');
+        }
         const label = document.createElement('input');
         label.className = 'input input--small';
         label.name = `port-${id}-label`;
@@ -298,10 +344,10 @@
         label.placeholder = isPower ? 'Label, e.g. Circuit B2' : key === 'kvm' ? 'Label, e.g. Web server' : 'Label, e.g. Printer';
         label.setAttribute('aria-label', `Label for ${name.textContent}`);
         label.value = saved.label;
-        row.append(name, select, label);
+        row.append(name, select, ...(peer ? [peer] : []), label);
         linksTable.append(row);
         total += 1;
-        if (saved.asset || saved.label) linked += 1;
+        if (saved.asset || saved.label || saved.peer) linked += 1;
       }
     });
     linksSummary.textContent = total ? `Port links · ${linked} of ${total} linked` : 'Port links';
@@ -386,6 +432,8 @@
   const resetForm = () => {
     form.reset();
     linkValues = new Map();
+    // Drop the previous item's rows so they are not remembered into this one.
+    linksTable.replaceChildren();
     form.querySelectorAll('[data-connector-count] input').forEach(input => { input.disabled = true; });
   };
   form.elements.unit_height.addEventListener('input', () => { heightTouched = true; });
@@ -435,8 +483,13 @@
       if (field) { field.value = String(count); field.disabled = false; }
     });
     (item.ports || []).forEach(port => {
-      const target = port.connector === 'psu' ? port.source_port_id : port.asset_id;
-      linkValues.set(`${port.connector}-${port.ordinal}`, { asset: target ? String(target) : '', label: port.label || '' });
+      // A remote port link reopens with its device and port selected.
+      const remoteId = port.connector === 'psu' ? null : (port.peer_port_id || port.fed_port_id);
+      const remote = remoteId ? catalogPorts.get(String(remoteId)) : null;
+      const target = port.connector === 'psu' ? port.source_port_id : (remote ? deviceValueFor(remote.item) : port.asset_id);
+      linkValues.set(`${port.connector}-${port.ordinal}`, {
+        asset: target ? String(target) : '', peer: remote ? String(remoteId) : '', label: port.label || '',
+      });
     });
     applyTypeDefaults(selectedType());
     form.querySelector('[data-selected-position]').textContent = positionText({

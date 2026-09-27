@@ -153,17 +153,24 @@ async def overview(company_id: int) -> dict[str, list[dict[str, Any]]]:
             port["equipment_name"] = item.get("name") or item.get("asset_name") or "Rack item"
             port["rack_name"] = item.get("rack_name")
             port["fed_items"] = []
+            port["fed_port_id"] = None
             ports_by_id[port["id"]] = port
     for item in equipment:
         for port in item["ports"]:
+            # Links to ports that no longer exist (a removed item) are ignored.
             source = ports_by_id.get(port.get("source_port_id"))
+            peer = ports_by_id.get(port.get("peer_port_id"))
+            port["source_port_id"] = source["id"] if source else None
+            port["peer_port_id"] = peer["id"] if peer else None
             port["source"] = f"{source['equipment_name']} · {source['display_label']}" if source else None
+            port["peer"] = f"{peer['equipment_name']} · {peer['display_label']}" if peer else None
             if source:
                 source["fed_items"].append(f"{port['equipment_name']} · {port['display_label']}")
+                source["fed_port_id"] = port["id"]
     for item in equipment:
         item["linked_port_count"] = sum(
             1 for port in item["ports"]
-            if port.get("asset_id") or port.get("label") or port["fed_items"] or port["source"])
+            if port.get("asset_id") or port.get("label") or port["fed_items"] or port["source"] or port["peer"])
     power_outlets = [
         {"id": port["id"], "equipment_id": port["equipment_id"],
          "label": f"{port['rack_name']} · {port['equipment_name']} · {port['display_label']}"}
@@ -261,12 +268,17 @@ class PortLink:
     Data, outlet and KVM device ports link to a company asset and/or a
     free-text label. A power supply (PSU) instead records the outlet on
     another unit that feeds it, and/or a label such as a wall circuit.
+
+    ``peer_port_id`` links to a specific port on another rack item: a data
+    port to the remote network port (stored on both ends), or an outlet to
+    the PSU it feeds (stored as that PSU's source).
     """
     connector: str
     ordinal: int
     asset_id: int | None = None
     label: str | None = None
     source_port_id: int | None = None
+    peer_port_id: int | None = None
 
 
 def _check_position(face: str, depth_mode: str, unit_height: int, width_lanes: int,
@@ -340,7 +352,8 @@ async def _apply_port_links(company_id: int, equipment_id: int,
     links = [link for link in links if (link.connector, link.ordinal) in by_position]
     power = rack_item_types.POWER_INPUT
     asset_ids = sorted({link.asset_id for link in links
-                        if link.asset_id is not None and link.connector != power})
+                        if link.asset_id is not None and link.connector != power
+                        and link.peer_port_id is None})
     if asset_ids:
         found = await db.fetch_all(
             "SELECT id FROM assets WHERE company_id=%s AND id IN (" + ",".join(["%s"] * len(asset_ids)) + ")",
@@ -357,14 +370,69 @@ async def _apply_port_links(company_id: int, equipment_id: int,
         valid = {int(row["id"]) for row in outlets if int(row["equipment_id"]) != equipment_id}
         if valid != set(source_ids):
             raise ValueError("A power supply must be fed from an outlet on another UPS or PDU")
+    peer_links = [link for link in links if link.connector in PEER_TARGETS]
+    await _check_peer_targets(company_id, equipment_id, peer_links)
+    port_ids: dict[int, int] = {}
+    if peer_links:
+        rows = await db.fetch_all(
+            "SELECT id, port_number FROM rack_equipment_ports WHERE equipment_id=%s AND company_id=%s",
+            (equipment_id, company_id)) or []
+        port_ids = {int(row["port_number"]): int(row["id"]) for row in rows}
     for link in links:
         label = (link.label or "").strip()[:191] or None
         port = by_position[(link.connector, link.ordinal)]
         is_power = link.connector == power
+        # A link to a specific remote port replaces a bare asset link.
+        asset_id = None if is_power or link.peer_port_id is not None else link.asset_id
         await db.execute(
             "UPDATE rack_equipment_ports SET asset_id=%s,label=%s,source_port_id=%s WHERE equipment_id=%s AND port_number=%s AND company_id=%s",
-            (None if is_power else link.asset_id, label, link.source_port_id if is_power else None,
+            (asset_id, label, link.source_port_id if is_power else None,
              equipment_id, int(port["port_number"]), company_id))
+        port_id = port_ids.get(int(port["port_number"]))
+        if link.connector in PEER_TARGETS and port_id is not None:
+            await _set_peer(company_id, link.connector, port_id, link.peer_port_id)
+
+
+# Which remote connector each connector can be linked to port-to-port.
+PEER_TARGETS = {"data": "data", "iec": "psu", "3pin": "psu"}
+
+
+async def _check_peer_targets(company_id: int, equipment_id: int, links: list[PortLink]) -> None:
+    targets = {link.peer_port_id: PEER_TARGETS[link.connector] for link in links if link.peer_port_id is not None}
+    if not targets:
+        return
+    rows = await db.fetch_all(
+        "SELECT id, equipment_id, connector FROM rack_equipment_ports WHERE company_id=%s AND id IN ("
+        + ",".join(["%s"] * len(targets)) + ")", (company_id, *targets)) or []
+    found = {int(row["id"]): row for row in rows}
+    for target_id, connector in targets.items():
+        row = found.get(target_id)
+        if (not row or str(row.get("connector") or "data") != connector
+                or int(row["equipment_id"]) == equipment_id):
+            noun = "power supply" if connector == "psu" else "network port"
+            raise ValueError(f"Choose a {noun} on another rack item")
+
+
+async def _set_peer(company_id: int, connector: str, port_id: int, target_id: int | None) -> None:
+    """Link one port to a remote port, replacing any earlier link on either end."""
+    if connector == "data":
+        # Network links are stored on both ends.
+        for end in {port_id, target_id} - {None}:
+            await db.execute(
+                "UPDATE rack_equipment_ports SET peer_port_id=NULL WHERE company_id=%s AND (peer_port_id=%s OR id=%s)",
+                (company_id, end, end))
+        if target_id is not None:
+            await db.execute("UPDATE rack_equipment_ports SET peer_port_id=%s WHERE company_id=%s AND id=%s",
+                             (target_id, company_id, port_id))
+            await db.execute("UPDATE rack_equipment_ports SET peer_port_id=%s WHERE company_id=%s AND id=%s",
+                             (port_id, company_id, target_id))
+        return
+    # An outlet feeds at most one PSU; the feed is recorded on the PSU.
+    await db.execute("UPDATE rack_equipment_ports SET source_port_id=NULL WHERE company_id=%s AND source_port_id=%s",
+                     (company_id, port_id))
+    if target_id is not None:
+        await db.execute("UPDATE rack_equipment_ports SET source_port_id=%s WHERE company_id=%s AND id=%s",
+                         (port_id, company_id, target_id))
 
 
 async def _sync_ports(company_id: int, equipment_id: int, counts: Mapping[str, int]) -> list[dict[str, Any]]:
@@ -386,6 +454,7 @@ async def _sync_ports(company_id: int, equipment_id: int, counts: Mapping[str, i
     if removed:
         marks = ",".join(["%s"] * len(removed))
         await db.execute("UPDATE rack_equipment_ports SET source_port_id=NULL WHERE source_port_id IN (" + marks + ")", tuple(removed))
+        await db.execute("UPDATE rack_equipment_ports SET peer_port_id=NULL WHERE peer_port_id IN (" + marks + ")", tuple(removed))
         await db.execute("DELETE FROM rack_equipment_ports WHERE id IN (" + marks + ")", tuple(removed))
     next_number = max((int(row["port_number"]) for row in rows), default=0) + 1
     for connector, count in counts.items():
