@@ -96,6 +96,18 @@
       button.title = 'No free rack positions';
     }
   });
+  document.querySelectorAll('[data-rack-swivel]').forEach(button => button.addEventListener('click', () => {
+    const faces = button.closest('[data-rack-faces]');
+    const swivelled = faces?.classList.toggle('is-swivelled') ?? false;
+    button.setAttribute('aria-pressed', String(swivelled));
+  }));
+  document.querySelectorAll('.rack__device').forEach(button => button.addEventListener('focus', () => {
+    const rack = button.closest('[data-rack-id]');
+    const status = rack?.querySelector('[data-rack-status] p');
+    const item = button.querySelector('strong')?.textContent?.trim();
+    const face = button.closest('[data-face]')?.dataset.face;
+    if (status && item) status.textContent = `${item} selected on the ${face} elevation.`;
+  }));
   if (!form || !placeDialog) return;
   const preview = form.querySelector('[data-placement-preview]');
   const updatePreview = () => {
