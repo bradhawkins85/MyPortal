@@ -926,21 +926,14 @@ async def racks_page(request: Request):
 def _rack_location(form: Any, rack_id: Any = None, anchor: str = "") -> str:
     """Return the rack workspace URL to land on after a rack form submission.
 
-    Only an integer rack id and a whitelisted view are echoed back, so the
-    redirect can never leave the rack page.
+    Only an integer rack id is echoed back, so the redirect can never leave
+    the rack page.
     """
-    params = []
     try:
         selected = int(rack_id if rack_id is not None else form.get("rack_id"))
     except (TypeError, ValueError):
-        selected = None
-    if selected is not None:
-        params.append(f"rack={selected}")
-    view = rack_dashboard.normalise_view(form.get("view") if form is not None else None)
-    if view != "graphical":
-        params.append(f"view={view}")
-    query = f"?{'&'.join(params)}" if params else ""
-    return f"/racks{query}{anchor}"
+        return f"/racks{anchor}"
+    return f"/racks?rack={selected}{anchor}"
 
 
 def _required_text(form: Any, key: str, limit: int = 191) -> str:

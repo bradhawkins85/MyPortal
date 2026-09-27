@@ -12,7 +12,7 @@ from typing import Any, Iterable, Mapping, Sequence
 FACES = ("front", "rear")
 LANES = (1, 2, 3)
 LANE_LABELS = {1: "left", 2: "centre", 3: "right"}
-VIEWS = ("graphical", "classic", "overview")
+VIEWS = ("graphical", "overview")
 HEAT_LEVELS = 8
 # Visual port positions drawn on switches and patch panels; the real port
 # count is still shown in labels and the item list.

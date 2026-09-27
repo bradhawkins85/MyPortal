@@ -124,7 +124,9 @@ def test_workspace_selects_requested_rack_and_normalises_view():
     data = {"racks": [{"id": 1, "unit_count": 4, "name": "A"}, {"id": 2, "unit_count": 4, "name": "B"}],
             "equipment": [], "reservations": []}
 
-    assert rack_dashboard.build_workspace(data, "2", "classic")["selected_rack"]["id"] == 2
+    assert rack_dashboard.build_workspace(data, "2", None)["selected_rack"]["id"] == 2
+    assert rack_dashboard.build_workspace(data, "2", "overview")["view"] == "overview"
+    assert rack_dashboard.normalise_view("classic") == "graphical"
     fallback = rack_dashboard.build_workspace(data, "999", "<script>")
     assert fallback["selected_rack"]["id"] == 1
     assert fallback["view"] == "graphical"
@@ -138,7 +140,9 @@ def test_graphical_dashboard_exposes_capacity_heatmap_and_swivel_controls():
     assert "draw.heatmap(rack, ws.heatmap)" in TEMPLATE
     assert "data-rack-sidebar-toggle" in TEMPLATE
     assert "data-rack-jump" in TEMPLATE
-    assert 'view=classic' in TEMPLATE
+    assert "view=overview" in TEMPLATE
+    assert "view=classic" not in TEMPLATE
+    assert "rack-segmented" not in TEMPLATE
 
 
 def test_graphical_dashboard_interactions_are_keyboard_accessible():

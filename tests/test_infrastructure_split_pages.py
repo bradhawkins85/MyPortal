@@ -62,10 +62,9 @@ def test_navigation_and_asset_cross_links_support_desktop_and_mobile_menu():
     assert '/racks?rack={{ placement.rack_id }}#rack-{{ placement.rack_id }}' in detail
 
 
-def test_rack_form_redirects_return_to_the_same_rack_and_view():
+def test_rack_form_redirects_return_to_the_same_rack():
     from app.features.assets.routes import _rack_location
 
-    assert _rack_location({"rack_id": "4", "view": "classic"}, anchor="#placement-9") == "/racks?rack=4&view=classic#placement-9"
-    assert _rack_location({"rack_id": "4", "view": "graphical"}) == "/racks?rack=4"
-    assert _rack_location({"rack_id": "//evil.example", "view": "https://evil"}) == "/racks"
+    assert _rack_location({"rack_id": "4"}, anchor="#placement-9") == "/racks?rack=4#placement-9"
+    assert _rack_location({"rack_id": "//evil.example"}) == "/racks"
     assert _rack_location({}, 12) == "/racks?rack=12"
