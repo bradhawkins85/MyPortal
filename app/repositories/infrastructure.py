@@ -272,6 +272,44 @@ async def link_equipment_port(company_id: int, equipment_id: int, port_number: i
                      (asset_id, port["id"], company_id))
 
 
+async def update_rack_equipment(company_id: int, equipment_id: int, name: str,
+                                item_type: str, asset_id: int | None,
+                                power_draw_watts: int | None, notes: str | None) -> None:
+    """Update a documented item without disturbing its placement or port links."""
+    clean_name = name.strip()
+    if not clean_name or len(clean_name) > 191 or item_type not in {"device", "patch_panel", "switch"}:
+        raise ValueError("Enter a valid rack item name and type")
+    if power_draw_watts is not None and power_draw_watts < 0:
+        raise ValueError("Power draw cannot be negative")
+    item = await db.fetch_one(
+        "SELECT id, port_count FROM rack_equipment WHERE id=%s AND company_id=%s",
+        (equipment_id, company_id))
+    if not item:
+        raise ValueError("Rack item not found")
+    if item_type in {"patch_panel", "switch"} and not item["port_count"]:
+        raise ValueError("Port count is required for a patch panel or switch")
+    if asset_id is not None and not await db.fetch_one(
+            "SELECT id FROM assets WHERE id=%s AND company_id=%s", (asset_id, company_id)):
+        raise ValueError("Asset does not belong to this company")
+    await db.execute(
+        """UPDATE rack_equipment SET name=%s,item_type=%s,asset_id=%s,
+                  power_draw_watts=%s,notes=%s WHERE id=%s AND company_id=%s""",
+        (clean_name, item_type, asset_id, power_draw_watts, notes, equipment_id, company_id))
+
+
+async def update_rack_reservation(company_id: int, reservation_id: int,
+                                  label: str | None, owner: str | None,
+                                  notes: str | None) -> None:
+    reservation = await db.fetch_one(
+        "SELECT id FROM rack_reservations WHERE id=%s AND company_id=%s",
+        (reservation_id, company_id))
+    if not reservation:
+        raise ValueError("Reservation not found")
+    await db.execute(
+        "UPDATE rack_reservations SET label=%s,owner=%s,notes=%s WHERE id=%s AND company_id=%s",
+        (label, owner, notes, reservation_id, company_id))
+
+
 async def reserve_space(company_id: int, rack_id: int, start_unit: int, unit_height: int,
                         face: str, width_lanes: int, start_lane: int, depth_mode: str,
                         label: str | None, owner: str | None, notes: str | None) -> int:

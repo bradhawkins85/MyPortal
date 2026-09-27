@@ -126,3 +126,44 @@ def test_rack_item_migration_and_template_contracts():
     assert 'value="patch_panel"' in template and 'value="switch"' in template
     assert "Not Configured" not in template and "Not configured" not in template
     assert template.count('class="stat-strip rack-stat-strip"') == 2
+
+
+def test_edit_rack_item_checks_company_asset_before_updating(monkeypatch):
+    monkeypatch.setattr(infrastructure.db, "fetch_one", AsyncMock(side_effect=[
+        {"id": 8, "port_count": 0}, None,
+    ]))
+    execute = AsyncMock()
+    monkeypatch.setattr(infrastructure.db, "execute", execute)
+
+    with pytest.raises(ValueError, match="does not belong"):
+        asyncio.run(infrastructure.update_rack_equipment(
+            1, 8, "Router", "device", 99, 120, None))
+    execute.assert_not_awaited()
+
+
+def test_edit_rack_item_preserves_placement_and_ports(monkeypatch):
+    monkeypatch.setattr(infrastructure.db, "fetch_one", AsyncMock(side_effect=[
+        {"id": 8, "port_count": 24}, {"id": 9},
+    ]))
+    execute = AsyncMock()
+    monkeypatch.setattr(infrastructure.db, "execute", execute)
+
+    asyncio.run(infrastructure.update_rack_equipment(
+        1, 8, "Core switch", "switch", 9, 150, "Uplink"))
+
+    sql, params = execute.await_args.args
+    assert "WHERE id=%s AND company_id=%s" in sql
+    assert "start_unit" not in sql and "rack_equipment_ports" not in sql
+    assert params == ("Core switch", "switch", 9, 150, "Uplink", 8, 1)
+
+
+def test_edit_reservation_is_company_scoped(monkeypatch):
+    monkeypatch.setattr(infrastructure.db, "fetch_one", AsyncMock(return_value={"id": 4}))
+    execute = AsyncMock()
+    monkeypatch.setattr(infrastructure.db, "execute", execute)
+
+    asyncio.run(infrastructure.update_rack_reservation(1, 4, "Maintenance", "Alex", None))
+
+    sql, params = execute.await_args.args
+    assert "WHERE id=%s AND company_id=%s" in sql
+    assert params == ("Maintenance", "Alex", None, 4, 1)
