@@ -147,7 +147,7 @@ def test_rack_item_migration_and_template_contracts():
     assert "asset_id INT NULL" in sql
     assert "rack_equipment_ports" in sql
     assert 'value="{{ type.key }}"' in template and "{% for type in item_types %}" in template
-    assert "Number of <span data-ports-noun>ports</span> <small>optional</small>" in template
+    assert "{{ connector.count_label }}" in template
     assert "Not Configured" not in template and "Not configured" not in template
 
 
