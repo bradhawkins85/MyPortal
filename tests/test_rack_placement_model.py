@@ -28,7 +28,7 @@ def test_place_asset_reserves_each_lane_on_both_faces(monkeypatch):
     monkeypatch.setattr(infrastructure.db, "execute_returning_lastrowid", insert)
     monkeypatch.setattr(infrastructure.db, "execute", execute)
 
-    result = asyncio.run(infrastructure.place_asset(1, 2, 9, 10, 2, "front", None, 2, 2, "full"))
+    result = asyncio.run(infrastructure.place_asset(1, 2, 9, 10, 2, "front", None, 2, 2, "full", name="Server"))
 
     assert result == 55
     assert execute.await_count == 8
@@ -40,8 +40,8 @@ def test_place_asset_reserves_each_lane_on_both_faces(monkeypatch):
 
 @pytest.mark.parametrize("width,lane", [(2, 3), (3, 2), (4, 1)])
 def test_place_asset_rejects_width_outside_three_lanes(width, lane):
-    with pytest.raises(ValueError, match="Invalid rack position"):
-        asyncio.run(infrastructure.place_asset(1, 2, 9, 10, 1, "front", None, width, lane, "half"))
+    with pytest.raises(ValueError, match="Invalid rack item or position"):
+        asyncio.run(infrastructure.place_asset(1, 2, 9, 10, 1, "front", None, width, lane, "half", name="Device"))
 
 
 def test_reservation_rejects_existing_equipment(monkeypatch):
@@ -85,8 +85,44 @@ def test_rack_details_migration_has_deployment_metadata():
     assert "433_rack_details_and_reservations.sql" in metadata["migrations"]
 
 
-def test_rack_template_explains_capacity_and_unknown_power():
+def test_rack_template_uses_stat_strips_and_hides_unconfigured_values():
     template = (ROOT / "app/templates/infrastructure/racks.html").read_text()
-    assert "Occupied lane-units across both faces" in template
-    assert "Capacity and per-placement draw must both be recorded" in template
+    assert 'class="rack-summary"' in template
+    assert template.count('class="stat-strip rack-stat-strip"') == 2
+    assert "Not configured" not in template
     assert "Accessible list and actions" in template
+
+
+def test_standalone_patch_panel_creates_numbered_ports(monkeypatch):
+    monkeypatch.setattr(infrastructure.db, "fetch_one", AsyncMock(side_effect=[{"unit_count": 42}, None, None]))
+    monkeypatch.setattr(infrastructure.db, "execute_returning_lastrowid", AsyncMock(return_value=81))
+    execute = AsyncMock()
+    monkeypatch.setattr(infrastructure.db, "execute", execute)
+
+    result = asyncio.run(infrastructure.place_asset(
+        1, 2, None, 10, 1, "front", None, item_type="patch_panel",
+        name="PP-A", port_count=4
+    ))
+
+    assert result == 81
+    port_calls = [call for call in execute.await_args_list if "rack_equipment_ports" in call.args[0]]
+    assert [call.args[1][2] for call in port_calls] == [1, 2, 3, 4]
+
+
+def test_link_port_rejects_cross_company_asset(monkeypatch):
+    monkeypatch.setattr(infrastructure.db, "fetch_one", AsyncMock(side_effect=[{"id": 7}, None]))
+    execute = AsyncMock()
+    monkeypatch.setattr(infrastructure.db, "execute", execute)
+    with pytest.raises(ValueError, match="does not belong"):
+        asyncio.run(infrastructure.link_equipment_port(1, 8, 2, 99))
+    execute.assert_not_awaited()
+
+
+def test_rack_item_migration_and_template_contracts():
+    sql = (ROOT / "migrations/434_rack_item_types_and_ports.sql").read_text()
+    template = (ROOT / "app/templates/infrastructure/racks.html").read_text()
+    assert "asset_id INT NULL" in sql
+    assert "rack_equipment_ports" in sql
+    assert 'value="patch_panel"' in template and 'value="switch"' in template
+    assert "Not Configured" not in template and "Not configured" not in template
+    assert template.count('class="stat-strip rack-stat-strip"') == 2
