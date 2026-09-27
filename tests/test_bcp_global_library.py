@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 from app.api.routes import bcp
@@ -25,3 +26,22 @@ def test_global_library_migration_tracks_customer_copies():
     assert "bcp_global_bia_assignment" in sql
     assert "PRIMARY KEY (global_risk_id, company_id)" in sql
     assert "PRIMARY KEY (global_bia_id, company_id)" in sql
+
+
+def test_bcp_template_responses_use_current_starlette_signature():
+    """The request must not be mistaken for a template name by Starlette."""
+    source = Path("app/api/routes/bcp.py").read_text()
+    tree = ast.parse(source)
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "TemplateResponse"
+    ]
+
+    assert calls
+    for call in calls:
+        assert not call.args
+        keywords = {keyword.arg for keyword in call.keywords}
+        assert {"request", "name", "context"} <= keywords
