@@ -139,9 +139,11 @@ def _block(rack: Mapping[str, Any], item: Mapping[str, Any], kind: str,
         view = _side_view(catalogue, item, width, height, rear)
         image, faceplate = view["image"], view["faceplate"]
         image_units, ports = view["image_units"], view["ports"]
-        # Swivelling the rack shows every item from the other side, including
-        # half-depth items that are otherwise only seen from one face.
-        alternate = _side_view(catalogue, item, width, height, not rear)
+        # Full-depth items already appear on both elevations and move with them
+        # when the rack is swivelled. Half-depth items appear on one face only,
+        # so swivelling shows their other side (e.g. a NAS's back panel).
+        if item.get("depth_mode") != "full":
+            alternate = _side_view(catalogue, item, width, height, not rear)
     return {
         "kind": kind,
         "id": item["id"],

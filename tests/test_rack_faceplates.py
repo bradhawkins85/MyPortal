@@ -108,3 +108,15 @@ def test_device_names_switch_sits_with_device_images_and_is_remembered():
     assert 0 < names - images < 300
     script = (root / "app/static/js/racks.js").read_text()
     assert "racks.deviceNames" in script and "racks.deviceImages" in script
+
+
+def test_full_depth_items_keep_each_elevations_view_when_swivelled():
+    rack = {"id": 1, "name": "Core", "unit_count": 4, "numbering_direction": "bottom-up"}
+    server = {
+        "id": 7, "rack_id": 1, "name": "Web", "item_type": "server", "start_unit": 1, "unit_height": 1,
+        "start_lane": 1, "width_lanes": 3, "face": "front", "depth_mode": "full", "ports": [],
+    }
+    front, rear = rack_dashboard.build_faces(rack, [server], [])
+    # The server moves with each elevation; its front and back are never swapped.
+    assert front["blocks"][0]["alternate"] is None and not front["blocks"][0]["rear"]
+    assert rear["blocks"][0]["alternate"] is None and rear["blocks"][0]["rear"]
