@@ -989,12 +989,28 @@
     }
 
     if (sidebarResetButton) {
-      sidebarResetButton.addEventListener('click', () => {
+      sidebarResetButton.addEventListener('click', async () => {
         clearMessages([sidebarSuccess, sidebarError]);
-        buildSidebarState(window.MyPortalSidebarMenu.getDefaults(), { keepHidden: false });
-        setSidebarDirty(true);
-        renderSidebarItems();
-        showMessage(sidebarSuccess, 'Default layout restored. Save to apply it to your menu.');
+        const confirmed = window.confirm(
+          'Reset the left menu to the default layout? Your groups, order and hidden links will be removed.',
+        );
+        if (!confirmed) {
+          return;
+        }
+        sidebarResetButton.disabled = true;
+        try {
+          const defaults = await window.MyPortalSidebarMenu.reset();
+          expandedGroupKeys.clear();
+          buildSidebarState(defaults);
+          renderSidebarItems();
+          setSidebarDirty(false);
+          if (sidebarStatus) sidebarStatus.textContent = 'Default layout applied';
+          showMessage(sidebarSuccess, 'Left menu reset to the default layout.');
+        } catch (error) {
+          showMessage(sidebarError, error.message || 'Unable to reset the left menu.');
+        } finally {
+          sidebarResetButton.disabled = false;
+        }
       });
     }
 

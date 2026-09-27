@@ -302,6 +302,20 @@ async def get_user_sidebar_preferences(user_id: int) -> dict[str, Any]:
     return resolve_stored_preferences(parsed)
 
 
+async def reset_user_sidebar_preferences(user_id: int) -> dict[str, Any]:
+    """Drop the user's saved layout so they follow the shipped default again.
+
+    Deleting (rather than saving a copy of the default) means later changes to
+    the default layout reach this user too.
+    """
+
+    await db.execute(
+        "DELETE FROM user_sidebar_preferences WHERE user_id = %s",
+        (user_id,),
+    )
+    return build_default_sidebar_preferences()
+
+
 async def upsert_user_sidebar_preferences(
     user_id: int,
     preferences: dict[str, Any],

@@ -3477,6 +3477,18 @@ button.header-title-menu__link,
   border-top: 1px solid var(--hf-line-soft);
 }
 
+.menu-editor__footer .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.menu-editor__footer .button svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
+}
+
 .menu-editor__status {
   margin-right: auto;
   color: var(--hf-muted);

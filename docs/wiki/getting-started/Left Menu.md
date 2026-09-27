@@ -38,8 +38,10 @@ Open **My Profile → Left menu** to change your layout:
   bin button. Removing a section keeps its links and moves them to the top
   level. Click a section's icon to choose a different icon.
 - Add **dividers** and **spacers** to separate entries at the top level.
-- **Restore default layout** loads the grouping shown above. It also clears
-  hidden links. Nothing changes until you select **Save menu**.
+- **Reset to default** discards your saved layout after you confirm. That
+  includes your sections, order and hidden links. The grouping shown above
+  applies straight away. After a reset you follow the default, so later
+  changes to the default layout reach you too.
 
 ## Upgrading
 

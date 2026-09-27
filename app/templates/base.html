@@ -1594,6 +1594,12 @@
             applySidebarPreferences(saved);
             return saved;
           },
+          reset: async () => {
+            const defaults = await requestSidebarPreferences('DELETE');
+            saveCachedSidebarPreferences(defaults);
+            applySidebarPreferences(defaults);
+            return defaults;
+          },
         };
 
         if (hasAuthenticatedUser && sidebarMenuRoot) {
