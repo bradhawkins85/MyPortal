@@ -421,37 +421,48 @@
       </div>
 
       <div class="management__column profile-columns__column">
-        <section class="card card--panel">
-        <header class="card__header card__header--stacked">
+        <section class="card card--panel menu-editor" data-sidebar-customisation>
+        <header class="card__header card__header--stacked menu-editor__header">
           <div>
-            <h2 class="card__title">Left menu customisation</h2>
+            <h2 class="card__title">Left menu</h2>
             <p class="card__subtitle">
-              Choose which sidebar links are visible, arrange their order, and collect related links in collapsible groups.
+              Drag links to reorder them, move them between groups, and switch off anything you don't use.
+              Changes preview here and apply to the sidebar when you save.
             </p>
           </div>
+          <div class="menu-editor__toolbar" role="toolbar" aria-label="Add to menu">
+            <button type="button" class="button button--ghost button--small" data-sidebar-add-group>
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 5a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm8 5v3H8v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
+              New group
+            </button>
+            <button type="button" class="button button--ghost button--small" data-sidebar-add-divider>
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 11h18v2H3z"/></svg>
+              Divider
+            </button>
+            <button type="button" class="button button--ghost button--small" data-sidebar-add-spacer>
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11 3h2v5h3l-4 4-4-4h3zm0 18h2v-5h3l-4-4-4 4h3z"/></svg>
+              Spacer
+            </button>
+          </div>
         </header>
-        <div class="card__body" data-sidebar-customisation>
-          <div class="table-wrapper">
-            <table class="table" id="sidebar-menu-table">
-              <thead>
-                <tr>
-                  <th scope="col">Visible</th>
-                  <th scope="col">Menu item</th>
-                  <th scope="col" class="table__actions">Move</th>
-                  <th scope="col" class="table__actions">Remove</th>
-                </tr>
-              </thead>
-              <tbody data-sidebar-items></tbody>
-            </table>
+        <div class="card__body menu-editor__body">
+          <div class="menu-editor__list-header">
+            <span class="menu-editor__list-title">Menu layout</span>
+            <button type="button" class="menu-editor__text-button" data-sidebar-expand-all aria-pressed="false">Expand all</button>
           </div>
-          <div class="form-actions">
-            <button type="button" class="button button--ghost" data-sidebar-add-divider>Add divider</button>
-            <button type="button" class="button button--ghost" data-sidebar-add-spacer>Add spacer</button>
-            <button type="button" class="button button--ghost" data-sidebar-add-group>Add group</button>
-            <button type="button" class="button" data-sidebar-save>Save menu</button>
-            <button type="button" class="button button--ghost" data-sidebar-reset>Reset default</button>
-          </div>
+          <ol class="menu-editor__list" data-sidebar-items aria-label="Left menu layout"></ol>
+          <p class="menu-editor__hint text-muted">
+            Tip: use the arrow buttons or the “Move to” menu if you prefer not to drag. Empty groups are hidden from the sidebar.
+          </p>
         </div>
+        <footer class="menu-editor__footer">
+          <span class="menu-editor__status" data-sidebar-status aria-live="polite"></span>
+          <button type="button" class="button button--ghost" data-sidebar-reset>
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+            Reset to default
+          </button>
+          <button type="button" class="button" data-sidebar-save>Save menu</button>
+        </footer>
         </section>
       </div>
     </div>

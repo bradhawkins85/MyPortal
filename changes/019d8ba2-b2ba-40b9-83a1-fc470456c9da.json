@@ -1,0 +1,7 @@
+{
+  "guid": "019d8ba2-b2ba-40b9-83a1-fc470456c9da",
+  "occurred_at": "2026-09-27T12:44Z",
+  "change_type": "Feature",
+  "summary": "Group the left menu into logical sections by default (Support, Sales & Billing, Assets & Network, Security & Compliance, Reports, Administration and more) and redesign the My Profile left menu editor with nested groups, drag and drop, visibility switches and a restore-default option.",
+  "content_hash": "733c335b80779bc956271b35dda93f68f7784f385bd060bdcb6d1719df2c4f0c"
+}

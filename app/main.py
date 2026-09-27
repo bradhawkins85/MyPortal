@@ -115,6 +115,7 @@ from app.core.logging import configure_logging, log_error, log_info, log_warning
 from loguru import logger
 from app.repositories import access_activity as access_activity_repo
 from app.repositories import audit_logs as audit_repo
+from app.repositories import sidebar_preferences as sidebar_preferences_repo
 from app.repositories import auth as auth_repo
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
@@ -943,6 +944,11 @@ def _feature_pack_available(slug: str) -> bool:
 
 
 templates.env.globals["feature_pack_available"] = _feature_pack_available
+# The sidebar applies this before its preferences request resolves, so first
+# visits render grouped instead of flashing the flat server-rendered list.
+templates.env.globals["sidebar_default_preferences"] = (
+    sidebar_preferences_repo.build_default_sidebar_preferences
+)
 
 
 def _deployment_slot() -> str | None:
