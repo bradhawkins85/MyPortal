@@ -22,6 +22,18 @@ def _make_request(path: str = "/admin/companies/assignment/1/2/role") -> Request
     return Request(scope, _dummy_receive)
 
 
+def test_combined_permissions_normalises_object_shaped_role_entries():
+    permissions = membership_repo._combined_permission_names(
+        [
+            {"key": "menu.continuity", "access": "write"},
+            "bcp:view",
+        ],
+        ["bcp:edit"],
+    )
+
+    assert permissions == ["bcp:edit", "bcp:view", "continuity.access"]
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
