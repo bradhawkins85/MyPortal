@@ -66,7 +66,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         script_sources = [
             "'self'",
             "'unsafe-inline'",
-            "https://unpkg.com",
             "https://cal.com",
             "https://app.cal.com",
             "https://static.cloudflareinsights.com",
@@ -109,9 +108,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         
         # Content-Security-Policy: Restrict resource loading to same origin
         # Allow 'unsafe-inline' for styles and scripts that are inline in templates
-        # Allow 'unsafe-eval' for some JavaScript libraries that use eval
-        # Allow unpkg.com for loading htmx library from CDN
-        # In production, these should be replaced with nonces or hashes
+        # htmx and the portal's other core dependencies are served from this
+        # application's static assets and are covered by 'self'. External
+        # sources below support optional integrations and analytics only.
         csp_directives = [
             "default-src 'self'",
             f"script-src {' '.join(script_sources)}",
