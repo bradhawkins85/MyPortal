@@ -28,6 +28,7 @@ class KnowledgeBaseArticleBase(BaseModel):
     is_published: bool = False
     allowed_user_ids: list[int] = Field(default_factory=list)
     allowed_company_ids: list[int] = Field(default_factory=list)
+    allowed_role_ids: list[int] = Field(default_factory=list)
     sections: list[KnowledgeBaseArticleSection] = Field(default_factory=list)
     content: str | None = Field(default=None)
     owner_id: int | None = None

@@ -148,9 +148,22 @@ async def admin_knowledge_base_page(request: Request):
         include_unpublished=True,
         include_permissions=True,
     )
+    now = datetime.now(timezone.utc)
+    counts = {"all": len(articles), "published": 0, "draft": 0, "in_review": 0, "retired": 0, "overdue": 0}
+    for article in articles:
+        lifecycle = "published" if article.get("is_published") else str(article.get("lifecycle_status") or "draft")
+        if lifecycle == "published" and not article.get("is_published"):
+            lifecycle = "draft"
+        counts[lifecycle] = counts.get(lifecycle, 0) + 1
+        review_due = article.get("review_due_at")
+        if review_due is not None and review_due.tzinfo is None:
+            review_due = review_due.replace(tzinfo=timezone.utc)
+        article["review_overdue"] = bool(review_due and review_due < now and lifecycle != "retired")
+        counts["overdue"] += int(article["review_overdue"])
     extra = {
         "title": "Knowledge base admin",
         "kb_articles": jsonable_encoder(articles),
+        "kb_status_counts": counts,
     }
     return await main_module._render_template(
         "admin/knowledge_base.html",

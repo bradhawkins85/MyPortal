@@ -81,10 +81,17 @@
         {% endif %}
       </div>
     </header>
+    {% set headed_sections = (kb_article.sections or []) | selectattr('heading') | list %}
+    {% if headed_sections | length >= 3 %}
+      <nav class="knowledge-base__toc" aria-label="On this page">
+        <span class="knowledge-base__toc-label">On this page</span>
+        {% for section in kb_article.sections %}{% if section.heading %}<a href="#section-{{ loop.index }}">{{ section.heading }}</a>{% endif %}{% endfor %}
+      </nav>
+    {% endif %}
     <div class="card__body knowledge-base__body" data-knowledge-base-article-body>
       {% if kb_article.sections %}
         {% for section in kb_article.sections %}
-          <section class="knowledge-base__section" data-knowledge-base-section>
+          <section class="knowledge-base__section" id="section-{{ loop.index }}" data-knowledge-base-section>
             {% if section.heading %}
               <h2 class="knowledge-base__section-heading">{{ section.heading }}</h2>
             {% endif %}
@@ -121,7 +128,7 @@
           id="kb-feedback-message"
           name="feedback"
           class="input"
-          rows="4"
+          rows="2"
           maxlength="5000"
           placeholder="Tell us what could be improved."
         ></textarea>
