@@ -225,10 +225,22 @@ def test_sidebar_custom_groups_have_profile_controls_and_nested_styles():
     assert "sidebarGroupIcons" in base_template
     assert "data-sidebar-add-group" in profile_template
     assert "SIDEBAR_GROUP_ICONS" in profile_script
-    assert "renderSidebarItems({ focusKey: groupKey })" in profile_script
+    assert "renderSidebarItems({ focusKey: groupKey, focusControl: 'name' })" in profile_script
     assert "inputToFocus.scrollIntoView({ block: 'nearest' })" in profile_script
-    assert "sidebar-row--group-child" in stylesheet
+    assert "data-sidebar-expand-all" in profile_template
+    assert "menu-editor__children" in stylesheet
     assert "menu__submenu--custom" in stylesheet
+
+
+def test_sidebar_applies_grouped_defaults_and_delegates_toggles():
+    base_template = Path("app/templates/base.html").read_text()
+
+    # First visits render the grouped default rather than a flat list.
+    assert "sidebar_default_preferences()" in base_template
+    assert "loadCachedSidebarPreferences() || sidebarDefaultPreferences" in base_template
+    # One delegated handler, so rebuilt groups never double-toggle.
+    assert "sidebarMenuRoot?.addEventListener('click'" in base_template
+    assert "document.querySelectorAll('[data-menu-toggle]').forEach" not in base_template
 
 
 def test_profile_menu_permission_shows_my_profile_for_non_admin(monkeypatch):

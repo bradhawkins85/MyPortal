@@ -29,6 +29,11 @@ EXPECTED_SLUGS = {
     "ai_quality",
     "ai_tag_synonyms",
     "tray",
+    "outlook_contacts",
+    "notification_contact",
+    "email_signature",
+    "click_to_call",
+    "gmp_glp",
 }
 
 
@@ -139,3 +144,103 @@ def test_sidebar_hides_disabled_core_components(monkeypatch):
         assert f'href="{path}"' not in body, path
     assert "Office 365" not in body
     assert 'href="/m365/best-practices"' not in body
+
+
+def _render(monkeypatch, template: str, *disabled: str, **context) -> str:
+    policy = ComponentAvailability(disabled_feature_packs=frozenset(disabled))
+    monkeypatch.setattr(main_module, "get_component_availability", lambda: policy)
+    request = SimpleNamespace(url=SimpleNamespace(path="/", query=""), query_params={})
+    return main_module.templates.env.get_template(template).render(
+        request=request,
+        app_name="MyPortal",
+        current_user={"id": 1, "is_super_admin": True, "email_signature": ""},
+        is_super_admin=True,
+        has_authenticated_user=True,
+        active_membership={},
+        available_companies=[],
+        module_enabled={},
+        enabled_module_slugs=[],
+        **context,
+    )
+
+
+PROFILE_CARDS = {
+    "outlook_contacts": "Outlook contacts</h2>",
+    "click_to_call": "Click to call</h2>",
+    "notification_contact": "Notification Contact</h2>",
+    "email_signature": "Email signature</h2>",
+}
+
+
+def _render_profile(monkeypatch, *disabled: str) -> str:
+    return _render(
+        monkeypatch,
+        "admin/profile.html",
+        *disabled,
+        profile_show_technician_tools=True,
+        profile_m365_contacts={"connected": False},
+        profile_totp_devices=[],
+        profile_passkeys=[],
+    )
+
+
+def test_profile_cards_render_by_default(monkeypatch):
+    body = _render_profile(monkeypatch)
+    for marker in PROFILE_CARDS.values():
+        assert marker in body
+    assert "click_to_call.js" in body
+
+
+@pytest.mark.parametrize("slug", sorted(PROFILE_CARDS))
+def test_profile_card_hidden_when_disabled(monkeypatch, slug):
+    body = _render_profile(monkeypatch, slug)
+    assert PROFILE_CARDS[slug] not in body
+    for other, marker in PROFILE_CARDS.items():
+        if other != slug:
+            assert marker in body
+    if slug == "click_to_call":
+        assert "click_to_call.js" not in body
+
+
+def test_profile_api_paths_blocked():
+    policy = ComponentAvailability(
+        disabled_feature_packs=frozenset({"outlook_contacts", "click_to_call"})
+    )
+    assert not policy.path_available("/admin/profile/m365-contacts/connect")
+    assert not policy.path_available("/api/profile/m365-contacts/phones")
+    assert not policy.path_available("/api/click-to-call/settings")
+    assert policy.path_available("/admin/profile")
+
+
+def test_gmp_glp_filter_clause(monkeypatch):
+    from app.repositories import compliance_checks as repo
+
+    enabled = ComponentAvailability()
+    disabled = ComponentAvailability(disabled_feature_packs=frozenset({"gmp_glp"}))
+    import app.services.component_availability as availability_module
+
+    monkeypatch.setattr(availability_module, "get_component_availability", lambda: enabled)
+    assert repo._hidden_category_clause("cat") is None
+    monkeypatch.setattr(availability_module, "get_component_availability", lambda: disabled)
+    assert repo._hidden_category_clause("cat") == "cat.code NOT IN ('GMP', 'GLP')"
+
+
+def test_gmp_glp_list_checks_query_excludes_categories(monkeypatch):
+    import asyncio
+
+    from app.repositories import compliance_checks as repo
+    import app.services.component_availability as availability_module
+
+    disabled = ComponentAvailability(disabled_feature_packs=frozenset({"gmp_glp"}))
+    monkeypatch.setattr(availability_module, "get_component_availability", lambda: disabled)
+    captured = {}
+
+    async def fake_fetch_all(query, params=None):
+        captured["query"] = query
+        return []
+
+    monkeypatch.setattr(repo.db, "fetch_all", fake_fetch_all)
+    asyncio.run(repo.list_checks())
+    assert "cat.code NOT IN ('GMP', 'GLP')" in captured["query"]
+    asyncio.run(repo.list_categories())
+    assert "cat.code NOT IN ('GMP', 'GLP')" in captured["query"]

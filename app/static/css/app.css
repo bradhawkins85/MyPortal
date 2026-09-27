@@ -8,6 +8,14 @@
   box-sizing: inherit;
 }
 
+/* Chromium wraps <details> content in a UA shadow slot that the universal
+ * rule above cannot reach, so the slot falls back to content-box and every
+ * descendant inherits it. Re-anchor border-box on the slotted children so
+ * width: 100% controls inside collapsible cards stay within their bounds. */
+details > * {
+  box-sizing: border-box;
+}
+
 /* ============================================================================
  * MyPortal responsive breakpoints — see docs/MOBILE_UX_GUIDELINES.md
  *   mobile  : max-width 640px  (phones)
@@ -2929,41 +2937,612 @@ button.header-title-menu__link,
   white-space: nowrap;
 }
 
+/* Left menu editor (My Profile) */
+/* The rows' controls must never widen the profile grid on narrow screens. */
+.menu-editor {
+  min-width: 0;
+  contain: inline-size;
+}
+
+.menu-editor__header {
+  gap: var(--space-gap-base);
+}
+
+.menu-editor__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-gap-tight);
+}
+
+.menu-editor__toolbar .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.menu-editor__toolbar svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
+}
+
+.menu-editor__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.menu-editor__list,
+.menu-editor__children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.menu-editor__row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.75rem;
+  padding: 0.35rem 0.5rem 0.35rem 0.25rem;
+  border-radius: var(--hf-radius-sm);
+  background: var(--hf-bg-sunken);
+  box-shadow: inset 0 0 0 1px var(--hf-line-soft);
+  position: relative;
+  transition: background 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+
+.menu-editor__row--item:hover {
+  background: rgba(27, 37, 51, 0.7);
+  box-shadow: inset 0 0 0 1px var(--hf-line);
+}
+
+.menu-editor__row--hidden .menu-editor__item-icon,
+.menu-editor__row--hidden .menu-editor__label {
+  opacity: 0.45;
+}
+
+.menu-editor__row--dragging {
+  opacity: 0.35;
+}
+
+.menu-editor__drop-before::before,
+.menu-editor__drop-after::after {
+  content: '';
+  position: absolute;
+  left: 0.25rem;
+  right: 0.25rem;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--hf-accent);
+  box-shadow: 0 0 0 2px var(--hf-accent-ring);
+  pointer-events: none;
+}
+
+.menu-editor__drop-before::before {
+  top: -0.25rem;
+}
+
+.menu-editor__drop-after::after {
+  bottom: -0.25rem;
+}
+
+.menu-editor__group.menu-editor__drop-before,
+.menu-editor__group.menu-editor__drop-after {
+  position: relative;
+}
+
+.menu-editor__drop-into {
+  background: var(--hf-accent-soft) !important;
+  box-shadow: inset 0 0 0 1px var(--hf-accent) !important;
+}
+
+.menu-editor__handle,
 .sidebar-drag-handle {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1.5rem;
+  height: 1.75rem;
   cursor: grab;
   touch-action: none;
-  color: rgba(249, 250, 251, 0.4);
-  padding: 0.25rem;
+  color: rgba(249, 250, 251, 0.35);
   border-radius: 4px;
   transition: color 0.15s;
 }
 
-.sidebar-drag-handle:hover {
+.menu-editor__handle svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
+}
+
+.menu-editor__handle:hover {
   color: rgba(249, 250, 251, 0.8);
 }
 
-.sidebar-drag-handle:active {
+.menu-editor__handle:active {
   cursor: grabbing;
 }
 
-.sidebar-row--dragging {
-  opacity: 0.4;
+.menu-editor__item-icon {
+  display: inline-flex;
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--hf-muted);
 }
 
-.sidebar-row--drag-over {
-  outline: 2px solid rgba(99, 102, 241, 0.7);
-  outline-offset: -2px;
+.menu-editor__item-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
 }
 
-.sidebar-row--group-child td:nth-child(2) {
-  padding-left: 2.25rem;
+.menu-editor__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  column-gap: 0.5rem;
+  row-gap: 0.2rem;
+  color: var(--hf-copy);
+  font-size: 0.92rem;
+  font-weight: 500;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
-.sidebar-row--group td {
-  background: rgba(99, 102, 241, 0.1);
+.menu-editor__tag {
+  flex: none;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: var(--hf-accent-soft);
+  color: var(--hf-accent-strong);
+  font-size: 0.7rem;
   font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.menu-editor__tag--muted {
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--hf-muted);
+}
+
+.menu-editor__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: none;
+  margin-left: auto;
+}
+
+.menu-editor__arrows {
+  display: inline-flex;
+  border-radius: 0.45rem;
+  box-shadow: inset 0 0 0 1px var(--hf-line);
+  overflow: hidden;
+}
+
+.menu-editor__arrows .menu-editor__icon-button {
+  border-radius: 0;
+}
+
+.menu-editor__arrows .menu-editor__icon-button + .menu-editor__icon-button {
+  box-shadow: inset 1px 0 0 var(--hf-line);
+}
+
+.menu-editor__icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--hf-muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.menu-editor__icon-button svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: currentColor;
+}
+
+.menu-editor__icon-button:hover,
+.menu-editor__icon-button:focus-visible {
+  background: var(--hf-panel-raised);
+  color: var(--hf-copy-strong);
+}
+
+.menu-editor__icon-button--danger:hover,
+.menu-editor__icon-button--danger:focus-visible {
+  background: rgba(248, 113, 113, 0.14);
+  color: var(--hf-danger);
+}
+
+.menu-editor__move {
+  width: 7.75rem;
+  height: 1.9rem;
+  padding: 0 1.6rem 0 0.55rem;
+  border: 1px solid var(--hf-line);
+  border-radius: 0.45rem;
+  background-color: var(--hf-panel);
+  color: var(--hf-copy);
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.menu-editor__move:disabled {
+  opacity: 0.45;
+}
+
+.menu-editor__switch {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  cursor: pointer;
+}
+
+.menu-editor__switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.menu-editor__switch-track {
+  width: 2.3rem;
+  height: 1.3rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.28);
+  position: relative;
+  transition: background 0.2s ease;
+}
+
+.menu-editor__switch-track::after {
+  content: '';
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: #f8fafc;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  transition: transform 0.2s ease;
+}
+
+.menu-editor__switch input:checked + .menu-editor__switch-track {
+  background: var(--hf-accent);
+}
+
+.menu-editor__switch input:checked + .menu-editor__switch-track::after {
+  transform: translateX(1rem);
+}
+
+.menu-editor__switch input:focus-visible + .menu-editor__switch-track {
+  outline: 2px solid var(--hf-focus);
+  outline-offset: 2px;
+}
+
+.menu-editor__switch input:disabled + .menu-editor__switch-track {
+  opacity: 0.5;
+}
+
+.menu-editor__switch:has(input:disabled) {
+  cursor: not-allowed;
+}
+
+.menu-editor__group {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.35rem;
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-panel-gradient);
+  box-shadow: inset 0 0 0 1px var(--hf-line), var(--hf-highlight);
+}
+
+.menu-editor__row--group {
+  background: transparent;
+  box-shadow: none;
+  padding-left: 0;
+}
+
+.menu-editor__collapse {
+  transition: transform 0.2s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.menu-editor__group--collapsed .menu-editor__collapse {
+  transform: rotate(-90deg);
+}
+
+.menu-editor__group--collapsed .menu-editor__children {
+  display: none;
+}
+
+.menu-editor__children {
+  margin-left: 1.4rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--hf-line-soft);
+}
+
+.menu-editor__icon-picker {
+  position: relative;
+  flex: none;
+}
+
+.menu-editor__group-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  background: var(--hf-accent-soft);
+  color: var(--hf-accent);
+  cursor: pointer;
+  list-style: none;
+}
+
+.menu-editor__group-icon::-webkit-details-marker,
+.menu-editor__group-icon::marker {
+  display: none;
+  content: '';
+}
+
+.menu-editor__group-icon svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  fill: currentColor;
+}
+
+.menu-editor__icon-grid {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  display: grid;
+  grid-template-columns: repeat(7, 2rem);
+  gap: 0.25rem;
+  padding: 0.5rem;
+  border-radius: var(--hf-radius-sm);
+  background: var(--hf-panel-raised);
+  box-shadow: inset 0 0 0 1px var(--hf-line-strong), var(--hf-shadow-md);
+}
+
+.menu-editor__icon-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--hf-muted);
+  cursor: pointer;
+}
+
+.menu-editor__icon-option svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  fill: currentColor;
+}
+
+.menu-editor__icon-option:hover,
+.menu-editor__icon-option:focus-visible {
+  background: var(--hf-panel);
+  color: var(--hf-copy-strong);
+}
+
+.menu-editor__icon-option[aria-selected='true'] {
+  background: var(--hf-accent-soft);
+  color: var(--hf-accent);
+  box-shadow: inset 0 0 0 1px var(--hf-accent);
+}
+
+.menu-editor__group-name {
+  flex: 1 1 8rem;
+  min-width: 0;
+  height: 2rem;
+  padding: 0 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--hf-copy-strong);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.menu-editor__group-name:hover {
+  border-color: var(--hf-line);
+}
+
+.menu-editor__group-name:focus {
+  outline: none;
+  border-color: var(--hf-accent);
+  background: rgba(8, 13, 20, 0.72);
+  box-shadow: 0 0 0 3px var(--hf-accent-ring);
+}
+
+.menu-editor__group-name--invalid,
+.menu-editor__group-name:placeholder-shown {
+  border-color: var(--hf-danger);
+}
+
+.menu-editor__count {
+  flex: none;
+  color: var(--hf-muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.menu-editor__empty {
+  padding: 0.75rem;
+  border: 1px dashed var(--hf-line-strong);
+  border-radius: var(--hf-radius-sm);
+  color: var(--hf-muted);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.menu-editor__row--separator {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--hf-line-soft);
+}
+
+.menu-editor__separator {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--hf-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.menu-editor__separator::before,
+.menu-editor__separator::after {
+  content: '';
+  flex: 1;
+  height: 0;
+  border-top: 1px solid var(--hf-line-strong);
+}
+
+.menu-editor__separator--spacer::before,
+.menu-editor__separator--spacer::after {
+  border-top-style: dashed;
+}
+
+.menu-editor__list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-tight);
+}
+
+.menu-editor__list-title {
+  color: var(--hf-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.menu-editor__text-button {
+  padding: 0.2rem 0.4rem;
+  border: 0;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--hf-accent);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.menu-editor__text-button:hover,
+.menu-editor__text-button:focus-visible {
+  background: var(--hf-accent-soft);
+  color: var(--hf-accent-strong);
+}
+
+.menu-editor__hint {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.menu-editor__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-gap-tight);
+  margin-top: var(--space-gap-base);
+  padding-top: var(--space-gap-base);
+  border-top: 1px solid var(--hf-line-soft);
+}
+
+.menu-editor__footer .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.menu-editor__footer .button svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
+}
+
+.menu-editor__status {
+  margin-right: auto;
+  color: var(--hf-muted);
+  font-size: 0.85rem;
+}
+
+.menu-editor__status--dirty {
+  color: var(--hf-warning);
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .menu-editor__row {
+    gap: 0.35rem;
+  }
+
+  .menu-editor__row--item {
+    flex-wrap: wrap;
+  }
+
+  .menu-editor__group-icon {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+
+  .menu-editor__group-name {
+    padding: 0 0.35rem;
+  }
+
+  .menu-editor__row--item .menu-editor__controls {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .menu-editor__move {
+    width: auto;
+    flex: 1;
+  }
+
+  .menu-editor__count {
+    display: none;
+  }
+
+  .menu-editor__children {
+    margin-left: 0.5rem;
+  }
 }
 
 .table__action-buttons {
@@ -8207,6 +8786,39 @@ dialog.dialog::backdrop {
   padding-left: 1rem;
 }
 
+.menu__group-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  padding: 0 var(--space-gap-tight);
+  min-width: 1.5rem;
+  border-radius: 999px;
+  background: var(--hf-accent-soft);
+  color: var(--hf-accent-strong);
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+}
+
+.menu__group-badge[hidden] {
+  display: none;
+}
+
+.menu__group-badge:not([hidden]) + .menu__expand-icon {
+  margin-left: 0.35rem;
+}
+
+/* Hide the rolled-up count while the group is open and its links show their own. */
+.menu__item--expanded > .menu__toggle .menu__group-badge {
+  display: none;
+}
+
+.menu__item--expanded > .menu__toggle .menu__group-badge + .menu__expand-icon {
+  margin-left: auto;
+}
+
 /* Business Continuity workspace */
 .bc-shell {
   display: grid;
@@ -10222,22 +10834,321 @@ a.service-card__ai-icon:hover {
   margin-top: 0.25rem;
 }
 
+/* Mid-width desktops: keep the reply composer and conversation in their own
+ * column on the right, with ticket details stacked above the reference cards
+ * on the left, rather than pushing the reply below every reference card. */
 @media (min-width: 961px) and (max-width: 1799px) {
   .management__body--ticket-detail-admin {
-    grid-template-columns: minmax(17.5rem, 19rem) minmax(0, 1fr);
+    grid-template-columns: minmax(18rem, 0.8fr) minmax(0, 1.2fr);
+    grid-template-rows: auto 1fr;
+  }
+
+  .management__body--ticket-detail-admin .management__column-group--main {
+    display: contents;
+  }
+
+  .management__body--ticket-detail-admin .management__column--details {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .management__body--ticket-detail-admin .management__column--content {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .management__body--ticket-detail-admin .management__column--activity {
+    grid-column: 2;
+    grid-row: 1 / span 2;
   }
 }
 
-@container ticket-activity (min-width: 65rem) {
-  .ticket-reply-compose-grid {
-    grid-template-columns: minmax(0, 1.35fr) minmax(20rem, 0.85fr);
-    align-items: start;
-    gap: 1.25rem;
+/* ---------------------------------------------------------------------------
+ * Ticket detail pages (/admin/tickets/:id and /tickets/:id): denser cards so
+ * more of the ticket fits on screen without controls spilling out of cards.
+ * ------------------------------------------------------------------------- */
+.management--ticket-detail .management__content {
+  gap: 1rem;
+}
+
+.management--ticket-detail .management__header {
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.management--ticket-detail .management__title {
+  font-size: 1.35rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.management--ticket-detail .management__meta {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+}
+
+.management--ticket-detail .management__header-actions {
+  gap: 0.5rem;
+}
+
+.management__body--ticket-detail .card {
+  padding: 0.9rem 1.1rem;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.management__body--ticket-detail .card-collapsible,
+.management__body--ticket-detail .card-collapsible__content {
+  gap: 0.75rem;
+}
+
+.management__body--ticket-detail .card__header {
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.management__body--ticket-detail .card__title {
+  font-size: 1.05rem;
+}
+
+/* A closed <details> still reserves a flex gap for its hidden content slot. */
+.management__body--ticket-detail .card-collapsible:not([open]) {
+  gap: 0;
+}
+
+.management__body--ticket-detail .ticket-description-summary {
+  align-items: flex-start;
+}
+
+.management__body--ticket-detail .card__toggle-icon {
+  width: 1.6rem;
+  height: 1.6rem;
+  font-size: 0.7rem;
+  flex-shrink: 0;
+}
+
+.management__body--ticket-detail .card__collapsible-meta {
+  flex-shrink: 0;
+}
+
+.management__body--ticket-detail .card__title-group {
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.management__body--ticket-detail .card__empty {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.management__body--ticket-detail .form-label {
+  font-size: 0.8rem;
+}
+
+.management__body--ticket-detail .form-input,
+.management__body--ticket-detail .form-textarea {
+  padding: 0.45rem 0.65rem;
+  font-size: 0.9rem;
+}
+
+.management__body--ticket-detail .form-help {
+  font-size: 0.75rem;
+  margin: 0;
+}
+
+/* Ticket details form */
+.ticket-details-form {
+  gap: 0.7rem;
+}
+
+.ticket-details-form .form-field {
+  gap: 0.3rem;
+}
+
+.ticket-details-form__pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.ticket-details-contact {
+  padding: 0.6rem 0.7rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.55rem;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.ticket-details-contact .form-help {
+  font-size: 0.85rem;
+  color: #e2e8f0;
+}
+
+.ticket-details-contact .button {
+  align-self: flex-start;
+}
+
+/* AI summary header: keep the actions on one line beside the title. */
+.ticket-ai-summary__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  min-width: 0;
+}
+
+.ticket-ai-summary__heading .card__subtitle {
+  font-size: 0.8rem;
+}
+
+.ticket-ai-summary__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* Expenses: description, amount and submit on a single row when space allows. */
+.ticket-expense-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(6rem, 8rem) auto;
+  align-items: end;
+  gap: 0.6rem;
+}
+
+@container ticket-content (max-width: 26rem) {
+  .ticket-expense-form {
+    grid-template-columns: minmax(0, 1fr) minmax(5rem, 7rem);
+  }
+
+  .ticket-expense-form__submit {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+}
+
+.management__body--ticket-detail .management__column--content,
+.management__body--ticket-detail .management__column--details {
+  container: ticket-content / inline-size;
+}
+
+/* Reply composer spacing */
+.ticket-reply-composer .ticket-reply-context {
+  padding: 0.45rem 0.7rem;
+  font-size: 0.8rem;
+}
+
+.ticket-reply-actions {
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+/* Description list used by the portal ticket details card. */
+.description-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.description-list__row {
+  display: grid;
+  grid-template-columns: minmax(6.5rem, 38%) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.description-list__row:last-child {
+  border-bottom: none;
+}
+
+.description-list dt {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(148, 163, 184, 0.95);
+}
+
+.description-list dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #e2e8f0;
+}
+
+/* The portal reply is wrapped in a mobile-collapsible; its summary is only
+ * useful as a tap target on phones, the card already has a heading. */
+@media (min-width: 641px) {
+  .management--ticket-detail .mobile-collapsible > summary {
+    display: none;
+  }
+}
+
+.management--ticket-detail .list__item a {
+  color: #7dd3fc;
+}
+
+@media (min-width: 961px) {
+  .management__body--ticket-detail-two-column {
+    grid-template-columns: clamp(18rem, 30%, 26rem) minmax(0, 1fr);
+  }
+}
+
+/* Reply composer: the editor takes the full width and the reply options sit
+ * beneath it in a responsive grid (attachments | flags | time & billing). */
+.ticket-reply-extras {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  align-items: start;
+  gap: 0.85rem 1.25rem;
+}
+
+.ticket-reply-extras > .ticket-reply-worklog {
+  grid-column: 1 / -1;
+}
+
+.ticket-reply-flags {
+  gap: 0.5rem;
+}
+
+.ticket-reply-flags .form-field--checkbox {
+  gap: 0.2rem;
+}
+
+.ticket-reply-flags .form-help {
+  margin: 0 0 0 1.6rem;
+}
+
+.ticket-reply-flags--inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+
+.ticket-reply-message .rich-text-editor__surface,
+.ticket-reply-message .rich-text-editor__fallback {
+  min-height: 12rem;
+}
+
+@container ticket-activity (min-width: 48rem) {
+  .ticket-reply-extras > .ticket-reply-worklog {
+    grid-column: auto;
+  }
+
+  .ticket-reply-worklog__fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container ticket-activity (min-width: 62rem) {
+  .ticket-reply-extras {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr);
   }
 
   .ticket-reply-message .rich-text-editor__surface,
   .ticket-reply-message .rich-text-editor__fallback {
-    min-height: 19rem;
+    min-height: 15rem;
   }
 }
 

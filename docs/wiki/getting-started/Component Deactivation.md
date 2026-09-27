@@ -93,6 +93,23 @@ one with its current status.
 | AI Quality | `ai_quality` | `/admin/ai-quality` | — |
 | AI Tag Synonyms | `ai_tag_synonyms` | `/admin/chat/ai-tag-synonyms`, `/chat/configuration` | — |
 | Tray Agent / Tray Settings | `tray` | `/admin/tray`, `/api/tray`, `/tray` | — |
+| Outlook Contacts (My Profile) | `outlook_contacts` | `/admin/profile/m365-contacts`, `/api/profile/m365-contacts` | — |
+| Notification Contact (My Profile) | `notification_contact` | — (profile card only) | — |
+| Email Signature (My Profile) | `email_signature` | — (profile card only) | — |
+| Click to Call | `click_to_call` | `/api/click-to-call` | — |
+| GMP/GLP Compliance Checks | `gmp_glp` | — (content filter) | — |
+
+My Profile components: `outlook_contacts` removes the Outlook contacts card
+and the ticket "Check Outlook contacts" button; `click_to_call` removes the
+click-to-call card and stops phone numbers being turned into call links;
+`notification_contact` and `email_signature` remove their My Profile cards
+only. Stored values are kept, so an existing email signature remains available
+to automations.
+
+`gmp_glp` hides the GMP and GLP categories, their predefined checks, company
+assignments of those checks and the "Re-seed GMP/GLP" button from Compliance
+Checks, and excludes them from compliance summaries. Custom categories and the
+rest of Compliance are unaffected, and no rows are deleted.
 
 Disabling `tray` also stops the tray agent API, so installed tray agents cannot
 check in, and blocks the tray Defender endpoints. Disabling `office365` hides
