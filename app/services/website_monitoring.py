@@ -7,7 +7,7 @@ import socket
 import ssl
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -56,6 +56,8 @@ async def validate_public_url(url: str) -> tuple[str, int, list[str]]:
 
 
 async def inspect_certificate(host: str, port: int, address: str) -> dict[str, Any]:
+    if not ipaddress.ip_address(address).is_global:
+        raise ValueError("Website connection address is not public")
     context = ssl.create_default_context()
     reader, writer = await asyncio.wait_for(
         asyncio.open_connection(address, port, ssl=context, server_hostname=host), CONNECT_TIMEOUT
@@ -87,6 +89,51 @@ async def lookup_domain_expiry(host: str) -> dict[str, Any] | None:
     return None
 
 
+def _address_url(url: str, address: str, port: int) -> str:
+    """Return *url* with its authority pinned to one validated address."""
+    parsed = urlsplit(url)
+    address_authority = f"[{address}]" if ":" in address else address
+    return urlunsplit((parsed.scheme, f"{address_authority}:{port}",
+                       parsed.path, parsed.query, ""))
+
+
+async def fetch_availability(url: str, host: str, port: int,
+                             addresses: list[str]) -> int:
+    """Fetch through validated addresses without resolving the hostname again.
+
+    The URL authority controls the actual TCP peer, while Host and sni_hostname
+    retain the site's HTTP virtual host and TLS certificate verification name.
+    A fresh client per address also prevents a failed attempt from reusing a
+    connection associated with another address.
+    """
+    parsed = urlsplit(url)
+    host_header = parsed.netloc
+    timeout = httpx.Timeout(TOTAL_TIMEOUT, connect=CONNECT_TIMEOUT)
+    last_error: httpx.TransportError | None = None
+    for address in addresses:
+        # Defense in depth for callers and future retry/address selection changes.
+        if not ipaddress.ip_address(address).is_global:
+            raise ValueError("Website connection address is not public")
+        try:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+                async with client.stream(
+                    "GET", _address_url(url, address, port),
+                    headers={"Host": host_header, "User-Agent": "MyPortal-Monitor/1"},
+                    extensions={"sni_hostname": host},
+                ) as response:
+                    consumed = 0
+                    async for chunk in response.aiter_bytes():
+                        consumed += len(chunk)
+                        if consumed >= MAX_BODY_BYTES:
+                            break
+                    return response.status_code
+        except httpx.TransportError as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise ValueError("Website hostname could not be resolved")
+
+
 async def check_website(website: dict[str, Any]) -> dict[str, Any]:
     """Run a check once. Failures are retryable and never erase good observations."""
     checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -97,15 +144,9 @@ async def check_website(website: dict[str, Any]) -> dict[str, Any]:
             certificate = await inspect_certificate(host, port, addresses[0])
         status_code = None
         if website.get("monitor_availability"):
-            timeout = httpx.Timeout(TOTAL_TIMEOUT, connect=CONNECT_TIMEOUT)
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
-                async with client.stream("GET", str(website["url"]), headers={"User-Agent": "MyPortal-Monitor/1"}) as response:
-                    status_code = response.status_code
-                    consumed = 0
-                    async for chunk in response.aiter_bytes():
-                        consumed += len(chunk)
-                        if consumed >= MAX_BODY_BYTES:
-                            break
+            status_code = await fetch_availability(
+                str(website["url"]), host, port, addresses
+            )
         dns_facts = {"addresses": addresses} if website.get("collect_dns") else None
         await repo.record_success(int(website["id"]), checked_at, status_code, certificate, dns_facts)
         domain = None
