@@ -29,6 +29,25 @@ def _utc_naive(value: datetime) -> datetime:
     return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
+def _dns_name_matches(pattern: str, hostname: str) -> bool:
+    """Match an RFC 6125-style DNS identity without deprecated ssl helpers."""
+    pattern = pattern.rstrip(".").lower()
+    hostname = hostname.rstrip(".").lower()
+    try:
+        hostname = hostname.encode("idna").decode("ascii")
+        if pattern.startswith("*."):
+            suffix = pattern[2:].encode("idna").decode("ascii")
+            return (
+                bool(suffix)
+                and hostname.count(".") == suffix.count(".") + 1
+                and hostname.endswith("." + suffix)
+            )
+        pattern = pattern.encode("idna").decode("ascii")
+    except UnicodeError:
+        return False
+    return bool(pattern) and hostname == pattern
+
+
 async def resolve_public_host(hostname: str) -> list[str]:
     try:
         answers = await asyncio.get_running_loop().getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
@@ -65,11 +84,7 @@ def _certificate_facts(der: bytes, host: str, *, trusted: bool) -> dict[str, Any
     except x509.ExtensionNotFound:
         sans = []
     names = sans or [attribute.value for attribute in cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)]
-    try:
-        ssl.match_hostname({"subjectAltName": [("DNS", name) for name in names]}, host)
-        hostname_match = True
-    except (ssl.CertificateError, ValueError):
-        hostname_match = False
+    hostname_match = any(_dns_name_matches(name, host) for name in names)
     now = datetime.now(timezone.utc)
     expires = cert.not_valid_after_utc
     status = "expired" if expires <= now else "hostname_mismatch" if not hostname_match else "valid" if trusted else "untrusted"

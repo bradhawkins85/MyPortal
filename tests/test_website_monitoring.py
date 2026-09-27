@@ -10,6 +10,19 @@ import httpx
 from app.services import website_monitoring as monitoring
 
 
+@pytest.mark.parametrize(("pattern", "hostname", "expected"), [
+    ("example.com", "example.com", True),
+    ("EXAMPLE.COM.", "example.com", True),
+    ("*.example.com", "www.example.com", True),
+    ("*.example.com", "example.com", False),
+    ("*.example.com", "deep.www.example.com", False),
+    ("www.example.com", "other.example.com", False),
+    ("", "example.com", False),
+])
+def test_dns_name_matching_without_removed_ssl_helper(pattern, hostname, expected):
+    assert monitoring._dns_name_matches(pattern, hostname) is expected
+
+
 @pytest.mark.parametrize("address", ["127.0.0.1", "10.0.0.8", "169.254.169.254", "::1"])
 def test_rejects_non_public_resolution(monkeypatch, address):
     async def fake_getaddrinfo(*args, **kwargs):
