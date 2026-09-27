@@ -97,6 +97,25 @@ def _drawn_ports(item: Mapping[str, Any], rear: bool = False) -> list[dict[str, 
     return [port for port in drawn if on_side(port["connector"])][:MAX_DRAWN_PORTS]
 
 
+def _side_view(catalogue: rack_item_types.RackItemType, item: Mapping[str, Any],
+               width: int, height: int, rear: bool) -> dict[str, Any]:
+    """How one side of an item is drawn: its image, repeat height and ports."""
+    view: dict[str, Any] = {
+        "rear": rear,
+        "image": rack_item_types.image_path(catalogue.key, width, rear),
+        "faceplate": None,
+        "image_units": catalogue.image_units,
+        "ports": _drawn_ports(item, rear),
+    }
+    if rack_faceplates.side_connectors(catalogue.key, rear):
+        # Draw this side from the item's actual connections at full height.
+        connections = rack_faceplates.connections_from_ports(item.get("ports") or [], catalogue.key, rear)
+        view["faceplate"] = rack_faceplates.data_uri(
+            rack_faceplates.render(catalogue.key, width, height, rear, connections))
+        view["image_units"] = height
+    return view
+
+
 def _block(rack: Mapping[str, Any], item: Mapping[str, Any], kind: str,
            face: str = "front") -> dict[str, Any]:
     start, height = int(item["start_unit"]), int(item["unit_height"])
@@ -105,6 +124,7 @@ def _block(rack: Mapping[str, Any], item: Mapping[str, Any], kind: str,
     rear = face != str(item.get("face") or "front")
     image = None
     faceplate = None
+    alternate = None
     ports: list[dict[str, Any]] = []
     if kind == "reservation":
         name = item.get("label") or "Reserved space"
@@ -116,14 +136,12 @@ def _block(rack: Mapping[str, Any], item: Mapping[str, Any], kind: str,
         item_type, type_label = catalogue.key, catalogue.label
         active, image_units = catalogue.active, catalogue.image_units
         status = equipment_status(item)
-        image = rack_item_types.image_path(catalogue.key, width, rear)
-        ports = _drawn_ports(item, rear)
-        if rack_faceplates.side_connectors(catalogue.key, rear):
-            # Draw this side from the item's actual connections at full height.
-            connections = rack_faceplates.connections_from_ports(item.get("ports") or [], catalogue.key, rear)
-            faceplate = rack_faceplates.data_uri(
-                rack_faceplates.render(catalogue.key, width, height, rear, connections))
-            image_units = height
+        view = _side_view(catalogue, item, width, height, rear)
+        image, faceplate = view["image"], view["faceplate"]
+        image_units, ports = view["image_units"], view["ports"]
+        # Swivelling the rack shows every item from the other side, including
+        # half-depth items that are otherwise only seen from one face.
+        alternate = _side_view(catalogue, item, width, height, not rear)
     return {
         "kind": kind,
         "id": item["id"],
@@ -144,6 +162,7 @@ def _block(rack: Mapping[str, Any], item: Mapping[str, Any], kind: str,
         "rear": rear,
         "image": image,
         "faceplate": faceplate,
+        "alternate": alternate,
         "port_count": int(item.get("port_count") or 0),
         "power_draw_watts": item.get("power_draw_watts"),
     }
