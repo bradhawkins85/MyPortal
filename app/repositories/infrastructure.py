@@ -218,7 +218,6 @@ async def place_asset(company_id: int, rack_id: int, asset_id: int | None, start
             or unit_height < 1 or width_lanes not in {1, 2, 3}
             or start_lane < 1 or start_lane + width_lanes - 1 > 3
             or port_count < 0 or port_count > 1000
-            or (item_type in {"patch_panel", "switch"} and port_count < 1)
             or (power_draw_watts is not None and power_draw_watts < 0)):
         raise ValueError("Invalid rack item or position")
     clean_name = (name or "Rack device").strip()
@@ -286,8 +285,6 @@ async def update_rack_equipment(company_id: int, equipment_id: int, name: str,
         (equipment_id, company_id))
     if not item:
         raise ValueError("Rack item not found")
-    if item_type in {"patch_panel", "switch"} and not item["port_count"]:
-        raise ValueError("Port count is required for a patch panel or switch")
     if asset_id is not None and not await db.fetch_one(
             "SELECT id FROM assets WHERE id=%s AND company_id=%s", (asset_id, company_id)):
         raise ValueError("Asset does not belong to this company")

@@ -129,7 +129,6 @@
     form.elements.name.required = !reservation;
     const portItem = !reservation && ['patch_panel', 'switch'].includes(form.elements.item_type.value);
     form.querySelector('[data-port-count]').hidden = !portItem;
-    form.elements.port_count.required = portItem;
     if (!portItem) form.elements.port_count.value = '';
     form.querySelector('[data-submit-label]').textContent = reservation ? 'Reserve space' : 'Place equipment';
   };
