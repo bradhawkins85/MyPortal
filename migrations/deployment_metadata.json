@@ -180,6 +180,12 @@
       "compatible-from": "*",
       "compatible-to": "*",
       "maintenance": false
-    } 
+    },
+    "433_rack_details_and_reservations.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    }
   }
 }
