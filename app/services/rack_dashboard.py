@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping, Sequence
 
-from app.services import rack_item_types
+from app.services import rack_faceplates, rack_item_types
 
 FACES = ("front", "rear")
 LANES = (1, 2, 3)
@@ -104,6 +104,7 @@ def _block(rack: Mapping[str, Any], item: Mapping[str, Any], kind: str,
     # A full-depth item is seen from behind on the face it is not mounted on.
     rear = face != str(item.get("face") or "front")
     image = None
+    faceplate = None
     ports: list[dict[str, Any]] = []
     if kind == "reservation":
         name = item.get("label") or "Reserved space"
@@ -117,6 +118,12 @@ def _block(rack: Mapping[str, Any], item: Mapping[str, Any], kind: str,
         status = equipment_status(item)
         image = rack_item_types.image_path(catalogue.key, width, rear)
         ports = _drawn_ports(item, rear)
+        if rack_faceplates.side_connectors(catalogue.key, rear):
+            # Draw this side from the item's actual connections at full height.
+            connections = rack_faceplates.connections_from_ports(item.get("ports") or [], catalogue.key, rear)
+            faceplate = rack_faceplates.data_uri(
+                rack_faceplates.render(catalogue.key, width, height, rear, connections))
+            image_units = height
     return {
         "kind": kind,
         "id": item["id"],
@@ -136,6 +143,7 @@ def _block(rack: Mapping[str, Any], item: Mapping[str, Any], kind: str,
         "ports": ports,
         "rear": rear,
         "image": image,
+        "faceplate": faceplate,
         "port_count": int(item.get("port_count") or 0),
         "power_draw_watts": item.get("power_draw_watts"),
     }

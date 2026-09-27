@@ -268,3 +268,11 @@ def test_item_list_section_remembers_expanded_state():
     script = (ROOT / "app/static/js/racks.js").read_text()
     assert "racks.itemListOpen" in script
     assert "details.addEventListener('toggle'" in script
+
+
+def test_saving_returns_to_the_previous_scroll_position_not_an_anchor():
+    routes = (ROOT / "app/features/assets/routes.py").read_text()
+    assert 'anchor=f"#placement-' not in routes and 'anchor=f"#reservation-' not in routes
+    script = (ROOT / "app/static/js/racks.js").read_text()
+    assert "racks.scrollAfterSave" in script
+    assert "document.addEventListener('submit'" in script

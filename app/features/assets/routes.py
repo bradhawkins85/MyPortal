@@ -1083,7 +1083,7 @@ async def place_rack_asset(request: Request):
     await audit_service.record(action="infrastructure.rack_equipment.create", request=request,
                                entity_type="rack_equipment", entity_id=record_id,
                                after={"company_id": company_id, "asset_id": asset_id})
-    return _main().flash_redirect(_rack_location(form, anchor=f"#placement-{record_id}"), "Rack item placed.", "success")
+    return _main().flash_redirect(_rack_location(form), "Rack item placed.", "success")
 
 
 @router.post("/api/infrastructure/rack-equipment/{equipment_id}/ports/{port_number}", summary="Link a rack item port to an asset")
@@ -1102,7 +1102,7 @@ async def link_rack_item_port(request: Request, equipment_id: int, port_number: 
                                entity_type="rack_equipment_port", entity_id=equipment_id,
                                after={"company_id": company_id, "port_number": port_number,
                                       "asset_id": asset_id})
-    return _main().flash_redirect(_rack_location(form, anchor=f"#placement-{equipment_id}"), "Port link updated.", "success")
+    return _main().flash_redirect(_rack_location(form), "Port link updated.", "success")
 
 
 @router.post("/api/infrastructure/rack-equipment/{equipment_id}/edit", summary="Edit a rack item")
@@ -1132,7 +1132,7 @@ async def edit_rack_equipment(request: Request, equipment_id: int):
     await audit_service.record(action="infrastructure.rack_equipment.update", request=request,
                                entity_type="rack_equipment", entity_id=equipment_id,
                                after={"company_id": company_id, "asset_id": asset_id})
-    return _main().flash_redirect(_rack_location(form, anchor=f"#placement-{equipment_id}"), "Rack item updated.", "success")
+    return _main().flash_redirect(_rack_location(form), "Rack item updated.", "success")
 
 
 @router.post("/api/infrastructure/rack-reservations/{reservation_id}/edit", summary="Edit a rack reservation")
@@ -1152,7 +1152,7 @@ async def edit_rack_reservation(request: Request, reservation_id: int):
     await audit_service.record(action="infrastructure.rack_reservation.update", request=request,
                                entity_type="rack_reservation", entity_id=reservation_id,
                                after={"company_id": company_id})
-    return _main().flash_redirect(_rack_location(form, anchor=f"#reservation-{reservation_id}"), "Reservation updated.", "success")
+    return _main().flash_redirect(_rack_location(form), "Reservation updated.", "success")
 
 
 @router.post("/api/infrastructure/rack-reservations", status_code=201, summary="Reserve rack space")
@@ -1175,7 +1175,7 @@ async def reserve_rack_space(request: Request):
     await audit_service.record(action="infrastructure.rack_reservation.create", request=request,
                                entity_type="rack_reservation", entity_id=record_id,
                                after={"company_id": company_id})
-    return _main().flash_redirect(_rack_location(form, anchor=f"#reservation-{record_id}"), "Rack space reserved.", "success")
+    return _main().flash_redirect(_rack_location(form), "Rack space reserved.", "success")
 
 
 @router.post("/api/infrastructure/{record_type}/{record_id}/delete", summary="Delete infrastructure documentation")
