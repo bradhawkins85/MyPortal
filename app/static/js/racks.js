@@ -55,6 +55,17 @@
     setImages(enabled);
     try { window.localStorage.setItem('racks.deviceImages', enabled ? '1' : '0'); } catch { /* storage unavailable */ }
   });
+  const namesToggle = document.querySelector('[data-rack-names-toggle]');
+  const setNames = (shown) => {
+    workspace?.classList.toggle('hide-device-names', !shown);
+    namesToggle?.setAttribute('aria-pressed', String(shown));
+  };
+  try { setNames(window.localStorage.getItem('racks.deviceNames') !== '0'); } catch { setNames(true); }
+  namesToggle?.addEventListener('click', () => {
+    const shown = workspace?.classList.contains('hide-device-names') ?? false;
+    setNames(shown);
+    try { window.localStorage.setItem('racks.deviceNames', shown ? '1' : '0'); } catch { /* storage unavailable */ }
+  });
   // Remember whether "Item list and port links" is expanded, across racks and visits.
   document.querySelectorAll('details.rack__details').forEach(details => {
     try { if (window.localStorage.getItem('racks.itemListOpen') === '1') details.open = true; } catch { /* storage unavailable */ }
@@ -193,7 +204,9 @@
   const defaultStatus = statusText?.textContent || '';
   const describe = (button) => {
     const face = button.closest('[data-face]')?.dataset.face;
-    const view = button.dataset.view === 'rear' ? ' (rear view)' : '';
+    const swivelled = button.closest('[data-rack-faces]')?.classList.contains('is-swivelled');
+    const side = swivelled && button.dataset.altView ? button.dataset.altView : button.dataset.view;
+    const view = side === 'rear' ? ' (rear view)' : '';
     if (statusText && button.dataset.itemSummary) statusText.textContent = `${button.dataset.itemSummary} · ${face} elevation${view}`;
   };
   document.querySelectorAll('.rack__device').forEach(button => {

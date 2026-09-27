@@ -253,7 +253,9 @@
 .rack-swivel:hover, .rack-swivel:focus-visible { color: var(--rack-cyan); }
 .rack-swivel:focus-visible { outline: 2px solid #f4cf64; }
 .rack__faces.is-swivelled .rack-face:first-of-type { order: 3; }
-.rack__faces.is-swivelled .rack-swivel { order: 2; transform: rotate(180deg); }
+.rack__faces.is-swivelled .rack-swivel { order: 2; }
+.rack-swivel .rack-icon { transition: transform .35s ease; }
+.rack__faces.is-swivelled .rack-swivel .rack-icon { transform: rotate(180deg); }
 .rack__faces.is-swivelled .rack-face:last-of-type { order: 1; }
 .rack-elevation-status { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: var(--space-3); margin-top: var(--space-4); padding: var(--space-3) var(--space-4); border: 1px solid var(--rack-line); border-radius: var(--radius-md); background: rgba(20, 28, 39, .8); }
 .rack-elevation-status__icon { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 50%; color: var(--rack-cyan); background: rgba(56, 189, 248, .12); }
@@ -527,3 +529,16 @@ dialog.rack-dialog--reservation { width: min(95vw, 42rem); max-width: 42rem; }
   .rack-port-link input { grid-column: 2; }
   .rack-dialog__preview .rack-faceplate { grid-column: 1 / -1; }
 }
+
+/* Swivelled racks show every item from its other side */
+.rack__device [data-side="alt"] { display: none; }
+.rack__faces.is-swivelled .rack__device [data-side="primary"] { display: none; }
+.rack__faces.is-swivelled .rack__device .rack__ports[data-side="alt"] { display: grid; }
+.rack__faces.is-swivelled .rack__device .rack__art[data-side="alt"] { display: block; }
+.rack-workspace.has-device-images .rack__faces.is-swivelled .rack__device[data-alt-view]:not(.rack__device--reserved) {
+  background-image: var(--device-image-alt);
+  background-size: 100% calc(var(--rack-row-height) * var(--image-units-alt, 1));
+}
+
+/* "Device names" switch */
+.rack-workspace.hide-device-names .rack__device:not(.rack__device--reserved) .rack__device-name { display: none; }

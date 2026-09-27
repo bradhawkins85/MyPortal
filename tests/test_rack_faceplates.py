@@ -64,3 +64,47 @@ def test_static_images_are_generated_from_the_same_drawers():
     root = Path(__file__).resolve().parents[1]
     static = (root / "app/static/images/racks/pdu-w3.svg").read_text().strip()
     assert static == F.render("pdu", 3, 1, False)
+
+
+def test_swivel_view_shows_the_back_of_half_depth_items():
+    rack = {"id": 1, "name": "Core", "unit_count": 4, "numbering_direction": "bottom-up"}
+    nas = {
+        "id": 5, "rack_id": 1, "name": "NAS", "item_type": "storage", "start_unit": 1, "unit_height": 2,
+        "start_lane": 1, "width_lanes": 3, "face": "front", "depth_mode": "half",
+        "ports": [{"port_number": 1, "connector": "data", "asset_id": 2},
+                  {"port_number": 2, "connector": "psu", "source_port_id": 9}],
+    }
+    pdu = {
+        "id": 6, "rack_id": 1, "name": "PDU", "item_type": "pdu", "start_unit": 3, "unit_height": 1,
+        "start_lane": 1, "width_lanes": 3, "face": "rear", "depth_mode": "half",
+        "ports": [{"port_number": 1, "connector": "iec"}, {"port_number": 2, "connector": "psu"}],
+    }
+    front, rear = rack_dashboard.build_faces(rack, [nas, pdu], [])
+    nas_block = front["blocks"][0]
+    assert not nas_block["rear"] and nas_block["faceplate"] is None  # drive bays from the front
+    assert nas_block["alternate"]["rear"] and nas_block["alternate"]["faceplate"]
+    assert nas_block["alternate"]["image_units"] == 2
+    assert [p["connector"] for p in nas_block["alternate"]["ports"]] == ["data", "psu"]
+    pdu_block = rear["blocks"][0]
+    assert not pdu_block["rear"] and pdu_block["alternate"]["rear"]  # outlets, then the input side
+    assert [p["connector"] for p in pdu_block["alternate"]["ports"]] == ["psu"]
+
+
+def test_rack_face_markup_carries_both_views():
+    from pathlib import Path
+
+    macros = (Path(__file__).resolve().parents[1] / "app/templates/infrastructure/_rack_macros.html").read_text()
+    assert "--device-image-alt:" in macros and 'data-alt-view=' in macros
+    assert "device_art(block, block.alternate, 'alt')" in macros
+
+
+def test_device_names_switch_sits_with_device_images_and_is_remembered():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    template = (root / "app/templates/infrastructure/racks.html").read_text()
+    images = template.index("data-rack-images-toggle")
+    names = template.index("data-rack-names-toggle")
+    assert 0 < names - images < 300
+    script = (root / "app/static/js/racks.js").read_text()
+    assert "racks.deviceNames" in script and "racks.deviceImages" in script
