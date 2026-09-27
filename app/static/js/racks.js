@@ -62,6 +62,23 @@
       try { window.localStorage.setItem('racks.itemListOpen', details.open ? '1' : '0'); } catch { /* storage unavailable */ }
     });
   });
+  // Saving a rack form reloads this page; come back to the same scroll
+  // position instead of the top (or an anchor further down).
+  const scrollKey = 'racks.scrollAfterSave';
+  // Listen on the document so a cancelled "Remove …?" confirm is already known.
+  document.addEventListener('submit', event => {
+    if (event.defaultPrevented || event.target.method !== 'post') return;
+    try {
+      window.sessionStorage.setItem(scrollKey, JSON.stringify({ y: window.scrollY, at: Date.now() }));
+    } catch { /* storage unavailable */ }
+  });
+  try {
+    const saved = JSON.parse(window.sessionStorage.getItem(scrollKey) || 'null');
+    window.sessionStorage.removeItem(scrollKey);
+    if (saved && Date.now() - saved.at < 60000 && !window.location.hash) {
+      window.requestAnimationFrame(() => window.scrollTo(0, saved.y));
+    }
+  } catch { /* storage unavailable */ }
   document.querySelector('[data-rack-jump]')?.addEventListener('change', event => event.currentTarget.form?.requestSubmit());
   document.querySelectorAll('[data-rack-list-open]').forEach(button => button.addEventListener('click', event => {
     const list = document.getElementById(button.dataset.rackListOpen);
