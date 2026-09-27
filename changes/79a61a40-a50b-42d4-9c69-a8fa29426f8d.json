@@ -1,7 +1,7 @@
 {
   "guid": "79a61a40-a50b-42d4-9c69-a8fa29426f8d",
-  "occurred_at": "2026-09-27T00:00Z",
-  "change_type": "Feature",
+  "occurred_at": "2026-09-27T00:00:00Z",
+  "change_type": "feature",
   "summary": "Moved IPAM creation into page actions and added safe discovered-device IP address imports with automatic subnet matching.",
-  "content_hash": "a0b9e50fbebeeb44342c3a1b97504da5bb06765cabb41a4b1b453a9a40e6e724"
+  "content_hash": "discovered-device-ipam-import-v1"
 }

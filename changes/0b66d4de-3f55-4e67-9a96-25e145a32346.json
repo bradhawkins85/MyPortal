@@ -3,5 +3,5 @@
   "occurred_at": "2026-08-31T00:00Z",
   "change_type": "Fix",
   "summary": "Flagged MyPortal assets removed from Tactical RMM with the Archive Asset field so billing workflows can exclude them.",
-  "content_hash": "19fab8364c684f842e4fbcefbc8f65de6e7bb528ba4c7ca7776714e4794ef4af"
+  "content_hash": "625e60d6a8d6ba869ff38acdd5f23ad7d53607b4985eefbfc97fe9160879b5fd"
 }

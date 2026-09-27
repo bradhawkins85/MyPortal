@@ -3,5 +3,5 @@
   "occurred_at": "2026-09-16T13:25Z",
   "change_type": "Fix",
   "summary": "Fixed shipment tracking notification emails so their SMTP2Go Sent, Delivered, and Read status is linked to the corresponding ticket conversation update.",
-  "content_hash": "87d65e03a86e2377882c2a78fbf7f0018774ce6fe7a8ca0fa0db2ddf133764b6"
+  "content_hash": "122b261ec3153a8ec52b8d548916e2f2897bb7aacc15356a6a579c05c7f613f6"
 }

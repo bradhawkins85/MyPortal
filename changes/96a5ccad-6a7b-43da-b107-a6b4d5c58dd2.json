@@ -1,7 +1,7 @@
 {
   "guid": "96a5ccad-6a7b-43da-b107-a6b4d5c58dd2",
-  "occurred_at": "2026-08-21T00:00Z",
-  "change_type": "Feature",
+  "occurred_at": "2026-08-21T00:00:00Z",
+  "change_type": "feature",
   "summary": "Added durable Voice Monitor dispatch and independently scalable workers.",
-  "content_hash": "71ac7cba7d3361d259d3280b42818b0776392cf52941409dd758aa1015be9c0c"
+  "content_hash": "voice-monitor-durable-dispatch-v1"
 }

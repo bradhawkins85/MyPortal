@@ -1,7 +1,7 @@
 {
   "guid": "6e971a30-474c-43fb-a14b-49940e95627f",
-  "occurred_at": "2026-09-25T00:00Z",
+  "occurred_at": "2026-09-25T00:00:00Z",
   "change_type": "Feature",
   "summary": "Add PDF downloads for accessible knowledge base articles.",
-  "content_hash": "98ced017aabf77e6321129fd17e8e32aadeea606fc5dee70dc933d7e900f25d5"
+  "content_hash": "2d39cbded0d8ca176174e1f99ed2b33fe2740b7756998c8709d705d97737449e"
 }

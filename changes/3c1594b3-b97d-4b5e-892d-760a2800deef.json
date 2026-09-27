@@ -1,7 +1,7 @@
 {
   "guid": "3c1594b3-b97d-4b5e-892d-760a2800deef",
-  "occurred_at": "2026-09-21T21:30Z",
+  "occurred_at": "2026-09-21T21:30:00Z",
   "change_type": "fixed",
   "summary": "Launch blue and green instances through the release Python interpreter",
-  "content_hash": "a08d8617d11c4d89b570cb9009905afdc68f21d7665f7c3d397445a042eeae8b"
+  "content_hash": "systemd-python-module-launch-avoids-uvicorn-console-script-shebang"
 }

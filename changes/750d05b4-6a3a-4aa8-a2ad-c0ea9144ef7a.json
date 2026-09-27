@@ -3,5 +3,5 @@
   "occurred_at": "2026-09-15T00:00Z",
   "change_type": "Enhancement",
   "summary": "Persist Microsoft 365 best-practice status filters and add checks table filtering and sorting",
-  "content_hash": "e7ca40bf58ebe75d572a977500df7010b676122726c97b06c30d178fbbf947e5"
+  "content_hash": "c3fef3a999b7a1892025f92447a7012928e96b5dc0488ecd6670aa7b6bd4e522"
 }

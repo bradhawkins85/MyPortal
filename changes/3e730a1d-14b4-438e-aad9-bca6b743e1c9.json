@@ -3,5 +3,5 @@
   "occurred_at": "2026-07-31T00:00Z",
   "change_type": "Fix",
   "summary": "Correct Huntress SAT OAuth authentication to use the documented token endpoint, read scopes, and bearer tokens.",
-  "content_hash": "09cd3a72afa1b4f8278ae61738e0448cde84445bdff7dd46b321e3755d691bd7"
+  "content_hash": "5f790d1c8dc9098a77a8a841fae665f1ab9378ebc4f45d6507cade5d91b8a422"
 }

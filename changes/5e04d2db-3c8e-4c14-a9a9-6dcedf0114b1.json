@@ -1,7 +1,7 @@
 {
   "guid": "5e04d2db-3c8e-4c14-a9a9-6dcedf0114b1",
-  "occurred_at": "2026-09-16T00:00Z",
-  "change_type": "Fix",
+  "occurred_at": "2026-09-16T00:00:00Z",
+  "change_type": "fix",
   "summary": "Prevent duplicate subscription billing by recording purchase and increase invoices in MyPortal before Xero sync.",
-  "content_hash": "a2d30b1126eba53cc4a23c05f7fc44c755b9f60c92aa6a1a9b2af8df3ff60581"
+  "content_hash": "subscription-local-invoice-before-xero"
 }

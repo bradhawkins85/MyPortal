@@ -3,5 +3,5 @@
   "occurred_at": "2026-09-19T00:00Z",
   "change_type": "Security",
   "summary": "Complete the role-permission coverage audit and close Defender and RAG authorization gaps.",
-  "content_hash": "2052d0aa0952e2f73258808acb37b401b3e787f8c1ebbbf270cc6f22bb3a7a9f"
+  "content_hash": "ac080602434aaf5bcc256030da31bd7e9af4ae80f32e6379c184f49db874f5e9"
 }
