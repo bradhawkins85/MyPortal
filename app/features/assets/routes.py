@@ -1011,7 +1011,8 @@ async def place_rack_asset(request: Request):
             int(form.get("unit_height")), str(form.get("face") or "front"),
             str(form.get("notes") or "").strip()[:1000] or None,
             int(form.get("width_lanes") or 3), int(form.get("start_lane") or 1),
-            str(form.get("depth_mode") or "half"))
+            str(form.get("depth_mode") or "half"),
+            int(form.get("power_draw_watts")) if form.get("power_draw_watts") else None)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await audit_service.record(action="infrastructure.rack_equipment.create", request=request,
@@ -1020,10 +1021,34 @@ async def place_rack_asset(request: Request):
     return _main().flash_redirect("/racks", "Asset placed in rack.", "success")
 
 
+@router.post("/api/infrastructure/rack-reservations", status_code=201, summary="Reserve rack space")
+async def reserve_rack_space(request: Request):
+    _user, company_id, redirect = await _infrastructure_write_context(request, "menu.racks")
+    if redirect:
+        return redirect
+    form = await request.form()
+    try:
+        record_id = await infrastructure_repo.reserve_space(
+            company_id, int(form.get("rack_id")), int(form.get("start_unit")),
+            int(form.get("unit_height")), str(form.get("face") or "front"),
+            int(form.get("width_lanes") or 3), int(form.get("start_lane") or 1),
+            str(form.get("depth_mode") or "half"),
+            str(form.get("label") or "").strip()[:191] or None,
+            str(form.get("owner") or "").strip()[:191] or None,
+            str(form.get("notes") or "").strip()[:1000] or None)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await audit_service.record(action="infrastructure.rack_reservation.create", request=request,
+                               entity_type="rack_reservation", entity_id=record_id,
+                               after={"company_id": company_id})
+    return _main().flash_redirect("/racks", "Rack space reserved.", "success")
+
+
 @router.post("/api/infrastructure/{record_type}/{record_id}/delete", summary="Delete infrastructure documentation")
 async def delete_infrastructure_record(request: Request, record_type: str, record_id: int):
     tables = {"networks": "ip_networks", "addresses": "ip_addresses",
-              "racks": "racks", "rack-equipment": "rack_equipment"}
+              "racks": "racks", "rack-equipment": "rack_equipment",
+              "rack-reservations": "rack_reservations"}
     if record_type not in tables:
         raise HTTPException(status_code=404, detail="Record type not found")
     permission_key = "menu.ipam" if record_type in {"networks", "addresses"} else "menu.racks"
