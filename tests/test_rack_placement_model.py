@@ -109,6 +109,28 @@ def test_standalone_patch_panel_creates_numbered_ports(monkeypatch):
     assert [call.args[1][2] for call in port_calls] == [1, 2, 3, 4]
 
 
+@pytest.mark.parametrize("item_type", ["patch_panel", "switch"])
+def test_port_capable_rack_item_can_be_placed_without_port_documentation(monkeypatch, item_type):
+    monkeypatch.setattr(infrastructure.db, "fetch_one", AsyncMock(side_effect=[
+        {"unit_count": 42}, None, None,
+    ]))
+    monkeypatch.setattr(
+        infrastructure.db, "execute_returning_lastrowid", AsyncMock(return_value=82)
+    )
+    execute = AsyncMock()
+    monkeypatch.setattr(infrastructure.db, "execute", execute)
+
+    result = asyncio.run(infrastructure.place_asset(
+        1, 2, None, 10, 1, "front", None, item_type=item_type,
+        name="Unmapped ports", port_count=0
+    ))
+
+    assert result == 82
+    assert not any(
+        "rack_equipment_ports" in call.args[0] for call in execute.await_args_list
+    )
+
+
 def test_link_port_rejects_cross_company_asset(monkeypatch):
     monkeypatch.setattr(infrastructure.db, "fetch_one", AsyncMock(side_effect=[{"id": 7}, None]))
     execute = AsyncMock()
@@ -124,6 +146,7 @@ def test_rack_item_migration_and_template_contracts():
     assert "asset_id INT NULL" in sql
     assert "rack_equipment_ports" in sql
     assert 'value="patch_panel"' in template and 'value="switch"' in template
+    assert "Number of ports (optional)" in template
     assert "Not Configured" not in template and "Not configured" not in template
     assert template.count('class="stat-strip rack-stat-strip"') == 2
 
