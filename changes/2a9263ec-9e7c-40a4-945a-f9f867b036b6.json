@@ -1,0 +1,7 @@
+{
+  "guid": "2a9263ec-9e7c-40a4-945a-f9f867b036b6",
+  "occurred_at": "2026-09-27T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added standalone rack devices, patch panels, switches, and per-port asset links.",
+  "content_hash": "rack-items-ports-v1"
+}
