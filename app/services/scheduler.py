@@ -52,6 +52,7 @@ from app.services import backup_jobs as backup_jobs_service
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
 from app.repositories import integration_modules as module_repo
+from app.repositories import websites as websites_repo
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SYSTEM_UPDATE_LOCK = asyncio.Lock()
@@ -1522,6 +1523,20 @@ class SchedulerService:
                                 },
                                 default=str,
                             )
+                elif command in {"refresh_website_checks", "refresh_dns_records"}:
+                    company_id = task.get("company_id")
+                    due_window = started_at.astimezone(timezone.utc).strftime("%Y%m%d%H%M")
+                    counts = await websites_repo.enqueue_scheduled_scope(
+                        command=str(command),
+                        company_id=int(company_id) if company_id is not None else None,
+                        task_id=int(task_id),
+                        due_window=due_window,
+                    )
+                    details = json.dumps({
+                        "scope": "all_companies" if company_id is None else "company",
+                        "company_id": int(company_id) if company_id is not None else None,
+                        **counts,
+                    })
                 else:
                     status = "skipped"
                     details = "No handler registered for command"

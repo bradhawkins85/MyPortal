@@ -8,7 +8,7 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.repositories import websites as repo
-from app.services.website_monitoring import check_website
+from app.services.website_monitoring import check_dns, check_website
 
 
 class WebsiteCheckWorker:
@@ -42,7 +42,8 @@ class WebsiteCheckWorker:
                                   interval_seconds=settings.website_check_interval_seconds)
             return
         try:
-            result = await check_website(website)
+            checker = check_dns if job.get("check_type") == "dns" else check_website
+            result = await checker(website)
         except Exception as exc:  # worker isolation; checker normally returns safe failures
             result = {"ok": False, "error": exc.__class__.__name__}
         await repo.finish_job(

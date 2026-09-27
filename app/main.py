@@ -565,6 +565,8 @@ TASK_COMMAND_LABELS: dict[str, str] = {
     "system_update": "Update MyPortal system",
     "update_products": "Update Shop Products",
     "update_stock_feed": "Update Shop Stock Feed",
+    "refresh_website_checks": "Refresh website checks",
+    "refresh_dns_records": "Refresh DNS records",
 }
 
 
@@ -6813,6 +6815,7 @@ async def admin_scheduled_tasks(
         "process_transcription", "update_tray_icon_installer", "rag_index_start",
         "rag_index_stop", "rag_matching_pause", "rag_matching_resume",
         "rag_cleanup_stale_matches",
+        "refresh_website_checks", "refresh_dns_records",
     )
     command_options = [
         {"value": command, "label": _scheduled_task_command_label(command)}

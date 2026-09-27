@@ -126,34 +126,101 @@ async def replace_links(company_id: int, website_id: int, asset_ids: list[int], 
         await db.execute("INSERT INTO website_kb_links (website_id, article_id) VALUES (%s, %s)", (website_id, article_id))
 
 
-async def enqueue_check(website_id: int) -> int:
+CHECK_TYPES = {"website", "dns"}
+
+
+async def enqueue_check(website_id: int, *, check_type: str = "website",
+                        idempotency_key: str | None = None) -> int:
+    if check_type not in CHECK_TYPES:
+        raise ValueError("Unknown website check type")
     existing = await db.fetch_one(
-        "SELECT id FROM website_check_jobs WHERE website_id = %s AND status IN ('pending', 'running') ORDER BY id LIMIT 1",
-        (website_id,),
+        "SELECT id FROM website_check_jobs WHERE website_id = %s AND check_type = %s "
+        "AND status IN ('pending', 'running') ORDER BY id LIMIT 1",
+        (website_id, check_type),
     )
     if existing:
         return int(existing["id"])
     return await db.execute_returning_lastrowid(
-        "INSERT INTO website_check_jobs (website_id) VALUES (%s)", (website_id,)
+        "INSERT INTO website_check_jobs (website_id, check_type, idempotency_key) VALUES (%s, %s, %s)",
+        (website_id, check_type, idempotency_key),
     )
+
+
+async def enqueue_scheduled_scope(*, command: str, company_id: int | None,
+                                  task_id: int, due_window: str) -> dict[str, int]:
+    """Queue one typed observation per eligible site, applying default overrides.
+
+    The existence of a company task (including an inactive one) deliberately
+    suppresses the all-company default for that command.
+    """
+    check_type = {"refresh_website_checks": "website", "refresh_dns_records": "dns"}.get(command)
+    if not check_type:
+        raise ValueError("Unknown website scheduled task command")
+    clauses = []
+    params: list[Any] = []
+    if company_id is not None:
+        clauses.append("w.company_id = %s")
+        params.append(int(company_id))
+    else:
+        clauses.append(
+            "NOT EXISTS (SELECT 1 FROM scheduled_tasks t WHERE t.company_id = w.company_id AND t.command = %s)"
+        )
+        params.append(command)
+    if check_type == "dns":
+        clauses.append("w.collect_dns = 1")
+    else:
+        clauses.append(
+            "(w.monitor_availability = 1 OR w.monitor_tls = 1 OR "
+            "w.collect_domain_expiry = 1)"
+        )
+    rows = await db.fetch_all(
+        "SELECT w.id FROM websites w WHERE " + " AND ".join(clauses) + " ORDER BY w.company_id, w.id",
+        tuple(params),
+    ) or []
+    queued = skipped = 0
+    for row in rows:
+        before = await db.fetch_one(
+            "SELECT id FROM website_check_jobs WHERE website_id = %s AND check_type = %s "
+            "AND status IN ('pending', 'running') LIMIT 1", (row["id"], check_type),
+        )
+        key = f"scheduled:{check_type}:{task_id}:{due_window}:{row['id']}"[:191]
+        try:
+            job_id = await enqueue_check(int(row["id"]), check_type=check_type,
+                                         idempotency_key=key)
+            if before or not job_id:
+                skipped += 1
+            else:
+                queued += 1
+        except Exception as exc:
+            if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
+                skipped += 1
+            else:
+                raise
+    return {"queued": queued, "checked": 0, "changed": 0, "skipped": skipped, "failed": 0}
 
 
 async def enqueue_due(now: datetime, limit: int) -> int:
     rows = await db.fetch_all(
-        "SELECT id, next_check_at FROM websites WHERE next_check_at IS NULL OR next_check_at <= %s ORDER BY next_check_at, id LIMIT %s",
+        """SELECT w.id, w.next_check_at FROM websites w
+           WHERE (w.next_check_at IS NULL OR w.next_check_at <= %s)
+           AND (w.monitor_availability = 1 OR w.monitor_tls = 1 OR w.collect_domain_expiry = 1)
+           AND NOT EXISTS (SELECT 1 FROM scheduled_tasks t
+                           WHERE t.command = 'refresh_website_checks'
+                           AND (t.company_id IS NULL OR t.company_id = w.company_id))
+           ORDER BY w.next_check_at, w.id LIMIT %s""",
         (now, limit),
     ) or []
     created = 0
     for row in rows:
         before = await db.fetch_one(
-            "SELECT id FROM website_check_jobs WHERE website_id = %s AND status IN ('pending', 'running') LIMIT 1",
+            "SELECT id FROM website_check_jobs WHERE website_id = %s AND check_type = 'website' AND status IN ('pending', 'running') LIMIT 1",
             (row["id"],),
         )
         if not before:
             due = row.get("next_check_at") or "initial"
             key = ("website:" + str(row["id"]) + ":" + str(due))[:191]
             try:
-                await db.execute("INSERT INTO website_check_jobs (website_id, available_at, idempotency_key) VALUES (%s, %s, %s)", (row["id"], now, key))
+                await db.execute("INSERT INTO website_check_jobs (website_id, check_type, available_at, idempotency_key) VALUES (%s, 'website', %s, %s)", (row["id"], now, key))
                 created += 1
             except Exception as exc:
                 # The unique idempotency key is the final arbiter when two
@@ -296,6 +363,18 @@ async def record_success(website_id: int, checked_at: datetime, http_status: int
          registration and registration.get("expires_at"),
          registration and registration.get("source"), checked_at if registration else None,
          website_id),
+    )
+
+
+async def record_dns_success(website_id: int, checked_at: datetime,
+                             dns_facts: dict[str, Any]) -> None:
+    """Persist a DNS-only observation without altering website availability."""
+    await _record_dns_snapshot(website_id, checked_at, dns_facts)
+    await db.execute(
+        """UPDATE websites SET dns_facts_json = %s, dns_checked_at = %s,
+        dns_source = %s, dns_coverage = %s WHERE id = %s""",
+        (json.dumps(dns_facts), checked_at, dns_facts.get("source"),
+         dns_facts.get("coverage"), website_id),
     )
 
 

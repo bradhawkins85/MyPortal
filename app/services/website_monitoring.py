@@ -234,3 +234,21 @@ async def check_website(website: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "checked_at": checked_at, "error": str(exc), "retryable": True}
     await repo.record_success(int(website["id"]), checked_at, status_code, certificate, dns_facts, registration)
     return {"ok": True, "checked_at": checked_at, "http_status": status_code, "certificate": certificate, "dns": dns_facts, "domain": registration, "warnings": errors}
+
+
+async def check_dns(website: dict[str, Any]) -> dict[str, Any]:
+    """Collect DNS only; never make an HTTP, TLS, or registration request."""
+    checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    if not website.get("collect_dns"):
+        return {"ok": True, "checked_at": checked_at, "skipped": True}
+    try:
+        parsed = urlsplit(str(website["url"]))
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("Only absolute HTTP and HTTPS URLs are supported")
+        dns_facts = await lookup_dns(parsed.hostname.rstrip(".").lower())
+        await repo.record_dns_success(int(website["id"]), checked_at, dns_facts)
+        return {"ok": True, "checked_at": checked_at, "dns": dns_facts}
+    except (ValueError, OSError, asyncio.TimeoutError) as exc:
+        message = "DNS: " + (str(exc) or exc.__class__.__name__)
+        await repo.record_component_failure(int(website["id"]), "dns", checked_at, message)
+        return {"ok": False, "checked_at": checked_at, "error": message, "retryable": True}

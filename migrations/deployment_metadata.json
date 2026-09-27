@@ -180,6 +180,12 @@
       "compatible-from": "*",
       "compatible-to": "*",
       "maintenance": false
-    } 
+    },
+    "433_typed_website_check_jobs.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    }
   }
 }
