@@ -5,6 +5,7 @@ import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
+import httpx
 
 from app.services import website_monitoring as monitoring
 
@@ -29,6 +30,101 @@ def test_rejects_credentials_and_nonstandard_ports():
         with pytest.raises(ValueError, match="standard web ports"):
             await monitoring.validate_public_url("https://example.com:8443")
     asyncio.run(run())
+
+
+def test_rejects_mixed_public_and_private_resolution(monkeypatch):
+    async def fake_getaddrinfo(*args, **kwargs):
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.8", 0)),
+        ]
+
+    async def run():
+        monkeypatch.setattr(monitoring.asyncio.get_running_loop(), "getaddrinfo", fake_getaddrinfo)
+        with pytest.raises(ValueError, match="non-public"):
+            await monitoring.validate_public_url("https://example.test")
+    asyncio.run(run())
+
+
+def test_availability_pins_validated_addresses_across_dns_change_and_retries(monkeypatch):
+    attempted = []
+
+    class Stream:
+        def __init__(self, url, kwargs):
+            self.url = str(url)
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            attempted.append((self.url, self.kwargs))
+            if "[2606:2800:220:1:248:1893:25c8:1946]" in self.url:
+                raise httpx.ConnectError("IPv6 unavailable")
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        status_code = 204
+
+        async def aiter_bytes(self):
+            yield b""
+
+    class Client:
+        def __init__(self, **kwargs):
+            assert kwargs["follow_redirects"] is False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        def stream(self, method, url, **kwargs):
+            assert method == "GET"
+            return Stream(url, kwargs)
+
+    resolutions = 0
+
+    # A rebinding lookup returns loopback after validation. The fetch must not
+    # perform that second lookup.
+    async def rebound(*args, **kwargs):
+        nonlocal resolutions
+        resolutions += 1
+        if resolutions > 1:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))]
+        return [
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "",
+             ("2606:2800:220:1:248:1893:25c8:1946", 0, 0, 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0)),
+        ]
+
+    monkeypatch.setattr(monitoring.httpx, "AsyncClient", Client)
+
+    async def run():
+        monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", rebound)
+        host, port, addresses = await monitoring.validate_public_url(
+            "https://example.test/path?q=1"
+        )
+        return await monitoring.fetch_availability(
+            "https://example.test/path?q=1", host, port, addresses
+        )
+
+    status = asyncio.run(run())
+
+    assert status == 204
+    assert resolutions == 1
+    assert [item[0] for item in attempted] == [
+        "https://[2606:2800:220:1:248:1893:25c8:1946]:443/path?q=1",
+        "https://93.184.216.34:443/path?q=1",
+    ]
+    assert all(item[1]["headers"]["Host"] == "example.test" for item in attempted)
+    assert all(item[1]["extensions"]["sni_hostname"] == "example.test" for item in attempted)
+
+
+def test_availability_revalidates_each_connection_address():
+    with pytest.raises(ValueError, match="connection address is not public"):
+        asyncio.run(monitoring.fetch_availability(
+            "http://example.test", "example.test", 80, ["127.0.0.1"]
+        ))
 
 
 def test_failed_check_records_failure_without_success(monkeypatch):
