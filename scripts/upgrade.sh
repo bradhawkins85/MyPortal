@@ -130,6 +130,25 @@ generate_deployment_plan() {
   DEPLOYMENT_REASON=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["reason"])' "$DEPLOYMENT_PLAN")
 }
 
+resolve_plan_base() {
+  local release="$1" revision="${1##*/}"
+
+  # The control checkout is not evidence of what is serving. In particular,
+  # package upgrades can advance that checkout before the immutable-release
+  # layout has created /opt/myportal/current. Comparing origin/main with HEAD
+  # in that state incorrectly produces a no-op and leaves the old service in
+  # place. Use a deployed release only when its directory name is a real commit;
+  # otherwise diff from Git's empty tree so the first immutable deployment is
+  # deliberately planned as a full, fail-closed cutover.
+  if [[ -n "$release" && "$revision" =~ ^[0-9a-f]{40}$ ]] && \
+     git cat-file -e "${revision}^{commit}" 2>/dev/null; then
+    printf '%s' "$revision"
+    return
+  fi
+
+  git hash-object -t tree /dev/null
+}
+
 publish_paths_without_worker_reload() {
   local revision="$1" category="$2" destination release path
   destination="${SHARED_ROOT}/published/${category}/${revision}"
@@ -793,10 +812,7 @@ PREVIOUS_RELEASE=$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)
 git fetch --quiet origin main
 TARGET_REVISION=$(git rev-parse 'origin/main^{commit}')
 RELEASE_DIR="${RELEASE_ROOT}/${TARGET_REVISION}"
-PLAN_BASE="${PREVIOUS_RELEASE##*/}"
-if [[ -z "$PLAN_BASE" ]] || ! git cat-file -e "${PLAN_BASE}^{commit}" 2>/dev/null; then
-  PLAN_BASE=$(git rev-parse 'HEAD^{commit}')
-fi
+PLAN_BASE=$(resolve_plan_base "$PREVIOUS_RELEASE")
 generate_deployment_plan "$PLAN_BASE" "$TARGET_REVISION"
 
 # The plan and every subsequent decision are recorded before preparation or
