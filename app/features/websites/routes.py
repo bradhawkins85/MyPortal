@@ -196,9 +196,22 @@ async def website_detail_page(request: Request, website_id: int):
         dns = json.loads(website.get("dns_facts_json") or "null")
     except (TypeError, json.JSONDecodeError):
         dns = None
+    def facts(column):
+        try:
+            return json.loads(website.get(column) or "null")
+        except (TypeError, json.JSONDecodeError):
+            return None
+    try:
+        history_page = max(1, int(request.query_params.get("dns_history_page", "1")))
+    except ValueError:
+        history_page = 1
     can_write = main_module._membership_menu_can(user, membership, "menu.websites", write=True)
     return await main_module._render_template("websites/detail.html", request, user, extra={
         "title": website["name"], "website": website, "links": links, "dns": dns,
+        "certificate": facts("certificate_facts_json"),
+        "registration": facts("registration_facts_json"),
+        "dns_changes": await repo.list_dns_changes(company_id, website_id, page=history_page),
+        "dns_history_page": history_page,
         "jobs": await repo.list_check_jobs(company_id, website_id), "can_write": can_write,
     })
 
