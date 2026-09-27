@@ -7,6 +7,7 @@ import json
 import pytest
 
 from app.services import documentation_search
+from app.services.rag_permissions import can_access_candidate
 from app.services.rag_urls import canonical_source_url
 
 
@@ -50,6 +51,9 @@ async def test_hostname_returns_asset_and_authorised_linked_runbook(monkeypatch)
         return rows[source_types[0]]
 
     monkeypatch.setattr(documentation_search.rag_repo, "list_active_chunks", active_chunks)
+    async def current(candidate, *, user, memberships, cache=None):
+        return can_access_candidate(candidate, user=user, memberships=memberships)
+    monkeypatch.setattr(documentation_search, "can_access_current_candidate", current)
     result = await documentation_search.search_documentation(
         "web-01.example.test", {"id": 9}, active_company_id=7,
         memberships=[{"company_id": 7, "can_manage_assets": True}],
@@ -73,6 +77,9 @@ async def test_unauthorised_content_contributes_no_result_snippet_or_count(monke
         return [secret]
 
     monkeypatch.setattr(documentation_search.rag_repo, "list_active_chunks", active_chunks)
+    async def current(candidate, *, user, memberships, cache=None):
+        return can_access_candidate(candidate, user=user, memberships=memberships)
+    monkeypatch.setattr(documentation_search, "can_access_current_candidate", current)
     result = await documentation_search.search_documentation(
         "forbidden-host.example.test", {"id": 9}, active_company_id=7,
         memberships=[{"company_id": 7, "can_manage_assets": True}], sources=["assets"],

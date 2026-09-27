@@ -22,7 +22,7 @@ from app.services.rag_index import (
     embedding_model,
     tokenise,
 )
-from app.services.rag_permissions import can_access_candidate
+from app.services.rag_permissions import can_access_current_candidate
 from app.services.agent_sources import SOURCE_TYPE_CAPS, SOURCE_WEIGHTS
 
 _EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
@@ -461,6 +461,23 @@ async def retrieve_candidates(
             limit=active_chunk_limit,
         )
         rows.extend(source_rows)
+    # This must precede metadata parsing, lexical matching, scoring and reranking:
+    # inaccessible text must not affect either evidence or another result's rank.
+    authorisation_cache: dict[tuple[str, str], bool] = {}
+    authorised_rows: list[Mapping[str, Any]] = []
+    for row in rows:
+        candidate = {
+            "permission_scope": _loads(row.get("permission_scope_json"), {}),
+            "company_id": row.get("company_id"),
+            "source_type": row.get("source_type"),
+            "source_id": row.get("source_id"),
+        }
+        if await can_access_current_candidate(
+            candidate, user=user, memberships=resolved_memberships,
+            cache=authorisation_cache,
+        ):
+            authorised_rows.append(row)
+    rows = authorised_rows
     metadata_by_chunk = {
         int(r.get("chunk_id") or 0): (_loads(r.get("metadata_json"), {}) or {})
         for r in rows
@@ -518,11 +535,6 @@ async def retrieve_candidates(
             "intents": profile.intents,
             "_embedding": [float(v) for v in embedding],
         }
-        if not can_access_candidate(
-            candidate, user=user, memberships=resolved_memberships
-        ):
-            discarded += 1
-            continue
         if active_company_id and candidate.get("company_id") not in (
             None,
             active_company_id,
