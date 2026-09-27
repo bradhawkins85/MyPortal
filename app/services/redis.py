@@ -1,6 +1,8 @@
 """Redis client utilities."""
 from __future__ import annotations
 
+from contextlib import suppress
+
 from redis.asyncio import Redis
 from redis.asyncio.connection import ConnectionPool
 
