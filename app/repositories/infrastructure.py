@@ -118,11 +118,30 @@ async def overview(company_id: int) -> dict[str, list[dict[str, Any]]]:
            FROM racks r LEFT JOIN rack_equipment e ON e.rack_id=r.id
            WHERE r.company_id=%s GROUP BY r.id ORDER BY r.name""", (company_id,)) or [])
     equipment = list(await db.fetch_all(
-        """SELECT e.*, r.name rack_name, r.unit_count, r.depth_mm, a.name asset_name
+        """SELECT e.*, r.name rack_name, r.unit_count, r.depth_mm, a.name asset_name,
+                  a.type asset_type, a.serial_number asset_serial
            FROM rack_equipment e JOIN racks r ON r.id=e.rack_id
            JOIN assets a ON a.id=e.asset_id WHERE e.company_id=%s
-           ORDER BY r.name, e.start_unit DESC""", (company_id,)) or [])
-    return {"networks": networks, "addresses": addresses, "racks": racks, "equipment": equipment}
+        ORDER BY r.name, e.start_unit DESC""", (company_id,)) or [])
+    reservations = list(await db.fetch_all(
+        """SELECT q.*, r.name rack_name FROM rack_reservations q
+           JOIN racks r ON r.id=q.rack_id WHERE q.company_id=%s
+           ORDER BY r.name, q.start_unit DESC""", (company_id,)) or [])
+    for rack in racks:
+        rack_equipment = [item for item in equipment if item["rack_id"] == rack["id"]]
+        rack_reservations = [item for item in reservations if item["rack_id"] == rack["id"]]
+        capacity = int(rack["unit_count"]) * 3 * 2
+        occupied = sum(int(item["unit_height"]) * int(item["width_lanes"]) *
+                       (2 if item["depth_mode"] == "full" else 1) for item in rack_equipment)
+        reserved = sum(int(item["unit_height"]) * int(item["width_lanes"]) *
+                       (2 if item["depth_mode"] == "full" else 1) for item in rack_reservations)
+        rack["occupied_percent"] = round(occupied * 100 / capacity) if capacity else 0
+        rack["reserved_percent"] = round(reserved * 100 / capacity) if capacity else 0
+        draws = [item.get("power_draw_watts") for item in rack_equipment]
+        rack["recorded_power_draw_watts"] = sum(value for value in draws if value is not None)
+        rack["has_recorded_power_draw"] = any(value is not None for value in draws)
+    return {"networks": networks, "addresses": addresses, "racks": racks,
+            "equipment": equipment, "reservations": reservations}
 
 
 async def for_asset(company_id: int, asset_id: int) -> dict[str, list[dict[str, Any]]]:
@@ -182,10 +201,11 @@ async def create_rack(company_id: int, name: str, location: str | None, unit_cou
 async def place_asset(company_id: int, rack_id: int, asset_id: int, start_unit: int,
                       unit_height: int, face: str, notes: str | None,
                       width_lanes: int = 3, start_lane: int = 1,
-                      depth_mode: str = "half") -> int:
+                      depth_mode: str = "half", power_draw_watts: int | None = None) -> int:
     if (face not in {"front", "rear"} or depth_mode not in {"half", "full"}
             or unit_height < 1 or width_lanes not in {1, 2, 3}
-            or start_lane < 1 or start_lane + width_lanes - 1 > 3):
+            or start_lane < 1 or start_lane + width_lanes - 1 > 3
+            or (power_draw_watts is not None and power_draw_watts < 0)):
         raise ValueError("Invalid rack position")
     rack = await db.fetch_one("SELECT unit_count FROM racks WHERE id=%s AND company_id=%s", (rack_id, company_id))
     asset = await db.fetch_one("SELECT id FROM assets WHERE id=%s AND company_id=%s", (asset_id, company_id))
@@ -202,12 +222,17 @@ async def place_asset(company_id: int, rack_id: int, asset_id: int, start_unit: 
         (rack_id, *slot_params))
     if conflict:
         raise ValueError(f"Rack unit {conflict['unit_number']} is already occupied")
+    reservation_conflict = await db.fetch_one(
+        "SELECT unit_number FROM rack_reservation_slots WHERE rack_id=%s AND (" + slot_conditions + ")",
+        (rack_id, *slot_params))
+    if reservation_conflict:
+        raise ValueError(f"Rack unit {reservation_conflict['unit_number']} is reserved")
     equipment_id = await db.execute_returning_lastrowid(
         """INSERT INTO rack_equipment
-           (company_id,rack_id,asset_id,start_unit,unit_height,face,notes,width_lanes,start_lane,depth_mode)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+           (company_id,rack_id,asset_id,start_unit,unit_height,face,notes,width_lanes,start_lane,depth_mode,power_draw_watts)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
         (company_id, rack_id, asset_id, start_unit, unit_height, face, notes,
-         width_lanes, start_lane, depth_mode))
+         width_lanes, start_lane, depth_mode, power_draw_watts))
     try:
         for unit in units:
             for slot_face in faces:
@@ -223,8 +248,51 @@ async def place_asset(company_id: int, rack_id: int, asset_id: int, start_unit: 
     return equipment_id
 
 
+async def reserve_space(company_id: int, rack_id: int, start_unit: int, unit_height: int,
+                        face: str, width_lanes: int, start_lane: int, depth_mode: str,
+                        label: str | None, owner: str | None, notes: str | None) -> int:
+    if (face not in {"front", "rear"} or depth_mode not in {"half", "full"}
+            or unit_height < 1 or width_lanes not in {1, 2, 3}
+            or start_lane < 1 or start_lane + width_lanes - 1 > 3):
+        raise ValueError("Invalid rack reservation")
+    rack = await db.fetch_one(
+        "SELECT unit_count FROM racks WHERE id=%s AND company_id=%s", (rack_id, company_id))
+    if not rack or start_unit < 1 or start_unit + unit_height - 1 > int(rack["unit_count"]):
+        raise ValueError("Rack or reserved units are invalid")
+    units = range(start_unit, start_unit + unit_height)
+    lanes = range(start_lane, start_lane + width_lanes)
+    faces = ["front", "rear"] if depth_mode == "full" else [face]
+    conditions = " OR ".join("(unit_number=%s AND face=%s AND lane=%s)"
+                             for _unit in units for _face in faces for _lane in lanes)
+    params = tuple(value for unit in units for slot_face in faces for lane in lanes
+                   for value in (unit, slot_face, lane))
+    for table in ("rack_equipment_slots", "rack_reservation_slots"):
+        conflict = await db.fetch_one(
+            "SELECT unit_number FROM " + table + " WHERE rack_id=%s AND (" + conditions + ")",
+            (rack_id, *params))
+        if conflict:
+            raise ValueError(f"Rack unit {conflict['unit_number']} is already occupied or reserved")
+    reservation_id = await db.execute_returning_lastrowid(
+        """INSERT INTO rack_reservations
+           (company_id,rack_id,start_unit,unit_height,face,width_lanes,start_lane,depth_mode,label,owner,notes)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+        (company_id, rack_id, start_unit, unit_height, face, width_lanes, start_lane,
+         depth_mode, label, owner, notes))
+    try:
+        for unit in units:
+            for slot_face in faces:
+                for lane in lanes:
+                    await db.execute(
+                        "INSERT INTO rack_reservation_slots (reservation_id,rack_id,unit_number,face,lane) VALUES (%s,%s,%s,%s,%s)",
+                        (reservation_id, rack_id, unit, slot_face, lane))
+    except Exception as exc:
+        await db.execute("DELETE FROM rack_reservations WHERE id=%s", (reservation_id,))
+        raise ValueError("One or more rack units are already reserved") from exc
+    return reservation_id
+
+
 async def delete_record(table: str, record_id: int, company_id: int) -> None:
-    allowed = {"ip_networks", "ip_addresses", "racks", "rack_equipment"}
+    allowed = {"ip_networks", "ip_addresses", "racks", "rack_equipment", "rack_reservations"}
     if table not in allowed:
         raise ValueError("Invalid record type")
     await db.execute("DELETE FROM " + table + " WHERE id=%s AND company_id=%s", (record_id, company_id))
