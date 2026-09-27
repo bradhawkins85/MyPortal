@@ -136,6 +136,12 @@ CORE_COMPONENTS: tuple[CoreComponent, ...] = (
         ("/api/click-to-call",),
     ),
     CoreComponent(
+        "forms",
+        "Forms",
+        "Forms (OpnForm) portal pages, forms administration and forms API.",
+        ("/myforms", "/forms", "/admin/forms", "/api/forms"),
+    ),
+    CoreComponent(
         "essential8",
         "Essential 8 Compliance",
         "Essential 8 compliance dashboard, controls, API, marketing help "

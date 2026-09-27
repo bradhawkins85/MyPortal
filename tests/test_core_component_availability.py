@@ -35,6 +35,7 @@ EXPECTED_SLUGS = {
     "click_to_call",
     "gmp_glp",
     "essential8",
+    "forms",
 }
 
 
@@ -117,6 +118,7 @@ def _render_sidebar(monkeypatch, *disabled: str) -> str:
 
 
 SIDEBAR_LINKS = (
+    "/myforms",
     "/devices",
     "/ipam",
     "/racks",
@@ -284,3 +286,10 @@ def test_essential8_report_queries_hidden(monkeypatch):
     monkeypatch.setattr(availability_module, "get_component_availability", lambda: policy)
     slugs = [q["slug"] for q in asyncio.run(company_report_layout.available_queries())]
     assert slugs == ["report-licenses"]
+
+
+def test_forms_paths_blocked():
+    policy = ComponentAvailability(disabled_feature_packs=frozenset({"forms"}))
+    for path in ("/myforms", "/myforms/admin/edit", "/forms", "/admin/forms", "/api/forms/1"):
+        assert not policy.path_available(path), path
+    assert policy.path_available("/formsets")

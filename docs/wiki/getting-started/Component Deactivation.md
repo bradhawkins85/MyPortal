@@ -97,6 +97,7 @@ one with its current status.
 | Notification Contact (My Profile) | `notification_contact` | — (profile card only) | — |
 | Email Signature (My Profile) | `email_signature` | — (profile card only) | — |
 | Click to Call | `click_to_call` | `/api/click-to-call` | — |
+| Forms | `forms` | `/myforms`, `/forms`, `/admin/forms`, `/api/forms` | — |
 | Essential 8 Compliance | `essential8` | `/compliance`, `/api/essential8`, `/admin/marketing/essential8-help-links` | pack `compliance` is disabled |
 | GMP/GLP Compliance Checks | `gmp_glp` | — (content filter) | — |
 

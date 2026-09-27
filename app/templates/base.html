@@ -154,7 +154,7 @@
           {% set can_access_cart = feature_pack_available('cart') and ((can_access_cart | default(false)) or is_super_admin or membership.get('can_access_cart')) %}
           {% set can_access_quotes = feature_pack_available('quotes') and ((can_access_quotes | default(false)) or is_super_admin or membership.get('can_access_quotes') or menu_access.get('menu.quotes') in ['read', 'write']) %}
           {% set can_access_orders = feature_pack_available('orders') and ((can_access_orders | default(false)) or is_super_admin or membership.get('can_access_orders') or menu_access.get('menu.orders') in ['read', 'write']) %}
-          {% set can_access_forms = (can_access_forms | default(false)) or is_super_admin or membership.get('can_access_forms') or menu_access.get('menu.forms') in ['read', 'write'] %}
+          {% set can_access_forms = feature_pack_available('forms') and ((can_access_forms | default(false)) or is_super_admin or membership.get('can_access_forms') or menu_access.get('menu.forms') in ['read', 'write']) %}
           {% set can_manage_assets = feature_pack_available('assets') and ((can_manage_assets | default(false)) or is_super_admin or membership.get('can_manage_assets') or menu_access.get('menu.assets') in ['read', 'write']) %}
           {% set can_access_documentation_search = is_super_admin or menu_access.get('menu.documentation_search') in ['read', 'write'] %}
           {% set can_access_processes = is_super_admin or menu_access.get('menu.processes') in ['read', 'write'] %}
