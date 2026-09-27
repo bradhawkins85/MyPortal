@@ -917,6 +917,8 @@ async def racks_page(request: Request):
         return data
     data["title"] = "Rack management"
     data["item_types"] = rack_item_types.ITEM_TYPES
+    data["connectors"] = rack_item_types.CONNECTORS
+    data["image_path"] = rack_item_types.image_path
     data["item_type_labels"] = {item_type.key: item_type.label for item_type in rack_item_types.ITEM_TYPES}
     for item in data.get("equipment") or []:
         item["item_type"] = rack_item_types.get(item.get("item_type")).key
@@ -939,6 +941,38 @@ def _rack_location(form: Any, rack_id: Any = None, anchor: str = "") -> str:
     except (TypeError, ValueError):
         return f"/racks{anchor}"
     return f"/racks?rack={selected}{anchor}"
+
+
+def _rack_connections(form: Any, item_type: str) -> dict[str, Any]:
+    """Parse port counts, per-port links and the power source from a rack item form.
+
+    Link fields are named ``port-<connector>-<ordinal>-asset`` and
+    ``port-<connector>-<ordinal>-label``.
+    """
+    catalogue = rack_item_types.get(item_type)
+    counts: dict[str, int] = {}
+    for connector in catalogue.connector_keys:
+        raw = form.get(f"port_count_{connector}")
+        if raw is None and connector == "data":
+            raw = form.get("port_count")
+        counts[connector] = int(raw or 0)
+    links = []
+    for connector, count in counts.items():
+        for ordinal in range(1, count + 1):
+            prefix = f"port-{connector}-{ordinal}-"
+            asset_raw = form.get(prefix + "asset")
+            label = _optional_text(form, prefix + "label")
+            if asset_raw is None and label is None:
+                continue
+            links.append(infrastructure_repo.PortLink(
+                connector, ordinal, int(asset_raw) if asset_raw else None, label))
+    source = form.get("power_source_port_id")
+    return {
+        "port_counts": counts,
+        "port_links": links,
+        "power_source_port_id": int(source) if source else None,
+        "power_source_label": _optional_text(form, "power_source_label"),
+    }
 
 
 def _optional_text(form: Any, key: str, limit: int = 191) -> str | None:
@@ -1036,6 +1070,7 @@ async def place_rack_asset(request: Request):
     try:
         asset_id = int(form.get("asset_id")) if form.get("asset_id") else None
         item_type = str(form.get("item_type") or rack_item_types.DEFAULT_KEY)
+        connections = _rack_connections(form, item_type)
         record_id = await infrastructure_repo.place_asset(
             company_id, int(form.get("rack_id")), asset_id, int(form.get("start_unit")),
             int(form.get("unit_height")), str(form.get("face") or "front"),
@@ -1044,7 +1079,7 @@ async def place_rack_asset(request: Request):
             str(form.get("depth_mode") or "half"),
             int(form.get("power_draw_watts")) if form.get("power_draw_watts") else None,
             item_type, _optional_text(form, "name"),
-            int(form.get("port_count") or 0))
+            int(form.get("port_count") or 0), **connections)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await audit_service.record(action="infrastructure.rack_equipment.create", request=request,
@@ -1061,7 +1096,8 @@ async def link_rack_item_port(request: Request, equipment_id: int, port_number: 
     form = await request.form()
     try:
         asset_id = int(form.get("asset_id")) if form.get("asset_id") else None
-        await infrastructure_repo.link_equipment_port(company_id, equipment_id, port_number, asset_id)
+        await infrastructure_repo.link_equipment_port(
+            company_id, equipment_id, port_number, asset_id, _optional_text(form, "label"))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await audit_service.record(action="infrastructure.rack_port.link", request=request,
@@ -1079,11 +1115,20 @@ async def edit_rack_equipment(request: Request, equipment_id: int):
     form = await request.form()
     try:
         asset_id = int(form.get("asset_id")) if form.get("asset_id") else None
+        item_type = str(form.get("item_type") or rack_item_types.DEFAULT_KEY)
+        extra: dict[str, Any] = {}
+        if form.get("start_unit"):
+            # The full edit form sends the same position and connection
+            # fields as placement; older clients send only the basics.
+            extra = _rack_connections(form, item_type)
+            extra["position"] = infrastructure_repo.RackPosition(
+                int(form.get("start_unit")), int(form.get("unit_height") or 1),
+                str(form.get("face") or "front"), int(form.get("width_lanes") or 3),
+                int(form.get("start_lane") or 1), str(form.get("depth_mode") or "half"))
         await infrastructure_repo.update_rack_equipment(
-            company_id, equipment_id, _optional_text(form, "name"),
-            str(form.get("item_type") or rack_item_types.DEFAULT_KEY), asset_id,
+            company_id, equipment_id, _optional_text(form, "name"), item_type, asset_id,
             int(form.get("power_draw_watts")) if form.get("power_draw_watts") else None,
-            str(form.get("notes") or "").strip()[:1000] or None)
+            str(form.get("notes") or "").strip()[:1000] or None, **extra)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await audit_service.record(action="infrastructure.rack_equipment.update", request=request,

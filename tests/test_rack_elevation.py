@@ -68,17 +68,17 @@ def test_rail_numbers_follow_mounting_direction():
     assert rack_dashboard.unit_rows({**rack, "numbering_direction": "top-down"})[:2] == [1, 2]
 
 
-def test_switch_draws_ports_and_linked_ports_are_lit():
+def test_switch_draws_ports_and_linked_or_labelled_ports_are_lit():
     rack = {"id": 1, "name": "Core rack", "unit_count": 4, "numbering_direction": "bottom-up"}
-    switch = _item(item_type="switch", unit_height=1, start_unit=1, depth_mode="half",
-                   port_count=4, ports=[{"port_number": n, "asset_id": 9 if n == 2 else None}
-                                        for n in range(1, 5)])
+    ports = [{"port_number": n, "connector": "data", "asset_id": 9 if n == 2 else None,
+              "label": "Printer" if n == 3 else None} for n in range(1, 5)]
+    switch = _item(item_type="switch", unit_height=1, start_unit=1, depth_mode="half", ports=ports)
 
     html = _render_face(rack, [switch], [])
 
     assert 'class="rack__ports"' in html
-    assert html.count("<i") - html.count('class="is-linked"') == 3
-    assert html.count('class="is-linked"') == 1
+    assert html.count('class="is-data is-linked"') == 2
+    assert html.count('class="is-data"') == 2
 
 
 def test_warning_asset_status_is_announced_not_colour_only():
@@ -153,14 +153,15 @@ def test_graphical_dashboard_interactions_are_keyboard_accessible():
 
 
 def test_add_rack_space_dialog_uses_visual_choices_and_live_preview():
-    dialog = TEMPLATE[TEMPLATE.index('<dialog id="rack-place-dialog"'):TEMPLATE.index('<dialog id="rack-edit-dialog"')]
+    dialog = TEMPLATE[TEMPLATE.index('<dialog id="rack-place-dialog"'):TEMPLATE.index('<dialog id="rack-reservation-dialog"')]
     for name in ("entry_kind", "item_type", "face", "depth_mode", "width_lanes", "start_lane"):
         assert f'type="radio" name="{name}"' in dialog
-    for name in ("rack_id", "name", "asset_id", "port_count", "power_draw_watts", "label", "owner",
-                 "start_unit", "unit_height", "notes"):
+    for name in ("rack_id", "name", "asset_id", "power_draw_watts", "label", "owner",
+                 "start_unit", "unit_height", "notes", "power_source_port_id", "power_source_label"):
         assert f'name="{name}"' in dialog
-    assert "data-placement-map" in dialog
-    assert "data-placement-preview" in dialog
+    assert 'name="port_count_{{ key }}"' in dialog
+    assert 'value="{{ value }}"{% if value == 3 %} checked{% endif %}' in dialog
+    assert "data-placement-map" in dialog and "data-placement-preview" in dialog
     script = (ROOT / "app/static/js/racks.js").read_text()
     assert "const renderMap" in script
     assert "const clampLanes" in script
@@ -175,12 +176,16 @@ def test_catalogue_lists_the_default_rack_item_types_with_images():
         "KVM console", "Power distribution unit (PDU)", "Uninterruptible power supply (UPS)",
         "Fan tray or ventilation", "Shelf or blanking panel", "Cable management ring or bar",
     ]
-    css = (ROOT / "app/static/css/infrastructure.css").read_text()
     for item_type in rack_item_types.ITEM_TYPES:
-        assert (ROOT / "app" / item_type.image.lstrip("/")).is_file()
-        assert f'url("../images/racks/{item_type.key}.svg")' in css
+        for width in (1, 2, 3):
+            for rear in (False, True):
+                image = rack_item_types.image_path(item_type.key, width, rear)
+                assert (ROOT / "app" / image.lstrip("/")).is_file(), image
     assert rack_item_types.get("device").key == "server"
-    assert rack_item_types.PORT_TYPE_KEYS == {"switch", "patch_panel", "pdu"}
+    assert rack_item_types.PORT_TYPE_KEYS == {"switch", "patch_panel", "pdu", "ups"}
+    assert rack_item_types.get("ups").connector_keys == ("iec", "3pin")
+    assert rack_item_types.get("pdu").power_input and rack_item_types.get("ups").power_input
+    assert rack_item_types.connector_label("3pin", 2) == "3-pin 2"
 
 
 def test_passive_items_have_no_status_led_and_pdus_draw_outlets():
@@ -192,7 +197,7 @@ def test_passive_items_have_no_status_led_and_pdus_draw_outlets():
 
     assert "Shelf or blanking panel" in html
     assert html.count('class="rack__led ') == 1
-    assert "rack__device--pdu" in html and html.count("<i") == 8
+    assert "rack__device--pdu" in html and html.count('<i class="is-iec"') == 8
 
 
 def test_device_images_toggle_is_on_by_default_and_remembered():
@@ -202,17 +207,40 @@ def test_device_images_toggle_is_on_by_default_and_remembered():
     assert "racks.deviceImages" in script
 
 
-def test_edit_rack_item_dialog_uses_type_cards_and_item_summary():
-    dialog = TEMPLATE[TEMPLATE.index('<dialog id="rack-edit-dialog"'):TEMPLATE.index('<dialog id="rack-reservation-dialog"')]
-    assert 'type="radio" name="item_type" value="{{ type.key }}"' in dialog
-    assert "<select class=\"input\" name=\"item_type\"" not in dialog
-    for marker in ("data-edit-face", "data-edit-ports-summary", "data-edit-map", "data-edit-type-hint",
-                   "data-edit-remove", "data-edit-ports"):
-        assert marker in dialog
-    for name in ("rack_id", "name", "asset_id", "power_draw_watts", "notes"):
-        assert f'name="{name}"' in dialog
+def test_editing_reuses_the_add_dialog_with_every_option():
+    assert '<dialog id="rack-edit-dialog"' not in TEMPLATE
+    assert 'id="rack-items-data"' in TEMPLATE
+    dialog = TEMPLATE[TEMPLATE.index('<dialog id="rack-place-dialog"'):TEMPLATE.index('<dialog id="rack-reservation-dialog"')]
+    assert "data-edit-remove" in dialog and "data-port-links" in dialog and "data-power-source" in dialog
+    script = (ROOT / "app/static/js/racks.js").read_text()
+    assert "const editEquipment" in script
+    assert "/edit`" in script
+    assert "blocksOn(rack, side, editingId)" in script
     reservation = TEMPLATE[TEMPLATE.index('<dialog id="rack-reservation-dialog"'):]
     assert "data-reservation-map" in reservation
-    script = (ROOT / "app/static/js/racks.js").read_text()
-    assert "const refreshEditSummary" in script
-    assert "input.hasAttribute('data-has-ports') && !hasPorts" in script
+
+
+def test_full_depth_items_show_their_rear_panel_on_the_opposite_face():
+    rack = {"id": 1, "name": "Core rack", "unit_count": 4, "numbering_direction": "bottom-up"}
+    ups_ports = [{"port_number": n, "connector": "iec" if n <= 2 else "3pin", "asset_id": None}
+                 for n in range(1, 4)]
+    ups = _item(item_type="ups", start_unit=1, unit_height=2, width_lanes=2, ports=ups_ports)
+    front, rear = rack_dashboard.build_faces(rack, [ups], [])
+
+    front_block, rear_block = front["blocks"][0], rear["blocks"][0]
+    assert front_block["image"] == "/static/images/racks/ups-w2.svg" and not front_block["rear"]
+    assert rear_block["image"] == "/static/images/racks/ups-w2-rear.svg" and rear_block["rear"]
+    # A UPS's outlets are on its back panel.
+    assert front_block["ports"] == []
+    assert [port["connector"] for port in rear_block["ports"]] == ["iec", "iec", "3pin"]
+
+
+def test_edit_payload_carries_position_counts_links_and_power_source():
+    item = _item(item_type="pdu", power_source_port_id=41, power_source_label="Wall B2",
+                 ports=[{"port_number": 1, "connector": "iec", "ordinal": 1, "asset_id": 5, "label": None},
+                        {"port_number": 2, "connector": "3pin", "ordinal": 1, "asset_id": None, "label": "Kettle"}])
+    payload = rack_dashboard.edit_payload(item)
+    assert payload["port_counts"] == {"iec": 1, "3pin": 1}
+    assert payload["ports"][1] == {"connector": "3pin", "ordinal": 1, "asset_id": None, "label": "Kettle"}
+    assert payload["power_source_port_id"] == 41 and payload["power_source_label"] == "Wall B2"
+    assert (payload["start_unit"], payload["width_lanes"], payload["depth_mode"]) == (3, 3, "full")
