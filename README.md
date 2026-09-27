@@ -75,6 +75,15 @@ sudo /opt/myportal/control/scripts/install_production.sh
 sudo scripts/install_development.sh
 ```
 
+Prefer Docker? One script installs Docker if needed and deploys (and later
+upgrades) MyPortal from GitHub releases, with no clone required; see
+[Running MyPortal with Docker](docs/wiki/getting-started/Docker.md):
+
+```bash
+curl -fsSLO https://github.com/bradhawkins85/MyPortal/releases/latest/download/myportal-docker.sh
+sudo bash myportal-docker.sh install
+```
+
 ## Getting started (manual development setup)
 
 MyPortal needs MariaDB 10.10 or newer. Migrations are applied explicitly with

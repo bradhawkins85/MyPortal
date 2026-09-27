@@ -12,6 +12,9 @@ access, and Jinja-powered views. Two scripts install it on a Debian/Ubuntu host
 Both scripts are safe to re-run; existing secrets, database passwords and data
 are preserved.
 
+To run MyPortal in Docker instead, see [Running MyPortal with Docker](Docker).
+It uses a single downloadable script and doesn't need a clone.
+
 ## Supported platforms
 
 | Requirement | Supported |

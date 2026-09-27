@@ -735,3 +735,17 @@ def test_development_checkout_queries_git_directly(monkeypatch, tmp_path):
 
     assert scheduler_module._release_revision() is None
     assert scheduler_module._git_context() == (tmp_path, [])
+
+
+def test_docker_deployment_defers_updates_to_release_script(monkeypatch):
+    from app.services import scheduler as scheduler_module
+
+    async def fail(*_args, **_kwargs):  # pragma: no cover - must not run
+        raise AssertionError("Git must not be queried inside a container")
+
+    monkeypatch.setenv("MYPORTAL_DEPLOYMENT", "docker")
+    monkeypatch.setattr(SchedulerService, "_get_git_ref", fail)
+
+    message = asyncio.run(SchedulerService().run_system_update(force_restart=True))
+
+    assert message == scheduler_module._DOCKER_SYSTEM_UPDATE_MESSAGE

@@ -1,0 +1,155 @@
+# Builds the MyPortal container image for a GitHub release, smoke-tests it
+# against MariaDB, publishes it to ghcr.io/<owner>/myportal:<tag> for amd64 and
+# arm64, and attaches scripts/myportal-docker.sh to the release.
+#
+# scripts/myportal-docker.sh installs and upgrades Docker deployments from
+# these release images (falling back to building the release's source
+# locally), so publishing a release is all that is needed to ship an update.
+#
+# One-time setup: after the first run, make the "myportal" package public
+# (GitHub → Packages → myportal → Package settings → Change visibility) so
+# hosts can pull it without logging in to ghcr.io.
+#
+# Pull requests that change the image only build and smoke-test it.
+
+name: Docker image
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Existing release tag to build and publish (for example v0.6.0)"
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - docker/**
+      - requirements.lock
+      - scripts/myportal-docker.sh
+      - .github/workflows/docker-release.yml
+
+permissions:
+  contents: write   # attach myportal-docker.sh to the release
+  packages: write   # push to ghcr.io
+
+concurrency:
+  group: docker-image-${{ github.event.release.tag_name || inputs.tag_name || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PUBLISH: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - name: Resolve release
+        id: release
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag_name || format('pr-{0}', github.event.pull_request.number) }}
+          PRERELEASE: ${{ github.event.release.prerelease || false }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
+            echo "Invalid tag: $TAG" >&2
+            exit 1
+          fi
+          image="ghcr.io/${OWNER,,}/myportal"
+          tags="${image}:${TAG}"
+          # "latest" follows the newest full release. The installer always
+          # pins an exact release tag, so this is only a convenience.
+          if [[ "${{ github.event_name }}" == "release" && "$PRERELEASE" != "true" ]]; then
+            tags="${tags},${image}:latest"
+          fi
+          {
+            echo "tag=${TAG}"
+            echo "image=${image}"
+            echo "tags=${tags}"
+          } >>"$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag_name || github.sha }}
+
+      - name: Check the installer script
+        run: |
+          bash -n scripts/myportal-docker.sh docker/entrypoint.sh
+          shellcheck -S warning scripts/myportal-docker.sh docker/entrypoint.sh
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build amd64 image for testing
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: myportal:smoke
+          build-args: |
+            MYPORTAL_VERSION=${{ steps.release.outputs.tag }}
+            MYPORTAL_REVISION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test against MariaDB
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          docker network create smoke
+          docker run -d --name db --network smoke \
+            -e MARIADB_ROOT_PASSWORD=root-smoke-password -e MARIADB_DATABASE=myportal \
+            -e MARIADB_USER=myportal -e MARIADB_PASSWORD=smoke-password \
+            mariadb:11.4 --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+          docker run -d --name app --network smoke -p 8000:8000 \
+            -e DB_HOST=db -e DB_USER=myportal -e DB_PASSWORD=smoke-password -e DB_NAME=myportal \
+            -e SESSION_SECRET="$(openssl rand -base64 48)" -e TOTP_ENCRYPTION_KEY="$(openssl rand -base64 48)" \
+            myportal:smoke
+          for _ in $(seq 1 90); do
+            if curl -fs http://127.0.0.1:8000/readyz | tee /tmp/readyz | grep -q "\"version\":\"${TAG}\""; then
+              break
+            fi
+            sleep 5
+          done
+          grep -q '"status":"ok"' /tmp/readyz || { docker logs app; exit 1; }
+          status=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' \
+            -d '{"email":"admin@example.com","password":"Smoke-Test-Password-1"}' \
+            http://127.0.0.1:8000/auth/register)
+          [[ "$status" == 201 ]] || { echo "registration returned $status" >&2; docker logs app; exit 1; }
+          docker exec app python -c 'import weasyprint; weasyprint.HTML(string="<p>ok</p>").write_pdf("/tmp/smoke.pdf")'
+          echo "Smoke test passed: $(cat /tmp/readyz)"
+
+      - name: Log in to ghcr.io
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish amd64 and arm64 images
+        if: env.PUBLISH == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.release.outputs.tags }}
+          build-args: |
+            MYPORTAL_VERSION=${{ steps.release.outputs.tag }}
+            MYPORTAL_REVISION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Attach installer script to the release
+        if: env.PUBLISH == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          files: scripts/myportal-docker.sh

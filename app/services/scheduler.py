@@ -58,6 +58,11 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SYSTEM_UPDATE_LOCK = asyncio.Lock()
 _OUTPUT_PREVIEW_LIMIT = 2000
 _SYSTEM_UPDATE_FLAG_PATH = _PROJECT_ROOT / "var" / "state" / "system_update.flag"
+_DOCKER_SYSTEM_UPDATE_MESSAGE = (
+    "This installation runs in Docker and is upgraded from GitHub releases. "
+    "Run 'sudo myportal-docker upgrade' on the Docker host, or enable automatic "
+    "upgrades with 'sudo myportal-docker auto-upgrade on'."
+)
 _SYSTEM_UPDATE_NOT_AVAILABLE_MESSAGE = (
     "No GitHub update available; upgrade was not scheduled."
 )
@@ -1617,6 +1622,11 @@ class SchedulerService:
     async def _run_system_update(
         self, *, force_restart: bool = False, scheduled: bool = False
     ) -> str | None:
+        if os.getenv("MYPORTAL_DEPLOYMENT", "").strip().lower() == "docker":
+            # Containers carry no Git checkout; releases are applied by
+            # scripts/myportal-docker.sh on the host.
+            log_info("System update skipped", reason="docker_deployment")
+            return _DOCKER_SYSTEM_UPDATE_MESSAGE
         async with _SYSTEM_UPDATE_LOCK:
             local_head = await self._get_git_ref("HEAD")
             remote_head = await self._get_remote_main_ref()
