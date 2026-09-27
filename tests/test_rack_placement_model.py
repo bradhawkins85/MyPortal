@@ -90,7 +90,7 @@ def test_rack_template_uses_stat_strips_and_hides_unconfigured_values():
     assert 'class="rack-summary"' in template
     assert template.count('class="stat-strip rack-stat-strip"') == 2
     assert "Not configured" not in template
-    assert "Accessible list and actions" in template
+    assert "Item list and port links" in template
 
 
 def test_standalone_patch_panel_creates_numbered_ports(monkeypatch):
