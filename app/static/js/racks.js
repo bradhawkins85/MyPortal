@@ -55,6 +55,13 @@
     setImages(enabled);
     try { window.localStorage.setItem('racks.deviceImages', enabled ? '1' : '0'); } catch { /* storage unavailable */ }
   });
+  // Remember whether "Item list and port links" is expanded, across racks and visits.
+  document.querySelectorAll('details.rack__details').forEach(details => {
+    try { if (window.localStorage.getItem('racks.itemListOpen') === '1') details.open = true; } catch { /* storage unavailable */ }
+    details.addEventListener('toggle', () => {
+      try { window.localStorage.setItem('racks.itemListOpen', details.open ? '1' : '0'); } catch { /* storage unavailable */ }
+    });
+  });
   document.querySelector('[data-rack-jump]')?.addEventListener('change', event => event.currentTarget.form?.requestSubmit());
   document.querySelectorAll('[data-rack-list-open]').forEach(button => button.addEventListener('click', event => {
     const list = document.getElementById(button.dataset.rackListOpen);

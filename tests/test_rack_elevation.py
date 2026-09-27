@@ -244,3 +244,10 @@ def test_edit_payload_carries_position_counts_links_and_power_source():
     assert payload["ports"][1] == {"connector": "3pin", "ordinal": 1, "asset_id": None, "label": "Kettle"}
     assert payload["power_source_port_id"] == 41 and payload["power_source_label"] == "Wall B2"
     assert (payload["start_unit"], payload["width_lanes"], payload["depth_mode"]) == (3, 3, "full")
+
+
+def test_item_list_section_remembers_expanded_state():
+    assert '<details class="rack__details" id="rack-list-{{ list_rack.id }}"' in TEMPLATE
+    script = (ROOT / "app/static/js/racks.js").read_text()
+    assert "racks.itemListOpen" in script
+    assert "details.addEventListener('toggle'" in script
