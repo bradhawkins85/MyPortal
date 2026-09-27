@@ -1328,7 +1328,8 @@
                 <span><strong>Channel:</strong> Email</span>
                 <span data-reply-visibility><strong>Visibility:</strong> Public reply</span>
               </div>
-              <div class="form-field">
+              <div class="ticket-reply-compose-grid">
+              <div class="form-field ticket-reply-message">
                 <span class="form-label" id="ticket-reply-label">Reply</span>
                 <div
                   class="rich-text-editor"
@@ -1443,6 +1444,7 @@
                   >{{ reply_body or '' }}</textarea>
                 </div>
               </div>
+              <div class="ticket-reply-extras">
               <div class="form-field">
                 <label class="form-label" for="ticket-reply-attachments">Attachments (optional)</label>
                 <input
@@ -1455,6 +1457,7 @@
                 />
                 <p class="form-help">You can upload multiple files. Server limit: 50MB per file.</p>
               </div>
+              <div class="ticket-reply-flags">
               <div class="form-field form-field--checkbox">
                 <label class="checkbox">
                   <input type="checkbox" name="isInternal" value="true" />
@@ -1475,8 +1478,10 @@
                 </label>
                 <p class="form-help">Explicitly exclude this entry from AI resolution step generation.</p>
               </div>
+              </div>
               <details class="ticket-reply-worklog" open>
                 <summary>Time &amp; billing</summary>
+              <div class="ticket-reply-worklog__fields">
               <div class="form-field">
                 <label class="form-label" for="ticket-reply-minutes">Minutes spent</label>
                 <input
@@ -1516,7 +1521,10 @@
                   </label>
                 </div>
               </div>
+              </div>
               </details>
+              </div>
+              </div>
               <div class="form-actions ticket-reply-actions">
                 <div class="ticket-page-clock" data-ticket-page-clock data-ticket-id="{{ ticket.id }}" aria-live="polite">
                   <span class="ticket-page-clock__label">Time open</span>
