@@ -22,6 +22,8 @@ def test_share_script_sanitizes_history_and_keeps_failures_non_enumerable():
     assert "credentials: 'omit'" in script
     assert "referrerPolicy: 'no-referrer'" in script
     assert "response.json()" in script  # only executed after the successful reveal
+    assert "verification_code: verificationCode" in script
+    assert "localStorage" not in script and "sessionStorage" not in script
     assert "expired, revoked, already used, or the code may be invalid" in script
 
 

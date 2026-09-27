@@ -104,10 +104,6 @@ class ShareVerification(BaseModel):
     verification_code: str = Field(min_length=6, max_length=32)
 
 
-class ShareToken(BaseModel):
-    share_token: str = Field(min_length=32, max_length=256)
-
-
 class StandingGrantCreate(BaseModel):
     selector_type: Literal["staff", "job_title"]
     staff_id: int | None = Field(default=None, gt=0)
