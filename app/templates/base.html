@@ -160,10 +160,10 @@
           {% set can_access_processes = is_super_admin or menu_access.get('menu.processes') in ['read', 'write'] %}
           {% set can_access_expirations = is_super_admin or menu_access.get('menu.expirations') in ['read', 'write'] %}
           {% set can_access_websites = is_super_admin or menu_access.get('menu.websites') in ['read', 'write'] %}
-          {% set can_access_network_devices = is_super_admin or menu_access.get('menu.network_devices') in ['read', 'write'] %}
-          {% set can_access_ipam = is_super_admin or menu_access.get('menu.ipam') in ['read', 'write'] %}
-          {% set can_access_racks = is_super_admin or menu_access.get('menu.racks') in ['read', 'write'] %}
-          {% set can_access_defender = is_super_admin or menu_access.get('menu.defender') in ['read', 'write'] %}
+          {% set can_access_network_devices = feature_pack_available('network_devices') and (is_super_admin or menu_access.get('menu.network_devices') in ['read', 'write']) %}
+          {% set can_access_ipam = feature_pack_available('ipam') and (is_super_admin or menu_access.get('menu.ipam') in ['read', 'write']) %}
+          {% set can_access_racks = feature_pack_available('racks') and (is_super_admin or menu_access.get('menu.racks') in ['read', 'write']) %}
+          {% set can_access_defender = feature_pack_available('defender') and (is_super_admin or menu_access.get('menu.defender') in ['read', 'write']) %}
           {% set can_access_voice_monitor = feature_pack_available('voice_monitor') and (is_super_admin or menu_access.get('menu.voice_monitor') in ['read', 'write']) %}
           {% set can_manage_licenses = (can_manage_licenses | default(false)) or is_super_admin or membership.get('can_manage_licenses') or can_access_m365_configuration or can_access_m365_licenses %}
           {% set can_manage_subscriptions = feature_pack_available('subscriptions') and ((can_manage_subscriptions | default(false)) or is_super_admin or (membership.get('can_manage_licenses') and membership.get('can_access_cart')) or menu_access.get('menu.subscriptions') in ['read', 'write']) %}
@@ -181,13 +181,25 @@
           {% set can_access_chat = feature_pack_available('chat') and ((can_access_chat | default(false)) or is_super_admin or membership.get('can_access_chat') or menu_access.get('menu.chat') in ['read', 'write']) %}
           {% set can_access_marketing = feature_pack_available('marketing') and ((can_access_marketing | default(false)) or is_super_admin or menu_access.get('menu.marketing') in ['read', 'write']) %}
           {% set can_access_admin_profile = is_super_admin or menu_access.get('menu.admin.profile') in ['read', 'write'] %}
-          {% set can_access_admin_backup_summary = is_super_admin or menu_access.get('menu.admin.backup_summary') in ['read', 'write'] %}
+          {% set can_access_admin_backup_summary = feature_pack_available('backup_summary') and (is_super_admin or menu_access.get('menu.admin.backup_summary') in ['read', 'write']) %}
           {% set can_access_admin_company = feature_pack_available('companies') and ((can_access_admin_company | default(false)) or is_super_admin or menu_access.get('menu.admin.company') in ['read', 'write']) %}
           {# A deployment-disabled pack must never leave a navigation path to its unmounted routes. #}
           {% set can_view_bcp = (can_view_bcp | default(false)) and feature_pack_available('continuity') %}
           {% set can_access_m365_signatures = can_access_m365_signatures and feature_pack_available('m365_admin') %}
           {% set can_access_m365_out_of_office = can_access_m365_out_of_office and feature_pack_available('m365_admin') %}
           {% set can_access_m365_spam_purge = (can_access_m365_spam_purge | default(false)) and feature_pack_available('m365_admin') %}
+          {% if not feature_pack_available('office365') %}
+            {% set can_manage_licenses = false %}
+            {% set can_access_m365_configuration = false %}
+            {% set can_access_m365_licenses = false %}
+            {% set can_access_m365_diagnostics = false %}
+            {% set can_access_m365_signatures = false %}
+            {% set can_access_m365_out_of_office = false %}
+            {% set can_access_m365_spam_purge = false %}
+            {% set can_view_m365_best_practices = false %}
+            {% set can_view_m365_user_mailboxes = false %}
+            {% set can_view_m365_shared_mailboxes = false %}
+          {% endif %}
           {% set has_company_section = can_access_tickets or can_manage_issues or can_access_marketing or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_access_network_devices or can_manage_licenses or can_manage_subscriptions or can_access_voice_monitor or can_manage_invoices or can_manage_staff or can_view_compliance or can_view_bcp or can_view_m365_best_practices or can_view_compliance_checks or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes or can_access_m365_signatures or can_access_m365_out_of_office %}
           {% set is_company_admin = can_access_admin_company %}
           {% set has_admin_access = is_super_admin or can_access_admin_company or can_access_admin_profile or can_access_admin_backup_summary %}
@@ -562,7 +574,7 @@
               </a>
             </li>
           {% endif %}
-          {% if has_authenticated_user and active_company_id %}
+          {% if has_authenticated_user and active_company_id and feature_pack_available('shared_credentials') %}
             <li class="menu__item">
               <a href="/shared-credentials" {% if current_path == '/shared-credentials' %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true">
@@ -711,28 +723,28 @@
                   <span class="menu__label">Impersonation</span>
                 </a>
               </li>
-              <li class="menu__item">
+              {% if feature_pack_available('rag_index') %}<li class="menu__item">
                 <a href="/admin/rag" {% if current_path.startswith('/admin/rag') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2a8 8 0 0 1 8 8c0 5.25-8 12-8 12S4 15.25 4 10a8 8 0 0 1 8-8zm0 2a6 6 0 0 0-6 6c0 2.94 3.68 7.1 6 9.36 2.32-2.26 6-6.42 6-9.36a6 6 0 0 0-6-6zm-2 5h4v2h-4zm0 3h4v2h-4z"/></svg>
                   </span>
                   <span class="menu__label">RAG Index</span>
                 </a>
-              </li>
-              <li class="menu__item">
+              </li>{% endif %}
+              {% if feature_pack_available('ai_quality') %}<li class="menu__item">
                 <a href="/admin/ai-quality" {% if current_path.startswith('/admin/ai-quality') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">✓</span>
                   <span class="menu__label">AI Quality</span>
                 </a>
-              </li>
-              <li class="menu__item">
+              </li>{% endif %}
+              {% if feature_pack_available('ai_tag_synonyms') %}<li class="menu__item">
                 <a href="/admin/chat/ai-tag-synonyms" {% if current_path.startswith('/admin/chat/ai-tag-synonyms') or current_path.startswith('/chat/configuration') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M4 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5l-5 5v-5H6a2 2 0 0 1-2-2V4zm4 4v2h8V8H8zm0 4v2h5v-2H8z"/></svg>
                   </span>
                   <span class="menu__label">AI Tag Synonyms</span>
                 </a>
-              </li>
+              </li>{% endif %}
               {% if module_enabled.get('call-recordings', false) %}<li class="menu__item" data-module-slug="call-recordings">
                 <a href="/admin/call-recordings" {% if current_path.startswith('/admin/call-recordings') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
@@ -757,7 +769,7 @@
                   <span class="menu__label">Schedule</span>
                 </a>
               </li>
-              {% if feature_pack_available('backups') %}<li class="menu__item">
+              {% if feature_pack_available('backup_history') %}<li class="menu__item">
                 <a href="/admin/backup-jobs" {% if current_path.startswith('/admin/backup-jobs') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M12 3a8 4 0 0 1 8 4v10a8 4 0 0 1-16 0V7a8 4 0 0 1 8-4zm-6 4c0 1.1 2.69 2 6 2s6-.9 6-2-2.69-2-6-2-6 .9-6 2zm0 3.5V13c0 1.1 2.69 2 6 2s6-.9 6-2v-2.5c-1.36.95-3.7 1.5-6 1.5s-4.64-.55-6-1.5zm0 4.5v2c0 1.1 2.69 2 6 2s6-.9 6-2v-2c-1.36.95-3.7 1.5-6 1.5s-4.64-.55-6-1.5z"/></svg>
@@ -797,14 +809,14 @@
                   <span class="menu__label">Approvals</span>
                 </a>
               </li>
-              <li class="menu__item">
+              {% if feature_pack_available('tray') %}<li class="menu__item">
                 <a href="/admin/tray/configurations" {% if current_path.startswith('/admin/tray') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M8 2h8v2H8zm6 4a4 4 0 0 1 4 4v1h1a3 3 0 0 1 0 6h-1v1a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4v-1H5a3 3 0 0 1 0-6h1v-1a4 4 0 0 1 4-4zm-4 2a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2zm2 3a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/></svg>
                   </span>
                   <span class="menu__label">Tray Settings</span>
                 </a>
-              </li>
+              </li>{% endif %}
               {% if feature_pack_available('api_keys') %}<li class="menu__item">
                 <a href="/admin/api-keys" {% if current_path.startswith('/admin/api-keys') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">

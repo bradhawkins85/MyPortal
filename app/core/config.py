@@ -286,7 +286,13 @@ class Settings(BaseSettings):
     @field_validator("disabled_feature_packs")
     @classmethod
     def validate_disabled_feature_packs(cls, value: str) -> str:
-        unknown = sorted(set(parse_slug_list(value)) - set(_DEFAULT_FEATURE_PACK_SLUGS))
+        from app.core.core_components import CORE_COMPONENT_SLUGS
+
+        unknown = sorted(
+            set(parse_slug_list(value))
+            - set(_DEFAULT_FEATURE_PACK_SLUGS)
+            - set(CORE_COMPONENT_SLUGS)
+        )
         if unknown:
             raise ValueError(
                 "DISABLED_FEATURE_PACKS contains unknown slug(s): " + ", ".join(unknown)
