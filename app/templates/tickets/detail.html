@@ -11,7 +11,7 @@
 {% endblock %}
 
 {% block content %}
-  <div class="management management--single">
+  <div class="management management--single management--ticket-detail">
     <section class="management__content">
       <header class="management__header">
         <div>
@@ -361,8 +361,8 @@
                       <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="insertOrderedList" aria-label="Numbered list">1.</button>
                     </div>
                     <div class="rich-text-editor__surface" data-rich-text-content contenteditable="true" role="textbox" aria-multiline="true">{{ ticket.resolution_steps | default('', true) | safe }}</div>
+                    <textarea id="ticket-resolution-steps" name="resolutionSteps" class="rich-text-editor__fallback" data-rich-text-value data-rich-text-fallback aria-labelledby="ticket-resolution-steps-label">{{ ticket.resolution_steps or '' }}</textarea>
                   </div>
-                  <textarea id="ticket-resolution-steps" name="resolutionSteps" class="rich-text-editor__fallback" data-rich-text-value data-rich-text-fallback aria-labelledby="ticket-resolution-steps-label">{{ ticket.resolution_steps or '' }}</textarea>
                   <p class="form-help">{{ 'AI generated' if ticket.resolution_steps_source == 'ai_generated' else 'Manually edited' if ticket.resolution_steps_source == 'manually_edited' else 'Add or generate a reusable resolution outline.' }}</p>
                 </div>
                 <div class="form-actions">
@@ -384,7 +384,7 @@
             </header>
             <div class="card__body">
               {% if can_reply %}
-                <form id="ticket-reply-form" action="/tickets/{{ ticket.id }}/replies" method="post" class="form" novalidate enctype="multipart/form-data" data-ticket-reply-form data-ticket-reply-cache data-ticket-reply-cache-ticket-id="{{ ticket.id }}">
+                <form id="ticket-reply-form" action="/tickets/{{ ticket.id }}/replies" method="post" class="form card__form ticket-reply-form" novalidate enctype="multipart/form-data" data-ticket-reply-form data-ticket-reply-cache data-ticket-reply-cache-ticket-id="{{ ticket.id }}">
                   {% include "partials/csrf.html" %}
                   <div class="form-field">
                     <span class="form-label" id="ticket-reply-label">Message</span>
@@ -489,28 +489,34 @@
                         aria-multiline="true"
                         data-placeholder="Write your reply..."
                       >{{ reply_body }}</div>
+                      <input type="hidden" name="mentionedUserIds" data-ticket-mention-user-ids />
+                      <textarea
+                        id="ticket-reply-body-hidden"
+                        name="body"
+                        class="rich-text-editor__fallback"
+                        data-rich-text-value
+                        data-rich-text-fallback
+                        aria-labelledby="ticket-reply-label"
+                        placeholder="Write your reply..."
+                        required
+                      >{{ reply_body | e }}</textarea>
                     </div>
-                    <input type="hidden" name="mentionedUserIds" data-ticket-mention-user-ids />
-                    <textarea
-                      id="ticket-reply-body-hidden"
-                      name="body"
-                      class="rich-text-editor__fallback"
-                      data-rich-text-value
-                      data-rich-text-fallback
-                      aria-labelledby="ticket-reply-label"
-                      placeholder="Write your reply..."
-                      required
-                    >{{ reply_body | e }}</textarea>
                   </div>
                   {% if has_helpdesk_access or is_super_admin %}
-                  <label class="form-checkbox">
-                    <input type="checkbox" name="isResolutionStep" value="1" data-resolution-classification="resolution" />
-                    <span>Mark this reply as a resolution step</span>
-                  </label>
-                  <label class="form-checkbox">
-                    <input type="checkbox" name="isNotResolutionStep" value="1" data-resolution-classification="excluded" />
-                    <span>Not a resolution step</span>
-                  </label>
+                  <div class="ticket-reply-flags ticket-reply-flags--inline">
+                    <div class="form-field form-field--checkbox">
+                      <label class="checkbox">
+                        <input type="checkbox" name="isResolutionStep" value="1" data-resolution-classification="resolution" />
+                        <span>Mark this reply as a resolution step</span>
+                      </label>
+                    </div>
+                    <div class="form-field form-field--checkbox">
+                      <label class="checkbox">
+                        <input type="checkbox" name="isNotResolutionStep" value="1" data-resolution-classification="excluded" />
+                        <span>Not a resolution step</span>
+                      </label>
+                    </div>
+                  </div>
                   {% endif %}
                   <div class="form-field">
                     <label class="form-label" for="ticket-reply-attachments">Attachments (optional)</label>
