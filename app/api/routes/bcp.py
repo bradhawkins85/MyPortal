@@ -429,7 +429,7 @@ async def bcp_overview(request: Request):
         },
     )
     
-    return templates.TemplateResponse("bcp/overview.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/overview.html", context=context)
 
 
 @router.get("/glossary", response_class=HTMLResponse, include_in_schema=False)
@@ -493,7 +493,7 @@ async def bcp_glossary(request: Request):
         },
     )
     
-    return templates.TemplateResponse("bcp/glossary.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/glossary.html", context=context)
 
 
 # Risk Assessment pages and endpoints
@@ -552,7 +552,7 @@ async def bcp_risks(request: Request, severity: str = Query(None), heatmap_filte
         },
     )
     
-    return templates.TemplateResponse("bcp/risks.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/risks.html", context=context)
 
 
 @router.get("/risks/heatmap", response_class=HTMLResponse, include_in_schema=False)
@@ -579,7 +579,7 @@ async def bcp_risks_heatmap_partial(request: Request):
         "severity_bands": get_severity_band_info(),
     }
     
-    return templates.TemplateResponse("bcp/heatmap_partial.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/heatmap_partial.html", context=context)
 
 
 @router.get("/bia", response_class=HTMLResponse, include_in_schema=False)
@@ -635,7 +635,7 @@ async def bcp_bia(request: Request, sort_by: str = Query("importance")):
         },
     )
     
-    return templates.TemplateResponse("bcp/bia.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/bia.html", context=context)
 
 
 @router.get("/incident", response_class=HTMLResponse, include_in_schema=False)
@@ -717,7 +717,7 @@ async def bcp_incident(request: Request, tab: str = Query("checklist")):
         },
     )
     
-    return templates.TemplateResponse("bcp/incident.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/incident.html", context=context)
 
 
 @router.get("/recovery", response_class=HTMLResponse, include_in_schema=False)
@@ -804,7 +804,7 @@ async def bcp_recovery(
         },
     )
     
-    return templates.TemplateResponse("bcp/recovery.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/recovery.html", context=context)
 
 
 @router.get("/contacts", response_class=HTMLResponse, include_in_schema=False)
@@ -850,7 +850,7 @@ async def bcp_contacts(request: Request):
         },
     )
 
-    return templates.TemplateResponse("bcp/contacts.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/contacts.html", context=context)
 
 
 @router.post("/contacts", include_in_schema=False)
@@ -958,7 +958,7 @@ async def bcp_schedules(request: Request):
         },
     )
     
-    return templates.TemplateResponse("bcp/schedules.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/schedules.html", context=context)
 
 
 @router.post("/training", include_in_schema=False)
@@ -1281,7 +1281,7 @@ async def bcp_roles(request: Request):
         },
     )
     
-    return templates.TemplateResponse("bcp/roles.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/roles.html", context=context)
 
 
 @router.post("/roles", include_in_schema=False)
@@ -1533,7 +1533,7 @@ async def bcp_export(request: Request):
         },
     )
 
-    return templates.TemplateResponse("bcp/export.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/export.html", context=context)
 
 
 @router.get("/export/pdf", include_in_schema=True)
@@ -1997,7 +1997,7 @@ async def bcp_insurance(request: Request):
         },
     )
     
-    return templates.TemplateResponse("bcp/insurance.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/insurance.html", context=context)
 
 
 @router.post("/insurance", include_in_schema=False)
@@ -2190,7 +2190,7 @@ async def bcp_backups(request: Request):
         },
     )
     
-    return templates.TemplateResponse("bcp/backups.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/backups.html", context=context)
 
 
 @router.post("/backups", include_in_schema=False)
@@ -2348,7 +2348,7 @@ async def bcp_bia_new(request: Request):
         },
     )
     
-    return templates.TemplateResponse("bcp/bia_edit.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/bia_edit.html", context=context)
 
 
 @router.get("/bia/{activity_id}/edit", response_class=HTMLResponse, include_in_schema=False)
@@ -2380,7 +2380,7 @@ async def bcp_bia_edit(request: Request, activity_id: int):
         },
     )
     
-    return templates.TemplateResponse("bcp/bia_edit.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/bia_edit.html", context=context)
 
 
 @router.post("/bia", include_in_schema=False)
@@ -3243,7 +3243,7 @@ async def bcp_evacuation(request: Request):
         },
     )
     
-    return templates.TemplateResponse("bcp/evacuation.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/evacuation.html", context=context)
 
 
 @router.post("/evacuation", include_in_schema=False)
@@ -3316,7 +3316,7 @@ async def bcp_emergency_kit(request: Request, tab: str = Query("documents")):
         },
     )
     
-    return templates.TemplateResponse("bcp/emergency_kit.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/emergency_kit.html", context=context)
 
 
 @router.post("/emergency-kit", include_in_schema=False)
@@ -3802,7 +3802,7 @@ async def bcp_recovery_checklist(request: Request):
         },
     )
     
-    return templates.TemplateResponse("bcp/recovery_checklist.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/recovery_checklist.html", context=context)
 
 
 # ============================================================================
@@ -3838,7 +3838,7 @@ async def bcp_recovery_contacts(request: Request):
         },
     )
     
-    return templates.TemplateResponse("bcp/recovery_contacts.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/recovery_contacts.html", context=context)
 
 
 @router.post("/recovery-contacts", include_in_schema=False)
@@ -3995,7 +3995,7 @@ async def bcp_insurance_claims(request: Request):
         },
     )
     
-    return templates.TemplateResponse("bcp/insurance_claims.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/insurance_claims.html", context=context)
 
 
 @router.post("/insurance-claims", include_in_schema=False)
@@ -4170,7 +4170,7 @@ async def bcp_market_changes(request: Request):
         },
     )
     
-    return templates.TemplateResponse("bcp/market_changes.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/market_changes.html", context=context)
 
 
 @router.post("/market-changes", include_in_schema=False)
@@ -4358,7 +4358,7 @@ async def bcp_wellbeing(request: Request):
         },
     )
     
-    return templates.TemplateResponse("bcp/wellbeing.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/wellbeing.html", context=context)
 
 
 # ============================================================================
@@ -4396,7 +4396,7 @@ async def bcp_seed_info(request: Request):
         },
     )
     
-    return templates.TemplateResponse("bcp/seed_info.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/seed_info.html", context=context)
 
 
 @router.post("/admin/reseed", include_in_schema=False)
@@ -4481,7 +4481,7 @@ async def bcp_global_library(request: Request):
         "global_bias": await bcp_repo.list_global_bia_assessments(),
         "companies": await company_repo.list_companies(),
     })
-    return templates.TemplateResponse("bcp/library.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/library.html", context=context)
 
 
 @router.post("/library/risks", include_in_schema=False)

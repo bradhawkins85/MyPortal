@@ -37,8 +37,9 @@ async def list_company_memberships(company_id: int) -> list[dict[str, Any]]:
         )
         membership["user_permissions"] = user_permissions
         # Combine role and user permissions for total permissions
-        all_permissions = set(membership.get("permissions", [])) | set(user_permissions)
-        membership["combined_permissions"] = sorted(all_permissions)
+        membership["combined_permissions"] = _combined_permission_names(
+            membership.get("permissions"), user_permissions
+        )
         result.append(membership)
     return result
 
@@ -63,8 +64,9 @@ async def get_membership_by_id(membership_id: int) -> Optional[dict[str, Any]]:
     )
     membership["user_permissions"] = user_permissions
     # Combine role and user permissions
-    all_permissions = set(membership.get("permissions", [])) | set(user_permissions)
-    membership["combined_permissions"] = sorted(all_permissions)
+    membership["combined_permissions"] = _combined_permission_names(
+        membership.get("permissions"), user_permissions
+    )
     return membership
 
 
@@ -384,6 +386,20 @@ def _legacy_permission_set(raw: Any) -> set[str]:
 
 def _permission_matches(raw: Any, permission: str) -> bool:
     return permission in _legacy_permission_set(raw)
+
+
+def _combined_permission_names(role_permissions: Any, user_permissions: Any) -> list[str]:
+    """Return hashable legacy permission names from mixed stored payloads.
+
+    Role permissions can be either the legacy string list or the current
+    tri-state menu mapping.  Normalising before combining prevents mapping
+    entries from being inserted into a set when older or partially migrated
+    role records contain object-shaped list items.
+    """
+    return sorted(
+        _legacy_permission_set(role_permissions)
+        | _legacy_permission_set(user_permissions)
+    )
 
 
 def _normalise_membership(row: dict[str, Any]) -> dict[str, Any]:

@@ -2198,6 +2198,17 @@ async def _get_effective_company_membership(
     return role_switching.effective_membership(request, membership)
 
 
+def _build_module_lookup(module_list: list[Any]) -> dict[str, dict[str, Any]]:
+    """Index valid module records without trusting database JSON shapes."""
+    return {
+        slug: module
+        for module in module_list
+        if isinstance(module, dict)
+        and isinstance((slug := module.get("slug")), str)
+        and slug
+    }
+
+
 async def _build_base_context(
     request: Request,
     user: dict[str, Any],
@@ -2319,7 +2330,7 @@ async def _build_base_context(
         except Exception as exc:  # pragma: no cover - defensive logging
             log_error("Failed to load integration modules for context", error=str(exc))
             module_list = []
-        module_lookup = {module.get("slug"): module for module in module_list if module.get("slug")}
+        module_lookup = _build_module_lookup(module_list)
         request.state.module_lookup = module_lookup
     
     role_switcher_allowed = bool(getattr(request.state, "role_switcher_allowed", False))
