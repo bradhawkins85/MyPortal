@@ -36,6 +36,7 @@ from app.services import audit as audit_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import automations as automations_service
 from app.services import asset_photos as asset_photo_service
+from app.services import rack_dashboard
 
 router = APIRouter(tags=["Assets"])
 
@@ -914,9 +915,25 @@ async def racks_page(request: Request):
     if isinstance(data, RedirectResponse):
         return data
     data["title"] = "Rack management"
+    data["workspace"] = rack_dashboard.build_workspace(
+        data, request.query_params.get("rack"), request.query_params.get("view")
+    )
     return await main_module._render_template(
         "infrastructure/racks.html", request, user, extra=data
     )
+
+
+def _rack_location(form: Any, rack_id: Any = None, anchor: str = "") -> str:
+    """Return the rack workspace URL to land on after a rack form submission.
+
+    Only an integer rack id is echoed back, so the redirect can never leave
+    the rack page.
+    """
+    try:
+        selected = int(rack_id if rack_id is not None else form.get("rack_id"))
+    except (TypeError, ValueError):
+        return f"/racks{anchor}"
+    return f"/racks?rack={selected}{anchor}"
 
 
 def _required_text(form: Any, key: str, limit: int = 191) -> str:
@@ -995,7 +1012,7 @@ async def create_rack(request: Request):
     await audit_service.record(action="infrastructure.rack.create", request=request,
                                entity_type="rack", entity_id=record_id,
                                after={"company_id": company_id})
-    return _main().flash_redirect("/racks", "Rack added.", "success")
+    return _main().flash_redirect(_rack_location(form, record_id), "Rack added.", "success")
 
 
 @router.post("/api/infrastructure/rack-equipment", status_code=201, summary="Place a device, patch panel, or switch in a rack")
@@ -1021,7 +1038,7 @@ async def place_rack_asset(request: Request):
     await audit_service.record(action="infrastructure.rack_equipment.create", request=request,
                                entity_type="rack_equipment", entity_id=record_id,
                                after={"company_id": company_id, "asset_id": asset_id})
-    return _main().flash_redirect("/racks", "Rack item placed.", "success")
+    return _main().flash_redirect(_rack_location(form, anchor=f"#placement-{record_id}"), "Rack item placed.", "success")
 
 
 @router.post("/api/infrastructure/rack-equipment/{equipment_id}/ports/{port_number}", summary="Link a rack item port to an asset")
@@ -1039,7 +1056,7 @@ async def link_rack_item_port(request: Request, equipment_id: int, port_number: 
                                entity_type="rack_equipment_port", entity_id=equipment_id,
                                after={"company_id": company_id, "port_number": port_number,
                                       "asset_id": asset_id})
-    return _main().flash_redirect(f"/racks#placement-{equipment_id}", "Port link updated.", "success")
+    return _main().flash_redirect(_rack_location(form, anchor=f"#placement-{equipment_id}"), "Port link updated.", "success")
 
 
 @router.post("/api/infrastructure/rack-equipment/{equipment_id}/edit", summary="Edit a rack item")
@@ -1060,7 +1077,7 @@ async def edit_rack_equipment(request: Request, equipment_id: int):
     await audit_service.record(action="infrastructure.rack_equipment.update", request=request,
                                entity_type="rack_equipment", entity_id=equipment_id,
                                after={"company_id": company_id, "asset_id": asset_id})
-    return _main().flash_redirect(f"/racks#placement-{equipment_id}", "Rack item updated.", "success")
+    return _main().flash_redirect(_rack_location(form, anchor=f"#placement-{equipment_id}"), "Rack item updated.", "success")
 
 
 @router.post("/api/infrastructure/rack-reservations/{reservation_id}/edit", summary="Edit a rack reservation")
@@ -1080,7 +1097,7 @@ async def edit_rack_reservation(request: Request, reservation_id: int):
     await audit_service.record(action="infrastructure.rack_reservation.update", request=request,
                                entity_type="rack_reservation", entity_id=reservation_id,
                                after={"company_id": company_id})
-    return _main().flash_redirect(f"/racks#reservation-{reservation_id}", "Reservation updated.", "success")
+    return _main().flash_redirect(_rack_location(form, anchor=f"#reservation-{reservation_id}"), "Reservation updated.", "success")
 
 
 @router.post("/api/infrastructure/rack-reservations", status_code=201, summary="Reserve rack space")
@@ -1103,7 +1120,7 @@ async def reserve_rack_space(request: Request):
     await audit_service.record(action="infrastructure.rack_reservation.create", request=request,
                                entity_type="rack_reservation", entity_id=record_id,
                                after={"company_id": company_id})
-    return _main().flash_redirect("/racks", "Rack space reserved.", "success")
+    return _main().flash_redirect(_rack_location(form, anchor=f"#reservation-{record_id}"), "Rack space reserved.", "success")
 
 
 @router.post("/api/infrastructure/{record_type}/{record_id}/delete", summary="Delete infrastructure documentation")
@@ -1121,7 +1138,12 @@ async def delete_infrastructure_record(request: Request, record_type: str, recor
     await audit_service.record(action="infrastructure.record.delete", request=request,
                                entity_type=record_type, entity_id=record_id,
                                before={"company_id": company_id})
-    destination = "/ipam" if record_type in {"networks", "addresses"} else "/racks"
+    if record_type in {"networks", "addresses"}:
+        destination = "/ipam"
+    elif record_type == "racks":
+        destination = "/racks"
+    else:
+        destination = _rack_location(await request.form())
     return _main().flash_redirect(destination, "Documentation removed.", "success")
 
 

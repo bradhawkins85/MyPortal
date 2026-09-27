@@ -24,9 +24,33 @@
     target?.scrollIntoView({ block: 'nearest' });
     target?.querySelector('button, a')?.focus();
   };
-  document.querySelectorAll('[data-rack-list-open]').forEach(button => button.addEventListener('click', () => {
+  const workspace = document.querySelector('[data-rack-workspace]');
+  const legacyRack = /^#rack-(\d+)$/.exec(window.location.hash);
+  if (legacyRack && !document.getElementById(`rack-${legacyRack[1]}`) && workspace?.dataset.view !== 'overview') {
+    window.location.replace(`/racks?rack=${legacyRack[1]}#rack-${legacyRack[1]}`);
+    return;
+  }
+  const sidebar = document.querySelector('[data-rack-sidebar]');
+  const sidebarToggle = sidebar?.querySelector('[data-rack-sidebar-toggle]');
+  const setSidebar = (collapsed) => {
+    workspace?.classList.toggle('is-sidebar-collapsed', collapsed);
+    sidebarToggle?.setAttribute('aria-expanded', String(!collapsed));
+    const label = collapsed ? 'Expand workspace menu' : 'Collapse workspace menu';
+    sidebarToggle?.setAttribute('title', label);
+    const text = sidebarToggle?.querySelector('.sr-only');
+    if (text) text.textContent = label;
+  };
+  try { setSidebar(window.localStorage.getItem('racks.sidebarCollapsed') === '1'); } catch { setSidebar(false); }
+  sidebarToggle?.addEventListener('click', () => {
+    const collapsed = !workspace?.classList.contains('is-sidebar-collapsed');
+    setSidebar(collapsed);
+    try { window.localStorage.setItem('racks.sidebarCollapsed', collapsed ? '1' : '0'); } catch { /* storage unavailable */ }
+  });
+  document.querySelector('[data-rack-jump]')?.addEventListener('change', event => event.currentTarget.form?.requestSubmit());
+  document.querySelectorAll('[data-rack-list-open]').forEach(button => button.addEventListener('click', event => {
     const list = document.getElementById(button.dataset.rackListOpen);
     if (!list) return;
+    event.preventDefault();
     list.open = true;
     list.scrollIntoView({ block: 'nearest' });
     list.querySelector('summary')?.focus();
@@ -45,6 +69,7 @@
     editForm.elements.asset_id.value = data.itemAsset || '';
     editForm.elements.power_draw_watts.value = data.itemPower || '';
     editForm.elements.notes.value = data.itemNotes || '';
+    if (data.rackOwner) editForm.elements.rack_id.value = data.rackOwner;
     editDialog.dataset.itemId = id;
     editDialog.querySelector('[data-edit-ports]').hidden = !hasPorts;
     editDialog.querySelector('[data-edit-position]').textContent = data.itemPosition || '';
@@ -58,6 +83,7 @@
     reservationForm.elements.label.value = data.reservationLabel || '';
     reservationForm.elements.owner.value = data.reservationOwner || '';
     reservationForm.elements.notes.value = data.reservationNotes || '';
+    if (data.rackOwner) reservationForm.elements.rack_id.value = data.rackOwner;
     reservationDialog.dataset.reservationId = id;
     reservationDialog.querySelector('[data-reservation-position]').textContent = data.reservationPosition || '';
     openDialog(reservationDialog, trigger);
@@ -101,12 +127,18 @@
     const swivelled = faces?.classList.toggle('is-swivelled') ?? false;
     button.setAttribute('aria-pressed', String(swivelled));
   }));
-  document.querySelectorAll('.rack__device').forEach(button => button.addEventListener('focus', () => {
-    const rack = button.closest('[data-rack-id]');
-    const status = rack?.querySelector('[data-rack-status] p');
-    const item = button.querySelector('strong')?.textContent?.trim();
+  const statusText = document.querySelector('[data-rack-status-text]');
+  const defaultStatus = statusText?.textContent || '';
+  const describe = (button) => {
     const face = button.closest('[data-face]')?.dataset.face;
-    if (status && item) status.textContent = `${item} selected on the ${face} elevation.`;
+    if (statusText && button.dataset.itemSummary) statusText.textContent = `${button.dataset.itemSummary} · ${face} elevation`;
+  };
+  document.querySelectorAll('.rack__device').forEach(button => {
+    button.addEventListener('focus', () => describe(button));
+    button.addEventListener('mouseenter', () => describe(button));
+  });
+  document.querySelectorAll('[data-rack-faces]').forEach(faces => faces.addEventListener('mouseleave', () => {
+    if (statusText && !faces.contains(document.activeElement)) statusText.textContent = defaultStatus;
   }));
   if (!form || !placeDialog) return;
   const preview = form.querySelector('[data-placement-preview]');
