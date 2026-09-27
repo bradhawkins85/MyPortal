@@ -10,83 +10,104 @@
   "company_admin": "Company admins",
   "super_admin": "Super admins"
 } %}
+{% set status_labels = {
+  "draft": ("Draft", "status--warning"),
+  "in_review": ("In review", "status--info"),
+  "published": ("Published", "status--success"),
+  "retired": ("Retired", "status--muted")
+} %}
 
 {% block header_actions %}
   {{ page_header_actions([
-    {"label": "New article", "type": "link", "href": "/admin/knowledge-base/new"},
-    {"label": "Resolution Steps", "type": "button", "attrs": {"data-resolution-steps-open": true}}
+    {"label": "New article", "type": "link", "href": "/admin/knowledge-base/new", "variant": "primary"},
+    {"label": "Resolution Steps", "type": "button", "attrs": {"data-resolution-steps-open": true}},
+    {"label": "Public view", "type": "link", "href": "/knowledge-base"}
   ], menu_id="knowledge-base-actions") }}
 {% endblock %}
 
 {% block content %}
-<div class="kb-admin">
-  <section class="card card--panel kb-admin__panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Knowledge base catalogue</h2>
-        <p class="card__subtitle">Review published and draft articles, filter entries, and open one in a dedicated editor.</p>
+<div class="kb-cat">
+  <section class="card card--panel">
+    <div class="kb-cat__toolbar">
+      <input
+        type="search"
+        class="form-input kb-cat__search"
+        placeholder="Search titles, summaries and tags"
+        aria-label="Filter articles"
+        data-table-filter="kb-admin-table"
+      />
+      <div class="kb-cat__filters" role="group" aria-label="Filter by status" data-kb-status-filters>
+        <button type="button" class="kb-cat__filter is-active" data-kb-status-filter="" aria-pressed="true">All<span class="kb-cat__filter-count">{{ kb_status_counts.all }}</span></button>
+        <button type="button" class="kb-cat__filter" data-kb-status-filter="published" aria-pressed="false">Published<span class="kb-cat__filter-count">{{ kb_status_counts.published }}</span></button>
+        <button type="button" class="kb-cat__filter" data-kb-status-filter="draft" aria-pressed="false">Draft<span class="kb-cat__filter-count">{{ kb_status_counts.draft }}</span></button>
+        {% if kb_status_counts.in_review %}<button type="button" class="kb-cat__filter" data-kb-status-filter="in_review" aria-pressed="false">In review<span class="kb-cat__filter-count">{{ kb_status_counts.in_review }}</span></button>{% endif %}
+        {% if kb_status_counts.retired %}<button type="button" class="kb-cat__filter" data-kb-status-filter="retired" aria-pressed="false">Retired<span class="kb-cat__filter-count">{{ kb_status_counts.retired }}</span></button>{% endif %}
+        {% if kb_status_counts.overdue %}<button type="button" class="kb-cat__filter" data-kb-status-filter="overdue" aria-pressed="false">Review overdue<span class="kb-cat__filter-count">{{ kb_status_counts.overdue }}</span></button>{% endif %}
       </div>
-      <div class="card__controls">
-        <input
-          type="search"
-          class="form-input"
-          placeholder="Filter articles"
-          aria-label="Filter articles"
-          data-table-filter="kb-admin-table"
-        />
-      </div>
-    </header>
+      <input type="hidden" data-table-column-filter="status" data-table-column-filter-table="kb-admin-table" data-kb-status-input />
+    </div>
     <div class="table-wrapper table-wrapper--short">
-      <table class="table table--compact" id="kb-admin-table" data-table data-table-id="knowledge-base">
+      <table class="table table--compact" id="kb-admin-table" data-table data-table-id="knowledge-base-admin">
         <thead>
           <tr>
-            <th scope="col" data-sort="string" data-column-key="title">Title</th>
-            <th scope="col" data-sort="string" data-column-key="scope">Scope</th>
-            <th scope="col" data-sort="string" data-column-key="status">Status</th>
+            <th scope="col" data-sort="string" data-column-key="title" data-mobile-priority="essential">Article</th>
+            <th scope="col" data-sort="string" data-column-key="status" data-mobile-priority="essential">Status</th>
+            <th scope="col" data-sort="string" data-column-key="scope">Visibility</th>
             <th scope="col" data-sort="date" data-column-key="review">Review due</th>
-            <th scope="col" data-sort="string" data-column-key="ai-tags">AI tags</th>
+            <th scope="col" data-sort="string" data-column-key="ai-tags" class="u-hide-tablet">Tags</th>
             <th scope="col" data-sort="date" data-column-key="updated">Updated</th>
+            <th scope="col" class="table__actions"><span class="visually-hidden">Actions</span></th>
           </tr>
         </thead>
         <tbody>
           {% for article in kb_articles %}
+          {% set lifecycle = 'published' if article.is_published else (article.lifecycle_status if article.lifecycle_status != 'published' else 'draft') %}
+          {% set status_label = status_labels.get(lifecycle, (lifecycle|title, 'status--muted')) %}
+          {% set all_tags = (article.ai_tags or []) + (article.manual_ai_tags or []) %}
           <tr
+            class="kb-cat__row"
             data-kb-row
+            data-kb-href="/admin/knowledge-base/articles/{{ article.slug }}"
             data-kb-article-id="{{ article.id }}"
             data-kb-article-slug="{{ article.slug }}"
-            data-kb-permission-scope="{{ article.permission_scope }}"
-            data-kb-is-published="{{ 'true' if article.is_published else 'false' }}"
-            data-kb-updated="{{ article.updated_at_iso or '' }}"
           >
-            <td data-label="Title" data-column-key="title">
+            <td data-label="Article" data-column-key="title">
               <a class="kb-admin__link" href="/admin/knowledge-base/articles/{{ article.slug }}">
                 <span class="kb-admin__title">{{ article.title }}</span>
-                {% if article.summary %}
-                  <span class="kb-admin__summary">{{ article.summary }}</span>
-                {% endif %}
+                {% if article.summary %}<span class="kb-admin__summary">{{ article.summary }}</span>{% endif %}
               </a>
             </td>
-            <td data-label="Scope" data-value="{{ article.permission_scope }}" data-column-key="scope">
-              <span class="tag">{{ scope_labels.get(article.permission_scope, article.permission_scope|title) }}</span>
+            <td data-label="Status" data-column-key="status" data-value="{{ lifecycle }}{% if article.review_overdue %} overdue{% endif %}">
+              <span class="status {{ status_label[1] }}">{{ status_label[0] }}</span>
             </td>
-            <td data-label="Status" data-value="{{ 'Published' if article.is_published else 'Draft' }}" data-column-key="status">
-              {% if article.is_published %}
-                <span class="status status--success">Published</span>
-              {% else %}
-                <span class="status status--warning">Draft</span>
-              {% endif %}
+            <td data-label="Visibility" data-column-key="scope" data-value="{{ article.permission_scope }}">
+              <span class="tag tag--muted">{{ scope_labels.get(article.permission_scope, article.permission_scope|title) }}</span>
             </td>
-            <td data-label="Review due" data-value="{{ article.review_due_at_iso or '' }}" data-column-key="review">{% if article.review_due_at_iso %}<span data-utc="{{ article.review_due_at_iso }}">{{ article.review_due_at_iso }}</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
-            <td data-label="AI tags" data-value="{{ (article.ai_tags or []) | join(', ') }}" data-column-key="ai-tags">
-              {% for tag in article.ai_tags or [] %}<span class="tag tag--muted">{{ tag }}</span>{% endfor %}{% for tag in article.manual_ai_tags or [] %}<span class="tag tag--manual" title="Manual admin-added AI tag">{{ tag }}</span>{% endfor %}{% if not article.ai_tags and not article.manual_ai_tags %}<span class="text-muted">—</span>{% endif %}
+            <td data-label="Review due" data-column-key="review" data-value="{{ article.review_due_at_iso or '' }}">
+              {% if article.review_due_at_iso %}<span class="{{ 'kb-cat__overdue' if article.review_overdue else '' }}">{{ article.review_due_at_iso[:10] }}</span>{% else %}<span class="text-muted">—</span>{% endif %}
             </td>
-            <td data-label="Updated" data-value="{{ article.updated_at_iso or '' }}" data-column-key="updated">
+            <td data-label="Tags" data-column-key="ai-tags" data-value="{{ all_tags | join(', ') }}" class="u-hide-tablet">
+              {% if all_tags %}
+                <div class="kb-cat__tags" title="{{ all_tags | join(', ') }}">
+                  {% for tag in (article.manual_ai_tags or []) %}<span class="tag tag--manual">{{ tag }}</span>{% endfor %}
+                  {% for tag in (article.ai_tags or [])[:3] %}<span class="tag tag--muted">{{ tag }}</span>{% endfor %}
+                  {% if (article.ai_tags or [])|length > 3 %}<span class="tag tag--muted">+{{ (article.ai_tags|length) - 3 }}</span>{% endif %}
+                </div>
+              {% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            <td data-label="Updated" data-column-key="updated" data-value="{{ article.updated_at_iso or '' }}">
               <span data-utc="{{ article.updated_at_iso or '' }}">{{ article.updated_at_iso or '—' }}</span>
+            </td>
+            <td class="table__actions">
+              <div class="kb-cat__actions">
+                <a class="kbe-btn" href="/admin/knowledge-base/articles/{{ article.slug }}">Edit</a>
+                <a class="kbe-btn" href="/knowledge-base/articles/{{ article.slug }}" target="_blank" rel="noopener noreferrer" title="Open reader view">View</a>
+              </div>
             </td>
           </tr>
           {% else %}
           <tr>
-            <td colspan="6" class="table__empty">No knowledge base articles are available yet.</td>
+            <td colspan="7" class="kb-cat__empty">No articles yet. <a href="/admin/knowledge-base/new">Write the first one</a>.</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -110,5 +131,6 @@
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/knowledge_base_catalogue.js') }}" defer></script>
   <script src="{{ static_url('/static/js/knowledge_base_resolution_steps.js') }}" defer></script>
 {% endblock %}

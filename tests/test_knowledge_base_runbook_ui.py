@@ -29,3 +29,22 @@ def test_customer_preview_does_not_request_unpublished_content():
     route = Path("app/api/routes/knowledge_base.py").read_text()
     preview = route.split("async def preview_article_for_customer", 1)[1].split("@router.post", 1)[0]
     assert "include_unpublished=False" in preview
+
+
+def test_create_payload_keeps_customer_role_audience():
+    from app.schemas.knowledge_base import KnowledgeBaseArticleCreate
+
+    payload = KnowledgeBaseArticleCreate(
+        slug="vpn", title="VPN", permission_scope="company",
+        allowed_company_ids=[1], allowed_role_ids=[3],
+    )
+    assert payload.dict()["allowed_role_ids"] == [3]
+
+
+def test_editor_saves_in_place_and_supports_section_reordering():
+    script = Path("app/static/js/knowledge_base_admin.js").read_text()
+
+    assert "window.location.reload" not in script
+    assert "history.replaceState" in script
+    assert "dragstart" in script and "data-kb-drag-handle" in script
+    assert "ensurePreviewMatchesForm" not in script

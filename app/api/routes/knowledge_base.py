@@ -107,6 +107,34 @@ _AUDIT_ARTICLE_FIELDS: tuple[str, ...] = (
 )
 
 
+def _article_response(article: dict) -> KnowledgeBaseArticleResponse:
+    return KnowledgeBaseArticleResponse(
+        id=article["id"],
+        slug=article["slug"],
+        title=article["title"],
+        summary=article.get("summary"),
+        content=article.get("content", ""),
+        sections=article.get("sections", []),
+        permission_scope=article["permission_scope"],
+        is_published=article["is_published"],
+        ai_tags=article.get("ai_tags", []),
+        excluded_ai_tags=article.get("excluded_ai_tags", []),
+        manual_ai_tags=article.get("manual_ai_tags", []),
+        allowed_user_ids=article.get("allowed_user_ids", []),
+        allowed_company_ids=article.get("allowed_company_ids", []),
+        company_admin_ids=article.get("company_admin_ids", []),
+        conditional_companies=article.get("conditional_companies", []),
+        created_by=article.get("created_by"),
+        created_at=article.get("created_at"),
+        updated_at=article.get("updated_at"),
+        published_at=article.get("published_at"),
+        owner_id=article.get("owner_id"), lifecycle_status=article.get("lifecycle_status", "draft"),
+        review_due_at=article.get("review_due_at"), asset_ids=article.get("asset_ids", []),
+        assets=article.get("assets", []),
+        attachments=article.get("attachments", []),
+    )
+
+
 def _audit_article_summary(article: dict | None) -> dict | None:
     if not article:
         return None
@@ -187,31 +215,7 @@ async def get_article(
     )
     if not article:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
-    return KnowledgeBaseArticleResponse(
-        id=article["id"],
-        slug=article["slug"],
-        title=article["title"],
-        summary=article.get("summary"),
-        content=article.get("content", ""),
-        sections=article.get("sections", []),
-        permission_scope=article["permission_scope"],
-        is_published=article["is_published"],
-        ai_tags=article.get("ai_tags", []),
-        excluded_ai_tags=article.get("excluded_ai_tags", []),
-        manual_ai_tags=article.get("manual_ai_tags", []),
-        allowed_user_ids=article.get("allowed_user_ids", []),
-        allowed_company_ids=article.get("allowed_company_ids", []),
-        company_admin_ids=article.get("company_admin_ids", []),
-        conditional_companies=article.get("conditional_companies", []),
-        created_by=article.get("created_by"),
-        created_at=article.get("created_at"),
-        updated_at=article.get("updated_at"),
-        published_at=article.get("published_at"),
-        owner_id=article.get("owner_id"), lifecycle_status=article.get("lifecycle_status", "draft"),
-        review_due_at=article.get("review_due_at"), asset_ids=article.get("asset_ids", []),
-        assets=article.get("assets", []),
-        attachments=article.get("attachments", []),
-    )
+    return _article_response(article)
 
 
 @router.get("/articles/{slug}/customer-preview")
@@ -270,31 +274,7 @@ async def create_article(
         before=None,
         after=_audit_article_summary(article),
     )
-    return KnowledgeBaseArticleResponse(
-        id=article["id"],
-        slug=article["slug"],
-        title=article["title"],
-        summary=article.get("summary"),
-        content=article.get("content", ""),
-        sections=article.get("sections", []),
-        permission_scope=article["permission_scope"],
-        is_published=article["is_published"],
-        ai_tags=article.get("ai_tags", []),
-        excluded_ai_tags=article.get("excluded_ai_tags", []),
-        manual_ai_tags=article.get("manual_ai_tags", []),
-        allowed_user_ids=article.get("allowed_user_ids", []),
-        allowed_company_ids=article.get("allowed_company_ids", []),
-        company_admin_ids=article.get("company_admin_ids", []),
-        conditional_companies=article.get("conditional_companies", []),
-        created_by=article.get("created_by"),
-        created_at=article.get("created_at"),
-        updated_at=article.get("updated_at"),
-        published_at=article.get("published_at"),
-        owner_id=article.get("owner_id"), lifecycle_status=article.get("lifecycle_status", "draft"),
-        review_due_at=article.get("review_due_at"), asset_ids=article.get("asset_ids", []),
-        assets=article.get("assets", []),
-        attachments=article.get("attachments", []),
-    )
+    return _article_response(article)
 
 
 @router.put("/articles/{article_id}", response_model=KnowledgeBaseArticleResponse)
@@ -329,31 +309,7 @@ async def update_article(
         before=_audit_article_summary(existing_article),
         after=_audit_article_summary(article),
     )
-    return KnowledgeBaseArticleResponse(
-        id=article["id"],
-        slug=article["slug"],
-        title=article["title"],
-        summary=article.get("summary"),
-        content=article.get("content", ""),
-        sections=article.get("sections", []),
-        permission_scope=article["permission_scope"],
-        is_published=article["is_published"],
-        ai_tags=article.get("ai_tags", []),
-        excluded_ai_tags=article.get("excluded_ai_tags", []),
-        manual_ai_tags=article.get("manual_ai_tags", []),
-        allowed_user_ids=article.get("allowed_user_ids", []),
-        allowed_company_ids=article.get("allowed_company_ids", []),
-        company_admin_ids=article.get("company_admin_ids", []),
-        conditional_companies=article.get("conditional_companies", []),
-        created_by=article.get("created_by"),
-        created_at=article.get("created_at"),
-        updated_at=article.get("updated_at"),
-        published_at=article.get("published_at"),
-        owner_id=article.get("owner_id"), lifecycle_status=article.get("lifecycle_status", "draft"),
-        review_due_at=article.get("review_due_at"), asset_ids=article.get("asset_ids", []),
-        assets=article.get("assets", []),
-        attachments=article.get("attachments", []),
-    )
+    return _article_response(article)
 
 
 @router.get("/articles/{article_id}/versions")
