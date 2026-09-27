@@ -10,7 +10,6 @@ from starlette.requests import Request
 
 from app.api.routes import auth as auth_routes
 from app.schemas.auth import (
-    PasskeyBeginRegistrationRequest,
     PasskeyCredentialRequest,
     PasskeyDeleteRequest,
     PasskeyFinishRegistrationRequest,
@@ -289,7 +288,7 @@ async def test_begin_passkey_authentication_generates_cookie_when_missing(monkey
     monkeypatch.setattr(
         auth_routes.passkeys_service,
         "authentication_options",
-        lambda: {
+            lambda **_: {
             "challenge_id": "challenge-1",
             "challenge": "expected-challenge",
             "expires_at": expires_at,
@@ -326,7 +325,7 @@ async def test_begin_passkey_authentication_sets_secure_cookie_in_production(mon
     monkeypatch.setattr(
         auth_routes.passkeys_service,
         "authentication_options",
-        lambda: {
+            lambda **_: {
             "challenge_id": "challenge-prod",
             "challenge": "expected-challenge",
             "expires_at": expires_at,
@@ -369,7 +368,7 @@ async def test_begin_passkey_authentication_replaces_invalid_cookie(monkeypatch,
     monkeypatch.setattr(
         auth_routes.passkeys_service,
         "authentication_options",
-        lambda: {
+            lambda **_: {
             "challenge_id": "challenge-1",
             "challenge": "expected-challenge",
             "expires_at": expires_at,
@@ -453,7 +452,7 @@ async def test_begin_passkey_authentication_reuses_valid_cookie_for_multiple_cer
         created.append(kwargs)
 
     monkeypatch.setattr(auth_routes.auth_repo, "create_passkey_challenge", fake_create_passkey_challenge)
-    monkeypatch.setattr(auth_routes.passkeys_service, "authentication_options", lambda: next(responses))
+    monkeypatch.setattr(auth_routes.passkeys_service, "authentication_options", lambda **_: next(responses))
 
     request = _request(
         "/auth/passkeys/authenticate/options",
@@ -560,3 +559,25 @@ async def _async_noop(**kwargs):
 
 async def _async_return(value):
     return value
+
+
+def test_passkey_rp_defaults_to_current_request_origin():
+    settings = auth_routes.get_settings().__class__(
+        SESSION_SECRET="secret", TOTP_ENCRYPTION_KEY="totp-secret",
+        PORTAL_URL="https://stale.example.com", PASSKEY_ALLOWED_ORIGINS="https://stale.example.com",
+    )
+    assert passkeys_service.relying_party_id_for_origin(
+        "https://portal.customer.example:8443", settings
+    ) == "portal.customer.example"
+    assert passkeys_service.allowed_origins_for_origin(
+        "https://portal.customer.example:8443", settings
+    )[0] == "https://portal.customer.example:8443"
+
+
+def test_explicit_passkey_rp_must_match_request_hostname():
+    settings = auth_routes.get_settings().__class__(
+        SESSION_SECRET="secret", TOTP_ENCRYPTION_KEY="totp-secret", PASSKEY_RP_ID="example.com",
+    )
+    assert passkeys_service.relying_party_id_for_origin("https://portal.example.com", settings) == "example.com"
+    with pytest.raises(ValueError, match="not valid"):
+        passkeys_service.relying_party_id_for_origin("https://portal.example.net", settings)
