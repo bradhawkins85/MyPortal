@@ -43,13 +43,13 @@
     ] %}
     <header class="card__header card__header--stacked">
       <div><h2>Discovered devices</h2><p class="card__lede">Asset matches use normalized MAC addresses. WAN IP identifies the network where each device was most recently seen.</p></div>
-      {% if devices %}<div class="card__controls"><label class="visually-hidden" for="network-device-search">Search devices</label><input id="network-device-search" class="input" type="search" placeholder="Search devices" data-table-filter="network-devices">{% if can_configure %}{{ table_column_picker("network-devices", discovered_device_columns) }}<button class="button button--secondary" type="button" data-device-bulk-open disabled>Update selected <span data-device-selected-count>(0)</span></button><form method="post" action="/devices/discovered-purge" data-confirm="Purge every discovered device outside its scanner's configured LAN or WAN CIDRs? This cannot be undone.">{% include "partials/csrf.html" %}<button class="button button--danger" type="submit">Purge out of scope</button></form>{% endif %}</div>{% endif %}
+      {% if devices %}<div class="card__controls"><label class="visually-hidden" for="network-device-search">Search devices</label><input id="network-device-search" class="input" type="search" placeholder="Search devices" data-table-filter="network-devices">{{ table_column_picker("network-devices", discovered_device_columns) }}{% if can_configure %}<button class="button button--secondary" type="button" data-device-bulk-open disabled>Update selected <span data-device-selected-count>(0)</span></button><form method="post" action="/devices/discovered-purge" data-confirm="Purge every discovered device outside its scanner's configured LAN or WAN CIDRs? This cannot be undone.">{% include "partials/csrf.html" %}<button class="button button--danger" type="submit">Purge out of scope</button></form>{% endif %}{% if can_import_ipam %}<button class="button button--secondary" type="button" data-ipam-bulk-open disabled>Add selected to IPAM <span data-ipam-selected-count>(0)</span></button>{% endif %}</div>{% endif %}
     </header>
     {% if devices %}
       <div class="table-wrapper"><table class="table" id="network-devices-table" data-table data-table-id="network-devices">
-        <thead><tr>{% if can_configure %}<th><input type="checkbox" data-device-select-all aria-label="Select all visible devices"></th>{% endif %}<th data-column-key="hostname" data-sort="string">Hostname</th><th data-column-key="state" data-sort="string">State</th><th data-column-key="type" data-sort="string">Type</th><th data-column-key="description" data-sort="string">Description</th><th data-column-key="discovered-by" data-sort="string">Discovered by</th><th data-column-key="wan-ip" data-sort="string">WAN IP</th><th data-column-key="local-ip" data-sort="string">Local IP</th><th data-column-key="mac-address" data-sort="string">MAC address</th><th data-column-key="mac-vendor-os" data-sort="string">MAC vendor / OS</th><th data-column-key="open-ports" data-sort="string">Open ports</th><th data-column-key="first-seen" data-sort="date">First seen</th><th data-column-key="last-seen" data-sort="date">Last seen</th><th data-column-key="myportal-asset" data-sort="string">MyPortal asset</th>{% if can_configure %}<th class="table__actions">Actions</th>{% endif %}</tr></thead>
-        <tbody>{% for device in devices %}<tr>
-          {% if can_configure %}<td><input type="checkbox" value="{{ device.id }}" data-device-select aria-label="Select {{ device.hostname or device.ip_address }}"></td>{% endif %}
+        <thead><tr>{% if can_configure or can_import_ipam %}<th><input type="checkbox" data-device-select-all aria-label="Select all visible devices"></th>{% endif %}<th data-column-key="hostname" data-sort="string">Hostname</th><th data-column-key="state" data-sort="string">State</th><th data-column-key="type" data-sort="string">Type</th><th data-column-key="description" data-sort="string">Description</th><th data-column-key="discovered-by" data-sort="string">Discovered by</th><th data-column-key="wan-ip" data-sort="string">WAN IP</th><th data-column-key="local-ip" data-sort="string">Local IP</th><th data-column-key="mac-address" data-sort="string">MAC address</th><th data-column-key="mac-vendor-os" data-sort="string">MAC vendor / OS</th><th data-column-key="open-ports" data-sort="string">Open ports</th><th data-column-key="first-seen" data-sort="date">First seen</th><th data-column-key="last-seen" data-sort="date">Last seen</th><th data-column-key="myportal-asset" data-sort="string">MyPortal asset</th>{% if can_configure or can_import_ipam %}<th class="table__actions">Actions</th>{% endif %}</tr></thead>
+        <tbody>{% for device in devices %}<tr id="discovered-device-{{ device.id }}">
+          {% if can_configure or can_import_ipam %}<td><input type="checkbox" value="{{ device.id }}" data-device-select aria-label="Select {{ device.hostname or device.ip_address }}"></td>{% endif %}
           <td data-column-key="hostname">{{ device.hostname or '—' }}</td>
           <td data-column-key="state"><span class="tag{% if device.state == 'New' %} tag--warning{% endif %}">{{ device.state }}</span></td>
           <td data-column-key="type">{{ device.device_type_name or '—' }}</td>
@@ -60,10 +60,10 @@
           <td data-column-key="first-seen" data-value="{{ device.first_seen_at or '' }}">{{ device.first_seen_at.strftime('%Y-%m-%d %H:%M') if device.first_seen_at else '—' }}</td>
           <td data-column-key="last-seen" data-value="{{ device.last_seen_at or '' }}">{{ device.last_seen_at.strftime('%Y-%m-%d %H:%M') if device.last_seen_at else '—' }}</td>
           <td data-column-key="myportal-asset">{% if device.matched_asset_id %}<a href="/assets/{{ device.matched_asset_id }}"><span class="tag">{{ device.matched_asset_name }}</span></a>{% elif device.agent_not_required %}<span class="tag">Agent not required</span>{% else %}<span class="tag tag--warning">Agent may be required</span>{% endif %}</td>
-          {% if can_configure %}<td class="table__actions">
+          {% if can_configure or can_import_ipam %}<td class="table__actions">
             <details class="header-title-menu__dropdown" data-header-menu><summary class="header-title-menu__toggle" data-header-menu-toggle>Actions <span aria-hidden="true">▾</span></summary>
               <div class="header-title-menu__list discovered-device-menu">
-                <form method="post" action="/devices/discovered/{{ device.id }}" class="discovered-device-form">
+                {% if can_configure %}<form method="post" action="/devices/discovered/{{ device.id }}" class="discovered-device-form">
                   {% include "partials/csrf.html" %}
                   <label>State<select class="input" name="state">{% for state in ['New', 'Known', 'Unknown'] %}<option value="{{ state }}" {% if device.state == state %}selected{% endif %}>{{ state }}</option>{% endfor %}</select></label>
                   <label>Device type<select class="input" name="device_type_id"><option value="">Not set</option>{% if device.recommended_device_type_ids %}<optgroup label="Recommended for {{ device.mac_vendor }}">{% for device_type in device_types %}{% if device_type.id in device.recommended_device_type_ids %}<option value="{{ device_type.id }}" {% if device.device_type_id == device_type.id %}selected{% endif %}>{{ device_type.name }}</option>{% endif %}{% endfor %}</optgroup><optgroup label="Other types">{% endif %}{% for device_type in device_types %}{% if device_type.id not in device.recommended_device_type_ids %}<option value="{{ device_type.id }}" {% if device.device_type_id == device_type.id %}selected{% endif %}>{{ device_type.name }}</option>{% endif %}{% endfor %}{% if device.recommended_device_type_ids %}</optgroup>{% endif %}</select></label>
@@ -74,7 +74,8 @@
                 {% if can_sync_hudu %}<form method="post" action="/devices/discovered/{{ device.id }}/hudu-sync">
                   {% include "partials/csrf.html" %}
                   <button class="button button--secondary" type="submit" {% if not device.device_type_id or not device.mac_address %}disabled title="Set a device type and MAC address before sending to Hudu"{% endif %}>Send / sync with Hudu</button>
-                </form>{% endif %}
+                </form>{% endif %}{% endif %}
+                {% if can_import_ipam %}<button class="button button--secondary" type="button" data-ipam-device-open="{{ device.id }}">Add to IPAM</button>{% endif %}
               </div>
             </details>
           </td>{% endif %}
@@ -100,6 +101,19 @@
       </div>
       <footer class="modal__footer"><button type="button" class="button button--ghost" data-device-bulk-close>Cancel</button><button class="button button--primary" type="submit">Update devices</button></footer>
     </form>
+  </section>
+</div>
+{% endif %}
+
+
+{% if can_import_ipam %}
+<div class="modal" id="device-ipam-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="device-ipam-title">
+  <div class="modal__backdrop" data-ipam-device-close></div><section class="modal__dialog modal__dialog--wide">
+    <header class="modal__header"><div><h2 id="device-ipam-title">Review IPAM import</h2><p class="card__lede">Subnets are selected automatically. Rows needing review will not be imported.</p></div><button class="modal__close" type="button" data-ipam-device-close aria-label="Close IPAM preview">&times;</button></header>
+    <form method="post" action="/devices/ipam-import" data-ipam-import-form><div class="modal__body form-stack">{% include "partials/csrf.html" %}<div data-ipam-device-ids></div>
+      <label class="checkbox"><input type="checkbox" name="use_wan" value="1" data-ipam-use-wan> <span>Explicitly use scanner/shared WAN addresses instead of each device's actual IP</span></label>
+      <div class="table-wrapper"><table class="table"><thead><tr><th>Device</th><th>Candidate IP</th><th>Network</th><th>Canonical asset / source</th><th>Review</th></tr></thead><tbody data-ipam-preview><tr><td colspan="5">Loading preview…</td></tr></tbody></table></div>
+    </div><footer class="modal__footer"><button class="button button--ghost" type="button" data-ipam-device-close>Cancel</button><button class="button button--primary" type="submit" data-ipam-import-submit disabled>Import valid addresses</button></footer></form>
   </section>
 </div>
 {% endif %}
@@ -136,5 +150,5 @@
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
-  {% if can_configure %}<script src="{{ static_url('/static/js/devices.js') }}" defer></script>{% endif %}
+  {% if can_configure or can_import_ipam %}<script src="{{ static_url('/static/js/devices.js') }}" defer></script>{% endif %}
 {% endblock %}

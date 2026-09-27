@@ -752,6 +752,9 @@ async def network_devices_page(request: Request):
     if redirect:
         return redirect
     can_configure = bool(user.get("is_super_admin")) or main_module._membership_menu_can(user, membership, "menu.network_devices", write=True)
+    can_import_ipam = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
+        user, membership, "menu.ipam", write=True
+    )
     scanner_assets = await network_devices_repo.list_scanners(company_id) if can_configure else []
     enabled_scanners = [
         scanner for scanner in scanner_assets if scanner.get("network_scanner_enabled")
@@ -774,9 +777,94 @@ async def network_devices_page(request: Request):
             "available_scanners": available_scanners,
             "can_manage_device_types": bool(user.get("is_super_admin")),
             "can_configure": can_configure,
+            "can_import_ipam": can_import_ipam,
             "can_sync_hudu": bool(company.get("hudu_id")),
         },
     )
+
+
+async def _device_ipam_context(request: Request):
+    """Require device visibility and IPAM write access for imports."""
+    main_module = _main()
+    user, membership, _company, company_id, redirect = await _load_asset_context(
+        request, "menu.network_devices"
+    )
+    if redirect:
+        return main_module, user, company_id, redirect
+    if not (user.get("is_super_admin") or main_module._membership_menu_can(
+        user, membership, "menu.ipam", write=True
+    )):
+        raise HTTPException(status_code=403, detail="IPAM write access required")
+    return main_module, user, company_id, None
+
+
+def _selected_device_ids(form: Any) -> list[int]:
+    try:
+        values = list(dict.fromkeys(int(value) for value in form.getlist("device_ids")))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid device selection") from exc
+    if not values or len(values) > 500:
+        raise HTTPException(status_code=422, detail="Select between 1 and 500 devices")
+    return values
+
+
+@router.post("/devices/ipam-preview", summary="Preview discovered device IPAM imports")
+async def preview_devices_in_ipam(request: Request):
+    _main_module, _user, company_id, redirect = await _device_ipam_context(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    device_ids = _selected_device_ids(form)
+    devices = await network_devices_repo.get_many_for_company(device_ids, company_id)
+    if len(devices) != len(device_ids):
+        raise HTTPException(status_code=404, detail="One or more discovered devices were not found")
+    previews = await infrastructure_repo.preview_discovered_addresses(
+        company_id, devices, use_wan=form.get("use_wan") == "1"
+    )
+    return JSONResponse({"items": [{
+        "device_id": item["device"]["id"],
+        "device": item["device"].get("hostname") or item["device"].get("mac_address") or f"Device {item['device']['id']}",
+        "candidate": item["candidate"],
+        "network": (f"{item['network']['name']} — {item['network']['cidr']}" if item["network"] else None),
+        "asset": item["device"].get("matched_asset_name"),
+        "asset_url": item["asset_url"],
+        "source_url": item["source_url"],
+        "reason": item["reason"],
+    } for item in previews]})
+
+
+@router.post("/devices/ipam-import", summary="Import discovered device addresses into IPAM")
+async def import_devices_to_ipam(request: Request):
+    main_module, _user, company_id, redirect = await _device_ipam_context(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    device_ids = _selected_device_ids(form)
+    devices = await network_devices_repo.get_many_for_company(device_ids, company_id)
+    if len(devices) != len(device_ids):
+        raise HTTPException(status_code=404, detail="One or more discovered devices were not found")
+    use_wan = form.get("use_wan") == "1"
+    results = []
+    for device in devices:
+        result = await infrastructure_repo.import_discovered_address(
+            company_id, device, use_wan=use_wan
+        )
+        results.append(result)
+        await audit_service.record(
+            action=f"infrastructure.address.discovery_{result['status']}", request=request,
+            entity_type="ip_address", entity_id=result.get("record_id"),
+            after={"company_id": company_id, "network_device_id": device["id"],
+                   "candidate": result["candidate"], "reason": result.get("reason")},
+        )
+    counts = {key: sum(item["status"] == key for item in results)
+              for key in ("created", "updated", "skipped", "conflict")}
+    await audit_service.record(
+        action="infrastructure.address.discovery_bulk", request=request,
+        entity_type="ip_address", after={"company_id": company_id, **counts},
+    )
+    message = ", ".join(f"{value} {key}" for key, value in counts.items())
+    level = "success" if counts["created"] or counts["updated"] else "info"
+    return main_module.flash_redirect("/devices", f"IPAM import: {message}.", level)
 
 
 @router.get("/infrastructure", summary="Legacy infrastructure entry point")

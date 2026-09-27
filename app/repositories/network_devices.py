@@ -53,6 +53,21 @@ async def get_for_company(device_id: int, company_id: int) -> dict[str, Any] | N
     )
 
 
+async def get_many_for_company(device_ids: list[int], company_id: int) -> list[dict[str, Any]]:
+    """Return only selected devices owned by the active company."""
+    if not device_ids:
+        return []
+    normalized = [int(device_id) for device_id in device_ids]
+    placeholders = ",".join("%s" for _ in normalized)
+    return list(await db.fetch_all(
+        """SELECT nd.*, a.name AS matched_asset_name
+           FROM network_devices nd
+           LEFT JOIN assets a ON a.id=nd.matched_asset_id
+           WHERE nd.company_id=%s AND nd.id IN (""" + placeholders + ")",
+        (company_id, *normalized),
+    ) or [])
+
+
 async def list_device_types() -> list[dict[str, Any]]:
     return list(
         await db.fetch_all(
