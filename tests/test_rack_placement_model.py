@@ -147,7 +147,7 @@ def test_rack_item_migration_and_template_contracts():
     assert "asset_id INT NULL" in sql
     assert "rack_equipment_ports" in sql
     assert 'value="patch_panel"' in template and 'value="switch"' in template
-    assert "Number of ports (optional)" in template
+    assert "Number of ports <small>optional</small>" in template
     assert "Not Configured" not in template and "Not configured" not in template
 
 

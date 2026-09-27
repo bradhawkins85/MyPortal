@@ -150,3 +150,17 @@ def test_graphical_dashboard_interactions_are_keyboard_accessible():
     assert "button.setAttribute('aria-pressed', String(swivelled))" in script
     assert "button.addEventListener('focus'" in script
     assert "sidebarToggle?.setAttribute('aria-expanded'" in script
+
+
+def test_add_rack_space_dialog_uses_visual_choices_and_live_preview():
+    dialog = TEMPLATE[TEMPLATE.index('<dialog id="rack-place-dialog"'):TEMPLATE.index('<dialog id="rack-edit-dialog"')]
+    for name in ("entry_kind", "item_type", "face", "depth_mode", "width_lanes", "start_lane"):
+        assert f'type="radio" name="{name}"' in dialog
+    for name in ("rack_id", "name", "asset_id", "port_count", "power_draw_watts", "label", "owner",
+                 "start_unit", "unit_height", "notes"):
+        assert f'name="{name}"' in dialog
+    assert "data-placement-map" in dialog
+    assert "data-placement-preview" in dialog
+    script = (ROOT / "app/static/js/racks.js").read_text()
+    assert "const renderMap" in script
+    assert "const clampLanes" in script
