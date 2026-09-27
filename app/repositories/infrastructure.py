@@ -155,19 +155,20 @@ async def overview(company_id: int) -> dict[str, list[dict[str, Any]]]:
             port["fed_items"] = []
             ports_by_id[port["id"]] = port
     for item in equipment:
-        source = ports_by_id.get(item.get("power_source_port_id"))
-        item["power_source"] = (
-            f"{source['equipment_name']} · {source['display_label']}" if source else None)
-        if source:
-            source["fed_items"].append(item.get("name") or item.get("asset_name") or "Rack item")
+        for port in item["ports"]:
+            source = ports_by_id.get(port.get("source_port_id"))
+            port["source"] = f"{source['equipment_name']} · {source['display_label']}" if source else None
+            if source:
+                source["fed_items"].append(f"{port['equipment_name']} · {port['display_label']}")
     for item in equipment:
         item["linked_port_count"] = sum(
-            1 for port in item["ports"] if port.get("asset_id") or port.get("label") or port["fed_items"])
+            1 for port in item["ports"]
+            if port.get("asset_id") or port.get("label") or port["fed_items"] or port["source"])
     power_outlets = [
         {"id": port["id"], "equipment_id": port["equipment_id"],
          "label": f"{port['rack_name']} · {port['equipment_name']} · {port['display_label']}"}
         for item in equipment for port in item["ports"]
-        if port.get("connector") in {"iec", "3pin"} and item["id"] in equipment_by_id]
+        if port.get("connector") in rack_item_types.OUTLET_CONNECTORS and item["id"] in equipment_by_id]
     reservations = list(await db.fetch_all(
         """SELECT q.*, r.name rack_name FROM rack_reservations q
            JOIN racks r ON r.id=q.rack_id WHERE q.company_id=%s
@@ -255,11 +256,17 @@ def _item_name(name: str | None, asset: dict[str, Any] | None, item_type: str) -
 
 @dataclass(frozen=True)
 class PortLink:
-    """What is plugged into one port: a company asset and/or a free-text label."""
+    """What is connected to one port.
+
+    Data, outlet and KVM device ports link to a company asset and/or a
+    free-text label. A power supply (PSU) instead records the outlet on
+    another unit that feeds it, and/or a label such as a wall circuit.
+    """
     connector: str
     ordinal: int
     asset_id: int | None = None
     label: str | None = None
+    source_port_id: int | None = None
 
 
 def _check_position(face: str, depth_mode: str, unit_height: int, width_lanes: int,
@@ -291,27 +298,6 @@ async def _company_asset(company_id: int, asset_id: int | None) -> dict[str, Any
     if not asset:
         raise ValueError("Asset does not belong to this company")
     return asset
-
-
-async def _power_source(company_id: int, item_type: str, port_id: int | None,
-                        label: str | None, equipment_id: int | None = None
-                        ) -> tuple[int | None, str | None]:
-    """Validate where a PDU or UPS draws power from."""
-    if not rack_item_types.get(item_type).power_input:
-        return None, None
-    clean_label = (label or "").strip() or None
-    if clean_label and len(clean_label) > 191:
-        raise ValueError("Power source label is too long")
-    if port_id is None:
-        return None, clean_label
-    port = await db.fetch_one(
-        """SELECT p.id, p.equipment_id FROM rack_equipment_ports p
-           JOIN rack_equipment e ON e.id=p.equipment_id
-           WHERE p.id=%s AND p.company_id=%s AND p.connector IN ('iec','3pin')""",
-        (port_id, company_id))
-    if not port or (equipment_id is not None and int(port["equipment_id"]) == equipment_id):
-        raise ValueError("Choose a power outlet on another UPS or PDU")
-    return int(port["id"]), clean_label
 
 
 async def _slot_conflict(rack_id: int, units: list[int], faces: list[str], lanes: list[int],
@@ -352,19 +338,33 @@ async def _apply_port_links(company_id: int, equipment_id: int,
         ordinals[connector] = ordinals.get(connector, 0) + 1
         by_position[(connector, ordinals[connector])] = port
     links = [link for link in links if (link.connector, link.ordinal) in by_position]
-    asset_ids = sorted({link.asset_id for link in links if link.asset_id is not None})
+    power = rack_item_types.POWER_INPUT
+    asset_ids = sorted({link.asset_id for link in links
+                        if link.asset_id is not None and link.connector != power})
     if asset_ids:
         found = await db.fetch_all(
             "SELECT id FROM assets WHERE company_id=%s AND id IN (" + ",".join(["%s"] * len(asset_ids)) + ")",
             (company_id, *asset_ids)) or []
         if {int(row["id"]) for row in found} != set(asset_ids):
             raise ValueError("Asset does not belong to this company")
+    source_ids = sorted({link.source_port_id for link in links
+                         if link.source_port_id is not None and link.connector == power})
+    if source_ids:
+        outlets = await db.fetch_all(
+            "SELECT id, equipment_id FROM rack_equipment_ports WHERE company_id=%s AND connector IN ('iec','3pin') AND id IN ("
+            + ",".join(["%s"] * len(source_ids)) + ")",
+            (company_id, *source_ids)) or []
+        valid = {int(row["id"]) for row in outlets if int(row["equipment_id"]) != equipment_id}
+        if valid != set(source_ids):
+            raise ValueError("A power supply must be fed from an outlet on another UPS or PDU")
     for link in links:
         label = (link.label or "").strip()[:191] or None
         port = by_position[(link.connector, link.ordinal)]
+        is_power = link.connector == power
         await db.execute(
-            "UPDATE rack_equipment_ports SET asset_id=%s,label=%s WHERE equipment_id=%s AND port_number=%s AND company_id=%s",
-            (link.asset_id, label, equipment_id, int(port["port_number"]), company_id))
+            "UPDATE rack_equipment_ports SET asset_id=%s,label=%s,source_port_id=%s WHERE equipment_id=%s AND port_number=%s AND company_id=%s",
+            (None if is_power else link.asset_id, label, link.source_port_id if is_power else None,
+             equipment_id, int(port["port_number"]), company_id))
 
 
 async def _sync_ports(company_id: int, equipment_id: int, counts: Mapping[str, int]) -> list[dict[str, Any]]:
@@ -385,7 +385,7 @@ async def _sync_ports(company_id: int, equipment_id: int, counts: Mapping[str, i
         removed += [int(row["id"]) for row in existing[keep:]]
     if removed:
         marks = ",".join(["%s"] * len(removed))
-        await db.execute("UPDATE rack_equipment SET power_source_port_id=NULL WHERE power_source_port_id IN (" + marks + ")", tuple(removed))
+        await db.execute("UPDATE rack_equipment_ports SET source_port_id=NULL WHERE source_port_id IN (" + marks + ")", tuple(removed))
         await db.execute("DELETE FROM rack_equipment_ports WHERE id IN (" + marks + ")", tuple(removed))
     next_number = max((int(row["port_number"]) for row in rows), default=0) + 1
     for connector, count in counts.items():
@@ -405,9 +405,7 @@ async def place_asset(company_id: int, rack_id: int, asset_id: int | None, start
                       depth_mode: str = "half", power_draw_watts: int | None = None,
                       item_type: str = "server", name: str | None = None,
                       port_count: int = 0, *, port_counts: Mapping[str, int] | None = None,
-                      port_links: Iterable[PortLink] = (),
-                      power_source_port_id: int | None = None,
-                      power_source_label: str | None = None) -> int:
+                      port_links: Iterable[PortLink] = ()) -> int:
     item_type = rack_item_types.normalise(item_type)
     _check_position(face, depth_mode, unit_height, width_lanes, start_lane)
     if power_draw_watts is not None and power_draw_watts < 0:
@@ -422,8 +420,6 @@ async def place_asset(company_id: int, rack_id: int, asset_id: int | None, start
     clean_name = _item_name(name, asset, item_type)
     if not rack or (asset_id is not None and not asset) or start_unit < 1 or start_unit + unit_height - 1 > int(rack["unit_count"]):
         raise ValueError("Rack, asset, or occupied units are invalid")
-    source_port_id, source_label = await _power_source(
-        company_id, item_type, power_source_port_id, power_source_label)
     units = list(range(start_unit, start_unit + unit_height))
     lanes = list(range(start_lane, start_lane + width_lanes))
     faces = ["front", "rear"] if depth_mode == "full" else [face]
@@ -434,9 +430,6 @@ async def place_asset(company_id: int, rack_id: int, asset_id: int | None, start
                "width_lanes", "start_lane", "depth_mode", "power_draw_watts", "item_type", "name", "port_count"]
     values: list[Any] = [company_id, rack_id, asset_id, start_unit, unit_height, face, notes, width_lanes,
                          start_lane, depth_mode, power_draw_watts, item_type, clean_name, sum(counts.values())]
-    if source_port_id is not None or source_label is not None:
-        columns += ["power_source_port_id", "power_source_label"]
-        values += [source_port_id, source_label]
     equipment_id = await db.execute_returning_lastrowid(
         "INSERT INTO rack_equipment (" + ",".join(columns) + ") VALUES (" + ",".join(["%s"] * len(columns)) + ")",
         tuple(values))
@@ -494,9 +487,7 @@ async def update_rack_equipment(company_id: int, equipment_id: int, name: str | 
                                 power_draw_watts: int | None, notes: str | None, *,
                                 position: RackPosition | None = None,
                                 port_counts: Mapping[str, int] | None = None,
-                                port_links: Iterable[PortLink] | None = None,
-                                power_source_port_id: int | None = None,
-                                power_source_label: str | None = None) -> None:
+                                port_links: Iterable[PortLink] | None = None) -> None:
     """Update a rack item, optionally moving it and changing its connections.
 
     Callers that omit ``position``, ``port_counts`` and ``port_links`` leave the
@@ -516,14 +507,8 @@ async def update_rack_equipment(company_id: int, equipment_id: int, name: str | 
     catalogue = rack_item_types.get(item_type)
     counts = _port_counts(item_type, port_counts) if port_counts is not None else (
         None if catalogue.has_ports else {})
-    full_edit = position is not None or port_counts is not None or port_links is not None
     assignments = ["name=%s", "item_type=%s", "asset_id=%s", "power_draw_watts=%s", "notes=%s"]
     values: list[Any] = [clean_name, item_type, asset_id, power_draw_watts, notes]
-    if full_edit:
-        source_port_id, source_label = await _power_source(
-            company_id, item_type, power_source_port_id, power_source_label, equipment_id)
-        assignments += ["power_source_port_id=%s", "power_source_label=%s"]
-        values += [source_port_id, source_label]
     old_slots: list[dict[str, Any]] = []
     if position is not None:
         _check_position(position.face, position.depth_mode, position.unit_height,

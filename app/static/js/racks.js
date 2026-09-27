@@ -201,14 +201,15 @@
   const submit = form.querySelector('[data-submit-label]');
   const removeButton = placeDialog.querySelector('[data-edit-remove]');
   const connections = form.querySelector('[data-connections]');
-  const powerSource = form.querySelector('[data-power-source]');
   const linksTable = form.querySelector('[data-port-links]');
   const linksSummary = form.querySelector('[data-port-links-summary]');
   const linksPanel = form.querySelector('[data-port-links-panel]');
   const assetOptions = form.querySelector('template[data-asset-options]');
-  const connectorLabels = { data: 'Port', iec: 'IEC', '3pin': '3-pin' };
+  const outletOptions = form.querySelector('template[data-outlet-options]');
+  const connectorLabels = { data: 'Port', iec: 'IEC', '3pin': '3-pin', psu: 'PSU', kvm: 'Device' };
   let editingId = null;
   let heightTouched = false;
+  let countsTouched = new Set();
   // What the user has entered per port, kept while counts change.
   let linkValues = new Map();
 
@@ -246,17 +247,25 @@
         name.className = 'rack-port-link__name';
         name.setAttribute('role', 'rowheader');
         name.textContent = `${connectorLabels[key] || 'Port'} ${ordinal}`;
+        // A power supply is fed from another unit's outlet; other ports link to assets.
+        const isPower = key === 'psu';
         const select = document.createElement('select');
         select.className = 'input input--small';
-        select.name = `port-${id}-asset`;
-        select.setAttribute('aria-label', `Asset on ${name.textContent}`);
-        select.append(assetOptions.content.cloneNode(true));
+        select.name = `port-${id}-${isPower ? 'source' : 'asset'}`;
+        select.setAttribute('aria-label', `${isPower ? 'Outlet feeding' : 'Asset on'} ${name.textContent}`);
+        select.append((isPower ? outletOptions : assetOptions).content.cloneNode(true));
+        if (isPower) {
+          select.querySelectorAll('option[data-equipment-id]').forEach(option => {
+            if (editingId !== null && option.dataset.equipmentId === editingId) option.remove();
+          });
+        }
         select.value = saved.asset;
+        if (select.value !== saved.asset) select.value = '';
         const label = document.createElement('input');
         label.className = 'input input--small';
         label.name = `port-${id}-label`;
         label.maxLength = 191;
-        label.placeholder = 'Label, e.g. Printer';
+        label.placeholder = isPower ? 'Label, e.g. Circuit B2' : key === 'kvm' ? 'Label, e.g. Web server' : 'Label, e.g. Printer';
         label.setAttribute('aria-label', `Label for ${name.textContent}`);
         label.value = saved.label;
         row.append(name, select, label);
@@ -320,19 +329,18 @@
       field.querySelector('input').disabled = !active;
     });
     connections.hidden = keys.length === 0;
-    const powered = !reservation && type?.dataset.powerInput === 'true';
-    powerSource.hidden = !powered;
-    powerSource.querySelectorAll('select, input').forEach(control => { control.disabled = !powered; });
     faceplate.hidden = reservation;
     if (editingId) submit.textContent = 'Save changes';
     else submit.textContent = reservation ? 'Reserve space' : 'Place equipment';
     renderLinks();
   };
   const applyTypeDefaults = (input) => {
-    // Seed connector counts the first time a connector becomes relevant.
+    // New items take the type's default counts unless the user typed one;
+    // edits keep existing counts and only seed newly relevant connectors.
     typeConnectors(input).forEach(({ key, count }) => {
       const field = form.elements[`port_count_${key}`];
-      if (field && field.disabled) field.value = String(count);
+      if (!field) return;
+      if (editingId === null ? !countsTouched.has(key) : field.disabled) field.value = String(count);
     });
     if (heightTouched) return;
     const rack = rackFor(form.elements.rack_id.value);
@@ -344,13 +352,6 @@
     form.querySelector('[data-kind-choice]').hidden = mode === 'edit';
     removeButton.hidden = mode !== 'edit';
     title.textContent = mode === 'edit' ? 'Edit rack item' : 'Add rack space';
-  };
-  const hideOwnOutlets = (equipmentId) => {
-    form.elements.power_source_port_id.querySelectorAll('option[data-equipment-id]').forEach(option => {
-      const own = equipmentId !== null && option.dataset.equipmentId === String(equipmentId);
-      option.hidden = own;
-      option.disabled = own;
-    });
   };
   const resetForm = () => {
     form.reset();
@@ -367,8 +368,8 @@
     resetForm();
     editingId = null;
     heightTouched = false;
+    countsTouched = new Set();
     setMode('add');
-    hideOwnOutlets(null);
     form.elements.rack_id.value = button.dataset.rack;
     form.elements.face.value = button.dataset.face;
     form.elements.start_unit.value = button.dataset.unit;
@@ -385,7 +386,6 @@
     editingId = String(id);
     heightTouched = true;
     setMode('edit');
-    hideOwnOutlets(item.id);
     form.action = `/api/infrastructure/rack-equipment/${encodeURIComponent(id)}/edit`;
     form.elements.entry_kind.value = 'equipment';
     form.elements.rack_id.value = listItem.dataset.rackOwner || '';
@@ -400,14 +400,13 @@
     form.elements.unit_height.value = item.unit_height;
     form.elements.width_lanes.value = item.width_lanes;
     form.elements.start_lane.value = item.start_lane;
-    form.elements.power_source_port_id.value = item.power_source_port_id ?? '';
-    form.elements.power_source_label.value = item.power_source_label || '';
     Object.entries(item.port_counts || {}).forEach(([key, count]) => {
       const field = form.elements[`port_count_${key}`];
       if (field) { field.value = String(count); field.disabled = false; }
     });
     (item.ports || []).forEach(port => {
-      linkValues.set(`${port.connector}-${port.ordinal}`, { asset: port.asset_id ? String(port.asset_id) : '', label: port.label || '' });
+      const target = port.connector === 'psu' ? port.source_port_id : port.asset_id;
+      linkValues.set(`${port.connector}-${port.ordinal}`, { asset: target ? String(target) : '', label: port.label || '' });
     });
     applyTypeDefaults(selectedType());
     form.querySelector('[data-selected-position]').textContent = positionText({
@@ -432,6 +431,7 @@
       linksSummary.textContent = rows.length ? `Port links · ${linked} of ${rows.length} linked` : 'Port links';
       return;
     }
+    if (event.target.name?.startsWith('port_count_')) countsTouched.add(event.target.name.slice('port_count_'.length));
     if (event.target.name?.startsWith('port_count_') || event.target.name === 'entry_kind') updateKind();
     updatePreview();
   });
