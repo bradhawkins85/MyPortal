@@ -34,6 +34,7 @@ EXPECTED_SLUGS = {
     "email_signature",
     "click_to_call",
     "gmp_glp",
+    "essential8",
 }
 
 
@@ -244,3 +245,42 @@ def test_gmp_glp_list_checks_query_excludes_categories(monkeypatch):
     assert "cat.code NOT IN ('GMP', 'GLP')" in captured["query"]
     asyncio.run(repo.list_categories())
     assert "cat.code NOT IN ('GMP', 'GLP')" in captured["query"]
+
+
+def test_essential8_paths_blocked_without_touching_compliance_checks():
+    policy = ComponentAvailability(disabled_feature_packs=frozenset({"essential8"}))
+    assert not policy.path_available("/compliance")
+    assert not policy.path_available("/compliance/control/3")
+    assert not policy.path_available("/api/essential8/controls")
+    assert not policy.path_available("/admin/marketing/essential8-help-links")
+    assert policy.path_available("/compliance-checks")
+    assert policy.path_available("/admin/compliance-checks/library")
+    assert policy.path_available("/api/compliance-checks/checks")
+
+
+def test_essential8_sidebar_link_hidden(monkeypatch):
+    body = _render_sidebar(monkeypatch)
+    assert 'href="/compliance"' in body
+    body = _render_sidebar(monkeypatch, "essential8")
+    assert 'href="/compliance"' not in body
+    assert 'href="/compliance-checks"' in body
+
+
+def test_essential8_report_queries_hidden(monkeypatch):
+    import asyncio
+
+    from app.services import company_report_layout
+    import app.services.component_availability as availability_module
+
+    async def fake_list_queries():
+        return [
+            {"slug": "report-essential-8-compliance-progress"},
+            {"slug": "stat-strip-report-essential-8"},
+            {"slug": "report-licenses"},
+        ]
+
+    monkeypatch.setattr(company_report_layout.reporting_repo, "list_queries", fake_list_queries)
+    policy = ComponentAvailability(disabled_feature_packs=frozenset({"essential8"}))
+    monkeypatch.setattr(availability_module, "get_component_availability", lambda: policy)
+    slugs = [q["slug"] for q in asyncio.run(company_report_layout.available_queries())]
+    assert slugs == ["report-licenses"]

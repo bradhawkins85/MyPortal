@@ -97,6 +97,7 @@ one with its current status.
 | Notification Contact (My Profile) | `notification_contact` | — (profile card only) | — |
 | Email Signature (My Profile) | `email_signature` | — (profile card only) | — |
 | Click to Call | `click_to_call` | `/api/click-to-call` | — |
+| Essential 8 Compliance | `essential8` | `/compliance`, `/api/essential8`, `/admin/marketing/essential8-help-links` | pack `compliance` is disabled |
 | GMP/GLP Compliance Checks | `gmp_glp` | — (content filter) | — |
 
 My Profile components: `outlook_contacts` removes the Outlook contacts card
@@ -105,6 +106,11 @@ click-to-call card and stops phone numbers being turned into call links;
 `notification_contact` and `email_signature` remove their My Profile cards
 only. Stored values are kept, so an existing email signature remains available
 to automations.
+
+`essential8` removes the Compliance (Essential 8) menu entry, dashboard, control
+pages and API, the "Essential 8 help links" marketing page, and the Essential 8
+reporting queries from company overview reports. Compliance Checks stays
+available. Disabling the whole `compliance` pack also disables Essential 8.
 
 `gmp_glp` hides the GMP and GLP categories, their predefined checks, company
 assignments of those checks and the "Re-seed GMP/GLP" button from Compliance

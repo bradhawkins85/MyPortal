@@ -136,6 +136,14 @@ CORE_COMPONENTS: tuple[CoreComponent, ...] = (
         ("/api/click-to-call",),
     ),
     CoreComponent(
+        "essential8",
+        "Essential 8 Compliance",
+        "Essential 8 compliance dashboard, controls, API, marketing help "
+        "links and company report sections. Compliance Checks is unaffected.",
+        ("/compliance", "/api/essential8", "/admin/marketing/essential8-help-links"),
+        parent_pack="compliance",
+    ),
+    CoreComponent(
         "gmp_glp",
         "GMP/GLP Compliance Checks",
         "GMP and GLP categories and predefined checks in Compliance Checks. "

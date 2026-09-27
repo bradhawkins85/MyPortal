@@ -157,8 +157,22 @@ class LayoutReport:
     rows: list[dict[str, Any]] = field(default_factory=list)
 
 
+def _query_available(slug: Any) -> bool:
+    """Hide reporting queries owned by a deployment-disabled component."""
+
+    if "essential-8" in str(slug or ""):
+        from app.services.component_availability import get_component_availability
+
+        return get_component_availability().feature_pack_available("essential8")
+    return True
+
+
 async def available_queries() -> list[dict[str, Any]]:
-    return await reporting_repo.list_queries()
+    return [
+        query
+        for query in await reporting_repo.list_queries()
+        if _query_available(query.get("slug"))
+    ]
 
 
 async def get_layout(company_id: int) -> list[dict[str, Any]]:
@@ -187,6 +201,8 @@ async def build(company_id: int, company: dict[str, Any]) -> LayoutReport:
         rendered_columns = []
         for config in row.get("columns", []):
             slug = config.get("slug")
+            if not _query_available(slug):
+                continue
             query = by_slug.get(slug)
             error = None
             if not query:

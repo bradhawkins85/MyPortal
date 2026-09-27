@@ -4,7 +4,7 @@
 {% block header_title %}Marketing pages{% endblock %}
 
 {% block header_actions %}
-  {% if is_super_admin %}
+  {% if is_super_admin and feature_pack_available('essential8') %}
     {{ page_header_actions([
       {"label": "Essential 8 help links", "type": "link", "href": "/admin/marketing/essential8-help-links", "variant": "ghost"}
     ]) }}
