@@ -101,6 +101,7 @@
             </div>
             <div class="rack-elevation-status__actions">
               <button class="rack-images-toggle" type="button" data-rack-images-toggle aria-pressed="true">Device images</button>
+              <button class="rack-images-toggle" type="button" data-rack-names-toggle aria-pressed="true">Device names</button>
               <button class="button button--small button--secondary" type="button" data-rack-list-open="rack-list-{{ rack.id }}">Item list</button>
             </div>
           </div>
@@ -140,9 +141,10 @@
   {% endif %}
 
   {% if racks and ws.view != 'overview' %}
+  <script type="application/json" id="rack-items-data">{{ ws["items"]|tojson }}</script>
   {% set list_rack = rack %}
     <details class="rack__details" id="rack-list-{{ list_rack.id }}"><summary>Item list and port links</summary><div class="rack-list"><h3>Installed rack items</h3><ul>
-      {% for item in equipment if item.rack_id == list_rack.id %}<li id="placement-{{ item.id }}" data-rack-owner="{{ list_rack.id }}" data-item-name="{{ item.name or '' }}" data-item-type="{{ item.item_type }}" data-item-port-count="{{ item.port_count or 0 }}" data-item-asset="{{ item.asset_id or '' }}" data-item-power="{{ item.power_draw_watts if item.power_draw_watts is not none else '' }}" data-item-notes="{{ item.notes or '' }}" data-item-position="U{{ item.start_unit }}–{{ item.start_unit + item.unit_height - 1 }} · {{ item.face|title }}{{ ' and rear' if item.depth_mode == 'full' else '' }} · lanes {{ item.start_lane }}–{{ item.start_lane + item.width_lanes - 1 }}" data-item-asset-name="{{ item.asset_name or '' }}" data-item-linked-ports="{{ (item.ports or [])|selectattr('asset_id')|list|length }}" data-start-unit="{{ item.start_unit }}" data-unit-height="{{ item.unit_height }}" data-start-lane="{{ item.start_lane }}" data-width-lanes="{{ item.width_lanes }}" data-face="{{ item.face }}" data-depth-mode="{{ item.depth_mode }}"><div><strong>{{ item.name or item.asset_name or item_type_labels[item.item_type] }}</strong><small class="rack-list__type">{{ item_type_labels[item.item_type] }}</small><span>U{{ item.start_unit }}–{{ item.start_unit + item.unit_height - 1 }}, {{ item.face|title }}{{ ' and rear' if item.depth_mode == 'full' else '' }}, lanes {{ item.start_lane }}–{{ item.start_lane + item.width_lanes - 1 }}</span>{% if item.asset_name %}<small>Linked asset: <a href="/assets/{{ item.asset_id }}">{{ item.asset_name }}</a>{% if item.asset_status %} · {{ item.asset_status }}{% endif %}</small>{% endif %}{% if item.ports %}<div class="rack-ports" aria-label="{{ item.name }} port asset links">{% for port in item.ports %}<form method="post" action="/api/infrastructure/rack-equipment/{{ item.id }}/ports/{{ port.port_number }}" class="rack-port">{% include "partials/csrf.html" %}<input type="hidden" name="rack_id" value="{{ list_rack.id }}"><label><span>Port {{ port.port_number }}{% if port.asset_name %} · {{ port.asset_name }}{% endif %}</span><select class="input" name="asset_id" aria-label="Asset linked to port {{ port.port_number }}" {% if not can_edit %}disabled{% endif %}><option value="">Not linked</option>{% for asset in assets %}<option value="{{ asset.id }}" {% if asset.id == port.asset_id %}selected{% endif %}>{{ asset.name }}</option>{% endfor %}</select></label>{% if can_edit %}<button class="button button--small button--secondary">Save</button>{% endif %}</form>{% endfor %}</div>{% endif %}</div>{% if can_edit %}<div class="rack-list__actions"><button class="button button--small button--secondary" type="button" data-edit-equipment="{{ item.id }}">Edit</button><form class="inline-form" method="post" action="/api/infrastructure/rack-equipment/{{ item.id }}/delete" data-confirm-remove="{{ item.name or item.asset_name or item_type_labels[item.item_type] }}">{% include "partials/csrf.html" %}<input type="hidden" name="rack_id" value="{{ list_rack.id }}"><button class="button button--small button--danger" type="submit">Remove</button></form></div>{% endif %}</li>{% else %}<li>No rack items installed.</li>{% endfor %}</ul>
+      {% for item in equipment if item.rack_id == list_rack.id %}<li id="placement-{{ item.id }}" data-rack-owner="{{ list_rack.id }}" data-item-name="{{ item.name or '' }}" data-item-type="{{ item.item_type }}" data-item-port-count="{{ item.port_count or 0 }}" data-item-asset="{{ item.asset_id or '' }}" data-item-power="{{ item.power_draw_watts if item.power_draw_watts is not none else '' }}" data-item-notes="{{ item.notes or '' }}" data-item-position="U{{ item.start_unit }}–{{ item.start_unit + item.unit_height - 1 }} · {{ item.face|title }}{{ ' and rear' if item.depth_mode == 'full' else '' }} · lanes {{ item.start_lane }}–{{ item.start_lane + item.width_lanes - 1 }}" data-item-asset-name="{{ item.asset_name or '' }}" data-item-linked-ports="{{ (item.ports or [])|selectattr('asset_id')|list|length }}" data-start-unit="{{ item.start_unit }}" data-unit-height="{{ item.unit_height }}" data-start-lane="{{ item.start_lane }}" data-width-lanes="{{ item.width_lanes }}" data-face="{{ item.face }}" data-depth-mode="{{ item.depth_mode }}"><div><strong>{{ item.name or item.asset_name or item_type_labels[item.item_type] }}</strong><small class="rack-list__type">{{ item_type_labels[item.item_type] }}</small><span>U{{ item.start_unit }}–{{ item.start_unit + item.unit_height - 1 }}, {{ item.face|title }}{{ ' and rear' if item.depth_mode == 'full' else '' }}, lanes {{ item.start_lane }}–{{ item.start_lane + item.width_lanes - 1 }}</span>{% if item.asset_name %}<small>Linked asset: <a href="/assets/{{ item.asset_id }}">{{ item.asset_name }}</a>{% if item.asset_status %} · {{ item.asset_status }}{% endif %}</small>{% endif %}{% if item.ports %}{% set linked = item.linked_port_count or 0 %}<details class="rack-connection-list"><summary>{{ item.ports|length }} connection{{ '' if item.ports|length == 1 else 's' }} · {{ linked }} linked</summary><ul class="rack-connection-list__items" aria-label="{{ item.name }} connections">{% for port in item.ports %}<li class="rack-connection rack-connection--{{ port.connector }}{% if port.asset_id or port.label or port.fed_items %} is-linked{% endif %}"><span class="rack-connection__port">{{ port.display_label }}</span><span class="rack-connection__target">{% set parts = [] %}{% if port.source %}{% set _ = parts.append('Fed from ' ~ port.source) %}{% endif %}{% if port.label %}{% set _ = parts.append(port.label) %}{% endif %}{% if port.fed_items %}{% set _ = parts.append('Feeds ' ~ port.fed_items|join(', ')) %}{% endif %}{% if port.asset_id %}<a href="/assets/{{ port.asset_id }}">{{ port.asset_name or 'Asset' }}</a>{% if parts %} · {% endif %}{% endif %}{{ parts|join(' · ') }}{% if not (port.asset_id or parts) %}<span class="rack-connection__empty">{{ 'No power source' if port.connector == 'psu' else 'Not connected' }}</span>{% endif %}</span></li>{% endfor %}</ul></details>{% endif %}</div>{% if can_edit %}<div class="rack-list__actions"><button class="button button--small button--secondary" type="button" data-edit-equipment="{{ item.id }}">Edit</button><form class="inline-form" method="post" action="/api/infrastructure/rack-equipment/{{ item.id }}/delete" data-confirm-remove="{{ item.name or item.asset_name or item_type_labels[item.item_type] }}">{% include "partials/csrf.html" %}<input type="hidden" name="rack_id" value="{{ list_rack.id }}"><button class="button button--small button--danger" type="submit">Remove</button></form></div>{% endif %}</li>{% else %}<li>No rack items installed.</li>{% endfor %}</ul>
       <h3>Reservations</h3><ul>{% for item in reservations if item.rack_id == list_rack.id %}<li id="reservation-{{ item.id }}" data-rack-owner="{{ list_rack.id }}" data-reservation-label="{{ item.label or '' }}" data-reservation-owner="{{ item.owner or '' }}" data-reservation-notes="{{ item.notes or '' }}" data-reservation-position="U{{ item.start_unit }}–{{ item.start_unit + item.unit_height - 1 }} · {{ item.face|title }}{{ ' and rear' if item.depth_mode == 'full' else '' }}" data-start-unit="{{ item.start_unit }}" data-unit-height="{{ item.unit_height }}" data-start-lane="{{ item.start_lane }}" data-width-lanes="{{ item.width_lanes }}" data-face="{{ item.face }}" data-depth-mode="{{ item.depth_mode }}"><div><strong>{{ item.label or 'Reserved space' }}</strong><span>U{{ item.start_unit }}–{{ item.start_unit + item.unit_height - 1 }}, {{ item.face|title }}{% if item.owner %} · {{ item.owner }}{% endif %}</span></div>{% if can_edit %}<div class="rack-list__actions"><button class="button button--small button--secondary" type="button" data-edit-reservation="{{ item.id }}">Edit</button><form class="inline-form" method="post" action="/api/infrastructure/rack-reservations/{{ item.id }}/delete" data-confirm-remove="{{ item.label or 'this reservation' }}">{% include "partials/csrf.html" %}<input type="hidden" name="rack_id" value="{{ list_rack.id }}"><button class="button button--small button--danger" type="submit">Remove</button></form></div>{% endif %}</li>{% else %}<li>No space reserved.</li>{% endfor %}</ul></div></details>
   {% endif %}
   </div>
@@ -150,12 +152,12 @@
 {% endblock %}
 {% block modals %}{% if can_edit %}
 <dialog id="rack-create-dialog" class="dialog" aria-labelledby="rack-create-title"><form class="dialog__container form-stack" method="post" action="/api/infrastructure/racks"><header class="dialog__header"><h2 id="rack-create-title">Add rack</h2><button type="button" class="dialog__close" data-dialog-close aria-label="Close">×</button></header><div class="dialog__body form-stack">{% include "partials/csrf.html" %}<label>Name<input class="input" name="name" required maxlength="191"></label><label>Location<input class="input" name="location" maxlength="255"></label><label>Height (U)<input class="input" type="number" name="unit_count" min="1" max="100" value="42" required></label><label>Depth (mm)<input class="input" type="number" name="depth_mm" min="100" max="5000" value="1000" required></label></div><footer class="dialog__footer"><button type="button" class="button button--secondary" data-dialog-close>Cancel</button><button class="button button--primary">Add rack</button></footer></form></dialog>
-<dialog id="rack-place-dialog" class="dialog rack-dialog rack-dialog--place" aria-labelledby="rack-place-title">
+<dialog id="rack-place-dialog" class="dialog rack-dialog rack-dialog--place" aria-labelledby="rack-place-title" data-mode="add">
   <form class="dialog__container" method="post" action="/api/infrastructure/rack-equipment" data-placement-form>
     <header class="dialog__header rack-dialog__header">
       <div>
         <p class="rack-dialog__eyebrow">Rack elevation</p>
-        <h2 class="dialog__title" id="rack-place-title">Add rack space</h2>
+        <h2 class="dialog__title" id="rack-place-title" data-dialog-title>Add rack space</h2>
         <p class="rack-dialog__position" data-selected-position></p>
       </div>
       <button type="button" class="dialog__close" data-dialog-close aria-label="Close">×</button>
@@ -163,7 +165,7 @@
     <div class="dialog__body rack-dialog__body">
       {% include "partials/csrf.html" %}<input type="hidden" name="rack_id">
       <div class="rack-dialog__main">
-        <fieldset class="rack-choice rack-choice--kind">
+        <fieldset class="rack-choice rack-choice--kind" data-kind-choice>
           <legend>What would you like to add?</legend>
           <label class="rack-choice__option"><input type="radio" name="entry_kind" value="equipment" checked><span>{{ draw.icon('cabinet') }}<strong>Equipment</strong><small>Install servers, network, power, or passive hardware</small></span></label>
           <label class="rack-choice__option"><input type="radio" name="entry_kind" value="reservation"><span>{{ draw.icon('reservation') }}<strong>Reservation</strong><small>Hold space for planned equipment</small></span></label>
@@ -171,14 +173,26 @@
         <div class="rack-dialog__section" data-equipment-fields>
           <fieldset class="rack-choice rack-choice--type">
             <legend>Item type</legend>
-            {% for type in item_types %}<label class="rack-choice__option" title="{{ type.label }}"><input type="radio" name="item_type" value="{{ type.key }}" data-default-height="{{ type.default_height }}" data-ports-label="{{ type.ports_label or '' }}"{% if loop.first %} checked{% endif %}><span><img class="rack-choice__image" src="{{ static_url(type.image) }}" alt="" width="96" height="{{ 9 * type.image_units }}" loading="lazy"><strong>{{ type.short_label }}</strong></span></label>{% endfor %}
+            {% for type in item_types %}<label class="rack-choice__option" title="{{ type.label }}"><input type="radio" name="item_type" value="{{ type.key }}" data-default-height="{{ type.default_height }}" data-type-label="{{ type.label }}" data-connectors="{{ type.connectors|map('join', ':')|join(' ') }}" data-power-input="{{ 'true' if type.power_input else 'false' }}" data-image-units="{{ type.image_units }}" data-image-w1="{{ static_url(image_path(type.key, 1)) }}" data-image-w2="{{ static_url(image_path(type.key, 2)) }}" data-image-w3="{{ static_url(image_path(type.key, 3)) }}"{% if loop.first %} checked{% endif %}><span><img class="rack-choice__image" src="{{ static_url(type.image) }}" alt="" width="96" height="{{ 9 * type.image_units }}" loading="lazy"><strong>{{ type.short_label }}</strong></span></label>{% endfor %}
           </fieldset>
           <div class="rack-fields">
             <label class="rack-field rack-field--wide"><span>Item name <small>optional · defaults to the linked asset or type</small></span><input class="input" name="name" maxlength="191" placeholder="e.g. Core switch A"></label>
             <label class="rack-field rack-field--wide"><span>Linked asset <small>optional</small></span><select class="input" name="asset_id"><option value="">No linked asset</option>{% for asset in assets %}<option value="{{ asset.id }}">{{ asset.name }}</option>{% endfor %}</select></label>
-            <label class="rack-field" data-port-count hidden><span>Number of <span data-ports-noun>ports</span> <small>optional</small></span><input class="input" type="number" name="port_count" min="0" max="1000" inputmode="numeric"></label>
             <label class="rack-field"><span>Power draw <small>W, optional</small></span><input class="input" type="number" name="power_draw_watts" min="0" inputmode="numeric"></label>
           </div>
+          <fieldset class="rack-dialog__section rack-connections" data-connections hidden>
+            <legend>Connections</legend>
+            <div class="rack-fields">
+              {% for key, connector in connectors.items() %}<label class="rack-field" data-connector-count="{{ key }}" hidden><span>{{ connector.count_label }}</span><input class="input" type="number" name="port_count_{{ key }}" min="0" max="1000" value="0" inputmode="numeric"></label>{% endfor %}
+            </div>
+            <details class="rack-port-links" data-port-links-panel>
+              <summary><span data-port-links-summary>Port links</span></summary>
+              <p class="rack-dialog__hint">Link each port or connected device to an asset, or label one that is not in the asset register. Choose the outlet feeding each power supply.</p>
+              <div class="rack-port-links__table" data-port-links role="table" aria-label="Port links"></div>
+            </details>
+            <template data-asset-options><option value="">No asset</option>{% for asset in assets %}<option value="{{ asset.id }}">{{ asset.name }}</option>{% endfor %}</template>
+            <template data-outlet-options><option value="">No documented outlet</option>{% for outlet in power_outlets %}<option value="{{ outlet.id }}" data-equipment-id="{{ outlet.equipment_id }}">{{ outlet.label }}</option>{% endfor %}</template>
+          </fieldset>
         </div>
         <div class="rack-dialog__section rack-fields" data-reservation-fields hidden>
           <label class="rack-field"><span>Reservation label <small>optional</small></span><input class="input" name="label" maxlength="191" placeholder="e.g. Future firewall"></label>
@@ -191,60 +205,20 @@
             <div class="rack-field"><span id="rack-place-depth">Depth</span><div class="rack-segment" role="radiogroup" aria-labelledby="rack-place-depth"><label><input type="radio" name="depth_mode" value="half" checked><span>Half</span></label><label><input type="radio" name="depth_mode" value="full"><span>Full · both faces</span></label></div></div>
             <label class="rack-field"><span>Starting U</span><input class="input" type="number" name="start_unit" min="1" required inputmode="numeric"></label>
             <label class="rack-field"><span>Height (U)</span><input class="input" type="number" name="unit_height" min="1" value="1" required inputmode="numeric"></label>
-            <div class="rack-field"><span id="rack-place-width">Width</span><div class="rack-segment" role="radiogroup" aria-labelledby="rack-place-width">{% for value, label in [(1, '⅓'), (2, '⅔'), (3, 'Full')] %}<label><input type="radio" name="width_lanes" value="{{ value }}"{% if loop.first %} checked{% endif %}><span>{{ label }}<span class="sr-only"> width</span></span></label>{% endfor %}</div></div>
+            <div class="rack-field"><span id="rack-place-width">Width</span><div class="rack-segment" role="radiogroup" aria-labelledby="rack-place-width">{% for value, label in [(1, '⅓'), (2, '⅔'), (3, 'Full')] %}<label><input type="radio" name="width_lanes" value="{{ value }}"{% if value == 3 %} checked{% endif %}><span>{{ label }}<span class="sr-only"> width</span></span></label>{% endfor %}</div></div>
             <div class="rack-field"><span id="rack-place-lane">Starting lane</span><div class="rack-segment" role="radiogroup" aria-labelledby="rack-place-lane">{% for value, label in [(1, 'Left'), (2, 'Centre'), (3, 'Right')] %}<label><input type="radio" name="start_lane" value="{{ value }}"{% if loop.first %} checked{% endif %}><span>{{ label }}</span></label>{% endfor %}</div></div>
           </div>
         </fieldset>
         <label class="rack-field rack-dialog__section"><span>Notes <small>optional</small></span><textarea class="input" name="notes" maxlength="1000" rows="2"></textarea></label>
       </div>
       <aside class="rack-dialog__preview" aria-label="Placement preview">
+        <div class="rack-faceplate" data-faceplate aria-hidden="true"><span data-faceplate-name></span></div>
         <div class="rack-mini" data-placement-map aria-hidden="true"></div>
         <p class="rack-mini__caption" data-placement-map-caption></p>
         <div class="rack-preview" role="status" aria-live="polite" data-placement-preview></div>
       </aside>
     </div>
-    <footer class="dialog__footer"><button type="button" class="button button--secondary" data-dialog-close>Cancel</button><button class="button button--primary" data-submit-label>Place equipment</button></footer>
-  </form>
-</dialog>
-<dialog id="rack-edit-dialog" class="dialog rack-dialog rack-dialog--edit" aria-labelledby="rack-edit-title">
-  <form class="dialog__container" method="post" data-edit-form>
-    <header class="dialog__header rack-dialog__header">
-      <div>
-        <p class="rack-dialog__eyebrow">Rack elevation</p>
-        <h2 class="dialog__title" id="rack-edit-title">Edit rack item</h2>
-        <p class="rack-dialog__position" data-edit-position></p>
-      </div>
-      <button type="button" class="dialog__close" data-dialog-close aria-label="Close">×</button>
-    </header>
-    <div class="dialog__body rack-dialog__body">
-      {% include "partials/csrf.html" %}<input type="hidden" name="rack_id" value="{{ workspace.selected_rack.id if workspace.selected_rack else '' }}">
-      <div class="rack-dialog__main">
-        <fieldset class="rack-choice rack-choice--type">
-          <legend>Item type</legend>
-          {% for type in item_types %}<label class="rack-choice__option" title="{{ type.label }}"><input type="radio" name="item_type" value="{{ type.key }}" data-ports-label="{{ type.ports_label or '' }}" data-type-label="{{ type.label }}" data-image="{{ static_url(type.image) }}" data-image-units="{{ type.image_units }}"{% if type.has_ports %} data-has-ports{% endif %}{% if loop.first %} checked{% endif %}><span><img class="rack-choice__image" src="{{ static_url(type.image) }}" alt="" width="96" height="{{ 9 * type.image_units }}" loading="lazy"><strong>{{ type.short_label }}</strong></span></label>{% endfor %}
-          <p class="rack-dialog__hint" data-edit-type-hint hidden>Types with ports or outlets need numbered connections, which are created when an item is placed. Remove and re-add the item to change it to one of these types.</p>
-        </fieldset>
-        <div class="rack-dialog__section rack-fields">
-          <label class="rack-field rack-field--wide"><span>Item name <small>optional · defaults to the linked asset or type</small></span><input class="input" name="name" maxlength="191"></label>
-          <label class="rack-field rack-field--wide"><span>Linked asset <small>optional</small></span><select class="input" name="asset_id"><option value="">No linked asset</option>{% for asset in assets %}<option value="{{ asset.id }}">{{ asset.name }}</option>{% endfor %}</select></label>
-          <label class="rack-field"><span>Power draw <small>W, optional</small></span><input class="input" type="number" name="power_draw_watts" min="0" inputmode="numeric"></label>
-        </div>
-        <label class="rack-field rack-dialog__section"><span>Notes <small>optional</small></span><textarea class="input" name="notes" maxlength="1000" rows="2"></textarea></label>
-      </div>
-      <aside class="rack-dialog__preview rack-edit-summary" aria-label="Item summary">
-        <div class="rack-edit-summary__face" data-edit-face aria-hidden="true"></div>
-        <dl class="rack-edit-summary__facts">
-          <div><dt>Type</dt><dd data-edit-type-label></dd></div>
-          <div><dt>Position</dt><dd data-edit-position-detail></dd></div>
-          <div data-edit-ports-row><dt data-edit-ports-noun>Ports</dt><dd data-edit-ports-summary></dd></div>
-          <div><dt>Linked asset</dt><dd data-edit-asset></dd></div>
-        </dl>
-        <div class="rack-mini" data-edit-map aria-hidden="true"></div>
-        <p class="rack-mini__caption" data-edit-map-caption></p>
-        <p class="rack-dialog__hint">Position and connection count stay the same. Port and outlet links are edited in the item list.</p>
-      </aside>
-    </div>
-    <footer class="dialog__footer rack-dialog__footer"><button type="button" class="button button--danger" data-edit-remove>Remove item</button><span class="rack-dialog__spacer"></span><button type="button" class="button button--secondary" data-edit-ports>Port links</button><button type="button" class="button button--secondary" data-dialog-close>Cancel</button><button class="button button--primary">Save changes</button></footer>
+    <footer class="dialog__footer rack-dialog__footer"><button type="button" class="button button--danger" data-edit-remove hidden>Remove item</button><span class="rack-dialog__spacer"></span><button type="button" class="button button--secondary" data-dialog-close>Cancel</button><button class="button button--primary" data-submit-label>Place equipment</button></footer>
   </form>
 </dialog>
 <dialog id="rack-reservation-dialog" class="dialog rack-dialog rack-dialog--reservation" aria-labelledby="rack-reservation-title">

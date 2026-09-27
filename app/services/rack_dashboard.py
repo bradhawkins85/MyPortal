@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping, Sequence
 
-from app.services import rack_item_types
+from app.services import rack_faceplates, rack_item_types
 
 FACES = ("front", "rear")
 LANES = (1, 2, 3)
@@ -77,21 +77,55 @@ def _covers(item: Mapping[str, Any], unit: int, lane: int) -> bool:
             and lane_start <= lane < lane_start + int(item["width_lanes"]))
 
 
-def _drawn_ports(item: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _drawn_ports(item: Mapping[str, Any], rear: bool = False) -> list[dict[str, Any]]:
+    """Return the connections physically on the viewed side of an item."""
     item_type = rack_item_types.get(item.get("item_type"))
     if not item_type.has_ports:
         return []
+    on_side = lambda connector: (connector in item_type.rear_connectors) == rear  # noqa: E731
     ports = list(item.get("ports") or [])
     if ports:
-        return [{"number": int(port["port_number"]), "linked": port.get("asset_id") is not None}
-                for port in ports[:MAX_DRAWN_PORTS]]
-    count = int(item.get("port_count") or 0) or item_type.default_ports
-    return [{"number": number, "linked": False} for number in range(1, min(count, MAX_DRAWN_PORTS) + 1)]
+        drawn = [{"number": int(port["port_number"]), "connector": str(port.get("connector") or "data"),
+                  "linked": (port.get("asset_id") is not None or bool(port.get("label"))
+                             or port.get("source_port_id") is not None)}
+                 for port in ports]
+    else:
+        drawn = [{"number": 0, "connector": connector, "linked": False}
+                 for connector, count in item_type.connectors for _ in range(count)]
+        for number, port in enumerate(drawn, start=1):
+            port["number"] = number
+    return [port for port in drawn if on_side(port["connector"])][:MAX_DRAWN_PORTS]
 
 
-def _block(rack: Mapping[str, Any], item: Mapping[str, Any], kind: str) -> dict[str, Any]:
+def _side_view(catalogue: rack_item_types.RackItemType, item: Mapping[str, Any],
+               width: int, height: int, rear: bool) -> dict[str, Any]:
+    """How one side of an item is drawn: its image, repeat height and ports."""
+    view: dict[str, Any] = {
+        "rear": rear,
+        "image": rack_item_types.image_path(catalogue.key, width, rear),
+        "faceplate": None,
+        "image_units": catalogue.image_units,
+        "ports": _drawn_ports(item, rear),
+    }
+    if rack_faceplates.side_connectors(catalogue.key, rear):
+        # Draw this side from the item's actual connections at full height.
+        connections = rack_faceplates.connections_from_ports(item.get("ports") or [], catalogue.key, rear)
+        view["faceplate"] = rack_faceplates.data_uri(
+            rack_faceplates.render(catalogue.key, width, height, rear, connections))
+        view["image_units"] = height
+    return view
+
+
+def _block(rack: Mapping[str, Any], item: Mapping[str, Any], kind: str,
+           face: str = "front") -> dict[str, Any]:
     start, height = int(item["start_unit"]), int(item["unit_height"])
     lane, width = int(item["start_lane"]), int(item["width_lanes"])
+    # A full-depth item is seen from behind on the face it is not mounted on.
+    rear = face != str(item.get("face") or "front")
+    image = None
+    faceplate = None
+    alternate = None
+    ports: list[dict[str, Any]] = []
     if kind == "reservation":
         name = item.get("label") or "Reserved space"
         item_type, type_label, active, image_units = "reserved", "Reserved", False, 1
@@ -102,6 +136,12 @@ def _block(rack: Mapping[str, Any], item: Mapping[str, Any], kind: str) -> dict[
         item_type, type_label = catalogue.key, catalogue.label
         active, image_units = catalogue.active, catalogue.image_units
         status = equipment_status(item)
+        view = _side_view(catalogue, item, width, height, rear)
+        image, faceplate = view["image"], view["faceplate"]
+        image_units, ports = view["image_units"], view["ports"]
+        # Swivelling the rack shows every item from the other side, including
+        # half-depth items that are otherwise only seen from one face.
+        alternate = _side_view(catalogue, item, width, height, not rear)
     return {
         "kind": kind,
         "id": item["id"],
@@ -118,7 +158,11 @@ def _block(rack: Mapping[str, Any], item: Mapping[str, Any], kind: str) -> dict[
         "end_lane": lane + width - 1,
         "width_lanes": width,
         "grid_row": _grid_row(rack, item),
-        "ports": _drawn_ports(item) if kind == "equipment" else [],
+        "ports": ports,
+        "rear": rear,
+        "image": image,
+        "faceplate": faceplate,
+        "alternate": alternate,
         "port_count": int(item.get("port_count") or 0),
         "power_draw_watts": item.get("power_draw_watts"),
     }
@@ -142,7 +186,7 @@ def build_faces(rack: Mapping[str, Any], equipment: Iterable[Mapping[str, Any]],
         ]
         faces.append({
             "face": face,
-            "blocks": [_block(rack, item, kind) for item, kind in on_face],
+            "blocks": [_block(rack, item, kind, face) for item, kind in on_face],
             "open_slots": open_slots,
         })
     return faces
@@ -206,6 +250,36 @@ def build_heatmap(rack: Mapping[str, Any], equipment: Iterable[Mapping[str, Any]
             "peak_watts": round(peak, 1), "levels": HEAT_LEVELS}
 
 
+def edit_payload(item: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the fields the add/edit dialog needs to reopen a rack item."""
+    catalogue = rack_item_types.get(item.get("item_type"))
+    counts = {connector: 0 for connector in catalogue.connector_keys}
+    for port in item.get("ports") or []:
+        connector = str(port.get("connector") or "data")
+        counts[connector] = counts.get(connector, 0) + 1
+    return {
+        "id": item["id"],
+        "name": item.get("name") or "",
+        "item_type": catalogue.key,
+        "asset_id": item.get("asset_id"),
+        "power_draw_watts": item.get("power_draw_watts"),
+        "notes": item.get("notes") or "",
+        "start_unit": int(item["start_unit"]),
+        "unit_height": int(item["unit_height"]),
+        "face": item.get("face") or "front",
+        "width_lanes": int(item["width_lanes"]),
+        "start_lane": int(item["start_lane"]),
+        "depth_mode": item.get("depth_mode") or "half",
+        "port_counts": counts,
+        "ports": [
+            {"connector": str(port.get("connector") or "data"), "ordinal": int(port.get("ordinal") or 0),
+             "asset_id": port.get("asset_id"), "label": port.get("label") or "",
+             "source_port_id": port.get("source_port_id")}
+            for port in item.get("ports") or []
+        ],
+    }
+
+
 def estate_summary(racks: Sequence[Mapping[str, Any]], equipment: Sequence[Mapping[str, Any]],
                    reservations: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Return totals across every rack for the overview and sidebar."""
@@ -233,6 +307,7 @@ def build_workspace(data: Mapping[str, Any], requested_rack: Any, requested_view
         "heatmap": None,
         "reservation_count": 0,
         "warning_count": 0,
+        "items": [],
     }
     if selected is not None:
         workspace["faces"] = build_faces(selected, equipment, reservations)
@@ -241,4 +316,5 @@ def build_workspace(data: Mapping[str, Any], requested_rack: Any, requested_view
         workspace["warning_count"] = sum(
             1 for item in equipment
             if item["rack_id"] == selected["id"] and equipment_status(item) == "warning")
+        workspace["items"] = [edit_payload(item) for item in equipment if item["rack_id"] == selected["id"]]
     return workspace
