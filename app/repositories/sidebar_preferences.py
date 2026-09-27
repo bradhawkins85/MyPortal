@@ -6,7 +6,182 @@ from typing import Any
 from app.core.database import db
 
 PROTECTED_MENU_KEYS: set[str] = {"/admin/profile"}
-ALLOWED_GROUP_ICONS: set[str] = {"folder", "shop", "briefcase", "grid", "star", "users"}
+ALLOWED_GROUP_ICONS: set[str] = {
+    "folder",
+    "shop",
+    "briefcase",
+    "grid",
+    "star",
+    "users",
+    "support",
+    "server",
+    "shield",
+    "chart",
+    "settings",
+    "automation",
+    "phone",
+    "history",
+}
+
+# Bumped whenever the shipped default layout changes shape. Saved preferences
+# carry the version they were written against so legacy (pre-grouping) rows
+# can be upgraded to the grouped default instead of staying a flat list.
+SIDEBAR_LAYOUT_VERSION = 1
+
+# The default left menu. Keys are the sidebar hrefs (or ``data-menu-key``
+# values). Items a user cannot access are simply absent from their sidebar, and
+# groups left with no accessible items are not rendered, so one layout serves
+# every role. Menu entries not listed here fall to the bottom, ungrouped.
+_DEFAULT_LAYOUT: tuple[tuple[str, ...] | tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("/",),
+    ("/search",),
+    ("/notifications",),
+    ("/chat",),
+    (
+        "__group__:default-support",
+        "Support",
+        "support",
+        (
+            "/tickets",
+            "/admin/tickets",
+            "/admin/issues",
+            "/service-status",
+            "/knowledge-base",
+            "/documentation-search",
+            "/myforms",
+            "/help",
+        ),
+    ),
+    (
+        "__group__:default-commerce",
+        "Sales & Billing",
+        "shop",
+        (
+            "/shop",
+            "/quotes",
+            "/orders",
+            "/invoices",
+            "/subscriptions",
+            "/admin/marketing",
+        ),
+    ),
+    ("/m365",),
+    (
+        "__group__:default-infrastructure",
+        "Assets & Network",
+        "server",
+        (
+            "/assets",
+            "/devices",
+            "/ipam",
+            "/racks",
+            "/websites",
+            "/expirations",
+        ),
+    ),
+    (
+        "__group__:default-company",
+        "Company",
+        "briefcase",
+        (
+            "/staff",
+            "/processes",
+            "/shared-credentials",
+            "/voice-monitor",
+        ),
+    ),
+    (
+        "__group__:default-security",
+        "Security & Compliance",
+        "shield",
+        (
+            "/compliance",
+            "/compliance-checks",
+            "/bcp",
+            "/defender",
+            "/dmarc",
+        ),
+    ),
+    (
+        "__group__:default-reports",
+        "Reports",
+        "chart",
+        (
+            "/reports/company-overview",
+            "/reporting",
+            "/admin/backup-summary",
+        ),
+    ),
+    ("/admin/profile",),
+    (
+        "__group__:default-admin",
+        "Administration",
+        "settings",
+        (
+            "/admin/companies",
+            "/admin/users",
+            "/admin/roles",
+            "/admin/sessions",
+            "/admin/impersonation",
+            "/admin/approvals",
+            "/admin/api-keys",
+            "/admin/modules",
+            "/admin/feature-packs",
+            "/admin/tray/configurations",
+        ),
+    ),
+    (
+        "__group__:default-automation",
+        "Automation & AI",
+        "automation",
+        (
+            "/admin/scheduled-tasks",
+            "/admin/cron-calendar",
+            "/admin/webhooks",
+            "/admin/message-templates",
+            "/admin/rag",
+            "/admin/ai-quality",
+            "/admin/chat/ai-tag-synonyms",
+        ),
+    ),
+    (
+        "__group__:default-calls",
+        "Calls & Voice",
+        "phone",
+        (
+            "/admin/calls",
+            "/admin/call-recordings",
+            "/admin/voice-monitor",
+        ),
+    ),
+    (
+        "__group__:default-logs",
+        "Logs & History",
+        "history",
+        (
+            "/admin/backup-jobs",
+            "/admin/change-log",
+            "/admin/audit-logs",
+        ),
+    ),
+)
+
+
+def build_default_sidebar_preferences() -> dict[str, Any]:
+    """Return a fresh copy of the default, logically grouped left menu."""
+
+    order: list[str] = []
+    groups: list[dict[str, Any]] = []
+    for entry in _DEFAULT_LAYOUT:
+        order.append(entry[0])
+        if len(entry) == 4:
+            group_id, label, icon, items = entry  # type: ignore[misc]
+            groups.append({"id": group_id, "label": label, "icon": icon, "items": list(items)})
+    return {"version": SIDEBAR_LAYOUT_VERSION, "order": order, "hidden": [], "groups": groups}
+
+
+def default_group_ids() -> list[str]:
+    return [group["id"] for group in build_default_sidebar_preferences()["groups"]]
 
 
 def _normalise_menu_key(value: Any) -> str:
@@ -18,7 +193,7 @@ def _normalise_menu_key(value: Any) -> str:
 
 def _coerce_preferences(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
-        return {"order": [], "hidden": [], "groups": []}
+        return {"version": SIDEBAR_LAYOUT_VERSION, "order": [], "hidden": [], "groups": []}
 
     order_values = payload.get("order") if isinstance(payload.get("order"), list) else []
     hidden_values = payload.get("hidden") if isinstance(payload.get("hidden"), list) else []
@@ -80,7 +255,26 @@ def _coerce_preferences(payload: Any) -> dict[str, Any]:
         if group["id"] not in seen_order:
             order.append(group["id"])
 
-    return {"order": order, "hidden": hidden, "groups": groups}
+    return {"version": SIDEBAR_LAYOUT_VERSION, "order": order, "hidden": hidden, "groups": groups}
+
+
+def resolve_stored_preferences(payload: Any) -> dict[str, Any]:
+    """Turn a stored preferences document into the layout the sidebar uses.
+
+    Users who never customised the menu get the grouped default. Rows saved
+    before grouping existed (no ``version`` and no groups) were only ever a
+    flat order plus hidden items, so they are upgraded to the default layout
+    while keeping the links the user chose to hide.
+    """
+
+    if not isinstance(payload, dict) or not payload:
+        return build_default_sidebar_preferences()
+    coerced = _coerce_preferences(payload)
+    if "version" not in payload and not coerced["groups"]:
+        defaults = build_default_sidebar_preferences()
+        defaults["hidden"] = coerced["hidden"]
+        return defaults
+    return coerced
 
 
 async def get_user_sidebar_preferences(user_id: int) -> dict[str, Any]:
@@ -93,7 +287,7 @@ async def get_user_sidebar_preferences(user_id: int) -> dict[str, Any]:
         (user_id,),
     )
     if not row:
-        return {"order": [], "hidden": [], "groups": []}
+        return build_default_sidebar_preferences()
 
     raw_preferences = row.get("preferences_json")
     parsed: Any
@@ -105,7 +299,7 @@ async def get_user_sidebar_preferences(user_id: int) -> dict[str, Any]:
     else:
         parsed = raw_preferences
 
-    return _coerce_preferences(parsed)
+    return resolve_stored_preferences(parsed)
 
 
 async def upsert_user_sidebar_preferences(
