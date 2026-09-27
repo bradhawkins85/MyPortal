@@ -703,3 +703,49 @@ def test_consume_transactional_reload_writes_revision_ack_and_is_idempotent(
     asyncio.run(scheduler._consume_feature_pack_reload_flag())
     assert registry.reloaded == ["tickets", "service_status"]
     assert not flag_path.exists()
+
+
+def test_immutable_release_reports_its_recorded_revision(monkeypatch, tmp_path):
+    from app.services import scheduler as scheduler_module
+
+    revision = "a" * 40
+    release = tmp_path / "releases" / revision
+    release.mkdir(parents=True)
+    (release / "version.txt").write_text(f"{revision}\n", encoding="utf-8")
+    control = tmp_path / "control"
+    (control / ".git").mkdir(parents=True)
+    monkeypatch.setattr(scheduler_module, "_PROJECT_ROOT", release)
+    monkeypatch.setenv("MYPORTAL_CONTROL_CHECKOUT", str(control))
+
+    assert scheduler_module._release_revision() == revision
+    assert asyncio.run(SchedulerService()._get_git_ref("HEAD")) == revision
+    assert scheduler_module._git_context() == (
+        control,
+        ["-c", f"safe.directory={control}"],
+    )
+
+
+def test_development_checkout_queries_git_directly(monkeypatch, tmp_path):
+    from app.services import scheduler as scheduler_module
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "version.txt").write_text("b" * 40, encoding="utf-8")
+    monkeypatch.setattr(scheduler_module, "_PROJECT_ROOT", tmp_path)
+    monkeypatch.setenv("MYPORTAL_CONTROL_CHECKOUT", "/somewhere/else")
+
+    assert scheduler_module._release_revision() is None
+    assert scheduler_module._git_context() == (tmp_path, [])
+
+
+def test_docker_deployment_defers_updates_to_release_script(monkeypatch):
+    from app.services import scheduler as scheduler_module
+
+    async def fail(*_args, **_kwargs):  # pragma: no cover - must not run
+        raise AssertionError("Git must not be queried inside a container")
+
+    monkeypatch.setenv("MYPORTAL_DEPLOYMENT", "docker")
+    monkeypatch.setattr(SchedulerService, "_get_git_ref", fail)
+
+    message = asyncio.run(SchedulerService().run_system_update(force_restart=True))
+
+    assert message == scheduler_module._DOCKER_SYSTEM_UPDATE_MESSAGE

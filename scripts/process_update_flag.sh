@@ -3,7 +3,18 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
-FLAG_DIR="${PROJECT_ROOT}/var/state"
+SHARED_STATE_DIR="${MYPORTAL_SHARED_ROOT:-/opt/myportal/shared}/state"
+SERVICE_USER="myportal"
+# Immutable releases link var/ to the shared tree, so the application writes
+# its update request to the shared state directory. Checkouts that predate the
+# immutable-release layout keep the flag inside the checkout.
+if [[ -d "$SHARED_STATE_DIR" ]]; then
+  FLAG_DIR="$SHARED_STATE_DIR"
+  LEGACY_FLAG_DIR=false
+else
+  FLAG_DIR="${PROJECT_ROOT}/var/state"
+  LEGACY_FLAG_DIR=true
+fi
 UPDATE_FLAG_FILE="${FLAG_DIR}/system_update.flag"
 LOCK_FILE="${FLAG_DIR}/system_update.lock"
 REPORT_HELPER="${SCRIPT_DIR}/system_update_report.py"
@@ -86,15 +97,19 @@ validate_flag_file() {
       exit 1
     fi
 
-    if [[ -n "$flag_owner" && -n "$project_owner" && "$flag_owner" != "0" && "$flag_owner" != "$project_owner" ]]; then
+    local service_uid
+    service_uid=$(id -u "$SERVICE_USER" 2>/dev/null || true)
+    if [[ -n "$flag_owner" && -n "$project_owner" && "$flag_owner" != "0" && "$flag_owner" != "$project_owner" && "$flag_owner" != "$service_uid" ]]; then
       echo "Error: Refusing to process update flag owned by unexpected uid $flag_owner." >&2
       exit 1
     fi
   fi
 }
 
-mkdir -p "$FLAG_DIR"
-chmod 750 "$FLAG_DIR" >/dev/null 2>&1 || true
+if [[ "$LEGACY_FLAG_DIR" == true ]]; then
+  mkdir -p "$FLAG_DIR"
+  chmod 750 "$FLAG_DIR" >/dev/null 2>&1 || true
+fi
 
 if [[ ! -f "$UPDATE_FLAG_FILE" ]]; then
   exit 0

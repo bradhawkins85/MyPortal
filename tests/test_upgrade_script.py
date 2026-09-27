@@ -688,7 +688,7 @@ def test_deleted_migration_is_not_treated_as_additive_release(tmp_path):
     ).strip()
     function = SCRIPT[
         SCRIPT.index("is_additive_migration_only_release() {") : SCRIPT.index(
-            "\ncommand -v git"
+            "\nrequire_host_prerequisites() {"
         )
     ]
 
@@ -805,7 +805,7 @@ def test_upgrade_rejects_missing_secrets_before_installing_release(tmp_path):
     )
     assert "before running the upgrade" in result.stderr
     validation = SCRIPT.index(
-        "validate_required_configuration\n", SCRIPT.index("command -v git")
+        "validate_required_configuration\n", SCRIPT.index("\nrequire_host_prerequisites\n")
     )
     preparation = SCRIPT.index('prepare_release "$TARGET_REVISION"')
     assert validation < preparation
@@ -968,9 +968,9 @@ def test_pre_cutover_failure_does_not_rewrite_working_upstream():
 def test_failure_rolls_back_links_and_upstream():
     assert "rollback()" in SCRIPT
     assert (
-        'trap \'rollback "$active" "$inactive" "$old_inactive" "$upstream_switched"\' ERR'
-        in SCRIPT
-    )
+        'trap "rollback $(printf \'%q \' "$active" "$inactive" "$old_inactive")'
+        '\\"\\$upstream_switched\\"" ERR'
+    ) in SCRIPT
     assert 'write_upstream "$old_active" "$new_instance"' in SCRIPT
     assert 'atomic_link "$PREVIOUS_RELEASE" "$CURRENT_LINK"' in SCRIPT
 
@@ -1023,3 +1023,34 @@ def test_feature_pack_reload_timeout_is_validated_before_upgrade():
     )
     fetch = SCRIPT.index("git fetch --quiet origin main")
     assert validation < fetch
+
+
+def test_rollback_targets_are_not_shadowed_by_failing_helper():
+    """A failure inside a helper with its own active/inactive locals (such as
+    install_blue_green_nginx_config) must still roll back the caller's slots."""
+
+    trap_line = next(
+        line.strip() for line in SCRIPT.splitlines() if line.strip().startswith('trap "rollback')
+    )
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -Eeuo pipefail\n"
+            'rollback() { echo "rollback $1 $2 [$3] $4"; }\n'
+            'helper() { local active="$2" inactive="$3"; false; }\n'
+            "run() {\n"
+            "  local active=blue inactive=green old_inactive='' upstream_switched=false\n"
+            f"  {trap_line}\n"
+            "  upstream_switched=true\n"
+            '  helper release "$inactive" "$active"\n'
+            "}\n"
+            "run",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert result.stdout.strip() == "rollback blue green [] true"

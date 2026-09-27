@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from datetime import datetime, timezone
-from enum import StrEnum
+from enum import Enum
 from typing import Any, Mapping
 
 from loguru import logger
@@ -12,6 +12,17 @@ from loguru import logger
 from app.core.config import get_settings
 from app.repositories import rag_relationships as rel_repo
 from app.services import modules as modules_service
+
+
+try:
+    from enum import StrEnum
+except ImportError:  # Python 3.10 (Ubuntu 22.04); pyproject supports >=3.10
+
+    class StrEnum(str, Enum):
+        """Backport of :class:`enum.StrEnum` (Python 3.11+)."""
+
+        def __str__(self) -> str:
+            return str(self.value)
 
 
 class RelationshipType(StrEnum):

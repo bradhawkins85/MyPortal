@@ -19,7 +19,15 @@ _default_history_dir = (
     Path(_shared_root) / "state/system-updates"
     if _shared_root else _PROJECT_ROOT / "var/state/system-updates"
 )
-_HISTORY_DIR = Path(os.getenv("MYPORTAL_SYSTEM_UPDATE_HISTORY_DIR", _default_history_dir))
+
+
+def _resolve_history_dir(default: Path) -> Path:
+    # .env.example ships this key blank; treat blank as "use the default"
+    # rather than Path(""), which resolves to the (read-only) working directory.
+    return Path(os.getenv("MYPORTAL_SYSTEM_UPDATE_HISTORY_DIR") or default)
+
+
+_HISTORY_DIR = _resolve_history_dir(_default_history_dir)
 _MAX_OUTPUT = 32_000
 _SECRET_RE = re.compile(
     r"(?i)(authorization|password|passwd|token|secret|api[_-]?key|private[_-]?key)"

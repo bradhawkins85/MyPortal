@@ -1,5 +1,5 @@
 {
-  "guid": "8c7a5d91-2234-4f9b-b88b-website-delete",
+  "guid": "0fe2396a-7ee1-4426-880c-a63829f2ffb4",
   "occurred_at": "2026-09-27T00:00:00Z",
   "change_type": "feature",
   "summary": "Added a permission-gated website deletion action with confirmation, tenant scoping, and audit logging.",

@@ -1,5 +1,5 @@
 {
-  "guid": "2a2c9560-4230-4d00-9000-website-observations",
+  "guid": "a1b5e220-7541-489e-b0b1-2acd2d0b2eb4",
   "occurred_at": "2026-09-27T00:00:00Z",
   "change_type": "feature",
   "summary": "Expanded website monitoring with structured TLS, RDAP registration, DNS observations and tenant-scoped DNS change history.",

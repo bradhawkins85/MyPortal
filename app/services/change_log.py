@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import uuid
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import Sequence
 
 from app.core.database import db
-from app.core.logging import log_error, log_info
+from app.core.logging import log_debug, log_error, log_info
 from app.repositories import change_log as change_log_repo
 
 _CHANGE_MD_PATTERN = re.compile(
@@ -135,8 +136,20 @@ def _cache_key(path: Path, *, root: Path) -> str:
         return str(path.resolve())
 
 
-def _load_sync_cache(changes_dir: Path) -> dict[str, int]:
-    cache_path = changes_dir / _CACHE_FILENAME
+def _sync_cache_path(changes_dir: Path, *, root: Path) -> Path:
+    """Keep the cache beside the change files unless they are read-only.
+
+    Immutable production releases cannot be written to; their ``var``
+    directory links to the deployment's shared, writable state instead.
+    """
+
+    if os.access(changes_dir, os.W_OK):
+        return changes_dir / _CACHE_FILENAME
+    return root / "var" / "state" / "change-log-cache.json"
+
+
+def _load_sync_cache(changes_dir: Path, *, root: Path) -> dict[str, int]:
+    cache_path = _sync_cache_path(changes_dir, root=root)
     try:
         raw = json.loads(cache_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -154,7 +167,7 @@ def _load_sync_cache(changes_dir: Path) -> dict[str, int]:
 
 
 def _save_sync_cache(changes_dir: Path, *, root: Path) -> None:
-    cache_path = changes_dir / _CACHE_FILENAME
+    cache_path = _sync_cache_path(changes_dir, root=root)
     states: dict[str, int] = {}
 
     for path in sorted(changes_dir.glob("*.json")):
@@ -169,6 +182,7 @@ def _save_sync_cache(changes_dir: Path, *, root: Path) -> None:
         states[_cache_key(changes_md, root=root)] = mtime
 
     try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(
             json.dumps(states, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -254,16 +268,25 @@ async def _persist_entries(entries: Sequence[ChangeLogEntry], *, changes_dir: Pa
             else:
                 should_write = current != desired
         if should_write:
-            _write_change_file(entry, target_path)
+            # Normalising the source file is best-effort: production releases
+            # are read-only, and the database record below is authoritative.
+            try:
+                _write_change_file(entry, target_path)
+            except OSError as exc:
+                log_debug("Change log file left unnormalised", file=str(target_path), error=str(exc))
 
-        await repository.upsert_change(
-            guid=entry.guid,
-            occurred_at_utc=entry.occurred_at_utc,
-            change_type=entry.change_type,
-            summary=entry.summary,
-            source_file=str(Path("changes") / target_path.name),
-            content_hash=entry.content_hash,
-        )
+        try:
+            await repository.upsert_change(
+                guid=entry.guid,
+                occurred_at_utc=entry.occurred_at_utc,
+                change_type=entry.change_type,
+                summary=entry.summary,
+                source_file=str(Path("changes") / target_path.name),
+                content_hash=entry.content_hash,
+            )
+        except Exception as exc:  # noqa: BLE001 - one bad entry must not hide the rest
+            log_error("Unable to store change log entry", file=str(target_path), error=str(exc))
+            continue
         stored += 1
     return stored
 
@@ -278,7 +301,7 @@ async def sync_change_log_sources(*, base_path: Path | None = None, repository=c
         log_info("Skipping change log synchronisation because the database is not connected")
         return
 
-    cache = _load_sync_cache(changes_dir)
+    cache = _load_sync_cache(changes_dir, root=root)
     entries: list[ChangeLogEntry] = []
     for path in sorted(changes_dir.glob("*.json")):
         cache_key = _cache_key(path, root=root)

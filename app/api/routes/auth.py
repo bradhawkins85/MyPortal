@@ -368,6 +368,30 @@ async def _complete_login_response(
     return response
 
 
+async def _resolve_first_user_company_id(requested_company_id: int | None) -> int:
+    """Return the company for the initial super administrator.
+
+    ``users.company_id`` is mandatory, but a freshly installed portal gives the
+    first user no way to know a company identifier, so the field is optional on
+    the registration form. Fall back to the first existing company (normally
+    the demo company seeded at startup) and create one when none exists yet.
+    """
+
+    if requested_company_id is not None:
+        if not await company_repo.get_company_by_id(requested_company_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Company {requested_company_id} does not exist",
+            )
+        return requested_company_id
+
+    companies = await company_repo.list_companies(include_archived=True)
+    if companies:
+        return int(min(int(company["id"]) for company in companies))
+    company = await company_repo.create_company(name="Default Company")
+    return int(company["id"])
+
+
 @router.post(
     "/register",
     response_model=LoginResponse,
@@ -448,13 +472,17 @@ async def register(
                     detail="Registration is restricted to approved company domains or existing staff records",
                 ) from exc
 
+    first_user_company_id: int | None = None
+    if is_first_user:
+        first_user_company_id = await _resolve_first_user_company_id(payload.company_id)
+
     created = await user_repo.create_user(
         email=payload.email,
         password=payload.password,
         first_name=payload.first_name or (matched_staff or {}).get("first_name"),
         last_name=payload.last_name or (matched_staff or {}).get("last_name"),
         mobile_phone=payload.mobile_phone or (matched_staff or {}).get("mobile_phone"),
-        company_id=payload.company_id if is_first_user else matched_company_id,
+        company_id=first_user_company_id if is_first_user else matched_company_id,
         is_super_admin=is_first_user,
     )
 

@@ -6,7 +6,22 @@ umask 027
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
-SYSTEM_UPDATE_FLAG_FILE="${PROJECT_ROOT}/var/state/system_update.flag"
+SERVICE_USER="myportal"
+
+# The coordinator runs as root, while the control checkout is frequently owned
+# by the administrator who cloned it. Git refuses to operate on repositories
+# owned by another user unless they are listed in safe.directory; the
+# GIT_CONFIG_* variables add that setting for this process only.
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PROJECT_ROOT"
+
+# The application writes update requests below its release's var/state, which
+# every immutable release links to the shared state directory. Checkouts that
+# predate the immutable-release layout keep the flag inside the checkout.
+if [[ -d "${MYPORTAL_SHARED_ROOT:-/opt/myportal/shared}/state" ]]; then
+  SYSTEM_UPDATE_FLAG_FILE="${MYPORTAL_SHARED_ROOT:-/opt/myportal/shared}/state/system_update.flag"
+else
+  SYSTEM_UPDATE_FLAG_FILE="${PROJECT_ROOT}/var/state/system_update.flag"
+fi
 
 # The flag pauses mail import while an update is waiting to be applied.  A
 # failed coordinator run is terminal for that request, so never leave the flag
@@ -60,6 +75,7 @@ REQUESTED_UPGRADE_MODE="rolling"
 RESTART_MODE="rolling"
 UPGRADE_READY_WAIT_SECONDS=0
 DEPLOYMENT_PLAN='{}'
+DEPLOYMENT_PLAN_FILE=""
 DEPLOYMENT_ACTION="staged-cutover"
 DEPLOYMENT_REASON="planner_not_run"
 STEP_REPORT=""
@@ -123,11 +139,21 @@ cleanup_old_releases() {
   fi
 }
 
+# The plan lists every changed path. A first deployment diffs from the empty
+# tree, which makes the JSON far larger than the kernel's 128 KiB limit for a
+# single argument, so helpers read it from a file rather than from argv.
+plan_field() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]])' \
+    "$DEPLOYMENT_PLAN_FILE" "$1"
+}
+
 generate_deployment_plan() {
   local base="$1" target="$2"
-  DEPLOYMENT_PLAN=$(PYTHONPATH="$PROJECT_ROOT" python3 -m app.services.deployment_plan "$base" "$target")
-  DEPLOYMENT_ACTION=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["action"])' "$DEPLOYMENT_PLAN")
-  DEPLOYMENT_REASON=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["reason"])' "$DEPLOYMENT_PLAN")
+  DEPLOYMENT_PLAN_FILE="${SHARED_ROOT}/state/deployment_plan.json"
+  PYTHONPATH="$PROJECT_ROOT" python3 -m app.services.deployment_plan "$base" "$target" >"$DEPLOYMENT_PLAN_FILE"
+  DEPLOYMENT_PLAN=$(<"$DEPLOYMENT_PLAN_FILE")
+  DEPLOYMENT_ACTION=$(plan_field action)
+  DEPLOYMENT_REASON=$(plan_field reason)
 }
 
 resolve_plan_base() {
@@ -165,7 +191,7 @@ publish_paths_without_worker_reload() {
       chmod u+w "$release" "$release/$(dirname "$path")" 2>/dev/null || true
       install -m 0644 "$destination/$path" "$release/$path"
     done
-  done < <(python3 -c 'import json,sys; p=json.loads(sys.argv[1]); c=sys.argv[2]; prefixes={"static":"app/static/","template":"app/templates/","feature_pack":"app/features/","tray":"tray/"}; print("\n".join(x for x in p["changed_paths"] if x.startswith(prefixes[c])))' "$DEPLOYMENT_PLAN" "$category")
+  done < <(python3 -c 'import json,sys; p=json.load(open(sys.argv[1], encoding="utf-8")); c=sys.argv[2]; prefixes={"static":"app/static/","template":"app/templates/","feature_pack":"app/features/","tray":"tray/"}; print("\n".join(x for x in p["changed_paths"] if x.startswith(prefixes[c])))' "$DEPLOYMENT_PLAN_FILE" "$category")
   ln -sfn "$destination" "${SHARED_ROOT}/published/${category}/current"
 }
 
@@ -464,6 +490,20 @@ install_blue_green_service_unit() {
   fi
 }
 
+install_nginx_site() {
+  local source_config="$1" installed_config="$2"
+  if [[ -e /proc/net/if_inet6 ]]; then
+    install -m 0644 "$source_config" "$installed_config"
+  else
+    # nginx refuses to start when asked to listen on [::] and the kernel has
+    # IPv6 disabled, which is common for LXC containers and hardened VMs.
+    sed '/listen[[:space:]]*\[::\]/d' "$source_config" >"${installed_config}.new.$$"
+    chmod 0644 "${installed_config}.new.$$"
+    mv -f "${installed_config}.new.$$" "$installed_config"
+    echo "IPv6 is unavailable; installed ${installed_config} with IPv4 listeners only." >&2
+  fi
+}
+
 install_blue_green_nginx_config() {
   local release="$1" active="$2" inactive="$3"
   local source_config="${release}/deploy/nginx/myportal-bluegreen.conf"
@@ -485,12 +525,19 @@ install_blue_green_nginx_config() {
   # provides instead of requiring a manual proxy setup after the workers start.
   if [[ -d "$available_dir" && -d "$enabled_dir" ]]; then
     installed_config="${available_dir}/myportal.conf"
-    install -m 0644 "$source_config" "$installed_config"
+    install_nginx_site "$source_config" "$installed_config"
     ln -sfn "$installed_config" "${enabled_dir}/myportal.conf"
+    # The packaged "Welcome to nginx" site is the default_server for port 80
+    # and would answer every request instead of MyPortal. Disable only the
+    # unmodified package link; a customised default site is left alone.
+    if [[ -L "${enabled_dir}/default" && "$(readlink -f "${enabled_dir}/default")" == "${available_dir}/default" ]]; then
+      rm -f "${enabled_dir}/default"
+      echo "Disabled the packaged nginx default site so MyPortal serves port 80." >&2
+    fi
   else
     installed_config="/etc/nginx/conf.d/myportal.conf"
     install -d -m 0755 "$(dirname "$installed_config")"
-    install -m 0644 "$source_config" "$installed_config"
+    install_nginx_site "$source_config" "$installed_config"
   fi
 
   # The include is mandatory for nginx -t. Point it at the already validated
@@ -610,15 +657,6 @@ validate_release_metadata() {
   fi
 }
 
-validate_release_metadata() {
-  local revision="$1" release="$2" recorded
-  recorded=$(tr -d '\r\n' <"$release/version.txt" 2>/dev/null || true)
-  if [[ ! "$revision" =~ ^[0-9a-f]{40}$ || "${release##*/}" != "$revision" || "$recorded" != "$revision" ]]; then
-    echo "Release preparation failed: cause=bad_release_metadata release=${release} expected=${revision} recorded=${recorded:-<missing>}" >&2
-    return 1
-  fi
-}
-
 prepare_release() {
   local revision="$1" release="$2" staging
   staging="${release}.staging.$$"
@@ -626,6 +664,11 @@ prepare_release() {
   # The service needs to traverse deployment-owned parents to reach both the
   # instance symlink and its immutable release target.
   chmod a+rx "$RELEASE_ROOT" "$INSTANCE_ROOT" "$SHARED_ROOT"
+  # Releases link var/ to the shared tree. The application records update
+  # requests and feature-pack reload results in var/state and keeps runtime
+  # data in var/data, so the service account must be able to write both.
+  chgrp "$SERVICE_USER" "$SHARED_ROOT/state" "$SHARED_ROOT/data"
+  chmod 0770 "$SHARED_ROOT/state" "$SHARED_ROOT/data"
   prepare_shared_uploads
   if [[ -e "$release" ]]; then
     # A previous attempt may have prepared this revision with missing or stale
@@ -739,7 +782,11 @@ run_rolling_restart() {
   local revision="$1" release="$2" active inactive old_inactive upstream_switched=false start=$SECONDS
   active=$(read_active); [[ "$active" == blue ]] && inactive=green || inactive=blue
   old_inactive=$(readlink -f "$INSTANCE_ROOT/$inactive" 2>/dev/null || true)
-  trap 'rollback "$active" "$inactive" "$old_inactive" "$upstream_switched"' ERR
+  # Bind the slot names now. The trap body runs in the scope of whichever
+  # function failed, and helpers such as write_upstream_file declare their own
+  # "active"/"inactive" locals that would otherwise swap the rollback target.
+  # shellcheck disable=SC2064 # expanding the slot names now is the point
+  trap "rollback $(printf '%q ' "$active" "$inactive" "$old_inactive")\"\$upstream_switched\"" ERR
 
   # Only the non-serving slot changes during preparation and validation.
   atomic_link "$release" "$INSTANCE_ROOT/$inactive"
@@ -796,8 +843,46 @@ is_additive_migration_only_release() {
   return 0
 }
 
-command -v git >/dev/null && command -v curl >/dev/null && command -v nginx >/dev/null && command -v systemctl >/dev/null && command -v flock >/dev/null
+require_host_prerequisites() {
+  local tool missing=()
+  for tool in git curl nginx systemctl flock runuser python3; do
+    command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+  done
+  if ((${#missing[@]})); then
+    echo "Missing required commands: ${missing[*]}. Run scripts/install_production.sh to prepare this host." >&2
+    return 1
+  fi
+  if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
+    echo "Service account '${SERVICE_USER}' does not exist. Run scripts/install_production.sh to prepare this host." >&2
+    return 1
+  fi
+  if [[ ! -f "$ENV_FILE" ]]; then
+    echo "Environment file ${ENV_FILE} does not exist. Run scripts/install_production.sh to create it." >&2
+    return 1
+  fi
+}
+
+retire_legacy_service() {
+  # Installations made by the original installer ran a single-checkout
+  # myportal.service on port 8000. Once a blue/green slot is serving, that
+  # unit would run every scheduled job a second time against the same
+  # database, so stop and remove it.
+  local unit="/etc/systemd/system/myportal.service"
+  [[ -f "$unit" ]] || return 0
+  systemctl disable --now myportal.service >/dev/null 2>&1 || true
+  rm -f "$unit"
+  systemctl daemon-reload
+  echo "Retired the legacy single-checkout myportal.service unit." >&2
+}
+
+require_host_prerequisites
 cd "$PROJECT_ROOT"
+# Create missing deployment parents explicitly: under umask 027, mkdir -p
+# would make /opt/myportal untraversable for the unprivileged service account.
+for deployment_dir in "$RELEASE_ROOT" "$SHARED_ROOT" "$INSTANCE_ROOT" "$(dirname "$CURRENT_LINK")"; do
+  deployment_parent=$(dirname "$deployment_dir")
+  [[ -d "$deployment_parent" ]] || install -d -m 0755 "$deployment_parent"
+done
 if [[ ! "$FEATURE_PACK_RELOAD_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
   echo "MYPORTAL_FEATURE_PACK_RELOAD_TIMEOUT must be a positive integer." >&2
   exit 2
@@ -822,7 +907,7 @@ write_upgrade_status preparing "Deployment plan ${DEPLOYMENT_ACTION} for ${TARGE
 # Artifact validation is preparation, not cutover. A staged bundle must be
 # complete and valid before any release, instance, or active link moves. The
 # normal GitHub Release delivery path does not stage a server-side bundle.
-if python3 -c 'import json,sys; raise SystemExit(not json.loads(sys.argv[1])["validate_tray_artifacts"])' "$DEPLOYMENT_PLAN"; then
+if [[ "$(plan_field validate_tray_artifacts)" == True ]]; then
   if ! prepare_tray_artifacts "$TARGET_REVISION"; then
     record_step tray_artifacts failed "missing_stale_or_invalid_${TARGET_REVISION}" 0
     write_upgrade_status failed "Required tray artifacts failed validation; the active release was not touched." "$DEPLOYMENT_REASON"
@@ -863,9 +948,11 @@ case "$DEPLOYMENT_ACTION" in
     reload_flag="${SHARED_ROOT}/state/feature_pack_reload.flag"
     reload_result="${SHARED_ROOT}/state/feature_pack_reload.${request_id}.result"
     rm -f "$reload_result"
-    python3 - "$DEPLOYMENT_PLAN" "$request_id" "$TARGET_REVISION" "$RELEASE_DIR" "$reload_flag.tmp" <<'PY'
+    python3 - "$DEPLOYMENT_PLAN_FILE" "$request_id" "$TARGET_REVISION" "$RELEASE_DIR" "$reload_flag.tmp" <<'PY'
 import json, os, sys
-plan, request_id, revision, release_path, output = sys.argv[1:]
+plan_file, request_id, revision, release_path, output = sys.argv[1:]
+with open(plan_file, encoding="utf-8") as handle:
+    plan = handle.read()
 payload = {
     "request_id": request_id,
     "revision": revision,
@@ -882,10 +969,10 @@ PY
     reload_deadline=$((SECONDS + FEATURE_PACK_RELOAD_TIMEOUT))
     reload_acknowledged=false
     while ((SECONDS < reload_deadline)); do
-      if [[ -f "$reload_result" ]] && python3 - "$reload_result" "$request_id" "$TARGET_REVISION" "$DEPLOYMENT_PLAN" <<'PY'
+      if [[ -f "$reload_result" ]] && python3 - "$reload_result" "$request_id" "$TARGET_REVISION" "$DEPLOYMENT_PLAN_FILE" <<'PY'
 import json, sys
 result = json.load(open(sys.argv[1], encoding="utf-8"))
-expected = sorted(json.loads(sys.argv[4])["feature_packs"])
+expected = sorted(json.load(open(sys.argv[4], encoding="utf-8"))["feature_packs"])
 ok = result.get("request_id") == sys.argv[2] and result.get("revision") == sys.argv[3]
 ok = ok and result.get("status") == "succeeded"
 ok = ok and sorted(result.get("loaded", {})) == expected
@@ -952,6 +1039,7 @@ if is_additive_migration_only_release "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISIO
 fi
 install_blue_green_service_unit "$RELEASE_DIR"
 run_rolling_restart "$TARGET_REVISION" "$RELEASE_DIR"
+retire_legacy_service
 write_upgrade_status succeeded "Release ${TARGET_REVISION} is serving; previous release retained."
 echo "Successfully deployed ${TARGET_REVISION} from ${RELEASE_DIR}."
 cleanup_old_releases

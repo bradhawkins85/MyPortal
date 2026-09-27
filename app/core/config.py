@@ -958,6 +958,7 @@ class Settings(BaseSettings):
         "sms_endpoint",
         "opnform_base_url",
         "stock_feed_url",
+        "wan_ip_source_url",
         mode="before",
     )
     @classmethod

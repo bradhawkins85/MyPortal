@@ -3,6 +3,11 @@
 Production updates use two systemd slots and immutable, revision-named release
 directories. The Git checkout is a **control checkout**, never a serving tree.
 
+`scripts/install_production.sh` prepares a host for this layout and performs
+the first deployment with `scripts/upgrade.sh`. It creates the `myportal`
+service account, `/etc/myportal.env`, MariaDB and nginx. The coordinator
+refuses to run on a host that has not been prepared.
+
 ## Layout
 
 * `/opt/myportal/releases/<git-sha>` contains application code, static assets,
