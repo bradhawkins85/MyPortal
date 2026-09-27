@@ -198,7 +198,7 @@
                 {% if not ticket_requester_phone_display and not ticket_company_phone_display %}
                   <p class="form-help">—</p>
                 {% endif %}
-                {% if ticket_requester_lookup_name %}
+                {% if ticket_requester_lookup_name and feature_pack_available('outlook_contacts') %}
                   <div
                     data-outlook-contact-phones
                     data-requester-name="{{ ticket_requester_lookup_name }}"
