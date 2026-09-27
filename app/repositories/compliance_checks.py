@@ -126,7 +126,7 @@ async def create_category(*, code: str, name: str, description: Optional[str] = 
         INSERT INTO compliance_check_categories (code, name, description, is_system)
         VALUES (%(code)s, %(name)s, %(description)s, %(is_system)s)
     """
-    new_id = await db.execute(query, {"code": code, "name": name, "description": description, "is_system": int(is_system)})
+    new_id = await db.execute_returning_lastrowid(query, {"code": code, "name": name, "description": description, "is_system": int(is_system)})
     result = await get_category(new_id)
     if not result:
         raise RuntimeError("Failed to retrieve newly created category")
@@ -260,7 +260,7 @@ async def create_check(
            %(interval)s, %(evidence_required)s,
            %(is_predefined)s, %(is_active)s, %(sort_order)s, %(created_by)s)
     """
-    new_id = await db.execute(query, {
+    new_id = await db.execute_returning_lastrowid(query, {
         "category_id": category_id,
         "code": code,
         "title": title,
@@ -593,7 +593,7 @@ async def add_evidence(
         VALUES
           (%(assignment_id)s, %(evidence_type)s, %(title)s, %(content)s, %(file_path)s, %(uploaded_by)s)
     """
-    new_id = await db.execute(query, {
+    new_id = await db.execute_returning_lastrowid(query, {
         "assignment_id": assignment_id,
         "evidence_type": evidence_type,
         "title": title,

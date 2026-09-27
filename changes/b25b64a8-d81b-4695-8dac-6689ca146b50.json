@@ -1,7 +1,7 @@
 {
   "guid": "b25b64a8-d81b-4695-8dac-6689ca146b50",
-  "occurred_at": "2026-09-24T00:00:00Z",
-  "change_type": "fix",
+  "occurred_at": "2026-09-24T00:00Z",
+  "change_type": "Fix",
   "summary": "Repair unchanged historical RAG documents that have no active chunks during reconciliation.",
-  "content_hash": "c67de30c87c39c4b5265e0a685a63a7bfe328a6e70144aa30a99167586a7c9e5"
+  "content_hash": "104d3ac3556d58be06ce7cbc57c829c7e778412adf349583efb4e3678bd7f7fc"
 }

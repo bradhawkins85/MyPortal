@@ -1,7 +1,7 @@
 {
   "guid": "3c82c80f-01b2-4ccc-bc1e-b83352cd2fe0",
-  "occurred_at": "2026-09-18T00:00:00Z",
-  "change_type": "fix",
+  "occurred_at": "2026-09-18T00:00Z",
+  "change_type": "Fix",
   "summary": "Ensure 60-day subscription reminder tickets are created even without a billing contact and make all-company renewal processing administrator-schedulable.",
-  "content_hash": "subscription-renewal-reminder-scheduling"
+  "content_hash": "97e2a8410be3634b4795f4f90786444de9c9e9546b5031e4adf3844486a822e1"
 }

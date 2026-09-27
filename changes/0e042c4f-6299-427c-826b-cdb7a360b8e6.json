@@ -3,5 +3,5 @@
   "occurred_at": "2026-09-24T00:00Z",
   "change_type": "Fix",
   "summary": "Fixed Microsoft 365 spam search and purge preflight failures caused by the Purview REST endpoint rejecting Get-RoleGroupMember with HTTP 500.",
-  "content_hash": "708770d5689d875a5c6649ec1ba6e8d9da25ecd60f13da145579667f4619221b"
+  "content_hash": "0e1e4041372cb36b969ed79042071258d1873e4cc379b2b034e8d7e223176f85"
 }

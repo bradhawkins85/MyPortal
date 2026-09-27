@@ -20,8 +20,11 @@
 
 [Unit]
 Description=MyPortal customer portal (%i instance)
-After=network-online.target mysql.service redis.service
+After=network-online.target mariadb.service mysql.service redis.service
 Wants=network-online.target
+# A slot has no release until the deployment coordinator first assigns one.
+# Skip it rather than letting Restart=always retry a missing release forever.
+ConditionPathExists=/opt/myportal/instances/%i
 
 [Service]
 # Uvicorn does not send sd_notify(3) readiness messages. The deployment

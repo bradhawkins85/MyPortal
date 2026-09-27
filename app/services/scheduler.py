@@ -77,6 +77,35 @@ _FEATURE_PACK_RELOAD_RESULT_PATH = (
 )
 _FEATURE_PACK_RELOAD_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9_.-]{1,160}\Z")
 _GIT_REVISION_RE = re.compile(r"[0-9a-f]{40,64}\Z")
+
+
+def _release_revision() -> str | None:
+    """Return the revision of an immutable release, or ``None`` for a checkout."""
+
+    if (_PROJECT_ROOT / ".git").exists():
+        return None
+    try:
+        value = (_PROJECT_ROOT / "version.txt").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return value if _GIT_REVISION_RE.fullmatch(value) else None
+
+
+def _git_context() -> tuple[Path, list[str]]:
+    """Return the directory and options for Git queries about this deployment.
+
+    A development checkout is queried directly. Immutable releases carry no
+    ``.git`` directory, so they query the root-owned control checkout named by
+    ``MYPORTAL_CONTROL_CHECKOUT`` (read-only; safe.directory is scoped to this
+    one command because the service account does not own that checkout).
+    """
+
+    if (_PROJECT_ROOT / ".git").exists():
+        return _PROJECT_ROOT, []
+    control = os.getenv("MYPORTAL_CONTROL_CHECKOUT", "").strip()
+    if control and (Path(control) / ".git").exists():
+        return Path(control), ["-c", f"safe.directory={control}"]
+    return _PROJECT_ROOT, []
 _FEATURE_PACK_SLUG_RE = re.compile(r"[a-z][a-z0-9_]*\Z")
 
 # Directory prefix used to detect changes that are isolated to a single
@@ -2049,12 +2078,14 @@ class SchedulerService:
         return slugs or None
 
     async def _run_git(self, *args: str) -> tuple[int, str, str]:
+        cwd, options = _git_context()
         process = await asyncio.create_subprocess_exec(
             "git",
+            *options,
             *args,
             stdout=PIPE,
             stderr=PIPE,
-            cwd=str(_PROJECT_ROOT),
+            cwd=str(cwd),
         )
         stdout, stderr = await process.communicate()
         return (
@@ -2119,13 +2150,21 @@ class SchedulerService:
             os.chmod(_SYSTEM_UPDATE_FLAG_PATH.parent, 0o700)
 
     async def _get_git_ref(self, ref: str) -> str | None:
+        if ref == "HEAD":
+            # An immutable release is not a Git checkout; the revision it was
+            # exported from is recorded in version.txt by scripts/upgrade.sh.
+            release_revision = _release_revision()
+            if release_revision:
+                return release_revision
+        cwd, options = _git_context()
         process = await asyncio.create_subprocess_exec(
             "git",
+            *options,
             "rev-parse",
             ref,
             stdout=PIPE,
             stderr=PIPE,
-            cwd=str(_PROJECT_ROOT),
+            cwd=str(cwd),
         )
         stdout, stderr = await process.communicate()
         if process.returncode != 0:
@@ -2135,15 +2174,17 @@ class SchedulerService:
         return _truncate_output(stdout)
 
     async def _get_remote_main_ref(self) -> str | None:
+        cwd, options = _git_context()
         process = await asyncio.create_subprocess_exec(
             "git",
+            *options,
             "ls-remote",
             "--heads",
             "origin",
             "main",
             stdout=PIPE,
             stderr=PIPE,
-            cwd=str(_PROJECT_ROOT),
+            cwd=str(cwd),
         )
         stdout, stderr = await process.communicate()
         if process.returncode != 0:

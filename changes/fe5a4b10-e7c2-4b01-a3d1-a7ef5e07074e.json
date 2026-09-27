@@ -1,7 +1,7 @@
 {
   "guid": "fe5a4b10-e7c2-4b01-a3d1-a7ef5e07074e",
-  "occurred_at": "2026-09-23T04:34:30.788991Z",
-  "change_type": "fix",
+  "occurred_at": "2026-09-23T04:34Z",
+  "change_type": "Fix",
   "summary": "Stabilize Matrix AI waiting-assistant recommendations",
-  "content_hash": "8d2c85d14c11d4353caad76d51eef8bf2d529dba15c5c88c7953f2fd56694ee1"
+  "content_hash": "952c488bbbb44c0869cc5e6104c8389ebca2d05d69d8634532fca7519629f48b"
 }

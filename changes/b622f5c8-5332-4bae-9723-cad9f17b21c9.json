@@ -1,7 +1,7 @@
 {
   "guid": "b622f5c8-5332-4bae-9723-cad9f17b21c9",
   "occurred_at": "2026-09-27T05:17Z",
-  "change_type": "feature",
+  "change_type": "Feature",
   "summary": "Redesigned the Add rack space dialog with visual equipment and item type choices, segmented position controls, lane clamping, and a live mini-rack placement preview.",
   "content_hash": "682b05ab9f413c96f42bcb56401cd29c59018cfa95f79d03a94cea4201b31186"
 }

@@ -1,6 +1,6 @@
 [Unit]
 Description=MyPortal Voice Monitor worker (%i)
-After=network-online.target mysql.service redis.service
+After=network-online.target mariadb.service mysql.service redis.service
 Wants=network-online.target
 
 [Service]

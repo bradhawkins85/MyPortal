@@ -61,7 +61,24 @@ MyPortal combines customer operations, service delivery workflows, and integrati
 ### Backup Reporting
 <img width="1394" height="1240" alt="image" src="https://github.com/user-attachments/assets/356e1632-efa5-409d-92e3-606ecc00d9dd" />
 
-## Getting started
+## Installation
+
+On Ubuntu 24.04 / Debian 12 (bare metal, VM or LXC), install with the provided
+scripts; see [Setup and Installation](docs/wiki/getting-started/Setup%20and%20Installation.md):
+
+```bash
+# Production: nginx on port 80, MariaDB, immutable blue/green releases
+sudo git clone https://github.com/bradhawkins85/MyPortal /opt/myportal/control
+sudo /opt/myportal/control/scripts/install_production.sh
+
+# Development: editable install, isolated database, optional service on port 8000
+sudo scripts/install_development.sh
+```
+
+## Getting started (manual development setup)
+
+MyPortal needs MariaDB 10.10 or newer. Migrations are applied explicitly with
+`python manage.py migrate --target-release development`.
 
 1. Create and activate a virtual environment
 2. Install dependencies:

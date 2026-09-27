@@ -3,20 +3,31 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
-ENV_FILE="${PROJECT_ROOT}/.env"
 ENV_TEMPLATE="${PROJECT_ROOT}/.env.example"
 VENV_DIR="${PROJECT_ROOT}/.venv"
+
+# Production layout. These match the defaults used by scripts/upgrade.sh,
+# deploy/systemd/myportal@.service and deploy/nginx/myportal-bluegreen.conf.
+SERVICE_USER="myportal"
+PRODUCTION_ENV_FILE="/etc/myportal.env"
+DEPLOY_ROOT="/opt/myportal"
+UPDATE_CRON_FILE="/etc/cron.d/myportal-update"
 
 usage() {
   cat <<'USAGE'
 Usage: install_environment.sh <environment>
 
-Prepare a MyPortal installation for the specified environment. Supported
-environments are:
-  production   Installs dependencies in a dedicated virtual environment using
-               regular (non-editable) mode.
-  development  Installs dependencies in editable mode to support local
-               iteration alongside production deployments.
+Prepare a MyPortal installation on a Debian/Ubuntu host (bare metal, VM or
+LXC). Supported environments are:
+  production   Must run as root. Installs system packages (MariaDB, nginx,
+               WeasyPrint libraries, baresip), creates the "myportal" service
+               account and /etc/myportal.env, then performs the first
+               immutable blue/green deployment with scripts/upgrade.sh. The
+               portal is served by nginx on port 80.
+  development  Installs dependencies in editable mode in <checkout>/.venv,
+               provisions an isolated local "myportal_dev" database, applies
+               migrations and, when run with sudo on a systemd host, starts
+               the myportal-dev.service unit on port 8000.
 USAGE
 }
 
@@ -29,12 +40,29 @@ ENVIRONMENT="$1"
 case "$ENVIRONMENT" in
   production|development)
     ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
   *)
     echo "Error: Unsupported environment '${ENVIRONMENT}'." >&2
     usage >&2
     exit 1
     ;;
 esac
+
+if [[ "$ENVIRONMENT" == "production" ]]; then
+  ENV_FILE="$PRODUCTION_ENV_FILE"
+else
+  ENV_FILE="${PROJECT_ROOT}/.env"
+fi
+
+is_root() { [[ "${EUID:-$(id -u)}" == "0" ]]; }
+
+if [[ "$ENVIRONMENT" == "production" ]] && ! is_root; then
+  echo "Error: the production installer must run as root (use sudo)." >&2
+  exit 1
+fi
 
 select_system_python() {
   if command -v python3 >/dev/null 2>&1; then
@@ -55,8 +83,109 @@ if [[ -z "$SYSTEM_PYTHON" ]]; then
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# System packages
+# ---------------------------------------------------------------------------
+
+APT_UPDATED=false
+
+run_privileged() {
+  # Elevate with sudo for a development install started by an unprivileged user.
+  if is_root; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    echo "Error: root privileges are required to run: $*" >&2
+    exit 1
+  fi
+}
+
+apt_update_once() {
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Error: apt-get not found. MyPortal's installers support Debian and Ubuntu hosts." >&2
+    exit 1
+  fi
+  # Fresh containers and minimal images ship without package lists, so refresh
+  # them before checking which packages are available.
+  if [[ "$APT_UPDATED" != true ]]; then
+    run_privileged apt-get update -qq || echo "Warning: apt-get update failed." >&2
+    APT_UPDATED=true
+  fi
+}
+
+apt_install() {
+  apt_update_once
+  run_privileged env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$@"
+}
+
+apt_package_available() {
+  command -v apt-cache >/dev/null 2>&1 && [[ -n "$(apt-cache policy "$1" 2>/dev/null | awk '/Candidate:/ {print $2}' | grep -v '(none)')" ]]
+}
+
+install_system_packages() {
+  apt_update_once
+  local py_version
+  py_version=$("$SYSTEM_PYTHON" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+
+  # Debian and Ubuntu split ensurepip out of the standard library. The venv
+  # module itself is always importable, so test for ensurepip: without it
+  # `python3 -m venv` creates an environment that has no pip.
+  local -a packages=()
+  if ! "$SYSTEM_PYTHON" -c 'import ensurepip' >/dev/null 2>&1; then
+    if apt_package_available "python${py_version}-venv"; then
+      packages+=("python${py_version}-venv")
+    else
+      packages+=(python3-venv)
+    fi
+  fi
+
+  # git/curl/flock/runuser are used by the upgrade coordinator; the pango,
+  # harfbuzz and libmagic runtime libraries are loaded by WeasyPrint (PDF
+  # rendering) and python-magic.
+  packages+=(ca-certificates git curl util-linux libpango-1.0-0 libpangoft2-1.0-0 libmagic1)
+  if apt_package_available libharfbuzz-subset0; then
+    packages+=(libharfbuzz-subset0)
+  fi
+  if [[ "$ENVIRONMENT" == "production" ]]; then
+    packages+=(nginx cron)
+  fi
+
+  echo "Installing system packages: ${packages[*]}" >&2
+  apt_install "${packages[@]}"
+
+  if ! "$SYSTEM_PYTHON" -c 'import ensurepip' >/dev/null 2>&1; then
+    echo "Error: Python ensurepip is still unavailable; install python${py_version}-venv and rerun the installer." >&2
+    exit 1
+  fi
+}
+
+install_sip_client() {
+  if command -v baresip >/dev/null 2>&1; then
+    echo "SIP client (baresip) is already installed." >&2
+    return
+  fi
+  echo "Installing server SIP client (baresip)…" >&2
+  apt_install baresip
+  command -v baresip >/dev/null 2>&1 || { echo "Error: baresip installation failed." >&2; exit 1; }
+}
+
+# ---------------------------------------------------------------------------
+# Environment file
+# ---------------------------------------------------------------------------
+
 ensure_env_file() {
   if [[ -f "$ENV_FILE" ]]; then
+    return
+  fi
+
+  local legacy_env="${PROJECT_ROOT}/.env"
+  if [[ "$ENVIRONMENT" == "production" && -f "$legacy_env" ]]; then
+    # Installations created by the previous installer kept their configuration
+    # (including live secrets and database credentials) in the checkout.
+    # Carry it over unchanged rather than generating new keys.
+    install -m 0640 "$legacy_env" "$ENV_FILE"
+    echo "Created ${ENV_FILE} from the existing ${legacy_env}." >&2
     return
   fi
 
@@ -65,8 +194,46 @@ ensure_env_file() {
     exit 1
   fi
 
-  cp "$ENV_TEMPLATE" "$ENV_FILE"
+  install -m 0600 "$ENV_TEMPLATE" "$ENV_FILE"
   echo "Created ${ENV_FILE} from template." >&2
+
+  if [[ "$ENVIRONMENT" == "development" ]]; then
+    # Keep a development database separate from a production database that
+    # may share this host's MariaDB server.
+    set_env_value DB_NAME myportal_dev
+    set_env_value DB_USER myportal_dev
+    set_env_value SYSTEMD_SERVICE_NAME myportal-dev
+    # The development service runs a single checkout; there is no immutable
+    # release for the auto-update wrapper to deploy.
+    set_env_value UVICORN_AUTO_UPDATE_ENABLED false
+    # /var/log/myportal belongs to the production service account; log to the
+    # console (and so the journal) instead.
+    set_env_value APP_LOG_PATH ""
+  fi
+}
+
+set_env_value() {
+  # Set KEY=VALUE, replacing an existing assignment or appending a new one.
+  ENV_SET_KEY="$1" ENV_SET_VALUE="$2" ENV_SET_FILE="$ENV_FILE" "$SYSTEM_PYTHON" - <<'PY'
+import os
+from pathlib import Path
+
+env_path = Path(os.environ["ENV_SET_FILE"])
+key = os.environ["ENV_SET_KEY"]
+value = os.environ["ENV_SET_VALUE"]
+content = env_path.read_text(encoding="utf-8")
+lines = content.splitlines()
+for index, raw_line in enumerate(lines):
+    stripped = raw_line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in raw_line:
+        continue
+    if raw_line.split("=", 1)[0].strip() == key:
+        lines[index] = f"{key}={value}"
+        break
+else:
+    lines.append(f"{key}={value}")
+env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
 }
 
 ensure_env_default() {
@@ -108,8 +275,11 @@ ensure_env_secret() {
   # Replace weak or placeholder values for the given key with a freshly
   # generated cryptographically-random string. Existing non-placeholder
   # values are left untouched so redeploying never rotates live secrets.
+  # With "placeholder-only", a short but deliberately chosen value (such as
+  # an existing database password) is also preserved.
   local key="$1"
   local byte_length="${2:-48}"
+  local mode="${3:-weak}"
 
   if [[ ! -f "$ENV_FILE" ]]; then
     return
@@ -117,6 +287,7 @@ ensure_env_secret() {
 
   ENV_SECRET_KEY="$key" \
     ENV_SECRET_BYTES="$byte_length" \
+    ENV_SECRET_MODE="$mode" \
     ENV_SECRET_FILE="$ENV_FILE" \
     "$SYSTEM_PYTHON" - <<'PY'
 from __future__ import annotations
@@ -128,6 +299,7 @@ from pathlib import Path
 env_path = Path(os.environ["ENV_SECRET_FILE"])
 key = os.environ["ENV_SECRET_KEY"]
 byte_length = int(os.environ.get("ENV_SECRET_BYTES", "48"))
+placeholder_only = os.environ.get("ENV_SECRET_MODE") == "placeholder-only"
 
 PLACEHOLDER = {
     "",
@@ -138,6 +310,7 @@ PLACEHOLDER = {
     "replace-me",
     "secret",
     "password",
+    "strong-password",
 }
 
 
@@ -145,7 +318,7 @@ def looks_weak(value: str) -> bool:
     stripped = value.strip().strip('"').strip("'")
     if stripped.lower() in PLACEHOLDER:
         return True
-    if len(stripped) < 24:
+    if not placeholder_only and len(stripped) < 24:
         return True
     return False
 
@@ -181,8 +354,19 @@ PY
 }
 
 secure_env_file_permissions() {
-  if [[ -f "$ENV_FILE" ]]; then
+  if [[ ! -f "$ENV_FILE" ]]; then
+    return
+  fi
+  if [[ "$ENVIRONMENT" == "production" ]]; then
+    # systemd reads the file as root; the application (running as the service
+    # account) also reads it through each release's .env symlink.
+    chown "root:${SERVICE_USER}" "$ENV_FILE"
+    chmod 640 "$ENV_FILE"
+  else
     chmod 600 "$ENV_FILE" 2>/dev/null || true
+    if is_root && [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+      chown "${SUDO_USER}:$(id -gn "$SUDO_USER")" "$ENV_FILE"
+    fi
   fi
 }
 
@@ -229,193 +413,105 @@ else:
 PY
 }
 
-install_and_start_systemd_service() {
-  if ! command -v systemctl >/dev/null 2>&1; then
-    echo "systemctl not found; skipping systemd service setup." >&2
+# ---------------------------------------------------------------------------
+# Production: service account, directories, first deployment, update cron
+# ---------------------------------------------------------------------------
+
+ensure_service_account() {
+  if id -u "$SERVICE_USER" >/dev/null 2>&1; then
     return
   fi
+  local nologin
+  nologin=$(command -v nologin 2>/dev/null || echo /usr/sbin/nologin)
+  useradd --system --user-group --home-dir /nonexistent --no-create-home \
+    --shell "$nologin" "$SERVICE_USER"
+  echo "Created service account '${SERVICE_USER}'." >&2
+}
 
-  if [[ ! -d /run/systemd/system ]]; then
-    echo "systemd is not active on this host; skipping service setup." >&2
-    return
+prepare_production_directories() {
+  # Created with explicit modes: upgrade.sh runs with umask 027, which would
+  # otherwise leave /opt/myportal untraversable by the service account.
+  install -d -m 0755 "$DEPLOY_ROOT"
+  install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" /var/log/myportal
+  install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" /var/lib/myportal
+}
+
+check_control_checkout() {
+  local origin
+  origin=$(git -C "$PROJECT_ROOT" config --get remote.origin.url 2>/dev/null || true)
+  if [[ -z "$origin" ]]; then
+    echo "Error: ${PROJECT_ROOT} is not a git clone with an 'origin' remote." >&2
+    echo "Clone the repository (for example into ${DEPLOY_ROOT}/control) and rerun the installer." >&2
+    exit 1
   fi
+  case "$PROJECT_ROOT" in
+    /home/*|/root/*)
+      # myportal@.service sets ProtectHome=true, so the application cannot
+      # read a checkout here to look for updates from the admin UI.
+      echo "Warning: the control checkout ${PROJECT_ROOT} is under a home directory." >&2
+      echo "Deployments will work, but the admin UI cannot check for updates. Clone into ${DEPLOY_ROOT}/control instead." >&2
+      ;;
+  esac
+}
 
-  if [[ "${EUID:-$(id -u)}" != "0" ]]; then
-    echo "Installer is not running as root; skipping systemd service setup." >&2
-    echo "Run this installer with sudo to auto-create and start the service." >&2
-    return
+run_first_deployment() {
+  echo "Deploying the latest release with scripts/upgrade.sh…" >&2
+  MYPORTAL_ENV_FILE="$ENV_FILE" "${SCRIPT_DIR}/upgrade.sh"
+}
+
+install_update_cron() {
+  cat >"$UPDATE_CRON_FILE" <<CRON
+# Installed by scripts/install_production.sh. Applies updates requested from
+# the MyPortal admin UI (the application writes the system_update flag).
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+* * * * * root ${SCRIPT_DIR}/process_update_flag.sh >> /var/log/myportal/process_update_flag.log 2>&1
+CRON
+  chmod 644 "$UPDATE_CRON_FILE"
+  if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+    systemctl enable --now cron >/dev/null 2>&1 || true
   fi
+}
 
-  local service_name
-  service_name=$(read_env_value "SYSTEMD_SERVICE_NAME" "myportal")
-  service_name=${service_name:-myportal}
-  if [[ "$service_name" != *.service ]]; then
-    service_name="${service_name}.service"
-  fi
+# ---------------------------------------------------------------------------
+# Development: virtualenv, migrations, optional systemd unit
+# ---------------------------------------------------------------------------
 
-  local service_user service_group
-  service_user=$(stat -c '%U' "$PROJECT_ROOT" 2>/dev/null || true)
-  service_group=$(stat -c '%G' "$PROJECT_ROOT" 2>/dev/null || true)
-
-  if [[ -z "$service_user" || "$service_user" == "UNKNOWN" || "$service_user" == "root" ]]; then
-    if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
-      service_user="$SUDO_USER"
-    else
-      service_user=$(id -un)
-    fi
-  fi
-
-  if [[ -z "$service_group" || "$service_group" == "UNKNOWN" ]]; then
-    service_group=$(id -gn "$service_user" 2>/dev/null || id -gn)
-  fi
-
-  local unit_path="/etc/systemd/system/${service_name}"
-  cat >"$unit_path" <<UNIT
-[Unit]
-Description=MyPortal customer portal
-After=network-online.target mysql.service redis.service
-Wants=network-online.target
-
-[Service]
-# Uvicorn does not implement systemd's sd_notify protocol. Readiness is
-# exposed by the application's health endpoints instead.
-Type=simple
-User=${service_user}
-Group=${service_group}
-WorkingDirectory=${PROJECT_ROOT}
-EnvironmentFile=${ENV_FILE}
-ExecStart=${PROJECT_ROOT}/scripts/start_with_auto_update.sh ${VENV_DIR}/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
-ExecReload=/bin/kill -s HUP \$MAINPID
-Restart=always
-RestartSec=5
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ProtectHome=true
-ReadWritePaths=${PROJECT_ROOT}
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-  chmod 644 "$unit_path"
-  systemctl daemon-reload
-  if systemctl enable --now "$service_name"; then
-    echo "Systemd service '${service_name}' is enabled and running." >&2
+as_checkout_owner() {
+  # When a developer runs the installer with sudo, build the virtualenv and run
+  # migrations as that developer so the checkout (including .venv, egg-info and
+  # __pycache__) stays owned by them and later git/pip commands work unprivileged.
+  if is_root && [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    runuser -u "$SUDO_USER" -- "$@"
   else
-    echo "Warning: Failed to enable/start '${service_name}' automatically." >&2
-    echo "Run: sudo systemctl status ${service_name}" >&2
+    "$@"
   fi
-}
-
-ensure_venv_package() {
-  # If the venv module is already available, nothing to do.
-  if "$SYSTEM_PYTHON" -m venv --help >/dev/null 2>&1; then
-    return
-  fi
-
-  # Only attempt to fix this on Debian/Ubuntu via apt-get.
-  if ! command -v apt-get >/dev/null 2>&1; then
-    echo "Error: Python venv module is not available. Install the python3-venv package for your distribution and rerun the installer." >&2
-    exit 1
-  fi
-
-  # Determine the versioned package name, e.g. python3.12-venv.
-  local py_version
-  py_version=$("$SYSTEM_PYTHON" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || true)
-  local venv_pkg="python3-venv"
-  if [[ -n "$py_version" ]]; then
-    venv_pkg="python${py_version}-venv"
-  fi
-
-  echo "Python venv module not available; installing ${venv_pkg} via apt-get…" >&2
-  if ! apt-get update -qq; then
-    echo "Warning: apt-get update failed." >&2
-  fi
-  if ! apt-get install -y -qq "$venv_pkg" 2>/dev/null; then
-    # Fall back to the generic python3-venv package.
-    echo "Warning: Could not install ${venv_pkg}; trying python3-venv…" >&2
-    if ! apt-get install -y -qq python3-venv; then
-      echo "Error: Failed to install a python3-venv package. Install it manually and rerun the installer." >&2
-      exit 1
-    fi
-  fi
-
-  # Verify the module is now usable.
-  if ! "$SYSTEM_PYTHON" -m venv --help >/dev/null 2>&1; then
-    echo "Error: Python venv module still unavailable after installing ${venv_pkg}." >&2
-    exit 1
-  fi
-  echo "${venv_pkg} installed successfully." >&2
-}
-
-ensure_pip_package() {
-  # pip is bundled via ensurepip on most platforms, but on Debian/Ubuntu
-  # it requires the python3-pip system package.  Install it when missing so
-  # the venv gets a working pip.
-  if "$SYSTEM_PYTHON" -m ensurepip --version >/dev/null 2>&1; then
-    return
-  fi
-
-  if ! command -v apt-get >/dev/null 2>&1; then
-    echo "Error: pip (ensurepip) is not available. Install python3-pip for your distribution and rerun the installer." >&2
-    exit 1
-  fi
-
-  local py_version
-  py_version=$("$SYSTEM_PYTHON" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || true)
-  local pip_pkg="python3-pip"
-  if [[ -n "$py_version" ]]; then
-    pip_pkg="python${py_version}-pip"
-  fi
-
-  echo "pip (ensurepip) not available; installing ${pip_pkg} via apt-get…" >&2
-  if ! apt-get update -qq; then
-    echo "Warning: apt-get update failed." >&2
-  fi
-  if ! apt-get install -y -qq "$pip_pkg" 2>/dev/null; then
-    echo "Warning: Could not install ${pip_pkg}; trying python3-pip…" >&2
-    if ! apt-get install -y -qq python3-pip; then
-      echo "Error: Failed to install a python3-pip package. Install it manually and rerun the installer." >&2
-      exit 1
-    fi
-  fi
-
-  if ! "$SYSTEM_PYTHON" -m ensurepip --version >/dev/null 2>&1; then
-    echo "Error: pip still unavailable after installing ${pip_pkg}." >&2
-    exit 1
-  fi
-  echo "${pip_pkg} installed successfully." >&2
 }
 
 ensure_virtualenv() {
-  ensure_venv_package
-  ensure_pip_package
-
+  if [[ -d "$VENV_DIR" ]] && is_root && [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    # Earlier installer versions ran pip as root inside the checkout.
+    chown -R "${SUDO_USER}:$(id -gn "$SUDO_USER")" "$VENV_DIR"
+  fi
   if [[ -d "$VENV_DIR" ]]; then
-    # The venv already exists. Ensure pip is available inside it; an existing
-    # venv may have been created without pip (e.g. on Debian/Ubuntu before the
-    # python3-pip package was installed, or with --without-pip).
     local python_bin
     python_bin=$(venv_python)
-    if [[ -n "$python_bin" ]] && ! "$python_bin" -m pip --version >/dev/null 2>&1; then
-      echo "pip not found in existing virtual environment; bootstrapping via ensurepip…" >&2
-      "$python_bin" -m ensurepip --upgrade
+    if [[ -n "$python_bin" ]] && "$python_bin" -m pip --version >/dev/null 2>&1; then
+      return
     fi
-    return
+    # A venv created before python3-venv was installed has no pip and cannot
+    # be repaired reliably; rebuild it.
+    echo "Existing virtual environment at ${VENV_DIR} is unusable; recreating it." >&2
+    rm -rf "$VENV_DIR"
   fi
 
-  "$SYSTEM_PYTHON" -m venv --upgrade-deps "$VENV_DIR"
+  as_checkout_owner "$SYSTEM_PYTHON" -m venv "$VENV_DIR"
   echo "Created virtual environment at ${VENV_DIR}." >&2
 }
 
 venv_python() {
   if [[ -x "${VENV_DIR}/bin/python" ]]; then
     printf '%s' "${VENV_DIR}/bin/python"
-    return
-  fi
-  if [[ -x "${VENV_DIR}/Scripts/python.exe" ]]; then
-    printf '%s' "${VENV_DIR}/Scripts/python.exe"
     return
   fi
   printf ''
@@ -430,27 +526,93 @@ install_dependencies() {
     exit 1
   fi
 
-  "$python_bin" -m pip install --upgrade pip setuptools wheel
-  if [[ "$ENVIRONMENT" == "development" ]]; then
-    "$python_bin" -m pip install --upgrade -e "$PROJECT_ROOT"
-  else
-    "$python_bin" -m pip install --upgrade "$PROJECT_ROOT"
-  fi
+  as_checkout_owner "$python_bin" -m pip install --disable-pip-version-check --upgrade pip setuptools wheel
+  # Pin runtime dependencies to the same lock used by production releases and
+  # add the test tooling from the dev extra.
+  as_checkout_owner "$python_bin" -m pip install --disable-pip-version-check \
+    --requirement "${PROJECT_ROOT}/requirements.lock" --editable "${PROJECT_ROOT}[dev]"
 }
 
-install_sip_client() {
-  if command -v baresip >/dev/null 2>&1; then
-    echo "SIP client (baresip) is already installed." >&2
+run_migrations() {
+  local python_bin
+  python_bin=$(venv_python)
+  echo "Applying database migrations…" >&2
+  (cd "$PROJECT_ROOT" && as_checkout_owner "$python_bin" manage.py migrate --target-release development)
+}
+
+install_development_service() {
+  if ! command -v systemctl >/dev/null 2>&1 || [[ ! -d /run/systemd/system ]]; then
+    echo "systemd is not active on this host; skipping service setup." >&2
     return
   fi
-  if ! command -v apt-get >/dev/null 2>&1; then
-    echo "Error: baresip is required; install it and rerun this installer." >&2
-    exit 1
+  if ! is_root; then
+    echo "Installer is not running as root; skipping systemd service setup." >&2
+    echo "Run this installer with sudo to auto-create and start the service." >&2
+    return
   fi
-  echo "Installing server SIP client (baresip)…" >&2
-  apt-get update -qq
-  apt-get install -y -qq baresip
-  command -v baresip >/dev/null 2>&1 || { echo "Error: baresip installation failed." >&2; exit 1; }
+
+  local service_name
+  service_name=$(read_env_value "SYSTEMD_SERVICE_NAME" "myportal-dev")
+  service_name=${service_name:-myportal-dev}
+  if [[ "$service_name" != *.service ]]; then
+    service_name="${service_name}.service"
+  fi
+  if [[ "$service_name" == "myportal.service" ]]; then
+    # Never overwrite the name used by a production installation.
+    service_name="myportal-dev.service"
+  fi
+
+  local service_user service_group
+  service_user=$(stat -c '%U' "$PROJECT_ROOT" 2>/dev/null || true)
+  if [[ -z "$service_user" || "$service_user" == "UNKNOWN" || "$service_user" == "root" ]]; then
+    if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+      service_user="$SUDO_USER"
+    else
+      service_user=$(id -un)
+    fi
+  fi
+  service_group=$(id -gn "$service_user" 2>/dev/null || id -gn)
+
+  local port
+  port=$(read_env_value "DEV_SERVER_PORT" "8000")
+  port=${port:-8000}
+
+  local unit_path="/etc/systemd/system/${service_name}"
+  cat >"$unit_path" <<UNIT
+[Unit]
+Description=MyPortal customer portal (development checkout ${PROJECT_ROOT})
+After=network-online.target mariadb.service mysql.service redis.service
+Wants=network-online.target
+
+[Service]
+# Uvicorn does not implement systemd's sd_notify protocol.
+Type=simple
+User=${service_user}
+Group=${service_group}
+WorkingDirectory=${PROJECT_ROOT}
+EnvironmentFile=${ENV_FILE}
+ExecStart=${VENV_DIR}/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port ${port}
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+# read-only (rather than true) keeps checkouts under /home usable.
+ProtectHome=read-only
+ReadWritePaths=${PROJECT_ROOT}
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+  chmod 644 "$unit_path"
+  systemctl daemon-reload
+  if systemctl enable "$service_name" >/dev/null 2>&1 && systemctl restart "$service_name"; then
+    echo "Systemd service '${service_name}' is enabled and running on port ${port}." >&2
+  else
+    echo "Warning: Failed to enable/start '${service_name}' automatically." >&2
+    echo "Run: sudo systemctl status ${service_name}" >&2
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -465,57 +627,58 @@ install_pwsh() {
   fi
 
   # Only attempt installation on Debian/Ubuntu where apt-get is available.
-  if ! command -v apt-get >/dev/null 2>&1; then
-    echo "Warning: apt-get not found – skipping PowerShell Core installation." >&2
+  if ! command -v apt-get >/dev/null 2>&1 || ! is_root; then
+    echo "Warning: skipping optional PowerShell Core installation (needs root and apt-get)." >&2
     echo "Install PowerShell Core manually: https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell" >&2
     return
   fi
 
   echo "Installing PowerShell Core (pwsh)…" >&2
 
-  # Packages required to register the Microsoft package repository.
-  if ! apt-get update -qq; then
-    echo "Warning: apt-get update failed – skipping PowerShell Core installation." >&2
-    return
-  fi
-  if ! apt-get install -y -qq apt-transport-https software-properties-common wget; then
-    echo "Warning: Failed to install prerequisite packages – skipping PowerShell Core installation." >&2
+  if ! apt-get install -y -qq wget >/dev/null; then
+    echo "Warning: Failed to install wget – skipping PowerShell Core installation." >&2
     return
   fi
 
   # Detect the running distribution.  /etc/os-release is standard on all
   # systemd-based distributions.
-  local version_id=""
+  local distro_id="" version_id=""
   if [[ -f /etc/os-release ]]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    version_id="${VERSION_ID:-}"
+    distro_id=$(. /etc/os-release && printf '%s' "${ID:-}")
+    version_id=$(. /etc/os-release && printf '%s' "${VERSION_ID:-}")
   fi
 
-  if [[ -z "$version_id" ]]; then
-    echo "Warning: Unable to determine OS version – skipping PowerShell Core installation." >&2
-    echo "Install PowerShell Core manually: https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell" >&2
-    return
-  fi
+  case "$distro_id" in
+    ubuntu|debian) ;;
+    *)
+      echo "Warning: Unsupported distribution '${distro_id:-unknown}' – skipping PowerShell Core installation." >&2
+      echo "Install PowerShell Core manually: https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell" >&2
+      return
+      ;;
+  esac
 
   # Register the Microsoft package repository.
-  local pkg_url="https://packages.microsoft.com/config/ubuntu/${version_id}/packages-microsoft-prod.deb"
+  local pkg_url="https://packages.microsoft.com/config/${distro_id}/${version_id}/packages-microsoft-prod.deb"
   local tmp_deb
   tmp_deb=$(mktemp /tmp/packages-microsoft-prod.XXXXXX.deb)
   if ! wget -q -O "$tmp_deb" "$pkg_url"; then
     rm -f "$tmp_deb"
-    echo "Warning: Failed to download Microsoft package list for Ubuntu ${version_id}." >&2
+    echo "Warning: Failed to download Microsoft package list for ${distro_id} ${version_id}." >&2
     echo "Install PowerShell Core manually: https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell" >&2
     return
   fi
-  dpkg -i "$tmp_deb"
+  if ! dpkg -i "$tmp_deb" >/dev/null; then
+    rm -f "$tmp_deb"
+    echo "Warning: Failed to register the Microsoft package repository." >&2
+    return
+  fi
   rm -f "$tmp_deb"
 
   if ! apt-get update -qq; then
     echo "Warning: apt-get update failed after adding Microsoft repository." >&2
     return
   fi
-  if ! apt-get install -y -qq powershell; then
+  if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq powershell; then
     echo "Warning: Failed to install powershell package." >&2
     echo "Install PowerShell Core manually: https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell" >&2
     return
@@ -532,8 +695,8 @@ install_exo_module() {
   local pwsh_bin
   pwsh_bin=$(command -v pwsh 2>/dev/null || true)
 
-  if [[ -z "$pwsh_bin" ]]; then
-    echo "Warning: pwsh not available – skipping ExchangeOnlineManagement module install." >&2
+  if [[ -z "$pwsh_bin" ]] || ! is_root; then
+    echo "Warning: skipping optional ExchangeOnlineManagement module install (needs root and pwsh)." >&2
     return
   fi
 
@@ -547,237 +710,34 @@ install_exo_module() {
 
   echo "Installing ExchangeOnlineManagement PowerShell module…" >&2
 
+  # Optional: a PowerShell Gallery outage must not abort the installation.
   "$pwsh_bin" -NoProfile -NonInteractive -Command \
-    'Install-Module -Name ExchangeOnlineManagement -Repository PSGallery -Scope AllUsers -Force -AllowClobber'
+    'Install-Module -Name ExchangeOnlineManagement -Repository PSGallery -Scope AllUsers -Force -AllowClobber' \
+    || true
 
   if "$pwsh_bin" -NoProfile -NonInteractive -Command \
       'if (Get-Module -ListAvailable -Name ExchangeOnlineManagement) { exit 0 } else { exit 1 }' \
       2>/dev/null; then
     echo "ExchangeOnlineManagement module installed successfully." >&2
   else
-    echo "Warning: ExchangeOnlineManagement module installation may have failed." >&2
+    echo "Warning: ExchangeOnlineManagement module installation failed; the Exchange Online PowerShell fallback will be unavailable." >&2
   fi
 }
 
 # ---------------------------------------------------------------------------
-# .NET SDK + WiX v7 – required for building the Windows MSI tray installer
+# Main
 # ---------------------------------------------------------------------------
 
-install_dotnet() {
-  if command -v dotnet >/dev/null 2>&1; then
-    echo ".NET SDK is already installed ($(dotnet --version))." >&2
-    return
-  fi
+if [[ "$ENVIRONMENT" == "production" ]]; then
+  check_control_checkout
+fi
 
-  if ! command -v apt-get >/dev/null 2>&1; then
-    echo "Warning: apt-get not found – skipping .NET SDK installation." >&2
-    echo "Install .NET SDK 8+ manually to enable MSI builds: https://dotnet.microsoft.com/download" >&2
-    return
-  fi
+install_system_packages
 
-  echo "Installing .NET SDK 8.0…" >&2
-
-  if ! apt-get update -qq; then
-    echo "Warning: apt-get update failed – skipping .NET SDK installation." >&2
-    return
-  fi
-
-  # Try 8.0 first (LTS); fall back to 9.0 if the distro only ships the newer SDK.
-  if apt-get install -y -qq dotnet-sdk-8.0 2>/dev/null; then
-    :
-  elif apt-get install -y -qq dotnet-sdk-9.0 2>/dev/null; then
-    :
-  else
-    echo "Warning: Could not install .NET SDK via apt-get." >&2
-    echo "Install .NET SDK 8+ manually: https://dotnet.microsoft.com/download" >&2
-    return
-  fi
-
-  if command -v dotnet >/dev/null 2>&1; then
-    echo ".NET SDK installed ($(dotnet --version))." >&2
-  else
-    echo "Warning: .NET SDK package installed but dotnet not found on PATH." >&2
-  fi
-}
-
-install_wix() {
-  # WiX v7 is a .NET global tool installed per-user under ~/.dotnet/tools.
-  # WiX v7 requires accepting the FireGiant Open Source Maintenance Fee
-  # (OSMF) EULA. We pass `-acceptEula wix7` on the `wix build` command line
-  # per https://docs.firegiant.com/wix/osmf/ so unattended builds do not
-  # fail with WIX7015.
-  export PATH="${HOME}/.dotnet/tools:${PATH}"
-
-  if command -v wix >/dev/null 2>&1; then
-    local current_version
-    current_version=$(wix --version 2>/dev/null | head -n1 | awk '{print $1}')
-    if [[ "$current_version" == 7.* ]]; then
-      echo "WiX v7 is already installed (version ${current_version})." >&2
-      return
-    fi
-    echo "Found WiX version ${current_version:-unknown}; replacing with v7…" >&2
-    local dotnet_bin_uninstall
-    dotnet_bin_uninstall=$(command -v dotnet 2>/dev/null || true)
-    if [[ -n "$dotnet_bin_uninstall" ]]; then
-      "$dotnet_bin_uninstall" tool uninstall --global wix >/dev/null 2>&1 || true
-    fi
-  fi
-
-  local dotnet_bin
-  dotnet_bin=$(command -v dotnet 2>/dev/null || true)
-
-  if [[ -z "$dotnet_bin" ]]; then
-    echo "Warning: dotnet not available – skipping WiX v7 installation." >&2
-    return
-  fi
-
-  echo "Installing WiX v7 (dotnet global tool)…" >&2
-
-  if ! "$dotnet_bin" tool install --global wix --version "7.*" 2>/dev/null; then
-    # Already installed at a different version; try updating instead.
-    if ! "$dotnet_bin" tool update --global wix --version "7.*" 2>/dev/null; then
-      echo "Warning: Failed to install WiX v7." >&2
-      return
-    fi
-  fi
-
-  # Re-export so the newly installed binary is on PATH for the rest of this session.
-  export PATH="${HOME}/.dotnet/tools:${PATH}"
-
-  if command -v wix >/dev/null 2>&1; then
-    echo "WiX v7 installed successfully." >&2
-  else
-    echo "Warning: WiX v7 installed but wix binary not found on PATH." >&2
-    echo "Add \${HOME}/.dotnet/tools to PATH to use it." >&2
-  fi
-}
-
-# ---------------------------------------------------------------------------
-# Go toolchain – required for building the tray app binaries
-# ---------------------------------------------------------------------------
-
-GO_MIN_MAJOR=1
-GO_MIN_MINOR=22
-
-_go_satisfies_version() {
-  local go_bin="$1"
-  local version_output
-  version_output=$("$go_bin" version 2>/dev/null) || return 1
-  local major minor
-  if [[ "$version_output" =~ go([0-9]+)\.([0-9]+) ]]; then
-    major="${BASH_REMATCH[1]}"
-    minor="${BASH_REMATCH[2]}"
-    if [[ "$major" -gt "$GO_MIN_MAJOR" ]] || \
-       [[ "$major" -eq "$GO_MIN_MAJOR" && "$minor" -ge "$GO_MIN_MINOR" ]]; then
-      return 0
-    fi
-  fi
-  return 1
-}
-
-_detect_go() {
-  local -a candidates=("${GOROOT:-/usr/local/go}/bin/go" "go")
-  local candidate resolved
-  for candidate in "${candidates[@]}"; do
-    if [[ "$candidate" == /* ]]; then
-      [[ -x "$candidate" ]] && resolved="$candidate" || continue
-    else
-      command -v "$candidate" >/dev/null 2>&1 && resolved=$(command -v "$candidate") || continue
-    fi
-    if _go_satisfies_version "$resolved"; then
-      printf '%s' "$resolved"
-      return 0
-    fi
-  done
-  return 1
-}
-
-install_go() {
-  if _detect_go >/dev/null 2>&1; then
-    local go_bin
-    go_bin=$(_detect_go)
-    echo "Go toolchain found: $("$go_bin" version)." >&2
-    return
-  fi
-
-  if ! command -v apt-get >/dev/null 2>&1; then
-    echo "Warning: apt-get not found – skipping Go installation." >&2
-    echo "Install Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ manually to enable tray app builds: https://go.dev/dl/" >&2
-    return
-  fi
-
-  echo "Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ not found; installing via apt-get…" >&2
-  if ! apt-get update -qq; then
-    echo "Warning: apt-get update failed – skipping Go installation." >&2
-    return
-  fi
-  if ! apt-get install -y -qq golang-go; then
-    echo "Warning: Failed to install golang-go package." >&2
-    return
-  fi
-
-  if _detect_go >/dev/null 2>&1; then
-    local go_bin
-    go_bin=$(_detect_go)
-    echo "Go toolchain installed: $("$go_bin" version)." >&2
-  else
-    echo "Warning: golang-go installed but Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ was not detected." >&2
-    echo "Install Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ manually: https://go.dev/dl/" >&2
-  fi
-}
-
-build_tray_installers() {
-  local tray_dir="${PROJECT_ROOT}/tray"
-  local static_tray_dir="${PROJECT_ROOT}/app/static/tray"
-
-  if [[ ! -f "${tray_dir}/Makefile" ]]; then
-    echo "Tray app Makefile not found; skipping tray build." >&2
-    return
-  fi
-
-  local go_bin
-  if ! go_bin=$(_detect_go 2>/dev/null); then
-    echo "Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ not available; skipping tray build." >&2
-    return
-  fi
-
-  if ! command -v make >/dev/null 2>&1; then
-    echo "make not available; skipping tray build." >&2
-    return
-  fi
-
-  # Ensure WiX is on PATH (installed by install_wix above).
-  export PATH="${HOME}/.dotnet/tools:${PATH}"
-
-  if ! command -v wix >/dev/null 2>&1; then
-    echo "WiX v7 not available; skipping MSI build." >&2
-    return
-  fi
-
-  echo "Attempting to build Windows MSI installer…" >&2
-  local go_dir
-  go_dir=$(dirname "$go_bin")
-  if (cd "$tray_dir" && PATH="${go_dir}:${HOME}/.dotnet/tools:${PATH}" make build-msi); then
-    mkdir -p "$static_tray_dir"
-    if [[ -f "${tray_dir}/dist/windows/myportal-tray.msi" ]]; then
-      cp "${tray_dir}/dist/windows/myportal-tray.msi" "${static_tray_dir}/myportal-tray.msi"
-      echo "MSI installer built and copied → app/static/tray/" >&2
-    fi
-    if [[ -f "${tray_dir}/dist/darwin/myportal-tray.pkg" ]]; then
-      cp "${tray_dir}/dist/darwin/myportal-tray.pkg" "${static_tray_dir}/myportal-tray.pkg"
-      echo "PKG installer copied → app/static/tray/" >&2
-    fi
-    if [[ -f "${tray_dir}/dist/darwin/myportal-tray.dmg" ]]; then
-      cp "${tray_dir}/dist/darwin/myportal-tray.dmg" "${static_tray_dir}/myportal-tray.dmg"
-      echo "DMG installer copied → app/static/tray/" >&2
-    fi
-    if [[ ! -f "${tray_dir}/dist/windows/myportal-tray.msi" ]]; then
-      echo "Warning: MSI build reported success but myportal-tray.msi was not found at expected path." >&2
-    fi
-  else
-    echo "Warning: MSI build failed." >&2
-  fi
-}
+if [[ "$ENVIRONMENT" == "production" ]]; then
+  ensure_service_account
+  prepare_production_directories
+fi
 
 ensure_env_file
 ensure_env_default "DISABLED_FEATURE_PACKS" ""
@@ -794,17 +754,20 @@ ensure_env_secret "SESSION_SECRET" 48
 ensure_env_secret "TOTP_ENCRYPTION_KEY" 48
 ensure_env_secret "SMTP2GO_WEBHOOK_SECRET" 32
 ensure_env_secret "MCP_TOKEN" 32
+# The installer owns the local database account, so do not leave the password
+# shipped in .env.example in place on a new deployment.
+ensure_env_secret "DB_PASSWORD" 32 placeholder-only
 if [[ "$ENVIRONMENT" == "production" ]]; then
-  # The production installer owns the local database account, so do not leave
-  # the password shipped in .env.example in place on a new deployment.
-  ensure_env_secret "DB_PASSWORD" 32
+  # Immutable releases have no .git directory; the admin "system update"
+  # action queries this checkout for the latest revision instead.
+  set_env_value MYPORTAL_CONTROL_CHECKOUT "$PROJECT_ROOT"
 fi
 secure_env_file_permissions
 
-cat <<'REMINDER'
+cat <<REMINDER
 
 SECURITY REMINDER:
-  - Your .env file has been set to mode 0600 (owner-only).
+  - Configuration is stored in ${ENV_FILE} (not readable by other users).
   - If fresh secrets were generated above, store a secure backup. Losing
     TOTP_ENCRYPTION_KEY will make stored TOTP secrets and encrypted
     integration credentials unrecoverable.
@@ -813,25 +776,53 @@ SECURITY REMINDER:
 
 REMINDER
 
-if [[ "$ENVIRONMENT" == "production" ]]; then
+if is_root; then
   "${SCRIPT_DIR}/provision_mysql.sh" "$ENV_FILE"
+else
+  sudo "${SCRIPT_DIR}/provision_mysql.sh" "$ENV_FILE"
 fi
 
 install_pwsh
 install_exo_module
 install_sip_client
-ensure_virtualenv
-install_dependencies
-install_and_start_systemd_service
 # Tray binaries and installers are release artifacts built by CI. Installing
 # the server must not install Go/.NET/WiX or compile unrelated client software.
 
-cat <<MESSAGE
-MyPortal ${ENVIRONMENT} environment is ready.
-- Environment file: ${ENV_FILE}
-- Virtualenv: ${VENV_DIR}
+if [[ "$ENVIRONMENT" == "production" ]]; then
+  run_first_deployment
+  install_update_cron
 
-Remember to configure system services (e.g. systemd) and run database migrations
-if service automation was skipped on this host. The application automatically
-applies migrations during launch.
+  cat <<MESSAGE
+MyPortal production environment is ready.
+- Environment file: ${ENV_FILE}
+- Control checkout: ${PROJECT_ROOT}
+- Serving release:  $(readlink -f "${DEPLOY_ROOT}/current" 2>/dev/null || echo "<unknown>")
+- Portal URL:       http://$(hostname -f 2>/dev/null || hostname)/
+
+Open the portal URL and register the first account; it becomes the super
+administrator. Apply future updates with:
+  sudo ${SCRIPT_DIR}/upgrade.sh
+
+Before exposing the portal to the internet, terminate TLS in front of nginx,
+set PORTAL_URL to the public https:// address and ENVIRONMENT=production in
+${ENV_FILE} (production mode issues Secure-only cookies, which browsers only
+send over HTTPS), then apply the change with:
+  sudo systemctl restart myportal@blue.service myportal@green.service
 MESSAGE
+else
+  ensure_virtualenv
+  install_dependencies
+  run_migrations
+  install_development_service
+
+  cat <<MESSAGE
+MyPortal development environment is ready.
+- Environment file: ${ENV_FILE}
+- Virtualenv:       ${VENV_DIR}
+
+Run the development server manually with:
+  ${VENV_DIR}/bin/python -m uvicorn app.main:app --reload
+and apply new migrations after pulling changes with:
+  ${VENV_DIR}/bin/python manage.py migrate --target-release development
+MESSAGE
+fi

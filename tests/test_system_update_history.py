@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.services import system_update_history
 
 
@@ -34,3 +36,12 @@ def test_invalid_update_identifier_is_rejected(monkeypatch, tmp_path):
         pass
     else:
         raise AssertionError("path traversal identifier was accepted")
+
+
+
+def test_blank_history_dir_setting_uses_default(monkeypatch, tmp_path):
+    monkeypatch.setenv("MYPORTAL_SYSTEM_UPDATE_HISTORY_DIR", "")
+    assert system_update_history._resolve_history_dir(tmp_path) == tmp_path
+
+    monkeypatch.setenv("MYPORTAL_SYSTEM_UPDATE_HISTORY_DIR", "/srv/history")
+    assert system_update_history._resolve_history_dir(tmp_path) == Path("/srv/history")

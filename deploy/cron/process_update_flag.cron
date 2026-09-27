@@ -1,3 +1,4 @@
-# Replace /opt/myportal with the absolute path to your deployment root.
+# scripts/install_production.sh installs this job as /etc/cron.d/myportal-update.
+# Replace /opt/myportal/control with the path of your control checkout if it differs.
 # This entry checks for the system_update flag every minute and applies updates when needed.
-* * * * * root /usr/bin/env bash /opt/myportal/scripts/process_update_flag.sh >> /var/log/myportal/process_update_flag.log 2>&1
+* * * * * root /usr/bin/env bash /opt/myportal/control/scripts/process_update_flag.sh >> /var/log/myportal/process_update_flag.log 2>&1

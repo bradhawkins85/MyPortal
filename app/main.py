@@ -6047,12 +6047,12 @@ async def admin_service_status_page(request: Request):
         if company.get("id") is not None
     }
     public_status_urls = {
-        int(company["id"]): (
-            f"/service-status/public/{int(company['id'])}/"
-            f"{service_status_service.build_public_status_token(
-                int(company['id']),
+        int(company["id"]): "/service-status/public/{}/{}".format(
+            int(company["id"]),
+            service_status_service.build_public_status_token(
+                int(company["id"]),
                 seed=service_status_service.public_status_token_seed(company),
-            )}"
+            ),
         )
         for company in companies
         if company.get("id") is not None

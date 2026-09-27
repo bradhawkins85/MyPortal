@@ -3,5 +3,5 @@
   "occurred_at": "2026-09-21T00:00Z",
   "change_type": "Fix",
   "summary": "Prevent strict-mode upgrade failures by initializing tray artifact revisions before deriving validation and publication paths.",
-  "content_hash": "b67a88148814380ad795279c51d4231507d1bce4a47921cd0255bc386fc19561"
+  "content_hash": "6c0b9e9ff0fc6dda8d5d8879683c32d9e4f264d84cd617137341abb68d39e1ed"
 }

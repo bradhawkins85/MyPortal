@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install and initialise a local MySQL-compatible server for production.
-# Remote database hosts and SQLite configurations are deliberately left alone.
+# Install and initialise a local MariaDB server and the application's database
+# account (run as root). Remote database hosts and SQLite configurations are
+# left alone.
 ENV_FILE="${1:-}"
 if [[ -z "$ENV_FILE" || ! -f "$ENV_FILE" ]]; then
   echo "Error: provision_mysql.sh requires the path to an environment file." >&2
@@ -62,29 +63,65 @@ if [[ -z "$DB_PASSWORD" ]]; then
   exit 1
 fi
 
-if ! command -v mysqld >/dev/null 2>&1 && ! command -v mariadbd >/dev/null 2>&1; then
-  if ! command -v apt-get >/dev/null 2>&1; then
-    echo "Error: No local MySQL server found. Install MySQL/MariaDB and rerun the production installer." >&2
+server_binary() {
+  command -v mariadbd 2>/dev/null || command -v mysqld 2>/dev/null || true
+}
+
+# Migrations call functions such as RANDOM_BYTES() that MariaDB added in
+# 10.10. Ubuntu 22.04 ships 10.6, Ubuntu 24.04 and Debian 12 ship 10.11.
+MIN_MARIADB_VERSION="10.10"
+
+version_at_least() {
+  printf '%s\n%s\n' "$2" "$1" | sort -V -C
+}
+
+require_supported_mariadb() {
+  local version="$1" origin="$2"
+  if [[ -z "$version" ]] || ! version_at_least "$version" "$MIN_MARIADB_VERSION"; then
+    echo "Error: ${origin} provides MariaDB ${version:-<unknown>}; MyPortal requires MariaDB ${MIN_MARIADB_VERSION} or later." >&2
+    echo "Use Ubuntu 24.04 or Debian 12 (or newer), install MariaDB 10.11 LTS from https://mariadb.org/download/, or point DB_HOST at a supported server." >&2
     exit 1
   fi
-  echo "No local MySQL server found; installing the default MySQL server…" >&2
-  apt-get update -qq
-  if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq default-mysql-server; then
-    echo "The default MySQL package is unavailable; trying mysql-server…" >&2
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq mysql-server
+}
+
+# The schema migrations use MariaDB syntax (for example
+# "ALTER TABLE ... ADD COLUMN IF NOT EXISTS"), which Oracle MySQL rejects.
+# Ubuntu's default-mysql-server package is Oracle MySQL, so always ask for
+# MariaDB explicitly.
+if [[ -z "$(server_binary)" ]]; then
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Error: No local MariaDB server found. Install MariaDB 10.6 or later and rerun the installer." >&2
+    exit 1
   fi
+  echo "No local database server found; installing MariaDB…" >&2
+  apt-get update -qq || echo "Warning: apt-get update failed." >&2
+  candidate=$(apt-cache policy mariadb-server 2>/dev/null | awk '/Candidate:/ {print $2}' | sed -E 's/^[0-9]+://; s/[-+~].*//')
+  [[ "$candidate" == "(none)" ]] && candidate=""
+  # Check before installing so an unsupported release fails without leaving
+  # a half-migrated database behind.
+  require_supported_mariadb "$candidate" "The distribution's mariadb-server package"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq mariadb-server mariadb-client
 fi
 
+if ! "$(server_binary)" --version 2>/dev/null | grep -qi mariadb; then
+  echo "Error: the local database server is Oracle MySQL ($("$(server_binary)" --version 2>/dev/null))." >&2
+  echo "MyPortal migrations require MariaDB. Replace it with the mariadb-server package, or point DB_HOST at a MariaDB server, and rerun the installer." >&2
+  exit 1
+fi
+require_supported_mariadb \
+  "$("$(server_binary)" --version 2>/dev/null | grep -oE 'Ver [0-9]+\.[0-9]+(\.[0-9]+)?' | awk '{print $2}')" \
+  "The installed database server"
+
 if command -v systemctl >/dev/null 2>&1; then
-  systemctl enable --now mysql 2>/dev/null || systemctl enable --now mariadb
+  systemctl enable --now mariadb >/dev/null 2>&1 || systemctl enable --now mysql
 elif command -v service >/dev/null 2>&1; then
-  service mysql start 2>/dev/null || service mariadb start
+  service mariadb start 2>/dev/null || service mysql start
 else
-  echo "Error: MySQL was installed but no supported service manager was found." >&2
+  echo "Error: MariaDB was installed but no supported service manager was found." >&2
   exit 1
 fi
 
-MYSQL_BIN=$(command -v mysql || command -v mariadb || true)
+MYSQL_BIN=$(command -v mariadb || command -v mysql || true)
 if [[ -z "$MYSQL_BIN" ]]; then
   echo "Error: MySQL client was not installed with the server." >&2
   exit 1

@@ -1,171 +1,92 @@
 # Running MyPortal as a systemd Service
 
-The instructions below describe how to install MyPortal as a hardened
-`systemd` service on a Linux host. The goal is to provide a reproducible
-setup that keeps the application running, applies migrations at startup,
-and limits exposure in the event of a compromise.
+`scripts/install_production.sh` creates and manages every service described
+here; nothing needs to be configured by hand. This page explains what it sets
+up and how to operate it. For installation steps, see
+[Setup and Installation](Setup-and-Installation).
 
-## 1. Create a dedicated service account
+## What runs where
 
-Run these commands as `root` (or with `sudo`) to create an unprivileged
-user and group. The service user owns the application files and has no
-shell access for improved security.
+| Unit | Purpose |
+| --- | --- |
+| `myportal@blue.service` / `myportal@green.service` | The two application slots (ports 8001 and 8002, loopback checks only). Each runs `uvicorn` from the release its `/opt/myportal/instances/<slot>` link points to. nginx routes traffic to exactly one of them. |
+| `nginx.service` | Public listener on port 80, using `/etc/nginx/sites-available/myportal.conf` and the active-slot include `/etc/nginx/conf.d/myportal-active.inc`. |
+| `mariadb.service` | Local database, when `DB_HOST` is `localhost`. |
+| `/etc/cron.d/myportal-update` | Runs `scripts/process_update_flag.sh` every minute to apply updates requested from the admin UI. |
 
-```bash
-useradd --system --create-home --shell /usr/sbin/nologin myportal
-mkdir -p /opt/myportal
-chown myportal:myportal /opt/myportal
-```
+The unit template is `deploy/systemd/myportal@.service`, and `upgrade.sh`
+reinstalls it on every deployment. A slot with no assigned release is skipped
+(`ConditionPathExists`), so after the first deployment only one slot is
+running. That is expected.
 
-Clone the repository or deploy your application artifact into
-`/opt/myportal`. Copy `.env.example` to `.env` and update secrets and
-connection strings as needed.
+Hardening applied by the unit:
 
-## 2. Prepare the virtual environment
+- Runs as the unprivileged `myportal` account.
+- `NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=full` and `ProtectHome=true`.
+- Release directories are read-only. Only `/opt/myportal/shared` (uploads and
+  state) and `/var/log/myportal` are writable by the service.
+- Configuration comes from `/etc/myportal.env` (`root:myportal`, mode 0640).
 
-Switch to the service account and bootstrap the Python environment. This
-keeps dependencies isolated from the system Python install.
-
-```bash
-sudo -u myportal -H bash -c '
-  cd /opt/myportal && \
-  python3 -m venv .venv && \
-  source .venv/bin/activate && \
-  python scripts/bootstrap_venv.py
-'
-```
-
-Re-run the bootstrap script whenever you update dependencies. It will
-ensure `pip install -e .` runs inside the managed environment.
-
-## 3. Store environment variables securely
-
-Create an environment file that only the service account can read. This
-avoids embedding credentials in the unit file.
+## Day-to-day operations
 
 ```bash
-cat <<'ENV' | sudo tee /etc/myportal.env
-SESSION_SECRET=change-me
-TOTP_ENCRYPTION_KEY=change-me
-DATABASE_URL=mysql+aiomysql://user:pass@127.0.0.1:3306/myportal
-REDIS_URL=redis://127.0.0.1:6379/0
-ENV
-chmod 600 /etc/myportal.env
-chown myportal:myportal /etc/myportal.env
+# Health of the serving release (reports the deployed Git revision)
+curl http://localhost/readyz
+
+# Which slot is serving
+cat /etc/nginx/conf.d/myportal-active.inc
+
+# Status and logs
+systemctl status 'myportal@*'
+journalctl -u 'myportal@*' -f
+
+# Apply configuration changes made in /etc/myportal.env
+sudo systemctl restart myportal@blue.service myportal@green.service
+
+# Deploy the latest origin/main
+sudo /opt/myportal/control/scripts/upgrade.sh
 ```
 
-Update the values to match your deployment. Keep secrets strong and do
-not commit the file to version control.
+`APP_UPGRADE_MODE`, `SYSTEMD_SERVICE_NAME` and `APP_RESTART_COMMAND` are only
+honoured by the legacy `scripts/restart.sh` helper. Every update of a
+production server uses the blue/green procedure in `upgrade.sh`; see
+[Zero Downtime Upgrades](https://github.com/bradhawkins85/MyPortal/blob/main/docs/wiki/getting-started/Zero%20Downtime%20Upgrades.md).
 
-## 4. Create the systemd unit
+## TLS and hostname
 
-Write the following unit file to `/etc/systemd/system/myportal.service`:
+The bundled nginx site answers any hostname on port 80 (`server_name _;`). To
+use a real hostname:
 
-```ini
-[Unit]
-Description=MyPortal customer portal
-After=network-online.target mysql.service redis.service
-Wants=network-online.target
+1. Edit `server_name` in `/etc/nginx/sites-available/myportal.conf`.
+2. Terminate TLS, for example with `certbot --nginx`.
+3. Set `PORTAL_URL=https://…` and `ENVIRONMENT=production` in
+   `/etc/myportal.env`.
+4. Restart both slots as shown above.
 
-[Service]
-Type=notify
-User=myportal
-Group=myportal
-WorkingDirectory=/opt/myportal
-EnvironmentFile=/etc/myportal.env
-ExecStart=/opt/myportal/scripts/start_with_auto_update.sh /opt/myportal/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
-ExecReload=/bin/kill -s HUP $MAINPID
-Restart=always
-RestartSec=5
-# Sandbox the process as much as possible without breaking migrations or file access.
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ProtectHome=true
-ReadWritePaths=/opt/myportal
+`upgrade.sh` reinstalls the nginx site from the release on each deployment. If
+you customise the site, keep your changes in a separate file (for example a TLS
+server block in `/etc/nginx/sites-available/myportal-tls.conf` that proxies to
+`http://myportal_app`), so an upgrade does not overwrite them.
 
-[Install]
-WantedBy=multi-user.target
-```
+## Development service
 
-Key points:
-
-- `start_with_auto_update.sh` wraps the Uvicorn process. When startup
-  fails, it runs `scripts/upgrade.sh --auto-fallback` to pull the latest
-  code (using credentials from `.env` when present) before trying again.
-  Configure behaviour via `UVICORN_AUTO_UPDATE_ENABLED`,
-  `UVICORN_AUTO_UPDATE_ATTEMPTS`, and
-  `UVICORN_AUTO_UPDATE_RETRY_DELAY` in the environment file.
-- `Type=notify` allows Uvicorn to report readiness to systemd. Remove the
-  directive if you are not using Uvicorn's `--factory` or `--lifespan`
-  support.
-- The service runs as the dedicated `myportal` user with a restricted
-  home directory and `NoNewPrivileges` enabled.
-- `ProtectSystem` and `ProtectHome` restrict filesystem access while
-  keeping `/opt/myportal` writable for logs and migrations.
-
-## 5. Enable and start the service
-
-Reload systemd so it recognises the new unit, then enable and start it.
+`sudo scripts/install_development.sh` creates `myportal-dev.service` instead.
+It runs `uvicorn` from the developer's checkout and `.venv`, as the developer's
+user, on port 8000 (`DEV_SERVER_PORT` in `.env` changes this). It uses the
+checkout's `.env` and never touches the production units, so a development and
+a production installation can share one host.
 
 ```bash
-systemctl daemon-reload
-systemctl enable --now myportal.service
+systemctl status myportal-dev.service
+journalctl -u myportal-dev.service -f
 ```
 
-Systemd will apply database migrations each time the service starts,
-thanks to the startup hook in `app/main.py`.
+## Optional hardening
 
-## 6. Monitor and maintain the service
-
-Check the service status and logs with:
-
-```bash
-systemctl status myportal.service
-journalctl -u myportal.service -f
-```
-
-If you run updates via `scripts/upgrade.sh` or the scheduler's `system_update`
-task, the upgrade helper honours three environment variables defined in
-`.env`:
-
-- `APP_UPGRADE_MODE` selects the default deploy path for queued updates:
-  `graceful` (default), `rolling`, or `restart`.
-- `SYSTEMD_SERVICE_NAME` overrides the default `myportal` unit name.
-- `APP_RESTART_COMMAND` executes a custom restart command (for example,
-  `sudo systemctl restart myportal.service`) before falling back to the
-  standard `systemctl` invocations.
-
-When none of the restart strategies succeed, the helper now exits with a
-non-zero status so scheduled updates surface actionable errors instead of
-silently continuing without restarting the application.
-
-When deploying updates, pull the latest code, reinstall dependencies if
-needed, and prefer the helper so upgrades stay on the zero-downtime path:
-
-```bash
-cd /opt/myportal
-sudo -u myportal -H git pull origin main
-sudo -u myportal -H /opt/myportal/.venv/bin/pip install -e .
-sudo -u myportal /opt/myportal/scripts/upgrade.sh --graceful
-```
-
-If the service fails to start, `systemctl status` will show the most
-recent errors. Systemd automatically restarts the process after five
-seconds; adjust `RestartSec` as needed for your environment.
-
-## 7. Optional hardening
-
-- Place the application behind a reverse proxy (for example nginx) that
-  terminates TLS and sets secure headers.
-- Configure a dedicated firewall rule to limit inbound traffic to port
-  8000 (or whichever port you expose via the reverse proxy).
+- Allow only ports 80/443 through the firewall. The slots listen on
+  8001/8002 for the deployment coordinator's local checks; block those
+  ports from outside.
 - Define `FAIL2BAN_LOG_PATH` in `/etc/myportal.env` and install the bundled
-  Fail2ban filter/jail to automatically ban brute force login attempts.
-- Use `tmpfiles.d` to rotate Loguru output if you configure file-based
-  logging.
-- Integrate with your monitoring stack to alert on repeated restarts or
-  health check failures.
-
-With these steps in place, MyPortal runs as a resilient service that can
-be managed with the same tooling as the rest of your infrastructure.
+  Fail2ban filter and jail (see [Fail2ban](Fail2ban)).
+- Alert on repeated restarts of `myportal@*.service`, or on `/readyz`
+  returning a non-200 response.

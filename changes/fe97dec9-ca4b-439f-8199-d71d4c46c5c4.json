@@ -3,5 +3,5 @@
   "occurred_at": "2026-09-21T00:00Z",
   "change_type": "Fix",
   "summary": "Prevent deleted migration metadata and nounset link variables from aborting atomic upgrades.",
-  "content_hash": "3456355ab3ba930b6fa196e4817ff388dd529e7f17118ffa5d170c929ab0d241"
+  "content_hash": "286c6be2d9f6ad19679e632b5007f88b7fa02022c63dbbde47e1f8aefd1ff65d"
 }

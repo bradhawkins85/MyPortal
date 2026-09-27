@@ -188,7 +188,8 @@ def _build_price_change_email_text(
             vip_info = f" (VIP: {old_vip} -> {new_vip})"
         
         product_lines.append(f"  - {product['name']}: {old_price} -> {new_price}{vip_info}")
-    
+
+    products_text = "\n".join(product_lines)
     return f"""
 Subscription Price Change Notice
 
@@ -197,7 +198,7 @@ This is to inform you of upcoming price changes for your {category_name} subscri
 Effective Date: {effective_date.strftime("%B %d, %Y")}
 
 Price Changes:
-{"\\n".join(product_lines)}
+{products_text}
 
 These new prices will be reflected in your next billing cycle on or after the effective date.
 If you have any questions about these changes, please contact our support team.
