@@ -93,6 +93,16 @@ def test_rack_template_uses_stat_strips_and_hides_unconfigured_values():
     assert "Item list and port links" in template
 
 
+def test_rack_template_offers_persistent_new_and_old_views():
+    template = (ROOT / "app/templates/infrastructure/racks.html").read_text()
+    script = (ROOT / "app/static/js/racks.js").read_text()
+    assert 'data-rack-view="new"' in template
+    assert 'data-rack-view="old"' in template
+    assert 'data-rack-new-only' in template
+    assert "myportal-racks-view" in script
+    assert "setRackView" in script
+
+
 def test_standalone_patch_panel_creates_numbered_ports(monkeypatch):
     monkeypatch.setattr(infrastructure.db, "fetch_one", AsyncMock(side_effect=[{"unit_count": 42}, None, None]))
     monkeypatch.setattr(infrastructure.db, "execute_returning_lastrowid", AsyncMock(return_value=81))
