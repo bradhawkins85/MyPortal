@@ -349,7 +349,8 @@
 }
 
 /* Add rack space dialog */
-dialog.rack-dialog--place { width: min(95vw, 54rem); max-width: 54rem; }
+dialog.rack-dialog--place, dialog.rack-dialog--edit { width: min(95vw, 54rem); max-width: 54rem; }
+dialog.rack-dialog--reservation { width: min(95vw, 42rem); max-width: 42rem; }
 .rack-dialog {
   --rack-cyan: #38bdf8;
   --rack-orange: #fb923c;
@@ -459,3 +460,37 @@ dialog.rack-dialog--place { width: min(95vw, 54rem); max-width: 54rem; }
 .rack-images-toggle:focus-visible { outline: 2px solid #f4cf64; outline-offset: 2px; }
 .rack-elevation-status__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-2); }
 .rack-list__type { color: var(--rack-muted, #9fb0c4); font-size: var(--font-size-xs); }
+
+/* Edit rack item / reservation dialogs */
+.rack-dialog__footer { flex-wrap: wrap; }
+.rack-dialog__spacer { flex: 1; }
+.rack-dialog__hint { margin: .4rem 0 0; color: var(--rack-muted); font-size: .7rem; line-height: 1.4; }
+.rack-choice .rack-dialog__hint { grid-column: 1 / -1; }
+.rack-choice__option:has(input:disabled) { cursor: not-allowed; }
+.rack-choice__option input:disabled + span { opacity: .4; }
+.rack-choice__option:has(input:disabled):hover > span { border-color: var(--rack-line); }
+.rack-edit-summary { gap: var(--space-3); }
+.rack-edit-summary__face {
+  --row: 1.6rem;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  height: calc(var(--row) * var(--edit-units, 1));
+  padding: .2rem .35rem;
+  border-radius: 2px;
+  background: var(--edit-image) left top / 100% calc(var(--row) * var(--image-units, 1)) repeat-y, #1b222d;
+  box-shadow: 0 0 0 .3rem #252e3b, 0 .5rem 1rem rgba(0, 0, 0, .5);
+}
+.rack-edit-summary__face span { max-width: 100%; overflow: hidden; padding: 0 .3rem; border-radius: 2px; color: #f1f5f9; background: rgba(5, 8, 12, .78); font-size: .62rem; font-weight: 600; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.rack-edit-summary__facts { display: grid; gap: .35rem; margin: .3rem 0 0; }
+.rack-edit-summary__facts > div { display: grid; grid-template-columns: 5.2rem minmax(0, 1fr); gap: .4rem; font-size: var(--font-size-xs); }
+.rack-edit-summary__facts dt { color: var(--rack-muted); }
+.rack-edit-summary__facts dd { margin: 0; color: #f1f5f9; font-weight: 600; overflow-wrap: anywhere; }
+.rack-dialog--reservation .rack-dialog__body { grid-template-columns: minmax(0, 1fr) 11rem; }
+@media (max-width: 640px) {
+  .rack-dialog--reservation .rack-dialog__body { grid-template-columns: 1fr; }
+  .rack-edit-summary { grid-template-columns: 1fr; }
+  .rack-edit-summary .rack-mini, .rack-edit-summary .rack-mini__caption { display: none; }
+  .rack-dialog__spacer { display: none; }
+  .rack-dialog__footer .button { flex: 1 1 auto; }
+}

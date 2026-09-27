@@ -200,3 +200,19 @@ def test_device_images_toggle_is_on_by_default_and_remembered():
     assert 'data-rack-images-toggle aria-pressed="true"' in TEMPLATE
     script = (ROOT / "app/static/js/racks.js").read_text()
     assert "racks.deviceImages" in script
+
+
+def test_edit_rack_item_dialog_uses_type_cards_and_item_summary():
+    dialog = TEMPLATE[TEMPLATE.index('<dialog id="rack-edit-dialog"'):TEMPLATE.index('<dialog id="rack-reservation-dialog"')]
+    assert 'type="radio" name="item_type" value="{{ type.key }}"' in dialog
+    assert "<select class=\"input\" name=\"item_type\"" not in dialog
+    for marker in ("data-edit-face", "data-edit-ports-summary", "data-edit-map", "data-edit-type-hint",
+                   "data-edit-remove", "data-edit-ports"):
+        assert marker in dialog
+    for name in ("rack_id", "name", "asset_id", "power_draw_watts", "notes"):
+        assert f'name="{name}"' in dialog
+    reservation = TEMPLATE[TEMPLATE.index('<dialog id="rack-reservation-dialog"'):]
+    assert "data-reservation-map" in reservation
+    script = (ROOT / "app/static/js/racks.js").read_text()
+    assert "const refreshEditSummary" in script
+    assert "input.hasAttribute('data-has-ports') && !hasPorts" in script
