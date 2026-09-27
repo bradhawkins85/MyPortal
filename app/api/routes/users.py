@@ -54,6 +54,14 @@ async def update_my_sidebar_preferences(
     )
 
 
+@router.delete("/me/sidebar-preferences", response_model=dict[str, Any])
+async def reset_my_sidebar_preferences(
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    return await sidebar_preferences_repo.reset_user_sidebar_preferences(int(current_user["id"]))
+
+
 @router.get("/me/preferences")
 async def get_my_preference(
     key: str = Query(..., min_length=1, max_length=190),
