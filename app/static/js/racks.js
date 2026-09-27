@@ -46,6 +46,17 @@
     setSidebar(collapsed);
     try { window.localStorage.setItem('racks.sidebarCollapsed', collapsed ? '1' : '0'); } catch { /* storage unavailable */ }
   });
+  const imagesToggle = document.querySelector('[data-rack-images-toggle]');
+  const setImages = (enabled) => {
+    workspace?.classList.toggle('has-device-images', enabled);
+    imagesToggle?.setAttribute('aria-pressed', String(enabled));
+  };
+  try { setImages(window.localStorage.getItem('racks.deviceImages') !== '0'); } catch { setImages(true); }
+  imagesToggle?.addEventListener('click', () => {
+    const enabled = !workspace?.classList.contains('has-device-images');
+    setImages(enabled);
+    try { window.localStorage.setItem('racks.deviceImages', enabled ? '1' : '0'); } catch { /* storage unavailable */ }
+  });
   document.querySelector('[data-rack-jump]')?.addEventListener('change', event => event.currentTarget.form?.requestSubmit());
   document.querySelectorAll('[data-rack-list-open]').forEach(button => button.addEventListener('click', event => {
     const list = document.getElementById(button.dataset.rackListOpen);
@@ -61,10 +72,11 @@
     const data = item.dataset;
     editForm.action = `/api/infrastructure/rack-equipment/${encodeURIComponent(id)}/edit`;
     editForm.elements.name.value = data.itemName || '';
-    editForm.elements.item_type.value = data.itemType || 'device';
+    editForm.elements.item_type.value = data.itemType || 'server';
     const hasPorts = Number(data.itemPortCount || 0) > 0;
+    // Port rows are created at placement, so a port-less item cannot become a port type.
     [...editForm.elements.item_type.options].forEach(option => {
-      option.disabled = option.value !== 'device' && !hasPorts;
+      option.disabled = option.hasAttribute('data-has-ports') && !hasPorts && option.value !== data.itemType;
     });
     editForm.elements.asset_id.value = data.itemAsset || '';
     editForm.elements.power_draw_watts.value = data.itemPower || '';
@@ -223,14 +235,25 @@
     form.action = reservation ? '/api/infrastructure/rack-reservations' : '/api/infrastructure/rack-equipment';
     form.querySelector('[data-equipment-fields]').hidden = reservation;
     form.querySelector('[data-reservation-fields]').hidden = !reservation;
-    form.elements.name.required = !reservation;
-    const portItem = !reservation && ['patch_panel', 'switch'].includes(form.elements.item_type.value);
-    form.querySelector('[data-port-count]').hidden = !portItem;
-    if (!portItem) form.elements.port_count.value = '';
+    const type = form.querySelector('input[name="item_type"]:checked');
+    const portsLabel = reservation ? '' : type?.dataset.portsLabel || '';
+    form.querySelector('[data-port-count]').hidden = !portsLabel;
+    if (portsLabel) form.querySelector('[data-ports-noun]').textContent = portsLabel;
+    else form.elements.port_count.value = '';
     form.querySelector('[data-submit-label]').textContent = reservation ? 'Reserve space' : 'Place equipment';
   };
+  let heightTouched = false;
+  form.elements.unit_height.addEventListener('input', () => { heightTouched = true; });
+  form.querySelectorAll('input[name="item_type"]').forEach(input => input.addEventListener('change', () => {
+    if (heightTouched) return;
+    const rack = document.querySelector(`[data-rack-id="${CSS.escape(form.elements.rack_id.value)}"]`);
+    const room = Number(rack?.dataset.rackUnits || 1) - Number(form.elements.start_unit.value || 1) + 1;
+    form.elements.unit_height.value = String(Math.max(1, Math.min(Number(input.dataset.defaultHeight || 1), room)));
+    updatePreview();
+  }));
   document.querySelectorAll('[data-place-open]').forEach(button => button.addEventListener('click', () => {
     form.reset();
+    heightTouched = false;
     form.elements.rack_id.value = button.dataset.rack;
     form.elements.face.value = button.dataset.face;
     form.elements.start_unit.value = button.dataset.unit;
