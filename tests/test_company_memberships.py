@@ -34,6 +34,17 @@ def test_combined_permissions_normalises_object_shaped_role_entries():
     assert permissions == ["bcp:edit", "bcp:view", "continuity.access"]
 
 
+def test_base_context_module_lookup_ignores_unhashable_slugs():
+    modules = [
+        {"slug": {"unexpected": "object"}, "enabled": True},
+        {"slug": "syncro", "enabled": True},
+    ]
+
+    assert main._build_module_lookup(modules) == {
+        "syncro": {"slug": "syncro", "enabled": True}
+    }
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
