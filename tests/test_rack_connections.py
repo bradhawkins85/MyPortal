@@ -44,7 +44,7 @@ def test_switch_port_links_record_assets_and_labels(monkeypatch):
                     infrastructure.PortLink("data", 3, None, "  Reception printer ")]))
 
     links = [params for _sql_text, params in _sql(execute, "UPDATE rack_equipment_ports SET asset_id")]
-    assert links == [(5, None, 70, 1, 1), (None, "Reception printer", 70, 3, 1)]
+    assert links == [(5, None, None, 70, 1, 1), (None, "Reception printer", None, 70, 3, 1)]
 
 
 def test_port_link_to_another_companys_asset_is_rejected_and_item_removed(monkeypatch):
@@ -58,16 +58,30 @@ def test_port_link_to_another_companys_asset_is_rejected_and_item_removed(monkey
     assert _sql(execute, "DELETE FROM rack_equipment WHERE id")
 
 
-def test_pdu_power_source_must_be_an_outlet_on_another_item(monkeypatch):
-    _mock_db(monkeypatch, fetch_one=[{"id": 8, "rack_id": 2}, {"id": 41, "equipment_id": 8}])
+def test_server_psus_are_fed_from_outlets_on_other_units(monkeypatch):
+    execute, _insert = _mock_db(
+        monkeypatch, fetch_one=[{"unit_count": 42}, None, None],
+        fetch_all=[[{"id": 41, "equipment_id": 12}, {"id": 42, "equipment_id": 13}]])
+
+    asyncio.run(infrastructure.place_asset(
+        1, 2, None, 10, 1, "front", None, item_type="server", port_counts={"data": 1, "psu": 2},
+        port_links=[infrastructure.PortLink("psu", 1, source_port_id=41, label="A feed"),
+                    infrastructure.PortLink("psu", 2, asset_id=9, source_port_id=42)]))
+
+    links = [params for _sql_text, params in _sql(execute, "UPDATE rack_equipment_ports SET asset_id")]
+    # PSUs record their feeding outlet; any asset id sent for a PSU is ignored.
+    assert links == [(None, "A feed", 41, 70, 2, 1), (None, None, 42, 70, 3, 1)]
+
+
+def test_psu_cannot_be_fed_from_its_own_outlet(monkeypatch):
+    _mock_db(monkeypatch, fetch_one=[{"id": 8, "rack_id": 2}],
+             fetch_all=[[{"id": 5, "port_number": 1, "connector": "iec"},
+                         {"id": 6, "port_number": 2, "connector": "psu"}],
+                        [{"id": 5, "equipment_id": 8}]])
     with pytest.raises(ValueError, match="another UPS or PDU"):
         asyncio.run(infrastructure.update_rack_equipment(
-            1, 8, "PDU A", "pdu", None, None, None,
-            port_counts={"iec": 8, "3pin": 0}, power_source_port_id=41))
-
-
-def test_power_source_is_ignored_for_types_without_a_power_input(monkeypatch):
-    assert asyncio.run(infrastructure._power_source(1, "switch", 41, "Wall")) == (None, None)
+            1, 8, "UPS", "ups", None, None, None, port_counts={"iec": 1, "3pin": 0, "psu": 1},
+            port_links=[infrastructure.PortLink("psu", 1, source_port_id=5)]))
 
 
 def test_sync_ports_keeps_existing_links_and_trims_highest_ports(monkeypatch):
@@ -80,7 +94,7 @@ def test_sync_ports_keeps_existing_links_and_trims_highest_ports(monkeypatch):
 
     assert _sql(execute, "DELETE FROM rack_equipment_ports")[0][1] == (3,)
     # Anything fed from a removed outlet loses that link.
-    assert _sql(execute, "SET power_source_port_id=NULL")[0][1] == (3,)
+    assert _sql(execute, "SET source_port_id=NULL")[0][1] == (3,)
     inserted = [params[2:] for _sql_text, params in _sql(execute, "INSERT INTO rack_equipment_ports")]
     assert inserted == [(4, "3pin"), (5, "3pin")]
     assert [row["port_number"] for row in kept] == [1, 2, 4, 5]
@@ -125,24 +139,43 @@ def test_number_ports_orders_each_connector_separately():
     assert [port["display_label"] for port in numbered] == ["IEC 1", "IEC 2", "3-pin 1"]
 
 
-def test_form_parsing_reads_counts_links_and_power_source():
+def test_form_parsing_reads_counts_links_and_psu_sources():
     from app.features.assets.routes import _rack_connections
 
     form = {
-        "port_count_iec": "2", "port_count_3pin": "1", "port_count_data": "9",
+        "port_count_iec": "2", "port_count_3pin": "1", "port_count_psu": "1", "port_count_data": "9",
         "port-iec-1-asset": "5", "port-iec-1-label": "", "port-iec-2-asset": "",
         "port-iec-2-label": "Monitor", "port-3pin-1-asset": "", "port-3pin-1-label": "",
-        "power_source_port_id": "41", "power_source_label": "Wall B2",
+        "port-psu-1-source": "41", "port-psu-1-label": "Wall B2",
     }
     parsed = _rack_connections(form, "ups")
 
-    assert parsed["port_counts"] == {"iec": 2, "3pin": 1}
+    assert parsed["port_counts"] == {"iec": 2, "3pin": 1, "psu": 1}
     assert parsed["port_links"] == [
         infrastructure.PortLink("iec", 1, 5, None),
         infrastructure.PortLink("iec", 2, None, "Monitor"),
         infrastructure.PortLink("3pin", 1, None, None),
+        infrastructure.PortLink("psu", 1, None, "Wall B2", 41),
     ]
-    assert parsed["power_source_port_id"] == 41 and parsed["power_source_label"] == "Wall B2"
+
+
+def test_kvm_form_parses_connected_devices_network_and_psu():
+    from app.features.assets.routes import _rack_connections
+
+    parsed = _rack_connections({"port_count_kvm": "2", "port_count_data": "1", "port_count_psu": "1",
+                                "port-kvm-2-asset": "7", "port-kvm-2-label": "Web01"}, "kvm")
+    assert parsed["port_counts"] == {"kvm": 2, "data": 1, "psu": 1}
+    assert parsed["port_links"] == [infrastructure.PortLink("kvm", 2, 7, "Web01")]
+
+
+def test_migration_436_moves_power_sources_onto_psu_ports():
+    from pathlib import Path
+
+    sql = (Path(__file__).resolve().parents[1] / "migrations/436_rack_power_supply_inputs.sql").read_text()
+    assert sql.startswith("-- phase: expand")
+    assert "ADD COLUMN source_port_id INT NULL" in sql
+    assert "'psu', e.power_source_label, e.power_source_port_id" in sql
+    assert "DROP" not in sql.upper()
 
 
 def test_migration_adds_connectors_labels_and_power_sources():

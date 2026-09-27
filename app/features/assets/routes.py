@@ -944,10 +944,10 @@ def _rack_location(form: Any, rack_id: Any = None, anchor: str = "") -> str:
 
 
 def _rack_connections(form: Any, item_type: str) -> dict[str, Any]:
-    """Parse port counts, per-port links and the power source from a rack item form.
+    """Parse connection counts and per-port links from a rack item form.
 
-    Link fields are named ``port-<connector>-<ordinal>-asset`` and
-    ``port-<connector>-<ordinal>-label``.
+    Link fields are named ``port-<connector>-<ordinal>-asset`` (or ``-source``
+    for a power supply's feeding outlet) and ``port-<connector>-<ordinal>-label``.
     """
     catalogue = rack_item_types.get(item_type)
     counts: dict[str, int] = {}
@@ -958,21 +958,19 @@ def _rack_connections(form: Any, item_type: str) -> dict[str, Any]:
         counts[connector] = int(raw or 0)
     links = []
     for connector, count in counts.items():
+        target = "source" if connector == rack_item_types.POWER_INPUT else "asset"
         for ordinal in range(1, count + 1):
             prefix = f"port-{connector}-{ordinal}-"
-            asset_raw = form.get(prefix + "asset")
+            target_raw = form.get(prefix + target)
             label = _optional_text(form, prefix + "label")
-            if asset_raw is None and label is None:
+            if target_raw is None and label is None:
                 continue
+            target_id = int(target_raw) if target_raw else None
             links.append(infrastructure_repo.PortLink(
-                connector, ordinal, int(asset_raw) if asset_raw else None, label))
-    source = form.get("power_source_port_id")
-    return {
-        "port_counts": counts,
-        "port_links": links,
-        "power_source_port_id": int(source) if source else None,
-        "power_source_label": _optional_text(form, "power_source_label"),
-    }
+                connector, ordinal,
+                asset_id=target_id if target == "asset" else None, label=label,
+                source_port_id=target_id if target == "source" else None))
+    return {"port_counts": counts, "port_links": links}
 
 
 def _optional_text(form: Any, key: str, limit: int = 191) -> str | None:

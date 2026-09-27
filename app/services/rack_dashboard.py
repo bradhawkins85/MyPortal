@@ -77,20 +77,24 @@ def _covers(item: Mapping[str, Any], unit: int, lane: int) -> bool:
             and lane_start <= lane < lane_start + int(item["width_lanes"]))
 
 
-def _drawn_ports(item: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _drawn_ports(item: Mapping[str, Any], rear: bool = False) -> list[dict[str, Any]]:
+    """Return the connections physically on the viewed side of an item."""
     item_type = rack_item_types.get(item.get("item_type"))
     if not item_type.has_ports:
         return []
+    on_side = lambda connector: (connector in item_type.rear_connectors) == rear  # noqa: E731
     ports = list(item.get("ports") or [])
     if ports:
-        return [{"number": int(port["port_number"]), "connector": str(port.get("connector") or "data"),
-                 "linked": port.get("asset_id") is not None or bool(port.get("label"))}
-                for port in ports[:MAX_DRAWN_PORTS]]
-    drawn = [{"number": 0, "connector": connector, "linked": False}
-             for connector, count in item_type.connectors for _ in range(count)]
-    for number, port in enumerate(drawn, start=1):
-        port["number"] = number
-    return drawn[:MAX_DRAWN_PORTS]
+        drawn = [{"number": int(port["port_number"]), "connector": str(port.get("connector") or "data"),
+                  "linked": (port.get("asset_id") is not None or bool(port.get("label"))
+                             or port.get("source_port_id") is not None)}
+                 for port in ports]
+    else:
+        drawn = [{"number": 0, "connector": connector, "linked": False}
+                 for connector, count in item_type.connectors for _ in range(count)]
+        for number, port in enumerate(drawn, start=1):
+            port["number"] = number
+    return [port for port in drawn if on_side(port["connector"])][:MAX_DRAWN_PORTS]
 
 
 def _block(rack: Mapping[str, Any], item: Mapping[str, Any], kind: str,
@@ -112,8 +116,7 @@ def _block(rack: Mapping[str, Any], item: Mapping[str, Any], kind: str,
         active, image_units = catalogue.active, catalogue.image_units
         status = equipment_status(item)
         image = rack_item_types.image_path(catalogue.key, width, rear)
-        if rear == catalogue.ports_on_rear:
-            ports = _drawn_ports(item)
+        ports = _drawn_ports(item, rear)
     return {
         "kind": kind,
         "id": item["id"],
@@ -240,12 +243,11 @@ def edit_payload(item: Mapping[str, Any]) -> dict[str, Any]:
         "width_lanes": int(item["width_lanes"]),
         "start_lane": int(item["start_lane"]),
         "depth_mode": item.get("depth_mode") or "half",
-        "power_source_port_id": item.get("power_source_port_id"),
-        "power_source_label": item.get("power_source_label") or "",
         "port_counts": counts,
         "ports": [
             {"connector": str(port.get("connector") or "data"), "ordinal": int(port.get("ordinal") or 0),
-             "asset_id": port.get("asset_id"), "label": port.get("label") or ""}
+             "asset_id": port.get("asset_id"), "label": port.get("label") or "",
+             "source_port_id": port.get("source_port_id")}
             for port in item.get("ports") or []
         ],
     }

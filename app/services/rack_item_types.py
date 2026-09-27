@@ -5,12 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 # Connector kinds a rack item port can be. Data ports are RJ45/SFP style;
-# power outlets are either IEC (C13/C19) or 3-pin mains sockets.
+# power outlets are either IEC (C13/C19) or 3-pin mains sockets; PSUs are
+# power inputs fed from an outlet; KVM device ports connect managed devices.
 CONNECTORS = {
-    "data": {"label": "Port", "plural": "ports", "count_label": "Number of ports"},
+    "data": {"label": "Port", "plural": "network ports", "count_label": "Network ports"},
     "iec": {"label": "IEC", "plural": "IEC outlets", "count_label": "IEC outlets"},
     "3pin": {"label": "3-pin", "plural": "3-pin outlets", "count_label": "3-pin outlets"},
+    "psu": {"label": "PSU", "plural": "power supplies", "count_label": "Power supplies (PSUs)"},
+    "kvm": {"label": "Device", "plural": "connected devices", "count_label": "Connected devices"},
 }
+OUTLET_CONNECTORS = frozenset({"iec", "3pin"})
+POWER_INPUT = "psu"
 WIDTHS = (1, 2, 3)
 
 
@@ -24,13 +29,11 @@ class RackItemType:
     connectors: tuple[tuple[str, int], ...] = ()
     # Powered equipment shows a status LED; passive hardware does not.
     active: bool = True
-    # Power distribution hardware records where its input is fed from.
-    power_input: bool = False
     # Rack units covered by one repeat of the faceplate image.
     image_units: int = 1
-    # Where the documented connections physically are (a UPS's outlets are
-    # on its back panel).
-    ports_on_rear: bool = False
+    # Connectors physically on the back panel (e.g. server NICs and PSUs);
+    # the rest are on the front.
+    rear_connectors: tuple[str, ...] = ()
 
     @property
     def has_ports(self) -> bool:
@@ -43,6 +46,11 @@ class RackItemType:
     @property
     def default_counts(self) -> dict[str, int]:
         return dict(self.connectors)
+
+    @property
+    def power_input(self) -> bool:
+        """Whether the type has power supplies fed from another unit's outlets."""
+        return POWER_INPUT in self.connector_keys
 
     @property
     def image(self) -> str:
@@ -60,19 +68,24 @@ def image_path(key: str, width_lanes: int, rear: bool = False) -> str:
 
 
 ITEM_TYPES: tuple[RackItemType, ...] = (
-    RackItemType("server", "Server", "Server"),
+    RackItemType("server", "Server", "Server",
+                 connectors=(("data", 2), ("psu", 2)), rear_connectors=("data", "psu")),
     RackItemType("switch", "Network switch or router", "Switch / router",
-                 connectors=(("data", 24),)),
-    RackItemType("storage", "Storage array (SAN/NAS)", "Storage", default_height=2, image_units=2),
+                 connectors=(("data", 24), ("psu", 1)), rear_connectors=("psu",)),
+    RackItemType("storage", "Storage array (SAN/NAS)", "Storage", default_height=2, image_units=2,
+                 connectors=(("data", 4), ("psu", 2)), rear_connectors=("data", "psu")),
     RackItemType("patch_panel", "Patch panel", "Patch panel",
                  connectors=(("data", 24),), active=False),
-    RackItemType("kvm", "KVM console", "KVM console"),
+    RackItemType("kvm", "KVM console", "KVM console",
+                 connectors=(("kvm", 8), ("data", 1), ("psu", 1)),
+                 rear_connectors=("kvm", "data", "psu")),
     RackItemType("pdu", "Power distribution unit (PDU)", "PDU",
-                 connectors=(("iec", 8), ("3pin", 0)), power_input=True),
-    RackItemType("ups", "Uninterruptible power supply (UPS)", "UPS", default_height=2,
-                 connectors=(("iec", 6), ("3pin", 2)), power_input=True, image_units=2,
-                 ports_on_rear=True),
-    RackItemType("fan_tray", "Fan tray or ventilation", "Fan tray"),
+                 connectors=(("iec", 8), ("3pin", 0), ("psu", 1)), rear_connectors=("psu",)),
+    RackItemType("ups", "Uninterruptible power supply (UPS)", "UPS", default_height=2, image_units=2,
+                 connectors=(("iec", 6), ("3pin", 2), ("psu", 1)),
+                 rear_connectors=("iec", "3pin", "psu")),
+    RackItemType("fan_tray", "Fan tray or ventilation", "Fan tray",
+                 connectors=(("psu", 1),), rear_connectors=("psu",)),
     RackItemType("shelf", "Shelf or blanking panel", "Shelf / blank", active=False),
     RackItemType("cable_management", "Cable management ring or bar", "Cable management", active=False),
 )
