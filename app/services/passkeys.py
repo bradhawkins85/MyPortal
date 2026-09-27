@@ -77,6 +77,30 @@ def relying_party_id(settings: Settings | None = None) -> str:
     return "localhost"
 
 
+def relying_party_id_for_origin(origin: str, settings: Settings | None = None) -> str:
+    """Return an RP ID that the browser can use from ``origin``."""
+    active_settings = settings or get_settings()
+    hostname = (urlsplit(origin).hostname or "").rstrip(".").lower()
+    if not hostname:
+        raise ValueError("Passkey request origin does not contain a valid hostname")
+    explicit = active_settings.passkey_rp_id.strip().rstrip(".").lower()
+    if not explicit:
+        return hostname
+    if hostname != explicit and not hostname.endswith(f".{explicit}"):
+        raise ValueError("Configured PASSKEY_RP_ID is not valid for this portal hostname")
+    return explicit
+
+
+def allowed_origins_for_origin(origin: str, settings: Settings | None = None) -> list[str]:
+    """Allow configured origins plus the origin serving this ceremony."""
+    active_settings = settings or get_settings()
+    parts = urlsplit(origin)
+    if not parts.scheme or not parts.netloc:
+        raise ValueError("Passkey request origin is invalid")
+    request_origin = f"{parts.scheme.lower()}://{parts.netloc.lower()}"
+    return list(dict.fromkeys([request_origin, *allowed_origins(active_settings)]))
+
+
 def relying_party_name(settings: Settings | None = None) -> str:
     active_settings = settings or get_settings()
     return _normalise_name(active_settings.passkey_rp_name, fallback=active_settings.app_name)
@@ -122,6 +146,7 @@ def registration_options(
     user_handle: str,
     existing_credentials: list[dict[str, Any]],
     settings: Settings | None = None,
+    origin: str | None = None,
 ) -> dict[str, Any]:
     active_settings = settings or get_settings()
     challenge_id, challenge, expires_at = generate_challenge_pair()
@@ -138,7 +163,7 @@ def registration_options(
         if record.get("credential_id")
     ]
     options = generate_registration_options(
-        rp_id=relying_party_id(active_settings),
+        rp_id=relying_party_id_for_origin(origin, active_settings) if origin else relying_party_id(active_settings),
         rp_name=relying_party_name(active_settings),
         user_name=str(user.get("email") or ""),
         user_id=base64url_to_bytes(user_handle),
@@ -159,11 +184,11 @@ def registration_options(
     }
 
 
-def authentication_options(*, settings: Settings | None = None) -> dict[str, Any]:
+def authentication_options(*, settings: Settings | None = None, origin: str | None = None) -> dict[str, Any]:
     active_settings = settings or get_settings()
     challenge_id, challenge, expires_at = generate_challenge_pair()
     options = generate_authentication_options(
-        rp_id=relying_party_id(active_settings),
+        rp_id=relying_party_id_for_origin(origin, active_settings) if origin else relying_party_id(active_settings),
         challenge=base64url_to_bytes(challenge),
         allow_credentials=None,
         user_verification=UserVerificationRequirement.REQUIRED,
@@ -181,13 +206,14 @@ def verify_registration(
     credential: dict[str, Any],
     expected_challenge: str,
     settings: Settings | None = None,
+    origin: str | None = None,
 ):
     active_settings = settings or get_settings()
     return verify_registration_response(
         credential=credential,
         expected_challenge=base64url_to_bytes(expected_challenge),
-        expected_rp_id=relying_party_id(active_settings),
-        expected_origin=allowed_origins(active_settings),
+        expected_rp_id=relying_party_id_for_origin(origin, active_settings) if origin else relying_party_id(active_settings),
+        expected_origin=allowed_origins_for_origin(origin, active_settings) if origin else allowed_origins(active_settings),
         require_user_verification=True,
     )
 
@@ -199,13 +225,14 @@ def verify_authentication(
     public_key: bytes,
     sign_count: int,
     settings: Settings | None = None,
+    origin: str | None = None,
 ):
     active_settings = settings or get_settings()
     return verify_authentication_response(
         credential=credential,
         expected_challenge=base64url_to_bytes(expected_challenge),
-        expected_rp_id=relying_party_id(active_settings),
-        expected_origin=allowed_origins(active_settings),
+        expected_rp_id=relying_party_id_for_origin(origin, active_settings) if origin else relying_party_id(active_settings),
+        expected_origin=allowed_origins_for_origin(origin, active_settings) if origin else allowed_origins(active_settings),
         credential_public_key=public_key,
         credential_current_sign_count=sign_count,
         require_user_verification=True,

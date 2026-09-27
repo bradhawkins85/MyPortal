@@ -1,0 +1,7 @@
+{
+  "guid": "19251eeb-57a1-4fa4-a2d2-a41b7395bb83",
+  "occurred_at": "2026-09-27T00:00Z",
+  "change_type": "Fix",
+  "summary": "Derive passkey relying-party settings from the active portal origin so registrations work behind proxies and alternate hostnames.",
+  "content_hash": "3d6c90f20a66962a51b3cabac51876e09e9fcde7220f810e450ef4513941d649"
+}

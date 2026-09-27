@@ -257,6 +257,11 @@ def _passkey_login_cookie_name() -> str:
     return f"{settings.session_cookie_name}_passkey_login"
 
 
+def _passkey_request_origin(request: Request) -> str:
+    """Use the browser Origin when present, otherwise the request's own origin."""
+    return request.headers.get("origin") or f"{request.url.scheme}://{request.url.netloc}"
+
+
 def _request_is_secure(request: Request) -> bool:
     if settings.environment.lower() == "production":
         return True
@@ -1048,6 +1053,7 @@ async def list_passkeys(
 )
 async def begin_passkey_registration(
     payload: PasskeyBeginRegistrationRequest,
+    request: Request,
     session: SessionData = Depends(get_current_session),
     current_user: dict = Depends(get_current_user),
     _: None = Depends(require_database),
@@ -1055,11 +1061,13 @@ async def begin_passkey_registration(
     _require_password_reauthentication(current_user, payload.current_password)
     handle = await _ensure_passkey_user_handle(current_user)
     existing = await auth_repo.list_passkeys_for_user(int(current_user["id"]))
-    options = passkeys_service.registration_options(
-        user=current_user,
-        user_handle=handle,
-        existing_credentials=existing,
-    )
+    try:
+        options = passkeys_service.registration_options(
+            user=current_user, user_handle=handle, existing_credentials=existing,
+            origin=_passkey_request_origin(request),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Passkeys are not configured for this portal address") from exc
     await auth_repo.create_passkey_challenge(
         challenge_id=options["challenge_id"],
         ceremony="registration",
@@ -1102,6 +1110,7 @@ async def finish_passkey_registration(
         verified = passkeys_service.verify_registration(
             credential=payload.credential,
             expected_challenge=str(challenge["challenge"]),
+            origin=_passkey_request_origin(request),
         )
         credential_id = _get_passkey_credential_id(payload.credential)
     except HTTPException:
@@ -1223,7 +1232,10 @@ async def begin_passkey_authentication(
     _: None = Depends(require_database),
 ) -> Response:
     browser_binding = _validated_passkey_login_cookie(request) or _new_passkey_login_binding()
-    options = passkeys_service.authentication_options()
+    try:
+        options = passkeys_service.authentication_options(origin=_passkey_request_origin(request))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Passkeys are not configured for this portal address") from exc
     await auth_repo.create_passkey_challenge(
         challenge_id=options["challenge_id"],
         ceremony="authentication",
@@ -1299,6 +1311,7 @@ async def finish_passkey_authentication(
             expected_challenge=str(challenge["challenge"]),
             public_key=passkeys_service.base64url_to_bytes_safe(str(passkey.get("public_key") or "")),
             sign_count=int(passkey.get("sign_count") or 0),
+            origin=_passkey_request_origin(request),
         )
     except Exception as exc:
         await audit_service.record(
