@@ -1,23 +1,4 @@
 (() => {
-  const page = document.querySelector('.infrastructure-page');
-  const viewButtons = [...document.querySelectorAll('[data-rack-view]')];
-  const newOnly = [...document.querySelectorAll('[data-rack-new-only]')];
-  const viewPreference = {
-    get: () => { try { return window.localStorage.getItem('myportal-racks-view'); } catch (_) { return null; } },
-    set: value => { try { window.localStorage.setItem('myportal-racks-view', value); } catch (_) { /* The switch still works when storage is unavailable. */ } },
-  };
-  const setRackView = view => {
-    const selected = view === 'old' ? 'old' : 'new';
-    page?.setAttribute('data-view', selected);
-    viewButtons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.rackView === selected)));
-    newOnly.forEach(element => { element.hidden = selected !== 'new'; });
-    viewPreference.set(selected);
-  };
-  if (page && viewButtons.length) {
-    const savedView = viewPreference.get();
-    setRackView(savedView === 'old' ? 'old' : 'new');
-    viewButtons.forEach(button => button.addEventListener('click', () => setRackView(button.dataset.rackView)));
-  }
   const createDialog = document.querySelector('#rack-create-dialog');
   const placeDialog = document.querySelector('#rack-place-dialog');
   const editDialog = document.querySelector('#rack-edit-dialog');
@@ -31,7 +12,7 @@
     dialogTrigger = trigger;
     dialog.showModal();
   };
-  document.querySelectorAll('[data-rack-create-open]').forEach(button => button.addEventListener('click', event => openDialog(createDialog, event.currentTarget)));
+  document.querySelector('[data-rack-create-open]')?.addEventListener('click', event => openDialog(createDialog, event.currentTarget));
   document.querySelectorAll('[data-dialog-close]').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
   document.querySelectorAll('dialog').forEach(dialog => {
     dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
