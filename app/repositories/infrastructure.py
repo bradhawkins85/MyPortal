@@ -5,6 +5,7 @@ import ipaddress
 from typing import Any
 
 from app.core.database import db
+from app.services import rack_item_types
 
 ADDRESS_STATES = {"available", "reserved", "assigned", "dhcp", "deprecated"}
 
@@ -207,26 +208,35 @@ async def create_rack(company_id: int, name: str, location: str | None, unit_cou
         (company_id, name, location, unit_count, depth_mm))
 
 
+def _item_name(name: str | None, asset: dict[str, Any] | None, item_type: str) -> str:
+    """Return the display name for a rack item, falling back to its asset or type."""
+    clean = (name or "").strip()
+    if clean:
+        return clean
+    asset_name = str((asset or {}).get("name") or "").strip()
+    return asset_name[:191] or rack_item_types.get(item_type).label
+
+
 async def place_asset(company_id: int, rack_id: int, asset_id: int | None, start_unit: int,
                       unit_height: int, face: str, notes: str | None,
                       width_lanes: int = 3, start_lane: int = 1,
                       depth_mode: str = "half", power_draw_watts: int | None = None,
-                      item_type: str = "device", name: str | None = None,
+                      item_type: str = "server", name: str | None = None,
                       port_count: int = 0) -> int:
+    item_type = rack_item_types.normalise(item_type)
     if (face not in {"front", "rear"} or depth_mode not in {"half", "full"}
-            or item_type not in {"device", "patch_panel", "switch"}
             or unit_height < 1 or width_lanes not in {1, 2, 3}
             or start_lane < 1 or start_lane + width_lanes - 1 > 3
             or port_count < 0 or port_count > 1000
             or (power_draw_watts is not None and power_draw_watts < 0)):
         raise ValueError("Invalid rack item or position")
-    clean_name = (name or "Rack device").strip()
-    if len(clean_name) > 191:
+    if len((name or "").strip()) > 191:
         raise ValueError("Rack item name is too long")
     rack = await db.fetch_one("SELECT unit_count FROM racks WHERE id=%s AND company_id=%s", (rack_id, company_id))
     asset = None
     if asset_id is not None:
-        asset = await db.fetch_one("SELECT id FROM assets WHERE id=%s AND company_id=%s", (asset_id, company_id))
+        asset = await db.fetch_one("SELECT id, name FROM assets WHERE id=%s AND company_id=%s", (asset_id, company_id))
+    clean_name = _item_name(name, asset, item_type)
     if not rack or (asset_id is not None and not asset) or start_unit < 1 or start_unit + unit_height - 1 > int(rack["unit_count"]):
         raise ValueError("Rack, asset, or occupied units are invalid")
     units = list(range(start_unit, start_unit + unit_height))
@@ -271,13 +281,13 @@ async def link_equipment_port(company_id: int, equipment_id: int, port_number: i
                      (asset_id, port["id"], company_id))
 
 
-async def update_rack_equipment(company_id: int, equipment_id: int, name: str,
+async def update_rack_equipment(company_id: int, equipment_id: int, name: str | None,
                                 item_type: str, asset_id: int | None,
                                 power_draw_watts: int | None, notes: str | None) -> None:
     """Update a documented item without disturbing its placement or port links."""
-    clean_name = name.strip()
-    if not clean_name or len(clean_name) > 191 or item_type not in {"device", "patch_panel", "switch"}:
-        raise ValueError("Enter a valid rack item name and type")
+    item_type = rack_item_types.normalise(item_type)
+    if len((name or "").strip()) > 191:
+        raise ValueError("Rack item name is too long")
     if power_draw_watts is not None and power_draw_watts < 0:
         raise ValueError("Power draw cannot be negative")
     item = await db.fetch_one(
@@ -285,9 +295,13 @@ async def update_rack_equipment(company_id: int, equipment_id: int, name: str,
         (equipment_id, company_id))
     if not item:
         raise ValueError("Rack item not found")
-    if asset_id is not None and not await db.fetch_one(
-            "SELECT id FROM assets WHERE id=%s AND company_id=%s", (asset_id, company_id)):
-        raise ValueError("Asset does not belong to this company")
+    asset = None
+    if asset_id is not None:
+        asset = await db.fetch_one(
+            "SELECT id, name FROM assets WHERE id=%s AND company_id=%s", (asset_id, company_id))
+        if not asset:
+            raise ValueError("Asset does not belong to this company")
+    clean_name = _item_name(name, asset, item_type)
     await db.execute(
         """UPDATE rack_equipment SET name=%s,item_type=%s,asset_id=%s,
                   power_draw_watts=%s,notes=%s WHERE id=%s AND company_id=%s""",

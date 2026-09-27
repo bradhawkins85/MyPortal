@@ -146,8 +146,8 @@ def test_rack_item_migration_and_template_contracts():
     template = (ROOT / "app/templates/infrastructure/racks.html").read_text()
     assert "asset_id INT NULL" in sql
     assert "rack_equipment_ports" in sql
-    assert 'value="patch_panel"' in template and 'value="switch"' in template
-    assert "Number of ports (optional)" in template
+    assert 'value="{{ type.key }}"' in template and "{% for type in item_types %}" in template
+    assert "Number of <span data-ports-noun>ports</span> <small>optional</small>" in template
     assert "Not Configured" not in template and "Not configured" not in template
 
 
@@ -190,3 +190,34 @@ def test_edit_reservation_is_company_scoped(monkeypatch):
     sql, params = execute.await_args.args
     assert "WHERE id=%s AND company_id=%s" in sql
     assert params == ("Maintenance", "Alex", None, 4, 1)
+
+
+def _place(monkeypatch, asset_row=None, **kwargs):
+    rows = [{"unit_count": 42}] + ([asset_row] if asset_row is not None else []) + [None, None]
+    monkeypatch.setattr(infrastructure.db, "fetch_one", AsyncMock(side_effect=rows))
+    insert = AsyncMock(return_value=90)
+    monkeypatch.setattr(infrastructure.db, "execute_returning_lastrowid", insert)
+    monkeypatch.setattr(infrastructure.db, "execute", AsyncMock())
+    asyncio.run(infrastructure.place_asset(1, 2, kwargs.pop("asset_id", None), 10, 1, "front", None, **kwargs))
+    params = insert.await_args.args[1]
+    return params[11], params[12]
+
+
+@pytest.mark.parametrize("key", [
+    "server", "switch", "storage", "patch_panel", "kvm", "pdu", "ups", "fan_tray",
+    "shelf", "cable_management",
+])
+def test_every_catalogue_type_can_be_placed(monkeypatch, key):
+    assert _place(monkeypatch, item_type=key, name="Item")[0] == key
+
+
+def test_legacy_device_type_is_stored_as_server_and_unknown_types_are_rejected(monkeypatch):
+    assert _place(monkeypatch, item_type="device", name="Old")[0] == "server"
+    with pytest.raises(ValueError, match="Unknown rack item type"):
+        asyncio.run(infrastructure.place_asset(1, 2, None, 10, 1, "front", None, item_type="toaster"))
+
+
+def test_unnamed_item_defaults_to_linked_asset_then_type_label(monkeypatch):
+    assert _place(monkeypatch, item_type="server", asset_id=5,
+                  asset_row={"id": 5, "name": "SQL-01"})[1] == "SQL-01"
+    assert _place(monkeypatch, item_type="shelf")[1] == "Shelf or blanking panel"

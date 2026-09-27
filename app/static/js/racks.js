@@ -46,6 +46,17 @@
     setSidebar(collapsed);
     try { window.localStorage.setItem('racks.sidebarCollapsed', collapsed ? '1' : '0'); } catch { /* storage unavailable */ }
   });
+  const imagesToggle = document.querySelector('[data-rack-images-toggle]');
+  const setImages = (enabled) => {
+    workspace?.classList.toggle('has-device-images', enabled);
+    imagesToggle?.setAttribute('aria-pressed', String(enabled));
+  };
+  try { setImages(window.localStorage.getItem('racks.deviceImages') !== '0'); } catch { setImages(true); }
+  imagesToggle?.addEventListener('click', () => {
+    const enabled = !workspace?.classList.contains('has-device-images');
+    setImages(enabled);
+    try { window.localStorage.setItem('racks.deviceImages', enabled ? '1' : '0'); } catch { /* storage unavailable */ }
+  });
   document.querySelector('[data-rack-jump]')?.addEventListener('change', event => event.currentTarget.form?.requestSubmit());
   document.querySelectorAll('[data-rack-list-open]').forEach(button => button.addEventListener('click', event => {
     const list = document.getElementById(button.dataset.rackListOpen);
@@ -55,26 +66,125 @@
     list.scrollIntoView({ block: 'nearest' });
     list.querySelector('summary')?.focus();
   }));
+  const laneNames = ['left', 'centre', 'right'];
+  const blocksOn = (rack, face) => [...rack.querySelectorAll(`.rack-face[data-face="${face}"] .rack__device`)].map(slot => ({
+    unit: Number(slot.dataset.startUnit),
+    height: Number(slot.dataset.unitHeight),
+    lane: Number(slot.dataset.startLane),
+    width: Number(slot.dataset.widthLanes),
+    reserved: slot.hasAttribute('data-inspect-reservation'),
+  }));
+  const overlaps = (a, b) => a.unit < b.unit + b.height && a.unit + a.height > b.unit &&
+    a.lane < b.lane + b.width && a.lane + a.width > b.lane;
+  const renderMap = (map, mapCaption, rack, candidate, faces, conflict = false) => {
+    if (!map) return;
+    map.replaceChildren();
+    if (!rack) return;
+    const units = Number(rack.dataset.rackUnits || 0);
+    const topDown = rack.dataset.rackDirection === 'top-down';
+    const rowOf = (unit, height) => topDown ? unit : units - unit - height + 2;
+    map.style.setProperty('--mini-units', units);
+    ['front', 'rear'].forEach(face => {
+      const column = document.createElement('div');
+      column.className = 'rack-mini__face';
+      if (!faces.includes(face)) column.classList.add('is-inactive');
+      const label = document.createElement('span');
+      label.className = 'rack-mini__label';
+      label.textContent = face === 'front' ? 'Front' : 'Rear';
+      const grid = document.createElement('div');
+      grid.className = 'rack-mini__grid';
+      const place = (block, className) => {
+        const top = Math.max(1, rowOf(block.unit, block.height));
+        const bottom = Math.min(units + 1, rowOf(block.unit, block.height) + block.height);
+        if (bottom <= top) return;
+        const cell = document.createElement('i');
+        cell.className = className;
+        cell.style.gridRow = `${top} / ${bottom}`;
+        cell.style.gridColumn = `${block.lane} / span ${Math.max(1, Math.min(block.width, 4 - block.lane))}`;
+        grid.append(cell);
+      };
+      blocksOn(rack, face).forEach(block => place(block, block.reserved ? 'is-reserved' : 'is-used'));
+      if (faces.includes(face) && candidate) place(candidate, conflict ? 'is-candidate is-conflict' : 'is-candidate');
+      column.append(label, grid);
+      map.append(column);
+    });
+    if (mapCaption) mapCaption.textContent = `${rack.dataset.rackName} · ${units}U · ${topDown ? 'top down' : 'bottom up'}`;
+  };
+  const rackFor = (rackId) => rackId ? document.querySelector(`[data-rack-id="${CSS.escape(rackId)}"]`) : null;
+  const footprint = (data) => ({
+    unit: Number(data.startUnit), height: Number(data.unitHeight),
+    lane: Number(data.startLane), width: Number(data.widthLanes),
+  });
+  const facesOf = (data) => data.depthMode === 'full' ? ['front', 'rear'] : [data.face || 'front'];
+  const laneText = (lane, width) => width === 3 ? 'full width' : width === 2 ? `${laneNames[lane - 1]} + ${laneNames[lane]} lanes` : `${laneNames[lane - 1]} lane`;
+  const positionText = (data) => {
+    const spot = footprint(data);
+    const units = spot.height > 1 ? `U${spot.unit}–${spot.unit + spot.height - 1}` : `U${spot.unit}`;
+    const where = data.depthMode === 'full' ? 'front and rear' : data.face;
+    return `${units} · ${where} · ${laneText(spot.lane, spot.width)}`;
+  };
+  const editSummary = editDialog ? {
+    face: editDialog.querySelector('[data-edit-face]'),
+    typeLabel: editDialog.querySelector('[data-edit-type-label]'),
+    position: editDialog.querySelector('[data-edit-position-detail]'),
+    portsRow: editDialog.querySelector('[data-edit-ports-row]'),
+    portsNoun: editDialog.querySelector('[data-edit-ports-noun]'),
+    ports: editDialog.querySelector('[data-edit-ports-summary]'),
+    asset: editDialog.querySelector('[data-edit-asset]'),
+    hint: editDialog.querySelector('[data-edit-type-hint]'),
+  } : null;
+  const refreshEditSummary = () => {
+    const item = document.getElementById(`placement-${editDialog?.dataset.itemId}`);
+    if (!editSummary || !item) return;
+    const data = item.dataset;
+    const type = editForm.querySelector('input[name="item_type"]:checked');
+    const name = editForm.elements.name.value.trim();
+    const assetOption = editForm.elements.asset_id.selectedOptions[0];
+    const assetName = editForm.elements.asset_id.value ? assetOption?.textContent || '' : '';
+    const label = document.createElement('span');
+    label.textContent = name || assetName || type?.dataset.typeLabel || '';
+    editSummary.face.replaceChildren(label);
+    editSummary.face.style.setProperty('--edit-image', type ? `url("${type.dataset.image}")` : 'none');
+    editSummary.face.style.setProperty('--edit-units', String(Math.min(Number(data.unitHeight || 1), 4)));
+    editSummary.face.style.setProperty('--image-units', type?.dataset.imageUnits || '1');
+    editSummary.typeLabel.textContent = type?.dataset.typeLabel || '';
+    editSummary.position.textContent = positionText(data);
+    const total = Number(data.itemPortCount || 0);
+    editSummary.portsRow.hidden = total === 0;
+    editSummary.portsNoun.textContent = (type?.dataset.portsLabel || 'ports').replace(/^./, c => c.toUpperCase());
+    editSummary.ports.textContent = `${data.itemLinkedPorts || 0} of ${total} linked`;
+    editSummary.asset.textContent = assetName || 'None';
+  };
   const editEquipment = (id, trigger) => {
     const item = document.getElementById(`placement-${id}`);
     if (!editForm || !item) { focusListItem(`placement-${id}`); return; }
     const data = item.dataset;
     editForm.action = `/api/infrastructure/rack-equipment/${encodeURIComponent(id)}/edit`;
     editForm.elements.name.value = data.itemName || '';
-    editForm.elements.item_type.value = data.itemType || 'device';
+    editForm.elements.item_type.value = data.itemType || 'server';
     const hasPorts = Number(data.itemPortCount || 0) > 0;
-    [...editForm.elements.item_type.options].forEach(option => {
-      option.disabled = option.value !== 'device' && !hasPorts;
+    // Port rows are created at placement, so a port-less item cannot become a port type.
+    let locked = false;
+    editForm.querySelectorAll('input[name="item_type"]').forEach(input => {
+      input.disabled = input.hasAttribute('data-has-ports') && !hasPorts && input.value !== data.itemType;
+      locked ||= input.disabled;
     });
+    editSummary?.hint && (editSummary.hint.hidden = !locked);
     editForm.elements.asset_id.value = data.itemAsset || '';
     editForm.elements.power_draw_watts.value = data.itemPower || '';
     editForm.elements.notes.value = data.itemNotes || '';
     if (data.rackOwner) editForm.elements.rack_id.value = data.rackOwner;
     editDialog.dataset.itemId = id;
     editDialog.querySelector('[data-edit-ports]').hidden = !hasPorts;
-    editDialog.querySelector('[data-edit-position]').textContent = data.itemPosition || '';
+    editDialog.querySelector('[data-edit-position]').textContent = positionText(data);
+    const rack = rackFor(data.rackOwner);
+    renderMap(editDialog.querySelector('[data-edit-map]'), editDialog.querySelector('[data-edit-map-caption]'),
+      rack, footprint(data), facesOf(data));
+    refreshEditSummary();
     openDialog(editDialog, trigger);
   };
+  editForm?.addEventListener('input', refreshEditSummary);
+  editForm?.addEventListener('change', refreshEditSummary);
   const editReservation = (id, trigger) => {
     const item = document.getElementById(`reservation-${id}`);
     if (!reservationForm || !item) { focusListItem(`reservation-${id}`); return; }
@@ -85,7 +195,9 @@
     reservationForm.elements.notes.value = data.reservationNotes || '';
     if (data.rackOwner) reservationForm.elements.rack_id.value = data.rackOwner;
     reservationDialog.dataset.reservationId = id;
-    reservationDialog.querySelector('[data-reservation-position]').textContent = data.reservationPosition || '';
+    reservationDialog.querySelector('[data-reservation-position]').textContent = positionText(data);
+    renderMap(reservationDialog.querySelector('[data-reservation-map]'), reservationDialog.querySelector('[data-reservation-map-caption]'),
+      rackFor(data.rackOwner), footprint(data), facesOf(data));
     openDialog(reservationDialog, trigger);
   };
   document.querySelectorAll('[data-inspect-placement]').forEach(button => button.addEventListener('click', () => editEquipment(button.dataset.inspectPlacement, button)));
@@ -142,27 +254,36 @@
   }));
   if (!form || !placeDialog) return;
   const preview = form.querySelector('[data-placement-preview]');
+  const map = form.querySelector('[data-placement-map]');
+  const mapCaption = form.querySelector('[data-placement-map-caption]');
+  const clampLanes = (width) => {
+    const lanes = form.querySelectorAll('input[name="start_lane"]');
+    lanes.forEach(input => { input.disabled = Number(input.value) + width - 1 > 3; });
+    if ([...lanes].find(input => input.checked)?.disabled) lanes[3 - width].checked = true;
+  };
   const updatePreview = () => {
     const width = Number(form.elements.width_lanes.value);
+    clampLanes(width);
     const lane = Number(form.elements.start_lane.value);
     const unit = Number(form.elements.start_unit.value);
     const height = Number(form.elements.unit_height.value);
     const rack = document.querySelector(`[data-rack-id="${CSS.escape(form.elements.rack_id.value)}"]`);
-    const invalid = !rack || lane + width - 1 > 3 || unit < 1 || height < 1 || unit + height - 1 > Number(rack?.dataset.rackUnits || 0);
+    const units = Number(rack?.dataset.rackUnits || 0);
+    form.elements.start_unit.max = String(units || '');
+    form.elements.unit_height.max = String(Math.max(1, units - Math.max(unit, 1) + 1));
+    const invalid = !rack || lane + width - 1 > 3 || unit < 1 || height < 1 || unit + height - 1 > units;
     const faces = form.elements.depth_mode.value === 'full' ? ['front', 'rear'] : [form.elements.face.value];
-    const occupied = !invalid && faces.some(face =>
-      [...rack.querySelectorAll(`.rack-face[data-face="${face}"] .rack__device`)].some(slot => {
-        const slotUnit = Number(slot.dataset.startUnit);
-        const slotHeight = Number(slot.dataset.unitHeight);
-        const slotLane = Number(slot.dataset.startLane);
-        const slotWidth = Number(slot.dataset.widthLanes);
-        return unit < slotUnit + slotHeight && unit + height > slotUnit &&
-          lane < slotLane + slotWidth && lane + width > slotLane;
-      })
-    );
+    const candidate = { unit, height, lane, width };
+    const occupied = !invalid && faces.some(face => blocksOn(rack, face).some(block => overlaps(candidate, block)));
     const conflict = invalid || occupied;
+    renderMap(map, mapCaption, rack, unit >= 1 && height >= 1 ? candidate : null, faces, conflict);
     preview.classList.toggle('rack-preview--conflict', conflict);
-    preview.textContent = conflict ? 'This position is outside the rack or overlaps occupied or reserved space.' : `Available: U${unit}–${unit + height - 1}, lane ${lane}–${lane + width - 1}, ${form.elements.depth_mode.value === 'full' ? 'both faces' : form.elements.face.value + ' face'}.`;
+    const span = height > 1 ? `U${unit}–${unit + height - 1}` : `U${unit}`;
+    const lanes = width === 3 ? 'full width' : `${laneNames[lane - 1]}${width === 2 ? ` + ${laneNames[lane]}` : ''} lane${width === 2 ? 's' : ''}`;
+    const where = form.elements.depth_mode.value === 'full' ? 'both faces' : `${form.elements.face.value} face`;
+    if (invalid) preview.textContent = units ? `Choose a position between U1 and U${units}.` : 'Choose a rack position.';
+    else if (occupied) preview.textContent = `${span} overlaps installed or reserved space on the ${where}.`;
+    else preview.textContent = `${span} · ${lanes} · ${where} is free.`;
     form.querySelector('[data-submit-label]').disabled = conflict;
   };
   const updateKind = () => {
@@ -170,19 +291,30 @@
     form.action = reservation ? '/api/infrastructure/rack-reservations' : '/api/infrastructure/rack-equipment';
     form.querySelector('[data-equipment-fields]').hidden = reservation;
     form.querySelector('[data-reservation-fields]').hidden = !reservation;
-    form.elements.name.required = !reservation;
-    const portItem = !reservation && ['patch_panel', 'switch'].includes(form.elements.item_type.value);
-    form.querySelector('[data-port-count]').hidden = !portItem;
-    if (!portItem) form.elements.port_count.value = '';
+    const type = form.querySelector('input[name="item_type"]:checked');
+    const portsLabel = reservation ? '' : type?.dataset.portsLabel || '';
+    form.querySelector('[data-port-count]').hidden = !portsLabel;
+    if (portsLabel) form.querySelector('[data-ports-noun]').textContent = portsLabel;
+    else form.elements.port_count.value = '';
     form.querySelector('[data-submit-label]').textContent = reservation ? 'Reserve space' : 'Place equipment';
   };
+  let heightTouched = false;
+  form.elements.unit_height.addEventListener('input', () => { heightTouched = true; });
+  form.querySelectorAll('input[name="item_type"]').forEach(input => input.addEventListener('change', () => {
+    if (heightTouched) return;
+    const rack = document.querySelector(`[data-rack-id="${CSS.escape(form.elements.rack_id.value)}"]`);
+    const room = Number(rack?.dataset.rackUnits || 1) - Number(form.elements.start_unit.value || 1) + 1;
+    form.elements.unit_height.value = String(Math.max(1, Math.min(Number(input.dataset.defaultHeight || 1), room)));
+    updatePreview();
+  }));
   document.querySelectorAll('[data-place-open]').forEach(button => button.addEventListener('click', () => {
     form.reset();
+    heightTouched = false;
     form.elements.rack_id.value = button.dataset.rack;
     form.elements.face.value = button.dataset.face;
     form.elements.start_unit.value = button.dataset.unit;
     form.elements.start_lane.value = button.dataset.lane;
-    form.querySelector('[data-selected-position]').textContent = `${button.dataset.rackName} · ${button.dataset.face} · U${button.dataset.unit} · lane ${button.dataset.lane}`;
+    form.querySelector('[data-selected-position]').textContent = `${button.dataset.rackName} · ${button.dataset.face} · U${button.dataset.unit} · ${laneNames[Number(button.dataset.lane) - 1]} lane`;
     updateKind(); updatePreview(); openDialog(placeDialog, button);
   }));
   form.addEventListener('input', () => { updateKind(); updatePreview(); });

@@ -37,6 +37,7 @@ from app.services import knowledge_base as knowledge_base_service
 from app.services import automations as automations_service
 from app.services import asset_photos as asset_photo_service
 from app.services import rack_dashboard
+from app.services import rack_item_types
 
 router = APIRouter(tags=["Assets"])
 
@@ -915,6 +916,10 @@ async def racks_page(request: Request):
     if isinstance(data, RedirectResponse):
         return data
     data["title"] = "Rack management"
+    data["item_types"] = rack_item_types.ITEM_TYPES
+    data["item_type_labels"] = {item_type.key: item_type.label for item_type in rack_item_types.ITEM_TYPES}
+    for item in data.get("equipment") or []:
+        item["item_type"] = rack_item_types.get(item.get("item_type")).key
     data["workspace"] = rack_dashboard.build_workspace(
         data, request.query_params.get("rack"), request.query_params.get("view")
     )
@@ -934,6 +939,13 @@ def _rack_location(form: Any, rack_id: Any = None, anchor: str = "") -> str:
     except (TypeError, ValueError):
         return f"/racks{anchor}"
     return f"/racks?rack={selected}{anchor}"
+
+
+def _optional_text(form: Any, key: str, limit: int = 191) -> str | None:
+    value = str(form.get(key) or "").strip()
+    if len(value) > limit:
+        raise HTTPException(status_code=422, detail=f"Invalid {key.replace('_', ' ')}")
+    return value or None
 
 
 def _required_text(form: Any, key: str, limit: int = 191) -> str:
@@ -1015,7 +1027,7 @@ async def create_rack(request: Request):
     return _main().flash_redirect(_rack_location(form, record_id), "Rack added.", "success")
 
 
-@router.post("/api/infrastructure/rack-equipment", status_code=201, summary="Place a device, patch panel, or switch in a rack")
+@router.post("/api/infrastructure/rack-equipment", status_code=201, summary="Place equipment in a rack")
 async def place_rack_asset(request: Request):
     _user, company_id, redirect = await _infrastructure_write_context(request, "menu.racks")
     if redirect:
@@ -1023,7 +1035,7 @@ async def place_rack_asset(request: Request):
     form = await request.form()
     try:
         asset_id = int(form.get("asset_id")) if form.get("asset_id") else None
-        item_type = str(form.get("item_type") or "device")
+        item_type = str(form.get("item_type") or rack_item_types.DEFAULT_KEY)
         record_id = await infrastructure_repo.place_asset(
             company_id, int(form.get("rack_id")), asset_id, int(form.get("start_unit")),
             int(form.get("unit_height")), str(form.get("face") or "front"),
@@ -1031,7 +1043,7 @@ async def place_rack_asset(request: Request):
             int(form.get("width_lanes") or 3), int(form.get("start_lane") or 1),
             str(form.get("depth_mode") or "half"),
             int(form.get("power_draw_watts")) if form.get("power_draw_watts") else None,
-            item_type, _required_text(form, "name"),
+            item_type, _optional_text(form, "name"),
             int(form.get("port_count") or 0))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1068,8 +1080,8 @@ async def edit_rack_equipment(request: Request, equipment_id: int):
     try:
         asset_id = int(form.get("asset_id")) if form.get("asset_id") else None
         await infrastructure_repo.update_rack_equipment(
-            company_id, equipment_id, _required_text(form, "name"),
-            str(form.get("item_type") or "device"), asset_id,
+            company_id, equipment_id, _optional_text(form, "name"),
+            str(form.get("item_type") or rack_item_types.DEFAULT_KEY), asset_id,
             int(form.get("power_draw_watts")) if form.get("power_draw_watts") else None,
             str(form.get("notes") or "").strip()[:1000] or None)
     except (TypeError, ValueError) as exc:

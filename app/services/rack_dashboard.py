@@ -9,15 +9,16 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping, Sequence
 
+from app.services import rack_item_types
+
 FACES = ("front", "rear")
 LANES = (1, 2, 3)
 LANE_LABELS = {1: "left", 2: "centre", 3: "right"}
 VIEWS = ("graphical", "overview")
 HEAT_LEVELS = 8
-# Visual port positions drawn on switches and patch panels; the real port
-# count is still shown in labels and the item list.
+# Visual port positions drawn on port-capable items; the real port count is
+# still shown in labels and the item list.
 MAX_DRAWN_PORTS = 48
-DEFAULT_DRAWN_PORTS = 24
 _WARNING_WORDS = (
     "alert", "decommission", "degraded", "down", "error", "expired", "fail",
     "fault", "inactive", "maintenance", "offline", "retired", "warn",
@@ -77,13 +78,14 @@ def _covers(item: Mapping[str, Any], unit: int, lane: int) -> bool:
 
 
 def _drawn_ports(item: Mapping[str, Any]) -> list[dict[str, Any]]:
-    if item.get("item_type") not in {"switch", "patch_panel"}:
+    item_type = rack_item_types.get(item.get("item_type"))
+    if not item_type.has_ports:
         return []
     ports = list(item.get("ports") or [])
     if ports:
         return [{"number": int(port["port_number"]), "linked": port.get("asset_id") is not None}
                 for port in ports[:MAX_DRAWN_PORTS]]
-    count = int(item.get("port_count") or 0) or DEFAULT_DRAWN_PORTS
+    count = int(item.get("port_count") or 0) or item_type.default_ports
     return [{"number": number, "linked": False} for number in range(1, min(count, MAX_DRAWN_PORTS) + 1)]
 
 
@@ -92,18 +94,22 @@ def _block(rack: Mapping[str, Any], item: Mapping[str, Any], kind: str) -> dict[
     lane, width = int(item["start_lane"]), int(item["width_lanes"])
     if kind == "reservation":
         name = item.get("label") or "Reserved space"
-        item_type = "reserved"
+        item_type, type_label, active, image_units = "reserved", "Reserved", False, 1
         status = "reserved"
     else:
-        name = item.get("name") or item.get("asset_name") or "Rack device"
-        item_type = str(item.get("item_type") or "device")
+        catalogue = rack_item_types.get(item.get("item_type"))
+        name = item.get("name") or item.get("asset_name") or catalogue.label
+        item_type, type_label = catalogue.key, catalogue.label
+        active, image_units = catalogue.active, catalogue.image_units
         status = equipment_status(item)
     return {
         "kind": kind,
         "id": item["id"],
         "name": name,
         "item_type": item_type,
-        "type_label": "Reserved" if kind == "reservation" else item_type.replace("_", " ").title(),
+        "type_label": type_label,
+        "active": active,
+        "image_units": image_units,
         "status": status,
         "start_unit": start,
         "end_unit": start + height - 1,
