@@ -230,6 +230,24 @@ async def website_manual_check(request: Request, website_id: int):
     return RedirectResponse(f"/websites/{website_id}?check={outcome}", status_code=303)
 
 
+@web_router.post("/websites/{website_id}/delete")
+async def website_delete(request: Request, website_id: int):
+    user, company_id, _membership, redirect = await _web_context(request, write=True)
+    if redirect:
+        return redirect
+    website = await repo.get_website(company_id, website_id)
+    if not website:
+        raise HTTPException(status_code=404, detail="Website not found")
+    if not await repo.delete_website(company_id, website_id):
+        raise HTTPException(status_code=404, detail="Website not found")
+    await audit_service.record(
+        action="website.delete", request=request, user_id=int(user["id"]),
+        entity_type="website", entity_id=website_id,
+        before={"company_id": company_id, "name": website["name"], "url": website["url"]},
+    )
+    return RedirectResponse("/websites?deleted=1", status_code=303)
+
+
 @router.get("", summary="List websites for the active company")
 async def list_websites(context=Depends(access_context)):
     return await repo.list_websites(context[1])
