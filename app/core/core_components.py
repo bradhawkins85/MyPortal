@@ -111,6 +111,38 @@ CORE_COMPONENTS: tuple[CoreComponent, ...] = (
         ("/admin/chat/ai-tag-synonyms", "/chat/configuration"),
     ),
     CoreComponent(
+        "outlook_contacts",
+        "Outlook Contacts",
+        "My Profile Outlook contacts connection and the ticket "
+        "\"Check Outlook contacts\" lookup.",
+        ("/admin/profile/m365-contacts", "/api/profile/m365-contacts"),
+    ),
+    CoreComponent(
+        "notification_contact",
+        "Notification Contact",
+        "My Profile notification contact (SMS mobile number) card.",
+        (),
+    ),
+    CoreComponent(
+        "email_signature",
+        "Email Signature",
+        "My Profile email signature card.",
+        (),
+    ),
+    CoreComponent(
+        "click_to_call",
+        "Click to Call",
+        "My Profile click-to-call settings and click-to-call phone links.",
+        ("/api/click-to-call",),
+    ),
+    CoreComponent(
+        "gmp_glp",
+        "GMP/GLP Compliance Checks",
+        "GMP and GLP categories and predefined checks in Compliance Checks. "
+        "Other compliance content is unaffected.",
+        (),
+    ),
+    CoreComponent(
         "tray",
         "Tray Agent",
         "Tray agent API, installers, devices and tray settings.",

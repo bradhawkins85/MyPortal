@@ -5,12 +5,17 @@
 {% block title %}Compliance Checks Library{% endblock %}
 
 {% block header_actions %}
-  {{ page_header_actions([
+  {% set library_actions = [
     {"label": "Add check", "type": "button",
-     "attrs": {"id": "add-check-btn", "aria-haspopup": "dialog"}},
-    {"label": "Re-seed GMP/GLP", "type": "button",
-     "attrs": {"id": "seed-btn"}}
-  ]) }}
+     "attrs": {"id": "add-check-btn", "aria-haspopup": "dialog"}}
+  ] %}
+  {% if feature_pack_available('gmp_glp') %}
+    {% set library_actions = library_actions + [
+      {"label": "Re-seed GMP/GLP", "type": "button",
+       "attrs": {"id": "seed-btn"}}
+    ] %}
+  {% endif %}
+  {{ page_header_actions(library_actions) }}
 {% endblock %}
 
 {% block content %}
@@ -125,7 +130,7 @@
             {% else %}
             <tr>
               <td colspan="7" class="table__empty">
-                No checks in library. Use <strong>Re-seed GMP/GLP</strong> to load predefined checks.
+                No checks in library.{% if feature_pack_available('gmp_glp') %} Use <strong>Re-seed GMP/GLP</strong> to load predefined checks.{% endif %}
               </td>
             </tr>
             {% endfor %}

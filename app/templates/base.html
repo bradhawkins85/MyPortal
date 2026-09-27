@@ -1039,7 +1039,7 @@
     <script src="{{ static_url('/static/js/header_menu.js') }}" defer></script>
     <script src="{{ static_url('/static/js/table_columns.js') }}" defer></script>
     <script src="{{ static_url('/static/js/main.js') }}" defer></script>
-    {% if has_authenticated_user %}
+    {% if has_authenticated_user and feature_pack_available('click_to_call') %}
     <script src="{{ static_url('/static/js/click_to_call.js') }}" defer></script>
     {% endif %}
     <script>
