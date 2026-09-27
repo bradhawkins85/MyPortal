@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -168,6 +169,7 @@ async def test_asset_detail_page_renders_canonical_asset(monkeypatch):
     monkeypatch.setattr(asset_repo, "list_tickets_for_asset", AsyncMock(return_value=[]))
     monkeypatch.setattr(asset_repo, "list_company_assets", AsyncMock(return_value=[]))
     monkeypatch.setattr(asset_repo, "list_relationships_for_asset", AsyncMock(return_value=[]))
+    monkeypatch.setattr(assets_routes.audience_repo, "list_role_ids", AsyncMock(return_value=[]))
     monkeypatch.setattr(assets_routes.asset_photo_repo, "list_for_asset", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         assets_routes.knowledge_base_service,
@@ -186,6 +188,153 @@ async def test_asset_detail_page_renders_canonical_asset(monkeypatch):
 
     assert response.status_code == 200
     assert renderer.await_args.args[0] == "assets/detail.html"
+
+
+@pytest.mark.anyio
+async def test_roleless_asset_access_is_limited_to_legacy_publications(monkeypatch):
+    audiences = AsyncMock(side_effect=[[4], []])
+    monkeypatch.setattr(assets_routes.audience_repo, "list_role_ids", audiences)
+
+    assert not await assets_routes._customer_role_can_view_asset(
+        {"role_id": None}, 3, 42
+    )
+    assert await assets_routes._customer_role_can_view_asset(
+        {"role_id": None}, 3, 43
+    )
+
+    assert audiences.await_args_list[0].args == (3, "asset", 42)
+    assert audiences.await_args_list[1].args == (3, "asset", 43)
+
+
+@pytest.mark.anyio
+async def test_asset_role_change_takes_effect_immediately(monkeypatch):
+    allowed = AsyncMock(side_effect=[True, False])
+    monkeypatch.setattr(assets_routes.audience_repo, "role_can_access", allowed)
+    membership = {
+        "role_id": 7,
+        "menu_permissions": {"content.assets": "read"},
+    }
+
+    assert await assets_routes._customer_role_can_view_asset(membership, 3, 42)
+    assert not await assets_routes._customer_role_can_view_asset(membership, 3, 42)
+    assert allowed.await_count == 2
+
+
+def _photo_permissions(_user, membership, key, *, write=False):
+    value = (membership or {}).get(key)
+    return value == "write" or (value == "read" and not write)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("variant", ["original", "thumbnail"])
+async def test_direct_photo_variants_enforce_asset_role_audience(
+    monkeypatch, variant
+):
+    membership = {
+        "role_id": 8,
+        "menu.asset_photos": "read",
+        "menu.assets": "read",
+        "menu_permissions": {"content.assets": "read"},
+    }
+    monkeypatch.setattr(
+        assets_routes,
+        "_load_asset_context",
+        AsyncMock(return_value=({"id": 7}, membership, {"id": 3}, 3, None)),
+    )
+    monkeypatch.setattr(
+        assets_routes,
+        "_main",
+        lambda: SimpleNamespace(_membership_menu_can=_photo_permissions),
+    )
+    monkeypatch.setattr(
+        assets_routes.asset_repo,
+        "get_asset_by_id",
+        AsyncMock(return_value={"id": 42, "company_id": 3, "customer_visible": True}),
+    )
+    monkeypatch.setattr(
+        assets_routes.audience_repo, "role_can_access", AsyncMock(return_value=False)
+    )
+    photo_get = AsyncMock()
+    monkeypatch.setattr(assets_routes.asset_photo_repo, "get", photo_get)
+
+    with pytest.raises(assets_routes.HTTPException) as excinfo:
+        await assets_routes.get_asset_photo(
+            _make_request(f"/assets/42/photos/9/{variant}"), 42, 9, variant
+        )
+
+    assert excinfo.value.status_code == 404
+    photo_get.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_direct_photo_rejects_roleless_scoped_and_cross_company_assets(monkeypatch):
+    membership = {
+        "role_id": None,
+        "menu.asset_photos": "read",
+        "menu.assets": "read",
+    }
+    monkeypatch.setattr(
+        assets_routes,
+        "_load_asset_context",
+        AsyncMock(return_value=({"id": 7}, membership, {"id": 3}, 3, None)),
+    )
+    monkeypatch.setattr(
+        assets_routes,
+        "_main",
+        lambda: SimpleNamespace(_membership_menu_can=_photo_permissions),
+    )
+    asset_get = AsyncMock(
+        side_effect=[
+            {"id": 42, "company_id": 3, "customer_visible": True},
+            {"id": 42, "company_id": 99, "customer_visible": True},
+        ]
+    )
+    monkeypatch.setattr(assets_routes.asset_repo, "get_asset_by_id", asset_get)
+    audiences = AsyncMock(return_value=[11])
+    monkeypatch.setattr(assets_routes.audience_repo, "list_role_ids", audiences)
+
+    with pytest.raises(assets_routes.HTTPException) as scoped:
+        await assets_routes._photo_context(_make_request("/assets/42/photos/9/original"), 42)
+    with pytest.raises(assets_routes.HTTPException) as cross_company:
+        await assets_routes._photo_context(_make_request("/assets/42/photos/9/original"), 42)
+
+    assert scoped.value.status_code == 404
+    assert cross_company.value.status_code == 404
+    audiences.assert_awaited_once_with(3, "asset", 42)
+
+
+@pytest.mark.anyio
+async def test_asset_technician_permissions_remain_independent_of_publication(monkeypatch):
+    membership = {
+        "role_id": None,
+        "menu.asset_photos": "write",
+        "menu.assets": "write",
+    }
+    monkeypatch.setattr(
+        assets_routes,
+        "_load_asset_context",
+        AsyncMock(return_value=({"id": 7}, membership, {"id": 3}, 3, None)),
+    )
+    monkeypatch.setattr(
+        assets_routes,
+        "_main",
+        lambda: SimpleNamespace(_membership_menu_can=_photo_permissions),
+    )
+    monkeypatch.setattr(
+        assets_routes.asset_repo,
+        "get_asset_by_id",
+        AsyncMock(return_value={"id": 42, "company_id": 3, "customer_visible": False}),
+    )
+    audience_lookup = AsyncMock()
+    monkeypatch.setattr(assets_routes.audience_repo, "list_role_ids", audience_lookup)
+
+    _user, company_id, can_write = await assets_routes._photo_context(
+        _make_request("/assets/42/photos"), 42, write=True
+    )
+
+    assert company_id == 3
+    assert can_write
+    audience_lookup.assert_not_awaited()
 
 
 @pytest.mark.anyio

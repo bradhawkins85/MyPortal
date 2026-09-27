@@ -41,12 +41,14 @@ router = APIRouter(tags=["Assets"])
 
 
 async def _customer_role_can_view_asset(membership: dict[str, Any] | None, company_id: int, asset_id: int) -> bool:
-    # Non-role grants (named staff/job-title/one-time credentials) remain under
-    # their existing policy and are intentionally not converted into role grants.
-    if not membership or membership.get("role_id") is None:
-        return True
+    role_id = membership.get("role_id") if membership else None
+    if role_id is None:
+        # Audience rows were backfilled for every role when role-scoped
+        # publication was introduced.  Only publications with no audience rows
+        # can therefore use the narrow legacy roleless-membership compatibility
+        # path; a newly scoped publication must never inherit broad menu access.
+        return not await audience_repo.list_role_ids(company_id, "asset", asset_id)
     permissions = membership.get("menu_permissions") or membership.get("permissions") or {}
-    role_id = membership.get("role_id")
     if not isinstance(permissions, dict) or permissions.get("content.assets") not in {"read", "write"}:
         return False
     return await audience_repo.role_can_access(company_id, "asset", asset_id, int(role_id))
@@ -1533,11 +1535,17 @@ async def _photo_context(request: Request, asset_id: int, *, write: bool = False
     can_write = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
         user, membership, "menu.asset_photos", write=True
     )
+    can_manage_asset = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )
     if not can_view_photos:
         raise HTTPException(status_code=403, detail="Asset photo access denied")
     asset = await asset_repo.get_asset_by_id(asset_id)
     if (not asset or int(asset.get("company_id") or 0) != company_id
-            or (not can_write and not bool(asset.get("customer_visible")))):
+            or (not can_manage_asset and (
+                not bool(asset.get("customer_visible"))
+                or not await _customer_role_can_view_asset(membership, company_id, asset_id)
+            ))):
         raise HTTPException(status_code=404, detail="Asset not found")
     if write and not can_write:
         raise HTTPException(status_code=403, detail="Asset photo write access required")
