@@ -41,6 +41,14 @@ def test_rack_page_has_only_rack_controls_and_asset_links():
     assert 'id="rack-{{ rack.id }}"' in page
     assert "Add network" not in page
     assert "Document address" not in page
+    assert 'data-rack-create-open' in page
+    assert 'data-place-open' in page
+    assert 'name="depth_mm"' in page
+    assert 'name="width_lanes"' in page
+    assert 'name="depth_mode"' in page
+    assert 'href="/ipam"' not in page
+    assert '<h2>Add rack</h2>' not in page
+    assert '<section class="card card--panel"><header class="card__header"><h2>Place existing asset' not in page
 
 
 def test_navigation_and_asset_cross_links_support_desktop_and_mobile_menu():

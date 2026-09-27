@@ -901,7 +901,7 @@ async def create_rack(request: Request):
         record_id = await infrastructure_repo.create_rack(
             company_id, _required_text(form, "name"),
             str(form.get("location") or "").strip()[:255] or None,
-            int(form.get("unit_count")))
+            int(form.get("unit_count")), int(form.get("depth_mm")))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await audit_service.record(action="infrastructure.rack.create", request=request,
@@ -921,7 +921,9 @@ async def place_rack_asset(request: Request):
         record_id = await infrastructure_repo.place_asset(
             company_id, int(form.get("rack_id")), asset_id, int(form.get("start_unit")),
             int(form.get("unit_height")), str(form.get("face") or "front"),
-            str(form.get("notes") or "").strip()[:1000] or None)
+            str(form.get("notes") or "").strip()[:1000] or None,
+            int(form.get("width_lanes") or 3), int(form.get("start_lane") or 1),
+            str(form.get("depth_mode") or "half"))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await audit_service.record(action="infrastructure.rack_equipment.create", request=request,

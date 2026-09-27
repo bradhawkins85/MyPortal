@@ -35,7 +35,7 @@ async def overview(company_id: int) -> dict[str, list[dict[str, Any]]]:
            FROM racks r LEFT JOIN rack_equipment e ON e.rack_id=r.id
            WHERE r.company_id=%s GROUP BY r.id ORDER BY r.name""", (company_id,)) or [])
     equipment = list(await db.fetch_all(
-        """SELECT e.*, r.name rack_name, r.unit_count, a.name asset_name
+        """SELECT e.*, r.name rack_name, r.unit_count, r.depth_mm, a.name asset_name
            FROM rack_equipment e JOIN racks r ON r.id=e.rack_id
            JOIN assets a ON a.id=e.asset_id WHERE e.company_id=%s
            ORDER BY r.name, e.start_unit DESC""", (company_id,)) or [])
@@ -85,39 +85,53 @@ async def create_address(company_id: int, network_id: int, address: str, state: 
     return row_id
 
 
-async def create_rack(company_id: int, name: str, location: str | None, unit_count: int) -> int:
+async def create_rack(company_id: int, name: str, location: str | None, unit_count: int,
+                      depth_mm: int = 1000) -> int:
     if not 1 <= unit_count <= 100:
         raise ValueError("Rack size must be between 1 and 100 units")
+    if not 100 <= depth_mm <= 5000:
+        raise ValueError("Rack depth must be between 100 and 5000 mm")
     return await db.execute_returning_lastrowid(
-        "INSERT INTO racks (company_id,name,location,unit_count) VALUES (%s,%s,%s,%s)",
-        (company_id, name, location, unit_count))
+        "INSERT INTO racks (company_id,name,location,unit_count,depth_mm) VALUES (%s,%s,%s,%s,%s)",
+        (company_id, name, location, unit_count, depth_mm))
 
 
 async def place_asset(company_id: int, rack_id: int, asset_id: int, start_unit: int,
-                      unit_height: int, face: str, notes: str | None) -> int:
-    if face not in {"front", "rear"} or unit_height < 1:
+                      unit_height: int, face: str, notes: str | None,
+                      width_lanes: int = 3, start_lane: int = 1,
+                      depth_mode: str = "half") -> int:
+    if (face not in {"front", "rear"} or depth_mode not in {"half", "full"}
+            or unit_height < 1 or width_lanes not in {1, 2, 3}
+            or start_lane < 1 or start_lane + width_lanes - 1 > 3):
         raise ValueError("Invalid rack position")
     rack = await db.fetch_one("SELECT unit_count FROM racks WHERE id=%s AND company_id=%s", (rack_id, company_id))
     asset = await db.fetch_one("SELECT id FROM assets WHERE id=%s AND company_id=%s", (asset_id, company_id))
     if not rack or not asset or start_unit < 1 or start_unit + unit_height - 1 > int(rack["unit_count"]):
         raise ValueError("Rack, asset, or occupied units are invalid")
-    units = range(start_unit, start_unit + unit_height)
-    placeholders = ",".join("%s" for _ in units)
+    units = list(range(start_unit, start_unit + unit_height))
+    lanes = list(range(start_lane, start_lane + width_lanes))
+    faces = ["front", "rear"] if depth_mode == "full" else [face]
+    slot_conditions = " OR ".join("(unit_number=%s AND face=%s AND lane=%s)" for _ in units for _face in faces for _lane in lanes)
+    slot_params = tuple(value for unit in units for slot_face in faces for lane in lanes
+                        for value in (unit, slot_face, lane))
     conflict = await db.fetch_one(
-        "SELECT unit_number FROM rack_equipment_units WHERE rack_id=%s AND face=%s AND unit_number IN (" + placeholders + ")",
-        (rack_id, face, *units))
+        "SELECT unit_number FROM rack_equipment_slots WHERE rack_id=%s AND (" + slot_conditions + ")",
+        (rack_id, *slot_params))
     if conflict:
         raise ValueError(f"Rack unit {conflict['unit_number']} is already occupied")
     equipment_id = await db.execute_returning_lastrowid(
         """INSERT INTO rack_equipment
-           (company_id,rack_id,asset_id,start_unit,unit_height,face,notes)
-           VALUES (%s,%s,%s,%s,%s,%s,%s)""",
-        (company_id, rack_id, asset_id, start_unit, unit_height, face, notes))
+           (company_id,rack_id,asset_id,start_unit,unit_height,face,notes,width_lanes,start_lane,depth_mode)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+        (company_id, rack_id, asset_id, start_unit, unit_height, face, notes,
+         width_lanes, start_lane, depth_mode))
     try:
         for unit in units:
-            await db.execute(
-                "INSERT INTO rack_equipment_units (equipment_id,rack_id,unit_number,face) VALUES (%s,%s,%s,%s)",
-                (equipment_id, rack_id, unit, face))
+            for slot_face in faces:
+                for lane in lanes:
+                    await db.execute(
+                        "INSERT INTO rack_equipment_slots (equipment_id,rack_id,unit_number,face,lane) VALUES (%s,%s,%s,%s,%s)",
+                        (equipment_id, rack_id, unit, slot_face, lane))
     except Exception as exc:
         # The unique unit key is the final race-safe guard. Remove the parent
         # (and any units cascaded from it) if another request won the slot.
