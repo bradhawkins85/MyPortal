@@ -1,0 +1,77 @@
+{# Drawing helpers for the graphical rack workspace. Geometry comes from app/services/rack_dashboard.py. #}
+{% macro icon(name) -%}
+<svg class="rack-icon rack-icon--{{ name }}" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+{%- if name == 'overview' %}<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+{%- elif name == 'jump' %}<path d="M5 12h12"/><path d="m13 6 6 6-6 6"/>
+{%- elif name == 'cabinet' %}<rect x="5" y="2.5" width="14" height="19" rx="1.5"/><path d="M8 7h8M8 11h8M8 15h8"/><circle cx="16" cy="18.5" r=".6" fill="currentColor"/>
+{%- elif name == 'reservation' %}<path d="M7 3h10a1 1 0 0 1 1 1v17l-6-4-6 4V4a1 1 0 0 1 1-1z"/>
+{%- elif name == 'add' %}<path d="M12 5v14M5 12h14"/>
+{%- elif name == 'collapse' %}<path d="m15 6-6 6 6 6"/>
+{%- elif name == 'cube' %}<path d="m12 2.5 8.5 4.75v9.5L12 21.5l-8.5-4.75v-9.5z"/><path d="m3.5 7.25 8.5 4.75 8.5-4.75M12 12v9.5"/>
+{%- elif name == 'mount-up' %}<path d="M12 21V4"/><path d="m6 10 6-6 6 6"/>
+{%- elif name == 'mount-down' %}<path d="M12 3v17"/><path d="m6 14 6 6 6-6"/>
+{%- elif name == 'depth' %}<path d="M9 2.5v19M9 5h4M9 8.5h2.5M9 12h4M9 15.5h2.5M9 19h4"/>
+{%- elif name == 'swivel' %}<path d="M20 12a8 8 0 0 1-13.7 5.6"/><path d="M4 12a8 8 0 0 1 13.7-5.6"/><path d="M18 2.5v4h-4M6 21.5v-4h4"/>
+{%- elif name == 'status' %}<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5"/>
+{%- endif %}
+</svg>
+{%- endmacro %}
+
+{% macro donut(value, label, modifier, caption=None) -%}
+{% set percent = [[value or 0, 0]|max, 100]|min %}
+<figure class="rack-gauge rack-gauge--{{ modifier }}">
+  <svg class="rack-gauge__ring" viewBox="0 0 100 100" role="img" aria-label="{{ label }}: {{ percent }}%">
+    <circle class="rack-gauge__track" cx="50" cy="50" r="40" pathLength="100"/>
+    <circle class="rack-gauge__value" cx="50" cy="50" r="40" pathLength="100" stroke-dasharray="{{ percent }} 100" transform="rotate(-90 50 50)"/>
+  </svg>
+  <span class="rack-gauge__reading" aria-hidden="true"><strong>{{ percent }}%</strong>{% if caption %}<small>{{ caption }}</small>{% endif %}</span>
+  <figcaption>{{ label }}</figcaption>
+</figure>
+{%- endmacro %}
+
+{% macro rack_face(rack, face, can_edit) -%}
+{% set rows = rack.unit_count %}
+<section class="rack-face" data-face="{{ face.face }}" aria-labelledby="rack-{{ rack.id }}-{{ face.face }}">
+  <div class="rack__viewport">
+    <div class="rack__chassis" style="--rack-units: {{ rows }}">
+      <div class="rack__rail" aria-hidden="true">{% for row in range(rows) %}<span>{{ row + 1 if rack.numbering_direction == 'top-down' else rows - row }}</span>{% endfor %}</div>
+      <div class="rack__grid" aria-label="{{ rack.name }} {{ face.face }} rack positions">
+        {% for slot in face.open_slots %}<button class="rack__open" type="button" style="grid-row: {{ slot.row }}; grid-column: {{ slot.lane }}" {% if not can_edit %}disabled{% endif %} data-place-open data-rack="{{ rack.id }}" data-rack-name="{{ rack.name }}" data-face="{{ face.face }}" data-unit="{{ slot.unit }}" data-lane="{{ slot.lane }}" aria-label="Add equipment or reservation in {{ rack.name }}, {{ face.face }}, unit {{ slot.unit }}, lane {{ slot.lane }}"><span aria-hidden="true">+</span></button>{% endfor %}
+        {% for block in face.blocks %}
+        <button class="rack__device rack__device--{{ block.item_type }} rack__device--{{ block.status }}" type="button" style="grid-row: {{ block.grid_row }} / span {{ block.unit_height }}; grid-column: {{ block.start_lane }} / span {{ block.width_lanes }}; --unit-height: {{ block.unit_height }}; --width-lanes: {{ block.width_lanes }}" {% if block.kind == 'reservation' %}data-inspect-reservation{% else %}data-inspect-placement{% endif %}="{{ block.id }}" data-start-unit="{{ block.start_unit }}" data-unit-height="{{ block.unit_height }}" data-start-lane="{{ block.start_lane }}" data-width-lanes="{{ block.width_lanes }}" data-status="{{ block.status }}" data-item-summary="{{ block.name }} · {{ block.type_label }} · U{{ block.start_unit }}{% if block.unit_height > 1 %}–{{ block.end_unit }}{% endif %}{% if block.power_draw_watts is not none %} · {{ block.power_draw_watts }} W{% endif %}{% if block.status == 'warning' %} · needs attention{% endif %}" title="{{ block.name }} · U{{ block.start_unit }}{% if block.unit_height > 1 %}–{{ block.end_unit }}{% endif %}" aria-label="{{ 'Edit' if can_edit else 'Inspect' }} {% if block.kind == 'reservation' %}reservation {% endif %}{{ block.name }}, {{ face.face }}, units {{ block.start_unit }} to {{ block.end_unit }}, lanes {{ block.start_lane }} to {{ block.end_lane }}{% if block.status == 'warning' %}, needs attention{% endif %}">
+          <span class="rack__device-face">
+            {% if block.kind == 'equipment' %}<span class="rack__led rack__led--{{ block.status }}" aria-hidden="true"></span>{% endif %}
+            <span class="rack__device-name">{{ block.name }}</span>
+            {% if block.ports %}<span class="rack__ports" aria-hidden="true" style="--port-columns: {{ ((block.ports|length) / ([block.unit_height, 2]|min))|round(0, 'ceil')|int }}">{% for port in block.ports %}<i{% if port.linked %} class="is-linked"{% endif %}></i>{% endfor %}</span>
+            {% elif block.kind == 'equipment' %}<span class="rack__bays" aria-hidden="true"></span>{% endif %}
+            {% if block.status == 'warning' %}<span class="rack__device-alert" aria-hidden="true">!</span>{% endif %}
+          </span>
+        </button>
+        {% endfor %}
+      </div>
+      <div class="rack__rail rack__rail--right" aria-hidden="true">{% for row in range(rows) %}<span>{{ row + 1 if rack.numbering_direction == 'top-down' else rows - row }}</span>{% endfor %}</div>
+    </div>
+  </div>
+  <h4 class="rack-face__label" id="rack-{{ rack.id }}-{{ face.face }}">{{ face.face|title }} Elevation</h4>
+</section>
+{%- endmacro %}
+
+{% macro heatmap(rack, data) -%}
+<section class="rack-insight-card rack-heatmap-card" aria-labelledby="rack-{{ rack.id }}-heatmap">
+  <header class="rack-insight-card__header">
+    <h3 id="rack-{{ rack.id }}-heatmap">{{ 'Power density' if data.mode == 'power' else 'Space utilization' }}</h3>
+    <span class="rack-chip">{{ 'Recorded draw' if data.mode == 'power' else 'Occupancy' }}</span>
+  </header>
+  <div class="rack-heatmap" style="--heat-units: {{ data.units }}" role="img" aria-label="{{ 'Recorded power draw per slot' if data.mode == 'power' else 'Installed and reserved space' }} across {{ data.units }} rack units, front and rear, left to right lanes. Blue is low, red is high.">
+    {% for row in data.rows %}
+    <span class="rack-heatmap__row-label" aria-hidden="true">{{ row.label }}</span>
+    {% for cell in row.cells %}<i class="heat heat--{{ cell.level }} heat--{{ cell.state }}" title="{{ cell.label }}"></i>{% endfor %}
+    {% endfor %}
+  </div>
+  <div class="rack-heatmap__axis" style="--heat-units: {{ data.units }}" aria-hidden="true">{% for tick in data.ticks %}<span style="grid-column: {{ tick + 1 }}">{{ tick }}</span>{% endfor %}</div>
+  <div class="rack-heatmap__legend">
+    <span>{{ '0 W' if data.mode == 'power' else 'Open' }}</span><i aria-hidden="true"></i><span>{{ data.peak_watts|round|int ~ ' W/slot' if data.mode == 'power' else 'Installed' }}</span>
+  </div>
+  <p class="rack-heatmap__note">Rows: F/R = front/rear; L/C/R = lane. Columns: rack unit.{% if data.mode == 'occupancy' %} Record item power draw to switch to power density.{% endif %}</p>
+</section>
+{%- endmacro %}

@@ -87,8 +87,9 @@ def test_rack_details_migration_has_deployment_metadata():
 
 def test_rack_template_uses_stat_strips_and_hides_unconfigured_values():
     template = (ROOT / "app/templates/infrastructure/racks.html").read_text()
-    assert 'class="rack-summary"' in template
-    assert template.count('class="stat-strip rack-stat-strip"') == 2
+    assert 'class="rack-facts"' in template
+    assert 'class="rack-gauges"' in template
+    assert "{% if rack.width_mm %}" in template
     assert "Not configured" not in template
     assert "Item list and port links" in template
 
@@ -148,7 +149,6 @@ def test_rack_item_migration_and_template_contracts():
     assert 'value="patch_panel"' in template and 'value="switch"' in template
     assert "Number of ports (optional)" in template
     assert "Not Configured" not in template and "Not configured" not in template
-    assert template.count('class="stat-strip rack-stat-strip"') == 2
 
 
 def test_edit_rack_item_checks_company_asset_before_updating(monkeypatch):

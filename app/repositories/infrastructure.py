@@ -119,7 +119,7 @@ async def overview(company_id: int) -> dict[str, list[dict[str, Any]]]:
            WHERE r.company_id=%s GROUP BY r.id ORDER BY r.name""", (company_id,)) or [])
     equipment = list(await db.fetch_all(
         """SELECT e.*, r.name rack_name, r.unit_count, r.depth_mm, a.name asset_name,
-                  a.type asset_type, a.serial_number asset_serial
+                  a.type asset_type, a.serial_number asset_serial, a.status asset_status
            FROM rack_equipment e JOIN racks r ON r.id=e.rack_id
            LEFT JOIN assets a ON a.id=e.asset_id WHERE e.company_id=%s
         ORDER BY r.name, e.start_unit DESC""", (company_id,)) or [])

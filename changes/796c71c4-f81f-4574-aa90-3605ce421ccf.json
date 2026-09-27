@@ -1,0 +1,7 @@
+{
+  "guid": "796c71c4-f81f-4574-aa90-3605ce421ccf",
+  "occurred_at": "2026-09-27T04:52Z",
+  "change_type": "feature",
+  "summary": "Rebuilt the rack workspace with a collapsible navigation sidebar, New/Old and overview views, detailed device graphics with status LEDs and lit ports, capacity gauges, and a power-density heatmap driven by recorded rack data.",
+  "content_hash": "9e597c7d427ea4499808da6803e965ccab2d2fcd70061498e4b60a8f9fc4d00d"
+}

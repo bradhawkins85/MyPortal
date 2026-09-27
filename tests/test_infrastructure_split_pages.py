@@ -34,7 +34,7 @@ def test_ipam_page_has_only_ipam_controls_and_filterable_sortable_tables():
 
 
 def test_rack_page_has_only_rack_controls_and_asset_links():
-    page = _template("infrastructure/racks.html")
+    page = _template("infrastructure/racks.html") + _template("infrastructure/_rack_macros.html")
     assert "/api/infrastructure/racks" in page
     assert "/api/infrastructure/rack-equipment" in page
     assert 'href="/assets/{{ item.asset_id }}"' in page
@@ -59,4 +59,13 @@ def test_navigation_and_asset_cross_links_support_desktop_and_mobile_menu():
     assert '<a href="/racks"' in navigation
     assert '<span class="menu__label">Racks</span>' in navigation
     assert '/ipam#address-{{ address.id }}' in detail
-    assert '/racks#rack-{{ placement.rack_id }}' in detail
+    assert '/racks?rack={{ placement.rack_id }}#rack-{{ placement.rack_id }}' in detail
+
+
+def test_rack_form_redirects_return_to_the_same_rack_and_view():
+    from app.features.assets.routes import _rack_location
+
+    assert _rack_location({"rack_id": "4", "view": "classic"}, anchor="#placement-9") == "/racks?rack=4&view=classic#placement-9"
+    assert _rack_location({"rack_id": "4", "view": "graphical"}) == "/racks?rack=4"
+    assert _rack_location({"rack_id": "//evil.example", "view": "https://evil"}) == "/racks"
+    assert _rack_location({}, 12) == "/racks?rack=12"
