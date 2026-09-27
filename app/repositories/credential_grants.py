@@ -7,6 +7,7 @@ from typing import Any
 
 from app.core.database import db
 from app.repositories import vault
+from app.security.encryption import decrypt_secret, encrypt_secret
 
 _COLUMNS = "id, credential_id, credential_version, company_id, staff_id, grantor_user_id, recipient_user_id, recipient_email, reason, expires_at, revoked_at, consumed_at"
 
@@ -64,6 +65,80 @@ async def create(
     return await get(grant_id)
 
 
+async def create_workflow_external(
+    *,
+    credential_id: int,
+    company_id: int,
+    staff_id: int,
+    grantor_user_id: int,
+    recipient_email: str,
+    reason: str,
+    expires_at: datetime,
+    token: str,
+    verification_code: str,
+    workflow_execution_id: int,
+    workflow_step_identity: str,
+) -> tuple[dict[str, Any], str] | None:
+    """Atomically persist an external grant and its recoverable workflow output.
+
+    The unique execution/step key is the concurrency linearization point.  The
+    bearer token is only retained under authenticated encryption; hashes remain
+    the values used to authorize public requests.
+    """
+    credential = await db.fetch_one(
+        "SELECT c.current_version FROM credentials c JOIN credential_links l ON l.credential_id = c.id AND l.company_id = c.company_id AND l.target_type = 'staff' AND l.target_id = %s WHERE c.id = %s AND c.company_id = %s AND c.revoked_at IS NULL AND c.archived_at IS NULL",
+        (staff_id, credential_id, company_id),
+    )
+    if credential is None:
+        return None
+    encrypted_token = encrypt_secret(token)
+    try:
+        await db.execute_returning_lastrowid(
+            "INSERT INTO credential_grants (credential_id, credential_version, company_id, staff_id, grantor_user_id, recipient_user_id, recipient_email, reason, expires_at, token_hash, verification_hash, workflow_execution_id, workflow_step_identity, workflow_token_ciphertext) VALUES (%s, %s, %s, %s, %s, NULL, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                credential_id,
+                credential["current_version"],
+                company_id,
+                staff_id,
+                grantor_user_id,
+                recipient_email,
+                reason,
+                expires_at,
+                digest(token),
+                digest(token + ":" + verification_code),
+                workflow_execution_id,
+                workflow_step_identity,
+                encrypted_token,
+            ),
+        )
+    except Exception:
+        # A concurrent insert normally loses on the unique key.  Re-read below;
+        # unrelated database failures are deliberately returned as safe errors.
+        pass
+    prefixed_columns = ", ".join(
+        "g." + column.strip() for column in _COLUMNS.split(",")
+    )
+    row = await db.fetch_one(
+        "SELECT "
+        + prefixed_columns
+        + ", g.workflow_token_ciphertext FROM credential_grants g JOIN credentials c ON c.id = g.credential_id AND c.company_id = g.company_id WHERE g.company_id = %s AND g.workflow_execution_id = %s AND g.workflow_step_identity = %s AND g.expires_at > CURRENT_TIMESTAMP AND g.credential_version = c.current_version AND c.revoked_at IS NULL AND c.archived_at IS NULL",
+        (company_id, workflow_execution_id, workflow_step_identity),
+    )
+    if row is None:
+        return None
+    if (
+        row.get("revoked_at") is not None
+        or row.get("consumed_at") is not None
+        or row.get("workflow_token_ciphertext") is None
+    ):
+        return None
+    try:
+        recovered = decrypt_secret(str(row["workflow_token_ciphertext"]))
+    except Exception:
+        return None
+    return row, recovered
+
+
 async def get(grant_id: int) -> dict[str, Any] | None:
     return await db.fetch_one(
         "SELECT " + _COLUMNS + " FROM credential_grants WHERE id = %s", (grant_id,)
@@ -119,9 +194,7 @@ async def verify_external(token: str, code: str) -> int | None:
     return int(row["id"]) if changed else None
 
 
-async def consume_external(
-    token: str, code: str
-) -> tuple[dict[str, Any], str] | None:
+async def consume_external(token: str, code: str) -> tuple[dict[str, Any], str] | None:
     token_hash = digest(token)
     verification_hash = digest(token + ":" + code)
     # The code is checked again at the one-time linearization point. A prior

@@ -1,0 +1,7 @@
+{
+  "guid": "390825dc-f525-4fc6-a197-c9f24510bcbd",
+  "occurred_at": "2026-09-27T00:00:00Z",
+  "change_type": "security",
+  "summary": "Make external workflow credential shares idempotent and securely recoverable",
+  "content_hash": "workflow-external-share-idempotency-encrypted-output"
+}
