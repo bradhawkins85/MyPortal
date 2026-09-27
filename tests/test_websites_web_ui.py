@@ -1,14 +1,53 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 from fastapi import HTTPException
+from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader
 import pytest
 from starlette.datastructures import FormData
 from starlette.requests import Request
 
 from app.features.websites import routes
 from app.features.websites.routes import _form_payload
+
+
+def test_website_detail_renders_dns_record_values_without_dict_method_collision():
+    template_root = Path(__file__).parents[1] / "app" / "templates"
+    environment = Environment(
+        loader=ChoiceLoader([
+            DictLoader({
+                "base.html": "{% block content %}{% endblock %}",
+                "macros/header.html": "{% macro page_header_actions(actions) %}{% endmacro %}",
+                "macros/tables.html": (
+                    "{% macro data_table(rows, columns, aria_label) %}{{ caller() }}{% endmacro %}"
+                    "{% macro empty_state(title, message) %}{% endmacro %}"
+                ),
+            }),
+            FileSystemLoader(template_root),
+        ]),
+        autoescape=True,
+    )
+
+    rendered = environment.get_template("websites/detail.html").render(
+        request={"query_params": {}},
+        website={"id": 2, "name": "Portal", "url": "https://example.com"},
+        links={"assets": [], "articles": []},
+        dns={
+            "coverage": "partial",
+            "source": "public-dns",
+            "records": [{"name": "example.com", "type": "A", "values": ["192.0.2.1"]}],
+        },
+        certificate=None,
+        registration=None,
+        dns_changes=[],
+        dns_history_page=1,
+        jobs=[],
+        can_write=False,
+    )
+
+    assert "192.0.2.1" in rendered
 
 
 def test_website_form_maps_links_and_monitoring_options():
