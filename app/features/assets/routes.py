@@ -1042,6 +1042,47 @@ async def link_rack_item_port(request: Request, equipment_id: int, port_number: 
     return _main().flash_redirect(f"/racks#placement-{equipment_id}", "Port link updated.", "success")
 
 
+@router.post("/api/infrastructure/rack-equipment/{equipment_id}/edit", summary="Edit a rack item")
+async def edit_rack_equipment(request: Request, equipment_id: int):
+    _user, company_id, redirect = await _infrastructure_write_context(request, "menu.racks")
+    if redirect:
+        return redirect
+    form = await request.form()
+    try:
+        asset_id = int(form.get("asset_id")) if form.get("asset_id") else None
+        await infrastructure_repo.update_rack_equipment(
+            company_id, equipment_id, _required_text(form, "name"),
+            str(form.get("item_type") or "device"), asset_id,
+            int(form.get("power_draw_watts")) if form.get("power_draw_watts") else None,
+            str(form.get("notes") or "").strip()[:1000] or None)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await audit_service.record(action="infrastructure.rack_equipment.update", request=request,
+                               entity_type="rack_equipment", entity_id=equipment_id,
+                               after={"company_id": company_id, "asset_id": asset_id})
+    return _main().flash_redirect(f"/racks#placement-{equipment_id}", "Rack item updated.", "success")
+
+
+@router.post("/api/infrastructure/rack-reservations/{reservation_id}/edit", summary="Edit a rack reservation")
+async def edit_rack_reservation(request: Request, reservation_id: int):
+    _user, company_id, redirect = await _infrastructure_write_context(request, "menu.racks")
+    if redirect:
+        return redirect
+    form = await request.form()
+    try:
+        await infrastructure_repo.update_rack_reservation(
+            company_id, reservation_id,
+            str(form.get("label") or "").strip()[:191] or None,
+            str(form.get("owner") or "").strip()[:191] or None,
+            str(form.get("notes") or "").strip()[:1000] or None)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await audit_service.record(action="infrastructure.rack_reservation.update", request=request,
+                               entity_type="rack_reservation", entity_id=reservation_id,
+                               after={"company_id": company_id})
+    return _main().flash_redirect(f"/racks#reservation-{reservation_id}", "Reservation updated.", "success")
+
+
 @router.post("/api/infrastructure/rack-reservations", status_code=201, summary="Reserve rack space")
 async def reserve_rack_space(request: Request):
     _user, company_id, redirect = await _infrastructure_write_context(request, "menu.racks")
