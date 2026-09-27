@@ -2420,8 +2420,10 @@ async def list_modules() -> list[dict[str, Any]]:
             {**_resolve_module_for_runtime(module), "enabled": availability.module_enabled(module)}
         )
         for module in modules
-        if not _is_always_on_ticket_action_module(str(module.get("slug") or ""))
-        and availability.module_available(str(module.get("slug") or ""))
+        if isinstance(module.get("slug"), str)
+        and bool(module.get("slug"))
+        and not _is_always_on_ticket_action_module(module["slug"])
+        and availability.module_available(module["slug"])
     ]
     return result
 
