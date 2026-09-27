@@ -50,3 +50,18 @@ def test_reservation_occupies_only_its_face_and_lanes():
     assert html.count('data-inspect-reservation="4"') == 1
     assert 'grid-row: 3 / span 1; grid-column: 2 / span 2' in html
     assert html.count("data-place-open") == 22
+
+
+def test_graphical_dashboard_exposes_capacity_heatmap_and_swivel_controls():
+    assert 'class="rack-dashboard"' in TEMPLATE
+    assert 'data-rack-swivel' in TEMPLATE
+    assert 'class="rack-insight-card rack-insight-card--capacity"' in TEMPLATE
+    assert 'class="rack-heatmap"' in TEMPLATE
+    assert 'aria-label="Modeled utilization heatmap by rack unit from low to high"' in TEMPLATE
+    assert 'style="--meter-value: {{ rack.occupied_percent }}%"' in TEMPLATE
+
+
+def test_graphical_dashboard_interactions_are_keyboard_accessible():
+    script = (Path(__file__).resolve().parents[1] / "app/static/js/racks.js").read_text()
+    assert "button.setAttribute('aria-pressed', String(swivelled))" in script
+    assert "button.addEventListener('focus'" in script
