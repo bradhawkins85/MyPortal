@@ -1,0 +1,7 @@
+{
+  "guid": "9bbe4525-3c75-4f47-8224-1cf2d5baaf5c",
+  "occurred_at": "2026-09-27T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added graphical lane- and depth-aware rack placement workspace",
+  "content_hash": "9d045be1da7e5d38d907765d6a9acd551eff10222cddf7e581a303628038b25b"
+}
