@@ -27,7 +27,6 @@ from app.schemas.vault import (
     CredentialGrant,
     ExternalGrantCreated,
     ShareVerification,
-    ShareToken,
     StandingGrantCreate,
     StandingGrant,
     EligibleStaff,
@@ -658,9 +657,20 @@ async def verify_external_share(
 
 @router.post("/shares/reveal", response_model=SecretReveal)
 async def reveal_external_share(
-    payload: ShareToken, request: Request, _: None = Depends(require_database)
+    payload: ShareVerification, request: Request, _: None = Depends(require_database)
 ):
-    result = await grant_repo.consume_external(payload.share_token)
+    allowed, retry_after = await _external_share_limiter.check(
+        "ip:" + (get_client_ip(request, default="anonymous") or "anonymous")
+    )
+    if not allowed:
+        raise HTTPException(
+            429,
+            "Share unavailable",
+            headers={"Retry-After": str(int(retry_after or 300))},
+        )
+    result = await grant_repo.consume_external(
+        payload.share_token, payload.verification_code
+    )
     if result is None:
         expired = await grant_repo.claim_expiry(token=payload.share_token)
         if expired:

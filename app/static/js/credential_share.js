@@ -8,6 +8,7 @@
   const secretPanel = document.getElementById('secret-panel');
   const status = document.getElementById('status-message');
   const reveal = document.getElementById('reveal-button');
+  let verificationCode = '';
   const unavailable = 'This share is unavailable. It may be expired, revoked, already used, or the code may be invalid. Contact the sender for a new link or code.';
 
   const request = async (path, body) => fetch(path, {
@@ -29,6 +30,7 @@
     button.disabled = true; status.textContent = 'Verifying…'; status.className = 'status';
     try {
       const response = await request('/api/vault/shares/verify', {share_token: token, verification_code: code.value.trim()});
+      verificationCode = response.ok ? code.value.trim() : '';
       code.value = '';
       if (response.status === 429) { fail('Too many attempts. Wait a few minutes, then try again or contact the sender.'); return; }
       if (!response.ok) { fail(); return; }
@@ -40,7 +42,8 @@
   reveal.addEventListener('click', async () => {
     reveal.disabled = true; status.textContent = 'Revealing…'; status.className = 'status';
     try {
-      const response = await request('/api/vault/shares/reveal', {share_token: token});
+      const response = await request('/api/vault/shares/reveal', {share_token: token, verification_code: verificationCode});
+      verificationCode = '';
       if (response.status === 429) { fail('Too many attempts. Wait a few minutes, then try again or contact the sender.'); reveal.disabled = false; return; }
       if (!response.ok) { revealPanel.hidden = true; fail(); return; }
       const payload = await response.json();

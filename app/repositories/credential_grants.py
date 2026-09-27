@@ -119,12 +119,16 @@ async def verify_external(token: str, code: str) -> int | None:
     return int(row["id"]) if changed else None
 
 
-async def consume_external(token: str) -> tuple[dict[str, Any], str] | None:
+async def consume_external(
+    token: str, code: str
+) -> tuple[dict[str, Any], str] | None:
     token_hash = digest(token)
-    # The conditional state transition is the one-time gate. Only its winner may decrypt.
+    verification_hash = digest(token + ":" + code)
+    # The code is checked again at the one-time linearization point. A prior
+    # verification therefore cannot authorize a different holder of the link.
     changed = await db.execute_rowcount(
-        "UPDATE credential_grants SET consumed_at = CURRENT_TIMESTAMP, revealed_at = CURRENT_TIMESTAMP WHERE token_hash = %s AND recipient_user_id IS NULL AND verified_at IS NOT NULL AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP AND EXISTS (SELECT 1 FROM company_credential_features f WHERE f.company_id = credential_grants.company_id AND f.enabled = 1)",
-        (token_hash,),
+        "UPDATE credential_grants SET consumed_at = CURRENT_TIMESTAMP, revealed_at = CURRENT_TIMESTAMP WHERE token_hash = %s AND verification_hash = %s AND recipient_user_id IS NULL AND verified_at IS NOT NULL AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP AND EXISTS (SELECT 1 FROM company_credential_features f WHERE f.company_id = credential_grants.company_id AND f.enabled = 1)",
+        (token_hash, verification_hash),
     )
     if changed != 1:
         return None
