@@ -165,3 +165,29 @@ def test_success_feeds_certificate_and_domain_expiries(monkeypatch):
     assert result["certificate"] == certificate
     assert result["domain"] == domain
     monitoring.repo.record_domain_expiry.assert_awaited_once()
+
+@pytest.mark.parametrize(("host", "expected"), [
+    ("shop.example.com.au", "example.com.au"),
+    ("www.example.co.uk", "example.co.uk"),
+    ("example.com", "example.com"),
+])
+def test_registrable_domain_uses_public_suffix_list(host, expected):
+    assert monitoring.registrable_domain(host) == expected
+
+
+def test_dns_rrsets_ignore_answer_order_and_ttl(monkeypatch):
+    from app.repositories import websites
+    first = {"source": "recursive-dns", "coverage": "public lookup", "records": [
+        {"name": "EXAMPLE.COM", "type": "a", "values": ["192.0.2.2", "192.0.2.1"], "ttl": 240}
+    ]}
+    second = {"source": "recursive-dns", "coverage": "public lookup", "records": [
+        {"name": "example.com.", "type": "A", "values": ["192.0.2.1", "192.0.2.2"], "ttl": 120}
+    ]}
+    assert websites._rrsets(first) == websites._rrsets(second)
+
+
+def test_dns_rrsets_detect_value_change():
+    from app.repositories import websites
+    before = {"records": [{"name": "example.com", "type": "A", "values": ["192.0.2.1"]}]}
+    after = {"records": [{"name": "example.com", "type": "A", "values": ["192.0.2.2"]}]}
+    assert websites._rrsets(before) != websites._rrsets(after)
