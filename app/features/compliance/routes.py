@@ -13,10 +13,12 @@ from app.core.config import get_settings
 from app.repositories import companies as company_repo
 from app.repositories import compliance_checks as cc_repo
 from app.repositories import essential8 as essential8_repo
+from app.repositories import smb1001 as smb1001_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as users_repo
 from app.repositories import user_companies as user_company_repo
 from app.security.flash import flash_redirect
+from app.services import audit as audit_service
 from app.services import tickets as tickets_service
 
 
@@ -25,6 +27,7 @@ settings = get_settings()
 _STATUSES_REQUIRING_HELP = {"not_started", "in_progress", "non_compliant"}
 _ESSENTIAL8_TICKET_CATEGORY = "essential8"
 _ESSENTIAL8_TICKET_MODULE = "compliance"
+_SMB1001_TICKET_CATEGORY = "smb1001"
 
 
 def _slugify_essential8_element(name: str) -> str:
@@ -175,8 +178,138 @@ async def _load_compliance_context(request: Request):
     return user, membership, company, company_id, None
 
 
+def _build_smb1001_ticket_reference(company_id: int, control_id: int) -> str:
+    return f"smb1001:control:{control_id}:company:{company_id}"
+
+
+def _build_smb1001_ticket_subject(control: dict) -> str:
+    code = str(control.get("code") or "").strip()
+    name = str(control.get("name") or "SMB1001 control").strip()
+    label = f"{code} {name}".strip()
+    return f"SMB1001 implementation request: {label}"[:255]
+
+
+def _build_smb1001_ticket_description(*, control: dict, tier_name: str, company: dict | None, user: dict) -> str:
+    company_name = str((company or {}).get("name") or "Unknown company").strip()
+    requester_name = str(
+        user.get("display_name")
+        or user.get("full_name")
+        or user.get("name")
+        or user.get("username")
+        or user.get("email")
+        or "Portal user"
+    ).strip()
+    requester_email = str(user.get("email") or "Not provided").strip()
+    return "\n".join(
+        [
+            "A portal user requested technician assistance to implement an SMB1001 control.",
+            "",
+            f"Company: {company_name}",
+            f"Requester: {requester_name}",
+            f"Requester email: {requester_email}",
+            "",
+            f"Control: {control.get('code') or ''} {control.get('name') or 'SMB1001 control'}".strip(),
+            f"Tier: {tier_name}",
+            f"Domain: {control.get('domain_label') or control.get('domain') or 'Not specified'}",
+            f"Requirement: {control.get('description') or 'No description provided.'}",
+            f"How it is checked: {control.get('verification') or 'Not specified.'}",
+            "",
+            "Requested action: Please contact the requester to plan and implement this SMB1001 control.",
+        ]
+    )
+
+
 @router.get("/compliance", response_class=HTMLResponse)
 async def compliance_page(request: Request):
+    main_module = _main()
+    user, membership, company, company_id, redirect = await _load_compliance_context(request)
+    if redirect:
+        return redirect
+
+    profile = await smb1001_repo.ensure_company_profile(company_id, user_id=user.get("id"))
+    overview = await smb1001_repo.get_company_overview(company_id)
+    progress = overview["progress"]
+    controls_by_tier: dict[int, list[dict]] = {}
+    for control in overview["controls"]:
+        control["show_help"] = control["status"] in smb1001_repo.HELP_STATUSES
+        controls_by_tier.setdefault(int(control["tier_level"]), []).append(control)
+    legacy_essential8 = await essential8_repo.list_company_compliance(company_id)
+
+    extra = {
+        "title": "SMB1001 Compliance",
+        "profile": overview.get("profile") or profile,
+        "progress": progress,
+        "tiers": progress["tiers"],
+        "controls_by_tier": controls_by_tier,
+        "domains": smb1001_repo.DOMAINS,
+        "company_members": await users_repo.list_users_for_company(company_id),
+        "company": company,
+        "has_essential8_records": bool(legacy_essential8),
+        "is_super_admin": bool(user.get("is_super_admin")),
+        "can_manage": bool(user.get("is_super_admin")) or bool(membership and membership.get("is_admin")),
+    }
+    return await main_module._render_template("compliance/smb1001.html", request, user, extra=extra)
+
+
+@router.post("/compliance/smb1001/{control_id}/ticket", response_class=HTMLResponse)
+async def compliance_submit_smb1001_ticket(request: Request, control_id: int):
+    user, _membership, company, company_id, redirect = await _load_compliance_context(request)
+    if redirect:
+        return redirect
+
+    control = await smb1001_repo.get_control(control_id)
+    if not control:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Control not found")
+    tiers = {int(tier["tier_level"]): tier for tier in await smb1001_repo.list_tiers()}
+    tier_name = str((tiers.get(int(control["tier_level"])) or {}).get("name") or f"Tier {control['tier_level']}")
+
+    external_reference = _build_smb1001_ticket_reference(company_id, control_id)
+    existing_ticket = await tickets_repo.find_open_ticket_by_external_reference(external_reference)
+    if existing_ticket:
+        ticket_id = existing_ticket.get("id")
+        message = "An open ticket already exists for that SMB1001 control."
+        if ticket_id:
+            message = f"An open ticket already exists for that SMB1001 control (ticket #{ticket_id})."
+        return flash_redirect("/compliance", message, "info")
+
+    ticket_status = await tickets_service.resolve_status_or_default(None)
+    ticket = await tickets_service.create_ticket(
+        subject=_build_smb1001_ticket_subject(control),
+        description=_build_smb1001_ticket_description(
+            control=control,
+            tier_name=tier_name,
+            company=company,
+            user=user,
+        ),
+        requester_id=int(user["id"]),
+        company_id=company_id,
+        assigned_user_id=None,
+        priority="normal",
+        status=ticket_status,
+        category=_SMB1001_TICKET_CATEGORY,
+        module_slug=_ESSENTIAL8_TICKET_MODULE,
+        external_reference=external_reference,
+        trigger_automations=True,
+        initial_reply_author_id=int(user["id"]),
+        requester_email=str(user.get("email") or "") or None,
+    )
+    ticket_id = ticket.get("id")
+    await audit_service.record(
+        action="smb1001.help_ticket.create",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="ticket",
+        entity_id=int(ticket_id) if ticket_id else None,
+        metadata={"company_id": company_id, "control_id": control_id, "control_code": control.get("code")},
+    )
+    message = "Ticket submitted. A technician will contact you about this SMB1001 control."
+    if ticket_id:
+        message = f"Ticket #{ticket_id} submitted. A technician will contact you about this SMB1001 control."
+    return flash_redirect("/compliance", message, "success")
+
+
+@router.get("/compliance/essential8", response_class=HTMLResponse)
+async def essential8_legacy_page(request: Request):
     main_module = _main()
     user, _membership, company, company_id, redirect = await _load_compliance_context(request)
     if redirect:
@@ -202,7 +335,7 @@ async def compliance_page(request: Request):
         record["compliance_help_url"] = ""
 
     extra = {
-        "title": "Essential 8 Compliance",
+        "title": "Essential 8 Compliance (legacy)",
         "compliance_records": compliance_records,
         "summary": summary,
         "has_compliance_gaps": has_compliance_gaps,

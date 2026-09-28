@@ -81,7 +81,7 @@ MENU_PERMISSIONS: tuple[MenuPermission, ...] = (
     MenuPermission("menu.voice_monitor", "Voice monitor", "Company", "View subscribed monitoring numbers; write access allows monitoring preferences and test calls."),
     MenuPermission("menu.invoices", "Invoices", "Commerce", "View invoices; write access allows invoice management.", ("billing.manage", "invoices.manage"), "can_manage_invoices"),
     MenuPermission("menu.staff", "Staff", "Company", "View staff; write access allows staff management.", ("staff.manage",), "can_manage_staff"),
-    MenuPermission("menu.compliance", "Compliance", "Compliance", "View or manage Essential 8 compliance.", ("compliance.access",), "can_view_compliance"),
+    MenuPermission("menu.compliance", "SMB1001", "Compliance", "View or manage SMB1001 compliance (and legacy Essential 8 records).", ("compliance.access",), "can_view_compliance"),
     MenuPermission("menu.reports", "Reports", "Reporting", "View generated company reports."),
     MenuPermission("menu.reporting", "Reporting", "Reporting", "View or build reporting dashboards.", ("helpdesk.technician",), None),
     MenuPermission(

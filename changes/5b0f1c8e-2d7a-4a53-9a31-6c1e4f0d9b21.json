@@ -1,0 +1,7 @@
+{
+  "guid": "5b0f1c8e-2d7a-4a53-9a31-6c1e4f0d9b21",
+  "occurred_at": "2026-09-28T06:00Z",
+  "change_type": "Feature",
+  "summary": "Track compliance against SMB1001 (Bronze to Diamond) instead of the retiring Essential 8, rename the Compliance menu to SMB1001 and convert existing Essential 8 progress.",
+  "content_hash": "3145f83bc74b8887dcf7b281a81e57eec3412ef4a59b2cb6dad7fbea341eb4e0"
+}

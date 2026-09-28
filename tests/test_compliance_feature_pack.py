@@ -12,7 +12,10 @@ from app.features.compliance import routes as compliance_routes
 
 EXPECTED = {
     ("GET", "/compliance"),
+    ("POST", "/compliance/smb1001/{control_id}/ticket"),
+    ("GET", "/compliance/essential8"),
     ("GET", "/compliance/control/{control_id}"),
+    ("POST", "/compliance/requirements/{requirement_id}/ticket"),
     ("GET", "/compliance-checks"),
     ("GET", "/compliance-checks/{assignment_id}"),
     ("GET", "/admin/compliance-checks/library"),

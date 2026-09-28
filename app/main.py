@@ -72,6 +72,7 @@ from app.api.routes import (
     documentation,
     dashboard as dashboard_api,
     essential8 as essential8_api,
+    smb1001 as smb1001_api,
     compliance_checks as compliance_checks_api,
     email_blocklist as email_blocklist_api,
     email_tracking as email_tracking_api,
@@ -1245,6 +1246,7 @@ app.include_router(call_recordings_api.router)
 app.include_router(companies.router)
 app.include_router(documentation.router)
 app.include_router(essential8_api.router)
+app.include_router(smb1001_api.router)
 app.include_router(compliance_checks_api.router)
 app.include_router(licenses_api.router)
 app.include_router(forms_api.router)

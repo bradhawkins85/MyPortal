@@ -142,11 +142,26 @@ CORE_COMPONENTS: tuple[CoreComponent, ...] = (
         ("/myforms", "/forms", "/admin/forms", "/api/forms"),
     ),
     CoreComponent(
+        "smb1001",
+        "SMB1001 Compliance",
+        "SMB1001 compliance dashboard (the SMB1001 menu entry), tier "
+        "progress, controls and API. Disabling it also hides the legacy "
+        "Essential 8 pages under /compliance. Compliance Checks is unaffected.",
+        ("/compliance", "/api/smb1001"),
+        parent_pack="compliance",
+    ),
+    CoreComponent(
         "essential8",
-        "Essential 8 Compliance",
-        "Essential 8 compliance dashboard, controls, API, marketing help "
-        "links and company report sections. Compliance Checks is unaffected.",
-        ("/compliance", "/api/essential8", "/admin/marketing/essential8-help-links"),
+        "Essential 8 Compliance (legacy)",
+        "Legacy Essential 8 records, controls, API, marketing help links and "
+        "company report sections. SMB1001 and Compliance Checks are unaffected.",
+        (
+            "/compliance/essential8",
+            "/compliance/control",
+            "/compliance/requirements",
+            "/api/essential8",
+            "/admin/marketing/essential8-help-links",
+        ),
         parent_pack="compliance",
     ),
     CoreComponent(

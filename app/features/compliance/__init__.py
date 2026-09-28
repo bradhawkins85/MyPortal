@@ -2,8 +2,11 @@
 
 Owns the compliance dashboard/routes:
 
-* ``GET /compliance``
-* ``GET /compliance/control/{control_id}``
+* ``GET /compliance`` (SMB1001 dashboard)
+* ``POST /compliance/smb1001/{control_id}/ticket``
+* ``GET /compliance/essential8`` (legacy Essential 8 overview)
+* ``GET /compliance/control/{control_id}`` (legacy Essential 8 control)
+* ``POST /compliance/requirements/{requirement_id}/ticket``
 * ``GET /compliance-checks``
 * ``GET /compliance-checks/{assignment_id}``
 * ``GET /admin/compliance-checks/library``
@@ -18,7 +21,7 @@ from .routes import router as compliance_router
 
 PACK = FeaturePack(
     slug="compliance",
-    version="1.1.0",
+    version="1.2.0",
     routers=(compliance_router,),
 )
 
