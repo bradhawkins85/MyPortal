@@ -208,7 +208,7 @@ def test_options_round_trip_through_query_parameters():
     from starlette.datastructures import QueryParams
 
     options = nm.MapOptions(detail="detailed", types=frozenset({"switch", "router"}), show_subnets=True,
-                            include_unlinked=True, site="Warehouse", show_racks=False)
+                            include_unlinked=True, site="Warehouse", show_racks=False, layout="sites")
     parsed = nm.MapOptions.from_params(QueryParams(options.query()))
     assert parsed == options
     assert nm.MapOptions.from_params(QueryParams("detail=bogus&types=nope")).detail == nm.DEFAULT_DETAIL
@@ -245,10 +245,10 @@ def test_detail_levels_add_information():
 
 
 def test_wireless_links_are_dashed_and_labelled():
-    svg = nm.render_svg(_graph(), title="Map")
+    svg = nm.render_svg(_graph(layout="sites"), title="Map")
     edge = re.search(r'<g class="nm-edge"[^>]*data-medium="wireless".*?</g>', svg).group(0)
     assert 'stroke-dasharray="9 6"' in edge
-    assert "HO ↔ Warehouse · 5.8 GHz · 4.2 km · -54 dBm" in svg
+    assert "5.8 GHz · 4.2 km · -54 dBm · HO ↔ Warehouse" in svg
 
 
 def test_interactive_svg_leaves_navigation_to_the_page():
@@ -270,3 +270,51 @@ def test_inventory_lists_devices_with_their_links():
     bridge = next(row for row in rows if row["name"] == "HO-Bridge")
     assert bridge["site"] == "Head office"
     assert any(link["peer"] == "WH-Bridge" and link["medium"] == "Wireless" for link in bridge["links"])
+
+
+# ---------------------------------------------------------------------------
+# Topology layout
+# ---------------------------------------------------------------------------
+
+def test_topology_tree_runs_from_the_internet_outwards():
+    graph = _graph()
+    roots, children = nm.spanning_forest(graph)
+    assert roots[0] == "internet"
+    assert children["internet"] == ["asset:11"]
+    # The wireless bridge pair chains on: HO bridge -> WH bridge -> WH switch -> AP.
+    assert "asset:5" in children["asset:4"]
+    assert "asset:6" in children["asset:5"]
+    assert "asset:7" in children["asset:6"]
+
+
+def test_topology_places_each_device_right_of_its_uplink():
+    graph = _graph()
+    nm.layout(graph)
+    _roots, children = nm.spanning_forest(graph)
+    for parent, kids in children.items():
+        for kid in kids:
+            assert graph.nodes[kid].x > graph.nodes[parent].x
+        # A parent sits level with the middle of its children.
+        ys = [graph.nodes[kid].y for kid in kids]
+        assert min(ys) <= graph.nodes[parent].y <= max(ys)
+
+
+def test_topology_lists_unlinked_devices_separately():
+    graph = _graph(include_unlinked=True)
+    svg = nm.render_svg(graph, title="Map")
+    assert "Not linked to other devices" in svg
+    linked = [node for node in graph.nodes.values() if node.id in {"asset:1", "asset:7"}]
+    laptop = graph.nodes["asset:9"]
+    assert all(laptop.y > node.y for node in linked)
+
+
+def test_topology_links_are_smooth_curves():
+    svg = nm.render_svg(_graph(), title="Map")
+    paths = re.findall(r'<g class="nm-edge"[^>]*>.*?<path d="([^"]+)"', svg)
+    assert paths and all(" C" in path for path in paths)
+
+
+def test_sites_layout_still_groups_by_site_and_rack():
+    svg = nm.render_svg(_graph(layout="sites"), title="Map")
+    assert 'class="nm-site"' in svg and 'class="nm-rack"' in svg
+    assert 'class="nm-site"' not in nm.render_svg(_graph(), title="Map")

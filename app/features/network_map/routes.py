@@ -118,6 +118,7 @@ async def network_map_page(request: Request):
             "map_svg": Markup(svg), "map_payload": network_map.graph_payload(graph),
             "options": options, "options_query": query,
             "detail_levels": network_map.DETAIL_LEVELS,
+            "layouts": network_map.LAYOUTS,
             "type_groups": _type_filter_groups(everything.nodes),
             "sites": network_map.site_names(overview, extra),
             "node_count": sum(1 for node in graph.nodes.values() if node.kind in {"asset", "item"}),
