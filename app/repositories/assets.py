@@ -9,6 +9,7 @@ import aiomysql
 import aiosqlite
 
 from app.core.database import db
+from app.services import asset_types
 
 
 def _normalise_username(value: Any) -> str:
@@ -89,6 +90,8 @@ async def list_company_assets(company_id: int) -> list[dict[str, Any]]:
             company_id,
             name,
             type,
+            asset_type,
+            asset_type_source,
             machine_type,
             serial_number,
             status,
@@ -143,27 +146,54 @@ async def get_asset_by_id(asset_id: int) -> dict[str, Any] | None:
 async def create_manual_asset(
     *, company_id: int, name: str, type: str | None, status: str | None,
     serial_number: str | None, location: str | None, created_by: int,
+    asset_type: str | None = None,
 ) -> int:
     """Create a human-owned canonical asset without integration identifiers."""
     return await db.execute_returning_lastrowid(
         """INSERT INTO assets
-           (company_id, name, type, status, serial_number, location, provenance,
-            manual_created_by)
-           VALUES (%s, %s, %s, %s, %s, %s, 'manual', %s)""",
-        (company_id, name, type, status, serial_number, location, created_by),
+           (company_id, name, type, asset_type, asset_type_source, status,
+            serial_number, location, provenance, manual_created_by)
+           VALUES (%s, %s, %s, %s, 'manual', %s, %s, %s, 'manual', %s)""",
+        (company_id, name, type, asset_type, status, serial_number, location, created_by),
     )
 
 
 async def update_manual_inventory(
     asset_id: int, *, name: str, type: str | None, status: str | None,
-    serial_number: str | None, location: str | None,
+    serial_number: str | None, location: str | None, asset_type: str | None = None,
 ) -> None:
     """Update fields owned by a manual asset; integration-owned rows are excluded."""
     await db.execute(
-        """UPDATE assets SET name = %s, type = %s, status = %s,
-           serial_number = %s, location = %s
+        """UPDATE assets SET name = %s, type = %s, asset_type = %s,
+           asset_type_source = 'manual', status = %s, serial_number = %s, location = %s
            WHERE id = %s AND provenance = 'manual'""",
-        (name, type, status, serial_number, location, asset_id),
+        (name, type, asset_type, status, serial_number, location, asset_id),
+    )
+
+
+async def set_asset_type(company_id: int, asset_id: int, asset_type: str | None) -> None:
+    """Override a synced asset's catalogue type, or hand it back to sync (``None``).
+
+    An override survives later syncs; clearing it re-derives the type from
+    what the integration last reported.
+    """
+    if asset_type is None:
+        record = await db.fetch_one(
+            "SELECT type, form_factor, os_name, machine_type FROM assets WHERE id = %s AND company_id = %s",
+            (asset_id, company_id),
+        )
+        if not record:
+            return
+        await db.execute(
+            "UPDATE assets SET asset_type = %s, asset_type_source = 'auto' WHERE id = %s AND company_id = %s",
+            (asset_types.derive(record.get("type"), form_factor=record.get("form_factor"),
+                                os_name=record.get("os_name"), machine_type=record.get("machine_type")),
+             asset_id, company_id),
+        )
+        return
+    await db.execute(
+        "UPDATE assets SET asset_type = %s, asset_type_source = 'manual' WHERE id = %s AND company_id = %s",
+        (asset_types.normalise(asset_type), asset_id, company_id),
     )
 
 
@@ -601,9 +631,13 @@ async def upsert_asset(
             )
             return None
 
+    derived_type = asset_types.derive(
+        type, form_factor=form_factor, os_name=os_name, machine_type=machine_type
+    )
     params = (
         name,
         type,
+        derived_type,
         machine_type,
         status,
         os_name,
@@ -631,6 +665,7 @@ async def upsert_asset(
             UPDATE assets
             SET name = %s,
                 type = %s,
+                asset_type = CASE WHEN asset_type_source = 'manual' THEN asset_type ELSE %s END,
                 machine_type = COALESCE(%s, machine_type),
                 status = %s,
                 os_name = %s,
@@ -662,6 +697,7 @@ async def upsert_asset(
                 company_id,
                 name,
                 type,
+                asset_type,
                 machine_type,
                 serial_number,
                 status,
@@ -682,12 +718,13 @@ async def upsert_asset(
                 tactical_asset_id,
                 mac_address,
                 provenance
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'integration')
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'integration')
             """,
             (
                 company_id,
                 name,
                 type,
+                derived_type,
                 machine_type,
                 serial_number,
                 status,

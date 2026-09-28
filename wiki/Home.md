@@ -95,6 +95,7 @@ Welcome to the MyPortal documentation wiki. MyPortal is a Python-first customer 
 
 - [Message Templates](Message-Templates)
 - [Asset Custom Fields](Asset-Custom-Fields)
+- [Network Map](Network-Map)
 - [Transcription Setup](TRANSCRIPTION-SETUP)
 - [Subscription Coterming](SUBSCRIPTION-COTERMING)
 

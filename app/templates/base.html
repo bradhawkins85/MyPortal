@@ -163,6 +163,7 @@
           {% set can_access_network_devices = feature_pack_available('network_devices') and (is_super_admin or menu_access.get('menu.network_devices') in ['read', 'write']) %}
           {% set can_access_ipam = feature_pack_available('ipam') and (is_super_admin or menu_access.get('menu.ipam') in ['read', 'write']) %}
           {% set can_access_racks = feature_pack_available('racks') and (is_super_admin or menu_access.get('menu.racks') in ['read', 'write']) %}
+          {% set can_access_network_map = feature_pack_available('network_map') and (is_super_admin or menu_access.get('menu.network_map') in ['read', 'write']) %}
           {% set can_access_defender = feature_pack_available('defender') and (is_super_admin or menu_access.get('menu.defender') in ['read', 'write']) %}
           {% set can_access_voice_monitor = feature_pack_available('voice_monitor') and (is_super_admin or menu_access.get('menu.voice_monitor') in ['read', 'write']) %}
           {% set can_manage_licenses = (can_manage_licenses | default(false)) or is_super_admin or membership.get('can_manage_licenses') or can_access_m365_configuration or can_access_m365_licenses %}
@@ -419,6 +420,12 @@
               <a href="/racks" {% if current_path.startswith('/racks') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 2h14v20H5zm2 3v4h10V5zm0 6v3h10v-3zm0 5v3h10v-3z"/></svg></span>
                 <span class="menu__label">Racks</span>
+              </a>
+            </li>{% endif %}
+          {% if can_access_network_map %}<li class="menu__item">
+              <a href="/network-map" {% if current_path.startswith('/network-map') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 2h6v5h-2v3h6v4h2v6h-6v-6h2v-2H7v2h2v6H3v-6h2v-4h6V7H9z"/></svg></span>
+                <span class="menu__label">Network map</span>
               </a>
             </li>{% endif %}
           {% if can_access_defender %}

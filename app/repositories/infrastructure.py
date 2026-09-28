@@ -504,6 +504,7 @@ async def _sync_ports(company_id: int, equipment_id: int, counts: Mapping[str, i
         marks = ",".join(["%s"] * len(removed))
         await db.execute("UPDATE rack_equipment_ports SET source_port_id=NULL WHERE source_port_id IN (" + marks + ")", tuple(removed))
         await db.execute("UPDATE rack_equipment_ports SET peer_port_id=NULL WHERE peer_port_id IN (" + marks + ")", tuple(removed))
+        await _delete_port_links(removed)
         await db.execute("DELETE FROM rack_equipment_ports WHERE id IN (" + marks + ")", tuple(removed))
     next_number = max((int(row["port_number"]) for row in rows), default=0) + 1
     for connector, count in counts.items():
@@ -727,8 +728,24 @@ async def reserve_space(company_id: int, rack_id: int, start_unit: int, unit_hei
     return reservation_id
 
 
+async def _delete_port_links(port_ids: list[int]) -> None:
+    """Remove network map links that end on rack ports about to be deleted."""
+    if not port_ids:
+        return
+    marks = ",".join(["%s"] * len(port_ids))
+    await db.execute(
+        "DELETE FROM network_links WHERE (a_kind='rack_port' AND a_id IN (" + marks + "))"
+        " OR (b_kind='rack_port' AND b_id IN (" + marks + "))", (*port_ids, *port_ids))
+
+
 async def delete_record(table: str, record_id: int, company_id: int) -> None:
     allowed = {"ip_networks", "ip_addresses", "racks", "rack_equipment", "rack_reservations"}
     if table not in allowed:
         raise ValueError("Invalid record type")
+    if table in {"racks", "rack_equipment"}:
+        column = "e.rack_id" if table == "racks" else "e.id"
+        ports = await db.fetch_all(
+            "SELECT p.id FROM rack_equipment_ports p JOIN rack_equipment e ON e.id=p.equipment_id"
+            " WHERE " + column + "=%s AND e.company_id=%s", (record_id, company_id)) or []
+        await _delete_port_links([int(row["id"]) for row in ports])
     await db.execute("DELETE FROM " + table + " WHERE id=%s AND company_id=%s", (record_id, company_id))

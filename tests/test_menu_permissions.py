@@ -114,6 +114,7 @@ def test_sparse_legacy_roles_inherit_only_previously_owned_feature_access():
     assert permissions["menu.asset_photos"] == "read"
     assert permissions["menu.ipam"] == "write"
     assert permissions["menu.racks"] == "write"
+    assert permissions["menu.network_map"] == "write"
     assert permissions["menu.bcp_asset_links"] == "read"
     assert permissions["menu.credentials"] == "none"
 
@@ -132,7 +133,7 @@ def test_explicit_feature_denial_overrides_compatibility_mapping():
 def test_new_feature_permissions_default_to_no_access():
     permissions = normalize_menu_permissions(None)
     for key in (
-        "menu.documentation_search", "menu.processes", "menu.ipam", "menu.racks",
+        "menu.documentation_search", "menu.processes", "menu.ipam", "menu.racks", "menu.network_map",
         "menu.expirations", "menu.websites", "menu.asset_photos",
         "menu.asset_relationships", "menu.bcp_asset_links", "menu.credentials",
         "menu.credential_sharing",

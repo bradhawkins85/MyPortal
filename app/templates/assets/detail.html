@@ -3,6 +3,7 @@
 
 {% block header_title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
 {% block title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% endblock %}
 {% block header_actions %}
   {% set detail_actions = [{"label": "Start process", "type": "link", "href": "/processes/start?asset_id=" ~ asset.id}, {"label": "Back to Assets", "type": "link", "href": "/assets"}] %}
   {% if not customer_safe %}{% set _ = detail_actions.append({"label": "Company credentials", "type": "link", "href": "/admin/companies/" ~ asset.company_id ~ "/edit#credentials"}) %}{% endif %}
@@ -32,6 +33,67 @@
       <dt>IP addresses</dt><dd>{% for address in infrastructure_links.addresses %}<a href="/ipam#address-{{ address.id }}"><code>{{ address.address }}</code></a> <span class="text-muted">{{ address.network_name }}</span>{% if not loop.last %}<br>{% endif %}{% else %}<a href="/ipam#addresses">No documented address</a>{% endfor %}</dd>
       <dt>Rack positions</dt><dd>{% for placement in infrastructure_links.placements %}<a href="/racks?rack={{ placement.rack_id }}#rack-{{ placement.rack_id }}">{{ placement.rack_name }} · {{ placement.face|title }} U{{ placement.start_unit }}{% if placement.unit_height > 1 %}–{{ placement.start_unit + placement.unit_height - 1 }}{% endif %}</a>{% if not loop.last %}<br>{% endif %}{% else %}<a href="/racks">Not placed in a rack</a>{% endfor %}</dd>
     </dl></div>
+  </section>{% endif %}
+
+  {% if network_interfaces is not none %}{% set ni = network_interfaces %}{% set own_endpoints = [] %}{% for interface in ni.interfaces %}{% set _ = own_endpoints.append('interface:' ~ interface.id) %}{% endfor %}<section class="card card--panel admin-grid__full" id="interfaces">
+    <header class="card__header"><div><h2 class="card__title">Network interfaces</h2><p class="card__subtitle">Ports and radios on this device and what they connect to. They draw this device on the <a href="/network-map">network map</a>, including when it is not in a rack.</p></div></header>
+    <div class="card__body">
+      <div class="table-wrapper"><table class="table"><thead><tr><th>Interface</th><th>Kind</th><th>Address</th><th>Settings</th><th>Connected to</th>{% if can_edit_network_map %}<th class="table__actions">Actions</th>{% endif %}</tr></thead><tbody>
+        {% for interface in ni.interfaces %}<tr id="interface-{{ interface.id }}">
+          <td><strong>{{ interface.name }}</strong>{% if interface.mac_address %}<br><code class="text-muted">{{ interface.mac_address }}</code>{% endif %}</td>
+          <td>{% if interface.is_radio %}<span class="status status--info">{{ interface.kind_label }}</span>{% else %}{{ interface.kind_label }}{% endif %}</td>
+          <td>{% if interface.ip_address %}<code>{{ interface.ip_address }}</code>{% else %}—{% endif %}</td>
+          <td>{% if interface.is_radio %}{{ interface.radio_summary or '—' }}{% else %}{{ [interface.speed_mbps ~ ' Mbps' if interface.speed_mbps else none, 'VLAN ' ~ interface.vlan if interface.vlan else none] | select | join(' · ') or '—' }}{% endif %}</td>
+          <td>{% for link in interface.links %}<span>{{ link.peer }} <span class="text-muted">({{ link.medium }})</span></span>{% if can_edit_network_map %}<form class="form-inline" method="post" action="/api/network-map/links/{{ link.id }}/delete" data-confirm="Remove this link?">{% include "partials/csrf.html" %}<input type="hidden" name="next" value="/assets/{{ asset.id }}#interfaces"><button class="button button--ghost button--small" type="submit">Unlink</button></form>{% endif %}{% if not loop.last %}<br>{% endif %}{% else %}<span class="text-muted">Not linked</span>{% endfor %}</td>
+          {% if can_edit_network_map %}<td class="table__actions"><form method="post" action="/api/network-map/interfaces/{{ interface.id }}/delete" data-confirm="Remove this interface and its links?">{% include "partials/csrf.html" %}<input type="hidden" name="next" value="/assets/{{ asset.id }}#interfaces"><button class="button button--danger button--small" type="submit">Remove</button></form></td>{% endif %}
+        </tr>{% else %}<tr><td colspan="6">No interfaces documented. Racked equipment ports are documented in <a href="/racks">Racks</a>.</td></tr>{% endfor %}
+      </tbody></table></div>
+      {% if can_edit_network_map %}<div class="network-interface-forms">
+        <form class="form-stack" method="post" action="/api/network-map/interfaces" data-interface-form>{% include "partials/csrf.html" %}
+          <h3>Add interface</h3>
+          <input type="hidden" name="asset_id" value="{{ asset.id }}"><input type="hidden" name="next" value="/assets/{{ asset.id }}#interfaces">
+          <div class="form-row">
+            <label>Name<input class="input" name="name" maxlength="64" required placeholder="eth0, Port 1, Radio 1"></label>
+            <label>Kind<select class="input" name="kind" data-interface-kind>{% for key, label in ni.interface_kinds.items() %}<option value="{{ key }}" {% if key == ('radio' if asset_type.radio and not ni.interfaces else 'ethernet') %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+            <label>IP address<select class="input" name="ip_address_id"><option value="">None</option>{% for address in infrastructure_links.addresses %}<option value="{{ address.id }}">{{ address.address }} ({{ address.network_name }})</option>{% endfor %}</select></label>
+          </div>
+          <div class="form-row">
+            <label>MAC address<input class="input" name="mac_address" maxlength="32"></label>
+            <label>Speed (Mbps)<input class="input" name="speed_mbps" type="number" min="1" max="1000000"></label>
+            <label>VLAN(s)<input class="input" name="vlan" maxlength="64" placeholder="10, 20-30"></label>
+          </div>
+          <fieldset data-radio-fields><legend>Radio settings</legend><div class="form-row">
+            <label>Mode<select class="input" name="radio_mode"><option value="">Not set</option>{% for key, label in ni.radio_modes.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+            <label>Frequency (MHz)<input class="input" name="frequency_mhz" type="number" min="1" max="300000" placeholder="5800"></label>
+            <label>Channel width (MHz)<input class="input" name="channel_width_mhz" type="number" min="1" max="10000"></label>
+            <label>SSID / link name<input class="input" name="ssid" maxlength="64"></label>
+            <label>Azimuth (°)<input class="input" name="azimuth_deg" type="number" min="0" max="359"></label>
+            <label>Tx power (dBm)<input class="input" name="tx_power_dbm" type="number" min="-40" max="60"></label>
+            <label>Antenna gain (dBi)<input class="input" name="antenna_gain_dbi" type="number" min="-10" max="60"></label>
+          </div></fieldset>
+          <div class="form-row"><label>Notes<input class="input" name="notes" maxlength="255"></label></div>
+          <div><button class="button button--primary" type="submit">Add interface</button></div>
+        </form>
+        {% if ni.interfaces %}<form class="form-stack" method="post" action="/api/network-map/links" data-link-form>{% include "partials/csrf.html" %}
+          <h3>Link an interface</h3>
+          <input type="hidden" name="next" value="/assets/{{ asset.id }}#interfaces">
+          <div class="form-row">
+            <label>This device's interface<select class="input" name="a" required>{% for interface in ni.interfaces %}<option value="interface:{{ interface.id }}" data-radio="{{ '1' if interface.is_radio else '0' }}">{{ interface.name }}</option>{% endfor %}</select></label>
+            <label>Connects to<select class="input" name="b" required><option value="">Choose an interface or rack port</option>{% for option in ni.endpoint_options if option.value not in own_endpoints %}<option value="{{ option.value }}" data-radio="{{ '1' if option.radio else '0' }}">{{ option.label }}</option>{% endfor %}</select></label>
+            <label>Medium<select class="input" name="medium" data-link-medium>{% for key, label in ni.media.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+          </div>
+          <div class="form-row">
+            <label>Label<input class="input" name="label" maxlength="191" placeholder="Uplink to warehouse"></label>
+            <label>Speed (Mbps)<input class="input" name="speed_mbps" type="number" min="1" max="1000000"></label>
+            <label>Distance (m)<input class="input" name="distance_m" type="number" min="0" max="1000000"></label>
+            <label data-wireless-field>Frequency (MHz)<input class="input" name="frequency_mhz" type="number" min="1" max="300000"></label>
+            <label data-wireless-field>Signal (dBm)<input class="input" name="signal_dbm" type="number" min="-150" max="0"></label>
+          </div>
+          <div><button class="button button--primary" type="submit">Add link</button></div>
+          <p class="form-help">Radio interfaces carry wireless links and can link to several radios (point-to-multipoint); a wired port has one link.</p>
+        </form>{% endif %}
+      </div>{% endif %}
+    </div>
   </section>{% endif %}
 
   {% if can_view_asset_photos %}<section class="card card--panel admin-grid__full asset-photos" id="asset-photos">
@@ -86,7 +148,7 @@
         {% if asset.provenance == 'manual' %}
         <div class="alert alert--info" role="status">Manually documented asset — integrations cannot overwrite it until an authorised match is approved.</div>
         <div class="form-group"><label class="form-label" for="asset-name">Name</label><input class="input" id="asset-name" name="name" maxlength="255" required value="{{ asset.name or '' }}" {% if not can_edit %}disabled{% endif %}></div>
-        <div class="form-group"><label class="form-label" for="asset-type">Type</label><input class="input" id="asset-type" name="type" maxlength="255" value="{{ asset.type or '' }}" {% if not can_edit %}disabled{% endif %}></div>
+        <div class="form-group"><label class="form-label" for="asset-type">Type</label><select class="input" id="asset-type" name="asset_type" required {% if not can_edit %}disabled{% endif %}>{% for group in asset_type_groups %}<optgroup label="{{ group.label }}">{% for item in group.types %}<option value="{{ item.key }}" {% if item.key == asset_type.key %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</optgroup>{% endfor %}</select></div>
         <div class="form-group"><label class="form-label" for="asset-status">Status</label><input class="input" id="asset-status" name="status" maxlength="255" value="{{ asset.status or '' }}" {% if not can_edit %}disabled{% endif %}></div>
         <div class="form-group"><label class="form-label" for="asset-serial">Serial number</label><input class="input" id="asset-serial" name="serial_number" maxlength="255" value="{{ asset.serial_number or '' }}" {% if not can_edit %}disabled{% endif %}></div>
         {% endif %}
@@ -142,12 +204,21 @@
     <header class="card__header"><h2 class="card__title">{{ 'Manual inventory' if asset.provenance == 'manual' else 'Synced inventory' }}</h2></header>
     <div class="card__body"><dl class="definition-list">
       <dt>Asset ID</dt><dd>{{ asset.id }}</dd><dt>Company</dt><dd>{{ company.name if company else asset.company_id }}</dd>
-      <dt>Type</dt><dd>{{ asset.type or '—' }}</dd><dt>Status</dt><dd>{{ asset.status or '—' }}</dd>
+      <dt>Type</dt><dd><span class="asset-type-badge"><img src="{{ asset_type.icon }}" alt="" width="20" height="20"> {{ asset_type.label }}</span>{% if asset.provenance != 'manual' and asset.type and asset.type != asset_type.label %} <span class="text-muted">(reported as {{ asset.type }})</span>{% endif %}</dd><dt>Status</dt><dd>{{ asset.status or '—' }}</dd>
       <dt>Serial number</dt><dd>{{ asset.serial_number or '—' }}</dd><dt>Warranty</dt><dd>{{ asset.warranty_status or '—' }}{% if asset.warranty_end_date %} (ends {{ asset.warranty_end_date }}){% endif %}</dd>
       {% if not customer_safe %}<dt>Syncro ID</dt><dd>{{ asset.syncro_asset_id or '—' }}</dd><dt>Tactical ID</dt><dd>{{ asset.tactical_asset_id or '—' }}</dd>{% endif %}
       <dt>Provenance</dt><dd>{{ 'Manual' if asset.provenance == 'manual' else 'Integration' }}</dd>
       <dt>Last sync</dt><dd>{{ asset.last_sync or ('Not applicable' if asset.provenance == 'manual' else 'Never') }}</dd>
-    </dl><p class="text-muted">{{ 'Inventory and documentation are technician-maintained.' if asset.provenance == 'manual' else 'Inventory fields above are sync-owned; operational documentation is manual-owned.' }}</p></div>
+    </dl><p class="text-muted">{{ 'Inventory and documentation are technician-maintained.' if asset.provenance == 'manual' else 'Inventory fields above are sync-owned; operational documentation is manual-owned.' }}</p>
+    {% if can_edit and asset.provenance != 'manual' %}<form class="form-inline" method="post" action="/assets/{{ asset.id }}/asset-type">{% include "partials/csrf.html" %}
+      <label class="form-label" for="asset-type-override">Asset type</label>
+      <select class="input" id="asset-type-override" name="asset_type">
+        <option value="" {% if asset.asset_type_source != 'manual' %}selected{% endif %}>Automatic from sync ({{ derived_asset_type.label }})</option>
+        {% for group in asset_type_groups %}<optgroup label="{{ group.label }}">{% for item in group.types %}<option value="{{ item.key }}" {% if asset.asset_type_source == 'manual' and item.key == asset_type.key %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</optgroup>{% endfor %}
+      </select>
+      <button class="button button--ghost button--small" type="submit">Save type</button>
+      <small class="form-help">Sync keeps a type you choose here. Choose Automatic to follow what the integration reports.</small>
+    </form>{% endif %}</div>
   </section>
 
   {% if not customer_safe %}<section class="card card--panel">
@@ -161,7 +232,7 @@
           {% else %}<input form="manual-custom-fields" class="input" name="custom_{{ field.id }}" value="{{ field.value or '' }}">{% endif %}
         {% elif field.field_type == 'url' and field.value %}<a href="{{ field.value }}" target="_blank" rel="noopener noreferrer">{{ field.value }}</a>{% elif field.field_type == 'checkbox' %}{{ 'Yes' if field.value else 'No' }}{% else %}{{ field.value or '—' }}{% endif %}
       </dd>{% else %}<p class="text-muted">No custom fields configured.</p>{% endfor %}
-    </dl>{% if asset.provenance == 'manual' and can_edit %}<form id="manual-custom-fields" method="post" action="/assets/{{ asset.id }}"><input type="hidden" name="name" value="{{ asset.name }}"><input type="hidden" name="type" value="{{ asset.type or '' }}"><input type="hidden" name="status" value="{{ asset.status or '' }}"><input type="hidden" name="serial_number" value="{{ asset.serial_number or '' }}"><input type="hidden" name="location" value="{{ asset.location or '' }}"><input type="hidden" name="review_status" value="{{ asset.review_status or 'not_reviewed' }}"><button class="button button--primary" type="submit">Save custom fields</button></form>{% endif %}</div>
+    </dl>{% if asset.provenance == 'manual' and can_edit %}<form id="manual-custom-fields" method="post" action="/assets/{{ asset.id }}"><input type="hidden" name="name" value="{{ asset.name }}"><input type="hidden" name="type" value="{{ asset.type or '' }}"><input type="hidden" name="asset_type" value="{{ asset_type.key }}"><input type="hidden" name="status" value="{{ asset.status or '' }}"><input type="hidden" name="serial_number" value="{{ asset.serial_number or '' }}"><input type="hidden" name="location" value="{{ asset.location or '' }}"><input type="hidden" name="review_status" value="{{ asset.review_status or 'not_reviewed' }}"><button class="button button--primary" type="submit">Save custom fields</button></form>{% endif %}</div>
   </section>{% endif %}
 
   {% if not customer_safe and reconciliation_candidates %}<section class="card card--panel admin-grid__full">
@@ -218,4 +289,4 @@
 </div>
 {% include "partials/csrf.html" %}
 {% endblock %}
-{% block scripts %}<script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script><script src="{{ static_url('/static/js/record_picker.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script><script src="{{ static_url('/static/js/record_picker.js') }}" defer></script>{% if can_edit_network_map %}<script src="{{ static_url('/static/js/network_map.js') }}" defer></script>{% endif %}{% endblock %}

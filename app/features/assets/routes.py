@@ -36,8 +36,11 @@ from app.services import audit as audit_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import automations as automations_service
 from app.services import asset_photos as asset_photo_service
+from app.services import asset_types
 from app.services import rack_dashboard
 from app.services import rack_item_types
+
+from . import network_map_routes
 
 router = APIRouter(tags=["Assets"])
 
@@ -269,7 +272,9 @@ async def assets_page(request: Request):
         record: dict[str, Any] = {
             "id": row.get("id"),
             "name": name,
-            "type": _clean_text(row.get("type")),
+            "type": asset_types.get(asset_types.effective(row)).label,
+            "asset_type_icon": asset_types.get(asset_types.effective(row)).icon,
+            "reported_type": _clean_text(row.get("type")),
             "machine_type": _clean_text(row.get("machine_type")),
             "serial_number": _clean_text(row.get("serial_number")),
             "status": _clean_text(row.get("status")),
@@ -484,6 +489,7 @@ async def new_asset_page(request: Request):
     return await _main()._render_template(
         "assets/form.html", request, user,
         extra={"title": "Create asset", "company": company, "asset": None,
+               "asset_type_groups": asset_types.grouped(),
                "custom_fields": await asset_custom_fields_repo.list_field_definitions()},
     )
 
@@ -498,6 +504,15 @@ def _manual_asset_values(form: Any) -> dict[str, str | None]:
         if len(value) > 255:
             raise HTTPException(status_code=422, detail=f"{key.replace('_', ' ').title()} is too long")
         values[key] = value or None
+    # Manual assets take their type from the fixed catalogue. A bare free-text
+    # ``type`` (older API clients) is mapped onto the closest catalogue entry.
+    submitted = str(form.get("asset_type") or "").strip()
+    try:
+        key = asset_types.normalise(submitted) if submitted else asset_types.derive(values["type"])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Choose an asset type from the list") from exc
+    values["asset_type"] = key
+    values["type"] = asset_types.get(key).label
     return values
 
 
@@ -1774,6 +1789,12 @@ async def asset_detail_page(
         await infrastructure_repo.for_asset(company_id, asset_id)
         if not customer_safe else {"addresses": [], "placements": []}
     )
+    can_view_network_map = not customer_safe and (is_super_admin or main_module._membership_menu_can(
+        user, membership, "menu.network_map"))
+    network_interfaces = (
+        await network_map_routes.asset_interfaces_context(company_id, asset_id)
+        if can_view_network_map else None
+    )
     return await main_module._render_template(
         "assets/detail.html", request, user, extra={
             "title": str(record.get("name") or f"Asset {asset_id}"),
@@ -1789,6 +1810,11 @@ async def asset_detail_page(
             "linked_runbooks": linked_runbooks,
             "linked_websites": [] if customer_safe else await websites_repo.list_for_asset(company_id, asset_id),
             "can_edit": not customer_safe and can_write,
+            "asset_type": asset_types.get(asset_types.effective(record)),
+            "derived_asset_type": asset_types.get(asset_types.derive(
+                record.get("type"), form_factor=record.get("form_factor"),
+                os_name=record.get("os_name"), machine_type=record.get("machine_type"))),
+            "asset_type_groups": asset_types.grouped(),
             "reconciliation_candidates": [] if customer_safe else await asset_repo.list_reconciliation_candidates(company_id, asset_id),
             "asset_sources": [] if customer_safe else await asset_repo.list_asset_sources(company_id, asset_id),
             "customer_safe": customer_safe,
@@ -1796,6 +1822,9 @@ async def asset_detail_page(
             "customer_role_ids": await audience_repo.list_role_ids(company_id, "asset", asset_id) if can_write else [],
             "bcp_context": bcp_context,
             "infrastructure_links": infrastructure_links,
+            "network_interfaces": network_interfaces,
+            "can_edit_network_map": can_view_network_map and (is_super_admin or main_module._membership_menu_can(
+                user, membership, "menu.network_map", write=True)),
             "asset_photos": (await asset_photo_repo.list_for_asset(
                 company_id, asset_id, customer_only=customer_safe
             )) if can_view_photos else [],
@@ -2116,6 +2145,29 @@ async def update_asset_documentation(request: Request, asset_id: int):
                "reference_count": len(references), "has_notes": bool(_clean_optional(form, "operational_notes"))},
     )
     return main_module.flash_redirect(f"/assets/{asset_id}", "Asset documentation saved.", "success")
+
+
+@router.post("/assets/{asset_id}/asset-type", summary="Override or reset a synced asset's type")
+async def update_asset_type(request: Request, asset_id: int):
+    user, _company, company_id, redirect = await _asset_write_context(request)
+    if redirect:
+        return redirect
+    record = await asset_repo.get_asset_by_id(asset_id)
+    if not record or int(record.get("company_id") or 0) != company_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    form = await request.form()
+    submitted = str(form.get("asset_type") or "").strip() or None
+    try:
+        await asset_repo.set_asset_type(company_id, asset_id, submitted)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Choose an asset type from the list") from exc
+    await audit_service.record(
+        action="asset.type.update", request=request, user_id=int(user["id"]),
+        entity_type="asset", entity_id=asset_id,
+        before={"asset_type": record.get("asset_type"), "source": record.get("asset_type_source")},
+        after={"asset_type": submitted, "source": "manual" if submitted else "auto"},
+    )
+    return _main().flash_redirect(f"/assets/{asset_id}", "Asset type saved.", "success")
 
 
 @router.post("/assets/{asset_id}/reconciliation/{source_record_id}/approve")

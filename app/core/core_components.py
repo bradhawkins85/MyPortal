@@ -60,6 +60,13 @@ CORE_COMPONENTS: tuple[CoreComponent, ...] = (
         parent_pack="assets",
     ),
     CoreComponent(
+        "network_map",
+        "Network map",
+        "Network diagram built from racks, IPAM and assets, with interface and link documentation.",
+        ("/network-map", "/api/network-map"),
+        parent_pack="assets",
+    ),
+    CoreComponent(
         "defender",
         "Windows Defender",
         "Defender detections, exclusions and tray agent Defender commands.",
