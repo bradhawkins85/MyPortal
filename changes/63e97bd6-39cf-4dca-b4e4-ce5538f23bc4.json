@@ -3,5 +3,5 @@
   "occurred_at": "2026-09-21T00:00Z",
   "change_type": "Fix",
   "summary": "Preserve configured security secrets when preparing and migrating immutable upgrade releases.",
-  "content_hash": "1b33f4c037222f7ece2b8acb644dbf858f646c9939c44513696f057d3fd5fbb8"
+  "content_hash": "82eca9e3f0a93f63e664f9d1e13eeff101f608d48d602f907e5b0e0032b77d54"
 }

@@ -1,7 +1,7 @@
 {
   "guid": "2f802ca1-bfad-493c-a536-b671122ac07e",
-  "occurred_at": "2026-09-10T00:00:00Z",
-  "change_type": "fix",
+  "occurred_at": "2026-09-10T00:00Z",
+  "change_type": "Fix",
   "summary": "Require ticket assignments before replies",
-  "content_hash": "Ticket replies now require a company, and public replies also require a requester."
+  "content_hash": "51cb3166adc7d61cd2ed145937e4f1253f990ed6945c30416fc6facd8c922cf8"
 }

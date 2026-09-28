@@ -1,7 +1,7 @@
 {
   "guid": "0fe2396a-7ee1-4426-880c-a63829f2ffb4",
-  "occurred_at": "2026-09-27T00:00:00Z",
-  "change_type": "feature",
+  "occurred_at": "2026-09-27T00:00Z",
+  "change_type": "Feature",
   "summary": "Added a permission-gated website deletion action with confirmation, tenant scoping, and audit logging.",
-  "content_hash": "website-delete-action-v1"
+  "content_hash": "f742f7bbfc0591c4d629855ea98182355c53a21681532552cc525d84387b97ff"
 }

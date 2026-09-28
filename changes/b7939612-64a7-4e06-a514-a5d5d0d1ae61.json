@@ -1,7 +1,7 @@
 {
   "guid": "b7939612-64a7-4e06-a514-a5d5d0d1ae61",
   "occurred_at": "2026-09-27T08:20Z",
-  "change_type": "feature",
+  "change_type": "Feature",
   "summary": "Rack ports link port-to-port: outlets pick the PSU they feed on the chosen device and network ports pick the remote port, both ends show the link, and KVM connected devices stay asset-only.",
   "content_hash": "0959b5e35caf3f20f1baa421e59b8a7419c9ccbdefa8a0cb9ce9afcedb22518f"
 }

@@ -275,6 +275,7 @@ def test_smb1001_paths_blocked_without_touching_compliance_checks():
 
 
 def test_smb1001_sidebar_link(monkeypatch):
+    monkeypatch.setitem(main_module.templates.env.globals, "feature_pack_available", main_module._feature_pack_available)
     body = _render_sidebar(monkeypatch)
     assert 'href="/compliance"' in body
     assert "SMB1001" in body

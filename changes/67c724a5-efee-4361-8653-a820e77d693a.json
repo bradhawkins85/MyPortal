@@ -3,5 +3,5 @@
   "occurred_at": "2026-09-15T00:00Z",
   "change_type": "Fix",
   "summary": "Repair missing Microsoft 365 app permissions and retry Exchange Online remediation once after a 403 response.",
-  "content_hash": "594cf1df1479884feeb5c5728e7dda4f2599519b4e93e277bf5c8f08a0ce83fe"
+  "content_hash": "edf8c0429866dedaae517f4e2ec3dca9f94e673de538362ffbf8954cdf86bcb7"
 }

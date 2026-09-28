@@ -1,7 +1,7 @@
 {
   "guid": "6b320616-c4cc-4a3e-82ee-095e2d76cd99",
   "occurred_at": "2026-09-27T07:35Z",
-  "change_type": "feature",
+  "change_type": "Feature",
   "summary": "Swivelling a rack now shows every item from its other side, including the backs of half-depth devices such as NAS units and PDUs, and a remembered Device names switch sits beside Device images.",
   "content_hash": "9902f7aca3b20da76d7cb4a13d9c8e6c5d981ab22e88226d9939c0e67ee3bc23"
 }

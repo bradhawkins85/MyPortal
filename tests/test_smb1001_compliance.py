@@ -316,6 +316,8 @@ def _render_dashboard(monkeypatch, *disabled: str, can_manage: bool = True) -> s
 
     policy = ComponentAvailability(disabled_feature_packs=frozenset(disabled))
     monkeypatch.setattr(main_module, "get_component_availability", lambda: policy)
+    # Other tests can replace template globals; pin the one this page uses.
+    monkeypatch.setitem(main_module.templates.env.globals, "feature_pack_available", main_module._feature_pack_available)
     tiers = [
         {"tier_level": 1, "code": "bronze", "name": "Bronze", "description": "Foundations", "attestation": "self"},
         {"tier_level": 4, "code": "platinum", "name": "Platinum", "description": "Audit", "attestation": "independent"},
