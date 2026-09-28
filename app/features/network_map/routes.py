@@ -40,6 +40,9 @@ async def _context(request: Request, *, write: bool = False):
     """Return ``(user, membership, company, company_id, can_edit)`` or a redirect."""
     routes = _routes()
     main_module = routes._main()
+    if not main_module._feature_pack_available("assets"):
+        # The map is drawn from assets; without the assets pack there is nothing to show.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     user, membership, company, company_id, redirect = await routes._load_asset_context(
         request, PERMISSION)
     if redirect:

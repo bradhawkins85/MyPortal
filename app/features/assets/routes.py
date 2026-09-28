@@ -40,8 +40,6 @@ from app.services import asset_types
 from app.services import rack_dashboard
 from app.services import rack_item_types
 
-from . import network_map_routes
-
 router = APIRouter(tags=["Assets"])
 
 
@@ -1789,12 +1787,15 @@ async def asset_detail_page(
         await infrastructure_repo.for_asset(company_id, asset_id)
         if not customer_safe else {"addresses": [], "placements": []}
     )
-    can_view_network_map = not customer_safe and (is_super_admin or main_module._membership_menu_can(
-        user, membership, "menu.network_map"))
-    network_interfaces = (
-        await network_map_routes.asset_interfaces_context(company_id, asset_id)
-        if can_view_network_map else None
-    )
+    # Interfaces belong to the network map pack; the card disappears with it.
+    can_view_network_map = (
+        not customer_safe and main_module._feature_pack_available("network_map")
+        and (is_super_admin or main_module._membership_menu_can(user, membership, "menu.network_map")))
+    network_interfaces = None
+    if can_view_network_map:
+        from app.features.network_map import routes as network_map_routes
+
+        network_interfaces = await network_map_routes.asset_interfaces_context(company_id, asset_id)
     return await main_module._render_template(
         "assets/detail.html", request, user, extra={
             "title": str(record.get("name") or f"Asset {asset_id}"),

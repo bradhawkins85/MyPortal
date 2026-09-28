@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.responses import RedirectResponse
 
-from app.features.assets import network_map_routes as routes
+from app.features.network_map import routes
 from app.repositories import network_map as repo
 from app.security.menu_permissions import normalize_menu_permissions
 
@@ -216,3 +216,49 @@ async def test_removing_rack_items_removes_links_to_their_ports(monkeypatch):
     link_delete, record_delete = (call.args for call in execute.await_args_list)
     assert "DELETE FROM network_links" in link_delete[0] and link_delete[1] == (31, 32, 31, 32)
     assert record_delete[0].startswith("DELETE FROM rack_equipment")
+
+
+def test_network_map_is_its_own_feature_pack():
+    from app.core.features import discover_builtin_feature_pack_slugs
+    from app.features.network_map import PACK
+
+    assert "network_map" in discover_builtin_feature_pack_slugs()
+    assert PACK.slug == "network_map"
+    paths = {route.path for router in PACK.routers for route in router.routes}
+    assert {"/network-map", "/network-map/export.pdf", "/api/network-map/links"} <= paths
+
+
+def _render_sidebar(monkeypatch, *disabled):
+    import app.main as main_module
+    from app.services.component_availability import ComponentAvailability
+
+    policy = ComponentAvailability(disabled_feature_packs=frozenset(disabled))
+    monkeypatch.setattr(main_module, "get_component_availability", lambda: policy)
+    return main_module.templates.env.get_template("base.html").render(
+        request=SimpleNamespace(url=SimpleNamespace(path="/", query="")), app_name="MyPortal",
+        current_user={"id": 1, "is_super_admin": True}, is_super_admin=True, active_membership={},
+        active_company_id=1, available_companies=[], module_enabled={}, enabled_module_slugs=[])
+
+
+@pytest.mark.parametrize(("disabled", "shown"), [((), True), (("network_map",), False), (("assets",), False)])
+def test_disabling_the_pack_removes_the_menu_entry(monkeypatch, disabled, shown):
+    assert ('href="/network-map"' in _render_sidebar(monkeypatch, *disabled)) is shown
+
+
+@pytest.mark.anyio
+async def test_map_is_unavailable_without_the_assets_pack(monkeypatch):
+    import app.main as main_module
+    from app.services.component_availability import ComponentAvailability
+
+    policy = ComponentAvailability(disabled_feature_packs=frozenset({"assets"}))
+    monkeypatch.setattr(main_module, "get_component_availability", lambda: policy)
+    with pytest.raises(HTTPException) as error:
+        await routes._context(_request())
+    assert error.value.status_code == 404
+
+
+def test_settings_accept_the_pack_slug(monkeypatch):
+    from app.core.config import Settings
+
+    monkeypatch.setenv("DISABLED_FEATURE_PACKS", "network_map")
+    assert Settings().disabled_feature_packs == "network_map"

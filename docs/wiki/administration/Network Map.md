@@ -95,5 +95,15 @@ frequency, distance and signal, and marks each radio-equipped device with an ant
 
 The **Network map** role permission (Infrastructure group) controls access: *read* allows
 browsing and exporting; *write* allows interfaces and links to be documented. Roles saved
-before this permission existed inherit it from **Network Devices**. Operators can disable the
-feature with `DISABLED_FEATURE_PACKS=network_map`.
+before this permission existed inherit it from **Network Devices**.
+
+## Turning the feature off
+
+The network map is its own feature pack, `network_map`, listed under **Administration →
+Feature packs**. Add it to `DISABLED_FEATURE_PACKS` (for example
+`DISABLED_FEATURE_PACKS=network_map`) and restart to remove the menu entry, the
+**Network interfaces** card on asset pages, the exports and every `/network-map` and
+`/api/network-map` route. Documented interfaces and links stay in the database and return
+when the pack is enabled again. The asset type list and icons belong to the Assets pack and
+stay available. Disabling the Assets pack also hides the network map, since it is drawn from
+assets.
