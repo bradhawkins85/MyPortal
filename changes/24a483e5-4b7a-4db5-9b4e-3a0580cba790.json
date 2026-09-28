@@ -1,7 +1,7 @@
 {
   "guid": "24a483e5-4b7a-4db5-9b4e-3a0580cba790",
   "occurred_at": "2026-09-27T07:23Z",
-  "change_type": "Feature",
+  "change_type": "feature",
   "summary": "Rack faceplates are drawn from each item's actual connections: every network port, PSU, outlet and KVM device port is shown at the item's full height with connected ones marked, and PDUs show their real IEC and 3-pin outlets.",
   "content_hash": "fdb5cf01933df171ee5111fd8e8088882d0d089b7efc7eb30a6699e8163cd199"
 }

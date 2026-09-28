@@ -1,7 +1,7 @@
 {
   "guid": "8d53ca49-ddb4-453e-b0b4-b069b8616749",
-  "occurred_at": "2026-09-19T00:00Z",
-  "change_type": "Feature",
+  "occurred_at": "2026-09-19T00:00:00Z",
+  "change_type": "feature",
   "summary": "Added stable approval GUIDs for display and ticket automation assignment.",
-  "content_hash": "7ad2fd04b1d80ce932061cfa63fe0d3d18992a77e261893e50c80c49414816cd"
+  "content_hash": "approval-configuration-guids"
 }

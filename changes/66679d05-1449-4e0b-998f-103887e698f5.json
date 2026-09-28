@@ -1,7 +1,7 @@
 {
   "guid": "66679d05-1449-4e0b-998f-103887e698f5",
   "occurred_at": "2026-09-27T06:39Z",
-  "change_type": "Feature",
+  "change_type": "feature",
   "summary": "Rack items gain per-port links to assets or free-text labels, UPS IEC and 3-pin outlets, PDU and UPS power source links, full editing (type, position and connections) in the same dialog as adding, rear-view faceplates, dedicated one-third and two-thirds width images, and full-width placement by default.",
   "content_hash": "925e87a00f3cb03213302359c4b07c282d4c3f0acc2113ee44bd40d4090df05f"
 }

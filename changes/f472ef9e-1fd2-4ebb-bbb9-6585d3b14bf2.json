@@ -1,7 +1,7 @@
 {
   "guid": "f472ef9e-1fd2-4ebb-bbb9-6585d3b14bf2",
-  "occurred_at": "2026-09-27T00:00Z",
-  "change_type": "Feature",
+  "occurred_at": "2026-09-27T00:00:00Z",
+  "change_type": "feature",
   "summary": "Added a Docker image published for every GitHub release and a single-file myportal-docker.sh installer that installs Docker if needed, deploys MyPortal with MariaDB, and upgrades only to published releases with automatic backup and rollback.",
-  "content_hash": "8f8955a581126ef37213024c62046db20a35d8c51feb3618b2e3459893753393"
+  "content_hash": "docker-release-installer"
 }

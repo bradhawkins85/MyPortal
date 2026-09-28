@@ -1,7 +1,7 @@
 {
   "guid": "b96a0066-dbfb-4372-b23f-f934fb9a7598",
-  "occurred_at": "2026-07-07T03:59Z",
-  "change_type": "Fix",
+  "occurred_at": "2026-07-07T03:59:21Z",
+  "change_type": "fix",
   "summary": "Fix Next ticket number menu action on ticket workspace",
-  "content_hash": "8455fe6856d5ee0f65a8abf3f6c44c6a7aca40dee9e4b4e842998430e88ecb90"
+  "content_hash": "da5c3b5a5e5b4d06b7da414a9540c439df517264ab97b1b0d719e6374875bd58"
 }

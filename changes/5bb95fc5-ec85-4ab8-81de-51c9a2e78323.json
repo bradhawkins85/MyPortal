@@ -1,7 +1,7 @@
 {
   "guid": "5bb95fc5-ec85-4ab8-81de-51c9a2e78323",
-  "occurred_at": "2026-09-27T00:00Z",
+  "occurred_at": "2026-09-27T00:00:00Z",
   "change_type": "Fix",
   "summary": "Pin website monitoring connections to validated public addresses to prevent DNS rebinding.",
-  "content_hash": "392127cfa2ccca96f89a81a9802bf475e3aba21d07ddbecb7784317317ba7fb4"
+  "content_hash": ""
 }

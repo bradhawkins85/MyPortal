@@ -1,7 +1,7 @@
 {
   "guid": "4c22f096-95f7-4b9d-bca7-4685efe5ce6f",
-  "occurred_at": "2026-09-24T00:00Z",
+  "occurred_at": "2026-09-24T00:00:00Z",
   "change_type": "improvement",
   "summary": "Made Microsoft 365 mailbox synchronization restart-safe with durable tenant-scoped progress.",
-  "content_hash": "74aa0d94a36125e0315d1c0c2ba737d36aaae1f46fb8fcf20c6b19dfe5fc879a"
+  "content_hash": "m365-durable-job-execution-v1"
 }

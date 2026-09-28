@@ -1,7 +1,7 @@
 {
   "guid": "95ed12de-f971-4478-a820-4f184e9d8fc3",
-  "occurred_at": "2026-09-24T00:00Z",
+  "occurred_at": "2026-09-24T00:00:00Z",
   "change_type": "Fix",
   "summary": "Prevent M365 provisioning failures by replacing unsupported Secure Score and License Manager permissions with the supported Microsoft Graph access baseline.",
-  "content_hash": "41fb6d65445160fbdb4ea10eb535c639512caf798a84e6ca3120d5d78b72fdd9"
+  "content_hash": "m365-supported-permission-baseline"
 }

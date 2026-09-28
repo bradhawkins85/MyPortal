@@ -3,5 +3,5 @@
   "occurred_at": "2026-09-15T00:00Z",
   "change_type": "Fix",
   "summary": "Use the Exchange Online global quarantine policy for end-user quarantine notification checks and remediation.",
-  "content_hash": "e6c003436b29f640e606a8e96c12e193ec1cc304ed11ddc16a28d1377556ee48"
+  "content_hash": "a98f0ecf3429851634fb94028712029027e57cc5b19947a19ba72015acc5be4a"
 }

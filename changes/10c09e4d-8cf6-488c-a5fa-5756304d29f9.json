@@ -1,7 +1,7 @@
 {
   "guid": "10c09e4d-8cf6-488c-a5fa-5756304d29f9",
-  "occurred_at": "2026-09-22T00:00Z",
-  "change_type": "Fix",
+  "occurred_at": "2026-09-22T00:00:00Z",
+  "change_type": "fix",
   "summary": "Prevented deployment-disabled feature packs from loading, reloading, mounting routes, starting runtime hooks, or appearing in feature-pack registries.",
-  "content_hash": "f44e47fbec614ba52292e46c81f86dda45f510c7dfe03a2b15b59d0659cec605"
+  "content_hash": "disabled-feature-pack-runtime-exclusion"
 }

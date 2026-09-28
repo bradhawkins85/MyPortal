@@ -3,5 +3,5 @@
   "occurred_at": "2026-09-24T00:00Z",
   "change_type": "Fix",
   "summary": "Fixed Purview compliance preflight failures caused by empty Get-ComplianceSearch probes returning HTTP 500.",
-  "content_hash": "df25bbacde7ebf15319cd848d64f8424adaaee9adf19449811798c117fa992f6"
+  "content_hash": "407fbce0765d1d55c1b6d0466dcbebe55615d3c0b000961e254a10ce29d444cb"
 }
