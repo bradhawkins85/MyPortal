@@ -36,7 +36,7 @@ def test_script_is_valid_bash_and_ends_with_main():
 def test_help_lists_commands():
     result = subprocess.run(["bash", str(SCRIPT), "help"], text=True, capture_output=True, check=False)
     assert result.returncode == 0
-    for command in ("install", "upgrade", "check", "backup", "restore-db", "auto-upgrade", "superadmin"):
+    for command in ("install", "upgrade", "check", "backup", "restore-db", "auto-upgrade", "superadmin", "user verify"):
         assert command in result.stdout
 
 
@@ -198,3 +198,16 @@ def test_hash_password_accepts_a_portal_hash():
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == "pbkdf2_sha256$600000$c2FsdA$ZGlnZXN0"
+
+
+@pytest.mark.parametrize("args", ["", "verify", "bogus a@example.com", "verify a@example.com b@example.com", "verify --x"])
+def test_user_rejects_bad_usage_before_touching_docker(args):
+    result = subprocess.run(
+        ["bash", "-c", f'"{SCRIPT}" user {args}'],
+        text=True,
+        capture_output=True,
+        env={**os.environ, "MYPORTAL_DIR": "/nonexistent"},
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "usage: myportal-docker user verify USERNAME" in result.stderr
