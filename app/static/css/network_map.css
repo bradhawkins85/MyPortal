@@ -71,3 +71,26 @@
   .nm-viewport { height: 60vh; }
 }
 .nm-link-form > label > .input, .network-interface-forms .form-row > label > .input { width: 100%; min-width: 0; box-sizing: border-box; }
+
+/* On screen the map follows the app's dark theme; exports stay white for
+   printing. CSS here overrides the SVG's presentation attributes. */
+.nm-viewport { background: #1c1f2b; }
+.nm-viewport .nm-bg, .nm-viewport .nm-halo { fill: #1c1f2b; }
+.nm-viewport .nm-halo { stroke: #1c1f2b; }
+.nm-viewport .nm-title, .nm-viewport .nm-name, .nm-viewport .nm-site-label,
+.nm-viewport .nm-legend-title { fill: #e5e7eb; }
+.nm-viewport .nm-subtitle, .nm-viewport .nm-meta, .nm-viewport .nm-port,
+.nm-viewport .nm-box-meta, .nm-viewport .nm-rack-label { fill: #9aa4b6; }
+.nm-viewport .nm-ip, .nm-viewport .nm-if, .nm-viewport .nm-edge-label,
+.nm-viewport .nm-legend { fill: #cbd5e1; }
+.nm-viewport .nm-radio, .nm-viewport .nm-edge-label-radio { fill: #7cb4ff; }
+.nm-viewport .nm-site { fill: #22263a; stroke: #3a4158; }
+.nm-viewport .nm-rack { fill: #262b40; stroke: #4a5270; }
+.nm-viewport .nm-card { fill: #262b40; }
+.nm-viewport .nm-edge[data-medium="copper"] path,
+.nm-viewport .nm-edge[data-medium="other"] path { stroke: #c3cad8; }
+.nm-viewport .nm-edge[data-medium="wireless"] path { stroke: #d6dbe6; }
+.nm-viewport .nm-edge[data-medium="relationship"] path,
+.nm-viewport .nm-edge[data-medium="subnet"] path { stroke: #6b7489; }
+.nm-viewport .nm-legend-block path[stroke="#475569"] { stroke: #c3cad8; }
+.nm-viewport .is-selected .nm-card { fill-opacity: .12; }

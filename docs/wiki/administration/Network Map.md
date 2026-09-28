@@ -8,9 +8,19 @@ company's network from what is already documented in MyPortal:
 - **Assets** – every device, shown with the icon for its asset type, plus the network and
   radio interfaces documented on devices outside racks and the links between them.
 
-Devices are grouped by **site** (a rack's location, or the asset's location) and, inside a
-site, by **rack**. Devices outside racks are laid out in rows from the internet edge
-(modems, routers, firewalls) down through switching and wireless to servers and endpoints.
+The map has two layouts:
+
+- **Topology** (default) – laid out like a controller's topology view. The internet (or,
+  without a WAN link, the modem/router/firewall) sits on the left and every device is placed
+  one column to the right of the device it connects through, so each link runs left to right
+  as a smooth curve. Wireless links are dashed, with their frequency, distance and signal
+  under the link and port names above it. Devices with no documented links are listed
+  underneath under *Not linked to other devices*.
+- **Sites and racks** – devices grouped into boxes by **site** (a rack's location, or the
+  asset's location) and, inside a site, by **rack**, with devices outside racks laid out in
+  rows from the internet edge down to endpoints.
+
+On screen the map follows MyPortal's dark theme; exports are drawn on white for printing.
 
 ## Browsing
 
@@ -18,8 +28,8 @@ site, by **rack**. Devices outside racks are laid out in rows from the internet 
 - Select a device to highlight its links and see its addresses, interfaces and links in the
   side panel. Select a linked device's name to jump to it.
 - **Find a device** searches by name or IP address.
-- Filters: **Detail**, **Site** (a site plus the devices it links to), **Device types**,
-  **Show subnets**, **Include undocumented devices** and **Ignore rack grouping**.
+- Filters: **Layout**, **Detail**, **Site** (a site plus the devices it links to), **Device types**,
+  **Show subnets**, **Include undocumented devices** and **Ignore rack grouping** (sites layout).
 
 Routers, firewalls, switches, wireless devices and servers always appear. Computers,
 printers, phones and similar devices appear once they are documented on the network (racked,
@@ -28,7 +38,7 @@ every asset.
 
 ## Exporting
 
-**Export** offers PDF, PNG and SVG with the same options as browsing:
+**Export** offers PDF, PNG and SVG with the same options as browsing, including the layout:
 
 | Level of detail | Shows | PDF adds |
 | --- | --- | --- |

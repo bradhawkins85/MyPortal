@@ -34,6 +34,11 @@ DETAIL_LEVELS: dict[str, dict[str, str]] = {
     "detailed": {"label": "Detailed", "help": "Adds every interface, radio settings, serial numbers and a device inventory in PDF exports."},
 }
 DEFAULT_DETAIL = "standard"
+LAYOUTS: dict[str, dict[str, str]] = {
+    "topology": {"label": "Topology", "help": "Devices fan out from the internet edge, each beside the device it connects through."},
+    "sites": {"label": "Sites and racks", "help": "Devices grouped into boxes by site and rack."},
+}
+DEFAULT_LAYOUT = "topology"
 # Devices in these categories are the network itself, so they are always
 # drawn. Computers, printers and similar are drawn once they are documented
 # on the network (racked, addressed, given an interface or linked), or when
@@ -78,6 +83,7 @@ class MapOptions:
     include_unlinked: bool = False
     site: str | None = None
     show_racks: bool = True
+    layout: str = DEFAULT_LAYOUT
 
     @classmethod
     def from_params(cls, params: Any) -> "MapOptions":
@@ -95,7 +101,9 @@ class MapOptions:
             types = frozenset(key for key in raw_types if key in asset_types.BY_KEY)
         detail = str(params.get("detail") or DEFAULT_DETAIL)
         site = str(params.get("site") or "").strip() or None
+        layout = str(params.get("layout") or DEFAULT_LAYOUT)
         return cls(
+            layout=layout if layout in LAYOUTS else DEFAULT_LAYOUT,
             detail=detail if detail in DETAIL_LEVELS else DEFAULT_DETAIL,
             types=types,
             show_subnets=_truthy(params.get("subnets")),
@@ -107,6 +115,8 @@ class MapOptions:
     def query(self) -> list[tuple[str, str]]:
         """Return these options as query parameters, for export links."""
         pairs = [("detail", self.detail)]
+        if self.layout != DEFAULT_LAYOUT:
+            pairs.append(("layout", self.layout))
         pairs += [("types", key) for key in sorted(self.types or ())]
         if self.show_subnets:
             pairs.append(("subnets", "1"))
@@ -524,7 +534,127 @@ def _place_rows(nodes: list[Node], left: float, top: float, detail: str,
 
 
 def layout(graph: Graph) -> tuple[float, float, list[Box]]:
-    """Position every node, returning the drawing size and site/rack boxes."""
+    """Position every node, returning the drawing size and any site/rack boxes."""
+    if graph.options.layout == "topology":
+        return _layout_topology(graph)
+    return _layout_sites(graph)
+
+
+# Topology layout metrics: columns per hop from the internet edge.
+COLUMN_W = {"overview": 210, "standard": 250, "detailed": 270}
+ROW_GAP = 22
+COMPONENT_GAP = 48
+
+
+def _root_rank(node: Node, degree: int) -> tuple[Any, ...]:
+    """Order candidate roots: the internet, then edge devices, then the busiest."""
+    return (node.kind != "internet", node.type.tier, -degree, node.label.casefold())
+
+
+def spanning_forest(graph: Graph) -> tuple[list[str], dict[str, list[str]]]:
+    """Return tree roots and each node's children, breadth-first from the edge.
+
+    Every connected group of devices becomes one tree rooted at the internet
+    (or, without one, its modem/router/firewall), so each device sits one hop
+    to the right of the device it connects through. Subnet membership is not
+    a physical link and does not shape the tree.
+    """
+    physical = [edge for edge in graph.edges if edge.medium != "subnet"
+                and graph.nodes[edge.a].kind != "network" and graph.nodes[edge.b].kind != "network"]
+    neighbours = _neighbours(physical)
+    members = [node for node in graph.nodes.values() if node.kind != "network"]
+
+    def child_order(node_id: str) -> tuple[Any, ...]:
+        node = graph.nodes[node_id]
+        # Uplinks first, then larger subtrees, so the tree reads top-down like a rack.
+        return (node.type.tier, -len(neighbours.get(node_id, ())), node.label.casefold())
+
+    roots: list[str] = []
+    children: dict[str, list[str]] = {}
+    seen: set[str] = set()
+    remaining = sorted(members, key=lambda node: _root_rank(node, len(neighbours.get(node.id, ()))))
+    for candidate in remaining:
+        if candidate.id in seen:
+            continue
+        roots.append(candidate.id)
+        seen.add(candidate.id)
+        queue = [candidate.id]
+        while queue:
+            current = queue.pop(0)
+            for other in sorted(neighbours.get(current, ()), key=child_order):
+                if other not in seen:
+                    seen.add(other)
+                    children.setdefault(current, []).append(other)
+                    queue.append(other)
+    return roots, children
+
+
+def _layout_topology(graph: Graph) -> tuple[float, float, list[Box]]:
+    detail = graph.options.detail
+    column = COLUMN_W.get(detail, COLUMN_W["standard"])
+    for node in graph.nodes.values():
+        node.h = _node_height(node, detail)
+    roots, children = spanning_forest(graph)
+    connected = [root for root in roots if children.get(root)]
+    isolated = [root for root in roots if not children.get(root)]
+
+    # Subnets (when shown) run along the top, like the site layout's band.
+    top = MARGIN + TITLE_H
+    band = sorted((node for node in graph.nodes.values() if node.kind == "network"),
+                  key=lambda node: node.label.casefold())
+    for index, node in enumerate(band):
+        node.x, node.y = MARGIN + index * CELL_W, top
+    if band:
+        top += max(node.h for node in band) + GAP * 2
+
+    cursor = top
+    width = float(MARGIN + len(band) * CELL_W)
+
+    def place(node_id: str, depth: int) -> None:
+        # Leaves take the next free row; a parent is centred on its children,
+        # so every link runs rightwards from its uplink.
+        nonlocal cursor, width
+        node = graph.nodes[node_id]
+        node.x = MARGIN + depth * column
+        kids = children.get(node_id, [])
+        if not kids:
+            node.y = cursor
+            cursor += node.h + ROW_GAP
+        else:
+            for kid in kids:
+                place(kid, depth + 1)
+            first, last = graph.nodes[kids[0]], graph.nodes[kids[-1]]
+            node.y = (first.y + last.y) / 2
+            cursor = max(cursor, node.y + node.h + ROW_GAP)
+        width = max(width, node.x + CARD_W + MARGIN)
+
+    for root in connected:
+        place(root, 0)
+        cursor += COMPONENT_GAP - ROW_GAP
+
+    # Devices with no documented links sit in a grid underneath.
+    boxes: list[Box] = []
+    if isolated:
+        per_row = max(4, int((max(width, 1100) - 2 * MARGIN) // CELL_W))
+        grid_top = cursor + (SITE_HEADER if connected else 0)
+        row_height = 0.0
+        for index, node_id in enumerate(isolated):
+            node = graph.nodes[node_id]
+            row, col = divmod(index, per_row)
+            if col == 0 and row:
+                grid_top += row_height + ROW_GAP
+                row_height = 0.0
+            node.x, node.y = MARGIN + col * CELL_W, grid_top
+            row_height = max(row_height, node.h)
+            width = max(width, node.x + CARD_W + MARGIN)
+        if connected:
+            boxes.append(Box("heading", "Not linked to other devices", MARGIN, cursor, 0, 0))
+        cursor = grid_top + row_height + ROW_GAP
+    return max(width, 640.0), cursor - ROW_GAP + MARGIN, boxes
+
+
+def _layout_sites(graph: Graph) -> tuple[float, float, list[Box]]:
+    """Group devices into boxes by site, and by rack within a site."""
     detail = graph.options.detail
     neighbours = _neighbours(graph.edges)
     placed: dict[str, Node] = {}
@@ -685,7 +815,7 @@ def _label(css: str, x: float, y: float, text: str, anchor: str = "middle") -> s
     """Text with a white halo drawn underneath, so it reads over lines."""
     common = f'x="{x:.1f}" y="{y:.1f}" text-anchor="{anchor}"'
     font = " ".join(f'{key}="{_attr(value)}"' for key, value in PRESENTATION[css].items() if key != "fill")
-    return (f'<text {common} {font} fill="#ffffff" stroke="#ffffff" stroke-width="3" '
+    return (f'<text class="nm-halo" {common} {font} fill="#ffffff" stroke="#ffffff" stroke-width="3" '
             f'stroke-linejoin="round" aria-hidden="true">{text}</text>'
             f'<text class="{css}" {common}>{text}</text>')
 
@@ -733,6 +863,44 @@ def _edge_path(a: Node, b: Node, bend: float, lane: int | None = None) -> tuple[
     return path, mid, along(t, (x1, y1), (x2, y2)), along(t, (x2, y2), (x1, y1))
 
 
+def _bezier(p0, p1, p2, p3, t: float) -> tuple[float, float]:
+    u = 1 - t
+    return tuple(u ** 3 * a + 3 * u * u * t * b + 3 * u * t * t * c + t ** 3 * d  # type: ignore[return-value]
+                 for a, b, c, d in zip(p0, p1, p2, p3))
+
+
+def _topology_path(a: Node, b: Node, bend: float) -> tuple[str, tuple[float, float],
+                                                             tuple[float, float, str], tuple[float, float, str]]:
+    """A smooth horizontal curve between two devices, as in a controller's topology view.
+
+    Returns the path, its midpoint and a (x, y, text-anchor) spot for each
+    end's port label.
+    """
+    (ax, ay), (bx, by) = a.anchor, b.anchor
+    reach = ICON / 2 + 4
+    if abs(ax - bx) < 1:
+        # Devices in the same column: loop out to the right of both.
+        x1, x2 = ax + reach, bx + reach
+        offset = 36 + min(150.0, abs(by - ay) * 0.3) + bend
+        path = f"M{x1:.1f},{ay:.1f} C{x1 + offset:.1f},{ay:.1f} {x2 + offset:.1f},{by:.1f} {x2:.1f},{by:.1f}"
+        return (path, (x1 + offset * 0.75, (ay + by) / 2),
+                (x1 + 4, ay - 6, "start"), (x2 + 4, by - 6, "start"))
+    flip = ax > bx
+    (lx, ly), (rx, ry) = ((bx, by), (ax, ay)) if flip else ((ax, ay), (bx, by))
+    x1, x2 = lx + reach, rx - reach
+    pull = (x2 - x1) * 0.5
+    p0, p1, p2, p3 = (x1, ly), (x1 + pull, ly + bend), (x2 - pull, ry + bend), (x2, ry)
+    path = (f"M{x1:.1f},{ly:.1f} C{p1[0]:.1f},{p1[1]:.1f} {p2[0]:.1f},{p2[1]:.1f} {x2:.1f},{ry:.1f}")
+    mid = _bezier(p0, p1, p2, p3, 0.5)
+    # The uplink end's label sits a little way along the curve, where links
+    # fanning out from one port have already separated; the far end's label
+    # sits just before the device it reaches.
+    near_left = _bezier(p0, p1, p2, p3, 0.32)
+    left_label = (near_left[0], near_left[1] - 5, "middle")
+    right_label = (x2 - 6, ry - 6, "end")
+    return (path, mid, right_label, left_label) if flip else (path, mid, left_label, right_label)
+
+
 def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
                interactive: bool = False) -> str:
     """Draw the graph as a standalone SVG document."""
@@ -760,8 +928,11 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
     if subtitle:
         out.append(f'<text class="nm-subtitle" x="{MARGIN}" y="{MARGIN + 36}">{escape(subtitle)}</text>')
 
-    for box in [box for box in boxes if box.kind == "site"] + [box for box in boxes if box.kind == "rack"]:
-        if box.kind == "site":
+    topology = graph.options.layout == "topology"
+    for box in [box for box in boxes if box.kind != "rack"] + [box for box in boxes if box.kind == "rack"]:
+        if box.kind == "heading":
+            out.append(f'<text class="nm-site-label" x="{box.x:.1f}" y="{box.y + 20:.1f}">{escape(box.label)}</text>')
+        elif box.kind == "site":
             out.append(f'<g class="nm-site-box" data-site="{_attr(box.label)}"><rect class="nm-site" x="{box.x:.1f}" y="{box.y:.1f}" '
                        f'width="{box.w:.1f}" height="{box.h:.1f}" rx="10"/>'
                        f'<text class="nm-site-label" x="{box.x + SITE_PAD:.1f}" y="{box.y + 22:.1f}">{escape(_clip(box.label, 60))}</text>'
@@ -782,7 +953,11 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
         seen = pair_counts.get(pair, 0)  # type: ignore[arg-type]
         pair_counts[pair] = seen + 1  # type: ignore[index]
         bend = 0.0 if seen == 0 else (18.0 * ((seen + 1) // 2) * (1 if seen % 2 else -1))
-        path, mid, near_a, near_b = _edge_path(a, b, bend, edge.lane)
+        if topology:
+            path, mid, spot_a, spot_b = _topology_path(a, b, bend)
+        else:
+            path, mid, near_a, near_b = _edge_path(a, b, bend, edge.lane)
+            spot_a, spot_b = (*near_a, "middle"), (*near_b, "middle")
         style = MEDIUM_STYLES.get(edge.medium, MEDIUM_STYLES["other"])
         dash = f' stroke-dasharray="{style["dash"]}"' if style["dash"] else ""
         width_px = style["width"] + (1.2 if edge.count > 1 else 0)
@@ -795,7 +970,13 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
                    f'{dash} stroke-linecap="round"/></g>')
         if detail == "overview" or edge.medium == "subnet":
             continue
-        text_parts = [part for part in (edge.label, *edge.details) if part]
+        # A wireless link's frequency, distance and signal matter most, so
+        # they lead and survive when the label is shortened.
+        ordered = (*edge.details, edge.label) if edge.medium == "wireless" else (edge.label, *edge.details)
+        text_parts = [part for part in ordered if part]
+        # In the topology view a label must fit between the two devices.
+        room = abs(a.anchor[0] - b.anchor[0]) - ICON - 24
+        fit = max(12, int(room / 5.6)) if topology and room > 0 else 60
         if edge.count > 1:
             text_parts.append(f"×{edge.count}")
         if edge.medium == "wireless":
@@ -803,11 +984,16 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
                           f'y="{mid[1] - 9:.1f}" width="18" height="18"/>')
             if text_parts:
                 labels.append(_label("nm-edge-label-radio", mid[0], mid[1] + 22,
-                                     escape(_clip(" · ".join(text_parts), 60))))
+                                     escape(_clip(" · ".join(text_parts), min(60, fit)))))
         elif text_parts:
-            labels.append(_label("nm-edge-label", mid[0], mid[1] + 3, escape(_clip(" · ".join(text_parts), 44))))
-        for port, point, node in ((edge.a_port, near_a, a), (edge.b_port, near_b, b)):
+            # Port names sit above a topology link, so its own label goes below.
+            labels.append(_label("nm-edge-label", mid[0], mid[1] + 14 if topology else mid[1] + 3,
+                                 escape(_clip(" · ".join(text_parts), min(44, fit)))))
+        for port, point, node in ((edge.a_port, spot_a, a), (edge.b_port, spot_b, b)):
             if not port:
+                continue
+            if topology:
+                labels.append(_label("nm-port", point[0], point[1], escape(_clip(port, 18)), anchor=point[2]))
                 continue
             if edge.lane is not None:
                 # Rack-internal links leave from the card's right edge; stack
@@ -827,8 +1013,12 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
         if node.url and not interactive:
             out.append(f'<a href="{_attr(node.url)}">')
         out.append(f"<title>{escape(node.label)} — {escape(node.type.label if node.kind != 'network' else 'Subnet')}</title>")
+        # In the topology view devices are just an icon and labels; the card
+        # stays as an invisible click target that is outlined when selected.
+        card_style = ('fill-opacity="0" stroke="none"' if topology
+                      else f'stroke="{node.type.colour}" stroke-opacity="0.55"')
         out.append(f'<rect class="nm-card" x="{node.x:.1f}" y="{node.y:.1f}" width="{CARD_W}" height="{node.h:.1f}" '
-                   f'rx="8" stroke="{node.type.colour}" stroke-opacity="0.55"/>')
+                   f'rx="8" {card_style}/>')
         out.append(f'<use href="#nm-icon-{node.type_key}" xlink:href="#nm-icon-{node.type_key}" '
                    f'x="{cx - ICON / 2:.1f}" y="{node.y + 8:.1f}" width="{ICON}" height="{ICON}"/>')
         if node.radio_count:
@@ -889,7 +1079,7 @@ def graph_payload(graph: Graph) -> dict[str, Any]:
 
 
 def describe_options(options: MapOptions) -> str:
-    parts = [f"Detail: {DETAIL_LEVELS[options.detail]['label']}"]
+    parts = [f"{LAYOUTS[options.layout]['label']} layout", f"Detail: {DETAIL_LEVELS[options.detail]['label']}"]
     if options.types is not None:
         parts.append(f"{len(options.types)} device type{'s' if len(options.types) != 1 else ''}")
     else:

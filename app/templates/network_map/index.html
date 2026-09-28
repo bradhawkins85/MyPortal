@@ -7,11 +7,12 @@
 <div class="network-map-page" data-network-map>
   <form class="card card--panel nm-filters" method="get" action="/network-map" aria-label="Map options">
     <div class="nm-filters__row">
+      <label>Layout<select class="input" name="layout">{% for key, item in layouts.items() %}<option value="{{ key }}" {% if key == options.layout %}selected{% endif %} title="{{ item.help }}">{{ item.label }}</option>{% endfor %}</select></label>
       <label>Detail<select class="input" name="detail">{% for key, level in detail_levels.items() %}<option value="{{ key }}" {% if key == options.detail %}selected{% endif %}>{{ level.label }}</option>{% endfor %}</select></label>
       <label>Site<select class="input" name="site"><option value="">All sites</option>{% for site in sites %}<option value="{{ site }}" {% if site == options.site %}selected{% endif %}>{{ site }}</option>{% endfor %}</select></label>
       <label class="checkbox"><input type="checkbox" name="subnets" value="1" {% if options.show_subnets %}checked{% endif %}><span>Show subnets</span></label>
       <label class="checkbox"><input type="checkbox" name="all_devices" value="1" {% if options.include_unlinked %}checked{% endif %}><span>Include undocumented devices</span></label>
-      <label class="checkbox"><input type="checkbox" name="racks" value="0" {% if not options.show_racks %}checked{% endif %}><span>Ignore rack grouping</span></label>
+      <label class="checkbox"><input type="checkbox" name="racks" value="0" {% if not options.show_racks %}checked{% endif %}><span>Ignore rack grouping (sites layout)</span></label>
       <details class="nm-type-picker">
         <summary class="button button--ghost">Device types{% if options.types is not none %} ({{ options.types|length }}){% endif %}</summary>
         <div class="nm-type-picker__panel">
@@ -77,6 +78,7 @@
         <label class="checkbox"><input type="radio" name="format" value="png"><span>PNG image</span></label>
         <label class="checkbox"><input type="radio" name="format" value="svg"><span>SVG (scalable, editable in diagram tools)</span></label>
       </fieldset>
+      <fieldset><legend>Layout</legend>{% for key, item in layouts.items() %}<label class="checkbox"><input type="radio" name="layout" value="{{ key }}" {% if key == options.layout %}checked{% endif %}><span><strong>{{ item.label }}</strong> — {{ item.help }}</span></label>{% endfor %}</fieldset>
       <fieldset><legend>Level of detail</legend>{% for key, level in detail_levels.items() %}<label class="checkbox"><input type="radio" name="detail" value="{{ key }}" {% if key == options.detail %}checked{% endif %}><span><strong>{{ level.label }}</strong> — {{ level.help }}</span></label>{% endfor %}</fieldset>
       <fieldset><legend>Device types</legend>
         <div class="nm-type-picker__actions"><button class="button button--ghost button--small" type="button" data-nm-types="all">All</button><button class="button button--ghost button--small" type="button" data-nm-types="present">Types in use</button><button class="button button--ghost button--small" type="button" data-nm-types="network">Network only</button><button class="button button--ghost button--small" type="button" data-nm-types="none">None</button></div>
@@ -86,7 +88,7 @@
         <label>Site<select class="input" name="site"><option value="">All sites</option>{% for site in sites %}<option value="{{ site }}" {% if site == options.site %}selected{% endif %}>{{ site }}</option>{% endfor %}</select></label>
         <label class="checkbox"><input type="checkbox" name="subnets" value="1" {% if options.show_subnets %}checked{% endif %}><span>Show subnets</span></label>
         <label class="checkbox"><input type="checkbox" name="all_devices" value="1" {% if options.include_unlinked %}checked{% endif %}><span>Include undocumented devices</span></label>
-        <label class="checkbox"><input type="checkbox" name="racks" value="0" {% if not options.show_racks %}checked{% endif %}><span>Ignore rack grouping</span></label>
+        <label class="checkbox"><input type="checkbox" name="racks" value="0" {% if not options.show_racks %}checked{% endif %}><span>Ignore rack grouping (sites layout)</span></label>
         <label data-nm-paper>PDF paper size<select class="input" name="paper">{% for key, label in paper_sizes.items() %}<option value="{{ key }}" {% if key == 'a3' %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
       </fieldset>
       <p class="form-help" data-nm-export-status role="status"></p>
