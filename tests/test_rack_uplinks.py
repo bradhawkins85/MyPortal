@@ -127,3 +127,60 @@ def test_rack_page_shows_uplinks_and_picker_groups_items_by_rack():
     assert "Rack items without an asset" not in TEMPLATE
     assert "const deviceValueFor = (entry) => `item:${entry.id}`;" in SCRIPT
     assert "querySelectorAll('optgroup[data-rack-items]')" in SCRIPT
+
+
+def test_edit_dialog_and_pickers_carry_network_map_links():
+    item = _item(1, 10, "Comms A", "Switch 1", [dict(_port(101, "Port 1"), ordinal=1,
+                                                    network_peer="Office AP · eth0")])
+    item.update(start_unit=1, unit_height=1, start_lane=1, width_lanes=3, face="front", depth_mode="half")
+
+    assert rack_dashboard.edit_payload(item)["ports"][0]["network_peer"] == "Office AP · eth0"
+    assert rack_dashboard.port_catalog([item])[0]["ports"][0]["network_peer"] == "Office AP · eth0"
+    # The dialog shows the link read-only and pickers treat the port as in use.
+    assert "rack-port-link__network" in SCRIPT
+    assert "(port.peer_port_id || port.network_peer)" in SCRIPT
+
+
+def test_rack_save_cannot_relink_a_port_linked_on_the_network_map(monkeypatch):
+    fetch_all = AsyncMock(side_effect=[
+        [{"id": 101, "port_number": 1}],
+        [{"a_kind": "interface", "a_id": 7, "b_kind": "rack_port", "b_id": 101}],
+    ])
+    execute = AsyncMock()
+    monkeypatch.setattr(infrastructure.db, "fetch_all", fetch_all)
+    monkeypatch.setattr(infrastructure.db, "execute", execute)
+    monkeypatch.setattr(infrastructure.db, "fetch_one", AsyncMock())
+
+    ports = [{"port_number": 1, "connector": "data"}]
+    link = infrastructure.PortLink("data", 1, label="AP")
+    # A label alone is fine; the port keeps its network map link.
+    asyncio.run(infrastructure._apply_port_links(1, 5, ports, [link]))
+    assert execute.await_count >= 1
+
+    fetch_all.side_effect = [
+        [{"id": 55}],
+        [{"id": 101, "port_number": 1}],
+        [{"a_kind": "interface", "a_id": 7, "b_kind": "rack_port", "b_id": 101}],
+    ]
+    execute.reset_mock()
+    try:
+        asyncio.run(infrastructure._apply_port_links(1, 5, ports, [infrastructure.PortLink("data", 1, asset_id=55)]))
+    except ValueError as exc:
+        assert "network map" in str(exc)
+    else:
+        raise AssertionError("expected the network map link to block the save")
+    execute.assert_not_awaited()
+
+
+def test_peer_target_linked_on_the_network_map_is_rejected(monkeypatch):
+    monkeypatch.setattr(infrastructure.db, "fetch_all", AsyncMock(side_effect=[
+        [{"id": 201, "equipment_id": 2, "connector": "data"}],
+        [{"a_kind": "rack_port", "a_id": 201, "b_kind": "interface", "b_id": 7}],
+    ]))
+    link = infrastructure.PortLink("data", 1, peer_port_id=201)
+    try:
+        asyncio.run(infrastructure._check_peer_targets(1, 5, [link]))
+    except ValueError as exc:
+        assert "network map" in str(exc)
+    else:
+        raise AssertionError("expected the network map link to block the peer")

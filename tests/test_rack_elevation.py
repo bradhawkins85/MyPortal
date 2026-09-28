@@ -274,7 +274,7 @@ def test_edit_payload_carries_position_counts_links_and_psu_sources():
     assert payload["ports"][1]["label"] == "Kettle"
     assert payload["ports"][2] == {"connector": "psu", "ordinal": 1, "asset_id": None,
                                    "label": "Wall B2", "source_port_id": 41, "id": None,
-                                   "peer_port_id": None, "fed_port_id": None}
+                                   "peer_port_id": None, "fed_port_id": None, "network_peer": None}
     assert (payload["start_unit"], payload["width_lanes"], payload["depth_mode"]) == (3, 3, "full")
 
 

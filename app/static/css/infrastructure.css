@@ -492,6 +492,7 @@ dialog.rack-dialog--reservation { width: min(95vw, 42rem); max-width: 42rem; }
 .rack-port-link:nth-child(odd) { background: rgba(148, 163, 184, .05); }
 .rack-port-link--peer { grid-template-columns: 4.2rem minmax(0, 1fr) minmax(0, 1fr) minmax(0, .9fr); }
 .rack-port-link--peer select[data-link-peer][hidden] + input { grid-column: span 2; }
+.rack-port-link__network { min-width: 0; overflow-wrap: anywhere; color: var(--rack-muted); font-size: var(--font-size-xs); }
 .rack-port-link__name { color: var(--rack-muted); font-size: var(--font-size-xs); font-weight: 600; font-variant-numeric: tabular-nums; }
 .rack-port-link--iec .rack-port-link__name { color: #93c5fd; }
 .rack-port-link--3pin .rack-port-link__name { color: #fcd34d; }

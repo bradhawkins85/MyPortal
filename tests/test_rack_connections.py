@@ -37,7 +37,7 @@ def test_ups_is_placed_with_iec_and_three_pin_outlets(monkeypatch):
 def test_switch_port_links_record_assets_and_labels(monkeypatch):
     execute, _insert = _mock_db(
         monkeypatch, fetch_one=[{"unit_count": 42}, None, None],
-        fetch_all=[[{"id": 5}], [{"id": 101, "port_number": 1}, {"id": 103, "port_number": 3}]])
+        fetch_all=[[{"id": 5}], [{"id": 101, "port_number": 1}, {"id": 103, "port_number": 3}], []])
 
     asyncio.run(infrastructure.place_asset(
         1, 2, None, 10, 1, "front", None, item_type="switch", port_counts={"data": 3},
@@ -191,8 +191,10 @@ def test_migration_adds_connectors_labels_and_power_sources():
 
 
 def _peer_db(monkeypatch, targets, own_ports):
+    # Network port targets and claimed ports are also checked for network map links.
+    network = [[]] if any(target["connector"] == "data" for target in targets) else []
     execute, _insert = _mock_db(monkeypatch, fetch_one=[{"id": 8, "rack_id": 2}],
-                                fetch_all=[own_ports, targets, own_ports])
+                                fetch_all=[own_ports, targets, *network, own_ports, *network])
     return execute
 
 

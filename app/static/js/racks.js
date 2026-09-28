@@ -303,9 +303,10 @@
   const rememberLinks = () => {
     linksTable.querySelectorAll('[data-port-row]').forEach(row => {
       linkValues.set(row.dataset.portRow, {
-        asset: row.querySelector('[data-link-target]').value,
+        asset: row.querySelector('[data-link-target]')?.value || '',
         peer: row.querySelector('[data-link-peer]')?.value || '',
         label: row.querySelector('input').value,
+        network: linkValues.get(row.dataset.portRow)?.network || '',
       });
     });
   };
@@ -317,7 +318,7 @@
     peerSelect.replaceChildren(new Option(wanted === 'psu' ? 'Choose the PSU it feeds' : 'Choose the remote port', ''));
     const free = [];
     candidates.forEach(entry => entry.ports.filter(port => port.connector === wanted).forEach(port => {
-      const taken = wanted === 'psu' ? port.source_port_id : port.peer_port_id;
+      const taken = wanted === 'psu' ? port.source_port_id : (port.peer_port_id || port.network_peer);
       const inUse = taken && String(port.id) !== String(current);
       const option = new Option(`${candidates.length > 1 ? `${entry.name} · ` : ''}${port.label}${inUse ? ' (in use)' : ''}`, String(port.id));
       peerSelect.append(option);
@@ -372,7 +373,13 @@
         select.value = saved.asset;
         if (select.value !== saved.asset) select.value = '';
         let peer = null;
-        if (peerConnector[key]) {
+        let networkLink = null;
+        if (saved.network && key === 'data') {
+          // Linked from an asset's interfaces on the network map; changed there.
+          networkLink = document.createElement('span');
+          networkLink.className = 'rack-port-link__network';
+          networkLink.textContent = `↔ ${saved.network} (network map)`;
+        } else if (peerConnector[key]) {
           peer = document.createElement('select');
           peer.className = 'input input--small';
           peer.dataset.linkPeer = '';
@@ -389,10 +396,10 @@
         label.placeholder = isPower ? 'Label, e.g. Circuit B2' : key === 'kvm' ? 'Label, e.g. Web server' : 'Label, e.g. Printer';
         label.setAttribute('aria-label', `Label for ${name.textContent}`);
         label.value = saved.label;
-        row.append(name, select, ...(peer ? [peer] : []), label);
+        row.append(name, ...(networkLink ? [networkLink] : [select, ...(peer ? [peer] : [])]), label);
         linksTable.append(row);
         total += 1;
-        if (saved.asset || saved.label || saved.peer) linked += 1;
+        if (saved.asset || saved.label || saved.peer || saved.network) linked += 1;
       }
     });
     linksSummary.textContent = total ? `Port links · ${linked} of ${total} linked` : 'Port links';
@@ -534,6 +541,7 @@
       const target = port.connector === 'psu' ? port.source_port_id : (remote ? deviceValueFor(remote.item) : port.asset_id);
       linkValues.set(`${port.connector}-${port.ordinal}`, {
         asset: target ? String(target) : '', peer: remote ? String(remoteId) : '', label: port.label || '',
+        network: port.network_peer || '',
       });
     });
     applyTypeDefaults(selectedType());
@@ -542,7 +550,7 @@
       width: item.width_lanes, face: item.face, depthMode: item.depth_mode,
     });
     updateKind(); updatePreview();
-    linksPanel.open = (item.ports || []).some(port => port.asset_id || port.label);
+    linksPanel.open = (item.ports || []).some(port => port.asset_id || port.label || port.network_peer);
     openDialog(placeDialog, trigger);
   };
   editItem = editEquipment;
@@ -555,7 +563,8 @@
   form.addEventListener('input', event => {
     if (event.target.name?.startsWith('port-')) {
       const rows = [...linksTable.querySelectorAll('[data-port-row]')];
-      const linked = rows.filter(row => row.querySelector('select').value || row.querySelector('input').value).length;
+      const linked = rows.filter(row => row.querySelector('.rack-port-link__network')
+        || row.querySelector('select')?.value || row.querySelector('input').value).length;
       linksSummary.textContent = rows.length ? `Port links · ${linked} of ${rows.length} linked` : 'Port links';
       return;
     }
