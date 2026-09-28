@@ -58,6 +58,10 @@
     const data = new FormData(form);
     const boxes = Array.from(form.querySelectorAll('input[name="types"]'));
     if (boxes.length && boxes.every((box) => box.checked)) data.delete('types');
+    // Hiding unlinked devices is the default, so only "show" needs sending.
+    const hideUnlinked = data.getAll('unlinked').includes('hide');
+    data.delete('unlinked');
+    if (!hideUnlinked && form.querySelector('input[name="unlinked"]')) data.append('unlinked', 'show');
     const params = new URLSearchParams();
     for (const [key, value] of data.entries()) {
       if (key === 'csrf_token' || key === 'format' || value === '') continue;

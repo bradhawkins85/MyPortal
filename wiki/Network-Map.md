@@ -14,8 +14,7 @@ The map has two layouts:
   without a WAN link, the modem/router/firewall) sits on the left and every device is placed
   one column to the right of the device it connects through, so each link runs left to right
   as a smooth curve. Wireless links are dashed, with their frequency, distance and signal
-  under the link and port names above it. Devices with no documented links are listed
-  underneath under *Not linked to other devices*.
+  under the link and port names above it.
 - **Sites and racks** – devices grouped into boxes by **site** (a rack's location, or the
   asset's location) and, inside a site, by **rack**, with devices outside racks laid out in
   rows from the internet edge down to endpoints.
@@ -29,7 +28,12 @@ On screen the map follows MyPortal's dark theme; exports are drawn on white for 
   side panel. Select a linked device's name to jump to it.
 - **Find a device** searches by name or IP address.
 - Filters: **Layout**, **Detail**, **Site** (a site plus the devices it links to), **Device types**,
-  **Show subnets**, **Include undocumented devices** and **Ignore rack grouping** (sites layout).
+  **Show subnets**, **Hide devices not linked to other devices**, **Include undocumented
+  devices** and **Ignore rack grouping** (sites layout).
+- **Hide devices not linked to other devices** is on by default, so the map shows only
+  devices with at least one link (belonging to a subnet does not count). Untick it to add
+  them back; in the topology layout they are listed underneath under *Not linked to other
+  devices*. Exports follow the same setting.
 
 Routers, firewalls, switches, wireless devices and servers always appear. Computers,
 printers, phones and similar devices appear once they are documented on the network (racked,
