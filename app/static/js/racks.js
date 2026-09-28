@@ -4,17 +4,23 @@
   const reservationDialog = document.querySelector('#rack-reservation-dialog');
   const form = document.querySelector('[data-placement-form]');
   const reservationForm = document.querySelector('[data-reservation-form]');
-  let dialogTrigger = null;
+  // Each dialog remembers its own trigger so one dialog handing off to another
+  // (ports view -> edit) returns focus correctly.
+  const dialogTriggers = new WeakMap();
   const openDialog = (dialog, trigger) => {
     if (!dialog) return;
-    dialogTrigger = trigger;
+    dialogTriggers.set(dialog, trigger);
     dialog.showModal();
   };
   document.querySelector('[data-rack-create-open]')?.addEventListener('click', event => openDialog(createDialog, event.currentTarget));
   document.querySelectorAll('[data-dialog-close]').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
   document.querySelectorAll('dialog').forEach(dialog => {
     dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
-    dialog.addEventListener('close', () => { dialogTrigger?.focus(); dialogTrigger = null; });
+    dialog.addEventListener('close', () => {
+      const trigger = dialogTriggers.get(dialog);
+      dialogTriggers.delete(dialog);
+      if (!document.querySelector('dialog[open]')) trigger?.focus();
+    });
   });
   const focusListItem = (id) => {
     const target = document.getElementById(id);
@@ -216,6 +222,34 @@
   document.querySelectorAll('[data-rack-faces]').forEach(faces => faces.addEventListener('mouseleave', () => {
     if (statusText && !faces.contains(document.activeElement)) statusText.textContent = defaultStatus;
   }));
+
+  // Clicking an installed item shows its ports and what they connect to.
+  const portsDialog = document.querySelector('#rack-ports-dialog');
+  const portsEdit = portsDialog?.querySelector('[data-ports-edit]');
+  let editItem = null;
+  const showPorts = (button) => {
+    const id = button.dataset.inspectPlacement;
+    const source = document.querySelector(`template[data-port-table="${CSS.escape(id)}"]`);
+    if (!portsDialog || !source) return;
+    portsDialog.dataset.itemId = id;
+    portsDialog.querySelector('[data-ports-title]').textContent = source.dataset.itemTitle || 'Rack item';
+    portsDialog.querySelector('[data-ports-type]').textContent = `${source.dataset.itemTypeLabel || 'Rack item'} · ports and connections`;
+    const face = button.closest('[data-face]')?.dataset.face;
+    const start = Number(button.dataset.startUnit);
+    const end = start + Number(button.dataset.unitHeight) - 1;
+    portsDialog.querySelector('[data-ports-position]').textContent = [end > start ? `U${start}–${end}` : `U${start}`, face && `${face} elevation`].filter(Boolean).join(' · ');
+    portsDialog.querySelector('[data-ports-body]').replaceChildren(source.content.cloneNode(true));
+    if (portsEdit) portsEdit.hidden = !editItem;
+    openDialog(portsDialog, button);
+  };
+  document.querySelectorAll('[data-inspect-placement]').forEach(button => button.addEventListener('click', () => showPorts(button)));
+  portsEdit?.addEventListener('click', () => {
+    const id = portsDialog.dataset.itemId;
+    const trigger = dialogTriggers.get(portsDialog);
+    dialogTriggers.delete(portsDialog);
+    portsDialog.close();
+    editItem?.(id, trigger);
+  });
   if (!form || !placeDialog) return;
 
   // Add / edit rack item dialog. Editing reuses every field used when adding.
@@ -500,7 +534,7 @@
     linksPanel.open = (item.ports || []).some(port => port.asset_id || port.label);
     openDialog(placeDialog, trigger);
   };
-  document.querySelectorAll('[data-inspect-placement]').forEach(button => button.addEventListener('click', () => editEquipment(button.dataset.inspectPlacement, button)));
+  editItem = editEquipment;
   document.querySelectorAll('[data-edit-equipment]').forEach(button => button.addEventListener('click', () => editEquipment(button.dataset.editEquipment, button)));
   removeButton?.addEventListener('click', () => {
     const id = editingId;
