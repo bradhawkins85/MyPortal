@@ -90,6 +90,8 @@ Commands:
         sessions; --reset-2fa also removes its authenticator apps and passkeys.
         Passwords are prompted for, read from standard input when it is not a
         terminal, or generated and printed with --generate-password.
+  user verify USERNAME Mark a user's email address as verified and activate the
+                       account, bypassing the emailed verification link.
   help                 Show this help.
 
 Installation directory: ${MYPORTAL_DIR} (override with MYPORTAL_DIR).
@@ -967,6 +969,39 @@ SQL
   esac
 }
 
+cmd_user() {
+  local action="${1:-}"
+  (($#)) && shift
+  [[ "$action" == verify && $# -eq 1 && "$1" != -* ]] || die "usage: myportal-docker user verify USERNAME"
+  local username="$1"
+  require_root
+  require_installed
+  compose up -d db >/dev/null 2>&1 || true
+
+  local record id email is_active verified
+  record=$(db_sql <<SQL
+SELECT id, email, is_active, email_verified_at IS NOT NULL FROM users WHERE email = $(sql_string "$username") LIMIT 1;
+SQL
+  ) || die "could not query the database. Is MyPortal running? Check with 'myportal-docker status'."
+  [[ -n "$record" ]] || die "no user with username '${username}'."
+  IFS=$'\t' read -r id email is_active verified <<<"$record"
+
+  if [[ "$verified" == 1 ]]; then
+    info "${email} is already verified."
+    # A verified but inactive account was deactivated on purpose; verifying
+    # must not re-enable it.
+    [[ "$is_active" == 1 ]] || warn "${email} is deactivated; reactivate it in the portal if it should sign in."
+    return 0
+  fi
+  # The same changes the emailed verification link makes.
+  db_sql >/dev/null <<SQL
+UPDATE users SET is_active = 1, email_verified_at = UTC_TIMESTAMP() WHERE id = ${id};
+UPDATE account_verification_tokens SET used = 1 WHERE user_id = ${id};
+SQL
+  audit_cli_action cli.user.verify "$id"
+  info "Verified ${email}; the account can now sign in."
+}
+
 main() {
   local command="${1:-help}"
   (($#)) && shift
@@ -984,6 +1019,7 @@ main() {
     restart) cmd_restart ;;
     auto-upgrade) cmd_auto_upgrade "$@" ;;
     superadmin|super-admin) cmd_superadmin "$@" ;;
+    user) cmd_user "$@" ;;
     help|-h|--help) usage ;;
     *) usage >&2; exit 2 ;;
   esac

@@ -1,0 +1,7 @@
+{
+  "guid": "c74d7f96-9d86-4cae-962b-deac9f720976",
+  "occurred_at": "2026-09-28T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added myportal-docker user verify to mark a user's email address as verified and activate the account from the server command line, bypassing the emailed verification link.",
+  "content_hash": "docker-user-verify-v1"
+}

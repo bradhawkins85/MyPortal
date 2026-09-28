@@ -115,7 +115,22 @@ locked out:
 sudo myportal-docker superadmin reset-password admin@example.com --reset-2fa
 ```
 
-Every change made with these commands is recorded in the audit log with the
+## Verifying user accounts
+
+When a user cannot receive the verification email sent at sign-up (for
+example because outgoing email is not configured yet), verify the account from
+the server instead:
+
+```bash
+sudo myportal-docker user verify user@example.com
+```
+
+This makes the same change as the emailed link: the email address is marked
+verified and the account is activated. An account that is already verified but
+deactivated was disabled on purpose, so it is left deactivated; reactivate it
+in the portal instead.
+
+Every change made with the `superadmin` and `user` commands is recorded in the audit log with the
 source `myportal-docker`.
 
 ## Files and data
