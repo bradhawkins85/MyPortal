@@ -305,10 +305,77 @@ def port_catalog(equipment: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]
             "id": item["id"],
             "name": item.get("name") or item.get("asset_name") or rack_item_types.get(item.get("item_type")).label,
             "rack": item.get("rack_name") or "",
+            "rack_id": item.get("rack_id"),
             "asset_id": item.get("asset_id"),
             "ports": ports,
         })
     return catalog
+
+
+def link_target_groups(catalog: Sequence[Mapping[str, Any]], selected_rack_id: Any = None) -> list[dict[str, Any]]:
+    """Group the port catalogue by rack for the port link device picker.
+
+    The selected rack comes first so its neighbours are quickest to reach;
+    the other racks follow by name so an uplink's far end is easy to find.
+    """
+    groups: dict[Any, dict[str, Any]] = {}
+    for entry in catalog:
+        rack_id = entry.get("rack_id")
+        group = groups.setdefault(rack_id, {
+            "rack_id": rack_id, "rack": entry.get("rack") or "Unknown rack",
+            "current": selected_rack_id is not None and rack_id == selected_rack_id,
+            "entries": []})
+        group["entries"].append(entry)
+    return sorted(groups.values(), key=lambda group: (not group["current"], str(group["rack"]).lower()))
+
+
+def _link_end(item: Mapping[str, Any], port: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "rack_id": item.get("rack_id"),
+        "rack": item.get("rack_name") or "",
+        "equipment_id": item["id"],
+        "name": item.get("name") or item.get("asset_name") or rack_item_types.get(item.get("item_type")).label,
+        "port": port.get("display_label") or "",
+        "label": port.get("label") or "",
+    }
+
+
+def rack_links(equipment: Iterable[Mapping[str, Any]], rack_id: Any = None) -> list[dict[str, Any]]:
+    """Network links whose two ends sit in different racks (uplinks, trunks).
+
+    Each link is listed once. With ``rack_id`` only links touching that rack
+    are returned, with ``near`` always the end in that rack; otherwise ``near``
+    is the end in the rack whose name sorts first.
+    """
+    items = list(equipment)
+    ends: dict[int, dict[str, Any]] = {}
+    for item in items:
+        for port in item.get("ports") or []:
+            if str(port.get("connector") or "data") == "data" and port.get("id") is not None:
+                ends[int(port["id"])] = {"item": item, "port": port}
+    links = []
+    seen: set[frozenset[int]] = set()
+    for port_id, end in ends.items():
+        peer_id = end["port"].get("peer_port_id")
+        far = ends.get(int(peer_id)) if peer_id is not None else None
+        if far is None or far["item"].get("rack_id") == end["item"].get("rack_id"):
+            continue
+        key = frozenset({port_id, int(peer_id)})
+        if key in seen:
+            continue
+        seen.add(key)
+        near_end, far_end = _link_end(end["item"], end["port"]), _link_end(far["item"], far["port"])
+        if rack_id is not None:
+            if far_end["rack_id"] == rack_id:
+                near_end, far_end = far_end, near_end
+            elif near_end["rack_id"] != rack_id:
+                continue
+        elif (far_end["rack"].lower(), far_end["name"].lower()) < (near_end["rack"].lower(), near_end["name"].lower()):
+            near_end, far_end = far_end, near_end
+        links.append({"near": near_end, "far": far_end})
+    links.sort(key=lambda link: (link["near"]["rack"].lower(), link["near"]["name"].lower(),
+                                 link["far"]["rack"].lower(), link["far"]["name"].lower()))
+    return links
 
 
 def estate_summary(racks: Sequence[Mapping[str, Any]], equipment: Sequence[Mapping[str, Any]],
@@ -339,8 +406,19 @@ def build_workspace(data: Mapping[str, Any], requested_rack: Any, requested_view
         "reservation_count": 0,
         "warning_count": 0,
         "items": [],
+        "rack_links": [],
+        "link_targets": [],
+        "rack_link_counts": {},
     }
+    all_links = rack_links(equipment)
+    workspace["estate"]["rack_link_count"] = len(all_links)
+    for link in all_links:
+        for end in (link["near"], link["far"]):
+            workspace["rack_link_counts"][end["rack_id"]] = workspace["rack_link_counts"].get(end["rack_id"], 0) + 1
+    if workspace["view"] == "overview":
+        workspace["rack_links"] = all_links
     if selected is not None:
+        workspace["link_targets"] = link_target_groups(port_catalog(equipment), selected["id"])
         workspace["faces"] = build_faces(selected, equipment, reservations)
         workspace["heatmap"] = build_heatmap(selected, equipment, reservations)
         workspace["reservation_count"] = sum(1 for item in reservations if item["rack_id"] == selected["id"])
@@ -348,4 +426,6 @@ def build_workspace(data: Mapping[str, Any], requested_rack: Any, requested_view
             1 for item in equipment
             if item["rack_id"] == selected["id"] and equipment_status(item) == "warning")
         workspace["items"] = [edit_payload(item) for item in equipment if item["rack_id"] == selected["id"]]
+        if workspace["view"] != "overview":
+            workspace["rack_links"] = rack_links(equipment, selected["id"])
     return workspace

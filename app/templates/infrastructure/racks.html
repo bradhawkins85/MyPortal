@@ -62,16 +62,41 @@
       <div><dt>Rack units</dt><dd>{{ ws.estate.total_units }} U</dd></div>
       <div><dt>Installed items</dt><dd>{{ ws.estate.equipment_count }}</dd></div>
       <div><dt>Reservations</dt><dd>{{ ws.estate.reservation_count }}</dd></div>
+      <div><dt>Inter-rack links</dt><dd>{{ ws.estate.rack_link_count }}</dd></div>
       <div{% if ws.estate.warning_count %} class="is-warning"{% endif %}><dt>Needs attention</dt><dd>{{ ws.estate.warning_count }}</dd></div>
     </dl>
     <ul class="rack-overview">
       {% for option in racks %}
       <li class="rack-insight-card rack-overview__card" id="rack-{{ option.id }}">
-        <a class="rack-overview__link" href="/racks?rack={{ option.id }}"><h3>{{ option.name }}</h3><span>{{ option.location or 'No location' }} · {{ option.unit_count }}U · {{ option.equipment_count }} item{{ '' if option.equipment_count == 1 else 's' }}</span></a>
+        <a class="rack-overview__link" href="/racks?rack={{ option.id }}"><h3>{{ option.name }}</h3><span>{{ option.location or 'No location' }} · {{ option.unit_count }}U · {{ option.equipment_count }} item{{ '' if option.equipment_count == 1 else 's' }}{% set link_count = ws.rack_link_counts.get(option.id, 0) %}{% if link_count %} · {{ link_count }} inter-rack link{{ '' if link_count == 1 else 's' }}{% endif %}</span></a>
         <div class="rack-overview__gauges">{{ draw.donut(option.occupied_percent, 'Installed', 'installed') }}{{ draw.donut(option.reserved_percent, 'Reserved', 'reserved') }}</div>
       </li>
       {% endfor %}
     </ul>
+    <section class="rack-insight-card rack-interlinks" aria-labelledby="rack-interlinks-title">
+      <h3 id="rack-interlinks-title">Inter-rack links</h3>
+      {% if ws.rack_links %}
+      <div class="rack-ports__wrap">
+        <table class="rack-ports__table rack-interlinks__table">
+          <caption class="sr-only">Network links between racks</caption>
+          <thead><tr><th scope="col">Rack</th><th scope="col">Device and port</th><th scope="col">Linked rack</th><th scope="col">Device and port</th><th scope="col">Label</th></tr></thead>
+          <tbody>
+            {% for link in ws.rack_links %}
+            <tr>
+              <td><a href="/racks?rack={{ link.near.rack_id }}">{{ link.near.rack }}</a></td>
+              <td><a href="/racks?rack={{ link.near.rack_id }}#placement-{{ link.near.equipment_id }}">{{ link.near.name }}</a> · {{ link.near.port }}</td>
+              <td><a href="/racks?rack={{ link.far.rack_id }}">{{ link.far.rack }}</a></td>
+              <td><a href="/racks?rack={{ link.far.rack_id }}#placement-{{ link.far.equipment_id }}">{{ link.far.name }}</a> · {{ link.far.port }}</td>
+              <td>{{ [link.near.label, link.far.label]|select|unique|join(' · ') or '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="rack-links__empty">No network links between racks are documented yet. Open a rack, edit a switch or router, and link its uplink port to a device in another rack.</p>
+      {% endif %}
+    </section>
   {% else %}
     <article class="rack" id="rack-{{ rack.id }}" data-rack-id="{{ rack.id }}" data-rack-name="{{ rack.name }}" data-rack-units="{{ rack.unit_count }}" data-rack-direction="{{ rack.numbering_direction or 'bottom-up' }}">
       <header class="rack-hero">
@@ -135,6 +160,16 @@
             {% endif %}
           </section>
           {{ draw.heatmap(rack, ws.heatmap) }}
+          <section class="rack-insight-card rack-insight-card--links" aria-labelledby="rack-{{ rack.id }}-links">
+            <h3 id="rack-{{ rack.id }}-links">Links to other racks{% if ws.rack_links %} <small>{{ ws.rack_links|length }}</small>{% endif %}</h3>
+            {% if ws.rack_links %}
+            <ul class="rack-links">
+              {% for link in ws.rack_links %}<li class="rack-link"><span class="rack-link__end"><strong>{{ link.near.name }}</strong> · {{ link.near.port }}</span><span class="rack-link__arrow" aria-label="links to">↔</span><span class="rack-link__end"><a href="/racks?rack={{ link.far.rack_id }}#placement-{{ link.far.equipment_id }}">{{ link.far.rack }}</a> · <strong>{{ link.far.name }}</strong> · {{ link.far.port }}</span>{% set labels = [link.near.label, link.far.label]|select|unique|list %}{% if labels %}<small class="rack-link__label">{{ labels|join(' · ') }}</small>{% endif %}</li>{% endfor %}
+            </ul>
+            {% else %}
+            <p class="rack-links__empty">No uplinks documented yet.{% if can_edit %} Edit a switch or router here and link a network port to a port on a device in another rack.{% endif %}</p>
+            {% endif %}
+          </section>
         </aside>
       </div>
     </article>
@@ -230,10 +265,10 @@
             </div>
             <details class="rack-port-links" data-port-links-panel>
               <summary><span data-port-links-summary>Port links</span></summary>
-              <p class="rack-dialog__hint">Link each port or connected device to an asset, or label one that is not in the asset register. Choose the outlet feeding each power supply.</p>
+              <p class="rack-dialog__hint">Link each port or connected device to an asset, or label one that is not in the asset register. For an uplink, choose the switch or router in its rack, then its port; the link shows in both racks. Choose the outlet feeding each power supply.</p>
               <div class="rack-port-links__table" data-port-links role="table" aria-label="Port links"></div>
             </details>
-            <template data-asset-options><option value="">No asset</option><optgroup label="Assets">{% for asset in assets %}<option value="{{ asset.id }}">{{ asset.name }}</option>{% endfor %}</optgroup>{% set unlinked = port_catalog|rejectattr('asset_id')|list %}{% if unlinked %}<optgroup label="Rack items without an asset" data-rack-items>{% for entry in unlinked %}<option value="item:{{ entry.id }}">{{ entry.name }}{% if entry.rack %} ({{ entry.rack }}){% endif %}</option>{% endfor %}</optgroup>{% endif %}</template>
+            <template data-asset-options><option value="">No asset</option><optgroup label="Assets">{% for asset in assets %}<option value="{{ asset.id }}">{{ asset.name }}</option>{% endfor %}</optgroup>{% for group in workspace.link_targets %}<optgroup label="{{ 'This rack' if group.current else 'Rack' }} · {{ group.rack }}" data-rack-items>{% for entry in group.entries %}<option value="item:{{ entry.id }}">{{ entry.name }}</option>{% endfor %}</optgroup>{% endfor %}</template>
             <template data-outlet-options><option value="">No documented outlet</option>{% for outlet in power_outlets %}<option value="{{ outlet.id }}" data-equipment-id="{{ outlet.equipment_id }}">{{ outlet.label }}</option>{% endfor %}</template>
           </fieldset>
         </div>
