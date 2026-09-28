@@ -88,7 +88,8 @@ def _drawn_ports(item: Mapping[str, Any], rear: bool = False) -> list[dict[str, 
         drawn = [{"number": int(port["port_number"]), "connector": str(port.get("connector") or "data"),
                   "linked": (port.get("asset_id") is not None or bool(port.get("label"))
                              or port.get("source_port_id") is not None
-                             or port.get("peer_port_id") is not None or bool(port.get("fed_items")))}
+                             or port.get("peer_port_id") is not None or bool(port.get("peer"))
+                             or bool(port.get("fed_items")))}
                  for port in ports]
     else:
         drawn = [{"number": 0, "connector": connector, "linked": False}
@@ -278,7 +279,8 @@ def edit_payload(item: Mapping[str, Any]) -> dict[str, Any]:
             {"connector": str(port.get("connector") or "data"), "ordinal": int(port.get("ordinal") or 0),
              "asset_id": port.get("asset_id"), "label": port.get("label") or "",
              "source_port_id": port.get("source_port_id"), "id": port.get("id"),
-             "peer_port_id": port.get("peer_port_id"), "fed_port_id": port.get("fed_port_id")}
+             "peer_port_id": port.get("peer_port_id"), "fed_port_id": port.get("fed_port_id"),
+             "network_peer": port.get("network_peer")}
             for port in item.get("ports") or []
         ],
     }
@@ -295,7 +297,7 @@ def port_catalog(equipment: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]
         ports = [
             {"id": port["id"], "connector": str(port.get("connector") or "data"),
              "label": port.get("display_label") or "", "peer_port_id": port.get("peer_port_id"),
-             "source_port_id": port.get("source_port_id")}
+             "source_port_id": port.get("source_port_id"), "network_peer": port.get("network_peer")}
             for port in item.get("ports") or []
             if str(port.get("connector") or "data") in {"data", "psu"} and port.get("id") is not None
         ]

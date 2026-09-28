@@ -174,6 +174,7 @@ async def overview(company_id: int) -> dict[str, list[dict[str, Any]]]:
             if source:
                 source["fed_items"].append(f"{port['equipment_name']} · {port['display_label']}")
                 source["fed_port_id"] = port["id"]
+    await _annotate_network_links(company_id, ports_by_id)
     for item in equipment:
         item["linked_port_count"] = sum(
             1 for port in item["ports"]
@@ -203,6 +204,35 @@ async def overview(company_id: int) -> dict[str, list[dict[str, Any]]]:
     return {"networks": networks, "addresses": addresses, "racks": racks,
             "equipment": equipment, "reservations": reservations,
             "power_outlets": power_outlets}
+
+
+async def _annotate_network_links(company_id: int, ports_by_id: dict[int, dict[str, Any]]) -> None:
+    """Show network map links (e.g. an asset's eth0 to a switch port) on the rack ports they end on."""
+    links = await db.fetch_all(
+        """SELECT l.a_kind, l.a_id, l.b_kind, l.b_id, i.id interface_id, i.name interface_name,
+                  a.id interface_asset_id, a.name interface_asset_name
+           FROM network_links l
+           LEFT JOIN asset_interfaces i ON i.company_id=l.company_id AND i.id=CASE
+               WHEN l.a_kind='interface' THEN l.a_id WHEN l.b_kind='interface' THEN l.b_id END
+           LEFT JOIN assets a ON a.id=i.asset_id
+           WHERE l.company_id=%s AND (l.a_kind='rack_port' OR l.b_kind='rack_port')""",
+        (company_id,)) or []
+    for link in links:
+        ends = [(link["a_kind"], link["a_id"]), (link["b_kind"], link["b_id"])]
+        for (kind, port_id), (far_kind, far_id) in (ends, ends[::-1]):
+            port = ports_by_id.get(int(port_id)) if kind == "rack_port" else None
+            if port is None or port.get("peer"):
+                continue
+            if far_kind == "interface" and link.get("interface_id") is not None:
+                port["peer"] = f"{link['interface_asset_name']} · {link['interface_name']}"
+                port["network_peer_asset_id"] = link["interface_asset_id"]
+                port["network_peer"] = port["peer"]
+            elif far_kind == "rack_port" and int(far_id) in ports_by_id:
+                far = ports_by_id[int(far_id)]
+                port["peer"] = f"{far['equipment_name']} · {far['display_label']}"
+                if far["rack_id"] != port.get("rack_id"):
+                    port["peer"] += f" ({far['rack_name']})"
+                port["network_peer"] = port["peer"]
 
 
 async def for_asset(company_id: int, asset_id: int) -> dict[str, list[dict[str, Any]]]:
@@ -427,6 +457,13 @@ async def _apply_port_links(company_id: int, equipment_id: int,
             "SELECT id, port_number FROM rack_equipment_ports WHERE equipment_id=%s AND company_id=%s",
             (equipment_id, company_id)) or []
         port_ids = {int(row["port_number"]): int(row["id"]) for row in rows}
+    # A port linked on the network map (e.g. to an asset's eth0) is changed there.
+    claimed = [port_ids[int(by_position[(link.connector, link.ordinal)]["port_number"])]
+               for link in peer_links if link.connector == "data"
+               and (link.asset_id is not None or link.peer_port_id is not None)
+               and int(by_position[(link.connector, link.ordinal)]["port_number"]) in port_ids]
+    if await network_linked_ports(company_id, claimed):
+        raise ValueError(NETWORK_LINKED_MESSAGE)
     for link in links:
         label = (link.label or "").strip()[:191] or None
         port = by_position[(link.connector, link.ordinal)]
@@ -440,6 +477,28 @@ async def _apply_port_links(company_id: int, equipment_id: int,
         port_id = port_ids.get(int(port["port_number"]))
         if link.connector in PEER_TARGETS and port_id is not None:
             await _set_peer(company_id, link.connector, port_id, link.peer_port_id)
+
+
+NETWORK_LINKED_MESSAGE = ("That port is already linked on the network map; "
+                          "remove the link from the asset's interfaces first")
+
+
+async def network_linked_ports(company_id: int, port_ids: Iterable[int]) -> set[int]:
+    """Return which of these rack ports are an end of a network map link."""
+    ids = sorted({int(port_id) for port_id in port_ids})
+    if not ids:
+        return set()
+    marks = ",".join(["%s"] * len(ids))
+    rows = await db.fetch_all(
+        "SELECT a_kind, a_id, b_kind, b_id FROM network_links WHERE company_id=%s AND ("
+        "(a_kind='rack_port' AND a_id IN (" + marks + ")) OR (b_kind='rack_port' AND b_id IN (" + marks + ")))",
+        (company_id, *ids, *ids)) or []
+    linked = set()
+    for row in rows:
+        for kind, port_id in ((row["a_kind"], row["a_id"]), (row["b_kind"], row["b_id"])):
+            if kind == "rack_port" and int(port_id) in ids:
+                linked.add(int(port_id))
+    return linked
 
 
 # Which remote connector each connector can be linked to port-to-port.
@@ -460,6 +519,8 @@ async def _check_peer_targets(company_id: int, equipment_id: int, links: list[Po
                 or int(row["equipment_id"]) == equipment_id):
             noun = "power supply" if connector == "psu" else "network port"
             raise ValueError(f"Choose a {noun} on another rack item")
+    if await network_linked_ports(company_id, [target for target, connector in targets.items() if connector == "data"]):
+        raise ValueError(NETWORK_LINKED_MESSAGE)
 
 
 async def _set_peer(company_id: int, connector: str, port_id: int, target_id: int | None) -> None:
@@ -586,6 +647,8 @@ async def link_equipment_port(company_id: int, equipment_id: int, port_number: i
     if asset_id is not None and not await db.fetch_one(
             "SELECT id FROM assets WHERE id=%s AND company_id=%s", (asset_id, company_id)):
         raise ValueError("Asset does not belong to this company")
+    if asset_id is not None and await network_linked_ports(company_id, [port["id"]]):
+        raise ValueError(NETWORK_LINKED_MESSAGE)
     clean_label = (label or "").strip()[:191] or None
     await db.execute("UPDATE rack_equipment_ports SET asset_id=%s,label=%s WHERE id=%s AND company_id=%s",
                      (asset_id, clean_label, port["id"], company_id))
