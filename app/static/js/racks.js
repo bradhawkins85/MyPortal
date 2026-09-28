@@ -288,6 +288,8 @@
   const connectorLabels = { data: 'Port', iec: 'IEC', '3pin': '3-pin', psu: 'PSU', kvm: 'Device' };
   let editingId = null;
   let heightTouched = false;
+  // Whether the user picked a type; until then a linked asset picks it.
+  let typeTouched = false;
   let countsTouched = new Set();
   // What the user has entered per port, kept while counts change.
   let linkValues = new Map();
@@ -490,14 +492,26 @@
   };
   form.elements.unit_height.addEventListener('input', () => { heightTouched = true; });
   form.querySelectorAll('input[name="item_type"]').forEach(input => input.addEventListener('change', () => {
+    typeTouched = true;
     applyTypeDefaults(input);
     updateKind();
     updatePreview();
   }));
+  form.elements.asset_id.addEventListener('change', () => {
+    // A new item takes the linked asset's type, as on the asset register.
+    const key = form.elements.asset_id.selectedOptions[0]?.dataset.itemType;
+    const input = key && form.querySelector(`input[name="item_type"][value="${CSS.escape(key)}"]`);
+    if (editingId !== null || typeTouched || !input || input.checked) return;
+    input.checked = true;
+    applyTypeDefaults(input);
+    updateKind();
+    updatePreview();
+  });
   document.querySelectorAll('[data-place-open]').forEach(button => button.addEventListener('click', () => {
     resetForm();
     editingId = null;
     heightTouched = false;
+    typeTouched = false;
     countsTouched = new Set();
     setMode('add');
     form.elements.rack_id.value = button.dataset.rack;

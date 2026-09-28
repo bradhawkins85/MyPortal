@@ -189,15 +189,21 @@ def test_add_rack_space_dialog_uses_visual_choices_and_live_preview():
     assert "const clampLanes" in script
 
 
-def test_catalogue_lists_the_default_rack_item_types_with_images():
-    from app.services import rack_item_types
+def test_catalogue_lists_every_asset_type_plus_rack_hardware_with_images():
+    from app.services import asset_types, rack_item_types
 
-    labels = [item_type.label for item_type in rack_item_types.ITEM_TYPES]
-    assert labels == [
-        "Server", "Network switch or router", "Storage array (SAN/NAS)", "Patch panel",
-        "KVM console", "Power distribution unit (PDU)", "Uninterruptible power supply (UPS)",
-        "Fan tray or ventilation", "Shelf or blanking panel", "Cable management ring or bar",
-    ]
+    keys = [item_type.key for item_type in rack_item_types.ITEM_TYPES]
+    assert keys == [item.key for item in asset_types.ASSET_TYPES] + ["kvm", "fan_tray", "shelf", "cable_management"]
+    for item in asset_types.ASSET_TYPES:
+        assert rack_item_types.get(item.key).label == item.label
+        assert rack_item_types.get(item.key).asset_type == item.key
+    assert rack_item_types.get("kvm").asset_type == "other"
+    groups = rack_item_types.grouped()
+    assert [group["label"] for group in groups][-1] == "Rack hardware"
+    assert sum(len(group["types"]) for group in groups) == len(keys)
+    assert rack_item_types.for_asset({"asset_type": "firewall"}) == "firewall"
+    assert rack_item_types.for_asset({"type": "Managed Printer"}) == "printer"
+    assert all(len(key) <= 24 for key in keys)  # rack_equipment.item_type is VARCHAR(24)
     for item_type in rack_item_types.ITEM_TYPES:
         for width in (1, 2, 3):
             for rear in (False, True):

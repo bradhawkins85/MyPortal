@@ -26,7 +26,7 @@ from typing import Any, Iterable, Mapping
 from xml.sax.saxutils import escape
 
 from app.repositories import network_map as links_repo
-from app.services import asset_types
+from app.services import asset_types, rack_item_types
 
 DETAIL_LEVELS: dict[str, dict[str, str]] = {
     "overview": {"label": "Overview", "help": "Device icons and names with the links between them."},
@@ -293,7 +293,7 @@ def build_graph(overview: Mapping[str, Any], extra: Mapping[str, Any],
                 continue
             node = Node(f"item:{item['id']}", "item",
                         str(item.get("name") or item.get("asset_name") or "Rack item"),
-                        asset_types.RACK_ITEM_ASSET_TYPES.get(item_type, "other"),
+                        rack_item_types.get(item_type).asset_type,
                         url=f"/racks?rack={item['rack_id']}#placement-{item['id']}")
             nodes[node.id] = node
         assert node is not None

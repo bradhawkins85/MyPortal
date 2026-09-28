@@ -261,11 +261,13 @@ def draw_outlets(f: Face, box, iec: list[bool], three: list[bool]):
             three_pin_outlet(f, x, y, scale, linked)
 
 
-def draw_inputs(f: Face, x1, fed: list[bool]) -> float:
+def draw_inputs(f: Face, x1, fed: list[bool], y0=None, y1=None) -> float:
     """Power input inlets along the right edge; returns their left edge."""
     if not fed:
         return x1
-    positions, scale = grid((x1 - 26 * len(fed), f.top + 4, x1, f.bottom - 4), len(fed), 22, 22, gap_x=4, gap_y=4)
+    y0 = f.top + 4 if y0 is None else y0
+    y1 = f.bottom - 4 if y1 is None else y1
+    positions, scale = grid((x1 - 26 * len(fed), y0, x1, y1), len(fed), 22, 22, gap_x=4, gap_y=4)
     for (x, y), is_fed in zip(positions, fed):
         iec_inlet(f, x, y, scale, is_fed)
     return min(x for x, _y in positions) - 6
@@ -496,6 +498,333 @@ def cable_management(f: Face, rear: bool, conns: Connections) -> None:
         f.path(d, stroke="#e5e7eb", sw=1.2, opacity=0.5)
 
 
+# ------------------------------------------------- appliances and devices
+def rear_panel(f: Face, conns: Connections, box=None) -> None:
+    """A generic back panel: network ports left, power inputs right, vents between."""
+    x0, y0, x1, y1 = box or (f.inner_x0, f.top, f.inner_x1, f.bottom)
+    psus, ports = conns.get("psu", []), conns.get("data", [])
+    right = x1
+    if len(psus) > 1:
+        psu_w = min((x1 - x0) * 0.5, psu_width(len(psus), y1 - y0))
+        draw_psus(f, (x1 - psu_w, y0, x1, y1), psus)
+        right = x1 - psu_w - 8
+    elif psus:
+        right = draw_inputs(f, x1, psus, y0 + (y1 - y0 - 22) / 2, y0 + (y1 - y0 + 22) / 2)
+    left = x0
+    if ports:
+        port_w = min(right - x0, max(span_width(len(ports), 13, 0, 2), 13))
+        draw_data_ports(f, (x0, y0, x0 + port_w, min(y1, y0 + 34)), ports, max_rows=2)
+        left = x0 + port_w + 8
+    if right - left > 24:
+        vents(f, left, (y0 + y1) / 2 - 6, right - left - 8, 12)
+
+
+def status_leds(f: Face, x, colours=(LED_GREEN, LED_GREEN, LED_AMBER, LED_GREEN)) -> float:
+    """A column of status LEDs at the left of a front panel; returns the next free x."""
+    f.rect(x, 8, 16, 28, "#0d1116", rx=2)
+    for k, colour in enumerate(colours):
+        f.rect(x + 4, 12 + k * 6, 8, 3, colour)
+    return x + 22
+
+
+def glyph(f: Face, kind: str, cx, cy, colour=LED_BLUE) -> None:
+    """A small printed logo identifying an appliance's role."""
+    if kind == "shield":
+        f.path(f"M{cx:.1f} {cy - 9:.1f}l8 3v5c0 5-4 8-8 10c-4-2-8-5-8-10v-5z", stroke=colour, sw=1.6)
+    elif kind == "lock":
+        f.rect(cx - 6, cy - 2, 12, 10, colour, rx=1.5)
+        f.path(f"M{cx - 4:.1f} {cy - 2:.1f}v-3a4 4 0 0 1 8 0v3", stroke=colour, sw=1.6)
+    elif kind == "wifi":
+        for r in (4, 8, 12):
+            f.path(f"M{cx - r * .7:.1f} {cy + 4 - r * .7:.1f}a{r} {r} 0 0 1 {r * 1.4:.1f} 0", stroke=colour, sw=1.6)
+        f.circle(cx, cy + 5, 1.6, colour)
+    elif kind == "handset":
+        f.path(f"M{cx - 9:.1f} {cy - 2:.1f}q0-5 9-5t9 5l-3 3l-3-2v-2h-6v2l-3 2z", fill=colour)
+        f.rect(cx - 6, cy + 2, 12, 6, "none", rx=1, stroke=colour, sw=1.2)
+    elif kind == "balance":
+        f.path(f"M{cx - 9:.1f} {cy:.1f}h18M{cx + 5:.1f} {cy - 4:.1f}l4 4l-4 4"
+               f"M{cx - 9:.1f} {cy - 6:.1f}h6l6 12h6M{cx - 9:.1f} {cy + 6:.1f}h6l6-12h6", stroke=colour, sw=1.4)
+    elif kind == "route":
+        f.circle(cx, cy, 9, "none", colour, 1.4)
+        f.path(f"M{cx - 5:.1f} {cy:.1f}h10M{cx:.1f} {cy - 5:.1f}v10M{cx + 2:.1f} {cy - 2:.1f}l3 2l-3 2"
+               f"M{cx - 2:.1f} {cy - 2:.1f}l-3 2l3 2", stroke=colour, sw=1.4)
+    elif kind == "globe":
+        f.circle(cx, cy, 9, "none", colour, 1.4)
+        f.path(f"M{cx - 9:.1f} {cy:.1f}h18M{cx:.1f} {cy - 9:.1f}a5 9 0 0 1 0 18a5 9 0 0 1 0-18", stroke=colour, sw=1.2)
+    elif kind == "door":
+        f.rect(cx - 6, cy - 9, 12, 18, "none", rx=1, stroke=colour, sw=1.4)
+        f.circle(cx + 3, cy, 1.4, colour)
+    elif kind == "camera":
+        f.rect(cx - 9, cy - 5, 13, 10, "none", rx=2, stroke=colour, sw=1.4)
+        f.path(f"M{cx + 4:.1f} {cy - 2:.1f}l6-3v10l-6-3z", fill=colour)
+    elif kind == "cloud":
+        f.path(f"M{cx - 10:.1f} {cy + 6:.1f}a5 5 0 0 1 1-10a7 7 0 0 1 13-2a5 5 0 0 1 6 7a3 3 0 0 1-1 5z",
+               stroke=colour, sw=1.6)
+    else:  # chip
+        f.rect(cx - 7, cy - 7, 14, 14, "none", rx=2, stroke=colour, sw=1.4)
+        f.path(f"M{cx - 10:.1f} {cy - 3:.1f}h3M{cx - 10:.1f} {cy + 3:.1f}h3M{cx + 7:.1f} {cy - 3:.1f}h3"
+               f"M{cx + 7:.1f} {cy + 3:.1f}h3", stroke=colour, sw=1.2)
+
+
+def appliance(logo: str, accent: str = LED_BLUE, lcd: bool = False):
+    """Build a drawer for a 1U network appliance: LEDs, logo, optional LCD and front ports."""
+    def draw(f: Face, rear: bool, conns: Connections) -> None:
+        if rear:
+            rear_panel(f, conns)
+            return
+        x = status_leds(f, f.inner_x0)
+        if f.lanes > 1 or not conns.get("data"):
+            f.rect(x, 8, 28, 28, "#0d1116", rx=3)
+            glyph(f, logo, x + 14, 22, accent)
+            x += 34
+        if lcd and f.lanes > 1:
+            f.rect(x, 12, 52, 20, "#0a2534", rx=2, stroke=accent, sw=0.8)
+            f.rect(x + 5, 17, 30, 3, accent, opacity=0.85)
+            f.rect(x + 5, 24, 20, 3, LED_GREEN, opacity=0.8)
+            x += 58
+        console_x = f.inner_x1 - 12
+        f.rect(console_x, 15, 10, 14, "#050608", rx=1, stroke=accent)
+        draw_data_ports(f, (x, f.top, console_x - 6, f.bottom), conns.get("data", []))
+    return draw
+
+
+def hypervisor(f: Face, rear: bool, conns: Connections) -> None:
+    server(f, rear, conns)
+    if not rear:
+        f.rect(f.inner_x1 - 30, f.h - 18, 26, 10, "#0d1116", rx=2)
+        f.rect(f.inner_x1 - 27, f.h - 15, 20, 4, LED_BLUE, opacity=0.7)
+
+
+def virtual_machine(f: Face, rear: bool, conns: Connections) -> None:
+    if rear:
+        rear_panel(f, conns)
+        return
+    # A virtual machine has no hardware: draw its placeholder as dashed guests.
+    guests = fit(f.span, 70, 1, 5)
+    pitch = f.span / guests
+    for k in range(guests):
+        x = f.inner_x0 + k * pitch + 3
+        f.parts.append(f'<rect x="{x:.1f}" y="8" width="{pitch - 6:.1f}" height="28" rx="3" fill="#10151d" '
+                       f'stroke="{LED_BLUE}" stroke-width="1" stroke-dasharray="4 3"/>')
+        f.rect(x + 6, 14, min(24, pitch - 18), 4, LED_BLUE, opacity=0.7)
+        f.rect(x + 6, 22, min(16, pitch - 18), 3, "#4c5563")
+        f.rect(x + pitch - 16, 26, 4, 4, LED_GREEN)
+
+
+def workstation(f: Face, rear: bool, conns: Connections) -> None:
+    if rear:
+        rear_panel(f, conns)
+        return
+    x0 = f.inner_x0
+    f.rect(x0, 8, min(110, f.span * .45), 12, "#0d1116", rx=2, stroke="#6c7686")  # optical drive
+    f.rect(x0 + 6, 13, min(60, f.span * .25), 2, "#3a4150")
+    for k in range(2):
+        f.rect(x0 + k * 11, 28, 8, 5, "#0d1a2c", stroke="#6c7686")  # USB
+    f.circle(x0 + 30, 31, 3, "#1b2027", "#6c7686")  # audio
+    vx = x0 + min(120, f.span * .5)
+    for row in range(int((f.h - 16) // 7)):
+        for k in range(int((f.inner_x1 - 36 - vx) // 9)):
+            f.circle(vx + 4 + k * 9, 11 + row * 7, 2, "#0b0d10")
+    f.circle(f.inner_x1 - 16, 22, 7, "#1b2027", METAL)
+    f.circle(f.inner_x1 - 16, 22, 3.5, "none", LED_BLUE, 1.4)
+
+
+def display(f: Face, rear: bool, conns: Connections) -> None:
+    if rear:
+        f.rect(f.inner_x0 + f.span / 2 - 30, 8, 60, f.h - 16, "#15191f", rx=3, stroke="#4c5563")
+        for dx in (-18, 18):
+            for dy in (-14, 14):
+                f.circle(f.inner_x0 + f.span / 2 + dx, f.h / 2 + dy, 2.5, "#0b0d10", "#6c7686")
+        rear_panel(f, conns, (f.inner_x1 - 40, f.top, f.inner_x1, f.bottom))
+        return
+    f.rect(f.inner_x0, 5, f.span, f.h - 10, "#07090c", rx=3, stroke="#4c5563")
+    f.rect(f.inner_x0 + 6, 10, f.span - 12, f.h - 24, "#0e2233")
+    f.path(f"M{f.inner_x0 + 10:.1f} {f.h - 18:.1f}L{f.inner_x0 + f.span * .45:.1f} 12", stroke="#ffffff", sw=6, opacity=0.04)
+    f.rect(f.inner_x0 + f.span / 2 - 4, f.h - 11, 8, 2, LED_BLUE)
+
+
+def conference(f: Face, rear: bool, conns: Connections) -> None:
+    if rear:
+        rear_panel(f, conns)
+        return
+    f.rect(f.inner_x0, 8, f.span, 28, "#101318", rx=4)
+    glyph(f, "camera", f.inner_x0 + f.span / 2, 22, "#94a3b8")
+    f.rect(f.inner_x1 - 14, 20, 6, 4, LED_GREEN)
+
+
+def nvr(f: Face, rear: bool, conns: Connections) -> None:
+    if rear:
+        rear_panel(f, conns)
+        return
+    panel = 58 if f.lanes > 1 else 0
+    rows = max(1, round(f.h / UNIT))
+    bays = fit(f.span - panel - 4, 34, 1, 8)
+    for row in range(rows):
+        for i in range(bays):
+            drive_bay(f, f.inner_x0 + i * 34, 6 + row * UNIT, 31, 32)
+    if panel:
+        px = f.inner_x1 - panel
+        f.rect(px, 8, panel, f.h - 16, "#10151e", rx=3, stroke="#6c7686")
+        glyph(f, "camera", px + panel / 2, 24, LED_RED)
+        f.rect(px + 8, f.h - 22, panel - 16, 6, "#0e2a3a")
+        f.rect(px + 10, f.h - 20, 10, 2, LED_GREEN)
+
+
+def access_control(f: Face, rear: bool, conns: Connections) -> None:
+    if rear:
+        rear_panel(f, conns)
+        return
+    x = status_leds(f, f.inner_x0, (LED_GREEN, LED_RED, LED_AMBER, LED_OFF))
+    glyph(f, "door", x + 12, 22, LED_AMBER)
+    x += 30
+    blocks = fit(f.inner_x1 - x, 44, 1, 8)
+    for k in range(blocks):
+        bx = x + k * 44
+        f.rect(bx, 10, 40, 14, "#15803d", rx=1)
+        for t in range(5):
+            f.circle(bx + 5 + t * 7.5, 17, 2.4, "#d1d5db", "#4b5563", 0.6)
+        f.rect(bx + 16, 28, 8, 4, LED_GREEN if k % 2 == 0 else LED_OFF)
+
+
+def cloud_service(f: Face, rear: bool, conns: Connections) -> None:
+    # Cloud services have no hardware; the panel is a labelled placeholder.
+    if rear:
+        return
+    cx = f.inner_x0 + f.span / 2
+    glyph(f, "cloud", cx, f.h / 2 - 1, "#94a3b8")
+    f.rect(cx - 30, f.h - 10, 60, 2, "#3b424c", rx=1)
+
+
+# Devices that are not rack-mounted sit on a shelf; the drawing is the shelf
+# with the device on it, seen from the front (or its back panel from the rear).
+def _shelf_base(f: Face) -> float:
+    f.rect(f.x0 + 2, f.h - 7, f.x1 - f.x0 - 4, 5, "#6c7686", rx=1)
+    f.rect(f.x0 + 2, f.h - 7, f.x1 - f.x0 - 4, 1.5, "#9aa3ae")
+    return f.h - 7
+
+
+def on_shelf(silhouette, share: float = 0.6):
+    """Build a drawer for a desktop device resting on a shelf."""
+    def draw(f: Face, rear: bool, conns: Connections) -> None:
+        floor = _shelf_base(f)
+        width = max(40.0, f.span * (share if f.lanes > 1 else min(0.95, share + 0.3)))
+        x0 = f.inner_x0 + (f.span - width) / 2
+        if rear:
+            height = min(floor - 6, max(20.0, (floor - 6) * 0.8))
+            f.rect(x0, floor - height, width, height, "#1c2129", rx=3, stroke="#4c5563")
+            rear_panel(f, conns, (x0 + 5, floor - height + 3, x0 + width - 5, floor - 3))
+            return
+        silhouette(f, x0, width, floor)
+    return draw
+
+
+def _laptop(f, x, w, floor):
+    f.rect(x, floor - 9, w, 9, "#9aa3ae", rx=2)
+    f.rect(x, floor - 9, w, 3, "#c4cad3", rx=1.5)
+    f.rect(x + w / 2 - 10, floor - 4, 20, 2, "#6c7686", rx=1)
+    f.rect(x + w - 10, floor - 5, 4, 2, LED_GREEN)
+
+
+def _thin_client(f, x, w, floor):
+    bw = min(28, w)
+    for k in range(max(1, int(w // (bw + 10)))):
+        bx = x + k * (bw + 10)
+        h = min(floor - 6, 34)
+        f.rect(bx, floor - h, bw, h, "#1f252d", rx=3, stroke="#4c5563")
+        f.circle(bx + bw / 2, floor - h + 7, 3, "none", LED_BLUE, 1.2)
+        f.rect(bx + 6, floor - 12, 6, 4, "#0d1a2c", stroke="#6c7686", sw=0.6)
+        f.rect(bx + 15, floor - 12, 6, 4, "#0d1a2c", stroke="#6c7686", sw=0.6)
+
+
+def _tablet(f, x, w, floor):
+    h = min(floor - 6, 32)
+    tw = min(w, h * 1.5)
+    tx = x + (w - tw) / 2
+    f.path(f"M{tx + tw * .3:.1f} {floor:.1f}l6-8h{tw * .4 - 12:.1f}l6 8z", fill="#4c5563")
+    f.rect(tx, floor - h - 2, tw, h - 4, "#0b0d10", rx=4, stroke="#6c7686")
+    f.rect(tx + 4, floor - h + 2, tw - 8, h - 12, "#16324a")
+
+
+def _mobile_phone(f, x, w, floor):
+    f.rect(x, floor - 6, w, 6, "#1f252d", rx=2)  # charging dock
+    h = min(floor - 8, 30)
+    for k in range(max(1, min(6, int(w // 22)))):
+        px = x + 4 + k * 22
+        f.rect(px, floor - 4 - h, 14, h, "#0b0d10", rx=3, stroke="#6c7686", sw=0.8)
+        f.rect(px + 2, floor - 1 - h, 10, h - 8, "#16324a", rx=1)
+        f.rect(px + 5, floor - 6, 4, 2, LED_GREEN)
+
+
+def _printer(f, x, w, floor):
+    top = 6
+    f.rect(x, top + 8, w, floor - top - 8, "#d7dbe0", rx=4, stroke="#9aa3ae")
+    f.rect(x + 4, top, w - 8, 12, "#c4cad3", rx=3)  # scanner lid
+    f.rect(x + 10, top + 22, w * .55, 5, "#2b313a", rx=1)  # output slot
+    f.rect(x + w - 44, top + 18, 36, 16, "#1f252d", rx=2)  # control panel
+    f.rect(x + w - 41, top + 21, 22, 10, "#16324a")
+    f.circle(x + w - 13, top + 26, 2.5, LED_GREEN)
+    drawer_top = top + 40
+    drawers = max(1, int((floor - 4 - drawer_top) // 16))
+    for k in range(drawers):
+        y = drawer_top + k * 16
+        f.rect(x + 6, y, w - 12, 13, "#e5e7eb", rx=2, stroke="#9aa3ae")
+        f.rect(x + w / 2 - 12, y + 4, 24, 4, "#9aa3ae", rx=2)
+
+
+def _scanner(f, x, w, floor):
+    h = min(floor - 6, 40)
+    f.rect(x, floor - h * .55, w, h * .55, "#d7dbe0", rx=3, stroke="#9aa3ae")
+    f.path(f"M{x + w * .15:.1f} {floor - h * .55:.1f}l{w * .1:.1f}-{h * .4:.1f}h{w * .5:.1f}l{w * .1:.1f} {h * .4:.1f}z",
+           fill="#c4cad3", stroke="#9aa3ae")  # document feeder
+    f.rect(x + 8, floor - h * .3, w * .5, 3, "#2b313a")
+    f.circle(x + w - 10, floor - h * .3, 2.5, LED_GREEN)
+
+
+def _ip_phone(f, x, w, floor):
+    pw = min(w, 90)
+    for k in range(max(1, int(w // (pw + 8)))):
+        px = x + k * (pw + 8)
+        f.path(f"M{px:.1f} {floor:.1f}l{pw * .12:.1f}-{min(floor - 8, 40):.1f}h{pw * .76:.1f}l{pw * .12:.1f} {min(floor - 8, 40):.1f}z",
+               fill="#1f252d", stroke="#4c5563")
+        top = floor - min(floor - 8, 40)
+        f.rect(px + pw * .18, top + 6, pw * .24, (floor - top) - 14, "#2b313a", rx=5)  # handset
+        f.rect(px + pw * .48, top + 6, pw * .34, 12, "#16324a", rx=1)  # screen
+        for r in range(2):
+            for c in range(3):
+                f.rect(px + pw * .48 + c * pw * .12, top + 22 + r * 7, pw * .09, 4, "#4c5563", rx=1)
+
+
+def _camera(f, x, w, floor):
+    cx = x + w / 2
+    r = min(20, (floor - 8) / 2, w / 2)
+    f.rect(cx - r - 6, floor - 6, 2 * r + 12, 6, "#e5e7eb", rx=2)
+    f.path(f"M{cx - r:.1f} {floor - 6:.1f}a{r:.1f} {r:.1f} 0 0 1 {2 * r:.1f} 0z", fill="#1c2129", stroke="#9aa3ae")
+    f.circle(cx, floor - 6 - r * .45, r * .32, "#0b0d10", "#6c7686")
+    f.circle(cx, floor - 6 - r * .45, r * .12, LED_BLUE)
+
+
+def _access_point(f, x, w, floor):
+    cx, rw = x + w / 2, min(w / 2, 50)
+    f.parts.append(f'<ellipse cx="{cx:.1f}" cy="{floor - 8:.1f}" rx="{rw:.1f}" ry="7" fill="#eef1f4" stroke="#9aa3ae"/>')
+    f.parts.append(f'<ellipse cx="{cx:.1f}" cy="{floor - 10:.1f}" rx="{rw * .3:.1f}" ry="2" fill="none" stroke="{LED_BLUE}" stroke-width="1.4"/>')
+
+
+def _wireless_bridge(f, x, w, floor):
+    cx = x + w / 2
+    f.rect(cx - 3, floor - 12, 6, 12, "#6c7686")
+    f.rect(cx - 24, floor - 30, 48, 20, "#eef1f4", rx=4, stroke="#9aa3ae")
+    f.rect(cx + 14, floor - 25, 4, 2, LED_GREEN)
+    glyph(f, "wifi", cx - 6, floor - 22, "#9aa3ae")
+
+
+def _iot(f, x, w, floor):
+    bw = min(w, 60)
+    bx = x + (w - bw) / 2
+    f.rect(bx, floor - 18, bw, 18, "#eef1f4", rx=6, stroke="#9aa3ae")
+    for k, colour in enumerate((LED_GREEN, LED_BLUE, LED_OFF)):
+        f.circle(bx + 10 + k * 8, floor - 9, 2, colour)
+
+
 STYLES = {
     "server": ("#4a5361", "#262c35", "#5b6574", "#2b323c"),
     "switch": ("#2f5a49", "#17332a", "#6fb296", "#243a31"),
@@ -508,10 +837,36 @@ STYLES = {
     "shelf": ("#2a2f36", "#191c21", "#5b6574", "#22262c"),
     "cable_management": ("#23272d", "#121418", "#5b6574", "#1c1f24"),
 }
+_APPLIANCE = ("#343b45", "#1b2027", "#5b6574", "#262c35")
+_SHELF = ("#15181d", "#0e1013", "#3b424c", "#22262c")
+STYLES.update({
+    "modem": _APPLIANCE, "router": ("#2f4a5a", "#18282f", "#6f9bb2", "#233640"),
+    "firewall": ("#4a2c30", "#281618", "#b26f76", "#3a2226"), "vpn_gateway": ("#3a3150", "#1e1a2b", "#8f7cb3", "#2c2640"),
+    "load_balancer": ("#2f5a57", "#17332f", "#6fb2ac", "#243a38"), "wireless_controller": ("#2d3f5f", "#172033", "#6f8fc2", "#232f45"),
+    "hypervisor": STYLES["server"], "virtual_machine": ("#1d232c", "#12161c", "#3b82f6", "#1a1f27"),
+    "workstation": _APPLIANCE, "display": ("#1a1d22", "#0d0f12", "#4c5563", "#15181c"),
+    "conference": _APPLIANCE, "nvr": ("#3a3339", "#1d191d", "#8a7c8a", "#2b262b"),
+    "access_control": ("#3a3a33", "#1d1d19", "#8a8a7c", "#2b2b26"), "phone_system": ("#3b3a4d", "#1e1d27", "#8584a8", "#2b2a38"),
+    "cloud_service": ("#23272d", "#15181d", "#4c5563", "#1c1f24"), "other": _APPLIANCE,
+    **{key: _SHELF for key in ("laptop", "thin_client", "tablet", "mobile_phone", "printer", "scanner",
+                               "ip_phone", "camera", "access_point", "wireless_bridge", "iot")},
+})
 DRAWERS = {
     "server": server, "switch": switch, "storage": storage, "patch_panel": patch_panel,
     "kvm": kvm, "pdu": pdu, "ups": ups, "fan_tray": fan_tray, "shelf": shelf,
     "cable_management": cable_management,
+    "modem": appliance("globe", LED_GREEN), "router": appliance("route"),
+    "firewall": appliance("shield", LED_RED, lcd=True), "vpn_gateway": appliance("lock", "#a78bfa"),
+    "load_balancer": appliance("balance", LED_GREEN, lcd=True), "wireless_controller": appliance("wifi"),
+    "phone_system": appliance("handset", "#a5b4fc"), "other": appliance("chip", "#94a3b8"),
+    "hypervisor": hypervisor, "virtual_machine": virtual_machine, "workstation": workstation,
+    "display": display, "conference": conference, "nvr": nvr, "access_control": access_control,
+    "cloud_service": cloud_service,
+    "laptop": on_shelf(_laptop), "thin_client": on_shelf(_thin_client, 0.5), "tablet": on_shelf(_tablet, 0.3),
+    "mobile_phone": on_shelf(_mobile_phone, 0.5), "printer": on_shelf(_printer, 0.7),
+    "scanner": on_shelf(_scanner, 0.6), "ip_phone": on_shelf(_ip_phone, 0.7), "camera": on_shelf(_camera, 0.3),
+    "access_point": on_shelf(_access_point, 0.5), "wireless_bridge": on_shelf(_wireless_bridge, 0.4),
+    "iot": on_shelf(_iot, 0.3),
 }
 
 
