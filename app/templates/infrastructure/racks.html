@@ -133,7 +133,7 @@
         </div>
         <aside class="rack-dashboard__insights" aria-label="{{ rack.name }} rack insights">
           <section class="rack-insight-card rack-insight-card--details" aria-labelledby="rack-{{ rack.id }}-details">
-            <h3 id="rack-{{ rack.id }}-details">Details</h3>
+            <div class="rack-insight-card__header"><h3 id="rack-{{ rack.id }}-details">Details</h3>{% if can_edit %}<button class="button button--small button--secondary" type="button" data-rack-resize-open aria-haspopup="dialog" aria-controls="rack-resize-dialog">Resize</button>{% endif %}</div>
             <dl class="rack-facts">
               <div>{{ draw.icon('cube') }}<dt>Height</dt><dd>{{ rack.unit_count }} U</dd></div>
               <div>{{ draw.icon('mount-down' if rack.numbering_direction == 'top-down' else 'mount-up') }}<dt>Mounting</dt><dd>{{ (rack.numbering_direction or 'bottom-up')|replace('-', ' ')|title }}</dd></div>
@@ -230,6 +230,15 @@
 </dialog>
 {% if can_edit %}
 <dialog id="rack-create-dialog" class="dialog" aria-labelledby="rack-create-title"><form class="dialog__container form-stack" method="post" action="/api/infrastructure/racks"><header class="dialog__header"><h2 id="rack-create-title">Add rack</h2><button type="button" class="dialog__close" data-dialog-close aria-label="Close">×</button></header><div class="dialog__body form-stack">{% include "partials/csrf.html" %}<label>Name<input class="input" name="name" required maxlength="191"></label><label>Location<input class="input" name="location" maxlength="255"></label><label>Height (U)<input class="input" type="number" name="unit_count" min="1" max="100" value="42" required></label><label>Depth (mm)<input class="input" type="number" name="depth_mm" min="100" max="5000" value="1000" required></label></div><footer class="dialog__footer"><button type="button" class="button button--secondary" data-dialog-close>Cancel</button><button class="button button--primary">Add rack</button></footer></form></dialog>
+{% if rack %}
+{# Shrinking drops the highest-numbered units, so the smallest allowed height is
+   the top of the highest item or reservation. The server enforces the same rule. #}
+{% set occupied_ends = [0] %}
+{% for item in equipment if item.rack_id == rack.id %}{% set _ = occupied_ends.append(item.start_unit + item.unit_height - 1) %}{% endfor %}
+{% for item in reservations if item.rack_id == rack.id %}{% set _ = occupied_ends.append(item.start_unit + item.unit_height - 1) %}{% endfor %}
+{% set min_units = [occupied_ends|max, 1]|max %}
+<dialog id="rack-resize-dialog" class="dialog" aria-labelledby="rack-resize-title"><form class="dialog__container form-stack" method="post" action="/api/infrastructure/racks/{{ rack.id }}/resize"><header class="dialog__header"><h2 id="rack-resize-title">Resize {{ rack.name }}</h2><button type="button" class="dialog__close" data-dialog-close aria-label="Close">×</button></header><div class="dialog__body form-stack">{% include "partials/csrf.html" %}<input type="hidden" name="rack_id" value="{{ rack.id }}"><label>Height (U)<input class="input" type="number" name="unit_count" min="{{ min_units }}" max="100" value="{{ rack.unit_count }}" required aria-describedby="rack-resize-hint"></label><label>Depth (mm)<input class="input" type="number" name="depth_mm" min="100" max="5000" value="{{ rack.depth_mm or 1000 }}" required></label><p class="form-help" id="rack-resize-hint">{% if occupied_ends|max %}Items or reservations reach U{{ occupied_ends|max }}, so this rack can't be shorter than {{ min_units }} U. Move or remove anything above the new height before shrinking.{% else %}This rack is empty, so it can be resized freely.{% endif %}</p></div><footer class="dialog__footer"><button type="button" class="button button--secondary" data-dialog-close>Cancel</button><button class="button button--primary">Save size</button></footer></form></dialog>
+{% endif %}
 <dialog id="rack-place-dialog" class="dialog rack-dialog rack-dialog--place" aria-labelledby="rack-place-title" data-mode="add">
   <form class="dialog__container" method="post" action="/api/infrastructure/rack-equipment" data-placement-form>
     <header class="dialog__header rack-dialog__header">

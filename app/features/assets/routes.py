@@ -1065,6 +1065,29 @@ async def create_rack(request: Request):
     return _main().flash_redirect(_rack_location(form, record_id), "Rack added.", "success")
 
 
+@router.post("/api/infrastructure/racks/{rack_id}/resize", summary="Change a rack's height and depth")
+async def resize_rack(request: Request, rack_id: int):
+    _user, company_id, redirect = await _infrastructure_write_context(request, "menu.racks")
+    if redirect:
+        return redirect
+    form = await request.form()
+    try:
+        unit_count, depth_mm = int(form.get("unit_count")), int(form.get("depth_mm"))
+        before = await infrastructure_repo.resize_rack(company_id, rack_id, unit_count, depth_mm)
+    except infrastructure_repo.RackResizeBlocked as exc:
+        # Send the technician back to the rack with the items that are in the
+        # way rather than a bare error page.
+        return _main().flash_redirect(_rack_location(form, rack_id), str(exc), "error")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await audit_service.record(action="infrastructure.rack.resize", request=request,
+                               entity_type="rack", entity_id=rack_id,
+                               before={"company_id": company_id, **before},
+                               after={"company_id": company_id, "unit_count": unit_count,
+                                      "depth_mm": depth_mm})
+    return _main().flash_redirect(_rack_location(form, rack_id), "Rack size updated.", "success")
+
+
 @router.post("/api/infrastructure/rack-equipment", status_code=201, summary="Place equipment in a rack")
 async def place_rack_asset(request: Request):
     _user, company_id, redirect = await _infrastructure_write_context(request, "menu.racks")
