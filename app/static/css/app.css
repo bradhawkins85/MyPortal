@@ -14654,3 +14654,17 @@ progress {
     --hf-muted: #cbd5e1;
   }
 }
+
+.defender-commands-section {
+  margin-top: calc(var(--space-gap-roomy) * 1.5);
+}
+
+.defender-policy-issues {
+  margin-top: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.defender-policy-issues ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1rem;
+}

@@ -1,6 +1,10 @@
 package defender
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 func TestDecodeStatusAcceptsPowerShellUTF8BOM(t *testing.T) {
 	output := append([]byte{0xef, 0xbb, 0xbf}, []byte(`{
@@ -62,5 +66,24 @@ func TestDecodeStatusAcceptsPowerShellUTF8BOM(t *testing.T) {
 func TestDecodeStatusRejectsPowerShellDiagnosticOutput(t *testing.T) {
 	if _, err := decodeStatus([]byte("warning\n{\"health_status\":\"healthy\"}")); err == nil {
 		t.Fatal("expected diagnostic output mixed into JSON to be rejected")
+	}
+}
+
+func TestDecodeStatusKeepsTheMostRecentDetectionsWithinPortalLimits(t *testing.T) {
+	var detections []string
+	for i := 0; i < 150; i++ {
+		detections = append(detections, fmt.Sprintf(`{"detection_uid":"det-%d","threat_name":"T","detected_at":"2026-01-01T00:00:00Z","infected_files":[%s]}`,
+			i, strings.TrimSuffix(strings.Repeat(`"f",`, 120), ",")))
+	}
+	detections = append(detections, `{"detection_uid":"newest","threat_name":"T","detected_at":"2026-09-01T00:00:00Z"}`)
+	status, err := decodeStatus([]byte(`{"health_status":"healthy","detections":[` + strings.Join(detections, ",") + `]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Detections) != maxReportedDetections || status.Detections[0].DetectionUID != "newest" {
+		t.Fatalf("got %d detections, first %q", len(status.Detections), status.Detections[0].DetectionUID)
+	}
+	if len(status.Detections[1].InfectedFiles) != maxReportedInfectedFiles {
+		t.Fatalf("infected files = %d", len(status.Detections[1].InfectedFiles))
 	}
 }

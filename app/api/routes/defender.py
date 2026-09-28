@@ -53,6 +53,7 @@ async def defender_page(request: Request):
     enabled = await repo.company_enabled(company_id)
     devices, exclusions, detections = await repo.dashboard(company_id) if enabled else ([], [], [])
     defender_settings = await repo.settings(company_id) if enabled else {}
+    commands = await repo.recent_commands(company_id) if enabled else []
     is_super_admin = bool(user.get("is_super_admin"))
     exclusion_lists = await repo.exclusion_lists() if enabled and is_super_admin else []
     companies = await companies_repo.list_companies() if enabled and is_super_admin else []
@@ -64,6 +65,15 @@ async def defender_page(request: Request):
         "defender_can_write": (bool(user.get("is_super_admin")) or bool(user.get("is_company_admin"))
                                or _main()._menu_can(user.get("menu_access"), "menu.defender", write=True)),
         "defender_settings": defender_settings,
+        "defender_commands": commands,
+        # Managed endpoints where Tamper Protection stops the agent applying
+        # exclusions; the page flags these rather than letting the policy look
+        # effective.
+        "defender_tamper_locked_devices": [
+            device for device in devices if device.get("defender_managed") and device.get("tamper_locks_exclusions")
+            and (exclusions or any(item.get("status") == "blocked_tamper_protection"
+                                   for item in device.get("policy_issues") or []))
+        ],
     }
     if is_super_admin:
         extra.update(defender_exclusion_lists=exclusion_lists, defender_companies=companies)

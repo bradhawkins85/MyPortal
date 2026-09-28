@@ -1,5 +1,6 @@
 """Regression coverage for the Windows Defender management surface."""
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -99,6 +100,8 @@ def test_defender_page_renders_html_template(monkeypatch):
             "defender_detections": [],
             "defender_can_write": True,
             "defender_settings": {},
+            "defender_commands": [],
+            "defender_tamper_locked_devices": [],
         }
         return rendered_response
 
@@ -466,3 +469,137 @@ def test_defender_reporting_migration_excludes_non_windows_agents():
     assert "WHERE slug = 'dashboard-defender-devices'" in sql
     assert "WHERE slug = 'dashboard-defender-unhealthy-devices'" in sql
     assert "WHERE slug = 'dashboard-defender-health-by-status'" in sql
+
+
+def _policy_result(**overrides):
+    result = {
+        "status": "blocked",
+        "evaluated_at": "2026-09-28T01:00:00Z",
+        "tamper_protection": {"enabled": True, "source": "Intune", "protects_exclusions": None},
+        "items": [
+            {"setting": "exclusion_path", "value": r"C:\Trusted", "action": "add",
+             "status": "blocked_tamper_protection", "message": "Tamper Protection is on"},
+            {"setting": "scheduled_scan", "value": "Quick scan Monday at 02:00", "action": "set", "status": "applied"},
+        ],
+    }
+    result.update(overrides)
+    return result
+
+
+def test_status_report_persists_policy_result(monkeypatch):
+    executed = []
+
+    async def execute(sql, params):
+        executed.append((sql, params))
+
+    monkeypatch.setattr(defender_repo.db, "execute", execute)
+    report = DefenderStatusReport(policy_result=_policy_result())
+
+    asyncio.run(defender_repo.report_status(7, 42, report))
+
+    sql, params = executed[0]
+    assert "policy_status=VALUES(policy_status)" in sql
+    assert params[-3] == "blocked"
+    assert params[-2] is not None
+    stored = json.loads(params[-1])
+    assert stored["items"][0]["status"] == "blocked_tamper_protection"
+    assert stored["tamper_protection"]["source"] == "Intune"
+
+
+def test_status_report_from_older_agent_stores_no_policy_result(monkeypatch):
+    executed = []
+    monkeypatch.setattr(defender_repo.db, "execute", lambda sql, params: asyncio.sleep(0, result=executed.append(params)))
+
+    asyncio.run(defender_repo.report_status(7, 42, DefenderStatusReport()))
+
+    assert executed[0][-3:] == (None, None, None)
+
+
+def test_policy_summary_flags_tamper_protection_that_may_lock_exclusions():
+    locked = defender_repo._policy_summary(_policy_result())
+    assert locked["tamper_locks_exclusions"] is True
+    assert [item["status"] for item in locked["policy_issues"]] == ["blocked_tamper_protection"]
+
+    unlocked = defender_repo._policy_summary(_policy_result(tamper_protection={"enabled": True, "protects_exclusions": False}))
+    assert unlocked["tamper_locks_exclusions"] is False
+
+    assert defender_repo._policy_summary(None) == {"policy": None, "policy_issues": [], "tamper_locks_exclusions": False}
+
+
+def test_defender_dashboard_exposes_policy_outcome(monkeypatch):
+    async def fetch_all(sql, _params):
+        if "FROM tray_devices td LEFT JOIN defender_device_status ds" in sql:
+            assert "ds.policy_result_json" in sql
+            return [{"id": 7, "hostname": "PC-07", "defender_managed": 1, "antivirus_enabled": True,
+                     "details_json": json.dumps({"running_mode": "Passive"}), "policy_status": "blocked",
+                     "policy_result_json": json.dumps(_policy_result())}]
+        return []
+
+    monkeypatch.setattr(defender_repo.db, "fetch_all", fetch_all)
+
+    devices, _, _ = asyncio.run(defender_repo.dashboard(42))
+
+    assert devices[0]["tamper_locks_exclusions"] is True
+    assert devices[0]["running_mode"] == "Passive"
+    assert devices[0]["policy_issues"][0]["value"] == r"C:\Trusted"
+    assert "policy_result_json" not in devices[0]
+
+
+def test_command_poll_fails_commands_the_agent_never_finished(monkeypatch):
+    executed = []
+
+    async def execute(sql, params):
+        executed.append(sql)
+
+    monkeypatch.setattr(defender_repo.db, "execute", execute)
+    monkeypatch.setattr(defender_repo.db, "fetch_all", lambda *_args: asyncio.sleep(0, result=[]))
+
+    asyncio.run(defender_repo.poll_commands(7, 42))
+
+    assert "status='claimed'" in executed[0] and "INTERVAL 24 HOUR" in executed[0]
+
+
+def test_recent_commands_include_the_agent_result_message(monkeypatch):
+    monkeypatch.setattr(defender_repo.db, "fetch_all", lambda *_args: asyncio.sleep(0, result=[
+        {"id": 1, "command_type": "enable_firewall", "status": "failed",
+         "result_json": json.dumps({"message": "Group Policy turns the firewall off"})},
+    ]))
+
+    commands = asyncio.run(defender_repo.recent_commands(42))
+
+    assert commands[0]["message"] == "Group Policy turns the firewall off"
+    assert "result_json" not in commands[0]
+
+
+def test_long_agent_policy_messages_are_truncated_not_rejected():
+    report = DefenderStatusReport(policy_result=_policy_result(items=[
+        {"setting": "exclusion_path", "value": "C:\\" + "a" * 1200, "action": "add", "status": "failed", "message": "x" * 5000},
+    ]))
+    item = report.policy_result.items[0]
+    assert len(item.value) == 1000 and len(item.message) == 2000
+
+
+def test_exclusion_values_reject_control_characters():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        DefenderExclusionCreate(scope="company", exclusion_type="path", value="C:\\Trusted\nC:\\Other")
+    assert DefenderExclusionCreate(scope="company", exclusion_type="path", value="  C:\\Trusted  ").value == "C:\\Trusted"
+
+
+def test_defender_ui_flags_tamper_protection_and_policy_outcome():
+    template = Path("app/templates/defender/index.html").read_text()
+    assert "data-defender-tamper-warning" in template
+    assert "Exclusions locked" in template
+    assert '<th data-sort="string">Policy</th>' in template
+    assert "Blocked by tamper protection" in template
+    assert "Update tray agent" in template
+    assert 'id="defender-commands-table" data-table' in template
+    assert "Registry path (not supported by Defender)" in template
+
+
+def test_defender_template_compiles():
+    from jinja2 import Environment, FileSystemLoader
+
+    Environment(loader=FileSystemLoader("app/templates")).get_template("defender/index.html")
