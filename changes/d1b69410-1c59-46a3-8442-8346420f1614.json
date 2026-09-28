@@ -1,0 +1,7 @@
+{
+  "guid": "d1b69410-1c59-46a3-8442-8346420f1614",
+  "occurred_at": "2026-09-28T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added myportal-docker superadmin create and reset-password commands so server owners can create a super administrator or reset a super administrator's password (optionally clearing 2FA) from the command line, with audit logging.",
+  "content_hash": "docker-superadmin-create-reset-v1"
+}

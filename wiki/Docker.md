@@ -94,9 +94,29 @@ address the user signs in with (matched case-insensitively).
 | `sudo myportal-docker superadmin list` | List users with super administrator rights |
 | `sudo myportal-docker superadmin grant USERNAME` | Grant super administrator rights |
 | `sudo myportal-docker superadmin revoke USERNAME` | Revoke super administrator rights |
+| `sudo myportal-docker superadmin create USERNAME` | Create a new super administrator |
+| `sudo myportal-docker superadmin reset-password USERNAME` | Set a new password for a super administrator |
 
 `revoke` refuses to remove the last active super administrator; add `--force`
 to do it anyway. Changes apply on the user's next request; no restart is needed.
+
+`create` and `reset-password` prompt for the new password (at least 12
+characters). Add `--generate-password` to have one generated and printed
+instead, or pipe the password in on standard input for scripts. `create` also
+accepts `--first-name` and `--last-name`.
+
+`reset-password` only works for super administrators, and signs the user out of
+every session. If the authenticator app or passkey is lost too, add
+`--reset-2fa` to remove them; two-factor sign-in is then set up again at the
+next sign-in. For example, to regain access when the only administrator is
+locked out:
+
+```bash
+sudo myportal-docker superadmin reset-password admin@example.com --reset-2fa
+```
+
+Every change made with these commands is recorded in the audit log with the
+source `myportal-docker`.
 
 ## Files and data
 

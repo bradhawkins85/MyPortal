@@ -135,7 +135,17 @@ def test_sql_string_hex_encodes_the_value():
 
 @pytest.mark.parametrize(
     "args",
-    ["", "bogus", "grant", "grant a@example.com b@example.com", "revoke a@example.com --bogus"],
+    [
+        "",
+        "bogus",
+        "grant",
+        "grant a@example.com b@example.com",
+        "revoke a@example.com --bogus",
+        "list a@example.com",
+        "create",
+        "create a@example.com --first-name",
+        "reset-password",
+    ],
 )
 def test_superadmin_rejects_bad_usage_before_touching_docker(args):
     result = subprocess.run(
@@ -147,3 +157,44 @@ def test_superadmin_rejects_bad_usage_before_touching_docker(args):
     )
     assert result.returncode != 0
     assert "Error:" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("stdin", "ok"),
+    [("a-long-enough-password\n", True), ("short\n", False), ("", False), ("x" * 129 + "\n", False)],
+)
+def test_read_new_password_from_stdin_enforces_policy(stdin, ok):
+    result = subprocess.run(
+        ["bash", "-c", f'source <(sed \'$d\' "{SCRIPT}")\nread_new_password false'],
+        input=stdin,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert (result.returncode == 0) is ok, result.stderr
+    if ok:
+        assert result.stdout == stdin.rstrip("\n")
+
+
+def test_read_new_password_generates_a_policy_compliant_password():
+    result = _run("read_new_password true")
+    assert result.returncode == 0
+    assert len(result.stdout) >= 12
+
+
+def test_hash_password_rejects_output_that_is_not_a_portal_hash():
+    result = _run(
+        "compose() { printf 'pbkdf2_sha256$600000$abc$def\\x27; DROP TABLE users; --'; }\n"
+        "printf secret | hash_password"
+    )
+    assert result.returncode != 0
+    assert "could not hash the password" in result.stderr
+
+
+def test_hash_password_accepts_a_portal_hash():
+    result = _run(
+        "compose() { [[ $3 == true ]] || printf 'pbkdf2_sha256$600000$c2FsdA$ZGlnZXN0'; }\n"
+        "printf secret | hash_password"
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "pbkdf2_sha256$600000$c2FsdA$ZGlnZXN0"

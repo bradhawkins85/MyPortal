@@ -83,6 +83,13 @@ Commands:
   superadmin revoke USERNAME [--force]
         Revoke super administrator rights. Refuses to remove the last active
         super administrator unless --force is given.
+  superadmin create USERNAME [--first-name NAME] [--last-name NAME] [--generate-password]
+        Create a new super administrator, for example when nobody can sign in.
+  superadmin reset-password USERNAME [--generate-password] [--reset-2fa]
+        Set a new password for a super administrator and sign it out of all
+        sessions; --reset-2fa also removes its authenticator apps and passkeys.
+        Passwords are prompted for, read from standard input when it is not a
+        terminal, or generated and printed with --generate-password.
   help                 Show this help.
 
 Installation directory: ${MYPORTAL_DIR} (override with MYPORTAL_DIR).
@@ -748,6 +755,9 @@ EOF
 # ---------------------------------------------------------------------------
 # Super administrators
 # ---------------------------------------------------------------------------
+MIN_PASSWORD_LENGTH=12   # the portal's own password policy
+MAX_PASSWORD_LENGTH=128
+
 db_sql() {
   # Run the SQL read from stdin against the MyPortal database; prints
   # tab-separated rows without a header.
@@ -762,6 +772,10 @@ sql_string() {
     "$(printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n')"
 }
 
+sql_string_or_null() {
+  if [[ -n "$1" ]]; then sql_string "$1"; else printf 'NULL'; fi
+}
+
 find_user() {
   # find_user USERNAME -> "id<TAB>email<TAB>is_super_admin<TAB>is_active"
   db_sql <<SQL
@@ -769,27 +783,85 @@ SELECT id, email, is_super_admin, is_active FROM users WHERE email = $(sql_strin
 SQL
 }
 
+audit_cli_action() {
+  # audit_cli_action ACTION USER_ID: record the change in the portal's audit log.
+  db_sql >/dev/null <<SQL || warn "could not record the change in the audit log."
+INSERT INTO audit_logs (action, entity_type, entity_id, metadata, created_at)
+VALUES ('$1', 'user', $2, JSON_OBJECT('source', 'myportal-docker'), UTC_TIMESTAMP());
+SQL
+}
+
+read_new_password() {
+  # read_new_password GENERATE -> prints the password. Prompts on a terminal,
+  # otherwise reads one line from standard input.
+  local generate="$1" password confirm
+  if [[ "$generate" == true ]]; then
+    random_secret 20
+    return 0
+  fi
+  if [[ -t 0 ]]; then
+    read -r -s -p "New password: " password </dev/tty; printf '\n' >&2
+    read -r -s -p "Repeat password: " confirm </dev/tty; printf '\n' >&2
+    [[ "$password" == "$confirm" ]] || die "the passwords do not match."
+  else
+    IFS= read -r password || [[ -n "$password" ]] || die "no password on standard input (or use --generate-password)."
+  fi
+  ((${#password} >= MIN_PASSWORD_LENGTH)) || die "the password must be at least ${MIN_PASSWORD_LENGTH} characters."
+  ((${#password} <= MAX_PASSWORD_LENGTH)) || die "the password must be at most ${MAX_PASSWORD_LENGTH} characters."
+  printf '%s' "$password"
+}
+
+hash_password() {
+  # Hash the password read from stdin with the portal's own password hashing,
+  # so the stored format always matches the running release.
+  local program='import sys; from app.security.passwords import hash_password; sys.stdout.write(hash_password(sys.stdin.read()))'
+  local hash
+  if compose exec -T app true >/dev/null 2>&1; then
+    hash=$(compose exec -T app python -c "$program")
+  else
+    hash=$(compose run --rm --no-deps -T app python -c "$program" 2>/dev/null)
+  fi
+  # Only the portal's PBKDF2 format is accepted; it also makes the value safe
+  # to place in SQL.
+  [[ "$hash" =~ ^pbkdf2_sha256\$[0-9]+\$[A-Za-z0-9_-]+\$[A-Za-z0-9_-]+$ ]] \
+    || die "could not hash the password with the MyPortal image."
+  printf '%s' "$hash"
+}
+
+superadmin_usage() {
+  die "usage: myportal-docker superadmin list
+       myportal-docker superadmin grant USERNAME
+       myportal-docker superadmin revoke USERNAME [--force]
+       myportal-docker superadmin create USERNAME [--first-name NAME] [--last-name NAME] [--generate-password]
+       myportal-docker superadmin reset-password USERNAME [--generate-password] [--reset-2fa]"
+}
+
 cmd_superadmin() {
   local action="${1:-}"
   (($#)) && shift
-  local username="" force=false
+  local username="" force=false generate=false reset_2fa=false first_name="" last_name=""
   while (($#)); do
     case "$1" in
       --force) force=true; shift ;;
+      --generate-password) generate=true; shift ;;
+      --reset-2fa) reset_2fa=true; shift ;;
+      --first-name) (($# >= 2)) || die "--first-name needs a value."; first_name="$2"; shift 2 ;;
+      --last-name) (($# >= 2)) || die "--last-name needs a value."; last_name="$2"; shift 2 ;;
       -*) die "unknown option for superadmin: $1" ;;
       *) [[ -z "$username" ]] || die "superadmin takes a single USERNAME."; username="$1"; shift ;;
     esac
   done
   case "$action" in
-    list|grant|revoke) ;;
-    *) die "usage: myportal-docker superadmin list | grant USERNAME | revoke USERNAME [--force]" ;;
+    list) [[ -z "$username" ]] || superadmin_usage ;;
+    grant|revoke|create|reset-password) [[ -n "$username" ]] || superadmin_usage ;;
+    *) superadmin_usage ;;
   esac
   require_root
   require_installed
   compose up -d db >/dev/null 2>&1 || true
+  local db_error="could not query the database. Is MyPortal running? Check with 'myportal-docker status'."
 
   if [[ "$action" == list ]]; then
-    [[ -z "$username" ]] || die "usage: myportal-docker superadmin list"
     local rows
     rows=$(db_sql <<'SQL'
 -- Blank names become "-" so the tab-separated columns stay aligned.
@@ -797,7 +869,7 @@ SELECT id, email, COALESCE(NULLIF(TRIM(CONCAT(COALESCE(first_name, ''), ' ', COA
        IF(is_active = 1, 'yes', 'no')
 FROM users WHERE is_super_admin = 1 ORDER BY LOWER(email), id;
 SQL
-    ) || die "could not query the database. Is MyPortal running? Check with 'myportal-docker status'."
+    ) || die "$db_error"
     if [[ -z "$rows" ]]; then
       printf 'No users have super administrator rights.\n'
       return 0
@@ -810,35 +882,89 @@ SQL
     return 0
   fi
 
-  [[ -n "$username" ]] || die "usage: myportal-docker superadmin ${action} USERNAME"
   local record id email is_super is_active
-  record=$(find_user "$username") \
-    || die "could not query the database. Is MyPortal running? Check with 'myportal-docker status'."
+  record=$(find_user "$username") || die "$db_error"
+
+  if [[ "$action" == create ]]; then
+    [[ -z "$record" ]] \
+      || die "a user with username '${username}' already exists. Use 'superadmin grant' or 'superadmin reset-password' instead."
+    [[ "$username" =~ ^[^[:space:]@]+@[^[:space:]@]+$ && ${#username} -le 255 ]] \
+      || die "USERNAME must be the email address the user will sign in with."
+    local password hash
+    password=$(read_new_password "$generate")
+    hash=$(printf '%s' "$password" | hash_password)
+    # users.company_id is mandatory: use the first company, as the portal does
+    # for the first registered account, creating one when none exists.
+    id=$(db_sql <<SQL
+SET @company = (SELECT MIN(id) FROM companies);
+INSERT INTO companies (name) SELECT 'Default Company' FROM DUAL WHERE @company IS NULL;
+SET @company = COALESCE(@company, LAST_INSERT_ID());
+INSERT INTO users (email, password_hash, first_name, last_name, company_id, is_super_admin, is_active, email_verified_at)
+VALUES ($(sql_string "$username"), '${hash}', $(sql_string_or_null "$first_name"), $(sql_string_or_null "$last_name"),
+        @company, 1, 1, UTC_TIMESTAMP());
+SELECT LAST_INSERT_ID();
+SQL
+    ) || die "could not create the user."
+    audit_cli_action cli.superadmin.create "$id"
+    info "Created super administrator ${username}."
+    [[ "$generate" != true ]] || printf 'Password: %s\n' "$password"
+    return 0
+  fi
+
   [[ -n "$record" ]] || die "no user with username '${username}'. List users with super administrator rights with 'myportal-docker superadmin list'."
   IFS=$'\t' read -r id email is_super is_active <<<"$record"
 
-  if [[ "$action" == grant ]]; then
-    if [[ "$is_super" == 1 ]]; then
-      info "${email} already has super administrator rights."
-      return 0
-    fi
-    db_sql <<<"UPDATE users SET is_super_admin = 1 WHERE id = ${id};" >/dev/null
-    info "Granted super administrator rights to ${email}."
-    [[ "$is_active" == 1 ]] || warn "${email} is deactivated and cannot sign in until it is reactivated."
-    return 0
-  fi
-
-  if [[ "$is_super" != 1 ]]; then
-    info "${email} does not have super administrator rights."
-    return 0
-  fi
-  local others
-  others=$(db_sql <<<"SELECT COUNT(*) FROM users WHERE is_super_admin = 1 AND is_active = 1 AND id <> ${id};")
-  if [[ "$others" == 0 && "$force" != true ]]; then
-    die "${email} is the last active super administrator; revoking would leave nobody able to administer MyPortal. Grant another user first, or rerun with --force."
-  fi
-  db_sql <<<"UPDATE users SET is_super_admin = 0 WHERE id = ${id};" >/dev/null
-  info "Revoked super administrator rights from ${email}."
+  case "$action" in
+    grant)
+      if [[ "$is_super" == 1 ]]; then
+        info "${email} already has super administrator rights."
+        return 0
+      fi
+      db_sql <<<"UPDATE users SET is_super_admin = 1 WHERE id = ${id};" >/dev/null
+      audit_cli_action cli.superadmin.grant "$id"
+      info "Granted super administrator rights to ${email}."
+      [[ "$is_active" == 1 ]] || warn "${email} is deactivated and cannot sign in until it is reactivated."
+      ;;
+    revoke)
+      if [[ "$is_super" != 1 ]]; then
+        info "${email} does not have super administrator rights."
+        return 0
+      fi
+      local others
+      others=$(db_sql <<<"SELECT COUNT(*) FROM users WHERE is_super_admin = 1 AND is_active = 1 AND id <> ${id};")
+      if [[ "$others" == 0 && "$force" != true ]]; then
+        die "${email} is the last active super administrator; revoking would leave nobody able to administer MyPortal. Grant another user first, or rerun with --force."
+      fi
+      db_sql <<<"UPDATE users SET is_super_admin = 0 WHERE id = ${id};" >/dev/null
+      audit_cli_action cli.superadmin.revoke "$id"
+      info "Revoked super administrator rights from ${email}."
+      ;;
+    reset-password)
+      [[ "$is_super" == 1 ]] \
+        || die "${email} is not a super administrator; this command only resets super administrator passwords. Reset other users' passwords in the portal."
+      local password hash
+      password=$(read_new_password "$generate")
+      hash=$(printf '%s' "$password" | hash_password)
+      # Signing the user out everywhere ends any session opened with the old
+      # password.
+      db_sql >/dev/null <<SQL
+UPDATE users SET password_hash = '${hash}', force_password_change = 0 WHERE id = ${id};
+UPDATE user_sessions SET is_active = 0 WHERE user_id = ${id};
+SQL
+      audit_cli_action cli.superadmin.reset_password "$id"
+      info "Reset the password of ${email} and signed it out of all sessions."
+      if [[ "$reset_2fa" == true ]]; then
+        db_sql >/dev/null <<SQL
+DELETE FROM user_totp_authenticators WHERE user_id = ${id};
+DELETE FROM user_passkeys WHERE user_id = ${id};
+SQL
+        audit_cli_action cli.superadmin.reset_2fa "$id"
+        info "Removed the authenticator apps and passkeys of ${email}; two-factor sign-in is set up again at the next sign-in."
+      fi
+      [[ "$is_active" == 1 ]] || warn "${email} is deactivated and cannot sign in until it is reactivated."
+      [[ "$generate" != true ]] || printf 'Password: %s\n' "$password"
+      ;;
+  esac
 }
 
 main() {
