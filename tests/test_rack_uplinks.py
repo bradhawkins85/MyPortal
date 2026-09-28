@@ -85,13 +85,39 @@ def test_overview_names_the_far_rack_on_cross_rack_peers(monkeypatch):
         {"id": 201, "equipment_id": 2, "port_number": 1, "connector": "data", "peer_port_id": 101},
     ]
     monkeypatch.setattr(infrastructure.db, "fetch_all",
-                        AsyncMock(side_effect=[[], [], racks, equipment, ports, []]))
+                        AsyncMock(side_effect=[[], [], racks, equipment, ports, [], []]))
 
     result = asyncio.run(infrastructure.overview(1))
 
     core_port = result["equipment"][0]["ports"][0]
     assert core_port["peer"] == "Access switch · Port 1 (Comms B)"
     assert (core_port["peer_rack_id"], core_port["peer_equipment_id"]) == (20, 2)
+
+
+def test_overview_shows_asset_interface_links_on_rack_ports(monkeypatch):
+    """Linking an access point's eth0 to Switch 1 Port 1 marks that switch port connected."""
+    racks = [{"id": 10, "name": "Comms A", "unit_count": 42}]
+    equipment = [{"id": 1, "rack_id": 10, "rack_name": "Comms A", "name": "Switch 1", "item_type": "switch",
+                  "unit_height": 1, "width_lanes": 3, "depth_mode": "half", "power_draw_watts": None}]
+    ports = [
+        {"id": 101, "equipment_id": 1, "port_number": 1, "connector": "data"},
+        {"id": 102, "equipment_id": 1, "port_number": 2, "connector": "data"},
+    ]
+    links = [{"a_kind": "interface", "a_id": 7, "b_kind": "rack_port", "b_id": 101,
+              "interface_id": 7, "interface_name": "eth0",
+              "interface_asset_id": 55, "interface_asset_name": "Office AP"}]
+    monkeypatch.setattr(infrastructure.db, "fetch_all",
+                        AsyncMock(side_effect=[[], [], racks, equipment, ports, links, []]))
+
+    result = asyncio.run(infrastructure.overview(1))
+
+    item = result["equipment"][0]
+    assert item["ports"][0]["peer"] == "Office AP · eth0"
+    assert item["ports"][0]["network_peer_asset_id"] == 55
+    assert item["ports"][1]["peer"] is None
+    assert item["linked_port_count"] == 1
+    drawn = rack_dashboard._drawn_ports(item)
+    assert [port["linked"] for port in drawn] == [True, False]
 
 
 def test_rack_page_shows_uplinks_and_picker_groups_items_by_rack():

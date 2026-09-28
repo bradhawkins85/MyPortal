@@ -88,7 +88,8 @@ def _drawn_ports(item: Mapping[str, Any], rear: bool = False) -> list[dict[str, 
         drawn = [{"number": int(port["port_number"]), "connector": str(port.get("connector") or "data"),
                   "linked": (port.get("asset_id") is not None or bool(port.get("label"))
                              or port.get("source_port_id") is not None
-                             or port.get("peer_port_id") is not None or bool(port.get("fed_items")))}
+                             or port.get("peer_port_id") is not None or bool(port.get("peer"))
+                             or bool(port.get("fed_items")))}
                  for port in ports]
     else:
         drawn = [{"number": 0, "connector": connector, "linked": False}

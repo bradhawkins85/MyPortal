@@ -174,6 +174,7 @@ async def overview(company_id: int) -> dict[str, list[dict[str, Any]]]:
             if source:
                 source["fed_items"].append(f"{port['equipment_name']} · {port['display_label']}")
                 source["fed_port_id"] = port["id"]
+    await _annotate_network_links(company_id, ports_by_id)
     for item in equipment:
         item["linked_port_count"] = sum(
             1 for port in item["ports"]
@@ -203,6 +204,33 @@ async def overview(company_id: int) -> dict[str, list[dict[str, Any]]]:
     return {"networks": networks, "addresses": addresses, "racks": racks,
             "equipment": equipment, "reservations": reservations,
             "power_outlets": power_outlets}
+
+
+async def _annotate_network_links(company_id: int, ports_by_id: dict[int, dict[str, Any]]) -> None:
+    """Show network map links (e.g. an asset's eth0 to a switch port) on the rack ports they end on."""
+    links = await db.fetch_all(
+        """SELECT l.a_kind, l.a_id, l.b_kind, l.b_id, i.id interface_id, i.name interface_name,
+                  a.id interface_asset_id, a.name interface_asset_name
+           FROM network_links l
+           LEFT JOIN asset_interfaces i ON i.company_id=l.company_id AND i.id=CASE
+               WHEN l.a_kind='interface' THEN l.a_id WHEN l.b_kind='interface' THEN l.b_id END
+           LEFT JOIN assets a ON a.id=i.asset_id
+           WHERE l.company_id=%s AND (l.a_kind='rack_port' OR l.b_kind='rack_port')""",
+        (company_id,)) or []
+    for link in links:
+        ends = [(link["a_kind"], link["a_id"]), (link["b_kind"], link["b_id"])]
+        for (kind, port_id), (far_kind, far_id) in (ends, ends[::-1]):
+            port = ports_by_id.get(int(port_id)) if kind == "rack_port" else None
+            if port is None or port.get("peer"):
+                continue
+            if far_kind == "interface" and link.get("interface_id") is not None:
+                port["peer"] = f"{link['interface_asset_name']} · {link['interface_name']}"
+                port["network_peer_asset_id"] = link["interface_asset_id"]
+            elif far_kind == "rack_port" and int(far_id) in ports_by_id:
+                far = ports_by_id[int(far_id)]
+                port["peer"] = f"{far['equipment_name']} · {far['display_label']}"
+                if far["rack_id"] != port.get("rack_id"):
+                    port["peer"] += f" ({far['rack_name']})"
 
 
 async def for_asset(company_id: int, asset_id: int) -> dict[str, list[dict[str, Any]]]:
