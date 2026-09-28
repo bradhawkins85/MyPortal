@@ -559,6 +559,12 @@ async def create_manual_asset(request: Request):
     return RedirectResponse(url=f"/assets/{asset_id}", status_code=303)
 
 
+def _require_expirations_available() -> None:
+    """Expirations are linked to the Websites feature pack; hide them with it."""
+    if not _main()._feature_pack_available("websites"):
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
 def _expiration_key(item: dict[str, Any]) -> tuple[str, int, str]:
     return str(item["source_type"]), int(item["source_id"]), str(item["source_field"])
 
@@ -566,6 +572,7 @@ def _expiration_key(item: dict[str, Any]) -> tuple[str, int, str]:
 @router.get("/expirations", response_class=HTMLResponse)
 async def expirations_page(request: Request):
     """Aggregate dates live from sources the current user may access."""
+    _require_expirations_available()
     main_module = _main()
     user, membership, company, company_id, redirect = await _load_asset_context(request, "menu.expirations")
     if redirect:
@@ -641,6 +648,7 @@ async def expirations_page(request: Request):
 
 @router.post("/expirations/settings")
 async def save_expiration_settings(request: Request):
+    _require_expirations_available()
     main_module = _main()
     user, membership, _company, company_id, redirect = await _load_asset_context(request, "menu.expirations")
     if redirect:
@@ -671,6 +679,7 @@ async def save_expiration_settings(request: Request):
 
 @router.post("/expirations/remind")
 async def send_expiration_reminder(request: Request):
+    _require_expirations_available()
     main_module = _main()
     user, membership, _company, company_id, redirect = await _load_asset_context(request, "menu.expirations")
     if redirect:
