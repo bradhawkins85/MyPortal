@@ -103,15 +103,6 @@ BY_KEY: dict[str, AssetType] = {item.key: item for item in ASSET_TYPES}
 DEFAULT_KEY = "other"
 SOURCES = ("auto", "manual")
 
-# Rack item types are drawn with the matching asset icon when a rack item has
-# no linked asset.
-RACK_ITEM_ASSET_TYPES = {
-    "server": "server", "switch": "switch", "storage": "storage",
-    "patch_panel": "patch_panel", "kvm": "other", "pdu": "pdu", "ups": "ups",
-    "fan_tray": "other", "shelf": "other", "cable_management": "other",
-}
-
-
 def get(key: str | None) -> AssetType:
     """Return the catalogue entry for ``key``, defaulting to "Other device"."""
     return BY_KEY.get(str(key or "").strip().lower(), BY_KEY[DEFAULT_KEY])

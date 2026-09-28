@@ -930,6 +930,11 @@ async def racks_page(request: Request):
         return data
     data["title"] = "Rack management"
     data["item_types"] = rack_item_types.ITEM_TYPES
+    data["item_type_groups"] = rack_item_types.grouped()
+    data["default_item_type"] = rack_item_types.DEFAULT_KEY
+    data["asset_item_types"] = {
+        asset["id"]: rack_item_types.for_asset(asset) for asset in data.get("assets") or [] if asset.get("id")
+    }
     data["connectors"] = rack_item_types.CONNECTORS
     data["image_path"] = rack_item_types.image_path
     data["port_catalog"] = rack_dashboard.port_catalog(data.get("equipment") or [])

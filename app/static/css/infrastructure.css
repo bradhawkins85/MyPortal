@@ -393,6 +393,8 @@ dialog.rack-dialog--reservation { width: min(95vw, 42rem); max-width: 42rem; }
 .rack-choice { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
 .rack-choice legend { grid-column: 1 / -1; }
 .rack-choice--type { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.rack-choice__group { grid-column: 1 / -1; margin: var(--space-2) 0 0; color: var(--rack-muted); font-size: .7rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.rack-choice__group:first-of-type { margin-top: 0; }
 .rack-choice__option { position: relative; display: block; min-width: 0; cursor: pointer; }
 .rack-choice__option input, .rack-segment input { position: absolute; opacity: 0; pointer-events: none; }
 .rack-choice__option > span { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: .6rem; height: 100%; padding: .65rem .75rem; border: 1px solid var(--rack-line); border-radius: var(--radius-sm); background: var(--rack-panel); transition: border-color .15s ease, background .15s ease; }
