@@ -96,6 +96,11 @@
       window.requestAnimationFrame(() => window.scrollTo(0, saved.y));
     }
   } catch { /* storage unavailable */ }
+  // Links from another rack's uplink list land on the far item in the item list.
+  const placementHash = /^#(placement-\d+)$/.exec(window.location.hash);
+  if (placementHash && document.getElementById(placementHash[1])) {
+    window.requestAnimationFrame(() => focusListItem(placementHash[1]));
+  }
   document.querySelector('[data-rack-jump]')?.addEventListener('change', event => event.currentTarget.form?.requestSubmit());
   document.querySelectorAll('[data-rack-list-open]').forEach(button => button.addEventListener('click', event => {
     const list = document.getElementById(button.dataset.rackListOpen);
@@ -263,7 +268,8 @@
   catalog.forEach(entry => entry.ports.forEach(port => catalogPorts.set(String(port.id), { ...port, item: entry })));
   // Which remote connector a port links to: network port to network port, outlet to PSU.
   const peerConnector = { data: 'data', iec: 'psu', '3pin': 'psu' };
-  const deviceValueFor = (entry) => entry.asset_id ? String(entry.asset_id) : `item:${entry.id}`;
+  // Remote ports reopen with their rack item chosen, so the picker shows which rack it is in.
+  const deviceValueFor = (entry) => `item:${entry.id}`;
   const preview = form.querySelector('[data-placement-preview]');
   const map = form.querySelector('[data-placement-map]');
   const mapCaption = form.querySelector('[data-placement-map-caption]');
@@ -354,9 +360,13 @@
           select.querySelectorAll('option[data-equipment-id]').forEach(option => {
             if (editingId !== null && option.dataset.equipmentId === editingId) option.remove();
           });
-        } else if (!peerConnector[key]) {
+        } else if (editingId !== null) {
+          // An item cannot link to itself.
+          select.querySelector(`option[value="item:${CSS.escape(editingId)}"]`)?.remove();
+        }
+        if (!isPower && !peerConnector[key]) {
           // KVM device ports link to an asset only.
-          select.querySelector('optgroup[data-rack-items]')?.remove();
+          select.querySelectorAll('optgroup[data-rack-items]').forEach(group => group.remove());
         }
         select.value = saved.asset;
         if (select.value !== saved.asset) select.value = '';

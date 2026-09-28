@@ -152,6 +152,7 @@ async def overview(company_id: int) -> dict[str, list[dict[str, Any]]]:
         for port in item["ports"]:
             port["equipment_name"] = item.get("name") or item.get("asset_name") or "Rack item"
             port["rack_name"] = item.get("rack_name")
+            port["rack_id"] = item.get("rack_id")
             port["fed_items"] = []
             port["fed_port_id"] = None
             ports_by_id[port["id"]] = port
@@ -164,6 +165,12 @@ async def overview(company_id: int) -> dict[str, list[dict[str, Any]]]:
             port["peer_port_id"] = peer["id"] if peer else None
             port["source"] = f"{source['equipment_name']} · {source['display_label']}" if source else None
             port["peer"] = f"{peer['equipment_name']} · {peer['display_label']}" if peer else None
+            # Uplinks to another rack name the far rack so the link reads on its own.
+            port["peer_equipment_id"] = peer["equipment_id"] if peer else None
+            port["peer_rack_id"] = peer["rack_id"] if peer else None
+            port["peer_rack_name"] = peer["rack_name"] if peer else None
+            if peer and peer["rack_id"] != item.get("rack_id"):
+                port["peer"] += f" ({peer['rack_name']})"
             if source:
                 source["fed_items"].append(f"{port['equipment_name']} · {port['display_label']}")
                 source["fed_port_id"] = port["id"]
