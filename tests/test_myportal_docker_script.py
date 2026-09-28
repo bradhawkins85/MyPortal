@@ -211,3 +211,91 @@ def test_user_rejects_bad_usage_before_touching_docker(args):
     )
     assert result.returncode != 0
     assert "usage: myportal-docker user verify USERNAME" in result.stderr
+
+
+def _upgrade_harness(tmp_path, *, installed: str, latest: str, published: bool) -> str:
+    """Shell prelude that stubs out Docker, GitHub and root checks for cmd_upgrade."""
+    project_env = tmp_path / ".env"
+    project_env.write_text(f"MYPORTAL_VERSION={installed}\n", encoding="utf-8")
+    return (
+        f'PROJECT_ENV="{project_env}"\n'
+        "require_root() { :; }; require_installed() { :; }; ensure_docker() { :; }\n"
+        f"latest_release_tag() {{ printf '%s' '{latest}'; }}\n"
+        f"release_published() {{ echo \"published? $1\" >&2; {'true' if published else 'false'}; }}\n"
+        'self_update() { echo "self_update $*"; }\n'
+        # Called as image=$(obtain_image ...): report on stderr, then stop the run.
+        'obtain_image() { echo "obtain_image $*" >&2; exit 3; }\n'
+    )
+
+
+def test_upgrade_refreshes_script_when_already_on_latest_release(tmp_path):
+    result = _run(_upgrade_harness(tmp_path, installed="v0.6.4", latest="v0.6.4", published=True) + "cmd_upgrade --yes")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["self_update v0.6.4 upgrade --yes"]
+    assert "already the latest release" in result.stderr
+
+
+def test_upgrade_waits_until_release_is_fully_published(tmp_path):
+    result = _run(_upgrade_harness(tmp_path, installed="v0.6.3", latest="v0.6.4", published=False) + "cmd_upgrade --yes")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""  # self_update did not run
+    assert "obtain_image" not in result.stderr
+    assert "still being published" in result.stderr
+
+
+def test_upgrade_proceeds_once_release_is_published(tmp_path):
+    result = _run(_upgrade_harness(tmp_path, installed="v0.6.3", latest="v0.6.4", published=True) + "cmd_upgrade --yes")
+    assert result.stdout.splitlines() == ["self_update v0.6.4 upgrade --yes"]
+    assert "obtain_image v0.6.4" in result.stderr
+
+
+def test_explicit_upgrade_does_not_wait_for_publication(tmp_path):
+    result = _run(
+        _upgrade_harness(tmp_path, installed="v0.6.3", latest="v0.6.4", published=False)
+        + "cmd_upgrade --version v0.6.4 --yes"
+    )
+    assert "published?" not in result.stderr
+    assert "obtain_image v0.6.4" in result.stderr
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_release_published_checks_the_release_script_asset(tmp_path, available):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_curl = bin_dir / "curl"
+    fake_curl.write_text(f'#!/usr/bin/env bash\necho "$*" >> "$CALLS"\nexit {0 if available else 22}\n', encoding="utf-8")
+    fake_curl.chmod(0o755)
+    calls = tmp_path / "calls"
+    result = _run('release_published v0.6.4', env={"PATH": f"{bin_dir}:{os.environ['PATH']}", "CALLS": str(calls)})
+    assert (result.returncode == 0) is available
+    assert "https://github.com/bradhawkins85/MyPortal/releases/download/v0.6.4/myportal-docker.sh" in calls.read_text()
+
+
+@pytest.mark.parametrize("same", [True, False])
+def test_self_update_installs_the_installed_release_script(tmp_path, same):
+    published = "#!/usr/bin/env bash\necho new\n"
+    installed = tmp_path / "myportal-docker"
+    installed.write_text(published if same else "#!/usr/bin/env bash\necho old\n", encoding="utf-8")
+    project_env = tmp_path / ".env"
+    project_env.write_text("MYPORTAL_VERSION=v0.6.4\n", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    source = tmp_path / "published.sh"
+    source.write_text(published, encoding="utf-8")
+    fake_curl = bin_dir / "curl"
+    # Honour "-o FILE" by copying the published script there.
+    fake_curl.write_text(
+        '#!/usr/bin/env bash\nwhile (($#)); do [[ $1 == -o ]] && cp "$SRC" "$2"; shift; done\n', encoding="utf-8"
+    )
+    fake_curl.chmod(0o755)
+
+    result = _run(
+        f'INSTALLED_SCRIPT="{installed}"; PROJECT_ENV="{project_env}"\n'
+        "require_root() { :; }; require_installed() { :; }\n"
+        "cmd_self_update",
+        env={"PATH": f"{bin_dir}:{os.environ['PATH']}", "SRC": str(source)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert installed.read_text(encoding="utf-8") == published
+    assert ("already the version" in result.stderr) is same
