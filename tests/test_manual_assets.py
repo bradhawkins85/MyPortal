@@ -37,9 +37,31 @@ async def test_manual_create_uses_active_company_and_redirects_to_canonical_page
     assert response.status_code == 303
     assert response.headers["location"] == "/assets/91"
     assert create.await_args.kwargs == {
-        "company_id": 4, "created_by": 8, "name": "Printer", "type": "Printer",
-        "status": "Active", "serial_number": "P-1", "location": "Office",
+        "company_id": 4, "created_by": 8, "name": "Printer", "type": "Printer / MFP",
+        "asset_type": "printer", "status": "Active", "serial_number": "P-1", "location": "Office",
     }
+
+
+@pytest.mark.anyio
+async def test_manual_create_takes_type_from_catalogue(monkeypatch):
+    monkeypatch.setattr(routes, "_asset_write_context", AsyncMock(return_value=({"id": 8}, {"id": 4}, 4, None)))
+    create = AsyncMock(return_value=92)
+    monkeypatch.setattr(routes.asset_repo, "create_manual_asset", create)
+    monkeypatch.setattr(routes.asset_custom_fields_repo, "list_field_definitions", AsyncMock(return_value=[]))
+    monkeypatch.setattr(routes.audit_service, "record", AsyncMock())
+
+    await routes.create_manual_asset(_request(body=b"name=Hilltop+link&asset_type=wireless_bridge"))
+
+    assert create.await_args.kwargs["asset_type"] == "wireless_bridge"
+    assert create.await_args.kwargs["type"] == "Point-to-point wireless bridge"
+
+
+@pytest.mark.anyio
+async def test_manual_create_rejects_unknown_catalogue_type(monkeypatch):
+    monkeypatch.setattr(routes, "_asset_write_context", AsyncMock(return_value=({"id": 8}, {"id": 4}, 4, None)))
+    with pytest.raises(routes.HTTPException) as error:
+        await routes.create_manual_asset(_request(body=b"name=X&asset_type=spaceship"))
+    assert error.value.status_code == 422
 
 
 @pytest.mark.anyio

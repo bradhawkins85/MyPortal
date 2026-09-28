@@ -1,0 +1,7 @@
+{
+  "guid": "47f986a2-5cb0-4261-9a9b-4477f4d7fbe8",
+  "occurred_at": "2026-09-28T00:00Z",
+  "change_type": "Feature",
+  "summary": "Add a Network map that ties together IPAM, Racks and Assets: browse the diagram, export it as PDF, PNG or SVG with a chosen level of detail and device types, document interfaces and point-to-point wireless links for devices outside racks, and type assets (including Tactical RMM synced assets) from a fixed list with icons.",
+  "content_hash": "46afd2316812ea32ed4f265cb46a6ea2a4ebd6f3a3ff02184ed2bf8f37809852"
+}

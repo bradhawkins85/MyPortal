@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block title %}Assets{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% endblock %}
 
 {% block header_title %}
   <span class="header__title-text">Assets</span>
@@ -118,6 +119,10 @@
                 {% if key == 'name' %}
                   <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ value or '' }}" data-mobile-priority="essential">
                     <a href="/assets/{{ asset.id }}">{{ value or ('Asset ' ~ asset.id) }}</a>
+                  </td>
+                {% elif key == 'type' %}
+                  <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ value or '' }}" {% if mobile_priority %}data-mobile-priority="{{ mobile_priority }}"{% endif %}{% if asset.reported_type and asset.reported_type != value %} title="Reported as {{ asset.reported_type }}"{% endif %}>
+                    {% if asset.asset_type_icon %}<img class="asset-type-icon" src="{{ asset.asset_type_icon }}" alt="" width="20" height="20" loading="lazy">{% endif %}{{ value or '—' }}
                   </td>
                 {% elif key in ['ram_gb', 'approx_age', 'performance_score'] %}
                   <td
