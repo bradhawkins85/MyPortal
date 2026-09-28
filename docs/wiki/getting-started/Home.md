@@ -5,6 +5,7 @@ Welcome to the MyPortal documentation wiki. MyPortal is a Python-first customer 
 ## Quick Start
 
 - [Installation and Setup](Setup-and-Installation)
+- [Onboarding Wizard](Onboarding-Wizard)
 - [Configuration Reference](Configuration)
 - [Authentication](Authentication-API)
 

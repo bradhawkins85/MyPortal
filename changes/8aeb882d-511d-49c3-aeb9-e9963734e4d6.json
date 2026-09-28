@@ -1,7 +1,7 @@
 {
   "guid": "8aeb882d-511d-49c3-aeb9-e9963734e4d6",
-  "occurred_at": "2026-09-23T00:00:00Z",
-  "change_type": "fix",
+  "occurred_at": "2026-09-23T00:00Z",
+  "change_type": "Fix",
   "summary": "Aligned Agent source filters and retrieval routing so all searchable portal sources can reach answer evidence.",
-  "content_hash": "agent-source-routing-registry"
+  "content_hash": "2266fb12615015fab2e4d2d1238a0594cc006e9360bc49cf4e506f5080a7b9d4"
 }

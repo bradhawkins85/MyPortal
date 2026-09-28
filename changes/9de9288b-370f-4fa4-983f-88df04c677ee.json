@@ -1,7 +1,7 @@
 {
   "guid": "9de9288b-370f-4fa4-983f-88df04c677ee",
-  "occurred_at": "2026-09-26T00:00:00Z",
+  "occurred_at": "2026-09-26T00:00Z",
   "change_type": "security",
   "summary": "Gate documentation rollout on role-aware browser journeys",
-  "content_hash": "browser-gate-documentation-rollout-v1"
+  "content_hash": "09834832294491bd9c96c6225081ed02a6e8ba8ed96a699b0dd339d35e57943a"
 }

@@ -32,6 +32,10 @@ The installer:
    database migrations run automatically when the container starts.
 5. Installs itself as `/usr/local/bin/myportal-docker`.
 
+Optionally run `sudo myportal-docker setup` to choose which features are
+enabled and configure their settings (see [Onboarding Wizard](Onboarding%20Wizard.md)),
+then `sudo myportal-docker restart`.
+
 Then open `http://<host>/` and register. The first account becomes the super
 administrator.
 
@@ -79,6 +83,7 @@ installations are upgraded with this script.
 | --- | --- |
 | `myportal-docker status` | Running release, containers and readiness |
 | `myportal-docker logs [--tail 100]` | Application logs (follows by default) |
+| `sudo myportal-docker setup` | Onboarding wizard: enable features and configure `myportal.env` (`--check` to verify it). See [Onboarding Wizard](Onboarding%20Wizard.md) |
 | `sudo myportal-docker restart` | Apply changes made to `myportal.env` |
 | `sudo myportal-docker backup` | Database dump plus uploaded files |
 | `sudo myportal-docker restore-db FILE` | Restore a database backup |

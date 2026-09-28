@@ -1,7 +1,7 @@
 {
   "guid": "5656a14b-938f-4fef-b771-5c29e0d92cc1",
-  "occurred_at": "2026-09-28T00:00:00Z",
-  "change_type": "feature",
+  "occurred_at": "2026-09-28T00:00Z",
+  "change_type": "Feature",
   "summary": "Added myportal-docker superadmin list, grant and revoke commands so server owners can manage super administrator rights by username from the command line.",
-  "content_hash": "docker-superadmin-cli-v1"
+  "content_hash": "0a414d84cf9fb4f92523391fd7a2eb60c92655ec75b3cf257b66fe3898c75f30"
 }

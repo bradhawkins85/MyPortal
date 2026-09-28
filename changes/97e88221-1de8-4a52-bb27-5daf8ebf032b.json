@@ -3,5 +3,5 @@
   "occurred_at": "2026-09-24T00:00Z",
   "change_type": "Fix",
   "summary": "Allow the first managed Microsoft 365 connection to be staged when only placeholder admin credentials exist.",
-  "content_hash": "9ad45930057158973827084033720df741420840d887326769636a946302e6ad"
+  "content_hash": "c399adc261580561e80838b830e5021fb7f5bf382cb0c087cbcde69c748246c0"
 }

@@ -1,7 +1,7 @@
 {
   "guid": "7bf44254-0bb9-4f04-a86c-fca5ebf0a4b6",
-  "occurred_at": "2026-09-25T00:00:00Z",
-  "change_type": "fix",
+  "occurred_at": "2026-09-25T00:00Z",
+  "change_type": "Fix",
   "summary": "Office 365 mailbox sign-in now uses delegated user authentication independently of tenant-level application configuration.",
-  "content_hash": "m365-mail-delegated-user-auth"
+  "content_hash": "0a14015a9c0d7f91891550953086096ef17fd87add0f523fe211b72c8c7f8c1b"
 }

@@ -1,7 +1,7 @@
 {
   "guid": "2584ec32-c3a0-42f9-afd5-dd784c60c4f2",
-  "occurred_at": "2026-09-22T00:00:00Z",
-  "change_type": "fix",
+  "occurred_at": "2026-09-22T00:00Z",
+  "change_type": "Fix",
   "summary": "Corrected AI quality foreign-key column types for MySQL compatibility.",
-  "content_hash": "ai-quality-mysql-foreign-keys"
+  "content_hash": "4f29efcb399c10b3da8fb58049933b64f12144798ab84dc86a897c0466ca7446"
 }

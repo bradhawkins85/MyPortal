@@ -1,7 +1,7 @@
 {
   "guid": "7898ae36-075e-4c9f-b8e7-2abdb7477e74",
-  "occurred_at": "2026-09-28T00:00:00Z",
+  "occurred_at": "2026-09-28T00:00Z",
   "change_type": "Fix",
   "summary": "Moved credential vault controls below company settings and made both credential panels collapsed by default.",
-  "content_hash": "f1e6062352bd49eec671444b6fd5aec6a16c767499d52efe2893817468f27d4f"
+  "content_hash": "4dd0a9634a3be5fbf8ed8a53a00d29f2ea2bdb1ea799e2ba78748980a8c03c5c"
 }
