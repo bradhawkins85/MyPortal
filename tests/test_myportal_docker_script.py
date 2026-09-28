@@ -36,7 +36,7 @@ def test_script_is_valid_bash_and_ends_with_main():
 def test_help_lists_commands():
     result = subprocess.run(["bash", str(SCRIPT), "help"], text=True, capture_output=True, check=False)
     assert result.returncode == 0
-    for command in ("install", "upgrade", "check", "backup", "restore-db", "auto-upgrade"):
+    for command in ("install", "upgrade", "check", "backup", "restore-db", "auto-upgrade", "superadmin"):
         assert command in result.stdout
 
 
@@ -122,3 +122,28 @@ def test_random_secret_length_and_alphabet():
 def test_image_repository_defaults_to_lowercase_ghcr_path():
     result = _run('printf "%s" "$MYPORTAL_IMAGE_REPO"')
     assert result.stdout == "ghcr.io/bradhawkins85/myportal"
+
+
+def test_sql_string_hex_encodes_the_value():
+    # 'x' OR 1=1 -- must reach MariaDB as data, never as SQL.
+    result = _run("sql_string \"x' OR 1=1 --\"")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == (
+        "CONVERT(UNHEX('7827204f5220313d31202d2d') USING utf8mb4) COLLATE utf8mb4_unicode_ci"
+    )
+
+
+@pytest.mark.parametrize(
+    "args",
+    ["", "bogus", "grant", "grant a@example.com b@example.com", "revoke a@example.com --bogus"],
+)
+def test_superadmin_rejects_bad_usage_before_touching_docker(args):
+    result = subprocess.run(
+        ["bash", "-c", f'"{SCRIPT}" superadmin {args}'],
+        text=True,
+        capture_output=True,
+        env={**os.environ, "MYPORTAL_DIR": "/nonexistent"},
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "Error:" in result.stderr

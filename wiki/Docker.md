@@ -83,6 +83,21 @@ installations are upgraded with this script.
 | `sudo myportal-docker backup` | Database dump plus uploaded files |
 | `sudo myportal-docker restore-db FILE` | Restore a database backup |
 
+## Super administrators
+
+Super administrator rights can be managed from the server, for example to
+recover access when no administrator can sign in. `USERNAME` is the email
+address the user signs in with (matched case-insensitively).
+
+| Command | Purpose |
+| --- | --- |
+| `sudo myportal-docker superadmin list` | List users with super administrator rights |
+| `sudo myportal-docker superadmin grant USERNAME` | Grant super administrator rights |
+| `sudo myportal-docker superadmin revoke USERNAME` | Revoke super administrator rights |
+
+`revoke` refuses to remove the last active super administrator; add `--force`
+to do it anyway. Changes apply on the user's next request; no restart is needed.
+
 ## Files and data
 
 | Path | Contents |

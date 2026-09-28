@@ -76,6 +76,13 @@ Commands:
   restore-db FILE      Restore a database backup (.sql.gz) made by this script.
   restart              Restart MyPortal (applies changes to myportal.env).
   auto-upgrade on|off  Check for and apply new releases daily.
+  superadmin list      List the users with super administrator rights.
+  superadmin grant USERNAME
+        Grant super administrator rights to a user (USERNAME is the email
+        address the user signs in with).
+  superadmin revoke USERNAME [--force]
+        Revoke super administrator rights. Refuses to remove the last active
+        super administrator unless --force is given.
   help                 Show this help.
 
 Installation directory: ${MYPORTAL_DIR} (override with MYPORTAL_DIR).
@@ -738,6 +745,102 @@ EOF
   esac
 }
 
+# ---------------------------------------------------------------------------
+# Super administrators
+# ---------------------------------------------------------------------------
+db_sql() {
+  # Run the SQL read from stdin against the MyPortal database; prints
+  # tab-separated rows without a header.
+  compose exec -T db sh -c \
+    'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" --batch --skip-column-names "$MARIADB_DATABASE"'
+}
+
+sql_string() {
+  # Quote an arbitrary value for SQL without escaping concerns: it is passed
+  # hex-encoded and compared with the users table's collation.
+  printf "CONVERT(UNHEX('%s') USING utf8mb4) COLLATE utf8mb4_unicode_ci" \
+    "$(printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n')"
+}
+
+find_user() {
+  # find_user USERNAME -> "id<TAB>email<TAB>is_super_admin<TAB>is_active"
+  db_sql <<SQL
+SELECT id, email, is_super_admin, is_active FROM users WHERE email = $(sql_string "$1") LIMIT 1;
+SQL
+}
+
+cmd_superadmin() {
+  local action="${1:-}"
+  (($#)) && shift
+  local username="" force=false
+  while (($#)); do
+    case "$1" in
+      --force) force=true; shift ;;
+      -*) die "unknown option for superadmin: $1" ;;
+      *) [[ -z "$username" ]] || die "superadmin takes a single USERNAME."; username="$1"; shift ;;
+    esac
+  done
+  case "$action" in
+    list|grant|revoke) ;;
+    *) die "usage: myportal-docker superadmin list | grant USERNAME | revoke USERNAME [--force]" ;;
+  esac
+  require_root
+  require_installed
+  compose up -d db >/dev/null 2>&1 || true
+
+  if [[ "$action" == list ]]; then
+    [[ -z "$username" ]] || die "usage: myportal-docker superadmin list"
+    local rows
+    rows=$(db_sql <<'SQL'
+-- Blank names become "-" so the tab-separated columns stay aligned.
+SELECT id, email, COALESCE(NULLIF(TRIM(CONCAT(COALESCE(first_name, ''), ' ', COALESCE(last_name, ''))), ''), '-'),
+       IF(is_active = 1, 'yes', 'no')
+FROM users WHERE is_super_admin = 1 ORDER BY LOWER(email), id;
+SQL
+    ) || die "could not query the database. Is MyPortal running? Check with 'myportal-docker status'."
+    if [[ -z "$rows" ]]; then
+      printf 'No users have super administrator rights.\n'
+      return 0
+    fi
+    printf '%-6s  %-40s  %-30s  %s\n' ID USERNAME NAME ACTIVE
+    local id email name active
+    while IFS=$'\t' read -r id email name active; do
+      printf '%-6s  %-40s  %-30s  %s\n' "$id" "$email" "$name" "$active"
+    done <<<"$rows"
+    return 0
+  fi
+
+  [[ -n "$username" ]] || die "usage: myportal-docker superadmin ${action} USERNAME"
+  local record id email is_super is_active
+  record=$(find_user "$username") \
+    || die "could not query the database. Is MyPortal running? Check with 'myportal-docker status'."
+  [[ -n "$record" ]] || die "no user with username '${username}'. List users with super administrator rights with 'myportal-docker superadmin list'."
+  IFS=$'\t' read -r id email is_super is_active <<<"$record"
+
+  if [[ "$action" == grant ]]; then
+    if [[ "$is_super" == 1 ]]; then
+      info "${email} already has super administrator rights."
+      return 0
+    fi
+    db_sql <<<"UPDATE users SET is_super_admin = 1 WHERE id = ${id};" >/dev/null
+    info "Granted super administrator rights to ${email}."
+    [[ "$is_active" == 1 ]] || warn "${email} is deactivated and cannot sign in until it is reactivated."
+    return 0
+  fi
+
+  if [[ "$is_super" != 1 ]]; then
+    info "${email} does not have super administrator rights."
+    return 0
+  fi
+  local others
+  others=$(db_sql <<<"SELECT COUNT(*) FROM users WHERE is_super_admin = 1 AND is_active = 1 AND id <> ${id};")
+  if [[ "$others" == 0 && "$force" != true ]]; then
+    die "${email} is the last active super administrator; revoking would leave nobody able to administer MyPortal. Grant another user first, or rerun with --force."
+  fi
+  db_sql <<<"UPDATE users SET is_super_admin = 0 WHERE id = ${id};" >/dev/null
+  info "Revoked super administrator rights from ${email}."
+}
+
 main() {
   local command="${1:-help}"
   (($#)) && shift
@@ -754,6 +857,7 @@ main() {
     restore-db) cmd_restore_db "$@" ;;
     restart) cmd_restart ;;
     auto-upgrade) cmd_auto_upgrade "$@" ;;
+    superadmin|super-admin) cmd_superadmin "$@" ;;
     help|-h|--help) usage ;;
     *) usage >&2; exit 2 ;;
   esac
