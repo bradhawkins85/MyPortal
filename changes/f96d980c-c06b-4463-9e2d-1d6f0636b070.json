@@ -1,0 +1,7 @@
+{
+  "guid": "f96d980c-c06b-4463-9e2d-1d6f0636b070",
+  "occurred_at": "2026-09-28T10:00Z",
+  "change_type": "Feature",
+  "summary": "Rack item types now match the asset types, grouped by category, with front and rear faceplate images for every type; linking an asset preselects its type.",
+  "content_hash": "e79e5d5e5653edc044846d0204bb7bc4af8ecbeb78bd95be2a3c6b6cd2815e3e"
+}
