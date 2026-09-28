@@ -36,7 +36,7 @@ def test_script_is_valid_bash_and_ends_with_main():
 def test_help_lists_commands():
     result = subprocess.run(["bash", str(SCRIPT), "help"], text=True, capture_output=True, check=False)
     assert result.returncode == 0
-    for command in ("install", "upgrade", "check", "backup", "restore-db", "auto-upgrade", "superadmin", "user verify"):
+    for command in ("install", "upgrade", "check", "backup", "restore-db", "auto-upgrade", "superadmin", "user verify", "setup"):
         assert command in result.stdout
 
 
