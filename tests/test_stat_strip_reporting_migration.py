@@ -7,6 +7,8 @@ from pathlib import Path
 
 MIGRATION = Path("migrations/381_stat_strip_reporting_queries.sql")
 M365_FIX_MIGRATION = Path("migrations/383_fix_m365_best_practices_stat_strip.sql")
+# Later migrations that add stat-strip catalogue entries for new templates.
+ADDITIONAL_MIGRATIONS = (Path("migrations/440_smb1001_evidence_help_links_reports.sql"),)
 
 # One reporting entry may back identical summary/detail or admin/dashboard strips.
 # Keeping this map beside the migration makes additions to the UI inventory visible
@@ -43,6 +45,7 @@ TEMPLATE_REPORTS = {
     "app/templates/reports/_sections/huntress_soc_detail.html": "stat-strip-report-huntress-soc",
     "app/templates/reports/_sections/m365_best_practices.html": "stat-strip-report-m365-best-practices",
     "app/templates/reports/_sections/orders_current_month.html": "stat-strip-report-orders-month",
+    "app/templates/reports/_sections/smb1001.html": "stat-strip-report-smb1001",
     "app/templates/reports/_sections/staff.html": "stat-strip-report-active-users",
     "app/templates/reports/_sections/tickets_last_month.html": "stat-strip-report-tickets-month",
     "app/templates/reports/_sections/voice_monitor.html": "stat-strip-report-voice-monitor",
@@ -78,6 +81,10 @@ def test_applied_stat_strip_catalogue_migration_remains_immutable() -> None:
 def test_stat_strip_catalogue_has_every_mapping_once() -> None:
     sql = MIGRATION.read_text()
     slugs = _catalogue_slugs(sql)
+    for migration in ADDITIONAL_MIGRATIONS:
+        added = migration.read_text()
+        slugs.extend(_catalogue_slugs(added))
+        assert "{{current.company}}" in added
     expected = {
         slug
         for mapping in TEMPLATE_REPORTS.values()

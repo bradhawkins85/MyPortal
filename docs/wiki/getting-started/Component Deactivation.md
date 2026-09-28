@@ -102,7 +102,8 @@ one with its current status.
 | Email Signature (My Profile) | `email_signature` | — (profile card only) | — |
 | Click to Call | `click_to_call` | `/api/click-to-call` | — |
 | Forms | `forms` | `/myforms`, `/forms`, `/admin/forms`, `/api/forms` | — |
-| Essential 8 Compliance | `essential8` | `/compliance`, `/api/essential8`, `/admin/marketing/essential8-help-links` | pack `compliance` is disabled |
+| SMB1001 Compliance | `smb1001` | `/compliance`, `/api/smb1001`, `/admin/marketing/smb1001-help-links` | pack `compliance` is disabled |
+| Essential 8 Compliance (legacy) | `essential8` | `/compliance/essential8`, `/compliance/control`, `/compliance/requirements`, `/api/essential8`, `/admin/marketing/essential8-help-links` | pack `compliance` is disabled |
 | GMP/GLP Compliance Checks | `gmp_glp` | — (content filter) | — |
 
 My Profile components: `outlook_contacts` removes the Outlook contacts card
@@ -112,10 +113,17 @@ click-to-call card and stops phone numbers being turned into call links;
 only. Stored values are kept, so an existing email signature remains available
 to automations.
 
-`essential8` removes the Compliance (Essential 8) menu entry, dashboard, control
-pages and API, the "Essential 8 help links" marketing page, and the Essential 8
-reporting queries from company overview reports. Compliance Checks stays
-available. Disabling the whole `compliance` pack also disables Essential 8.
+`smb1001` removes the SMB1001 menu entry, the SMB1001 dashboard and its API,
+the "SMB1001 help links" marketing page, and the SMB1001 report sections and
+reporting queries.
+Because the legacy Essential 8 pages live under `/compliance`, they are hidden
+too. Compliance Checks stays available.
+
+`essential8` removes the legacy Essential 8 pages and API, the "Essential 8
+help links" marketing page, the "Legacy Essential 8 records" and "Import
+Essential 8 progress" buttons on the SMB1001 page, and the Essential 8
+reporting queries from company overview reports. SMB1001 and Compliance Checks
+stay available. Disabling the whole `compliance` pack disables both.
 
 `gmp_glp` hides the GMP and GLP categories, their predefined checks, company
 assignments of those checks and the "Re-seed GMP/GLP" button from Compliance

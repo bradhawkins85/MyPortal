@@ -1,7 +1,7 @@
 {
   "guid": "58d0918e-c2fe-41cb-b289-b2cc0fb16bd5",
-  "occurred_at": "2026-09-25T00:00:00Z",
-  "change_type": "fix",
+  "occurred_at": "2026-09-25T00:00Z",
+  "change_type": "Fix",
   "summary": "Bound RAG relationship evaluation prompts to prevent model context overflow errors.",
-  "content_hash": "0d7bc4faeca0692c37ba148bc784d97c3db05c2120d7dd82c3fde0bf45f9fb9d"
+  "content_hash": "a8285d679804e1639c8e75ad8764e8a659c19f8ae195f8b830b7f93a6fa97b5c"
 }

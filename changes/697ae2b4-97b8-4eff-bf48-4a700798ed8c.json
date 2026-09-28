@@ -1,7 +1,7 @@
 {
   "guid": "697ae2b4-97b8-4eff-bf48-4a700798ed8c",
-  "occurred_at": "2026-09-27T00:00:00Z",
+  "occurred_at": "2026-09-27T00:00Z",
   "change_type": "Fix",
   "summary": "Allow switches and patch panels to be placed in racks before their ports are documented.",
-  "content_hash": "da6a02a110c67def1220464a3f7fac406968cb0997e688c9b909bff68871e064"
+  "content_hash": "21d9f747e3b5fa58b26ba03e5e2b03add50070f976988db261fcc04f4baf3ed9"
 }

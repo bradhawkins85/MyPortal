@@ -34,6 +34,7 @@ EXPECTED_SLUGS = {
     "email_signature",
     "click_to_call",
     "gmp_glp",
+    "smb1001",
     "essential8",
     "forms",
 }
@@ -249,21 +250,38 @@ def test_gmp_glp_list_checks_query_excludes_categories(monkeypatch):
     assert "cat.code NOT IN ('GMP', 'GLP')" in captured["query"]
 
 
-def test_essential8_paths_blocked_without_touching_compliance_checks():
+def test_essential8_paths_blocked_without_touching_smb1001_or_compliance_checks():
     policy = ComponentAvailability(disabled_feature_packs=frozenset({"essential8"}))
-    assert not policy.path_available("/compliance")
+    assert not policy.path_available("/compliance/essential8")
     assert not policy.path_available("/compliance/control/3")
+    assert not policy.path_available("/compliance/requirements/3/ticket")
     assert not policy.path_available("/api/essential8/controls")
     assert not policy.path_available("/admin/marketing/essential8-help-links")
+    assert policy.path_available("/compliance")
+    assert policy.path_available("/compliance/smb1001/4/ticket")
+    assert policy.path_available("/api/smb1001/tiers")
     assert policy.path_available("/compliance-checks")
     assert policy.path_available("/admin/compliance-checks/library")
     assert policy.path_available("/api/compliance-checks/checks")
 
 
-def test_essential8_sidebar_link_hidden(monkeypatch):
+def test_smb1001_paths_blocked_without_touching_compliance_checks():
+    policy = ComponentAvailability(disabled_feature_packs=frozenset({"smb1001"}))
+    assert not policy.path_available("/compliance")
+    assert not policy.path_available("/compliance/smb1001/4/ticket")
+    assert not policy.path_available("/api/smb1001/tiers")
+    assert policy.path_available("/compliance-checks")
+    assert policy.path_available("/api/compliance-checks/checks")
+
+
+def test_smb1001_sidebar_link(monkeypatch):
+    monkeypatch.setitem(main_module.templates.env.globals, "feature_pack_available", main_module._feature_pack_available)
     body = _render_sidebar(monkeypatch)
     assert 'href="/compliance"' in body
+    assert "SMB1001" in body
     body = _render_sidebar(monkeypatch, "essential8")
+    assert 'href="/compliance"' in body
+    body = _render_sidebar(monkeypatch, "smb1001")
     assert 'href="/compliance"' not in body
     assert 'href="/compliance-checks"' in body
 

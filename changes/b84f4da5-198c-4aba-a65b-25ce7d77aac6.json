@@ -1,7 +1,7 @@
 {
   "guid": "b84f4da5-198c-4aba-a65b-25ce7d77aac6",
-  "occurred_at": "2026-09-15T00:00:00Z",
-  "change_type": "fix",
+  "occurred_at": "2026-09-15T00:00Z",
+  "change_type": "Fix",
   "summary": "Removed the obsolete cart address-on-file shipping option and added selected shipping addresses to Xero invoice line items.",
-  "content_hash": "cart-shipping-address-xero-line-item"
+  "content_hash": "e8d3c5f8112d0641eb0f2ca0fc9f689530f424c40be8e6c744764e1f2e5253d7"
 }

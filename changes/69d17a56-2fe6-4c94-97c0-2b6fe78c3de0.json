@@ -1,7 +1,7 @@
 {
   "guid": "69d17a56-2fe6-4c94-97c0-2b6fe78c3de0",
-  "occurred_at": "2026-09-25T00:00:00Z",
-  "change_type": "fix",
+  "occurred_at": "2026-09-25T00:00Z",
+  "change_type": "Fix",
   "summary": "Request a verifiable Microsoft identity token when confirming or reconnecting a Microsoft 365 tenant.",
-  "content_hash": "m365-oauth-request-openid-identity-token"
+  "content_hash": "437867751a13847c6fe6dd7b4a9f8bf41569a8bc0910dc5e2073199aa06999a7"
 }

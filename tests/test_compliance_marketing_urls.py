@@ -68,8 +68,8 @@ def test_build_essential8_help_url_replaces_placeholder():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_compliance_page_no_longer_sets_per_control_help(monkeypatch):
-    request = _make_request("/compliance")
+async def test_essential8_legacy_page_no_longer_sets_per_control_help(monkeypatch):
+    request = _make_request("/compliance/essential8")
     captured: dict[str, object] = {}
 
     async def fake_render_template(template_name, request_obj, user_obj, *, extra):
@@ -121,7 +121,7 @@ async def test_compliance_page_no_longer_sets_per_control_help(monkeypatch):
         lambda: SimpleNamespace(_render_template=fake_render_template),
     )
 
-    await compliance_routes.compliance_page(request)
+    await compliance_routes.essential8_legacy_page(request)
 
     record = captured["extra"]["compliance_records"][0]
     assert record["show_compliance_help"] is False

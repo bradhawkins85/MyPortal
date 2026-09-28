@@ -1,7 +1,7 @@
 {
   "guid": "d23c5666-7cbb-47f0-9052-9df81e9ade85",
-  "occurred_at": "2026-09-27T01:57:09.592206+00:00",
+  "occurred_at": "2026-09-27T01:57Z",
   "change_type": "security",
   "summary": "Require external share verification codes during atomic credential reveal",
-  "content_hash": "206c8d5125cd89f12bfa0d39de38dfb331cc188e7fbd451b675f22bcf20c4fbf"
+  "content_hash": "b7b612cd3657766f5d5e934ccf0199d4e22f6a1ffb3a50ea7d3699886708cc7d"
 }

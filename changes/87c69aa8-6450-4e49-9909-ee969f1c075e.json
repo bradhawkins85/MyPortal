@@ -1,7 +1,7 @@
 {
   "guid": "87c69aa8-6450-4e49-9909-ee969f1c075e",
-  "occurred_at": "2026-09-24T00:00:00Z",
-  "change_type": "fix",
+  "occurred_at": "2026-09-24T00:00Z",
+  "change_type": "Fix",
   "summary": "Route Teams policy reads through isolated MicrosoftTeams sessions with per-company rollout and explicit provider contracts.",
-  "content_hash": "teams-supported-provider-routing"
+  "content_hash": "cabe7e93087429d6f1c7ba1787a1c759c675f9b06d05e3a4929ca1ac6837f498"
 }

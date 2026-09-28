@@ -1,7 +1,7 @@
 {
   "guid": "7f8408a8-5c92-49b4-bc6f-20d527a62417",
-  "occurred_at": "2026-09-24T00:00:00Z",
-  "change_type": "fix",
+  "occurred_at": "2026-09-24T00:00Z",
+  "change_type": "Fix",
   "summary": "Allow tray source upgrades to use GitHub Release delivery when no optional server-side checksum bundle was staged, while continuing to reject incomplete or invalid staged bundles.",
-  "content_hash": "7f8408a85c9249b4bc6f20d527a62417"
+  "content_hash": "de2c4b7f064e4bc80e7424ef1595998d42935b1bd7b91b4387c961d0674c1a66"
 }

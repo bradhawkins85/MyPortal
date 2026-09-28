@@ -1,7 +1,7 @@
 {
   "guid": "a536712a-aa84-44d5-a9db-1498a18544b5",
-  "occurred_at": "2026-09-27T04:28:18.159049Z",
-  "change_type": "feature",
+  "occurred_at": "2026-09-27T04:28Z",
+  "change_type": "Feature",
   "summary": "Introduced a high-fidelity graphical rack estate dashboard with dual elevations, capacity gauges, and a utilization heatmap.",
-  "content_hash": "24a2f3da730cfc2c0df8395fe125a134e66eb6ef240ffddccf154c3d3f56004e"
+  "content_hash": "062ab4f3aeb290011def8482885143e0da829d58c2b4f24797f6f315919f12c1"
 }

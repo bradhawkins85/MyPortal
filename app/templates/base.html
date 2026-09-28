@@ -173,7 +173,7 @@
           {% set staff_menu_is_explicit = 'menu.staff' in menu_access %}
           {% set can_manage_staff = feature_pack_available('staff') and (is_super_admin or (has_company_membership and staff_permission > 0 and (not staff_menu_is_explicit or has_staff_menu_access))) %}
           {% set can_manage_issues = feature_pack_available('issue_tracker') and ((has_issue_tracker_access | default(is_super_admin or (is_helpdesk_technician | default(false)))) or menu_access.get('menu.issues') in ['read', 'write']) %}
-          {% set can_view_compliance = feature_pack_available('compliance') and feature_pack_available('essential8') and ((can_view_compliance | default(false)) or is_super_admin or membership.get('can_view_compliance') or menu_access.get('menu.compliance') in ['read', 'write']) %}
+          {% set can_view_compliance = feature_pack_available('compliance') and feature_pack_available('smb1001') and ((can_view_compliance | default(false)) or is_super_admin or membership.get('can_view_compliance') or menu_access.get('menu.compliance') in ['read', 'write']) %}
           {% set can_view_m365_best_practices = (can_view_m365_best_practices | default(false)) or is_super_admin or membership.get('can_view_m365_best_practices') or menu_access.get('menu.m365.best_practices') in ['read', 'write'] %}
           {% set can_view_compliance_checks = (can_view_compliance_checks | default(false)) or is_super_admin or membership.get('can_view_compliance_checks') or menu_access.get('menu.compliance_checks') in ['read', 'write'] %}
           {% set can_manage_compliance_checks = (can_manage_compliance_checks | default(false)) or is_super_admin or membership.get('can_manage_compliance_checks') or menu_access.get('menu.compliance_checks.library') in ['read', 'write'] %}
@@ -597,7 +597,7 @@
                 <span class="menu__icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" focusable="false"><path d="M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
                 </span>
-                <span class="menu__label">Compliance</span>
+                <span class="menu__label">SMB1001</span>
               </a>
             </li>
           {% endif %}

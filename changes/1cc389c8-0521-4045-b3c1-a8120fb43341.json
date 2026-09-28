@@ -1,7 +1,7 @@
 {
   "guid": "1cc389c8-0521-4045-b3c1-a8120fb43341",
-  "occurred_at": "2026-09-27T00:00:00Z",
-  "change_type": "fix",
+  "occurred_at": "2026-09-27T00:00Z",
+  "change_type": "Fix",
   "summary": "Made the production and development install scripts complete a working installation on Ubuntu/Debian hosts, including MariaDB, nginx, the service account, migrations and the first blue/green deployment.",
-  "content_hash": "install-scripts-end-to-end"
+  "content_hash": "8178301b689b0174cdf6e1c63e18112b2b3503400d0997f7374648d4ef01467b"
 }

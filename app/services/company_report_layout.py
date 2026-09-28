@@ -33,7 +33,7 @@ def default_layout() -> list[dict[str, Any]]:
         ("Top mailboxes by size", "report-top-mailboxes-by-size"),
         ("Licenses", "report-licenses"),
         ("Subscriptions", "report-subscriptions"),
-        ("Essential 8 compliance", "report-essential-8-compliance-progress"),
+        ("SMB1001 compliance", "report-smb1001-compliance-progress"),
         ("Customer compliance checks", "report-customer-compliance-checks"),
         ("Tickets (past month)", "report-tickets-past-month"),
         ("Backup history", "report-backup-history"),
@@ -160,10 +160,12 @@ class LayoutReport:
 def _query_available(slug: Any) -> bool:
     """Hide reporting queries owned by a deployment-disabled component."""
 
-    if "essential-8" in str(slug or ""):
-        from app.services.component_availability import get_component_availability
+    text = str(slug or "")
+    for marker, component in (("essential-8", "essential8"), ("smb1001", "smb1001")):
+        if marker in text:
+            from app.services.component_availability import get_component_availability
 
-        return get_component_availability().feature_pack_available("essential8")
+            return get_component_availability().feature_pack_available(component)
     return True
 
 
