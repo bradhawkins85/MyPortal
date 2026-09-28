@@ -250,8 +250,47 @@ type HeartbeatRequest struct {
 // DefenderPolicy is the effective Defender configuration for this device.
 // A disabled policy is also returned when the company has not opted in.
 type DefenderPolicy struct {
-	Enabled    bool                `json:"enabled"`
-	Exclusions []DefenderExclusion `json:"exclusions"`
+	Enabled       bool                   `json:"enabled"`
+	Exclusions    []DefenderExclusion    `json:"exclusions"`
+	ScheduledScan *DefenderScheduledScan `json:"scheduled_scan,omitempty"`
+}
+
+// DefenderScheduledScan is the company's scheduled scan policy. A nil or
+// empty Type means MyPortal does not manage the endpoint's scan schedule.
+type DefenderScheduledScan struct {
+	Type string `json:"type"`
+	// Day is 0 (Monday) to 6 (Sunday), matching the portal's policy form.
+	Day  *int   `json:"day"`
+	Time string `json:"time"`
+}
+
+// DefenderPolicyResult reports how the endpoint reconciled the portal policy
+// so administrators can see settings that Tamper Protection or another
+// management system prevented the agent from applying.
+type DefenderPolicyResult struct {
+	Status           string               `json:"status"`
+	EvaluatedAt      time.Time            `json:"evaluated_at"`
+	TamperProtection DefenderTamperState  `json:"tamper_protection"`
+	Items            []DefenderPolicyItem `json:"items"`
+}
+
+// DefenderTamperState describes local controls that can block preference
+// changes. ProtectsExclusions is nil when Defender does not report it.
+type DefenderTamperState struct {
+	Enabled                 bool   `json:"enabled"`
+	Source                  string `json:"source,omitempty"`
+	ProtectsExclusions      *bool  `json:"protects_exclusions"`
+	LocalAdminMergeDisabled bool   `json:"local_admin_merge_disabled"`
+	ScheduleManagedByPolicy bool   `json:"schedule_managed_by_policy"`
+}
+
+// DefenderPolicyItem is the outcome for one policy setting.
+type DefenderPolicyItem struct {
+	Setting string `json:"setting"`
+	Value   string `json:"value"`
+	Action  string `json:"action"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
 }
 
 // DefenderExclusion is an exclusion selected by an administrator for this
@@ -275,6 +314,7 @@ type DefenderStatus struct {
 	HealthStatus              string                 `json:"health_status"`
 	Details                   map[string]interface{} `json:"details"`
 	Detections                []DefenderDetection    `json:"detections"`
+	PolicyResult              *DefenderPolicyResult  `json:"policy_result,omitempty"`
 }
 
 // DefenderDetection describes a threat recorded in Defender's protection history.

@@ -53,6 +53,9 @@ const (
 	heartbeatInterval = 30 * time.Second
 	configCacheName   = "tray-config.json"
 	stateFileName     = "tray-state.json"
+	// defenderPolicyStateFileName records the Defender exclusions and scan
+	// schedule the agent applied, so it never removes settings it did not add.
+	defenderPolicyStateFileName = "defender-policy.json"
 )
 
 var launchTrayUIForActiveUserFunc = launchTrayUIForActiveUser
@@ -131,6 +134,9 @@ type daemon struct {
 	pendingUIMessage *ipc.Message
 
 	networkScanMu sync.Mutex
+	// defenderScanMu serialises Defender scans, which run in the background
+	// because Start-MpScan blocks until a (possibly hours-long) scan finishes.
+	defenderScanMu sync.Mutex
 }
 
 func newDaemon(cfg *config.Config) *daemon {
@@ -274,21 +280,42 @@ func (d *daemon) processDefenderCommands() {
 			logger.Info("Skipping Defender commands because this device is not managed")
 			return
 		}
-		logger.Info("Executing Defender command %d (%s)", command.ID, command.CommandType)
-		executeErr := defender.Execute(command.CommandType, command.DetectionUID)
-		status := "completed"
-		result := map[string]interface{}{"message": "Command completed successfully"}
-		if executeErr != nil {
-			status = "failed"
-			result["message"] = executeErr.Error()
-			logger.Warn("Defender command %d failed: %v", command.ID, executeErr)
+		if defender.IsScan(command.CommandType) {
+			go func(command api.DefenderCommand) {
+				d.defenderScanMu.Lock()
+				defer d.defenderScanMu.Unlock()
+				// A queued scan may wait hours behind another one; confirm
+				// the device is still managed before it starts.
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				policy, err := d.client.GetDefenderPolicy(ctx)
+				cancel()
+				if err != nil || !policy.Enabled {
+					logger.Info("Skipping Defender command %d because management could not be confirmed", command.ID)
+					return
+				}
+				d.executeDefenderCommand(command)
+			}(command)
+			continue
 		}
-		ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
-		err = d.client.ReportDefenderCommandResult(ctx, command.ID, status, result)
-		cancel()
-		if err != nil {
-			logger.Warn("Defender command %d result upload: %v", command.ID, err)
-		}
+		d.executeDefenderCommand(command)
+	}
+}
+
+func (d *daemon) executeDefenderCommand(command api.DefenderCommand) {
+	logger.Info("Executing Defender command %d (%s)", command.ID, command.CommandType)
+	executeErr := defender.Execute(context.Background(), command.CommandType, command.DetectionUID)
+	status := "completed"
+	result := map[string]interface{}{"message": "Command completed successfully"}
+	if executeErr != nil {
+		status = "failed"
+		result["message"] = executeErr.Error()
+		logger.Warn("Defender command %d failed: %v", command.ID, executeErr)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	err := d.client.ReportDefenderCommandResult(ctx, command.ID, status, result)
+	cancel()
+	if err != nil {
+		logger.Warn("Defender command %d result upload: %v", command.ID, err)
 	}
 }
 
@@ -322,11 +349,24 @@ func (d *daemon) reportDefenderStatus() {
 	if !policy.Enabled {
 		return
 	}
+	// Reconcile the portal policy first so the status report carries the
+	// outcome. The defender package skips any change that Tamper Protection
+	// could block and reports it instead.
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Minute)
+	policyResult, policyErr := defender.ApplyPolicy(ctx, *policy, filepath.Join(stateDir(), defenderPolicyStateFileName))
+	cancel()
+	if policyErr != nil {
+		logger.Warn("Defender policy: %v", policyErr)
+		policyResult = &api.DefenderPolicyResult{Status: "failed", EvaluatedAt: time.Now().UTC(), Items: []api.DefenderPolicyItem{{
+			Setting: "policy", Action: "evaluate", Status: defender.StatusFailed, Message: policyErr.Error(),
+		}}}
+	}
 	status, err := defender.Collect()
 	if err != nil {
 		logger.Warn("Defender status collection: %v", err)
 		return
 	}
+	status.PolicyResult = policyResult
 	ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
 	err = d.client.ReportDefenderStatus(ctx, status)
 	cancel()

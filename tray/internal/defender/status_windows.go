@@ -3,18 +3,14 @@
 package defender
 
 import (
-	"bytes"
-	"encoding/base64"
+	"context"
 	"fmt"
-	"os/exec"
-	"strings"
-	"unicode/utf16"
+	"time"
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 )
 
-const statusScript = `$ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+const statusScript = `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $s = Get-MpComputerStatus
 $antivirusProducts = @()
 try {
@@ -81,32 +77,16 @@ $detections = @(Get-MpThreatDetection | Where-Object { $_.InitialDetectionTime -
   last_scan_at = if ($lastScan) { $lastScan.ToUniversalTime().ToString('o') } else { $null }
   scan_history = @($scanHistory)
   health_status = $health
-  details = [ordered]@{ antivirus_product_names = @($antivirusProducts); engine_version = $s.AMEngineVersion; product_version = $s.AMProductVersion; signature_version = $s.AntivirusSignatureVersion; signature_age_days = $s.AntivirusSignatureAge }
+  details = [ordered]@{ antivirus_product_names = @($antivirusProducts); engine_version = $s.AMEngineVersion; product_version = $s.AMProductVersion; signature_version = $s.AntivirusSignatureVersion; signature_age_days = $s.AntivirusSignatureAge; running_mode = [string]$s.AMRunningMode; tamper_protection_source = [string]$s.TamperProtectionSource }
   detections = $detections
 } | ConvertTo-Json -Depth 4 -Compress`
 
 func collect() (api.DefenderStatus, error) {
-	powershell, err := exec.LookPath("powershell.exe")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	out, err := runPowerShell(ctx, statusScript)
 	if err != nil {
-		return api.DefenderStatus{}, fmt.Errorf("locate PowerShell: %w", err)
-	}
-	encoded := encodePowerShell(statusScript)
-	cmd := exec.Command(powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return api.DefenderStatus{}, fmt.Errorf("query Microsoft Defender: %w: %s", err, strings.TrimSpace(stderr.String()))
+		return api.DefenderStatus{}, fmt.Errorf("query Microsoft Defender: %w", err)
 	}
 	return decodeStatus(out)
-}
-
-func encodePowerShell(script string) string {
-	encoded := utf16.Encode([]rune(script))
-	buf := make([]byte, len(encoded)*2)
-	for i, value := range encoded {
-		buf[i*2] = byte(value)
-		buf[i*2+1] = byte(value >> 8)
-	}
-	return base64.StdEncoding.EncodeToString(buf)
 }

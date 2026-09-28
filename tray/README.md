@@ -240,9 +240,9 @@ run the RMM exclusion script as LocalSystem or an administrator. The script is
 idempotent and defaults to `%ProgramFiles%\MyPortalTray` and
 `%ProgramData%\MyPortal\tray`:
 
-The Tray agent does not change Defender preferences or Tamper Protection. This
-separate, administrator-initiated script is the only supported way to configure
-the optional exclusions.
+This script only excludes the Tray agent itself. Exclusions and scheduled scans
+configured on the portal's **Windows Defender** page are applied by the agent
+(see below).
 
 ```powershell
 .\integrations\tacticalrmm\set-tray-defender-exclusions.ps1
@@ -254,6 +254,33 @@ Custom paths can be supplied when an installation uses non-standard locations:
 .\integrations\tacticalrmm\set-tray-defender-exclusions.ps1 `
     -ExclusionPath 'C:\Apps\MyPortalTray', 'D:\MyPortalData'
 ```
+
+### Windows Defender policy and Tamper Protection
+
+When Windows Defender management is enabled for a company, the service
+reconciles the portal policy every five minutes:
+
+- **Exclusions** (path, process, extension) are added with `Add-MpPreference`.
+  The agent records what it added in `%ProgramData%\MyPortal\tray\defender-policy.json`
+  and only ever removes those entries, so exclusions set locally or by another
+  tool are left alone. Defender has no registry exclusions; registry entries
+  are reported as unsupported.
+- **Scheduled scans** set `ScanParameters`, `ScanScheduleDay` and
+  `ScanScheduleTime`. The original schedule is restored when the portal
+  schedule is disabled.
+
+The agent never attempts a change that Tamper Protection could block:
+
+- Exclusion changes are skipped while Tamper Protection is on, unless Defender
+  reports that Tamper Protection does not cover exclusions
+  (`HKLM\SOFTWARE\Microsoft\Windows Defender\Features\TPExclusions` = 0).
+- Settings controlled by Group Policy or Intune (`DisableLocalAdminMerge`, a
+  managed scan schedule) are skipped because the local value would be ignored.
+- Every change is verified by reading the preferences back. A change Defender
+  discards is reported and not retried until the policy or the device's
+  protection settings change.
+
+The outcome of each setting is shown in the portal's **Policy** column.
 
 ### macOS (bash, RMM one-liner)
 
