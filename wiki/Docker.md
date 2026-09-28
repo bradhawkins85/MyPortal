@@ -82,6 +82,7 @@ installations are upgraded with this script.
 | `sudo myportal-docker restart` | Apply changes made to `myportal.env` |
 | `sudo myportal-docker backup` | Database dump plus uploaded files |
 | `sudo myportal-docker restore-db FILE` | Restore a database backup |
+| `sudo myportal-docker self-update` | Reinstall `myportal-docker` from the installed release, to get commands it added |
 
 ## Super administrators
 

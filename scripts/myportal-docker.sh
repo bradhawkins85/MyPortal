@@ -71,6 +71,8 @@ Commands:
   check                Report the installed and latest release. Exits 0 when
                        up to date and 10 when an upgrade is available.
   status               Show the containers and the running release.
+  self-update          Reinstall this script from the installed release, to
+                       get commands that release added.
   logs [ARGS...]       Follow the application logs (docker compose logs ARGS).
   backup               Back up the database and uploaded files.
   restore-db FILE      Restore a database backup (.sql.gz) made by this script.
@@ -562,6 +564,24 @@ require_installed() {
     || die "MyPortal is not installed in ${MYPORTAL_DIR}. Run 'install' first."
 }
 
+release_script_url() {
+  printf '%s' "${MYPORTAL_GITHUB_URL}/${MYPORTAL_REPO}/releases/download/$1/${SCRIPT_ASSET}"
+}
+
+release_published() {
+  # The release workflow attaches this script only after the release's images
+  # are published, so its presence means the release is ready to install.
+  # A one-byte GET: the asset host rejects HEAD requests.
+  curl -fsSL -r 0-0 -o /dev/null "$(release_script_url "$1")" 2>/dev/null
+}
+
+fetch_release_script() {
+  # fetch_release_script TAG FILE: download the script published with TAG and
+  # check that it is a valid bash script.
+  curl -fsSL "$(release_script_url "$1")" -o "$2" 2>/dev/null \
+    && head -n1 "$2" | grep -q '^#!' && bash -n "$2" 2>/dev/null
+}
+
 self_update() {
   # Re-run this command with the script published alongside the target
   # release, so compose changes that ship with a release are applied too.
@@ -569,8 +589,7 @@ self_update() {
   [[ -z "${MYPORTAL_SELF_UPDATED:-}" ]] || return 0
   local candidate
   candidate=$(mktemp)
-  if curl -fsSL "${MYPORTAL_GITHUB_URL}/${MYPORTAL_REPO}/releases/download/${tag}/${SCRIPT_ASSET}" -o "$candidate" 2>/dev/null \
-     && head -n1 "$candidate" | grep -q '^#!' && bash -n "$candidate" 2>/dev/null; then
+  if fetch_release_script "$tag" "$candidate"; then
     if ! cmp -s "$candidate" "$INSTALLED_SCRIPT"; then
       install -m 0755 "$candidate" "$INSTALLED_SCRIPT"
       rm -f "$candidate"
@@ -601,6 +620,9 @@ cmd_upgrade() {
   valid_tag "$version" || die "invalid release tag: ${version}"
 
   if [[ "$version" == "$current" ]]; then
+    # An earlier upgrade may have run before this release's script was
+    # attached; pick it up now so its commands are available.
+    self_update "$version" upgrade "${original_args[@]}"
     info "MyPortal ${current} is already the latest release."
     return 0
   fi
@@ -612,6 +634,12 @@ cmd_upgrade() {
     # Do not take the portal down every night for a release that already
     # failed its health check here.
     warn "release ${version} failed to start on this host before; skipping it. Retry with: myportal-docker upgrade --version ${version}"
+    return 0
+  fi
+  if [[ "$explicit" != true ]] && ! release_published "$version"; then
+    # Upgrading before the images are published would build the release
+    # locally and leave this script out of date.
+    info "Release ${version} is still being published; try again in a few minutes."
     return 0
   fi
   self_update "$version" upgrade "${original_args[@]}"
@@ -649,6 +677,25 @@ cmd_upgrade() {
     die "the upgrade to ${version} failed and ${current} was restored. The database was backed up before the upgrade to ${backup}; if ${current} misbehaves after the partial migration, restore it with 'myportal-docker restore-db ${backup}'."
   fi
   die "the upgrade to ${version} failed and ${current} did not recover. Restore the database with 'myportal-docker restore-db ${backup}'."
+}
+
+cmd_self_update() {
+  require_root
+  require_installed
+  local tag candidate
+  tag=$(get_setting "$PROJECT_ENV" MYPORTAL_VERSION)
+  candidate=$(mktemp)
+  if ! fetch_release_script "$tag" "$candidate"; then
+    rm -f "$candidate"
+    die "could not download ${SCRIPT_ASSET} for release ${tag}. It is attached to a release a few minutes after publication; try again shortly."
+  fi
+  if cmp -s "$candidate" "$INSTALLED_SCRIPT"; then
+    info "${INSTALLED_SCRIPT} is already the version published with ${tag}."
+  else
+    install -m 0755 "$candidate" "$INSTALLED_SCRIPT"
+    info "Updated ${INSTALLED_SCRIPT} to the version published with ${tag}."
+  fi
+  rm -f "$candidate"
 }
 
 cmd_check() {
@@ -1009,6 +1056,7 @@ main() {
     install) cmd_install "$@" ;;
     upgrade|update) cmd_upgrade "$@" ;;
     check) cmd_check ;;
+    self-update) cmd_self_update ;;
     status) cmd_status ;;
     logs)
       require_installed
