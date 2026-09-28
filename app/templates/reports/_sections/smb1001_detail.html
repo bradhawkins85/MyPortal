@@ -1,0 +1,49 @@
+<section class="card card--panel" data-report-section="smb1001_detail">
+  <header class="card__header report-section__header">
+    <h2>SMB1001 — Per-control breakdown</h2>
+    <span class="report-section__meta">{{ section.detail_data.total or 0 }} controls</span>
+  </header>
+  <div class="card__body">
+    {% set controls = section.detail_data.controls or [] %}
+    {% if controls %}
+      {% set status_variant = {'compliant': 'success', 'not_applicable': 'success', 'in_progress': 'warning', 'non_compliant': 'danger', 'not_started': 'neutral'} %}
+      <div class="table-wrapper">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Control</th>
+            <th>Tier</th>
+            <th>Status</th>
+            <th>Last reviewed</th>
+            <th>Target date</th>
+            <th>Evidence files</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for control in controls %}
+            <tr>
+              <td>{{ control.code }}</td>
+              <td>
+                <strong>{{ control.name or '—' }}</strong>
+                {% if control.domain %}<div class="report-section__meta">{{ control.domain }}</div>{% endif %}
+              </td>
+              <td>{{ control.tier }}</td>
+              <td>
+                <span class="status status--{{ status_variant.get(control.status, 'neutral') }}">
+                  {{ control.status | replace('_', ' ') | title }}
+                </span>
+              </td>
+              <td>{{ control.last_reviewed_date or '—' }}</td>
+              <td>{{ control.target_compliance_date or '—' }}</td>
+              <td>{{ control.evidence_file_count or 0 }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    {% else %}
+      <p class="report-empty">No SMB1001 control data is available for this company.</p>
+    {% endif %}
+  </div>
+</section>

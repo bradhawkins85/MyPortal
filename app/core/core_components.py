@@ -145,9 +145,10 @@ CORE_COMPONENTS: tuple[CoreComponent, ...] = (
         "smb1001",
         "SMB1001 Compliance",
         "SMB1001 compliance dashboard (the SMB1001 menu entry), tier "
-        "progress, controls and API. Disabling it also hides the legacy "
+        "progress, controls, evidence, API, marketing help links and company "
+        "report sections. Disabling it also hides the legacy "
         "Essential 8 pages under /compliance. Compliance Checks is unaffected.",
-        ("/compliance", "/api/smb1001"),
+        ("/compliance", "/api/smb1001", "/admin/marketing/smb1001-help-links"),
         parent_pack="compliance",
     ),
     CoreComponent(

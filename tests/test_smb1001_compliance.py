@@ -15,6 +15,7 @@ from app.features.compliance import routes as compliance_routes
 from app.repositories import smb1001 as smb1001_repo
 
 MIGRATION = Path(__file__).resolve().parent.parent / "migrations" / "439_smb1001_compliance.sql"
+EXTRAS_MIGRATION = Path(__file__).resolve().parent.parent / "migrations" / "440_smb1001_evidence_help_links_reports.sql"
 _PARAM = re.compile(r"%\((\w+)\)s")
 
 
@@ -33,9 +34,17 @@ class _SqliteDb:
         self.conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)")
         self.conn.execute("INSERT INTO companies (id, name) VALUES (1, 'Acme')")
         self.conn.execute("INSERT INTO users (id, email) VALUES (7, 'admin@example.com')")
+        self.conn.execute(
+            "CREATE TABLE marketing_pages (id INTEGER PRIMARY KEY, slug TEXT, title TEXT, is_published INTEGER)"
+        )
+        self.conn.execute(
+            "CREATE TABLE reporting_queries (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT UNIQUE, name TEXT,"
+            " description TEXT, sql_query TEXT, is_system INTEGER)"
+        )
         adapter = Database.__new__(Database)
-        for statement in adapter._split_sql_statements(adapter._adapt_sql_for_sqlite(MIGRATION.read_text())):
-            self.conn.execute(statement)
+        for migration in (MIGRATION, EXTRAS_MIGRATION):
+            for statement in adapter._split_sql_statements(adapter._adapt_sql_for_sqlite(migration.read_text())):
+                self.conn.execute(statement)
         self.conn.commit()
 
     def _run(self, sql: str, params):
@@ -277,6 +286,19 @@ async def test_compliance_page_renders_smb1001(monkeypatch):
         AsyncMock(return_value={"profile": {"target_tier": 2}, "tiers": tiers, "controls": controls, "progress": progress}),
     )
     monkeypatch.setattr(compliance_routes.essential8_repo, "list_company_compliance", AsyncMock(return_value=[{"id": 1}]))
+    monkeypatch.setattr(
+        compliance_routes.smb1001_repo,
+        "list_evidence_map",
+        AsyncMock(return_value={1: [{"id": 5, "control_id": 1, "file_name": "report.pdf"}]}),
+    )
+    monkeypatch.setattr(
+        compliance_routes.smb1001_repo,
+        "list_help_links",
+        AsyncMock(return_value={
+            1: {"help_url": "/marketing/it-support", "recommendation_name": "Managed IT"},
+            2: {"help_url": "https://example.com/mfa", "recommendation_name": ""},
+        }),
+    )
     monkeypatch.setattr(compliance_routes.users_repo, "list_users_for_company", AsyncMock(return_value=[]))
     monkeypatch.setattr(compliance_routes, "_main", lambda: SimpleNamespace(_render_template=fake_render_template))
 
@@ -291,6 +313,11 @@ async def test_compliance_page_renders_smb1001(monkeypatch):
     assert [c["code"] for c in extra["controls_by_tier"][2]] == ["AM-03"]
     assert extra["controls_by_tier"][1][0]["show_help"] is False
     assert extra["controls_by_tier"][2][0]["show_help"] is True
+    # Help links only show for controls that still need work.
+    assert extra["controls_by_tier"][1][0]["compliance_help_url"] == ""
+    assert extra["controls_by_tier"][2][0]["compliance_help_url"] == "https://example.com/mfa"
+    assert extra["controls_by_tier"][2][0]["compliance_help_label"] == "Recommended product or service"
+    assert extra["controls_by_tier"][1][0]["evidence_files"][0]["file_name"] == "report.pdf"
 
 
 def test_smb1001_ticket_text_names_control_and_tier():
@@ -381,3 +408,360 @@ def test_dashboard_template_hides_legacy_links_and_editing(monkeypatch):
     assert 'id="smb1001-import-e8"' not in body
     assert 'id="smb1001-target-tier"' not in body
     assert 'data-save-control="1"' not in body
+
+
+# ---------------------------------------------------------------------------
+# Evidence, help links, recommendations and reports
+# ---------------------------------------------------------------------------
+
+
+def test_extras_migration_declares_phase_and_reporting_queries():
+    adapter = Database.__new__(Database)
+    metadata = adapter._migration_metadata(EXTRAS_MIGRATION)
+    assert metadata["phase"] == "expand"
+    db = _SqliteDb()
+    slugs = {row[0] for row in db.conn.execute("SELECT slug FROM reporting_queries")}
+    assert slugs == {"report-smb1001-compliance-progress", "stat-strip-report-smb1001"}
+    for (sql,) in db.conn.execute("SELECT sql_query FROM reporting_queries"):
+        assert "{{current.company}}" in sql
+        # The stored query must run once the company variable is substituted.
+        db.conn.execute(sql.replace("{{current.company}}", "1")).fetchall()
+
+
+async def _control_id(code: str) -> int:
+    return next(int(c["id"]) for c in await smb1001_repo.list_controls() if c["code"] == code)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_evidence_versions_and_delete_promotes_previous(sqlite_db):
+    control_id = await _control_id("AM-03")
+    first = await smb1001_repo.add_evidence(
+        company_id=1, control_id=control_id, title="MFA report", file_name="a.pdf",
+        file_path="compliance/smb1001/a.evidence", uploaded_by=7, file_size_bytes=10,
+    )
+    second = await smb1001_repo.add_evidence(
+        company_id=1, control_id=control_id, title="MFA report v2", file_name="b.pdf",
+        file_path="compliance/smb1001/b.evidence", uploaded_by=7,
+    )
+    assert (first["version_number"], second["version_number"]) == (1, 2)
+
+    files = (await smb1001_repo.list_evidence_map(1))[control_id]
+    assert [(f["version_number"], f["is_current"]) for f in files] == [(2, True), (1, False)]
+    # Another company cannot see or fetch it.
+    assert await smb1001_repo.get_evidence(2, second["id"]) is None
+
+    deleted = await smb1001_repo.delete_evidence(1, second["id"], user_id=7)
+    assert deleted["file_path"] == "compliance/smb1001/b.evidence"
+    files = (await smb1001_repo.list_evidence_map(1, control_id=control_id))[control_id]
+    assert [(f["version_number"], f["is_current"]) for f in files] == [(1, True)]
+    actions = [row["action"] for row in await smb1001_repo.list_control_audit(1, control_id)]
+    assert actions.count("evidence_upload") == 2 and "evidence_delete" in actions
+
+
+@pytest.mark.anyio("asyncio")
+async def test_help_links_prefer_external_url_and_need_published_pages(sqlite_db):
+    sqlite_db.conn.execute("INSERT INTO marketing_pages (id, slug, title, is_published) VALUES (3, 'edr', 'EDR', 1)")
+    sqlite_db.conn.execute("INSERT INTO marketing_pages (id, slug, title, is_published) VALUES (4, 'draft', 'Draft', 0)")
+    edr, mfa, draft, cleared = [await _control_id(code) for code in ("TM-07", "AM-03", "TM-01", "TM-02")]
+    await smb1001_repo.replace_help_links({
+        edr: {"marketing_page_id": 3, "recommendation_name": "Managed EDR", "external_url": ""},
+        mfa: {"marketing_page_id": 3, "recommendation_name": "", "external_url": "https://example.com/mfa"},
+        draft: {"marketing_page_id": 4, "recommendation_name": "Draft", "external_url": ""},
+        cleared: {"marketing_page_id": None, "recommendation_name": "Old", "external_url": ""},
+    })
+    await smb1001_repo.replace_help_links({cleared: {"marketing_page_id": None, "recommendation_name": "", "external_url": ""}})
+
+    links = await smb1001_repo.list_help_links()
+    assert links[edr]["help_url"] == "/marketing/edr"
+    assert links[mfa]["help_url"] == "https://example.com/mfa"
+    assert links[draft]["help_url"] == ""
+    assert cleared not in links
+
+
+@pytest.mark.anyio("asyncio")
+async def test_recommendations_cover_outstanding_controls_to_target(sqlite_db, monkeypatch):
+    _no_essential8(monkeypatch)
+    await smb1001_repo.ensure_company_profile(1)
+    await smb1001_repo.set_target_tier(1, 2)
+    bronze = await smb1001_repo.list_controls(tier_level=1)
+    for control in bronze[1:]:
+        await smb1001_repo.save_company_control_compliance(1, control["id"], status="compliant")
+    await smb1001_repo.replace_help_links({bronze[0]["id"]: {"recommendation_name": "IT support plan", "external_url": "https://example.com/it"}})
+
+    result = await smb1001_repo.list_recommendations(1)
+
+    tiers = {row["tier_level"] for row in result["recommendations"]}
+    assert tiers == {1, 2}
+    first = next(row for row in result["recommendations"] if row["control_id"] == bronze[0]["id"])
+    assert first["recommendation"] == "IT support plan"
+    assert first["url"] == "https://example.com/it"
+    assert result["total"] == 1 + len(await smb1001_repo.list_controls(tier_level=2))
+    assert result["horizon_tier"] == "Silver"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_report_builders(sqlite_db, monkeypatch):
+    from app.services import reports
+
+    _no_essential8(monkeypatch)
+    for control in await smb1001_repo.list_controls(tier_level=1):
+        await smb1001_repo.save_company_control_compliance(1, control["id"], status="compliant")
+    control_id = await _control_id("AM-03")
+    await smb1001_repo.save_company_control_compliance(1, control_id, status="non_compliant")
+    await smb1001_repo.add_evidence(
+        company_id=1, control_id=control_id, title="Report", file_name="r.pdf", file_path="compliance/smb1001/r.evidence"
+    )
+
+    summary = await reports._build_smb1001(1)
+    assert summary["achieved_tier"] == "Bronze"
+    assert summary["next_tier"] == "Silver"
+    silver = summary["tiers"][1]
+    assert silver["non_compliant"] == 1 and silver["done"] == 0
+    assert not reports._section_is_empty("smb1001", summary)
+
+    detail = await reports._build_smb1001_detail(1)
+    row = next(item for item in detail["controls"] if item["code"] == "AM-03")
+    assert row["status"] == "non_compliant" and row["evidence_file_count"] == 1
+
+    recommendations = await reports._build_smb1001_recommendations(1)
+    assert recommendations["horizon_tier"] == "Silver"
+    assert all(item["tier"] == "Silver" for item in recommendations["recommendations"])
+
+
+def test_report_sections_follow_component_switches(monkeypatch):
+    from app.services import reports
+    import app.services.component_availability as availability_module
+    from app.services.component_availability import ComponentAvailability
+
+    keys = [section.key for section in reports.REPORT_SECTIONS]
+    assert keys.index("smb1001") < keys.index("essential8")
+    policy = ComponentAvailability(disabled_feature_packs=frozenset({"essential8"}))
+    monkeypatch.setattr(availability_module, "get_component_availability", lambda: policy)
+    assert reports._section_component_available("smb1001")
+    assert reports._section_component_available("smb1001_recommendations")
+    assert not reports._section_component_available("essential8_ml2")
+    assert reports._section_component_available("licenses")
+
+
+def test_default_layout_and_queries_use_smb1001(monkeypatch):
+    import asyncio
+
+    from app.services import company_report_layout
+    import app.services.component_availability as availability_module
+    from app.services.component_availability import ComponentAvailability
+
+    slugs = [column["slug"] for row in company_report_layout.default_layout() for column in row["columns"]]
+    assert "report-smb1001-compliance-progress" in slugs
+    assert "report-essential-8-compliance-progress" not in slugs
+
+    async def fake_list_queries():
+        return [{"slug": "report-smb1001-compliance-progress"}, {"slug": "stat-strip-report-smb1001"}, {"slug": "report-licenses"}]
+
+    monkeypatch.setattr(company_report_layout.reporting_repo, "list_queries", fake_list_queries)
+    policy = ComponentAvailability(disabled_feature_packs=frozenset({"smb1001"}))
+    monkeypatch.setattr(availability_module, "get_component_availability", lambda: policy)
+    assert [q["slug"] for q in asyncio.run(company_report_layout.available_queries())] == ["report-licenses"]
+
+
+def test_report_section_templates_render():
+    import app.main as main_module
+
+    env = main_module.templates.env
+    summary = {
+        "achieved_tier": "Bronze", "next_tier": "Silver", "next_tier_remaining": 3, "target_tier": "Gold",
+        "target_done": 7, "target_total": 31, "target_percentage": 22.6, "total": 46,
+        "tiers": [{"tier_level": 1, "name": "Bronze", "attestation": "self", "total": 7, "done": 7, "in_progress": 0,
+                   "non_compliant": 0, "not_started": 0, "percentage": 100.0, "achieved": True}],
+    }
+    body = env.get_template("reports/_sections/smb1001.html").render(section=SimpleNamespace(data=summary))
+    assert "Tier achieved" in body and "Bronze" in body and "Self-attested" in body
+    detail = {"total": 1, "controls": [{"code": "AM-03", "name": "MFA", "tier": "Silver", "domain": "Access management",
+                                        "status": "non_compliant", "evidence_file_count": 2}]}
+    body = env.get_template("reports/_sections/smb1001_detail.html").render(section=SimpleNamespace(detail_data=detail))
+    assert "AM-03" in body and "Non Compliant" in body
+    recs = {"total": 1, "horizon_tier": "Silver", "recommendations": [
+        {"code": "AM-03", "control": "MFA", "tier": "Silver", "status": "in_progress", "recommendation": "MFA rollout", "url": "/marketing/mfa"}
+    ]}
+    body = env.get_template("reports/_sections/smb1001_recommendations.html").render(section=SimpleNamespace(data=recs))
+    assert 'href="/marketing/mfa"' in body and "to reach Silver" in body
+
+
+# ---------------------------------------------------------------------------
+# Evidence API
+# ---------------------------------------------------------------------------
+
+
+def _upload(data: bytes, filename: str, content_type: str):
+    import io
+
+    from fastapi import UploadFile
+    from starlette.datastructures import Headers
+
+    return UploadFile(file=io.BytesIO(data), filename=filename, headers=Headers({"content-type": content_type}))
+
+
+@pytest.fixture
+def evidence_api(sqlite_db, monkeypatch, tmp_path):
+    from app.api.routes import smb1001 as api
+
+    monkeypatch.setattr(api, "_assert_company_compliance_access", AsyncMock())
+    monkeypatch.setattr(api, "_private_uploads_root", lambda: tmp_path)
+    audit = AsyncMock()
+    monkeypatch.setattr(api.audit_service, "record", audit)
+    return SimpleNamespace(api=api, root=tmp_path, audit=audit)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_evidence_upload_download_and_delete(evidence_api):
+    api = evidence_api.api
+    control_id = await _control_id("AM-03")
+    user = {"id": 7}
+
+    record = await api.upload_control_evidence(
+        1, control_id, SimpleNamespace(), title=" MFA report ", description=None,
+        evidence_file=_upload(b"<script>alert(1)</script>", "../../evil.html", "text/html"), user=user,
+    )
+    assert record["title"] == "MFA report"
+    assert record["file_name"] == "evil.html"
+    assert record["file_path"].startswith("compliance/smb1001/") and record["file_path"].endswith(".evidence")
+    stored = evidence_api.root / record["file_path"]
+    assert stored.read_bytes() == b"<script>alert(1)</script>"
+
+    response = await api.download_evidence(1, record["id"], user=user)
+    # Active content is never served inline with its own type.
+    assert response.media_type == "application/octet-stream"
+    assert "attachment" in response.headers["content-disposition"]
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+    with pytest.raises(api.HTTPException) as missing:
+        await api.download_evidence(2, record["id"], user=user)
+    assert missing.value.status_code == 404
+
+    result = await api.delete_evidence(1, record["id"], SimpleNamespace(), user=user)
+    assert result == {"deleted": True, "id": record["id"]}
+    assert not stored.exists()
+    assert [call.kwargs["action"] for call in evidence_api.audit.await_args_list] == [
+        "smb1001.evidence.upload",
+        "smb1001.evidence.delete",
+    ]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_evidence_upload_rejects_empty_oversized_and_unknown_control(evidence_api, monkeypatch):
+    api = evidence_api.api
+    control_id = await _control_id("AM-03")
+    user = {"id": 7}
+
+    with pytest.raises(api.HTTPException) as empty:
+        await api.upload_control_evidence(
+            1, control_id, SimpleNamespace(), title="Empty", description=None,
+            evidence_file=_upload(b"", "e.pdf", "application/pdf"), user=user,
+        )
+    assert empty.value.status_code == 400
+
+    monkeypatch.setattr(api, "_MAX_EVIDENCE_SIZE_BYTES", 4)
+    with pytest.raises(api.HTTPException) as too_big:
+        await api.upload_control_evidence(
+            1, control_id, SimpleNamespace(), title="Big", description=None,
+            evidence_file=_upload(b"12345", "b.pdf", "application/pdf"), user=user,
+        )
+    assert too_big.value.status_code == 413
+
+    with pytest.raises(api.HTTPException) as unknown:
+        await api.upload_control_evidence(
+            1, 99999, SimpleNamespace(), title="X", description=None,
+            evidence_file=_upload(b"1", "x.pdf", "application/pdf"), user=user,
+        )
+    assert unknown.value.status_code == 404
+    # Nothing is left on disk from rejected uploads.
+    assert not any(path.is_file() for path in evidence_api.root.rglob("*"))
+    assert await smb1001_repo.list_evidence_map(1) == {}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_download_refuses_paths_outside_evidence_folder(evidence_api):
+    api = evidence_api.api
+    control_id = await _control_id("AM-03")
+    (evidence_api.root / "secret.txt").write_text("secret")
+    record = await smb1001_repo.add_evidence(
+        company_id=1, control_id=control_id, title="x", file_name="x", file_path="compliance/smb1001/../../secret.txt"
+    )
+    with pytest.raises(api.HTTPException) as refused:
+        await api.download_evidence(1, record["id"], user={"id": 7})
+    assert refused.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Marketing help links admin
+# ---------------------------------------------------------------------------
+
+
+class _FormRequest(SimpleNamespace):
+    async def form(self):
+        return self._form
+
+
+@pytest.mark.anyio("asyncio")
+async def test_marketing_help_links_save_validates_and_stores(sqlite_db, monkeypatch):
+    from fastapi import HTTPException
+
+    from app.features.marketing import routes as marketing_routes
+
+    monkeypatch.setattr(
+        marketing_routes, "_require_marketing_access", AsyncMock(return_value=({"id": 7, "is_super_admin": True}, None))
+    )
+    monkeypatch.setattr(marketing_routes.marketing_repo, "list_pages", AsyncMock(return_value=[{"id": 3}]))
+    monkeypatch.setattr(marketing_routes.audit_service, "record", AsyncMock())
+    edr = await _control_id("TM-07")
+
+    bad = _FormRequest(_form={f"external_url_{edr}": "javascript:alert(1)"})
+    with pytest.raises(HTTPException) as exc:
+        await marketing_routes.admin_marketing_update_smb1001_help_links(bad)
+    assert exc.value.status_code == 400
+
+    unknown_page = _FormRequest(_form={f"control_{edr}": "9"})
+    with pytest.raises(HTTPException):
+        await marketing_routes.admin_marketing_update_smb1001_help_links(unknown_page)
+
+    sqlite_db.conn.execute("INSERT INTO marketing_pages (id, slug, title, is_published) VALUES (3, 'edr', 'EDR', 1)")
+    good = _FormRequest(_form={f"control_{edr}": "3", f"recommendation_name_{edr}": "Managed EDR"})
+    response = await marketing_routes.admin_marketing_update_smb1001_help_links(good)
+    assert response.status_code == 303
+    links = await smb1001_repo.list_help_links()
+    assert links[edr]["recommendation_name"] == "Managed EDR"
+    assert links[edr]["help_url"] == "/marketing/edr"
+
+    non_admin = AsyncMock(return_value=({"id": 8, "is_super_admin": False}, None))
+    monkeypatch.setattr(marketing_routes, "_require_marketing_access", non_admin)
+    with pytest.raises(HTTPException) as forbidden:
+        await marketing_routes.admin_marketing_update_smb1001_help_links(good)
+    assert forbidden.value.status_code == 403
+
+
+def test_marketing_help_links_template_renders(monkeypatch):
+    import app.main as main_module
+    from app.services.component_availability import ComponentAvailability
+
+    monkeypatch.setattr(main_module, "get_component_availability", lambda: ComponentAvailability(disabled_feature_packs=frozenset()))
+    monkeypatch.setitem(main_module.templates.env.globals, "feature_pack_available", main_module._feature_pack_available)
+    body = main_module.templates.env.get_template("admin/marketing_smb1001_help_links.html").render(
+        request=SimpleNamespace(url=SimpleNamespace(path="/admin/marketing/smb1001-help-links", query=""), query_params={}),
+        app_name="MyPortal",
+        current_user={"id": 1, "is_super_admin": True, "email_signature": ""},
+        is_super_admin=True,
+        has_authenticated_user=True,
+        active_membership={},
+        available_companies=[],
+        module_enabled={},
+        enabled_module_slugs=[],
+        csrf_token="token",
+        marketing_pages=[{"id": 3, "title": "EDR", "is_published": False}],
+        smb1001_help_tiers=[{
+            "tier_level": 3, "name": "Gold", "description": "Gold tier",
+            "controls": [{"id": 20, "code": "TM-07", "name": "EDR", "domain_label": "Technology management",
+                          "selected_marketing_page_id": 3, "recommendation_name": "Managed EDR", "external_url": ""}],
+        }],
+    )
+    assert 'name="control_20"' in body
+    assert "EDR (unpublished)" in body
+    assert 'value="Managed EDR"' in body

@@ -229,9 +229,18 @@ async def compliance_page(request: Request):
     profile = await smb1001_repo.ensure_company_profile(company_id, user_id=user.get("id"))
     overview = await smb1001_repo.get_company_overview(company_id)
     progress = overview["progress"]
+    evidence_map = await smb1001_repo.list_evidence_map(company_id)
+    help_links = await smb1001_repo.list_help_links()
     controls_by_tier: dict[int, list[dict]] = {}
     for control in overview["controls"]:
-        control["show_help"] = control["status"] in smb1001_repo.HELP_STATUSES
+        needs_help = control["status"] in smb1001_repo.HELP_STATUSES
+        link = help_links.get(int(control["id"])) or {}
+        control["show_help"] = needs_help
+        control["evidence_files"] = evidence_map.get(int(control["id"]), [])
+        control["compliance_help_url"] = link.get("help_url", "") if needs_help else ""
+        control["compliance_help_label"] = (
+            link.get("recommendation_name") or "Recommended product or service"
+        ) if control["compliance_help_url"] else ""
         controls_by_tier.setdefault(int(control["tier_level"]), []).append(control)
     legacy_essential8 = await essential8_repo.list_company_compliance(company_id)
 

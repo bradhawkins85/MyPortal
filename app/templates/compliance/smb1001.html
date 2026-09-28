@@ -144,6 +144,9 @@
                 {% if record.source == 'essential8' %}<span class="tag tag--muted" title="Status converted from Essential 8">From Essential 8</span>{% endif %}
               </div>
               <div class="card__collapsible-meta">
+                {% if control.compliance_help_url %}
+                <a href="{{ control.compliance_help_url }}" class="requirement-item__help-btn" title="Get compliance help: {{ control.compliance_help_label }}" aria-label="Get compliance help" onclick="event.stopPropagation()" rel="noopener">?</a>
+                {% endif %}
                 <div class="requirement-item__status">
                   <span class="badge badge--status-{{ control.status }}" data-requirement-status>{{ status_label(control.status) }}</span>
                 </div>
@@ -189,9 +192,47 @@
                   <label for="smb-target-{{ control.id }}" class="form-label">Target date</label>
                   <input type="date" id="smb-target-{{ control.id }}" class="form-input" value="{{ record.target_compliance_date or '' }}" {% if not can_manage %}readonly{% endif %} />
                 </div>
+                <div class="form-field">
+                  <span class="form-label">Evidence files</span>
+                  {% if control.evidence_files %}
+                  <ul class="evidence-list">
+                    {% for evidence in control.evidence_files %}
+                    <li class="evidence-list__item" data-evidence-id="{{ evidence.id }}">
+                      <span class="tag tag--muted">v{{ evidence.version_number }}</span>
+                      <strong>{{ evidence.title }}</strong>
+                      {% if evidence.is_current %}<span class="tag tag--muted">Current</span>{% endif %}
+                      <div class="text--muted">
+                        <a href="/api/smb1001/companies/{{ company.id }}/evidence/{{ evidence.id }}/download">{{ evidence.file_name }}</a>
+                        {% if evidence.file_size_bytes %} · {{ evidence.file_size_bytes | filesizeformat }}{% endif %}
+                        {% if evidence.uploaded_at %} · {{ evidence.uploaded_at[:10] }}{% endif %}
+                        {% if can_manage %}
+                        · <button type="button" class="button button--danger button--small" data-delete-evidence="{{ evidence.id }}">Delete</button>
+                        {% endif %}
+                      </div>
+                    </li>
+                    {% endfor %}
+                  </ul>
+                  {% else %}
+                  <p class="text--muted">No evidence files uploaded yet.</p>
+                  {% endif %}
+                </div>
+                {% if can_manage %}
+                <div class="form-field">
+                  <label for="smb-evidence-title-{{ control.id }}" class="form-label">Evidence title</label>
+                  <input type="text" id="smb-evidence-title-{{ control.id }}" class="form-input" maxlength="255" placeholder="e.g. MFA enforcement report" />
+                </div>
+                <div class="form-field">
+                  <label for="smb-evidence-file-{{ control.id }}" class="form-label">Evidence file (max 15 MB)</label>
+                  <input type="file" id="smb-evidence-file-{{ control.id }}" class="form-input" />
+                </div>
+                {% endif %}
                 <div class="compliance-form__actions">
                   {% if can_manage %}
                   <button type="button" class="button button--primary button--small" data-save-control="{{ control.id }}">Save</button>
+                  <button type="button" class="button button--ghost button--small" data-upload-evidence="{{ control.id }}">Upload evidence</button>
+                  {% endif %}
+                  {% if control.compliance_help_url %}
+                  <a href="{{ control.compliance_help_url }}" class="button button--ghost button--small" rel="noopener" {% if control.compliance_help_url.startswith('http') %}target="_blank"{% endif %}>Get compliance help: {{ control.compliance_help_label }}</a>
                   {% endif %}
                   {% if control.show_help %}
                   <button type="submit" form="smb-ticket-form-{{ control.id }}" class="button button--ghost button--small">Request technician help</button>
@@ -299,6 +340,55 @@ document.addEventListener('DOMContentLoaded', () => {
         showNotification('Control saved. Refresh to update tier progress.', 'success');
       } catch (error) {
         showNotification(error.message || 'Failed to save control', 'error');
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-upload-evidence]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!companyId) return;
+      const id = btn.dataset.uploadEvidence;
+      const title = (document.getElementById(`smb-evidence-title-${id}`)?.value || '').trim();
+      const file = document.getElementById(`smb-evidence-file-${id}`)?.files?.[0];
+      if (!title || !file) {
+        showNotification('Choose a file and enter an evidence title', 'error');
+        return;
+      }
+      if (file.size > 15 * 1024 * 1024) {
+        showNotification('Evidence files must be 15 MB or smaller', 'error');
+        return;
+      }
+      const payload = new FormData();
+      payload.append('title', title);
+      payload.append('evidence_file', file);
+      btn.disabled = true;
+      try {
+        const response = await fetch(`/api/smb1001/companies/${companyId}/controls/${id}/evidence`, {
+          method: 'POST',
+          headers: { 'X-CSRF-Token': csrfToken },
+          body: payload,
+        });
+        if (!response.ok) {
+          let detail = 'Evidence upload failed';
+          try { detail = (await response.json()).detail || detail; } catch (error) { /* keep default */ }
+          throw new Error(detail);
+        }
+        window.location.reload();
+      } catch (error) {
+        showNotification(error.message || 'Evidence upload failed', 'error');
+        btn.disabled = false;
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-delete-evidence]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!companyId || !window.confirm('Delete this evidence file? This cannot be undone.')) return;
+      try {
+        await send(`/api/smb1001/companies/${companyId}/evidence/${btn.dataset.deleteEvidence}`, 'DELETE');
+        window.location.reload();
+      } catch (error) {
+        showNotification(error.message || 'Failed to delete evidence', 'error');
       }
     });
   });

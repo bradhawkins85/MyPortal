@@ -1,0 +1,19 @@
+<section class="card card--panel" data-report-section="smb1001_recommendations">
+  <header class="card__header report-section__header">
+    <h2>SMB1001 compliance recommendations</h2>
+    <span class="report-section__meta">{{ section.data.total or 0 }} controls need attention{% if section.data.horizon_tier %} to reach {{ section.data.horizon_tier }}{% endif %}</span>
+  </header>
+  <div class="card__body">
+    {% set recommendations = section.data.recommendations or [] %}
+    {% if recommendations %}
+    <div class="table-wrapper"><table class="table">
+      <thead><tr><th>Code</th><th>Control</th><th>Tier</th><th>Status</th><th>Recommended product or service</th></tr></thead>
+      <tbody>{% for item in recommendations %}<tr>
+        <td>{{ item.code }}</td><td>{{ item.control }}</td><td>{{ item.tier }}</td>
+        <td><span class="status status--{{ 'danger' if item.status == 'non_compliant' else 'warning' }}">{{ item.status|replace('_', ' ')|title }}</span></td>
+        <td>{% if item.url %}<a href="{{ item.url }}">{{ item.recommendation }}</a>{% else %}{{ item.recommendation }}{% endif %}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}<p class="report-empty">All SMB1001 controls up to the target tier are complete.</p>{% endif %}
+  </div>
+</section>

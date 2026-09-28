@@ -1,0 +1,7 @@
+{
+  "guid": "b8fb5e22-52fd-42a3-bef0-604943a66bec",
+  "occurred_at": "2026-09-28T09:00Z",
+  "change_type": "Feature",
+  "summary": "Add SMB1001 evidence file uploads, recommended product/service help links and SMB1001 company report sections, replacing the Essential 8 equivalents.",
+  "content_hash": "3b7f096036a65f89a5b61623ba79e99c6865c74eca703295ea16bed6659aab6f"
+}

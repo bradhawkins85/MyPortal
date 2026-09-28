@@ -543,6 +543,278 @@ async def get_company_overview(company_id: int) -> dict[str, Any]:
     return {"profile": profile, "tiers": tiers, "controls": controls, "progress": progress}
 
 
+# ---------------------------------------------------------------------------
+# Evidence files
+# ---------------------------------------------------------------------------
+
+_EVIDENCE_COLUMNS = """
+    id, company_id, control_id, version_number, title, description, file_name,
+    content_type, file_path, file_size_bytes, uploaded_by, uploaded_at, is_current
+"""
+
+
+def _normalise_evidence(row: Any) -> dict[str, Any]:
+    item = dict(row)
+    item["uploaded_at"] = _format_datetime(item.get("uploaded_at"))
+    item["is_current"] = bool(item.get("is_current"))
+    return item
+
+
+async def add_evidence(
+    *,
+    company_id: int,
+    control_id: int,
+    title: str,
+    file_name: str,
+    file_path: str,
+    uploaded_by: Optional[int] = None,
+    description: Optional[str] = None,
+    content_type: Optional[str] = None,
+    file_size_bytes: Optional[int] = None,
+) -> dict[str, Any]:
+    """Store a new evidence version; it becomes the current version for the control."""
+
+    params: dict[str, Any] = {"company_id": company_id, "control_id": control_id}
+    latest = await db.fetch_one(
+        """
+        SELECT COALESCE(MAX(version_number), 0) AS latest_version
+        FROM company_smb1001_evidence
+        WHERE company_id = %(company_id)s AND control_id = %(control_id)s
+        """,
+        params,
+    )
+    version = int((latest or {}).get("latest_version") or 0) + 1
+    await db.execute(
+        """
+        UPDATE company_smb1001_evidence SET is_current = 0
+        WHERE company_id = %(company_id)s AND control_id = %(control_id)s
+        """,
+        params,
+    )
+    await db.execute(
+        """
+        INSERT INTO company_smb1001_evidence
+            (company_id, control_id, version_number, title, description, file_name,
+             content_type, file_path, file_size_bytes, uploaded_by, is_current)
+        VALUES
+            (%(company_id)s, %(control_id)s, %(version_number)s, %(title)s, %(description)s, %(file_name)s,
+             %(content_type)s, %(file_path)s, %(file_size_bytes)s, %(uploaded_by)s, 1)
+        """,
+        {
+            **params,
+            "version_number": version,
+            "title": title,
+            "description": description,
+            "file_name": file_name,
+            "content_type": content_type,
+            "file_path": file_path,
+            "file_size_bytes": file_size_bytes,
+            "uploaded_by": uploaded_by,
+        },
+    )
+    row = await db.fetch_one(
+        f"""
+        SELECT {_EVIDENCE_COLUMNS}
+        FROM company_smb1001_evidence
+        WHERE company_id = %(company_id)s AND control_id = %(control_id)s AND version_number = %(version_number)s
+        """,  # nosec B608 - fixed column list
+        {**params, "version_number": version},
+    )
+    await append_audit(
+        company_id=company_id,
+        control_id=control_id,
+        user_id=uploaded_by,
+        action="evidence_upload",
+        from_status=None,
+        to_status=None,
+        change_summary=f"Uploaded evidence version {version}: {title}",
+    )
+    return _normalise_evidence(row) if row else {}
+
+
+async def get_evidence(company_id: int, evidence_id: int) -> Optional[dict[str, Any]]:
+    row = await db.fetch_one(
+        f"""
+        SELECT {_EVIDENCE_COLUMNS}
+        FROM company_smb1001_evidence
+        WHERE company_id = %(company_id)s AND id = %(evidence_id)s
+        """,  # nosec B608 - fixed column list
+        {"company_id": company_id, "evidence_id": evidence_id},
+    )
+    return _normalise_evidence(row) if row else None
+
+
+async def list_evidence_map(company_id: int, *, control_id: Optional[int] = None) -> dict[int, list[dict[str, Any]]]:
+    """Evidence for a company grouped by control, newest version first."""
+
+    params: dict[str, Any] = {"company_id": company_id}
+    control_clause = ""
+    if control_id is not None:
+        control_clause = " AND control_id = %(control_id)s"
+        params["control_id"] = control_id
+    rows = await db.fetch_all(
+        f"""
+        SELECT {_EVIDENCE_COLUMNS}
+        FROM company_smb1001_evidence
+        WHERE company_id = %(company_id)s{control_clause}
+        ORDER BY control_id, version_number DESC
+        """,  # nosec B608 - fixed clauses
+        params,
+    )
+    result: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        item = _normalise_evidence(row)
+        result.setdefault(int(item["control_id"]), []).append(item)
+    return result
+
+
+async def delete_evidence(company_id: int, evidence_id: int, *, user_id: Optional[int] = None) -> Optional[dict[str, Any]]:
+    """Delete one evidence version, promoting the newest remaining version to current.
+
+    Returns the deleted record so the caller can remove the stored file.
+    """
+
+    evidence = await get_evidence(company_id, evidence_id)
+    if not evidence:
+        return None
+    await db.execute(
+        "DELETE FROM company_smb1001_evidence WHERE company_id = %(company_id)s AND id = %(evidence_id)s",
+        {"company_id": company_id, "evidence_id": evidence_id},
+    )
+    control_id = int(evidence["control_id"])
+    if evidence.get("is_current"):
+        latest = await db.fetch_one(
+            """
+            SELECT MAX(version_number) AS latest_version
+            FROM company_smb1001_evidence
+            WHERE company_id = %(company_id)s AND control_id = %(control_id)s
+            """,
+            {"company_id": company_id, "control_id": control_id},
+        )
+        if latest and latest.get("latest_version") is not None:
+            await db.execute(
+                """
+                UPDATE company_smb1001_evidence SET is_current = 1
+                WHERE company_id = %(company_id)s AND control_id = %(control_id)s
+                  AND version_number = %(version_number)s
+                """,
+                {"company_id": company_id, "control_id": control_id, "version_number": int(latest["latest_version"])},
+            )
+    await append_audit(
+        company_id=company_id,
+        control_id=control_id,
+        user_id=user_id,
+        action="evidence_delete",
+        from_status=None,
+        to_status=None,
+        change_summary=f"Deleted evidence version {evidence.get('version_number')}: {evidence.get('title')}",
+    )
+    return evidence
+
+
+# ---------------------------------------------------------------------------
+# Recommended product / service help links
+# ---------------------------------------------------------------------------
+
+
+def resolve_help_url(link: Optional[dict[str, Any]]) -> str:
+    """External link wins; otherwise a published portal marketing page."""
+
+    if not link:
+        return ""
+    if link.get("external_url"):
+        return str(link["external_url"])
+    if link.get("marketing_page_slug") and link.get("marketing_page_is_published"):
+        return f"/marketing/{link['marketing_page_slug']}"
+    return ""
+
+
+async def list_help_links() -> dict[int, dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT
+            link.control_id,
+            link.marketing_page_id,
+            link.recommendation_name,
+            link.external_url,
+            page.slug AS marketing_page_slug,
+            page.title AS marketing_page_title,
+            page.is_published AS marketing_page_is_published
+        FROM smb1001_control_marketing_pages AS link
+        LEFT JOIN marketing_pages AS page ON page.id = link.marketing_page_id
+        ORDER BY link.control_id
+        """
+    )
+    links: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        item = {
+            "control_id": int(row["control_id"]),
+            "marketing_page_id": int(row["marketing_page_id"]) if row.get("marketing_page_id") else None,
+            "recommendation_name": str(row.get("recommendation_name") or "").strip(),
+            "external_url": str(row.get("external_url") or "").strip(),
+            "marketing_page_slug": str(row.get("marketing_page_slug") or "").strip(),
+            "marketing_page_title": str(row.get("marketing_page_title") or "").strip(),
+            "marketing_page_is_published": bool(int(row.get("marketing_page_is_published") or 0)),
+        }
+        item["help_url"] = resolve_help_url(item)
+        links[item["control_id"]] = item
+    return links
+
+
+async def replace_help_links(links: dict[int, dict[str, Any]]) -> None:
+    """Replace the recommendation configured for each given control."""
+
+    for control_id, link in links.items():
+        params = {
+            "control_id": int(control_id),
+            "marketing_page_id": link.get("marketing_page_id"),
+            "recommendation_name": str(link.get("recommendation_name") or "").strip() or None,
+            "external_url": str(link.get("external_url") or "").strip() or None,
+        }
+        await db.execute(
+            "DELETE FROM smb1001_control_marketing_pages WHERE control_id = %(control_id)s",
+            {"control_id": params["control_id"]},
+        )
+        if params["marketing_page_id"] or params["recommendation_name"] or params["external_url"]:
+            await db.execute(
+                """
+                INSERT INTO smb1001_control_marketing_pages
+                    (control_id, marketing_page_id, recommendation_name, external_url)
+                VALUES
+                    (%(control_id)s, %(marketing_page_id)s, %(recommendation_name)s, %(external_url)s)
+                """,
+                params,
+            )
+
+
+async def list_recommendations(company_id: int) -> dict[str, Any]:
+    """Outstanding controls up to the target tier (or the next tier, if beyond it) with recommendations."""
+
+    overview = await get_company_overview(company_id)
+    progress = overview["progress"]
+    horizon = max(int(progress["target_tier"]), int(progress["achieved_level"]) + 1)
+    tier_names = {int(tier["tier_level"]): tier["name"] for tier in overview["tiers"]}
+    links = await list_help_links()
+    rows: list[dict[str, Any]] = []
+    for control in overview["controls"]:
+        if int(control["tier_level"]) > horizon or control["status"] in DONE_STATUSES:
+            continue
+        link = links.get(int(control["id"])) or {}
+        rows.append(
+            {
+                "control_id": control["id"],
+                "code": control["code"],
+                "control": control["name"],
+                "tier": tier_names.get(int(control["tier_level"]), f"Tier {control['tier_level']}"),
+                "tier_level": int(control["tier_level"]),
+                "status": control["status"],
+                "recommendation": link.get("recommendation_name") or "Contact us for assistance",
+                "url": link.get("help_url") or "",
+            }
+        )
+    return {"recommendations": rows, "total": len(rows), "horizon_tier": tier_names.get(horizon)}
+
+
 __all__ = [
     "DOMAINS",
     "DONE_STATUSES",
@@ -550,7 +822,15 @@ __all__ = [
     "HELP_STATUSES",
     "MAX_TIER",
     "STATUSES",
+    "add_evidence",
     "append_audit",
+    "delete_evidence",
+    "get_evidence",
+    "list_evidence_map",
+    "list_help_links",
+    "list_recommendations",
+    "replace_help_links",
+    "resolve_help_url",
     "build_tier_progress",
     "clamp_tier",
     "create_profile",

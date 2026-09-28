@@ -25,6 +25,7 @@ from app.repositories import licenses as licenses_repo
 from app.repositories import m365_best_practices as m365_bp_repo
 from app.repositories import report_sections as report_sections_repo
 from app.repositories import shop as shop_repo
+from app.repositories import smb1001 as smb1001_repo
 from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import voice_monitor as voice_monitor_repo
 from app.services import m365_best_practices as m365_bp_service
@@ -87,16 +88,26 @@ REPORT_SECTIONS: tuple[ReportSection, ...] = (
         description="Active subscriptions linked to the company.",
     ),
     ReportSection(
+        key="smb1001",
+        label="SMB1001 compliance",
+        description="Tier achieved, target tier and progress for each SMB1001 tier (Bronze to Diamond).",
+    ),
+    ReportSection(
+        key="smb1001_recommendations",
+        label="SMB1001 compliance recommendations",
+        description="Outstanding SMB1001 controls up to the target tier and recommended products or services.",
+    ),
+    ReportSection(
         key="essential8",
-        label="Essential 8 compliance — all maturity levels",
+        label="Essential 8 compliance (legacy) — all maturity levels",
         description="Compliance percentages for maturity levels 1, 2, and 3.",
     ),
-    ReportSection(key="essential8_ml1", label="Essential 8 — maturity level 1", description="Maturity level 1 compliance percentage."),
-    ReportSection(key="essential8_ml2", label="Essential 8 — maturity level 2", description="Maturity level 2 compliance percentage."),
-    ReportSection(key="essential8_ml3", label="Essential 8 — maturity level 3", description="Maturity level 3 compliance percentage."),
+    ReportSection(key="essential8_ml1", label="Essential 8 (legacy) — maturity level 1", description="Maturity level 1 compliance percentage."),
+    ReportSection(key="essential8_ml2", label="Essential 8 (legacy) — maturity level 2", description="Maturity level 2 compliance percentage."),
+    ReportSection(key="essential8_ml3", label="Essential 8 (legacy) — maturity level 3", description="Maturity level 3 compliance percentage."),
     ReportSection(
         key="essential8_recommendations",
-        label="Essential 8 compliance recommendations",
+        label="Essential 8 compliance recommendations (legacy)",
         description="Non-compliant requirements at the current maturity level and recommended products or services.",
     ),
     ReportSection(
@@ -514,6 +525,46 @@ async def _build_essential8_recommendations(company_id: int) -> dict[str, Any]:
     return {"recommendations": rows, "total": len(rows)}
 
 
+async def _build_smb1001(company_id: int) -> dict[str, Any]:
+    # First use converts Essential 8 progress, matching the SMB1001 page.
+    await smb1001_repo.ensure_company_profile(company_id)
+    overview = await smb1001_repo.get_company_overview(company_id)
+    progress = overview["progress"]
+    tiers = [
+        {
+            "tier_level": tier["tier_level"],
+            "name": tier["name"],
+            "attestation": tier.get("attestation"),
+            "total": tier["total"],
+            "done": tier["done"],
+            "in_progress": tier["counts"]["in_progress"],
+            "non_compliant": tier["counts"]["non_compliant"],
+            "not_started": tier["counts"]["not_started"],
+            "percentage": tier["percentage"],
+            "achieved": tier["achieved"],
+        }
+        for tier in progress["tiers"]
+    ]
+    target = next((tier for tier in tiers if tier["tier_level"] == progress["target_tier"]), None)
+    return {
+        "achieved_tier": (progress.get("achieved_tier") or {}).get("name"),
+        "next_tier": (progress.get("next_tier") or {}).get("name"),
+        "next_tier_remaining": (progress.get("next_tier") or {}).get("remaining"),
+        "target_tier": target["name"] if target else None,
+        "target_done": progress["target_done"],
+        "target_total": progress["target_total"],
+        "target_percentage": progress["target_percentage"],
+        "overall_percentage": progress["overall_percentage"],
+        "total": progress["overall_total"],
+        "tiers": tiers,
+    }
+
+
+async def _build_smb1001_recommendations(company_id: int) -> dict[str, Any]:
+    await smb1001_repo.ensure_company_profile(company_id)
+    return await smb1001_repo.list_recommendations(company_id)
+
+
 async def _build_compliance_checks(company_id: int) -> dict[str, Any]:
     summary = await compliance_checks_repo.get_assignment_summary(company_id)
     return dict(summary)
@@ -742,6 +793,8 @@ _SECTION_BUILDERS = {
     "orders_current_month": _build_orders_current_month,
     "licenses": _build_licenses,
     "subscriptions": _build_subscriptions,
+    "smb1001": _build_smb1001,
+    "smb1001_recommendations": _build_smb1001_recommendations,
     "essential8": _build_essential8,
     "essential8_ml1": _build_essential8_ml1,
     "essential8_ml2": _build_essential8_ml2,
@@ -983,6 +1036,29 @@ async def _build_essential8_detail(company_id: int) -> dict[str, Any]:
         "total": len(rows),
         "generated_at": bundle.get("generated_at"),
     }
+
+
+async def _build_smb1001_detail(company_id: int) -> dict[str, Any]:
+    """Per-control SMB1001 status with review dates and evidence counts."""
+    overview = await smb1001_repo.get_company_overview(company_id)
+    evidence_map = await smb1001_repo.list_evidence_map(company_id)
+    tier_names = {int(tier["tier_level"]): tier["name"] for tier in overview["tiers"]}
+    rows: list[dict[str, Any]] = []
+    for control in overview["controls"]:
+        record = control.get("compliance") or {}
+        rows.append(
+            {
+                "code": control["code"],
+                "name": control["name"],
+                "tier": tier_names.get(int(control["tier_level"]), f"Tier {control['tier_level']}"),
+                "domain": control.get("domain_label"),
+                "status": control["status"],
+                "last_reviewed_date": record.get("last_reviewed_date"),
+                "target_compliance_date": record.get("target_compliance_date"),
+                "evidence_file_count": len(evidence_map.get(int(control["id"]), [])),
+            }
+        )
+    return {"controls": rows, "total": len(rows)}
 
 
 async def _build_compliance_checks_detail(company_id: int) -> dict[str, Any]:
@@ -1284,6 +1360,7 @@ _DETAIL_BUILDERS: dict[str, Any] = {
     "orders_current_month": _build_orders_detail,
     "licenses": _build_licenses_detail,
     "subscriptions": _build_subscriptions_detail,
+    "smb1001": _build_smb1001_detail,
     "essential8": _build_essential8_detail,
     "compliance_checks": _build_compliance_checks_detail,
     "tickets_last_month": _build_tickets_detail,
@@ -1409,7 +1486,7 @@ async def build_company_report(company_id: int) -> ReportData:
 
     sections: list[SectionResult] = []
     for section_def in ordered_defs:
-        enabled = visibility.get(section_def.key, True)
+        enabled = visibility.get(section_def.key, True) and _section_component_available(section_def.key)
         data: dict[str, Any] = {}
         if enabled:
             builder = _SECTION_BUILDERS.get(section_def.key)
@@ -1456,6 +1533,16 @@ async def build_company_report(company_id: int) -> ReportData:
 # ---------------------------------------------------------------------------
 
 
+def _section_component_available(key: str) -> bool:
+    """Hide sections owned by a deployment-disabled component."""
+    for prefix in ("smb1001", "essential8"):
+        if key == prefix or key.startswith(f"{prefix}_"):
+            from app.services.component_availability import get_component_availability
+
+            return get_component_availability().feature_pack_available(prefix)
+    return True
+
+
 def _section_is_empty(key: str, data: dict[str, Any]) -> bool:
     """Return True when a section has no meaningful content to display."""
     if not data or "error" in data:
@@ -1475,6 +1562,8 @@ def _section_is_empty(key: str, data: dict[str, Any]) -> bool:
     if key == "licenses":
         return int(data.get("total") or 0) == 0
     if key == "subscriptions":
+        return int(data.get("total") or 0) == 0
+    if key in {"smb1001", "smb1001_recommendations"}:
         return int(data.get("total") or 0) == 0
     if key in {"essential8", "essential8_ml1", "essential8_ml2", "essential8_ml3"}:
         levels = data.get("levels") or []

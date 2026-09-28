@@ -102,7 +102,7 @@ one with its current status.
 | Email Signature (My Profile) | `email_signature` | — (profile card only) | — |
 | Click to Call | `click_to_call` | `/api/click-to-call` | — |
 | Forms | `forms` | `/myforms`, `/forms`, `/admin/forms`, `/api/forms` | — |
-| SMB1001 Compliance | `smb1001` | `/compliance`, `/api/smb1001` | pack `compliance` is disabled |
+| SMB1001 Compliance | `smb1001` | `/compliance`, `/api/smb1001`, `/admin/marketing/smb1001-help-links` | pack `compliance` is disabled |
 | Essential 8 Compliance (legacy) | `essential8` | `/compliance/essential8`, `/compliance/control`, `/compliance/requirements`, `/api/essential8`, `/admin/marketing/essential8-help-links` | pack `compliance` is disabled |
 | GMP/GLP Compliance Checks | `gmp_glp` | — (content filter) | — |
 
@@ -113,7 +113,9 @@ click-to-call card and stops phone numbers being turned into call links;
 only. Stored values are kept, so an existing email signature remains available
 to automations.
 
-`smb1001` removes the SMB1001 menu entry, the SMB1001 dashboard and its API.
+`smb1001` removes the SMB1001 menu entry, the SMB1001 dashboard and its API,
+the "SMB1001 help links" marketing page, and the SMB1001 report sections and
+reporting queries.
 Because the legacy Essential 8 pages live under `/compliance`, they are hidden
 too. Compliance Checks stays available.
 
