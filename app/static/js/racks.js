@@ -13,6 +13,7 @@
     dialog.showModal();
   };
   document.querySelector('[data-rack-create-open]')?.addEventListener('click', event => openDialog(createDialog, event.currentTarget));
+  document.querySelector('[data-rack-resize-open]')?.addEventListener('click', event => openDialog(document.querySelector('#rack-resize-dialog'), event.currentTarget));
   document.querySelectorAll('[data-dialog-close]').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
   document.querySelectorAll('dialog').forEach(dialog => {
     dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });

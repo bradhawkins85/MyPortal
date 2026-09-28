@@ -259,6 +259,48 @@ async def create_rack(company_id: int, name: str, location: str | None, unit_cou
         (company_id, name, location, unit_count, depth_mm))
 
 
+class RackResizeBlocked(ValueError):
+    """Shrinking a rack would drop units that still hold items or reservations."""
+
+
+async def resize_rack(company_id: int, rack_id: int, unit_count: int, depth_mm: int) -> dict[str, Any]:
+    """Change a rack's height and depth, returning its previous dimensions.
+
+    Growing is always allowed. Shrinking removes the highest-numbered units,
+    so it is refused while any item or reservation still sits in them; the
+    technician has to move or remove those first.
+    """
+    if not 1 <= unit_count <= 100:
+        raise ValueError("Rack size must be between 1 and 100 units")
+    if not 100 <= depth_mm <= 5000:
+        raise ValueError("Rack depth must be between 100 and 5000 mm")
+    rack = await db.fetch_one(
+        "SELECT unit_count, depth_mm FROM racks WHERE id=%s AND company_id=%s", (rack_id, company_id))
+    if not rack:
+        raise ValueError("Rack not found")
+    if unit_count < int(rack["unit_count"]):
+        blocking = [
+            f"{row['label'] or fallback} (U{row['start_unit']}–{row['end_unit']})"
+            for sql, fallback in (
+                ("""SELECT COALESCE(e.name, a.name) label, e.start_unit,
+                           e.start_unit + e.unit_height - 1 end_unit
+                    FROM rack_equipment e LEFT JOIN assets a ON a.id=e.asset_id
+                    WHERE e.rack_id=%s AND e.company_id=%s AND e.start_unit + e.unit_height - 1 > %s
+                    ORDER BY e.start_unit""", "Rack item"),
+                ("""SELECT label, start_unit, start_unit + unit_height - 1 end_unit
+                    FROM rack_reservations
+                    WHERE rack_id=%s AND company_id=%s AND start_unit + unit_height - 1 > %s
+                    ORDER BY start_unit""", "Reserved space"))
+            for row in (await db.fetch_all(sql, (rack_id, company_id, unit_count)) or [])]
+        if blocking:
+            raise RackResizeBlocked(
+                f"Move or remove everything above U{unit_count} before shrinking this rack: "
+                + ", ".join(blocking))
+    await db.execute("UPDATE racks SET unit_count=%s,depth_mm=%s WHERE id=%s AND company_id=%s",
+                     (unit_count, depth_mm, rack_id, company_id))
+    return {"unit_count": rack["unit_count"], "depth_mm": rack["depth_mm"]}
+
+
 def _item_name(name: str | None, asset: dict[str, Any] | None, item_type: str) -> str:
     """Return the display name for a rack item, falling back to its asset or type."""
     clean = (name or "").strip()
