@@ -5,6 +5,10 @@ file. The template at `.env.example` lists every supported key alongside
 recommended defaults. Copy the template to `.env` (or point your process manager
 at a dedicated path) and edit values as required for the deployment target.
 
+The [Onboarding Wizard](Onboarding%20Wizard.md) (`scripts/onboarding_wizard.py`,
+or `myportal-docker setup` on Docker) prompts for these values feature by
+feature, and `--check` verifies an existing file.
+
 For integration-specific guidance refer to the dedicated documentation under
 `docs/`. For example, [docs/xero.md](xero.md) outlines the callback URL and
 credential requirements for the Xero module.

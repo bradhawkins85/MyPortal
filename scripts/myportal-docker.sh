@@ -77,6 +77,11 @@ Commands:
   backup               Back up the database and uploaded files.
   restore-db FILE      Restore a database backup (.sql.gz) made by this script.
   restart              Restart MyPortal (applies changes to myportal.env).
+  setup [--check | --list | --feature NAME]
+        Run the onboarding wizard: choose which feature packs and modules are
+        enabled and configure their settings in myportal.env. Re-run it at any
+        time to review or correct settings; --check only reports missing or
+        invalid values. Disabling a feature keeps its settings.
   auto-upgrade on|off  Check for and apply new releases daily.
   superadmin list      List the users with super administrator rights.
   superadmin grant USERNAME
@@ -766,6 +771,23 @@ cmd_restart() {
   wait_for_release "$(get_setting "$PROJECT_ENV" MYPORTAL_VERSION)" || die "MyPortal did not become ready."
 }
 
+cmd_setup() {
+  require_root
+  require_installed
+  local image
+  image=$(get_setting "$PROJECT_ENV" MYPORTAL_IMAGE)
+  [[ -n "$image" ]] || die "no MyPortal image is recorded in ${PROJECT_ENV}."
+  docker run --rm "$image" test -f /app/scripts/onboarding_wizard.py >/dev/null 2>&1 \
+    || die "the installed release has no onboarding wizard. Run 'myportal-docker upgrade' first."
+  local -a tty=(-i)
+  [[ -t 0 && -t 1 ]] && tty=(-it)
+  # Runs as root so it can rewrite the root-owned myportal.env; the directory
+  # is mounted (not the file) so the file can be replaced atomically.
+  docker run --rm "${tty[@]}" --user 0:0 --entrypoint python \
+    -v "${MYPORTAL_DIR}:/config" "$image" \
+    /app/scripts/onboarding_wizard.py --docker --env-file /config/myportal.env "$@"
+}
+
 cmd_auto_upgrade() {
   require_root
   require_installed
@@ -1065,6 +1087,7 @@ main() {
     backup) cmd_backup ;;
     restore-db) cmd_restore_db "$@" ;;
     restart) cmd_restart ;;
+    setup|onboard) cmd_setup "$@" ;;
     auto-upgrade) cmd_auto_upgrade "$@" ;;
     superadmin|super-admin) cmd_superadmin "$@" ;;
     user) cmd_user "$@" ;;

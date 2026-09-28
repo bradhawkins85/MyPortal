@@ -7,6 +7,10 @@ in selectors and navigation.
 
 ## Configuration
 
+The [Onboarding Wizard](Onboarding%20Wizard.md) asks about every feature pack
+and module and maintains these variables for you; disabling a feature there
+keeps its settings in the file.
+
 Set either optional variable in the deployment `.env` file (or the systemd
 environment file):
 

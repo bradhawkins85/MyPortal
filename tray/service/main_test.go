@@ -12,16 +12,21 @@ import (
 	"github.com/bradhawkins85/myportal-tray/internal/ipc"
 )
 
-func TestServiceDoesNotModifyDefenderPreferences(t *testing.T) {
+func TestServiceChangesDefenderPreferencesOnlyThroughTamperAwarePolicy(t *testing.T) {
 	source, err := os.ReadFile("main.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	for _, forbidden := range []string{"ApplyExclusions", "Add-MpPreference", "Set-MpPreference", "TamperProtection"} {
+	// Preference changes must go through defender.ApplyPolicy, which skips
+	// changes Tamper Protection could block instead of attempting them.
+	for _, forbidden := range []string{"Add-MpPreference", "Set-MpPreference", "Remove-MpPreference"} {
 		if strings.Contains(string(source), forbidden) {
-			t.Errorf("tray service must not attempt to modify Defender preferences: found %q", forbidden)
+			t.Errorf("tray service must not modify Defender preferences directly: found %q", forbidden)
 		}
+	}
+	if !strings.Contains(string(source), "defender.ApplyPolicy(") {
+		t.Error("tray service no longer applies the portal's Defender policy")
 	}
 }
 
