@@ -44,7 +44,29 @@ def test_full_depth_item_is_one_spanning_block_on_each_face(direction, row):
     assert html.count('data-inspect-placement="7"') == 2
     assert html.count(f"grid-row: {row} / span 2; grid-column: 1 / span 3") == 2
     assert html.count("data-place-open") == 36
-    assert 'aria-label="Edit Two U server, front, units 3 to 4, lanes 1 to 3"' in html
+    assert 'aria-label="Show ports for Two U server, front, units 3 to 4, lanes 1 to 3"' in html
+    assert html.count('class="rack__device-edit"') == 2
+    assert f'style="grid-row: {row}; grid-column: 3" data-edit-equipment="7"' in html
+
+
+def test_edit_pencil_is_only_offered_to_editors():
+    rack = {"id": 1, "name": "Core rack", "unit_count": 4, "numbering_direction": "bottom-up"}
+    html = _render_face(rack, [_item(depth_mode="half")], [], can_edit=False)
+    assert 'data-inspect-placement="7"' in html
+    assert "rack__device-edit" not in html
+
+
+def test_clicking_an_item_opens_a_ports_table_dialog():
+    modals = TEMPLATE[TEMPLATE.index("{% block modals %}"):]
+    ports = modals[:modals.index("</dialog>")]
+    assert '<dialog id="rack-ports-dialog"' in ports and "data-ports-body" in ports
+    assert "{% if can_edit %}" not in modals[:modals.index('<dialog id="rack-ports-dialog"')]
+    assert "data-ports-edit" in ports
+    assert '<template data-port-table="{{ item.id }}"' in TEMPLATE
+    assert '<th scope="col">Connected to</th>' in TEMPLATE
+    script = (ROOT / "app/static/js/racks.js").read_text()
+    assert "addEventListener('click', () => showPorts(button))" in script
+    assert script.index("const showPorts") < script.index("if (!form || !placeDialog) return;")
 
 
 def test_reservation_occupies_only_its_face_and_lanes():

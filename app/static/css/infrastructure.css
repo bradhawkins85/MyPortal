@@ -545,3 +545,49 @@ dialog.rack-dialog--reservation { width: min(95vw, 42rem); max-width: 42rem; }
 
 /* "Device names" switch */
 .rack-workspace.hide-device-names .rack__device:not(.rack__device--reserved) .rack__device-name { display: none; }
+
+/* Hover pencil on installed items opens the edit dialog; the item itself opens its ports. */
+.rack__device-edit {
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  align-self: start;
+  justify-self: end;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 1px;
+  padding: 0;
+  border: 1px solid rgba(244, 207, 100, .75);
+  border-radius: 3px;
+  color: #1a1302;
+  background: #f4cf64;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .55);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s ease;
+}
+.rack__device-edit .rack-icon { width: .75rem; height: .75rem; stroke-width: 2.2; }
+.rack__device:hover + .rack__device-edit,
+.rack__device:focus-visible + .rack__device-edit,
+.rack__device-edit:hover,
+.rack__device-edit:focus-visible { opacity: 1; pointer-events: auto; }
+.rack__device-edit:focus-visible { outline: 2px solid #f8fafc; outline-offset: 1px; }
+@media (hover: none) { .rack__device-edit { opacity: .9; pointer-events: auto; } }
+@media (prefers-reduced-motion: reduce) { .rack__device-edit { transition: none; } }
+
+/* Ports and connections dialog */
+dialog.rack-dialog--ports { width: min(95vw, 48rem); max-width: 48rem; }
+.rack-ports { display: grid; gap: var(--space-3); max-height: min(70vh, 40rem); overflow: auto; }
+.rack-ports__asset { margin: 0; color: var(--rack-muted); font-size: var(--font-size-sm); }
+.rack-ports a { color: var(--rack-cyan); }
+.rack-ports__wrap { overflow-x: auto; border: 1px solid var(--rack-line); border-radius: 6px; }
+.rack-ports__table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }
+.rack-ports__table th, .rack-ports__table td { padding: .45rem .7rem; border-bottom: 1px solid var(--rack-line); text-align: left; vertical-align: top; }
+.rack-ports__table thead th { position: sticky; top: 0; color: var(--rack-muted); background: var(--rack-panel-raised); font-size: var(--font-size-xs); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.rack-ports__table tbody tr:last-child > * { border-bottom: 0; }
+.rack-ports__table tbody th { color: #f8fafc; font-weight: 600; white-space: nowrap; }
+.rack-ports__row.is-connected > th { box-shadow: inset 3px 0 0 var(--rack-cyan); }
+.rack-ports__empty { color: var(--rack-muted); font-style: italic; }
+.rack-ports__none { margin: 0; color: var(--rack-muted); }
+.rack-dialog--ports .button .rack-icon { width: 1rem; height: 1rem; vertical-align: -.15em; }

@@ -144,6 +144,33 @@
   <script type="application/json" id="rack-items-data">{{ ws["items"]|tojson }}</script>
   <script type="application/json" id="rack-port-catalog">{{ port_catalog|tojson }}</script>
   {% set list_rack = rack %}
+  {% set port_types = {"data": "Network", "iec": "IEC outlet", "3pin": "3-pin outlet", "psu": "Power supply", "kvm": "KVM device"} %}
+  {% for item in equipment if item.rack_id == list_rack.id %}
+  <template data-port-table="{{ item.id }}" data-item-title="{{ item.name or item.asset_name or item_type_labels[item.item_type] }}" data-item-type-label="{{ item_type_labels[item.item_type] }}">
+    {% if item.asset_name %}<p class="rack-ports__asset">Linked asset: <a href="/assets/{{ item.asset_id }}">{{ item.asset_name }}</a>{% if item.asset_status %} · {{ item.asset_status }}{% endif %}</p>{% endif %}
+    {% if item.ports %}
+    <div class="rack-ports__wrap">
+      <table class="rack-ports__table">
+        <caption class="sr-only">Ports on {{ item.name or item.asset_name or item_type_labels[item.item_type] }}</caption>
+        <thead><tr><th scope="col">Port</th><th scope="col">Type</th><th scope="col">Connected to</th><th scope="col">Label</th></tr></thead>
+        <tbody>
+          {% for port in item.ports %}
+          {% set parts = [] %}{% if port.source %}{% set _ = parts.append('Fed from ' ~ port.source) %}{% endif %}{% if port.peer %}{% set _ = parts.append(port.peer) %}{% endif %}{% if port.fed_items %}{% set _ = parts.append('Feeds ' ~ port.fed_items|join(', ')) %}{% endif %}
+          <tr class="rack-ports__row{% if port.asset_id or parts %} is-connected{% endif %}">
+            <th scope="row">{{ port.display_label }}</th>
+            <td>{{ port_types.get(port.connector, port.connector) }}</td>
+            <td>{% if port.asset_id %}<a href="/assets/{{ port.asset_id }}">{{ port.asset_name or 'Asset' }}</a>{% if parts %}<br>{% endif %}{% endif %}{{ parts|join('; ') }}{% if not (port.asset_id or parts) %}<span class="rack-ports__empty">{{ 'No power source' if port.connector == 'psu' else 'Not connected' }}</span>{% endif %}</td>
+            <td>{{ port.label or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="rack-ports__none">No ports documented for this item.{% if can_edit %} Use Edit to add network ports, outlets or power supplies.{% endif %}</p>
+    {% endif %}
+  </template>
+  {% endfor %}
     <details class="rack__details" id="rack-list-{{ list_rack.id }}"><summary>Item list and port links</summary><div class="rack-list"><h3>Installed rack items</h3><ul>
       {% for item in equipment if item.rack_id == list_rack.id %}<li id="placement-{{ item.id }}" data-rack-owner="{{ list_rack.id }}" data-item-name="{{ item.name or '' }}" data-item-type="{{ item.item_type }}" data-item-port-count="{{ item.port_count or 0 }}" data-item-asset="{{ item.asset_id or '' }}" data-item-power="{{ item.power_draw_watts if item.power_draw_watts is not none else '' }}" data-item-notes="{{ item.notes or '' }}" data-item-position="U{{ item.start_unit }}–{{ item.start_unit + item.unit_height - 1 }} · {{ item.face|title }}{{ ' and rear' if item.depth_mode == 'full' else '' }} · lanes {{ item.start_lane }}–{{ item.start_lane + item.width_lanes - 1 }}" data-item-asset-name="{{ item.asset_name or '' }}" data-item-linked-ports="{{ (item.ports or [])|selectattr('asset_id')|list|length }}" data-start-unit="{{ item.start_unit }}" data-unit-height="{{ item.unit_height }}" data-start-lane="{{ item.start_lane }}" data-width-lanes="{{ item.width_lanes }}" data-face="{{ item.face }}" data-depth-mode="{{ item.depth_mode }}"><div><strong>{{ item.name or item.asset_name or item_type_labels[item.item_type] }}</strong><small class="rack-list__type">{{ item_type_labels[item.item_type] }}</small><span>U{{ item.start_unit }}–{{ item.start_unit + item.unit_height - 1 }}, {{ item.face|title }}{{ ' and rear' if item.depth_mode == 'full' else '' }}, lanes {{ item.start_lane }}–{{ item.start_lane + item.width_lanes - 1 }}</span>{% if item.asset_name %}<small>Linked asset: <a href="/assets/{{ item.asset_id }}">{{ item.asset_name }}</a>{% if item.asset_status %} · {{ item.asset_status }}{% endif %}</small>{% endif %}{% if item.ports %}{% set linked = item.linked_port_count or 0 %}<details class="rack-connection-list"><summary>{{ item.ports|length }} connection{{ '' if item.ports|length == 1 else 's' }} · {{ linked }} linked</summary><ul class="rack-connection-list__items" aria-label="{{ item.name }} connections">{% for port in item.ports %}<li class="rack-connection rack-connection--{{ port.connector }}{% if port.asset_id or port.label or port.fed_items %} is-linked{% endif %}"><span class="rack-connection__port">{{ port.display_label }}</span><span class="rack-connection__target">{% set parts = [] %}{% if port.source %}{% set _ = parts.append('Fed from ' ~ port.source) %}{% endif %}{% if port.peer %}{% set _ = parts.append('↔ ' ~ port.peer) %}{% endif %}{% if port.label %}{% set _ = parts.append(port.label) %}{% endif %}{% if port.fed_items %}{% set _ = parts.append('Feeds ' ~ port.fed_items|join(', ')) %}{% endif %}{% if port.asset_id %}<a href="/assets/{{ port.asset_id }}">{{ port.asset_name or 'Asset' }}</a>{% if parts %} · {% endif %}{% endif %}{{ parts|join(' · ') }}{% if not (port.asset_id or parts) %}<span class="rack-connection__empty">{{ 'No power source' if port.connector == 'psu' else 'Not connected' }}</span>{% endif %}</span></li>{% endfor %}</ul></details>{% endif %}</div>{% if can_edit %}<div class="rack-list__actions"><button class="button button--small button--secondary" type="button" data-edit-equipment="{{ item.id }}">Edit</button><form class="inline-form" method="post" action="/api/infrastructure/rack-equipment/{{ item.id }}/delete" data-confirm-remove="{{ item.name or item.asset_name or item_type_labels[item.item_type] }}">{% include "partials/csrf.html" %}<input type="hidden" name="rack_id" value="{{ list_rack.id }}"><button class="button button--small button--danger" type="submit">Remove</button></form></div>{% endif %}</li>{% else %}<li>No rack items installed.</li>{% endfor %}</ul>
       <h3>Reservations</h3><ul>{% for item in reservations if item.rack_id == list_rack.id %}<li id="reservation-{{ item.id }}" data-rack-owner="{{ list_rack.id }}" data-reservation-label="{{ item.label or '' }}" data-reservation-owner="{{ item.owner or '' }}" data-reservation-notes="{{ item.notes or '' }}" data-reservation-position="U{{ item.start_unit }}–{{ item.start_unit + item.unit_height - 1 }} · {{ item.face|title }}{{ ' and rear' if item.depth_mode == 'full' else '' }}" data-start-unit="{{ item.start_unit }}" data-unit-height="{{ item.unit_height }}" data-start-lane="{{ item.start_lane }}" data-width-lanes="{{ item.width_lanes }}" data-face="{{ item.face }}" data-depth-mode="{{ item.depth_mode }}"><div><strong>{{ item.label or 'Reserved space' }}</strong><span>U{{ item.start_unit }}–{{ item.start_unit + item.unit_height - 1 }}, {{ item.face|title }}{% if item.owner %} · {{ item.owner }}{% endif %}</span></div>{% if can_edit %}<div class="rack-list__actions"><button class="button button--small button--secondary" type="button" data-edit-reservation="{{ item.id }}">Edit</button><form class="inline-form" method="post" action="/api/infrastructure/rack-reservations/{{ item.id }}/delete" data-confirm-remove="{{ item.label or 'this reservation' }}">{% include "partials/csrf.html" %}<input type="hidden" name="rack_id" value="{{ list_rack.id }}"><button class="button button--small button--danger" type="submit">Remove</button></form></div>{% endif %}</li>{% else %}<li>No space reserved.</li>{% endfor %}</ul></div></details>
@@ -151,7 +178,22 @@
   </div>
 </section>
 {% endblock %}
-{% block modals %}{% if can_edit %}
+{% block modals %}
+<dialog id="rack-ports-dialog" class="dialog rack-dialog rack-dialog--ports" aria-labelledby="rack-ports-title">
+  <div class="dialog__container">
+    <header class="dialog__header rack-dialog__header">
+      <div>
+        <p class="rack-dialog__eyebrow" data-ports-type>Ports and connections</p>
+        <h2 class="dialog__title" id="rack-ports-title" data-ports-title>Ports</h2>
+        <p class="rack-dialog__position" data-ports-position></p>
+      </div>
+      <button type="button" class="dialog__close" data-dialog-close aria-label="Close">×</button>
+    </header>
+    <div class="dialog__body rack-ports" data-ports-body></div>
+    <footer class="dialog__footer rack-dialog__footer"><span class="rack-dialog__spacer"></span><button type="button" class="button button--secondary" data-dialog-close>Close</button>{% if can_edit %}<button type="button" class="button button--primary" data-ports-edit>{{ draw.icon('edit') }} Edit item</button>{% endif %}</footer>
+  </div>
+</dialog>
+{% if can_edit %}
 <dialog id="rack-create-dialog" class="dialog" aria-labelledby="rack-create-title"><form class="dialog__container form-stack" method="post" action="/api/infrastructure/racks"><header class="dialog__header"><h2 id="rack-create-title">Add rack</h2><button type="button" class="dialog__close" data-dialog-close aria-label="Close">×</button></header><div class="dialog__body form-stack">{% include "partials/csrf.html" %}<label>Name<input class="input" name="name" required maxlength="191"></label><label>Location<input class="input" name="location" maxlength="255"></label><label>Height (U)<input class="input" type="number" name="unit_count" min="1" max="100" value="42" required></label><label>Depth (mm)<input class="input" type="number" name="depth_mm" min="100" max="5000" value="1000" required></label></div><footer class="dialog__footer"><button type="button" class="button button--secondary" data-dialog-close>Cancel</button><button class="button button--primary">Add rack</button></footer></form></dialog>
 <dialog id="rack-place-dialog" class="dialog rack-dialog rack-dialog--place" aria-labelledby="rack-place-title" data-mode="add">
   <form class="dialog__container" method="post" action="/api/infrastructure/rack-equipment" data-placement-form>
