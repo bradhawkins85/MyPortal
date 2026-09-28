@@ -168,11 +168,31 @@ def test_point_to_point_wireless_link_between_sites():
 
 
 def test_undocumented_endpoints_are_hidden_until_requested():
-    assert "asset:9" not in _graph().nodes  # A laptop with nothing documented.
-    assert "asset:9" in _graph(include_unlinked=True).nodes
+    assert "asset:9" not in _graph(hide_unlinked=False).nodes  # A laptop with nothing documented.
+    assert "asset:9" in _graph(include_unlinked=True, hide_unlinked=False).nodes
     # Infrastructure always appears, and documented endpoints do too.
-    assert "asset:8" in _graph().nodes  # Has an IP address.
+    assert "asset:8" in _graph(hide_unlinked=False).nodes  # Has an IP address.
     assert "asset:10" in _graph().nodes  # Linked from a switch port.
+
+
+def test_devices_without_links_are_hidden_by_default():
+    graph = _graph()
+    assert "asset:8" not in graph.nodes  # Has an IP but no link to another device.
+    assert all(any(node_id in (edge.a, edge.b) for edge in graph.edges) for node_id in graph.nodes)
+    assert "asset:8" in _graph(hide_unlinked=False).nodes
+    # Subnet membership is not a link to another device.
+    assert "asset:8" not in _graph(show_subnets=True).nodes
+    assert "Not linked to other devices" not in nm.render_svg(graph, title="Map")
+
+
+def test_hide_unlinked_option_reads_its_checkbox():
+    from starlette.datastructures import QueryParams
+
+    assert nm.MapOptions.from_params(QueryParams("")).hide_unlinked is True
+    assert nm.MapOptions.from_params(QueryParams("unlinked=show&unlinked=hide")).hide_unlinked is True
+    assert nm.MapOptions.from_params(QueryParams("unlinked=show")).hide_unlinked is False
+    assert ("unlinked", "show") in nm.MapOptions(hide_unlinked=False).query()
+    assert all(key != "unlinked" for key, _value in nm.MapOptions().query())
 
 
 def test_type_filter_drops_devices_and_their_links():
@@ -208,7 +228,8 @@ def test_options_round_trip_through_query_parameters():
     from starlette.datastructures import QueryParams
 
     options = nm.MapOptions(detail="detailed", types=frozenset({"switch", "router"}), show_subnets=True,
-                            include_unlinked=True, site="Warehouse", show_racks=False, layout="sites")
+                            include_unlinked=True, site="Warehouse", show_racks=False, layout="sites",
+                            hide_unlinked=False)
     parsed = nm.MapOptions.from_params(QueryParams(options.query()))
     assert parsed == options
     assert nm.MapOptions.from_params(QueryParams("detail=bogus&types=nope")).detail == nm.DEFAULT_DETAIL
@@ -257,7 +278,7 @@ def test_interactive_svg_leaves_navigation_to_the_page():
 
 
 def test_layout_keeps_cards_apart():
-    graph = _graph(detail="detailed", include_unlinked=True)
+    graph = _graph(detail="detailed", include_unlinked=True, hide_unlinked=False)
     nm.layout(graph)
     cards = [(node.x, node.y, node.x + nm.CARD_W, node.y + node.h) for node in graph.nodes.values()]
     for index, (ax1, ay1, ax2, ay2) in enumerate(cards):
@@ -300,7 +321,7 @@ def test_topology_places_each_device_right_of_its_uplink():
 
 
 def test_topology_lists_unlinked_devices_separately():
-    graph = _graph(include_unlinked=True)
+    graph = _graph(include_unlinked=True, hide_unlinked=False)
     svg = nm.render_svg(graph, title="Map")
     assert "Not linked to other devices" in svg
     linked = [node for node in graph.nodes.values() if node.id in {"asset:1", "asset:7"}]

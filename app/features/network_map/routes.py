@@ -104,7 +104,7 @@ async def network_map_page(request: Request):
     user, _membership, company, company_id, can_edit = context
     options = network_map.MapOptions.from_params(request.query_params)
     graph, overview, extra = await _graph(company_id, options)
-    everything = network_map.build_graph(overview, extra, network_map.MapOptions(include_unlinked=True))
+    everything = network_map.build_graph(overview, extra, network_map.MapOptions(include_unlinked=True, hide_unlinked=False))
     title = "Network map"
     svg = network_map.render_svg(
         graph, title=title, subtitle=network_map.subtitle((company or {}).get("name"), options),

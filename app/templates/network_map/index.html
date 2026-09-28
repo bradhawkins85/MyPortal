@@ -11,7 +11,8 @@
       <label>Detail<select class="input" name="detail">{% for key, level in detail_levels.items() %}<option value="{{ key }}" {% if key == options.detail %}selected{% endif %}>{{ level.label }}</option>{% endfor %}</select></label>
       <label>Site<select class="input" name="site"><option value="">All sites</option>{% for site in sites %}<option value="{{ site }}" {% if site == options.site %}selected{% endif %}>{{ site }}</option>{% endfor %}</select></label>
       <label class="checkbox"><input type="checkbox" name="subnets" value="1" {% if options.show_subnets %}checked{% endif %}><span>Show subnets</span></label>
-      <label class="checkbox"><input type="checkbox" name="all_devices" value="1" {% if options.include_unlinked %}checked{% endif %}><span>Include undocumented devices</span></label>
+      <input type="hidden" name="unlinked" value="show"><label class="checkbox" title="Leave off devices with no link to another device"><input type="checkbox" name="unlinked" value="hide" {% if options.hide_unlinked %}checked{% endif %}><span>Hide devices not linked to other devices</span></label>
+<label class="checkbox"><input type="checkbox" name="all_devices" value="1" {% if options.include_unlinked %}checked{% endif %}><span>Include undocumented devices</span></label>
       <label class="checkbox"><input type="checkbox" name="racks" value="0" {% if not options.show_racks %}checked{% endif %}><span>Ignore rack grouping (sites layout)</span></label>
       <details class="nm-type-picker">
         <summary class="button button--ghost">Device types{% if options.types is not none %} ({{ options.types|length }}){% endif %}</summary>
@@ -87,7 +88,8 @@
       <fieldset><legend>Scope</legend>
         <label>Site<select class="input" name="site"><option value="">All sites</option>{% for site in sites %}<option value="{{ site }}" {% if site == options.site %}selected{% endif %}>{{ site }}</option>{% endfor %}</select></label>
         <label class="checkbox"><input type="checkbox" name="subnets" value="1" {% if options.show_subnets %}checked{% endif %}><span>Show subnets</span></label>
-        <label class="checkbox"><input type="checkbox" name="all_devices" value="1" {% if options.include_unlinked %}checked{% endif %}><span>Include undocumented devices</span></label>
+        <input type="hidden" name="unlinked" value="show"><label class="checkbox" title="Leave off devices with no link to another device"><input type="checkbox" name="unlinked" value="hide" {% if options.hide_unlinked %}checked{% endif %}><span>Hide devices not linked to other devices</span></label>
+<label class="checkbox"><input type="checkbox" name="all_devices" value="1" {% if options.include_unlinked %}checked{% endif %}><span>Include undocumented devices</span></label>
         <label class="checkbox"><input type="checkbox" name="racks" value="0" {% if not options.show_racks %}checked{% endif %}><span>Ignore rack grouping (sites layout)</span></label>
         <label data-nm-paper>PDF paper size<select class="input" name="paper">{% for key, label in paper_sizes.items() %}<option value="{{ key }}" {% if key == 'a3' %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
       </fieldset>

@@ -81,6 +81,8 @@ class MapOptions:
     types: frozenset[str] | None = None
     show_subnets: bool = False
     include_unlinked: bool = False
+    # Devices with no link to another device are left off unless asked for.
+    hide_unlinked: bool = True
     site: str | None = None
     show_racks: bool = True
     layout: str = DEFAULT_LAYOUT
@@ -108,6 +110,7 @@ class MapOptions:
             types=types,
             show_subnets=_truthy(params.get("subnets")),
             include_unlinked=_truthy(params.get("all_devices")),
+            hide_unlinked=_hide_unlinked(params),
             site=site,
             show_racks=str(params.get("racks") or "1") != "0",
         )
@@ -122,11 +125,24 @@ class MapOptions:
             pairs.append(("subnets", "1"))
         if self.include_unlinked:
             pairs.append(("all_devices", "1"))
+        if not self.hide_unlinked:
+            pairs.append(("unlinked", "show"))
         if self.site:
             pairs.append(("site", self.site))
         if not self.show_racks:
             pairs.append(("racks", "0"))
         return pairs
+
+
+def _hide_unlinked(params: Any) -> bool:
+    """Hiding is the default, so only an explicit ``unlinked=show`` turns it off.
+
+    The option's checkbox (``unlinked=hide``) follows a hidden ``unlinked=show``
+    field, so a ticked box submits both values and an unticked one only "show".
+    """
+    getlist = getattr(params, "getlist", None)
+    values = getlist("unlinked") if getlist else [params.get("unlinked")] if params.get("unlinked") else []
+    return not values or "hide" in values
 
 
 def _truthy(value: Any) -> bool:
@@ -417,6 +433,13 @@ def build_graph(overview: Mapping[str, Any], extra: Mapping[str, Any],
         neighbours = {end for edge in edge_list if edge.a in focus or edge.b in focus
                       for end in (edge.a, edge.b)}
         nodes = {node_id: node for node_id, node in nodes.items() if node_id in focus | neighbours}
+        edge_list = [edge for edge in edge_list if edge.a in nodes and edge.b in nodes]
+
+    if options.hide_unlinked:
+        # A subnet is not a device, so membership alone does not count as a link.
+        device_links = {end for edge in edge_list if edge.medium != "subnet" for end in (edge.a, edge.b)}
+        nodes = {node_id: node for node_id, node in nodes.items()
+                 if node.kind not in {"asset", "item"} or node_id in device_links}
         edge_list = [edge for edge in edge_list if edge.a in nodes and edge.b in nodes]
 
     # Subnets and the internet only draw while something still links to them.
@@ -1090,6 +1113,8 @@ def describe_options(options: MapOptions) -> str:
         parts.append("subnets shown")
     if options.include_unlinked:
         parts.append("including undocumented devices")
+    if not options.hide_unlinked:
+        parts.append("including unlinked devices")
     return " · ".join(parts)
 
 
