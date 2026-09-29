@@ -4,8 +4,8 @@ Scheduled `system_update` tasks always queue `scripts/upgrade.sh --rolling` thro
 the existing flag processor. Manual update entry points retain their existing
 mode selection. The processor records `pending`, `running`, `succeeded`, and
 `failed` states, UTC timestamps, bounded coordinator output, and a sanitized
-failure summary for global administrators at **Administration → Scheduled tasks
-→ System updates**.
+failure summary for global administrators at **Administration → System
+Updates** in the left menu.
 
 ## Starting an upgrade from the portal
 

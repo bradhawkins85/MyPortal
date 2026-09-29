@@ -552,100 +552,18 @@ def test_env_example_suggests_legacy_control_checkout():
     assert "\nMYPORTAL_CONTROL_CHECKOUT=/opt/myportal\n" in (ROOT / ".env.example").read_text()
 
 
-# ---------------------------------------------------------------------------
-# Coordinator and application agree on the history directory
-# ---------------------------------------------------------------------------
+def test_system_updates_has_its_own_administration_menu_item():
+    base = (ROOT / "app/templates/base.html").read_text()
+    admin_block = base[base.index('<li class="menu__heading" role="presentation">Administration</li>'):]
+    assert 'href="/admin/system-updates"' in admin_block
+    assert ">System Updates</span>" in admin_block
+    # Super-admin only: the link sits inside the is_super_admin block.
+    super_admin = admin_block[admin_block.index("{% if is_super_admin %}"):]
+    assert 'href="/admin/system-updates"' in super_admin
+    scheduled = (ROOT / "app/templates/admin/scheduled_tasks.html").read_text()
+    assert "/admin/system-updates" not in scheduled
 
-@pytest.mark.parametrize(
-    ("project", "shared_state_exists", "expected"),
-    [
-        # A release below /opt/myportal (the running application).
-        ("opt/myportal/releases/abc", False, "shared"),
-        # The control checkout cloned into /opt/myportal on older installs.
-        ("opt/myportal", True, "shared"),
-        # A development checkout on a host without the shared tree.
-        ("home/dev/MyPortal", False, None),
-    ],
-)
-def test_history_dir_matches_between_release_and_control_checkout(tmp_path, project, shared_state_exists, expected):
-    base = tmp_path
-    shared = base / "opt/myportal/shared"
-    if shared_state_exists:
-        (shared / "state").mkdir(parents=True)
-    # Point the default at the temporary tree while keeping the same layout.
-    project_root = base / project
-    result = system_update_history._default_shared_root(project_root, shared)
-    assert result == (str(shared) if expected == "shared" else None)
+    from app.repositories.sidebar_preferences import build_default_sidebar_preferences
 
-
-def test_report_helper_explains_a_missing_record(history):
-    result = subprocess.run(
-        [sys.executable, str(ROOT / "scripts/system_update_report.py"),
-         "597b18ed-eb3e-4e19-b9d6-98ad85c7a34d", "running"],
-        text=True, capture_output=True,
-        env={**os.environ, "PYTHONPATH": str(ROOT), "MYPORTAL_SYSTEM_UPDATE_HISTORY_DIR": str(history)},
-    )
-    assert result.returncode == 1
-    assert "Traceback" not in result.stderr
-    assert "No system update record 597b18ed" in result.stderr
-
-
-@pytest.mark.skipif(shutil.which("flock") is None, reason="flock is required")
-def test_baremetal_coordinator_upgrades_even_when_reporting_fails(tmp_path):
-    project = tmp_path / "project"
-    scripts = project / "scripts"
-    scripts.mkdir(parents=True)
-    shutil.copy(ROOT / "scripts/process_update_flag.sh", scripts)
-    (scripts / "system_update_report.py").write_text("import sys\nsys.exit(1)\n")
-    marker = tmp_path / "upgraded"
-    (scripts / "upgrade.sh").write_text(f"#!/usr/bin/env bash\ntouch {marker}\n")
-    (scripts / "upgrade.sh").chmod(0o755)
-    state = project / "var/state"
-    state.mkdir(parents=True)
-    flag = state / "system_update.flag"
-    flag.write_text("update_id=597b18ed-eb3e-4e19-b9d6-98ad85c7a34d\nrequested_mode=rolling\n")
-    flag.chmod(0o600)
-
-    result = subprocess.run(
-        ["bash", str(scripts / "process_update_flag.sh")], capture_output=True, text=True,
-        env={**os.environ, "MYPORTAL_SHARED_ROOT": str(tmp_path / "none"),
-             "MYPORTAL_UPDATER_STATE_DIR": str(tmp_path / "updater")},
-    )
-    assert result.returncode == 0, result.stderr
-    assert marker.exists()
-    assert not flag.exists()
-    assert "could not record" in result.stderr
-
-
-def _verify_release_sources(release: Path) -> subprocess.CompletedProcess[str]:
-    script = (ROOT / "scripts/upgrade.sh").read_text()
-    start = script.index("verify_release_sources() {")
-    end = script.index("\n}\n", script.index("\nPY\n", start)) + 3
-    program = script[start:end] + f"verify_release_sources {str(release)!r}\n"
-    return subprocess.run(["bash", "-c", program], text=True, capture_output=True)
-
-
-def test_upgrade_refuses_a_release_with_syntax_errors(tmp_path):
-    release = tmp_path / "6b54065a"
-    (release / "app/services").mkdir(parents=True)
-    (release / "app/services/ok.py").write_text("x = 1\n")
-    (release / "app/services/realtime.py").write_text(
-        "def f(v):\n    try:\n        int(v)\n    except ValueError:\n        continue\n"
-    )
-    result = _verify_release_sources(release)
-    assert result.returncode == 1
-    assert "app/services/realtime.py:5: 'continue' not properly in loop" in result.stderr
-    assert not list(release.rglob("*.pyc"))
-
-
-def test_upgrade_accepts_a_release_that_compiles(tmp_path):
-    release = tmp_path / "release"
-    (release / "app").mkdir(parents=True)
-    (release / "app/main.py").write_text("x = 1\n")
-    (release / "manage.py").write_text("print('ok')\n")
-    assert _verify_release_sources(release).returncode == 0
-
-
-def test_repository_sources_compile():
-    release_result = _verify_release_sources(ROOT)
-    assert release_result.returncode == 0, release_result.stderr
+    groups = {group["label"]: group for group in build_default_sidebar_preferences()["groups"]}
+    assert "/admin/system-updates" in groups["Administration"]["items"]

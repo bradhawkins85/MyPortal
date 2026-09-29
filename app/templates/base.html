@@ -848,6 +848,14 @@
                   <span class="menu__label">Feature Packs</span>
                 </a>
               </li>
+              <li class="menu__item">
+                <a href="/admin/system-updates" {% if current_path.startswith('/admin/system-updates') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M12 4a8 8 0 0 1 7.75 6h-2.1A6 6 0 0 0 7.1 7.1L9 9H4V4l1.68 1.68A8 8 0 0 1 12 4zM4.25 14h2.1a6 6 0 0 0 10.55 2.9L15 15h5v5l-1.68-1.68A8 8 0 0 1 4.25 14zM11 8h2v4.4l3 1.8-1 1.7-4-2.4z"/></svg>
+                  </span>
+                  <span class="menu__label">System Updates</span>
+                </a>
+              </li>
               {% if module_enabled.get('voice-monitor', false) %}<li class="menu__item">
                 <a href="/admin/voice-monitor" {% if current_path.startswith('/admin/voice-monitor') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
