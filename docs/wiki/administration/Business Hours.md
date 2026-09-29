@@ -7,8 +7,9 @@ tickets.
 ## Schedules
 
 - **Global schedule** – *Tickets → Actions → Business hours*
-  (`/admin/business-hours`). Your organisation's hours, time zone, and
-  closures such as public holidays.
+  (`/admin/business-hours`). Your organisation's hours and closures such as
+  public holidays. The global schedule always uses the portal time zone set by
+  `CRON_TIMEZONE`.
 - **Company schedule** – the *Business hours* card on a company's edit page.
   Choose *Use the global business hours* (default) or *Use custom hours* with
   the company's own time zone, hours, and closures. Custom schedules include

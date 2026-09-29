@@ -26,7 +26,9 @@ invoicing or product change. They live under *Marketing → Email campaigns*
 - **Reply-to address** – use a mailbox MyPortal imports (IMAP or Microsoft 365
   mail) so replies become tickets.
 - **Business hours** – each recipient's company hours (default, falling back
-  to the global hours) or the global hours. See [Business Hours](Business%20Hours.md).
+  to the global hours) or the global hours. Global hours use the portal time
+  zone (`CRON_TIMEZONE`). If no business hours are saved at all, campaigns use
+  weekdays 08:30–17:00 in `CRON_TIMEZONE`. See [Business Hours](Business%20Hours.md).
 - **Send no earlier than** – optional start time.
 
 ## Audience

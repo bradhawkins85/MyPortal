@@ -34,7 +34,7 @@ async def company_edit_context(company_id: int) -> dict[str, Any]:
             base_record.get("weekly_hours") if base_record else None
         ),
         "business_hours_timezone": (
-            base_record.get("timezone") if base_record else _default_timezone()
+            company_record.get("timezone") if company_record else _default_timezone()
         ),
         "business_hours_include_global_closures": (
             company_record.get("include_global_closures", True) if company_record else True
@@ -46,9 +46,9 @@ async def company_edit_context(company_id: int) -> dict[str, Any]:
 
 
 def _default_timezone() -> str:
-    from app.core.config import get_settings
+    from app.services import business_hours as service
 
-    return str(get_settings().default_timezone or "UTC")
+    return service.default_timezone_name()
 
 
 def _parse_schedule_form(form: Any) -> tuple[str, dict[str, Any] | None, str | None]:
@@ -86,7 +86,8 @@ async def admin_business_hours_page(request: Request):
         "title": "Business hours",
         "business_hours_configured": record is not None,
         "business_hours_rows": service.weekly_form_rows(record.get("weekly_hours") if record else None),
-        "business_hours_timezone": record.get("timezone") if record else _default_timezone(),
+        "business_hours_timezone": _default_timezone(),
+        "business_hours_timezone_locked": True,
         "business_hours_timezones": service.timezone_options(),
         "business_hours_closures": await repo.list_closures(None),
         "business_hours_status": await service.status_for_company(None),
@@ -103,10 +104,11 @@ async def admin_save_business_hours(request: Request):
     if redirect:
         return redirect
     form = await request.form()
-    timezone_name, weekly, error = _parse_schedule_form(form)
+    weekly, error = service.parse_weekly_form(form)
     if error:
         return flash_redirect(_GLOBAL_URL, error, "error")
-    await repo.save_schedule(None, timezone_name=timezone_name, weekly_hours=weekly)
+    # The global schedule always follows the portal time zone (CRON_TIMEZONE).
+    await repo.save_schedule(None, timezone_name=_default_timezone(), weekly_hours=weekly)
     service.invalidate_cache()
     return flash_redirect(_GLOBAL_URL, "Business hours saved.", "success")
 

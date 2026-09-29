@@ -1,8 +1,10 @@
 """Business hours: global and per-company opening schedules.
 
-A company without its own schedule inherits the global schedule. When no
-global schedule has been configured, every time is treated as open so that
-automations and SLA timers keep their pre-existing behaviour.
+A company without its own schedule inherits the global schedule. The global
+schedule is always read in the portal time zone (``CRON_TIMEZONE``); company
+schedules keep the time zone chosen for them. When no global schedule has been
+configured, every time is treated as open so that automations and SLA timers
+keep their pre-existing behaviour.
 """
 
 from __future__ import annotations
@@ -58,11 +60,20 @@ class BusinessHoursSchedule:
         return any(self.weekly.get(day) for day in range(7))
 
 
+def default_timezone_name() -> str:
+    """The portal time zone (``CRON_TIMEZONE``), falling back to UTC when invalid."""
+
+    from app.core.config import get_settings
+
+    name = str(get_settings().default_timezone or "").strip()
+    return name if name and is_valid_timezone(name) else "UTC"
+
+
 def resolve_zone(name: str | None) -> ZoneInfo:
     try:
-        return ZoneInfo(str(name or "UTC").strip() or "UTC")
+        return ZoneInfo(str(name or "").strip() or default_timezone_name())
     except (ZoneInfoNotFoundError, ValueError):
-        return ZoneInfo("UTC")
+        return ZoneInfo(default_timezone_name())
 
 
 def is_valid_timezone(name: str | None) -> bool:
@@ -141,7 +152,7 @@ def build_schedule(
     source: str = "global",
 ) -> BusinessHoursSchedule:
     return BusinessHoursSchedule(
-        timezone_name=str(record.get("timezone") or "UTC"),
+        timezone_name=str(record.get("timezone") or "").strip() or default_timezone_name(),
         weekly=normalise_weekly_hours(record.get("weekly_hours")),
         closures=frozenset(closures),
         source=source,
@@ -290,7 +301,9 @@ async def _load_schedule(company_id: int | None) -> BusinessHoursSchedule | None
             return build_schedule(company_record, closures, source="company")
     if not global_record:
         return None
-    return build_schedule(global_record, global_closures, source="global")
+    return build_schedule(
+        {**global_record, "timezone": default_timezone_name()}, global_closures, source="global"
+    )
 
 
 async def get_schedule(company_id: int | None = None) -> BusinessHoursSchedule | None:
