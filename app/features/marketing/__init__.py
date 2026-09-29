@@ -10,7 +10,7 @@ from .routes import router as marketing_router
 
 PACK = FeaturePack(
     slug="marketing",
-    version="1.2.0",
+    version="1.2.1",
     routers=(campaign_router, marketing_router),
 )
 

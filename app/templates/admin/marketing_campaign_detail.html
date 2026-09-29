@@ -29,32 +29,50 @@
         <p class="card__subtitle">{% include "admin/partials/marketing_campaign_status.html" %}</p>
       </div>
     </header>
-    <dl class="detail-list">
-      <dt>Type</dt>
-      <dd>{% if campaign.category == 'sales' %}Sales (includes an unsubscribe footer){% else %}Updates{% endif %}</dd>
-      <dt>Subject</dt>
-      <dd>{{ campaign.subject }}</dd>
-      <dt>Body</dt>
-      <dd>{% if campaign.message_template_id %}Message template #{{ campaign.message_template_id }}{% else %}Written on the campaign{% endif %}</dd>
-      <dt>Sender</dt>
-      <dd>{{ campaign.sender_name or '' }} {{ campaign.sender_email or 'Default sender' }}</dd>
-      <dt>Replies go to</dt>
-      <dd>{{ campaign.reply_to or 'The sender address' }}</dd>
-      <dt>Business hours</dt>
-      <dd>{% if campaign.business_hours_source == 'global' %}Global business hours{% else %}Each recipient's company hours{% endif %}</dd>
+    <div class="stat-strip marketing-campaign-stat-strip" data-stat-strip>
+      <div class="stat-strip__stat stat-strip__stat--info">
+        <span class="stat-strip__stat-label">Type</span>
+        <span class="stat-strip__stat-value">{% if campaign.category == 'sales' %}Sales (includes an unsubscribe footer){% else %}Updates{% endif %}</span>
+      </div>
+      <div class="stat-strip__stat stat-strip__stat--neutral">
+        <span class="stat-strip__stat-label">Subject</span>
+        <span class="stat-strip__stat-value">{{ campaign.subject }}</span>
+      </div>
+      <div class="stat-strip__stat stat-strip__stat--neutral">
+        <span class="stat-strip__stat-label">Body</span>
+        <span class="stat-strip__stat-value">{% if campaign.message_template_id %}Message template #{{ campaign.message_template_id }}{% else %}Written on the campaign{% endif %}</span>
+      </div>
+      <div class="stat-strip__stat stat-strip__stat--neutral">
+        <span class="stat-strip__stat-label">Sender</span>
+        <span class="stat-strip__stat-value">{{ campaign.sender_name or '' }} {{ campaign.sender_email or 'Default sender' }}</span>
+      </div>
+      <div class="stat-strip__stat stat-strip__stat--neutral">
+        <span class="stat-strip__stat-label">Replies go to</span>
+        <span class="stat-strip__stat-value">{{ campaign.reply_to or 'The sender address' }}</span>
+      </div>
+      <div class="stat-strip__stat stat-strip__stat--neutral">
+        <span class="stat-strip__stat-label">Business hours</span>
+        <span class="stat-strip__stat-value">{% if campaign.business_hours_source == 'global' %}Global business hours{% else %}Each recipient's company hours{% endif %}</span>
+      </div>
       {% if campaign.scheduled_for %}
-        <dt>Not before</dt>
-        <dd><span data-utc="{{ campaign.scheduled_for.isoformat() }}">{{ campaign.scheduled_for }}</span></dd>
+        <div class="stat-strip__stat stat-strip__stat--info">
+          <span class="stat-strip__stat-label">Not before</span>
+          <span class="stat-strip__stat-value" data-utc="{{ campaign.scheduled_for.isoformat() }}">{{ campaign.scheduled_for }}</span>
+        </div>
       {% endif %}
       {% if campaign.queued_at %}
-        <dt>Queued</dt>
-        <dd><span data-utc="{{ campaign.queued_at.isoformat() }}">{{ campaign.queued_at }}</span></dd>
+        <div class="stat-strip__stat stat-strip__stat--info">
+          <span class="stat-strip__stat-label">Queued</span>
+          <span class="stat-strip__stat-value" data-utc="{{ campaign.queued_at.isoformat() }}">{{ campaign.queued_at }}</span>
+        </div>
       {% endif %}
       {% if campaign.completed_at %}
-        <dt>Completed</dt>
-        <dd><span data-utc="{{ campaign.completed_at.isoformat() }}">{{ campaign.completed_at }}</span></dd>
+        <div class="stat-strip__stat stat-strip__stat--success">
+          <span class="stat-strip__stat-label">Completed</span>
+          <span class="stat-strip__stat-value" data-utc="{{ campaign.completed_at.isoformat() }}">{{ campaign.completed_at }}</span>
+        </div>
       {% endif %}
-    </dl>
+    </div>
   </section>
 
   {% if campaign.status == 'draft' %}
@@ -127,18 +145,25 @@
           <p class="card__subtitle">Delivery, opens and clicks come from SMTP2Go webhooks when SMTP2Go is enabled.</p>
         </div>
       </header>
-      <dl class="detail-list">
-        <dt>Recipients</dt><dd>{{ campaign_stats.total }}</dd>
-        <dt>Waiting for business hours</dt><dd>{{ campaign_stats.pending }}</dd>
-        <dt>Sent</dt><dd>{{ campaign_stats.sent }}</dd>
-        <dt>Delivered</dt><dd>{{ campaign_stats.delivered }}</dd>
-        <dt>Opened</dt><dd>{{ campaign_stats.opened }}</dd>
-        <dt>Clicked</dt><dd>{{ campaign_stats.clicked }}</dd>
-        <dt>Bounced</dt><dd>{{ campaign_stats.bounced }}</dd>
-        <dt>Replied (tickets)</dt><dd>{{ campaign_stats.replied }}</dd>
-        <dt>Failed</dt><dd>{{ campaign_stats.failed }}</dd>
-        <dt>Skipped</dt><dd>{{ campaign_stats.skipped }}</dd>
-      </dl>
+      <div class="stat-strip marketing-campaign-stat-strip" data-stat-strip>
+        {% for stat in [
+          {'label': 'Recipients', 'value': campaign_stats.total, 'variant': 'total'},
+          {'label': 'Waiting for business hours', 'value': campaign_stats.pending, 'variant': 'info'},
+          {'label': 'Sent', 'value': campaign_stats.sent, 'variant': 'info'},
+          {'label': 'Delivered', 'value': campaign_stats.delivered, 'variant': 'success'},
+          {'label': 'Opened', 'value': campaign_stats.opened, 'variant': 'success'},
+          {'label': 'Clicked', 'value': campaign_stats.clicked, 'variant': 'success'},
+          {'label': 'Bounced', 'value': campaign_stats.bounced, 'variant': 'danger'},
+          {'label': 'Replied (tickets)', 'value': campaign_stats.replied, 'variant': 'success'},
+          {'label': 'Failed', 'value': campaign_stats.failed, 'variant': 'danger'},
+          {'label': 'Skipped', 'value': campaign_stats.skipped, 'variant': 'warning'}
+        ] %}
+          <div class="stat-strip__stat stat-strip__stat--{{ stat.variant }}">
+            <span class="stat-strip__stat-label">{{ stat.label }}</span>
+            <span class="stat-strip__stat-value">{{ stat.value }}</span>
+          </div>
+        {% endfor %}
+      </div>
     </section>
 
     <section class="card card--panel">
