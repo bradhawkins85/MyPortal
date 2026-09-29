@@ -179,10 +179,48 @@
           <div class="form-field"><label class="form-label required" for="sla-template">SLA template</label><select class="form-input" id="sla-template" name="templateId" required><option value="">Select a template</option>{% for template in sla_templates %}<option value="{{ template.id }}" {% if company_sla and company_sla.id == template.id %}selected{% endif %}>{{ template.name }}</option>{% endfor %}</select></div>
           {% if company_sla and company_sla.targets %}<div class="table-wrapper"><table class="table"><thead><tr><th>Priority</th><th>First response</th><th>Resolution</th></tr></thead><tbody>{% for target in company_sla.targets %}<tr><td>{{ target.priority|replace('_', ' ')|title }}</td><td>{{ target.response_minutes }} minutes</td><td>{{ target.resolution_minutes }} minutes</td></tr>{% endfor %}</tbody></table></div>{% endif %}
           {% if company_sla and company_sla.pause_statuses %}<p class="form-help"><strong>Timer paused while:</strong> {{ company_sla.pause_statuses|map('replace', '_', ' ')|map('title')|join(', ') }}</p>{% endif %}
+          {% if company_sla and company_sla.business_hours_only %}<p class="form-help">Timers only count during this company's business hours.</p>{% endif %}
           <div class="form-actions"><button class="button" type="submit">Apply template</button><a class="button button--secondary" href="/admin/sla-templates">Manage templates</a>{% if company_sla %}<button class="button button--danger" type="submit" formaction="/admin/companies/{{ company.id }}/sla/delete" data-confirm="Remove this SLA template assignment?">Remove assignment</button>{% endif %}</div>
         </form>
       </div>
     </details>
+    {% if business_hours_rows is defined %}
+    <details class="card card--panel card-collapsible admin-grid__full" data-company-edit-section="business-hours">
+      <summary class="card__header card__header--collapsible"><div><h2 class="card__title">Business hours</h2><p class="card__subtitle">When this customer is open. Used by automations, SLA timers and the ticket open/closed indicator.</p></div><div class="card__collapsible-meta"><span class="status status--{{ 'neutral' if not business_hours_status.configured else ('success' if business_hours_status.open else 'warning') }}">{{ business_hours_status.label }}{% if business_hours_status.local_time %} · {{ business_hours_status.local_time }}{% endif %}</span><span class="card__toggle-icon" aria-hidden="true"></span></div></summary>
+      <div class="card-collapsible__content">
+        <form action="/admin/companies/{{ company.id }}/business-hours" method="post" class="form">
+          {% include "partials/csrf.html" %}
+          <fieldset class="form-field">
+            <legend class="form-label">Schedule</legend>
+            <label class="form-checkbox"><input type="radio" name="mode" value="global" {% if not business_hours_custom %}checked{% endif %} /> Use the <a href="/admin/business-hours">global business hours</a>{% if not business_hours_global_configured %} (not configured, always open){% endif %}</label>
+            <label class="form-checkbox"><input type="radio" name="mode" value="custom" {% if business_hours_custom %}checked{% endif %} /> Use custom hours for {{ company.name }}</label>
+          </fieldset>
+          {% set bh_rows = business_hours_rows %}
+          {% set bh_timezone = business_hours_timezone %}
+          {% set bh_timezones = business_hours_timezones %}
+          {% set bh_prefix = "company-business-hours" %}
+          {% include "partials/business_hours_fields.html" %}
+          <label class="form-checkbox"><input type="checkbox" name="includeGlobalClosures" value="1" {% if business_hours_include_global_closures %}checked{% endif %} /> Also close on global closures and public holidays</label>
+          <p class="form-help">Hours and closures below only apply when custom hours are selected.</p>
+          <div class="form-actions"><button class="button" type="submit">Save business hours</button></div>
+        </form>
+        <h3>Company closures</h3>
+        {% if business_hours_closures %}
+          <div class="table-wrapper"><table class="table"><thead><tr><th scope="col">Date</th><th scope="col">Name</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>
+            {% for closure in business_hours_closures %}
+              <tr><td>{{ closure.closure_date.isoformat() if closure.closure_date else '' }}</td><td>{{ closure.name or '—' }}</td><td><form action="/admin/companies/{{ company.id }}/business-hours/closures/{{ closure.id }}/delete" method="post">{% include "partials/csrf.html" %}<button class="button button--ghost" type="submit">Remove</button></form></td></tr>
+            {% endfor %}
+          </tbody></table></div>
+        {% else %}<p class="text-muted">No company closures have been added.</p>{% endif %}
+        <form action="/admin/companies/{{ company.id }}/business-hours/closures" method="post" class="form">
+          {% include "partials/csrf.html" %}
+          <div class="form-field"><label class="form-label required" for="company-closure-date">Date</label><input class="form-input" type="date" id="company-closure-date" name="closureDate" required /></div>
+          <div class="form-field"><label class="form-label" for="company-closure-name">Name</label><input class="form-input" id="company-closure-name" name="closureName" maxlength="150" placeholder="Annual shutdown" /></div>
+          <div class="form-actions"><button class="button button--secondary" type="submit">Add closure</button></div>
+        </form>
+      </div>
+    </details>
+    {% endif %}
     <details class="card card--panel card-collapsible admin-grid__full" data-company-edit-section="external-ids">
       <summary class="card__header card__header--collapsible card__header--stacked">
         <div>

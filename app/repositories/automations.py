@@ -31,6 +31,8 @@ _UPDATABLE_COLUMNS: frozenset[str] = frozenset(
         "scheduled_time",
         "run_once",
         "last_run_at",
+        "business_hours_mode",
+        "business_hours_source",
     }
 )
 
@@ -139,6 +141,8 @@ async def create_automation(
     action_payload: Any,
     status: str,
     next_run_at: datetime | None,
+    business_hours_mode: str | None = None,
+    business_hours_source: str | None = None,
 ) -> AutomationRecord:
     await _ensure_connection()
     automation_id = await db.execute_returning_lastrowid(
@@ -157,9 +161,11 @@ async def create_automation(
             status,
             next_run_at,
             scheduled_time,
-            run_once
+            run_once,
+            business_hours_mode,
+            business_hours_source
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             name,
@@ -176,6 +182,8 @@ async def create_automation(
             _prepare_for_storage(next_run_at),
             _prepare_for_storage(scheduled_time),
             run_once,
+            business_hours_mode,
+            business_hours_source,
         ),
     )
     row = await db.fetch_one("SELECT * FROM automations WHERE id = %s", (automation_id,))
@@ -196,6 +204,8 @@ async def create_automation(
             "next_run_at": next_run_at,
             "scheduled_time": scheduled_time,
             "run_once": run_once,
+            "business_hours_mode": business_hours_mode,
+            "business_hours_source": business_hours_source,
             "last_run_at": None,
             "last_error": None,
             "created_at": None,
@@ -247,6 +257,8 @@ async def clone_automation(automation_id: int, *, next_run_at: datetime | None =
         action_payload=original.get("action_payload"),
         status=str(original.get("status") or "inactive"),
         next_run_at=next_run_at,
+        business_hours_mode=original.get("business_hours_mode"),
+        business_hours_source=original.get("business_hours_source"),
     )
 
 

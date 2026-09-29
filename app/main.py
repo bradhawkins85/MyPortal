@@ -10040,6 +10040,21 @@ async def _render_ticket_detail(
         ticket_id,
         {"state": "not_applicable", "label": "No SLA"},
     )
+    ticket_business_hours: dict[str, Any] | None = None
+    ticket_deferred_automations: list[dict[str, Any]] = []
+    try:
+        from app.repositories import business_hours as business_hours_repo
+        from app.services import business_hours as business_hours_service
+
+        if ticket.get("company_id"):
+            ticket_business_hours = await business_hours_service.status_for_company(
+                int(ticket["company_id"])
+            )
+        ticket_deferred_automations = (
+            await business_hours_repo.list_pending_deferred_runs_for_ticket(ticket_id)
+        )
+    except Exception as exc:  # pragma: no cover - business hours must not break the page
+        log_error("Failed to load ticket business hours", ticket_id=ticket_id, error=str(exc))
 
     replies = await tickets_repo.list_replies(ticket_id)
     split_replies = await tickets_repo.list_split_replies_for_original(ticket_id)
@@ -10605,6 +10620,8 @@ async def _render_ticket_detail(
         "title": f"Ticket #{ticket_id}",
         "ticket": ticket,
         "ticket_sla": ticket_sla,
+        "ticket_business_hours": ticket_business_hours,
+        "ticket_deferred_automations": ticket_deferred_automations,
         "ticket_company": company,
         "ticket_module": module_info,
         "ticket_assigned_user": assigned_user,

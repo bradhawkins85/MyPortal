@@ -78,6 +78,8 @@ async def create_automation(
         run_once=data.get("run_once", False),
         trigger_event=data.get("trigger_event"),
         trigger_filters=data.get("trigger_filters"),
+        business_hours_mode=data.get("business_hours_mode"),
+        business_hours_source=data.get("business_hours_source"),
         action_module=data.get("action_module"),
         action_payload=data.get("action_payload"),
         status=data.get("status", "inactive"),

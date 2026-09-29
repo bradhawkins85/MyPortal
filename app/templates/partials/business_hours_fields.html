@@ -1,0 +1,31 @@
+{# Expects: bh_rows (weekly_form_rows), bh_timezone, bh_timezones, bh_prefix #}
+<div class="form-field">
+  <label class="form-label required" for="{{ bh_prefix }}-timezone">Time zone</label>
+  <select class="form-input" id="{{ bh_prefix }}-timezone" name="timezone" required>
+    {% for zone in bh_timezones %}<option value="{{ zone }}" {% if zone == bh_timezone %}selected{% endif %}>{{ zone }}</option>{% endfor %}
+  </select>
+</div>
+<div class="table-wrapper">
+  <table class="table">
+    <thead><tr><th scope="col">Day</th><th scope="col">Open</th><th scope="col">Hours</th><th scope="col">Second period (optional)</th></tr></thead>
+    <tbody>
+      {% for row in bh_rows %}
+        <tr>
+          <th scope="row">{{ row.label }}</th>
+          <td><input type="checkbox" name="day_{{ row.key }}_open" value="1" aria-label="Open on {{ row.label }}" {% if row.open %}checked{% endif %} /></td>
+          <td>
+            <input class="form-input" type="time" name="day_{{ row.key }}_start" value="{{ row.start }}" aria-label="{{ row.label }} opens" />
+            <span aria-hidden="true">–</span>
+            <input class="form-input" type="time" name="day_{{ row.key }}_end" value="{{ row.end }}" aria-label="{{ row.label }} closes" />
+          </td>
+          <td>
+            <input class="form-input" type="time" name="day_{{ row.key }}_start2" value="{{ row.start2 }}" aria-label="{{ row.label }} second period opens" />
+            <span aria-hidden="true">–</span>
+            <input class="form-input" type="time" name="day_{{ row.key }}_end2" value="{{ row.end2 }}" aria-label="{{ row.label }} second period closes" />
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="form-help">Use a second period for split shifts such as a lunch closure. A closing time of 00:00 means midnight at the end of the day, so 00:00–00:00 is open around the clock.</p>

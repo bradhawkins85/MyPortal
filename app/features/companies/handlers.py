@@ -933,6 +933,14 @@ async def _render_company_edit_page(
         "company_sla": await __import__("app.repositories.slas", fromlist=["slas"]).get_for_company(company_id),
         "sla_templates": await __import__("app.repositories.slas", fromlist=["slas"]).list_templates(),
     }
+    from .business_hours_handlers import company_edit_context
+
+    try:
+        extra.update(await company_edit_context(company_id))
+    except Exception as exc:  # pragma: no cover - business hours must not break the page
+        from app.core.logging import log_error
+
+        log_error("Failed to load company business hours", company_id=company_id, error=str(exc))
 
     response = await _main()._render_template(
         "admin/company_edit.html", request, user, extra=extra
@@ -1018,7 +1026,18 @@ async def admin_create_sla_template(request: Request):
     await sla_repo.create_template(
         name=name, description=description, enabled=form.get("enabled") is not None,
         targets=targets, pause_statuses=pause_statuses,
+        business_hours_only=form.get("businessHoursOnly") is not None,
     )
+    return RedirectResponse("/admin/sla-templates", status_code=303)
+
+
+async def admin_update_sla_template_business_hours(template_id: int, request: Request):
+    from app.repositories import slas as sla_repo
+    _, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    await sla_repo.set_business_hours_only(template_id, form.get("businessHoursOnly") is not None)
     return RedirectResponse("/admin/sla-templates", status_code=303)
 
 

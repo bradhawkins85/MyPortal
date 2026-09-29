@@ -23,7 +23,7 @@ from .routes import router as automations_router
 
 PACK = FeaturePack(
     slug="automations",
-    version="1.0.0",
+    version="1.1.0",
     routers=(automations_router,),
 )
 
