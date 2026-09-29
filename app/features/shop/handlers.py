@@ -585,7 +585,7 @@ def _public_shop_product_payload(product: Mapping[str, Any], *, is_vip: bool) ->
             )
         return public_items
 
-    sanitized_description = sanitize_rich_text(str(product.get("description") or ""))
+    sanitized_description = sanitize_rich_text(str(product.get("description") or ""), allow_embeds=True)
     payload = {
         "id": product.get("id"),
         "name": product.get("name"),
