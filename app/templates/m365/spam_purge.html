@@ -6,10 +6,13 @@
 {% block header_title %}Spam search & purge{% endblock %}
 
 {% block header_actions %}
-  {{ page_header_actions([
-    {"label": "New search", "type": "button", "variant": "primary", "attrs": {"data-focus-search": "true"}},
-    {"label": "API documentation", "type": "link", "href": "/docs"}
-  ]) }}
+  {% set spam_purge_actions = [
+    {"label": "New search", "type": "button", "variant": "primary", "attrs": {"data-focus-search": "true"}}
+  ] %}
+  {% if is_super_admin or (is_helpdesk_technician | default(false)) %}
+    {% set spam_purge_actions = spam_purge_actions + [{"label": "API documentation", "type": "link", "href": "/docs"}] %}
+  {% endif %}
+  {{ page_header_actions(spam_purge_actions) }}
 {% endblock %}
 
 {% block styles %}

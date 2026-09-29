@@ -1259,17 +1259,24 @@ if settings.mcp_enabled:
 
 
 @app.get(PROTECTED_OPENAPI_PATH, include_in_schema=False)
-async def authenticated_openapi_schema(
-    _: SessionData = Depends(get_current_session),
-) -> JSONResponse:
-    """Return the OpenAPI schema for authenticated users only."""
+async def authenticated_openapi_schema(request: Request) -> JSONResponse:
+    """Return the OpenAPI schema to super admins and helpdesk technicians only.
 
+    The schema enumerates every internal and administrative endpoint, so it is
+    not exposed to customer accounts.
+    """
+
+    user, redirect = await _require_authenticated_user(request)
+    if redirect or not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    if not await _is_helpdesk_technician(user, request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API documentation access denied")
     return JSONResponse(app.openapi())
 
 
 @app.get(SWAGGER_UI_PATH, include_in_schema=False)
 async def authenticated_swagger_ui(request: Request) -> Response:
-    """Render the Swagger UI after verifying the user session."""
+    """Render the Swagger UI for super admins and helpdesk technicians."""
 
     session = await session_manager.load_session(request)
     if not session:
@@ -1277,6 +1284,12 @@ async def authenticated_swagger_ui(request: Request) -> Response:
         login_url = f"/login?next={next_target}"
         redirect = RedirectResponse(url=login_url, status_code=status.HTTP_303_SEE_OTHER)
         return redirect
+
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    if not await _is_helpdesk_technician(user, request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API documentation access denied")
 
     return get_swagger_ui_html(
         openapi_url=PROTECTED_OPENAPI_PATH,

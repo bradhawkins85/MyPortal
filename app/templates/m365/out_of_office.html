@@ -3,7 +3,7 @@
 
 {% block title %}Out of Office{% endblock %}
 {% block header_title %}Out of Office{% endblock %}
-{% block header_actions %}{{ page_header_actions([{"label":"API documentation","type":"link","href":"/docs"}]) }}{% endblock %}
+{% block header_actions %}{% if is_super_admin or (is_helpdesk_technician | default(false)) %}{{ page_header_actions([{"label":"API documentation","type":"link","href":"/docs"}]) }}{% endif %}{% endblock %}
 
 {% block styles %}
 <style>
