@@ -48,7 +48,9 @@ it. On a server deployed before the wrapper existed, run
 `sudo <control checkout>/scripts/upgrade.sh --rolling` once and the wrapper is
 installed. Super administrators can also start the same upgrade from the
 portal's System updates page. Docker installations are upgraded with
-`myportal-docker upgrade` instead; see the Docker guide.
+`myportal-docker upgrade` instead, which applies the same blue/green approach
+with two application containers behind an nginx container; see the Docker
+guide.
 
 The coordinator installs `deploy/nginx/myportal-bluegreen.conf` using the
 host's `sites-available`/`sites-enabled` layout when present, or `conf.d` on

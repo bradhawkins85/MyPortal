@@ -25,9 +25,9 @@ The installer:
 2. Finds the latest published GitHub release and pulls
    `ghcr.io/bradhawkins85/myportal:<release>`. If the image can't be pulled,
    it builds the image locally from that release's source archive.
-3. Creates `/opt/myportal-docker` containing `docker-compose.yml` (MyPortal
-   and MariaDB 11.4) and the configuration files, with generated secrets
-   and database passwords.
+3. Creates `/opt/myportal-docker` containing `docker-compose.yml` (MariaDB
+   11.4, the blue and green MyPortal slots and an nginx proxy) and the
+   configuration files, with generated secrets and database passwords.
 4. Starts the stack. It waits until `/readyz` reports the new release;
    database migrations run automatically when the container starts.
 5. Installs itself as `/usr/local/bin/myportal-docker`.
@@ -53,20 +53,57 @@ sudo myportal-docker check      # exit code 10 when an upgrade is available
 sudo myportal-docker upgrade    # or: upgrade --version v0.6.1
 ```
 
-An upgrade:
+Upgrades are blue/green, like the [VM/LXC installation](Zero%20Downtime%20Upgrades.md),
+so the portal stays available throughout. MyPortal runs in two application
+containers, `app_blue` and `app_green`, that share the database and data
+volumes. Only one of them serves: an nginx container (`proxy`) publishes the
+HTTP port and forwards to it. An upgrade:
 
 1. Updates `myportal-docker` itself to the copy published with the target
    release, so compose changes that ship with a release are applied.
-2. Pulls (or builds) the new image **before** stopping anything.
+2. Pulls (or builds) the new image.
 3. Backs up the database to `/opt/myportal-docker/backups/`.
-4. Recreates the application container. Migrations run on start, and the
-   upgrade waits until `/readyz` reports the new release.
-5. If the new release doesn't become healthy, switches back to the previous
-   image and tells you which backup to restore if needed. Unattended runs
-   then skip that release until you retry it with `--version`.
+4. Starts the new release in the idle slot while the current one keeps
+   serving. Migrations run when it starts, and the upgrade waits until its
+   `/readyz` reports the new release.
+5. Switches the proxy to the new slot with a graceful nginx reload: requests
+   already in progress finish on the old slot, new ones go to the new slot.
+6. After a short drain (`MYPORTAL_DRAIN_SECONDS`, 10 by default), stops the
+   old slot. Its container and image are kept for `rollback`.
 
-The application is briefly unavailable while its container is recreated. For
-zero-downtime blue/green upgrades, use the VM/LXC installation instead.
+If the new release doesn't become healthy, it is stopped and the proxy is
+never switched, so users see no interruption. The upgrade tells you which
+backup to restore if a partial migration needs undoing. Unattended runs then
+skip that release until you retry it with `--version`.
+
+Like the VM/LXC installation, this relies on each release's migrations
+working with the release before it, because both run against the same
+database for a moment.
+
+### Rolling back
+
+```bash
+sudo myportal-docker rollback
+```
+
+switches back to the previous release, which the last upgrade left in the
+idle slot, the same way: it starts, becomes ready, and only then takes over.
+The database is not rolled back; if the older release has problems with the
+changes the newer one made, restore the backup taken before the upgrade with
+`restore-db`. Unattended and portal upgrades then skip the release you rolled
+back from; install it again with `upgrade --version TAG`. `restart` also uses
+the idle slot, so after a restart there is no previous release to roll back
+to until the next upgrade.
+
+### Installations made before blue/green
+
+Installations made with an earlier `myportal-docker` run a single `app`
+container. Their next `upgrade` (or `restart`) converts them: the new release
+starts in the blue slot alongside the old container, and the port then moves
+to the proxy, which interrupts the portal for a few seconds this one time.
+If `docker-compose.override.yml` changes the `app` service, the upgrade stops
+before changing anything: move those changes to `app_blue` and `app_green`
+(or to `proxy` for published ports and reverse-proxy labels) and rerun it.
 
 Automatic upgrades (daily, at a random time between 02:00 and 04:59):
 
@@ -85,8 +122,8 @@ The portal never gets root or the Docker socket. It only writes a request file
 into its own state volume. A root cron job on the host
 (`/etc/cron.d/myportal-docker-requests`, every minute) runs
 `myportal-docker process-requests`, which reads and clears the request through
-`docker compose exec`, and then runs the same `upgrade --yes` as the nightly
-job. It always moves to the latest published release (never a version named by
+`docker exec` in the serving container, and then runs the same `upgrade --yes`
+as the nightly job. It always moves to the latest published release (never a version named by
 the portal), with the usual backup and rollback. Progress and the result are
 written back to the portal's update history; the host keeps a copy in
 `/opt/myportal-docker/web-upgrade.log`.
@@ -109,7 +146,8 @@ the portal with a reminder to run `web-upgrades on`.
 | `myportal-docker status` | Running release, containers and readiness |
 | `myportal-docker logs [--tail 100]` | Application logs (follows by default) |
 | `sudo myportal-docker setup` | Onboarding wizard: enable features and configure `myportal.env` (`--check` to verify it). See [Onboarding Wizard](Onboarding%20Wizard.md) |
-| `sudo myportal-docker restart` | Apply changes made to `myportal.env` |
+| `sudo myportal-docker restart` | Apply changes made to `myportal.env`, without downtime (the idle slot starts with them, then takes over) |
+| `sudo myportal-docker rollback` | Switch back to the release before the last upgrade |
 | `sudo myportal-docker backup` | Database dump plus uploaded files |
 | `sudo myportal-docker restore-db FILE` | Restore a database backup |
 | `sudo myportal-docker self-update` | Reinstall `myportal-docker` from the installed release, to get commands it added |
@@ -173,6 +211,7 @@ source `myportal-docker`.
 | `/opt/myportal-docker/.env` | Installed release, image, port (managed by the script) |
 | `/opt/myportal-docker/docker-compose.yml` | Generated; rewritten on upgrade |
 | `/opt/myportal-docker/docker-compose.override.yml` | Optional local additions, merged automatically |
+| `/opt/myportal-docker/proxy/` | nginx configuration; generated, rewritten on upgrade and restart. `active-slot.inc` names the serving slot |
 | `/opt/myportal-docker/backups/` | Database and file backups (the newest 10 of each are kept) |
 
 Data lives in the Docker volumes `myportal_db_data`, `myportal_uploads`,
@@ -190,7 +229,12 @@ The container serves plain HTTP. To expose MyPortal publicly:
    so only the proxy can reach it.
 2. In `myportal.env`, set `PORTAL_URL=https://portal.example.com`,
    `ENVIRONMENT=production` (Secure-only cookies, HSTS), and `TRUSTED_PROXIES`
-   to the proxy's address.
+   to the address your proxy connects from, as seen by Docker (with
+   `--bind 127.0.0.1`, usually the Docker bridge gateway such as
+   `172.17.0.1`, or the proxy's own address). Only requests from those
+   addresses may set the client address (`X-Forwarded-For`) and scheme
+   (`X-Forwarded-Proto`); the bundled nginx proxy applies this, and the
+   application containers trust only the bundled proxy.
 3. Run `sudo myportal-docker restart`.
 
 ## Settings for special environments
@@ -206,6 +250,8 @@ These environment variables change the script's behaviour:
 | `MYPORTAL_BUILD_NETWORK` | – | Network for local builds, e.g. `host` when the proxy only listens on localhost |
 | `MYPORTAL_BASE_IMAGE` | `ubuntu:24.04` | Base image for local builds (e.g. a registry mirror) |
 | `MYPORTAL_HEALTH_TIMEOUT` | `600` | Seconds to wait for a release to become ready |
+| `MYPORTAL_DRAIN_SECONDS` | `10` | Seconds the old slot keeps running after the proxy switches, so its requests can finish |
+| `MYPORTAL_PROXY_IMAGE` | `nginx:1.28-alpine` | Proxy image for new installations and conversions (nginx 1.27.3 or newer); recorded as `PROXY_IMAGE` in `.env` |
 
 ## Maintainers: publishing images
 

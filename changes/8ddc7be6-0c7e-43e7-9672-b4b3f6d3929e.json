@@ -1,0 +1,7 @@
+{
+  "guid": "8ddc7be6-0c7e-43e7-9672-b4b3f6d3929e",
+  "occurred_at": "2026-09-29T00:00Z",
+  "change_type": "Feature",
+  "summary": "Upgrade Docker installations without downtime: blue/green application containers behind a bundled nginx proxy, plus a rollback command.",
+  "content_hash": "b16e3eeab86761ccbdea5040afe93e8e2a0c700772f8b5db1a34bc3d2dd4d548"
+}

@@ -299,3 +299,179 @@ def test_self_update_installs_the_installed_release_script(tmp_path, same):
     assert result.returncode == 0, result.stderr
     assert installed.read_text(encoding="utf-8") == published
     assert ("already the version" in result.stderr) is same
+
+
+# ---------------------------------------------------------------------------
+# Blue/green slots
+# ---------------------------------------------------------------------------
+def test_help_lists_rollback():
+    result = subprocess.run(["bash", str(SCRIPT), "help"], text=True, capture_output=True, check=False)
+    assert "rollback" in result.stdout
+
+
+def test_slot_helpers():
+    result = _run(
+        'printf "%s %s %s\\n" "$(other_slot blue)" "$(other_slot green)" "$(other_slot "")"\n'
+        'printf "%s %s\\n" "$(slot_key blue IMAGE)" "$(slot_key green VERSION)"'
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["green blue blue", "BLUE_IMAGE GREEN_VERSION"]
+
+
+@pytest.mark.parametrize(("slot", "service"), [("", "app"), ("blue", "app_blue"), ("green", "app_green")])
+def test_app_service_follows_the_active_slot(tmp_path, slot, service):
+    project_env = tmp_path / ".env"
+    project_env.write_text(f"ACTIVE_SLOT={slot}\n", encoding="utf-8")
+    result = _run(f'PROJECT_ENV="{project_env}"; app_service')
+    assert result.stdout == service
+
+
+def test_compose_file_publishes_the_port_only_on_the_proxy(tmp_path):
+    yaml = pytest.importorskip("yaml")
+    compose_file = tmp_path / "docker-compose.yml"
+    result = _run(f'COMPOSE_FILE="{compose_file}"; write_compose_file')
+    assert result.returncode == 0, result.stderr
+    services = yaml.safe_load(compose_file.read_text(encoding="utf-8"))["services"]
+    assert set(services) == {"db", "app_blue", "app_green", "proxy"}
+    assert services["proxy"]["ports"] == ["${HTTP_BIND}:${HTTP_PORT}:8080"]
+    for slot in ("blue", "green"):
+        app = services[f"app_{slot}"]
+        assert "ports" not in app
+        assert app["image"] == "${" + slot.upper() + "_IMAGE}"
+        assert app["environment"]["APP_INSTANCE_ID"] == slot
+        assert app["environment"]["PORT"] == "8000"
+        assert app["environment"]["TRUSTED_PROXIES"] == "${APP_TRUSTED_PROXIES}"
+    assert services["app_blue"]["volumes"] == services["app_green"]["volumes"]
+
+
+def test_proxy_config_applies_only_valid_trusted_proxies(tmp_path):
+    app_env = tmp_path / "myportal.env"
+    app_env.write_text(
+        'TRUSTED_PROXIES="10.0.0.5, 192.168.0.0/16,fd00::/8, evil; include /etc/passwd,host.example"\n',
+        encoding="utf-8",
+    )
+    proxy_dir = tmp_path / "proxy"
+    result = _run(f'APP_ENV="{app_env}"; PROXY_DIR="{proxy_dir}"; write_proxy_config green')
+    assert result.returncode == 0, result.stderr
+    config = (proxy_dir / "myportal.conf").read_text(encoding="utf-8")
+    for entry in ("10.0.0.5", "192.168.0.0/16", "fd00::/8"):
+        assert f"set_real_ip_from {entry};" in config
+        assert f"    {entry} 1;" in config
+    assert "evil" not in config and "host.example" not in config
+    assert config.count("set_real_ip_from") == 3
+    assert "ignoring TRUSTED_PROXIES entry 'evil;include/etc/passwd'" in result.stderr
+    # The application only ever sees the address the proxy determined.
+    assert "proxy_set_header X-Forwarded-For $remote_addr;" in config
+    assert (proxy_dir / "active-slot.inc").read_text(encoding="utf-8").splitlines()[-1] == (
+        "server app_green:8000 resolve;"
+    )
+    assert (proxy_dir / "myportal-unavailable.html").is_file()
+    assert oct(proxy_dir.stat().st_mode & 0o777) == oct(0o755)
+
+
+def test_proxy_config_keeps_the_active_slot(tmp_path):
+    proxy_dir = tmp_path / "proxy"
+    proxy_dir.mkdir()
+    (proxy_dir / "active-slot.inc").write_text("server app_blue:8000 resolve;\n", encoding="utf-8")
+    result = _run(f'APP_ENV="{tmp_path}/missing.env"; PROXY_DIR="{proxy_dir}"; write_proxy_config green')
+    assert result.returncode == 0, result.stderr
+    assert "app_blue" in (proxy_dir / "active-slot.inc").read_text(encoding="utf-8")
+    assert "set_real_ip_from" not in (proxy_dir / "myportal.conf").read_text(encoding="utf-8")
+
+
+def _deploy_harness(tmp_path, *, ready: bool) -> str:
+    """Stub Docker for deploy_release; the green slot is idle, blue serves v1."""
+    project_env = tmp_path / ".env"
+    project_env.write_text(
+        "MYPORTAL_VERSION=v1\nMYPORTAL_IMAGE=img:v1\nACTIVE_SLOT=blue\n"
+        "BLUE_IMAGE=img:v1\nGREEN_IMAGE=img:v0\nBLUE_VERSION=v1\nGREEN_VERSION=v0\n",
+        encoding="utf-8",
+    )
+    calls = tmp_path / "calls"
+    return (
+        f'PROJECT_ENV="{project_env}"; COMPOSE_FILE="{tmp_path}/docker-compose.yml"\n'
+        f'APP_ENV="{tmp_path}/myportal.env"; PROXY_DIR="{tmp_path}/proxy"; MYPORTAL_DRAIN_SECONDS=0\n'
+        f'compose() {{ echo "compose $*" >> "{calls}"; }}\n'
+        f'switch_proxy() {{ echo "switch_proxy $*" >> "{calls}"; }}\n'
+        "refresh_app_trusted_proxies() { :; }\n"
+        "wait_for_proxy() { :; }\n"
+        f"wait_for_service() {{ {'true' if ready else 'false'}; }}\n"
+        "service_container() { :; }\n"
+    )
+
+
+def test_deploy_switches_to_the_idle_slot_once_ready(tmp_path):
+    result = _run(_deploy_harness(tmp_path, ready=True) + "deploy_release img:v2 v2")
+    assert result.returncode == 0, result.stderr
+    settings = (tmp_path / ".env").read_text(encoding="utf-8")
+    for line in ("ACTIVE_SLOT=green", "GREEN_IMAGE=img:v2", "GREEN_VERSION=v2", "MYPORTAL_VERSION=v2",
+                 "MYPORTAL_IMAGE=img:v2", "BLUE_IMAGE=img:v1", "BLUE_VERSION=v1"):
+        assert line in settings.splitlines()
+    calls = (tmp_path / "calls").read_text(encoding="utf-8").splitlines()
+    assert "compose up -d --no-deps --force-recreate app_green" in calls
+    assert calls.index("switch_proxy green") < calls.index("compose stop app_blue")
+
+
+def test_deploy_leaves_the_serving_slot_alone_when_the_release_fails(tmp_path):
+    result = _run(_deploy_harness(tmp_path, ready=False) + "deploy_release img:v2 v2")
+    assert result.returncode != 0
+    settings = (tmp_path / ".env").read_text(encoding="utf-8").splitlines()
+    for line in ("ACTIVE_SLOT=blue", "GREEN_IMAGE=img:v0", "MYPORTAL_VERSION=v1"):
+        assert line in settings
+    calls = (tmp_path / "calls").read_text(encoding="utf-8").splitlines()
+    assert not any(call.startswith("switch_proxy") for call in calls)
+    assert "compose stop app_green" in calls
+    assert "compose stop app_blue" not in calls
+
+
+@pytest.mark.parametrize(
+    ("settings", "message"),
+    [
+        ("MYPORTAL_VERSION=v1\n", "no previous release is kept yet"),
+        ("MYPORTAL_VERSION=v2\nACTIVE_SLOT=blue\nGREEN_VERSION=v2\nGREEN_IMAGE=img:v2\n", "no previous release is kept"),
+        ("MYPORTAL_VERSION=v2\nACTIVE_SLOT=blue\nGREEN_VERSION=\n", "no previous release is kept"),
+    ],
+)
+def test_rollback_refuses_without_a_previous_release(tmp_path, settings, message):
+    project_env = tmp_path / ".env"
+    project_env.write_text(settings, encoding="utf-8")
+    result = _run(
+        f'PROJECT_ENV="{project_env}"\n'
+        "require_root() { :; }; require_installed() { :; }; ensure_docker() { :; }\n"
+        "deploy_release() { echo deployed; }\n"
+        "cmd_rollback --yes"
+    )
+    assert result.returncode != 0
+    assert message in result.stderr
+    assert "deployed" not in result.stdout
+
+
+def test_rollback_switches_to_the_kept_release_and_skips_the_newer_one(tmp_path):
+    project_env = tmp_path / ".env"
+    project_env.write_text(
+        "MYPORTAL_VERSION=v2\nACTIVE_SLOT=blue\nGREEN_VERSION=v1\nGREEN_IMAGE=img:v1\n", encoding="utf-8"
+    )
+    result = _run(
+        f'PROJECT_ENV="{project_env}"\n'
+        "require_root() { :; }; require_installed() { :; }; ensure_docker() { :; }\n"
+        "docker() { [[ $1 == image ]]; }\n"
+        'deploy_release() { echo "deploy_release $*"; }\n'
+        "cmd_rollback --yes"
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["deploy_release img:v1 v1"]
+    assert "FAILED_VERSION=v2" in project_env.read_text(encoding="utf-8").splitlines()
+
+
+def test_conversion_stops_when_the_override_changes_the_old_app_service(tmp_path):
+    (tmp_path / "docker-compose.override.yml").write_text(
+        "services:\n  app:\n    labels:\n      - traefik.enable=true\n", encoding="utf-8"
+    )
+    harness = _deploy_harness(tmp_path, ready=True)
+    project_env = tmp_path / ".env"
+    project_env.write_text("MYPORTAL_VERSION=v1\nMYPORTAL_IMAGE=img:v1\n", encoding="utf-8")
+    result = _run(harness + f'MYPORTAL_DIR="{tmp_path}"\ndeploy_release img:v2 v2')
+    assert result.returncode != 0
+    assert "changes the 'app' service" in result.stderr
+    assert not (tmp_path / "calls").exists()
+    assert project_env.read_text(encoding="utf-8") == "MYPORTAL_VERSION=v1\nMYPORTAL_IMAGE=img:v1\n"
