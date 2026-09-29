@@ -66,8 +66,12 @@ _MATCH_ORDER = {
 
 
 _EVALUATOR_BACKOFF_SECONDS = 60.0
+# A disabled module is a configuration choice rather than a transient failure,
+# so re-check it rarely and only log when the state changes.
+_EVALUATOR_DISABLED_RECHECK_SECONDS = 300.0
 _evaluator_retry_after = 0.0
 _last_unavailable_log_at = 0.0
+_evaluator_disabled = False
 _DEFAULT_PROMPT_TOKEN_BUDGET = 2500
 _TRUNCATION_NOTICE = (
     "\n[Document content truncated to fit the relationship context window.]"
@@ -105,6 +109,26 @@ def _set_evaluator_backoff(reason: str) -> None:
             reason,
         )
         _last_unavailable_log_at = now
+
+
+def _set_evaluator_disabled() -> None:
+    global _evaluator_retry_after, _evaluator_disabled
+    _evaluator_retry_after = max(
+        _evaluator_retry_after,
+        time.monotonic() + _EVALUATOR_DISABLED_RECHECK_SECONDS,
+    )
+    if not _evaluator_disabled:
+        logger.info(
+            "RAG relationship jobs idle: Ollama module disabled or not configured"
+        )
+        _evaluator_disabled = True
+
+
+def _clear_evaluator_disabled() -> None:
+    global _evaluator_disabled
+    if _evaluator_disabled:
+        logger.info("RAG relationship jobs resuming: Ollama module enabled")
+        _evaluator_disabled = False
 
 
 def _evaluator_in_backoff() -> bool:
@@ -376,8 +400,9 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
         return 0
     evaluator_module = await modules_service.get_module("ollama", redact=False)
     if not evaluator_module or not evaluator_module.get("enabled"):
-        _set_evaluator_backoff("Ollama module disabled or not configured")
+        _set_evaluator_disabled()
         return 0
+    _clear_evaluator_disabled()
     evaluator_settings = evaluator_module.get("settings")
     configured_model = (
         str(evaluator_settings.get("model") or "").strip()

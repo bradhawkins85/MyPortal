@@ -3,6 +3,7 @@ import aiosqlite
 from contextlib import asynccontextmanager
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 
 from app.repositories import rag_relationships as rag_relationships_repo
 from app.core.database import Database
@@ -343,6 +344,7 @@ async def test_evaluate_next_batch_does_not_claim_jobs_when_ollama_disabled(
         return []
 
     monkeypatch.setattr(rag_relationships, "_evaluator_retry_after", 0.0)
+    monkeypatch.setattr(rag_relationships, "_evaluator_disabled", False)
     monkeypatch.setattr(
         rag_relationships.rel_repo, "matching_paused", fake_matching_paused
     )
@@ -353,7 +355,61 @@ async def test_evaluate_next_batch_does_not_claim_jobs_when_ollama_disabled(
 
     assert await rag_relationships.evaluate_next_batch(limit=1) == 0
     assert claimed is False
-    assert rag_relationships._evaluator_retry_after > 0
+    assert rag_relationships._evaluator_disabled is True
+    assert (
+        rag_relationships._evaluator_retry_after
+        >= rag_relationships._EVALUATOR_DISABLED_RECHECK_SECONDS
+    )
+
+
+@pytest.mark.anyio
+async def test_disabled_ollama_logs_once_and_rechecks_rarely(monkeypatch):
+    from app.services import rag_relationships
+
+    module_lookups = 0
+    info_messages: list[str] = []
+    warning_messages: list[str] = []
+    clock = [1000.0]
+
+    async def fake_matching_paused():
+        return False
+
+    async def fake_get_module(slug, *, redact=True):
+        nonlocal module_lookups
+        module_lookups += 1
+        return {"slug": "ollama", "enabled": False}
+
+    monkeypatch.setattr(rag_relationships, "_evaluator_retry_after", 0.0)
+    monkeypatch.setattr(rag_relationships, "_evaluator_disabled", False)
+    monkeypatch.setattr(rag_relationships.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        rag_relationships.rel_repo, "matching_paused", fake_matching_paused
+    )
+    monkeypatch.setattr(
+        rag_relationships.modules_service, "get_module", fake_get_module
+    )
+    monkeypatch.setattr(
+        rag_relationships,
+        "logger",
+        SimpleNamespace(
+            info=lambda message, *args: info_messages.append(message),
+            warning=lambda message, *args: warning_messages.append(message),
+        ),
+    )
+
+    await rag_relationships.evaluate_next_batch(limit=1)
+    # Workers poll every few seconds; none of these should hit the module.
+    for _ in range(10):
+        clock[0] += 60.0
+        if clock[0] < 1000.0 + rag_relationships._EVALUATOR_DISABLED_RECHECK_SECONDS:
+            await rag_relationships.evaluate_next_batch(limit=1)
+    assert module_lookups == 1
+
+    clock[0] = 1000.0 + rag_relationships._EVALUATOR_DISABLED_RECHECK_SECONDS + 1
+    await rag_relationships.evaluate_next_batch(limit=1)
+    assert module_lookups == 2
+    assert len(info_messages) == 1
+    assert warning_messages == []
 
 
 @pytest.mark.anyio
