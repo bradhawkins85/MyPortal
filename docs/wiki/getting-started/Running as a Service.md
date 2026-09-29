@@ -9,7 +9,7 @@ up and how to operate it. For installation steps, see
 
 | Unit | Purpose |
 | --- | --- |
-| `myportal@blue.service` / `myportal@green.service` | The two application slots (ports 8001 and 8002, loopback checks only). Each runs `uvicorn` from the release its `/opt/myportal/instances/<slot>` link points to. nginx routes traffic to exactly one of them. |
+| `myportal@blue.service` / `myportal@green.service` | The two application slots (ports 8001 and 8002, bound to 127.0.0.1). Each runs `uvicorn` from the release its `/opt/myportal/instances/<slot>` link points to. nginx routes traffic to exactly one of them. |
 | `nginx.service` | Public listener on port 80, using `/etc/nginx/sites-available/myportal.conf` and the active-slot include `/etc/nginx/conf.d/myportal-active.inc`. |
 | `mariadb.service` | Local database, when `DB_HOST` is `localhost`. |
 | `/etc/cron.d/myportal-update` | Runs `scripts/process_update_flag.sh` every minute to apply updates requested from the admin UI. |
@@ -26,6 +26,12 @@ Hardening applied by the unit:
 - Release directories are read-only. Only `/opt/myportal/shared` (uploads and
   state) and `/var/log/myportal` are writable by the service.
 - Configuration comes from `/etc/myportal.env` (`root:myportal`, mode 0640).
+- Uvicorn listens on `127.0.0.1` only, so clients cannot bypass nginx (and
+  fail2ban) by connecting to ports 8001/8002 directly. If nginx runs on a
+  different host, set `MYPORTAL_BIND_HOST=0.0.0.0` in `/etc/myportal.env`,
+  firewall 8001/8002 to the proxy, and restart both slots. The address must
+  still accept loopback connections because `upgrade.sh` checks `/readyz` on
+  `127.0.0.1`.
 
 ## Day-to-day operations
 

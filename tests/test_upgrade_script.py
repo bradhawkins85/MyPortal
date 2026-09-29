@@ -587,6 +587,14 @@ def test_systemd_uses_the_ports_checked_by_blue_green_coordinator():
     assert '--port "$$port"' in unit
 
 
+def test_systemd_binds_uvicorn_to_loopback_by_default():
+    unit = (ROOT / "deploy/systemd/myportal@.service").read_text()
+
+    assert "--host 0.0.0.0" not in unit
+    assert 'host="$${MYPORTAL_BIND_HOST:-127.0.0.1}"' in unit
+    assert '--host "$$host"' in unit
+
+
 def test_systemd_does_not_wait_for_unsupported_uvicorn_notifications():
     unit = (ROOT / "deploy/systemd/myportal@.service").read_text()
     installer = (ROOT / "scripts/install_environment.sh").read_text()
