@@ -17,6 +17,7 @@ from markupsafe import Markup
 
 from app.repositories import infrastructure as infrastructure_repo
 from app.repositories import network_map as links_repo
+from app.security.flash import _safe_redirect_target
 from app.services import asset_types
 from app.services import audit as audit_service
 from app.services import network_map
@@ -201,8 +202,7 @@ def _fit_svg(svg: str) -> str:
 
 def _next_url(form: Any, fallback: str) -> str:
     """Only same-site paths are followed after a form post."""
-    target = str(form.get("next") or "")
-    return target if target.startswith("/") and not target.startswith("//") else fallback
+    return _safe_redirect_target(str(form.get("next") or ""), fallback=fallback)
 
 
 @router.post("/api/network-map/links", status_code=201, summary="Link two interfaces or rack ports")

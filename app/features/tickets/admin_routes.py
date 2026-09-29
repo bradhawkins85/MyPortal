@@ -37,7 +37,7 @@ from app.core.database import db
 from app.core.logging import log_debug, log_error, log_info
 from app.features.tickets.form_helpers import get_last_form_value
 from app.security.csrf import parse_csrf_form
-from app.security.flash import flash_redirect
+from app.security.flash import _safe_redirect_target, flash_redirect
 from app.repositories import assets as assets_repo
 from app.repositories import automations as automation_repo
 from app.repositories import companies as company_repo
@@ -452,15 +452,7 @@ def _parse_requester_value(raw: Any) -> tuple[str | None, int | None]:
     return prefix, numeric_id
 
 def _safe_local_redirect_target(raw: str | None, *, fallback: str) -> str:
-    candidate = (raw or "").strip()
-    if not candidate:
-        return fallback
-    parsed = urlsplit(candidate)
-    if parsed.scheme or parsed.netloc:
-        return fallback
-    if not candidate.startswith("/") or candidate.startswith("//"):
-        return fallback
-    return candidate
+    return _safe_redirect_target(raw or "", fallback=fallback)
 
 
 

@@ -121,7 +121,7 @@ def test_network_map_permission_follows_network_devices_for_legacy_roles():
 
 def test_next_url_stays_on_site():
     assert routes._next_url({"next": "/assets/4#interfaces"}, "/x") == "/assets/4#interfaces"
-    for bad in ("//evil.example", "https://evil.example", ""):
+    for bad in ("//evil.example", "https://evil.example", "", "/\\evil.example", "\\/evil.example", "/\t/evil.example"):
         assert routes._next_url({"next": bad}, "/network-map") == "/network-map"
 
 
