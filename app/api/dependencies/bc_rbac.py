@@ -204,3 +204,48 @@ async def get_bc_user_role(
             detail="BC system access required"
         )
     return role
+
+
+async def require_bc_plan_in_active_company(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    company_id: int | None = Depends(get_active_company_id),
+) -> None:
+    """Hide BC plans that belong to another company.
+
+    Applied to every BC plan router. Routes with a ``plan_id`` path
+    parameter only resolve when the plan's ``org_id`` is the caller's active
+    company; super admins can reach every plan. A missing plan is left for
+    the route to report.
+    """
+    raw_plan_id = request.path_params.get("plan_id")
+    if raw_plan_id is None or current_user.get("is_super_admin"):
+        return
+    from app.repositories import bc3 as bc_repo
+
+    try:
+        plan_id = int(raw_plan_id)
+    except (TypeError, ValueError):
+        return
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        return
+    org_id = plan.get("org_id")
+    if company_id is None or org_id is None or int(org_id) != int(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+
+
+def resolve_plan_company_id(current_user: dict, company_id: int | None, requested: int | None = None) -> int:
+    """Return the company a BC plan list or new plan is scoped to.
+
+    Non-admins are always limited to their active company. Super admins may
+    name another company explicitly and otherwise use their active company.
+    """
+    if current_user.get("is_super_admin") and requested is not None:
+        return int(requested)
+    if company_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Select a company before working with business continuity plans",
+        )
+    return int(company_id)
