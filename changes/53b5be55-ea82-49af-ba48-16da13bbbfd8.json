@@ -3,5 +3,5 @@
   "occurred_at": "2026-09-28T00:00Z",
   "change_type": "Feature",
   "summary": "Add an onboarding wizard (scripts/onboarding_wizard.py, myportal-docker setup) that enables feature packs and modules, configures their .env settings, and verifies existing files with --check.",
-  "content_hash": "5da925c5cca4fab0c41dcb916d73ec2c980989d49f257d8c92f1415b6c94cc77"
+  "content_hash": "5ecbf3c0363210ee2542086527db4e376beeb97147935022255fcce5a5601426"
 }
