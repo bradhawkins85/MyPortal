@@ -1625,10 +1625,10 @@ def _classify_private_upload(sanitized_path: PurePosixPath) -> tuple[bool, bool]
 
     Only directories the portal actually links through ``/uploads`` are
     served: product images (``shop/``), knowledge base inline images
-    (``knowledge-base/<file>``), Essential 8 evidence
-    (``compliance/essential8/``) and legacy top-level raster images.  Other
-    private stores (ticket attachments, KB attachments, SMB1001 evidence,
-    asset photos, report covers, ...) have dedicated, access-controlled
+    (``knowledge-base/<file>``) and legacy top-level raster images.  Other
+    private stores (ticket attachments, KB attachments, Essential 8 and
+    SMB1001 evidence, asset photos, report covers, ...) have dedicated,
+    per-company access-controlled
     download endpoints and are never exposed here.  ``None`` means "not found".
     """
 
@@ -1640,8 +1640,6 @@ def _classify_private_upload(sanitized_path: PurePosixPath) -> tuple[bool, bool]
         return (False, True) if is_image else None
     if len(parts) == 2 and parts[0] == "knowledge-base":
         return (True, True) if is_image else None
-    if len(parts) == 3 and parts[:2] == ("compliance", "essential8"):
-        return (False, is_image)
     return None
 
 
