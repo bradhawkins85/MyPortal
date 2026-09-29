@@ -19,6 +19,7 @@ def anyio_backend() -> str:
 
 @pytest.fixture(autouse=True)
 def _portal_url(monkeypatch):
+    monkeypatch.setattr(bh, "default_timezone_name", lambda: "Australia/Brisbane")
     monkeypatch.setattr(campaigns, "_portal_url", lambda: "https://portal.example.com")
     monkeypatch.setattr(campaigns, "default_sender", lambda: "news@example.com")
 
@@ -260,7 +261,7 @@ async def test_send_uses_global_hours_when_campaign_asks(monkeypatch):
     monkeypatch.setattr(campaign_repo, "mark_recipient_sent", sent)
 
     outcome = await campaigns.send_recipient(
-        _campaign(business_hours_source="global"), _recipient(), utc(2026, 9, 29, 8, 0)
+        _campaign(business_hours_source="global"), _recipient(), utc(2026, 9, 29, 1, 0)
     )
     assert outcome == "sent"
     get_schedule.assert_awaited_once_with(None)
@@ -430,3 +431,38 @@ async def test_imap_reuses_open_reply_ticket_but_not_closed_one(monkeypatch):
         subject="RE: x", from_email="jo@acme.com.au", related_message_ids=[]
     )
     assert ticket is None and matched is recipient
+
+
+@pytest.mark.anyio
+async def test_no_saved_hours_uses_default_weekday_hours_in_cron_timezone(monkeypatch):
+    monkeypatch.setattr(campaigns.business_hours_service, "get_schedule", AsyncMock(return_value=None))
+    defer = AsyncMock()
+    monkeypatch.setattr(campaign_repo, "defer_recipient", defer)
+    dispatch = AsyncMock()
+    monkeypatch.setattr(campaigns, "_dispatch", dispatch)
+
+    # 20:00 UTC Monday is 06:00 Tuesday in Brisbane: wait for 08:30 local (22:30 UTC).
+    outcome = await campaigns.send_recipient(_campaign(), _recipient(), utc(2026, 9, 28, 20, 0))
+    assert outcome == "deferred"
+    defer.assert_awaited_once_with(21, utc(2026, 9, 28, 22, 30))
+    dispatch.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_global_schedule_is_read_in_cron_timezone(monkeypatch):
+    bh.invalidate_cache()
+    from app.repositories import business_hours as bh_repo
+
+    monkeypatch.setattr(
+        bh_repo,
+        "get_schedule",
+        AsyncMock(return_value={"timezone": "UTC", "weekly_hours": bh.DEFAULT_WEEKLY_HOURS, "company_id": None}),
+    )
+    monkeypatch.setattr(bh_repo, "list_closures", AsyncMock(return_value=[]))
+    try:
+        schedule = await bh.get_schedule(None)
+    finally:
+        bh.invalidate_cache()
+    assert schedule.timezone_name == "Australia/Brisbane"
+    assert bh.is_open(schedule, utc(2026, 9, 28, 23, 0))  # Tue 09:00 Brisbane
+    assert not bh.is_open(schedule, utc(2026, 9, 29, 9, 0))  # Tue 19:00 Brisbane

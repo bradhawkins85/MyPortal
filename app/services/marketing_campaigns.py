@@ -538,6 +538,13 @@ async def _business_hours_delay(
 
     company_id = recipient.get("company_id") if campaign.get("business_hours_source") != "global" else None
     schedule = await business_hours_service.get_schedule(company_id)
+    if schedule is None:
+        # Campaigns must only go out in business hours, so with nothing saved
+        # use the default weekday hours in the portal time zone (CRON_TIMEZONE)
+        # rather than treating every moment as open.
+        schedule = business_hours_service.build_schedule(
+            {"weekly_hours": business_hours_service.DEFAULT_WEEKLY_HOURS}, source="default"
+        )
     if business_hours_service.is_open(schedule, now):
         return True, None
     return False, business_hours_service.next_open(schedule, now)
