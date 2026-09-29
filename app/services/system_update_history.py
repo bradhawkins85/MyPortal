@@ -34,6 +34,8 @@ _SECRET_RE = re.compile(
     r"(\s*[:=]\s*)([^\s,;]+)"
 )
 _VALID_STATUSES = {"pending", "running", "succeeded", "failed"}
+_ACTIVE_STATUSES = {"pending", "running"}
+_TERMINAL_STATUSES = {"succeeded", "failed"}
 
 
 def _now() -> str:
@@ -44,7 +46,8 @@ def sanitise_output(value: str | None) -> str:
     """Redact common credential assignments and bound administrator output."""
     cleaned = _SECRET_RE.sub(lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]", value or "")
     if len(cleaned) > _MAX_OUTPUT:
-        cleaned = cleaned[: _MAX_OUTPUT - 1] + "…"
+        # Keep the end of the log: it holds the current step and the result.
+        cleaned = "…" + cleaned[-(_MAX_OUTPUT - 1):]
     return cleaned
 
 
@@ -73,6 +76,7 @@ def _write(record: dict[str, Any]) -> dict[str, Any]:
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(temporary, 0o600)
+        _match_history_dir_owner(temporary)
         os.replace(temporary, _path(str(record["id"])))
     finally:
         try:
@@ -83,12 +87,30 @@ def _write(record: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
-def create_pending(*, requested_at: str, target_revision: str, source: str) -> dict[str, Any]:
+def _match_history_dir_owner(path: str) -> None:
+    """Give records written by the root update coordinator to the service account.
+
+    The coordinator reports progress as root; a root-owned 0600 record would be
+    unreadable to the application, so it inherits the history directory's owner.
+    """
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return
+    try:
+        owner = _HISTORY_DIR.stat()
+        os.chown(path, owner.st_uid, owner.st_gid)
+    except OSError:
+        pass
+
+
+def create_pending(
+    *, requested_at: str, target_revision: str, source: str,
+    mode: str = "rolling", output: str = "Rolling blue/green update queued.",
+) -> dict[str, Any]:
     record = {
-        "id": str(uuid.uuid4()), "status": "pending", "mode": "rolling",
+        "id": str(uuid.uuid4()), "status": "pending", "mode": mode,
         "source": source, "target_revision": target_revision,
         "started_at": requested_at, "completed_at": None, "updated_at": _now(),
-        "output": "Rolling blue/green update queued.", "error": None,
+        "output": output, "error": None,
     }
     return _write(record)
 
@@ -98,6 +120,9 @@ def update(update_id: str, *, status: str, output: str | None = None,
     if status not in _VALID_STATUSES:
         raise ValueError("Invalid system update status")
     record = get(update_id)
+    if record.get("status") in _TERMINAL_STATUSES and status in _ACTIVE_STATUSES:
+        # A late progress report must never reopen a finished update.
+        return record
     record.update({"status": status, "updated_at": _now()})
     if output is not None:
         record["output"] = sanitise_output(output)
@@ -133,3 +158,11 @@ def list_updates(*, limit: int = 200) -> list[dict[str, Any]]:
             continue
     records.sort(key=lambda item: str(item.get("started_at") or ""), reverse=True)
     return records[:limit]
+
+
+def find_active() -> dict[str, Any] | None:
+    """Return the newest update that is still queued or running, if any."""
+    for record in list_updates():
+        if record.get("status") in _ACTIVE_STATUSES:
+            return record
+    return None

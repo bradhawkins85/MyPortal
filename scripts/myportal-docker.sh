@@ -40,6 +40,10 @@ MYPORTAL_BACKUPS_TO_KEEP="${MYPORTAL_BACKUPS_TO_KEEP:-10}"
 
 INSTALLED_SCRIPT="/usr/local/bin/myportal-docker"
 AUTO_UPGRADE_CRON="/etc/cron.d/myportal-docker-upgrade"
+WEB_UPGRADE_CRON="/etc/cron.d/myportal-docker-requests"
+# Where the portal queues upgrade requests, inside the app container's state
+# volume. The host only ever reaches it through "docker compose exec".
+CONTAINER_UPDATE_FLAG="/app/var/state/system_update.flag"
 SCRIPT_ASSET="myportal-docker.sh"
 
 COMPOSE_FILE="${MYPORTAL_DIR}/docker-compose.yml"
@@ -83,6 +87,13 @@ Commands:
         time to review or correct settings; --check only reports missing or
         invalid values. Disabling a feature keeps its settings.
   auto-upgrade on|off  Check for and apply new releases daily.
+  web-upgrades on|off|status
+        Allow super administrators to start upgrades from the portal's System
+        updates page (on by default). A root cron job checks for requests every
+        minute and runs 'upgrade --yes'; it always upgrades to the latest
+        published release and takes nothing else from the portal.
+  process-requests     Apply a pending upgrade requested from the portal (run
+                       by the web-upgrades cron job).
   superadmin list      List the users with super administrator rights.
   superadmin grant USERNAME
         Grant super administrator rights to a user (USERNAME is the email
@@ -544,6 +555,10 @@ cmd_install() {
   # Recorded only once healthy, so a failed attempt can simply be rerun.
   set_setting "$PROJECT_ENV" MYPORTAL_VERSION "$version"
   install_script_copy "$version"
+  if [[ -x "$INSTALLED_SCRIPT" ]]; then
+    install_web_upgrade_cron
+    set_setting "$PROJECT_ENV" WEB_UPGRADES on
+  fi
 
   local host
   host=$(hostname -f 2>/dev/null || hostname)
@@ -555,8 +570,9 @@ MyPortal ${version} is running.
   Management:    myportal-docker help
 
 Open the portal and register: the first account becomes the super
-administrator. Upgrade with 'sudo myportal-docker upgrade', or enable daily
-automatic upgrades with 'sudo myportal-docker auto-upgrade on'.
+administrator. Upgrade from the portal's System updates page, with
+'sudo myportal-docker upgrade', or enable daily automatic upgrades with
+'sudo myportal-docker auto-upgrade on'.
 
 Before exposing the portal to the internet, terminate TLS in front of it, then
 set PORTAL_URL=https://… and ENVIRONMENT=production in ${APP_ENV} and run
@@ -618,6 +634,14 @@ cmd_upgrade() {
   require_root
   require_installed
   ensure_docker
+  if [[ -z "${MYPORTAL_UPGRADE_LOCKED:-}" ]]; then
+    # One upgrade at a time, whether from the shell, the nightly job or the
+    # portal. The descriptor and variable survive the self-update exec.
+    exec 9>"$(dirname "$PROJECT_ENV")/.upgrade.lock"
+    flock -n 9 || die "another upgrade is already running."
+    export MYPORTAL_UPGRADE_LOCKED=1
+  fi
+  adopt_web_upgrades
 
   local current
   current=$(get_setting "$PROJECT_ENV" MYPORTAL_VERSION)
@@ -788,6 +812,19 @@ cmd_setup() {
     /app/scripts/onboarding_wizard.py --docker --env-file /config/myportal.env "$@"
 }
 
+ensure_cron_daemon() {
+  if ! command -v cron >/dev/null 2>&1 && ! command -v crond >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq cron >/dev/null 2>&1
+    elif command -v dnf >/dev/null 2>&1; then
+      dnf -y -q install cronie >/dev/null
+    fi
+  fi
+  if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+    systemctl enable --now cron >/dev/null 2>&1 || systemctl enable --now crond >/dev/null 2>&1 || true
+  fi
+}
+
 cmd_auto_upgrade() {
   require_root
   require_installed
@@ -803,16 +840,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ${minute} ${hour} * * * root MYPORTAL_DIR=${MYPORTAL_DIR} ${INSTALLED_SCRIPT} upgrade --yes >> ${MYPORTAL_DIR}/auto-upgrade.log 2>&1
 EOF
       chmod 0644 "$AUTO_UPGRADE_CRON"
-      if ! command -v cron >/dev/null 2>&1 && ! command -v crond >/dev/null 2>&1; then
-        if command -v apt-get >/dev/null 2>&1; then
-          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq cron >/dev/null 2>&1
-        elif command -v dnf >/dev/null 2>&1; then
-          dnf -y -q install cronie >/dev/null
-        fi
-      fi
-      if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
-        systemctl enable --now cron >/dev/null 2>&1 || systemctl enable --now crond >/dev/null 2>&1 || true
-      fi
+      ensure_cron_daemon
       info "Automatic upgrades enabled (daily at $(printf '%02d:%02d' "$hour" "$minute"); log: ${MYPORTAL_DIR}/auto-upgrade.log)."
       ;;
     off)
@@ -821,6 +849,137 @@ EOF
       ;;
     *) die "usage: myportal-docker auto-upgrade on|off" ;;
   esac
+}
+
+# ---------------------------------------------------------------------------
+# Upgrades requested from the portal
+#
+# The portal never gets root or the Docker socket. Its only capability is to
+# drop a request file in its own state volume. This root job reads that file
+# through "docker compose exec" (so a symlink planted in the volume cannot
+# redirect a host path), takes nothing from it but a UUID to report progress
+# against, and runs the same 'upgrade --yes' as the nightly job: the latest
+# published release, with a backup and automatic rollback.
+# ---------------------------------------------------------------------------
+install_web_upgrade_cron() {
+  [[ -x "$INSTALLED_SCRIPT" ]] || die "${INSTALLED_SCRIPT} is missing; reinstall it with 'bash myportal-docker.sh install' or copy this script there."
+  cat >"$WEB_UPGRADE_CRON" <<EOF
+# Installed by myportal-docker: apply upgrades requested from the MyPortal
+# System updates page. Disable with 'myportal-docker web-upgrades off'.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+* * * * * root MYPORTAL_DIR=${MYPORTAL_DIR} ${INSTALLED_SCRIPT} process-requests >> ${MYPORTAL_DIR}/web-upgrade.log 2>&1
+EOF
+  chmod 0644 "$WEB_UPGRADE_CRON"
+  ensure_cron_daemon
+}
+
+adopt_web_upgrades() {
+  # Installations that predate web-triggered upgrades turn them on at their
+  # next upgrade, unless an administrator already chose 'web-upgrades off'.
+  [[ -z "$(get_setting "$PROJECT_ENV" WEB_UPGRADES)" && -x "$INSTALLED_SCRIPT" ]] || return 0
+  install_web_upgrade_cron
+  set_setting "$PROJECT_ENV" WEB_UPGRADES on
+  info "Upgrades can now be started from the portal's System updates page ('myportal-docker web-upgrades off' disables this)."
+}
+
+cmd_web_upgrades() {
+  require_root
+  require_installed
+  case "${1:-status}" in
+    on)
+      install_web_upgrade_cron
+      set_setting "$PROJECT_ENV" WEB_UPGRADES on
+      info "Super administrators can start upgrades from the portal's System updates page (log: ${MYPORTAL_DIR}/web-upgrade.log)."
+      ;;
+    off)
+      rm -f "$WEB_UPGRADE_CRON"
+      set_setting "$PROJECT_ENV" WEB_UPGRADES off
+      compose exec -T app rm -f "$CONTAINER_UPDATE_FLAG" >/dev/null 2>&1 || true
+      info "Upgrades from the portal are disabled."
+      ;;
+    status)
+      if [[ "$(get_setting "$PROJECT_ENV" WEB_UPGRADES)" == on && -f "$WEB_UPGRADE_CRON" ]]; then
+        printf 'Upgrades from the portal: enabled\n'
+      else
+        printf 'Upgrades from the portal: disabled\n'
+      fi
+      ;;
+    *) die "usage: myportal-docker web-upgrades on|off|status" ;;
+  esac
+}
+
+report_update() {
+  # report_update FILE UPDATE_ID STATUS [--error MESSAGE]
+  # Record progress in the portal's update history, with FILE as the output.
+  # The helper runs inside the container as its service account, so the host
+  # never writes into the volume. While the app container is being replaced,
+  # a one-off container records the final result instead.
+  local file="$1"; shift
+  local -a helper=(/app/scripts/system_update_report.py "$@" --output-file -)
+  compose exec -T -e PYTHONPATH=/app app python "${helper[@]}" <"$file" >/dev/null 2>&1 && return 0
+  [[ "${REPORT_EXEC_ONLY:-}" != 1 ]] || return 0
+  compose run --rm --no-deps -T -e PYTHONPATH=/app --entrypoint python app "${helper[@]}" <"$file" >/dev/null 2>&1 \
+    || warn "could not record the upgrade result in the portal."
+}
+
+cmd_process_requests() {
+  require_root
+  require_installed
+  [[ "$(get_setting "$PROJECT_ENV" WEB_UPGRADES)" != off ]] || return 0
+  exec 8>"${MYPORTAL_DIR}/.requests.lock"
+  flock -n 8 || return 0
+
+  local request update_id
+  request=$(compose exec -T app sh -c \
+    'f="$1"; if [ -f "$f" ] && [ ! -L "$f" ]; then head -c 4096 "$f"; fi' sh "$CONTAINER_UPDATE_FLAG" \
+    2>/dev/null) || return 0
+  [[ -n "$request" ]] || return 0
+  # Claim the request before acting on it, so a failure can never loop.
+  compose exec -T app rm -f "$CONTAINER_UPDATE_FLAG" >/dev/null 2>&1 || true
+  update_id=$(printf '%s\n' "$request" | sed -n 's/^update_id=//p' | head -n1 | tr -d '[:space:]')
+  if [[ ! "$update_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+    warn "ignoring an upgrade request without a valid identifier."
+    return 0
+  fi
+
+  local log status=0 progress_pid before after script
+  log=$(mktemp)
+  before=$(get_setting "$PROJECT_ENV" MYPORTAL_VERSION)
+  info "Upgrade ${update_id} requested from the portal."
+  printf 'Picked up by the Docker host at %s. Installed release: %s.\n' "$(date -u +%FT%TZ)" "$before" >"$log"
+  report_update "$log" "$update_id" running
+  (
+    # Finish an in-flight report before exiting so it cannot land after the
+    # final result; "sleep & wait" lets the signal interrupt the pause.
+    trap 'exit 0' TERM
+    while :; do
+      sleep "${MYPORTAL_PROGRESS_INTERVAL:-10}" & wait $!
+      REPORT_EXEC_ONLY=1 report_update "$log" "$update_id" running
+    done
+  ) &
+  progress_pid=$!
+
+  script="$INSTALLED_SCRIPT"
+  [[ -x "$script" ]] || script=$(readlink -f "$0")
+  MYPORTAL_DIR="$MYPORTAL_DIR" "$script" upgrade --yes >>"$log" 2>&1 || status=$?
+  kill "$progress_pid" 2>/dev/null || true
+  wait "$progress_pid" 2>/dev/null || true
+  cat "$log"
+
+  after=$(get_setting "$PROJECT_ENV" MYPORTAL_VERSION)
+  if ((status != 0)); then
+    report_update "$log" "$update_id" failed --error "myportal-docker upgrade exited with status ${status}."
+  elif [[ "$after" == "$before" ]]; then
+    # The portal only queues a request when a newer release exists, so an
+    # unchanged release means the upgrade was skipped; the output says why.
+    status=1
+    report_update "$log" "$update_id" failed --error "No upgrade was applied; ${before} is still installed. See the output for the reason."
+  else
+    report_update "$log" "$update_id" succeeded
+  fi
+  rm -f "$log"
+  return "$status"
 }
 
 # ---------------------------------------------------------------------------
@@ -1089,6 +1248,13 @@ main() {
     restart) cmd_restart ;;
     setup|onboard) cmd_setup "$@" ;;
     auto-upgrade) cmd_auto_upgrade "$@" ;;
+    web-upgrades) cmd_web_upgrades "$@" ;;
+    process-requests)
+      # The upgrade may replace this script on disk while it runs; exit here
+      # so bash never reads on into the new file's contents.
+      cmd_process_requests
+      exit 0
+      ;;
     superadmin|super-admin) cmd_superadmin "$@" ;;
     user) cmd_user "$@" ;;
     help|-h|--help) usage ;;

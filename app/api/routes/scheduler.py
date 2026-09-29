@@ -31,6 +31,7 @@ from app.schemas.scheduler import (
 from app.services import cron_calendar, scheduled_task_preview, webhook_monitor
 from app.services import webhook_deletion_rules as deletion_rules_service
 from app.services import system_update_history
+from app.services import system_updates as system_updates_service
 from app.services.scheduler import scheduler_service
 
 router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
@@ -99,6 +100,34 @@ async def list_system_updates(
     return system_update_history.list_updates(limit=limit)
 
 
+@router.get("/system-updates/check", response_model=dict[str, Any])
+async def check_system_update(
+    response: Response,
+    refresh: bool = False,
+    __: dict[str, Any] = Depends(require_super_admin),
+) -> dict[str, Any]:
+    """Report the installed version and whether a newer one is available."""
+    response.headers["Cache-Control"] = "no-store"
+    return await system_updates_service.check_for_update(refresh=refresh)
+
+
+@router.post("/system-updates", response_model=dict[str, Any], status_code=status.HTTP_202_ACCEPTED)
+async def request_system_update(
+    _: None = Depends(require_database),
+    current_user: dict[str, Any] = Depends(require_super_admin),
+) -> dict[str, Any]:
+    """Queue an upgrade for the host coordinator (bare metal or Docker)."""
+    result = await system_updates_service.request_update()
+    log_info(
+        "System update requested from API",
+        user_id=current_user.get("id"), created=result["created"],
+        update_id=(result["record"] or {}).get("id"),
+    )
+    if result["record"] is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=result["message"])
+    return result
+
+
 @router.get("/system-updates/{update_id}", response_model=dict[str, Any])
 async def get_system_update(
     update_id: str,
@@ -108,6 +137,7 @@ async def get_system_update(
 ) -> dict[str, Any]:
     """Inspect the sanitized output and result of one system update."""
     response.headers["Cache-Control"] = "no-store"
+    system_updates_service.expire_unclaimed_requests()
     try:
         return system_update_history.get(update_id)
     except (KeyError, ValueError):

@@ -6,6 +6,36 @@
   <header class="management__header"><div><h1 class="management__title">System updates</h1><p class="management__subtitle">Rolling blue/green deployments and sanitized coordinator results. Times display in your local timezone.</p></div>
     <label class="form-field"><span class="form-label">Filter updates</span><input class="form-input" type="search" data-table-filter="system-updates-table" placeholder="Status, revision, source…"></label>
   </header>
+  {% set check = update_check | default({}, true) %}
+  {% set is_docker = check.deployment == 'docker' %}
+  {% macro version_label(value) %}{% if value %}<code>{{ value[:12] if not is_docker else value }}</code>{% else %}<span class="text-muted">Unknown</span>{% endif %}{% endmacro %}
+  <div class="card card--panel" data-system-update-panel>
+    <h2 class="card__title">Upgrade MyPortal</h2>
+    <dl class="definition-list">
+      <dt>Installation</dt><dd>{{ 'Docker' if is_docker else 'Bare metal' }}</dd>
+      <dt>Installed {{ 'release' if is_docker else 'revision' }}</dt><dd>{{ version_label(check.installed) }}</dd>
+      <dt>Latest {{ 'release' if is_docker else 'revision on main' }}</dt><dd>{{ version_label(check.latest) }}</dd>
+      <dt>Status</dt><dd>
+        {% if check.error %}<span class="tag tag--danger">{{ check.error }}</span>
+        {% elif active_update %}<span class="tag tag--warning">Update {{ active_update.status }}</span>
+        {% elif check.available %}<span class="tag tag--warning">Update available</span>
+        {% else %}<span class="tag tag--success">Up to date</span>{% endif %}
+        {% if check.checked_at %}<span class="text-muted">Checked <span data-utc="{{ check.checked_at }}"></span></span>{% endif %}
+      </dd>
+    </dl>
+    <p class="text-muted">{% if is_docker %}Upgrades back up the database, move to the latest published release and roll back automatically if it does not become healthy. The Docker host picks up requests within a minute.{% else %}Upgrades use the rolling blue/green coordinator, so the portal stays online. The server picks up requests within a minute.{% endif %}</p>
+    <div class="form-actions">
+      {% if active_update %}
+        <a class="button button--primary" href="/admin/system-updates/{{ active_update.id }}">View progress</a>
+      {% else %}
+        <form method="post" action="/admin/system-updates/request">
+          {% include "partials/csrf.html" %}
+          <button type="submit" class="button button--primary" data-confirm="Upgrade MyPortal to the latest {{ 'release' if is_docker else 'revision' }} now?" {% if not check.available %}disabled{% endif %}>Update now</button>
+        </form>
+      {% endif %}
+      <a class="button button--ghost" href="/admin/system-updates?refresh=1">Check again</a>
+    </div>
+  </div>
   <div class="card card--panel"><div class="table-wrapper"><table class="table" id="system-updates-table" data-table data-table-id="system-updates">
     <thead><tr><th data-sort="date">Started</th><th data-sort="string">Status</th><th data-sort="string">Source</th><th data-sort="string">Mode</th><th data-sort="string">Target revision</th><th data-sort="date">Completed</th><th>Result</th></tr></thead>
     <tbody>{% for update in updates %}<tr>
@@ -18,4 +48,5 @@
     </tr>{% else %}<tr><td colspan="7" class="table__empty">No system updates have been recorded yet.</td></tr>{% endfor %}</tbody>
   </table></div></div>
 </section></div>
+<script src="{{ static_url('/static/js/system_updates.js') }}" defer></script>
 {% endblock %}

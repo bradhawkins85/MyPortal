@@ -145,6 +145,7 @@ from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
 from app.services import knowledge_base as knowledge_base_service
 from app.services import system_update_history
+from app.services import system_updates as system_updates_service
 from app.services.agent_sources import SOURCE_REGISTRY as AGENT_SOURCE_REGISTRY
 from app.security.menu_permissions import MENU_PERMISSIONS, catalogue_for_api, menu_has_access, normalize_access_level, normalize_menu_permissions
 from app.repositories import site_settings as site_settings_repo
@@ -6906,11 +6907,59 @@ async def admin_system_updates(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
+    system_updates_service.expire_unclaimed_requests()
     updates = system_update_history.list_updates()
+    update_check = await system_updates_service.check_for_update(
+        refresh=request.query_params.get("refresh") == "1"
+    )
     return await _render_template(
         "admin/system_updates.html", request, current_user,
-        extra={"title": "System update history", "updates": updates},
+        extra={
+            "title": "System update history", "updates": updates,
+            "update_check": update_check,
+            "active_update": system_update_history.find_active(),
+        },
     )
+
+
+@app.post("/admin/system-updates/request", response_class=HTMLResponse)
+async def admin_request_system_update(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    result = await system_updates_service.request_update()
+    record = result["record"]
+    if result["created"] and record:
+        await audit_service.record(
+            action="system.update.request", request=request,
+            user_id=int(current_user["id"]), entity_type="system_update",
+            metadata={"update_id": record["id"], "target": record.get("target_revision"),
+                      "deployment": system_updates_service.deployment_type()},
+        )
+    if record:
+        return flash_redirect(
+            f"/admin/system-updates/{record['id']}", result["message"],
+            "success" if result["created"] else "info",
+        )
+    return flash_redirect("/admin/system-updates", result["message"], "info")
+
+
+@app.post("/admin/system-updates/{update_id}/cancel", response_class=HTMLResponse)
+async def admin_cancel_system_update(request: Request, update_id: str):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    try:
+        system_updates_service.cancel_request(update_id)
+    except (KeyError, ValueError) as exc:
+        message = str(exc) if isinstance(exc, ValueError) else "System update not found."
+        return flash_redirect(f"/admin/system-updates/{update_id}", message, "error")
+    await audit_service.record(
+        action="system.update.cancel", request=request,
+        user_id=int(current_user["id"]), entity_type="system_update",
+        metadata={"update_id": update_id},
+    )
+    return flash_redirect(f"/admin/system-updates/{update_id}", "Update request cancelled.", "success")
 
 
 @app.get("/admin/system-updates/{update_id}", response_class=HTMLResponse)
@@ -6924,7 +6973,10 @@ async def admin_system_update_detail(request: Request, update_id: str):
         raise HTTPException(status_code=404, detail="System update not found")
     return await _render_template(
         "admin/system_update_detail.html", request, current_user,
-        extra={"title": "System update result", "update": update},
+        extra={
+            "title": "System update result", "update": update,
+            "host_setup_hint": system_updates_service.host_setup_hint(),
+        },
     )
 
 

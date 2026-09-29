@@ -74,8 +74,33 @@ Automatic upgrades (daily, at a random time between 02:00 and 04:59):
 sudo myportal-docker auto-upgrade on    # or off
 ```
 
-Inside the portal, the scheduled "system update" task only reports that Docker
-installations are upgraded with this script.
+### Upgrading from the portal
+
+Super administrators can start an upgrade from **Admin → Scheduled tasks →
+System updates**. The page shows the installed and latest release; **Update
+now** queues a request and opens a page that follows the upgrade output live
+until it succeeds or fails.
+
+The portal never gets root or the Docker socket. It only writes a request file
+into its own state volume. A root cron job on the host
+(`/etc/cron.d/myportal-docker-requests`, every minute) runs
+`myportal-docker process-requests`, which reads and clears the request through
+`docker compose exec`, and then runs the same `upgrade --yes` as the nightly
+job. It always moves to the latest published release (never a version named by
+the portal), with the usual backup and rollback. Progress and the result are
+written back to the portal's update history; the host keeps a copy in
+`/opt/myportal-docker/web-upgrade.log`.
+
+This is on for new installations, and existing installations turn it on at
+their next upgrade. To control it:
+
+```bash
+sudo myportal-docker web-upgrades status
+sudo myportal-docker web-upgrades off   # or on
+```
+
+A request that the host does not pick up within 15 minutes is marked failed in
+the portal with a reminder to run `web-upgrades on`.
 
 ## Day-to-day commands
 
