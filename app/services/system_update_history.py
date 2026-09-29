@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import tempfile
+import stat
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,53 +51,95 @@ def sanitise_output(value: str | None) -> str:
     return cleaned
 
 
-def _path(update_id: str) -> Path:
+def _record_name(update_id: str) -> str:
     try:
-        canonical_id = str(uuid.UUID(update_id))
+        return f"{uuid.UUID(update_id)}.json"
     except (ValueError, AttributeError, TypeError) as exc:
         raise ValueError("Invalid system update identifier") from exc
 
-    history_dir = _HISTORY_DIR.resolve()
-    candidate = (history_dir / f"{canonical_id}.json").resolve()
-    try:
-        candidate.relative_to(history_dir)
-    except ValueError as exc:
-        raise ValueError("Invalid system update identifier") from exc
-    return candidate
+
+# The history directory lives in the service-writable shared state tree, and
+# the bare-metal coordinator may report into it with elevated privileges.
+# Every access therefore goes through a directory descriptor opened without
+# following symlinks, and each record is opened with O_NOFOLLOW, so a planted
+# symlink or hard link can never redirect a read, write, chmod or chown.
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_DIR_FD_SUPPORTED = os.open in os.supports_dir_fd and os.unlink in os.supports_dir_fd
+
+
+def _open_history_dir(*, create: bool) -> int | None:
+    if create:
+        _HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    if not _DIR_FD_SUPPORTED:
+        return None
+    return os.open(_HISTORY_DIR, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _NOFOLLOW)
+
+
+def _read_record(name: str, dir_fd: int | None) -> Any:
+    if dir_fd is None:
+        return json.loads((_HISTORY_DIR / name).read_text(encoding="utf-8"))
+    fd = os.open(name, os.O_RDONLY | _NOFOLLOW | getattr(os, "O_NONBLOCK", 0), dir_fd=dir_fd)
+    with os.fdopen(fd, "r", encoding="utf-8") as handle:
+        info = os.fstat(handle.fileno())
+        # Only a private regular file is a record: never a FIFO, device, or a
+        # hard link to a file elsewhere on the filesystem.
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ValueError("Refusing to read a non-regular system update record")
+        return json.load(handle)
 
 
 def _write(record: dict[str, Any]) -> dict[str, Any]:
-    _HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=".system-update-", dir=_HISTORY_DIR)
+    name = _record_name(str(record["id"]))
+    dir_fd = _open_history_dir(create=True)
+    temporary = f".system-update-{uuid.uuid4().hex}.tmp"
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(record, handle, separators=(",", ":"), sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(temporary, 0o600)
-        _match_history_dir_owner(temporary)
-        os.replace(temporary, _path(str(record["id"])))
-    finally:
+        fd = os.open(
+            temporary if dir_fd is not None else str(_HISTORY_DIR / temporary),
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o600,
+            **({"dir_fd": dir_fd} if dir_fd is not None else {}),
+        )
         try:
-            os.unlink(temporary)
-        except FileNotFoundError:
-            # Temporary file may already have been atomically moved by os.replace().
-            pass
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(record, handle, separators=(",", ":"), sort_keys=True)
+                handle.write("\n")
+                handle.flush()
+                # Change the file we created through its descriptor, never by
+                # path: the path may have been swapped for a symlink meanwhile.
+                if hasattr(os, "fchmod"):
+                    os.fchmod(handle.fileno(), 0o600)
+                _match_history_dir_owner(handle.fileno(), dir_fd)
+                os.fsync(handle.fileno())
+            if dir_fd is not None:
+                os.replace(temporary, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+            else:
+                os.replace(_HISTORY_DIR / temporary, _HISTORY_DIR / name)
+        finally:
+            try:
+                if dir_fd is not None:
+                    os.unlink(temporary, dir_fd=dir_fd)
+                else:
+                    os.unlink(_HISTORY_DIR / temporary)
+            except FileNotFoundError:
+                # Temporary file may already have been atomically moved by os.replace().
+                pass
+    finally:
+        if dir_fd is not None:
+            os.close(dir_fd)
     return record
 
 
-def _match_history_dir_owner(path: str) -> None:
-    """Give records written by the root update coordinator to the service account.
+def _match_history_dir_owner(fd: int, dir_fd: int | None) -> None:
+    """Give records written by a root caller to the history directory's owner.
 
-    The coordinator reports progress as root; a root-owned 0600 record would be
-    unreadable to the application, so it inherits the history directory's owner.
+    The bare-metal coordinator reports as the service account, but a root
+    caller (for example a manual run) must not leave a root-owned 0600 record
+    the application cannot read. Only the open descriptor is changed.
     """
-    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+    if not hasattr(os, "geteuid") or os.geteuid() != 0 or dir_fd is None:
         return
     try:
-        owner = _HISTORY_DIR.stat()
-        os.chown(path, owner.st_uid, owner.st_gid)
+        owner = os.fstat(dir_fd)
+        os.fchown(fd, owner.st_uid, owner.st_gid)
     except OSError:
         pass
 
@@ -134,10 +176,21 @@ def update(update_id: str, *, status: str, output: str | None = None,
 
 
 def get(update_id: str) -> dict[str, Any]:
+    name = _record_name(update_id)
     try:
-        record = json.loads(_path(update_id).read_text(encoding="utf-8"))
+        dir_fd = _open_history_dir(create=False)
     except FileNotFoundError as exc:
         raise KeyError(update_id) from exc
+    try:
+        record = _read_record(name, dir_fd)
+    except FileNotFoundError as exc:
+        raise KeyError(update_id) from exc
+    except (OSError, ValueError) as exc:
+        # A symlink (ELOOP), FIFO, hard link, or corrupt JSON is not a record.
+        raise KeyError(update_id) from exc
+    finally:
+        if dir_fd is not None:
+            os.close(dir_fd)
     if not isinstance(record, dict):
         raise KeyError(update_id)
     return record
@@ -146,16 +199,21 @@ def get(update_id: str) -> dict[str, Any]:
 def list_updates(*, limit: int = 200) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     try:
-        paths = list(_HISTORY_DIR.glob("*.json"))
+        names = sorted(path.name for path in _HISTORY_DIR.glob("*.json"))
+        dir_fd = _open_history_dir(create=False)
     except OSError:
         return []
-    for path in paths:
-        try:
-            record = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(record, dict) and record.get("status") in _VALID_STATUSES:
-                records.append(record)
-        except (OSError, ValueError, TypeError):
-            continue
+    try:
+        for name in names:
+            try:
+                record = _read_record(name, dir_fd)
+                if isinstance(record, dict) and record.get("status") in _VALID_STATUSES:
+                    records.append(record)
+            except (OSError, ValueError, TypeError):
+                continue
+    finally:
+        if dir_fd is not None:
+            os.close(dir_fd)
     records.sort(key=lambda item: str(item.get("started_at") or ""), reverse=True)
     return records[:limit]
 
