@@ -449,3 +449,37 @@ def test_release_revision_falls_back_to_release_directory_name(monkeypatch, tmp_
     (release / "version.txt").write_text("20260313061816\n")
     monkeypatch.setattr(scheduler_module, "_PROJECT_ROOT", release)
     assert scheduler_module._release_revision() == REVISION
+
+
+def test_upgrade_installs_stable_command_for_the_control_checkout(tmp_path):
+    script = (ROOT / "scripts/upgrade.sh").read_text()
+    start = script.index("install_upgrade_command() {")
+    end = script.index("\n}\n", start) + 3
+    checkout = tmp_path / "my checkout"
+    command = tmp_path / "bin" / "myportal-upgrade"
+    program = (
+        f'PROJECT_ROOT={str(checkout)!r}; SCRIPT_DIR={str(checkout / "scripts")!r}\n'
+        + script[start:end]
+        + "install_upgrade_command\n"
+    )
+    subprocess.run(["bash", "-c", program], check=True,
+                   env={**os.environ, "MYPORTAL_UPGRADE_COMMAND": str(command)})
+    (checkout / "scripts").mkdir(parents=True)
+    fake = checkout / "scripts" / "upgrade.sh"
+    fake.write_text('#!/usr/bin/env bash\necho "ran $*"\n')
+    fake.chmod(0o755)
+    result = subprocess.run([str(command), "--rolling"], text=True, capture_output=True, check=True)
+    assert result.stdout == "ran --rolling\n"
+
+
+def test_docs_use_the_stable_upgrade_command():
+    for rel in (
+        "docs/wiki/getting-started/Zero Downtime Upgrades.md",
+        "docs/wiki/getting-started/Setup and Installation.md",
+        "docs/wiki/getting-started/Running as a Service.md",
+        "wiki/Setup-and-Installation.md",
+        "wiki/Systemd-Service.md",
+    ):
+        text = (ROOT / rel).read_text()
+        assert "/opt/myportal/control/scripts/upgrade.sh" not in text, rel
+        assert "myportal-upgrade" in text, rel

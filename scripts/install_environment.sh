@@ -800,8 +800,9 @@ MyPortal production environment is ready.
 - Portal URL:       http://$(hostname -f 2>/dev/null || hostname)/
 
 Open the portal URL and register the first account; it becomes the super
-administrator. Apply future updates with:
-  sudo ${SCRIPT_DIR}/upgrade.sh
+administrator. Apply future updates from the portal (Admin > Scheduled tasks >
+System updates) or with:
+  sudo myportal-upgrade
 
 Before exposing the portal to the internet, terminate TLS in front of nginx,
 set PORTAL_URL to the public https:// address and ENVIRONMENT=production in

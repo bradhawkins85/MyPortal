@@ -41,8 +41,10 @@ the Exchange Online PowerShell fallback is unavailable.
 
 ## Production installation
 
-Clone the repository as root into `/opt/myportal/control` and run the
-production installer:
+Clone the repository as root and run the production installer. The clone is
+the **control checkout** that releases are exported from; the examples use
+`/opt/myportal/control`, but any directory outside `/home` and `/root` works.
+The directory is created by `git clone`; it is not part of the repository.
 
 ```bash
 sudo git clone https://github.com/bradhawkins85/MyPortal /opt/myportal/control
@@ -102,8 +104,22 @@ HTTP: browsers will not send Secure cookies, so logins will fail.
 ### Updating a production server
 
 ```bash
-sudo /opt/myportal/control/scripts/upgrade.sh
+sudo myportal-upgrade
 ```
+
+`myportal-upgrade` is installed by the first deployment and runs
+`scripts/upgrade.sh` from your control checkout, wherever you cloned it. On a
+server deployed before this command existed, run the script from the checkout
+directly. `/opt/myportal/control` is only the suggested clone location; to find
+where yours is, run:
+
+```bash
+sudo grep MYPORTAL_CONTROL_CHECKOUT /etc/myportal.env
+```
+
+You can also start updates from the portal (Admin → Scheduled tasks → System
+updates) without logging in to the server. Docker installations have no
+control checkout: use `sudo myportal-docker upgrade` or the portal instead.
 
 The upgrade prepares the new release, runs migrations and verifies the idle
 slot before nginx switches to it. If anything fails, it rolls back to the
@@ -137,7 +153,8 @@ is serving, it removes `myportal.service`.
 | Path | Purpose |
 | --- | --- |
 | `/etc/myportal.env` | Configuration and secrets |
-| `/opt/myportal/control` | Control checkout that releases are exported from |
+| `/opt/myportal/control` | Suggested control checkout location (see `MYPORTAL_CONTROL_CHECKOUT` in `/etc/myportal.env`) |
+| `/usr/local/sbin/myportal-upgrade` | Runs `scripts/upgrade.sh` from the control checkout |
 | `/opt/myportal/current` | The serving release |
 | `/opt/myportal/shared` | Uploads, update state and other persistent data |
 | `/var/log/myportal/` | Application log and the update cron log |
