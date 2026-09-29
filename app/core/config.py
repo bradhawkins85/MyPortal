@@ -128,6 +128,17 @@ class Settings(BaseSettings):
         default="myportal_session",
         validation_alias=AliasChoices("SESSION_COOKIE_NAME", "SESSION_COOKIE"),
     )
+    session_absolute_ttl_hours: int = Field(
+        default=168,
+        ge=1,
+        le=8760,
+        validation_alias="SESSION_ABSOLUTE_TTL_HOURS",
+        description=(
+            "Maximum lifetime of a sign-in session in hours, measured from when "
+            "it was created. Activity extends the idle timeout but never past "
+            "this cap."
+        ),
+    )
     allowed_origins: str = Field(
         default="",
         validation_alias="ALLOWED_ORIGINS",
