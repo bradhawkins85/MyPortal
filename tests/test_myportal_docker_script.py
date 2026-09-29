@@ -475,3 +475,79 @@ def test_conversion_stops_when_the_override_changes_the_old_app_service(tmp_path
     assert "changes the 'app' service" in result.stderr
     assert not (tmp_path / "calls").exists()
     assert project_env.read_text(encoding="utf-8") == "MYPORTAL_VERSION=v1\nMYPORTAL_IMAGE=img:v1\n"
+
+
+def test_readiness_probe_ignores_http_proxy_settings():
+    # An HTTP_PROXY in myportal.env (or injected by Docker) must not route the
+    # in-container check of 127.0.0.1 through the proxy, where it never succeeds.
+    import http.server
+    import socket
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - http.server API
+            body = b'{"status":"ok","version":"v1"}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    try:
+        server = http.server.HTTPServer(("127.0.0.1", 8000), Handler)
+    except OSError:
+        pytest.skip("port 8000 is in use")
+    with socket.socket() as blackhole:
+        blackhole.bind(("127.0.0.1", 0))
+        proxy = f"http://127.0.0.1:{blackhole.getsockname()[1]}"
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        program = _run('printf "%s" "$READYZ_PROGRAM"').stdout
+        result = subprocess.run(
+            ["python3", "-c", program],
+            text=True,
+            capture_output=True,
+            env={**os.environ, "HTTP_PROXY": proxy, "http_proxy": proxy, "NO_PROXY": "", "no_proxy": ""},
+            timeout=30,
+            check=False,
+        )
+    finally:
+        server.shutdown()
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == '{"status":"ok","version":"v1"}'
+
+
+def test_switch_proxy_replaces_a_stopped_proxy_without_reloading_it(tmp_path):
+    calls = tmp_path / "calls"
+    state = tmp_path / "started"
+    result = _run(
+        f'PROXY_DIR="{tmp_path}"\n'
+        # No proxy runs until "compose up" starts one.
+        f'compose() {{ echo "compose $*" >> "{calls}"; touch "{state}"; }}\n'
+        f'service_container() {{ [[ -f "{state}" ]] && echo proxy-id; }}\n'
+        f'docker() {{ echo "docker $*" >> "{calls}"; [[ $1 == inspect ]] && echo "proxy-id now"; }}\n'
+        "switch_proxy green"
+    )
+    assert result.returncode == 0, result.stderr
+    lines = calls.read_text(encoding="utf-8").splitlines()
+    assert "compose up -d --no-deps --force-recreate proxy" in lines
+    assert not any("reload" in line for line in lines)
+    assert "app_green" in (tmp_path / "active-slot.inc").read_text(encoding="utf-8")
+
+
+def test_switch_proxy_reloads_a_running_proxy(tmp_path):
+    calls = tmp_path / "calls"
+    result = _run(
+        f'PROXY_DIR="{tmp_path}"\n'
+        f'compose() {{ echo "compose $*" >> "{calls}"; }}\n'
+        "service_container() { echo proxy-id; }\n"
+        f'docker() {{ echo "docker $*" >> "{calls}"; [[ $1 == inspect ]] && echo "proxy-id then"; return 0; }}\n'
+        "switch_proxy blue"
+    )
+    assert result.returncode == 0, result.stderr
+    lines = calls.read_text(encoding="utf-8").splitlines()
+    assert "compose up -d --no-deps proxy" in lines
+    assert "docker exec proxy-id nginx -s reload" in lines
