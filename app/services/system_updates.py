@@ -254,6 +254,7 @@ async def fail_superseded_updates() -> None:
             try:
                 _FLAG_PATH.unlink()
             except FileNotFoundError:
+                # The flag was already removed; nothing to clean up for this update.
                 pass
             except OSError as exc:
                 log_error(
