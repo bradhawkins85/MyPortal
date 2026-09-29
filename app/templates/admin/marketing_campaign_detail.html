@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}{{ campaign.name }}{% endblock %}
+
+{% block header_actions %}
+  {% set actions = [] %}
+  {% if campaign.status == 'draft' %}
+    {% set _ = actions.append({"label": "Send campaign", "type": "form", "action": "/admin/marketing/campaigns/" ~ campaign.id ~ "/send", "variant": "primary", "confirm": "Queue this campaign for " ~ (audience_recipient_count or 0) ~ " recipients? Emails go out during business hours."}) %}
+    {% set _ = actions.append({"label": "Edit campaign", "type": "link", "href": "/admin/marketing/campaigns/" ~ campaign.id ~ "/edit"}) %}
+  {% endif %}
+  {% set _ = actions.append({"label": "Preview email", "type": "link", "href": "/admin/marketing/campaigns/" ~ campaign.id ~ "/preview"}) %}
+  {% set _ = actions.append({"label": "Send test to me", "type": "form", "action": "/admin/marketing/campaigns/" ~ campaign.id ~ "/test"}) %}
+  {% if campaign.status == 'sending' %}
+    {% set _ = actions.append({"label": "Cancel sending", "type": "form", "action": "/admin/marketing/campaigns/" ~ campaign.id ~ "/cancel", "variant": "danger", "confirm": "Stop sending? Emails already sent are not recalled."}) %}
+  {% else %}
+    {% set _ = actions.append({"label": "Delete campaign", "type": "form", "action": "/admin/marketing/campaigns/" ~ campaign.id ~ "/delete", "variant": "danger", "confirm": "Delete this campaign and its send history?"}) %}
+  {% endif %}
+  {% set _ = actions.append({"label": "All campaigns", "type": "link", "href": "/admin/marketing/campaigns"}) %}
+  {{ page_header_actions(actions) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Summary</h2>
+        <p class="card__subtitle">{% include "admin/partials/marketing_campaign_status.html" %}</p>
+      </div>
+    </header>
+    <dl class="detail-list">
+      <dt>Type</dt>
+      <dd>{% if campaign.category == 'sales' %}Sales (includes an unsubscribe footer){% else %}Updates{% endif %}</dd>
+      <dt>Subject</dt>
+      <dd>{{ campaign.subject }}</dd>
+      <dt>Body</dt>
+      <dd>{% if campaign.message_template_id %}Message template #{{ campaign.message_template_id }}{% else %}Written on the campaign{% endif %}</dd>
+      <dt>Sender</dt>
+      <dd>{{ campaign.sender_name or '' }} {{ campaign.sender_email or 'Default sender' }}</dd>
+      <dt>Replies go to</dt>
+      <dd>{{ campaign.reply_to or 'The sender address' }}</dd>
+      <dt>Business hours</dt>
+      <dd>{% if campaign.business_hours_source == 'global' %}Global business hours{% else %}Each recipient's company hours{% endif %}</dd>
+      {% if campaign.scheduled_for %}
+        <dt>Not before</dt>
+        <dd><span data-utc="{{ campaign.scheduled_for.isoformat() }}">{{ campaign.scheduled_for }}</span></dd>
+      {% endif %}
+      {% if campaign.queued_at %}
+        <dt>Queued</dt>
+        <dd><span data-utc="{{ campaign.queued_at.isoformat() }}">{{ campaign.queued_at }}</span></dd>
+      {% endif %}
+      {% if campaign.completed_at %}
+        <dt>Completed</dt>
+        <dd><span data-utc="{{ campaign.completed_at.isoformat() }}">{{ campaign.completed_at }}</span></dd>
+      {% endif %}
+    </dl>
+  </section>
+
+  {% if campaign.status == 'draft' %}
+    <section class="card card--panel">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title">Recipients ({{ audience_recipient_count }})</h2>
+          <p class="card__subtitle">{{ audience_recipient_count }} contacts at {{ audience_company_count }} companies will receive this email.{% if audience_recipient_count > preview_limit %} Showing the first {{ preview_limit }}.{% endif %}</p>
+        </div>
+      </header>
+      <div class="table-wrapper">
+        <table class="table" data-table>
+          <thead>
+            <tr>
+              <th data-sort="string">Company</th>
+              <th data-sort="string">Name</th>
+              <th data-sort="string">Email</th>
+              <th data-sort="string">Job title</th>
+              <th data-sort="string">Billing contact</th>
+              <th class="table__actions">Preview</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for recipient in audience_recipients %}
+              <tr>
+                <td data-label="Company">{{ recipient.company_name or '-' }}</td>
+                <td data-label="Name">{{ recipient.name or '-' }}</td>
+                <td data-label="Email">{{ recipient.email }}</td>
+                <td data-label="Job title">{{ recipient.job_title or '-' }}</td>
+                <td data-label="Billing contact">{{ 'Yes' if recipient.is_billing_contact else 'No' }}</td>
+                <td class="table__actions"><a class="button button--ghost button--small" href="/admin/marketing/campaigns/{{ campaign.id }}/preview?email={{ recipient.email | urlencode }}">View email</a></td>
+              </tr>
+            {% else %}
+              <tr><td colspan="6" class="table__empty">No contacts match this audience. Edit the campaign to widen the filters.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    {% if audience_excluded %}
+      <section class="card card--panel">
+        <header class="card__header card__header--stacked">
+          <div>
+            <h2 class="card__title">Left out ({{ audience_excluded | length }})</h2>
+            <p class="card__subtitle">These contacts match the filters but will not be emailed.</p>
+          </div>
+        </header>
+        <div class="table-wrapper">
+          <table class="table">
+            <thead><tr><th>Company</th><th>Email</th><th>Reason</th></tr></thead>
+            <tbody>
+              {% for recipient in audience_excluded %}
+                <tr>
+                  <td data-label="Company">{{ recipient.company_name or '-' }}</td>
+                  <td data-label="Email">{{ recipient.email }}</td>
+                  <td data-label="Reason">{{ recipient.reason }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+  {% else %}
+    <section class="card card--panel">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title">Results</h2>
+          <p class="card__subtitle">Delivery, opens and clicks come from SMTP2Go webhooks when SMTP2Go is enabled.</p>
+        </div>
+      </header>
+      <dl class="detail-list">
+        <dt>Recipients</dt><dd>{{ campaign_stats.total }}</dd>
+        <dt>Waiting for business hours</dt><dd>{{ campaign_stats.pending }}</dd>
+        <dt>Sent</dt><dd>{{ campaign_stats.sent }}</dd>
+        <dt>Delivered</dt><dd>{{ campaign_stats.delivered }}</dd>
+        <dt>Opened</dt><dd>{{ campaign_stats.opened }}</dd>
+        <dt>Clicked</dt><dd>{{ campaign_stats.clicked }}</dd>
+        <dt>Bounced</dt><dd>{{ campaign_stats.bounced }}</dd>
+        <dt>Replied (tickets)</dt><dd>{{ campaign_stats.replied }}</dd>
+        <dt>Failed</dt><dd>{{ campaign_stats.failed }}</dd>
+        <dt>Skipped</dt><dd>{{ campaign_stats.skipped }}</dd>
+      </dl>
+    </section>
+
+    <section class="card card--panel">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title">Recipients</h2>
+        </div>
+      </header>
+      <div class="table-wrapper">
+        <table class="table" data-table>
+          <thead>
+            <tr>
+              <th data-sort="string">Company</th>
+              <th data-sort="string">Email</th>
+              <th data-sort="string">Status</th>
+              <th data-sort="string">Sent</th>
+              <th data-sort="string">Delivered</th>
+              <th data-sort="number">Opens</th>
+              <th data-sort="number">Clicks</th>
+              <th data-sort="string">Reply ticket</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for recipient in campaign_recipients %}
+              <tr>
+                <td data-label="Company">{{ recipient.company_name or '-' }}</td>
+                <td data-label="Email">{{ recipient.email }}</td>
+                <td data-label="Status">
+                  {% if recipient.status == 'sent' %}
+                    {% if recipient.bounced_at %}<span class="status status--danger">Bounced</span>{% else %}<span class="status status--success">Sent</span>{% endif %}
+                  {% elif recipient.status == 'pending' %}
+                    <span class="status status--info" title="Waiting for business hours">Queued</span>
+                    {% if recipient.send_after %}<br><small>after <span data-utc="{{ recipient.send_after.isoformat() }}">{{ recipient.send_after }}</span></small>{% endif %}
+                  {% elif recipient.status == 'failed' %}
+                    <span class="status status--danger" title="{{ recipient.error_message or '' }}">Failed</span>
+                  {% elif recipient.status == 'skipped' %}
+                    <span class="status status--warning" title="{{ recipient.skip_reason or '' }}">Skipped</span>
+                  {% else %}
+                    <span class="status status--neutral">{{ recipient.status | capitalize }}</span>
+                  {% endif %}
+                </td>
+                <td data-label="Sent">{% if recipient.sent_at %}<span data-utc="{{ recipient.sent_at.isoformat() }}">{{ recipient.sent_at }}</span>{% else %}-{% endif %}</td>
+                <td data-label="Delivered">{% if recipient.delivered_at %}<span data-utc="{{ recipient.delivered_at.isoformat() }}">{{ recipient.delivered_at }}</span>{% else %}-{% endif %}</td>
+                <td data-label="Opens">{{ recipient.open_count or 0 }}</td>
+                <td data-label="Clicks">{{ recipient.click_count or 0 }}</td>
+                <td data-label="Reply ticket">
+                  {% if recipient.reply_ticket_id %}
+                    <a href="/admin/tickets/{{ recipient.reply_ticket_id }}">#{{ recipient.reply_ticket_number or recipient.reply_ticket_id }}</a>
+                  {% else %}-{% endif %}
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="8" class="table__empty">No recipients.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
+</div>
+{% endblock %}

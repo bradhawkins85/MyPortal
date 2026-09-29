@@ -288,6 +288,16 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        if not self._scheduler.get_job("marketing-campaign-runner"):
+            self._scheduler.add_job(
+                self._run_marketing_campaign_runner,
+                "interval",
+                seconds=60,
+                id="marketing-campaign-runner",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
         if not self._scheduler.get_job("automation-runner"):
             self._scheduler.add_job(
                 self._run_automation_runner,
@@ -441,6 +451,17 @@ class SchedulerService:
                 )
                 return
             await automations_service.process_due_automations()
+
+    async def _run_marketing_campaign_runner(self) -> None:
+        """Send queued marketing campaign emails that are inside business hours."""
+        async with db.acquire_lock("marketing_campaign_runner", timeout=1) as lock_acquired:
+            if not lock_acquired:
+                return
+            from app.services import marketing_campaigns as marketing_campaigns_service
+
+            result = await marketing_campaigns_service.process_due_sends()
+            if any(result.values()):
+                log_info("Marketing campaign runner processed recipients", **result)
 
     async def _run_staff_workflow_due_runner(self) -> None:
         """Run due approved staff workflow executions with distributed lock."""

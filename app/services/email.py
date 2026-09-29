@@ -69,6 +69,7 @@ async def send_email(
     enable_tracking: bool = False,
     ticket_reply_id: int | None = None,
     attachments: Sequence[Mapping[str, Any]] | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Send an email using the configured SMTP server.
 
@@ -83,6 +84,8 @@ async def send_email(
         enable_tracking: Enable email tracking (opens and clicks)
         ticket_reply_id: ID of the ticket reply being sent (required for tracking)
         attachments: Optional file attachments. Content may be bytes or base64 text.
+        headers: Optional extra message headers (for example Message-ID or
+            List-Unsubscribe). Applied on the SMTP2Go and SMTP relay paths.
 
     Returns a tuple where the first element indicates if delivery was attempted and
     succeeded, and the second element contains the webhook monitor event metadata
@@ -252,6 +255,7 @@ async def send_email(
                     else None
                 ),
                 tracking_id=tracking_id,
+                custom_headers=dict(headers) if headers else None,
                 attachments=[
                     {"filename": name, "content": base64.b64encode(content).decode("ascii")}
                     for name, content, _mime in (_normalise_attachment(item) for item in (attachments or []))
@@ -369,6 +373,8 @@ async def send_email(
         message["Bcc"] = str(settings.outbound_audit_bcc)
     if reply_to:
         message["Reply-To"] = reply_to
+    for header_name, header_value in (headers or {}).items():
+        message[header_name] = header_value
 
     if text_body:
         message.set_content(text_body)

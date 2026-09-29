@@ -38,6 +38,8 @@ from app.services.imap import (
     _resolve_existing_reply_author_id,
     _int_or_none,
     _is_any_email_address_known,
+    _link_marketing_campaign_reply,
+    _match_marketing_campaign_reply,
     _normalise_bool,
     _normalise_filter,
     _normalise_ticket_external_reference,
@@ -1827,6 +1829,13 @@ async def sync_account(
                     related_message_ids=related_message_ids,
                     message_body=body,
                 )
+                campaign_reply: dict[str, Any] | None = None
+                if not existing_ticket:
+                    existing_ticket, campaign_reply = await _match_marketing_campaign_reply(
+                        subject=subject,
+                        from_email=from_email_addr,
+                        related_message_ids=related_message_ids,
+                    )
 
                 ticket: Mapping[str, Any] | None = None
                 is_new_ticket = False
@@ -1856,7 +1865,7 @@ async def sync_account(
                             assigned_user_id=None,
                             priority="normal",
                             status=None,
-                            category="email",
+                            category="marketing" if campaign_reply else "email",
                             module_slug=_MODULE_SLUG,
                             external_reference=_normalise_ticket_external_reference(
                                 internet_msg_id
@@ -1980,6 +1989,9 @@ async def sync_account(
                     )
                     continue
 
+                await _link_marketing_campaign_reply(
+                    campaign_reply, ticket, is_new_ticket=is_new_ticket
+                )
                 ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
                 reply_added = False
                 reply_outcome: str | None = None
