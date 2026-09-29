@@ -6,7 +6,9 @@ from fastapi.responses import JSONResponse
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
+from app.repositories import company_memberships as membership_repo
 from app.repositories import licenses as license_repo
+from app.repositories import user_companies as user_company_repo
 from app.services import staff_onboarding_workflows as staff_workflow_service
 from app.services import audit as audit_service
 from app.schemas.licenses import (
@@ -33,6 +35,36 @@ def _to_json_safe(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 router = APIRouter(prefix="/api/licenses", tags=["Licenses"])
+
+
+async def _require_license_access(license_id: int, user: dict[str, Any]) -> dict[str, Any]:
+    """Load a licence the caller may view.
+
+    Super admins and helpdesk technicians may view any licence; other users
+    need licence access through their membership in the licence's company.
+    """
+
+    record = await license_repo.get_license_by_id(license_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="License not found")
+    if user.get("is_super_admin"):
+        return record
+    try:
+        user_id = int(user.get("id"))
+        company_id = int(record.get("company_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="License not found") from None
+    if await membership_repo.user_has_permission(user_id, "helpdesk.technician"):
+        return record
+    membership = await user_company_repo.get_user_company(user_id, company_id)
+    if membership:
+        from app import main as main_module
+
+        if membership.get("can_manage_licenses") or main_module._membership_menu_can(
+            user, membership, "menu.m365.licenses"
+        ):
+            return record
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="License not found")
 
 
 def _audit_license(record: dict[str, Any]) -> dict[str, Any]:
@@ -88,11 +120,9 @@ async def create_license(
 async def get_license(
     license_id: int,
     _: None = Depends(require_database),
-    __: dict = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
-    record = await license_repo.get_license_by_id(license_id)
-    if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="License not found")
+    record = await _require_license_access(license_id, user)
     return LicenseResponse.model_validate(record)
 
 
@@ -165,11 +195,9 @@ async def delete_license(
 async def list_license_staff(
     license_id: int,
     _: None = Depends(require_database),
-    __: dict = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
-    existing = await license_repo.get_license_by_id(license_id)
-    if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="License not found")
+    await _require_license_access(license_id, user)
     members = await license_repo.list_staff_for_license(license_id)
     return [LicenseStaffResponse.model_validate(member) for member in members]
 
@@ -246,12 +274,10 @@ async def unlink_staff(
 async def get_license_usage_history(
     license_id: int,
     _: None = Depends(require_database),
-    __: dict = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
     """Return the usage history (count + allocated over time) for a license."""
-    existing = await license_repo.get_license_by_id(license_id)
-    if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="License not found")
+    existing = await _require_license_access(license_id, user)
 
     history = await license_repo.get_usage_history(license_id)
 
