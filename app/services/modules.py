@@ -1173,7 +1173,9 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "name": "Trello",
         "description": "Link companies to Trello boards. Cards created in Trello become tickets; ticket replies sync back as card comments.",
         "icon": "📋",
-        "settings": {},
+        # ``api_secret`` is the Trello application secret (trello.com/app-key)
+        # used to verify the X-Trello-Webhook signature on incoming events.
+        "settings": {"api_secret": str(os.getenv("TRELLO_API_SECRET", ""))},
         "enabled": True,  # Enabled by default so it appears as a trigger action when the module is configured
     },
     {
@@ -2349,6 +2351,7 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "password-pusher": ("api_key",),
         "hudu": ("api_key",),
         "solidtime": ("api_token", "webhook_secret"),
+        "trello": ("api_secret",),
     }
     targets = fields_to_redact.get(slug)
     if not targets:
