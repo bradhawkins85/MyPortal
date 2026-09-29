@@ -608,9 +608,10 @@ def test_submit_ticket_validates_required_answer(tq_http_client, enrolled_device
     )
     qid = int(q["id"])
 
-    _, device_uid = enrolled_device_token
+    auth_token, device_uid = enrolled_device_token
     resp = tq_http_client.post(
         "/api/tray/submit-ticket",
+        headers={"Authorization": f"Bearer {auth_token}"},
         json={
             "device_uid": device_uid,
             "name": "Alice",
@@ -624,9 +625,10 @@ def test_submit_ticket_validates_required_answer(tq_http_client, enrolled_device
 
 def test_submit_ticket_without_answers_still_works(tq_http_client, enrolled_device_token):
     """Backward compat: tickets submitted without answers still succeed."""
-    _, device_uid = enrolled_device_token
+    auth_token, device_uid = enrolled_device_token
     resp = tq_http_client.post(
         "/api/tray/submit-ticket",
+        headers={"Authorization": f"Bearer {auth_token}"},
         json={
             "device_uid": device_uid,
             "name": "Bob",

@@ -289,7 +289,9 @@ async def tray_chat_popup(
     chat_room: dict[str, Any] | None = None
     if resolved_room_id:
         chat_room = await chat_repo.get_room(int(resolved_room_id))
-        if not chat_room:
+        from app.api.routes.tray import room_accessible_to_device
+
+        if not chat_room or not room_accessible_to_device(chat_room, device):
             raise HTTPException(status_code=404, detail="Chat room not found")
         if chat_room.get("status") != "open":
             raise HTTPException(status_code=409, detail="Chat room is closed")

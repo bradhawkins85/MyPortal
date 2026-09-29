@@ -38,7 +38,7 @@ from app.api.dependencies.auth import (
 )
 from app.api.dependencies.api_keys import require_api_key
 from app.core.config import get_settings
-from app.core.logging import log_error, log_info
+from app.core.logging import log_error, log_info, log_warning
 from app.security.client_ip import get_client_ip
 from app.repositories import assets as assets_repo
 from app.repositories import chat as chat_repo
@@ -47,6 +47,7 @@ from app.repositories import tray as tray_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import site_settings as site_settings_repo
 from app.repositories import users as users_repo
+from app.repositories import user_companies as user_company_repo
 from app.repositories import staff as staff_repo
 from app.schemas.tray import (
     TrayChatStartRequest,
@@ -152,17 +153,37 @@ async def _resolve_tray_device(
     token = ""
     if auth_header.lower().startswith("bearer "):
         token = auth_header.split(" ", 1)[1].strip()
-    if token:
-        device = await tray_repo.get_device_by_auth_hash(tray_service.hash_token(token))
-        if not device:
-            raise HTTPException(
-                status_code=401, detail="Tray device authentication failed"
-            )
-    if device is None and payload.device_uid:
-        device = await tray_repo.get_device_by_uid(payload.device_uid)
-    if not device or device.get("status") == "revoked":
+    # The bearer auth token is the only accepted device identity: a
+    # client-supplied ``device_uid`` is not a secret and must not be enough
+    # to file tickets into the device's company.
+    if not token:
+        raise HTTPException(
+            status_code=401, detail="Tray device authentication required"
+        )
+    device = await tray_repo.get_device_by_auth_hash(tray_service.hash_token(token))
+    if not device:
+        raise HTTPException(
+            status_code=401, detail="Tray device authentication failed"
+        )
+    if device.get("status") == "revoked":
         raise HTTPException(status_code=404, detail="Device not found")
     return device
+
+
+async def _user_belongs_to_company(
+    user: dict[str, Any] | None, company_id: int | None
+) -> bool:
+    """Return whether ``user`` is a member of the tray device's company."""
+
+    if not user or company_id is None:
+        return False
+    if user.get("company_id") is not None and int(user["company_id"]) == int(company_id):
+        return True
+    try:
+        membership = await user_company_repo.get_user_company(int(user["id"]), int(company_id))
+    except (KeyError, TypeError, ValueError):
+        return False
+    return membership is not None
 
 
 async def _validate_tray_answers(
@@ -229,6 +250,27 @@ async def enrol_device(
 
     existing = await tray_repo.get_device_by_uid(device_uid)
     if existing:
+        # An install token only authorises (re-)enrolment within its own
+        # company, and must never resurrect a device an admin has revoked.
+        if existing.get("status") == "revoked":
+            log_warning(
+                "Tray re-enrolment refused for revoked device",
+                device_uid=device_uid,
+                install_token_id=token_record.get("id"),
+            )
+            raise HTTPException(status_code=403, detail="Device has been revoked")
+        existing_company = existing.get("company_id")
+        if (int(existing_company) if existing_company is not None else None) != (
+            int(company_id) if company_id is not None else None
+        ):
+            log_warning(
+                "Tray re-enrolment refused for device owned by another company",
+                device_uid=device_uid,
+                install_token_id=token_record.get("id"),
+            )
+            raise HTTPException(
+                status_code=409, detail="Device is already enrolled to another company"
+            )
         await tray_repo.update_device_auth(
             int(existing["id"]),
             auth_token_hash=auth_hash,
@@ -668,40 +710,18 @@ async def tray_submit_ticket(
 ) -> TrayTicketSubmitResponse:
     """Create a support ticket submitted via the tray icon.
 
-    The bearer auth token is the preferred device identity and is used to link
-    the ticket to the corresponding asset and company.  ``device_uid`` remains
-    accepted as a backwards-compatible fallback for older tray clients that do
-    not send bearer auth. Name, email, and phone are provided by the user in
-    the tray dialog. The requester is matched by email first, then by phone
-    number when no email match exists.
+    The bearer auth token is required and identifies the device, which links
+    the ticket to the corresponding asset and company.  A body ``device_uid``
+    is ignored for authentication. Name, email, and phone are provided by the
+    user in the tray dialog. The requester is matched (within the device's
+    company only) by email first, then by phone number when no email match
+    exists.
 
     Dynamic question answers are validated server-side against the current
     question definitions.  Required visible questions must have a non-empty
     value; select questions must use a declared option.
     """
-    # Prefer the bearer auth token when available. Older tray clients also send
-    # device_uid in the JSON body, but relying exclusively on that body value
-    # makes submissions fragile when the UI has an auth token yet cannot read
-    # the service-written DeviceUID from registry/state. The token already
-    # identifies the enrolled device, so use it as the authoritative source and
-    # keep device_uid as a backwards-compatible fallback for existing clients.
-    device = None
-    auth_header = request.headers.get("Authorization", "")
-    token = ""
-    if auth_header.lower().startswith("bearer "):
-        token = auth_header.split(" ", 1)[1].strip()
-    if token:
-        device = await tray_repo.get_device_by_auth_hash(tray_service.hash_token(token))
-        if not device:
-            raise HTTPException(
-                status_code=401, detail="Tray device authentication failed"
-            )
-
-    if device is None and payload.device_uid:
-        device = await tray_repo.get_device_by_uid(payload.device_uid)
-
-    if not device or device.get("status") == "revoked":
-        raise HTTPException(status_code=404, detail="Device not found")
+    device = await _resolve_tray_device(payload, request)
 
     company_id: int | None = device.get("company_id")
     asset_id: int | None = device.get("asset_id")
@@ -714,7 +734,11 @@ async def tray_submit_ticket(
     # phone match, including when the phone belongs to another user.
     requester_id: int | None = None
     requester_staff_id: int | None = None
+    # Only match portal users that belong to the device's company so a tray
+    # submission cannot attach a ticket to another tenant's user account.
     existing_user = await users_repo.get_user_by_email(normalised_email)
+    if not await _user_belongs_to_company(existing_user, company_id):
+        existing_user = None
     if existing_user is None and company_id is not None:
         staff_member = await staff_repo.get_staff_by_company_and_email(
             int(company_id), normalised_email
@@ -723,6 +747,8 @@ async def tray_submit_ticket(
             requester_staff_id = int(staff_member["id"])
     if existing_user is None and requester_staff_id is None and payload.phone:
         existing_user = await users_repo.get_user_by_phone(payload.phone)
+        if not await _user_belongs_to_company(existing_user, company_id):
+            existing_user = None
     if existing_user:
         requester_id = int(existing_user["id"])
 
@@ -869,26 +895,14 @@ async def tray_submit_syncro_ticket(
         if staff and staff.get("syncro_contact_id"):
             syncro_contact_id = str(staff.get("syncro_contact_id"))
 
-    if syncro_contact_id is None:
-        staff = await staff_repo.get_staff_by_email(normalised_email)
-        if staff and staff.get("syncro_contact_id"):
-            syncro_contact_id = str(staff.get("syncro_contact_id"))
-            if syncro_customer_id is None and staff.get("company_id"):
-                staff_company = await companies_repo.get_company_by_id(
-                    int(staff["company_id"])
-                )
-                if staff_company and staff_company.get("syncro_company_id"):
-                    syncro_customer_id = str(staff_company.get("syncro_company_id"))
-
-    if syncro_contact_id is None or syncro_customer_id is None:
+    # Requester matching is limited to the device's company: a claimed email
+    # must never link the ticket to another tenant's Syncro contact/customer.
+    if syncro_contact_id is None and syncro_customer_id is not None:
         contact = await syncro_service.find_contact_by_email(normalised_email)
         if contact:
-            syncro_contact_id = syncro_contact_id or contact.get("id")
-            syncro_customer_id = (
-                syncro_customer_id
-                or contact.get("customer_id")
-                or contact.get("customerId")
-            )
+            contact_customer_id = contact.get("customer_id") or contact.get("customerId")
+            if str(contact_customer_id) == str(syncro_customer_id):
+                syncro_contact_id = contact.get("id")
 
     full_description = _compose_ticket_description(
         payload=payload,
@@ -2142,6 +2156,31 @@ def _serialise_device(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def room_accessible_to_device(room: dict[str, Any] | None, device: dict[str, Any]) -> bool:
+    """Return whether a tray ``device`` may open popup chat for ``room``.
+
+    The room must belong to the device's company and, when the room is
+    linked to a specific tray device, to this device.
+    """
+
+    if not room:
+        return False
+    try:
+        device_company = int(device.get("company_id") or 0)
+        room_company = int(room.get("company_id") or 0)
+    except (TypeError, ValueError):
+        return False
+    if not device_company or room_company != device_company:
+        return False
+    room_device = room.get("tray_device_id")
+    if room_device is not None:
+        try:
+            return int(room_device) == int(device.get("id") or 0)
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
 async def _attach_room_to_device(room_id: int, device_id: int) -> None:
     """Set the ``tray_device_id`` link on ``chat_rooms``.
 
@@ -2617,7 +2656,7 @@ async def issue_chat_token(
     # popup must not turn that stale launch into a brand-new user chat.
     if room_id is not None:
         requested_room = await chat_repo.get_room(int(room_id))
-        if not requested_room:
+        if not requested_room or not room_accessible_to_device(requested_room, device):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Chat room not found"
             )
