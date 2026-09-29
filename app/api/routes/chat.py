@@ -25,6 +25,7 @@ from app.schemas.chat import (
 )
 from app.security.encryption import decrypt_secret
 from app.services import audit as audit_service
+from app.services import chat_access
 from app.services import chat_ticket_sync
 from app.services import chat_ntfy_notifications
 from app.services import tray_chat_notifications
@@ -291,7 +292,7 @@ async def get_room(
 ) -> JSONResponse:
     _require_matrix_enabled()
     room = await chat_repo.get_room(room_id)
-    if not room:
+    if not room or not await chat_access.can_access_room(room, current_user):
         raise HTTPException(status_code=404, detail="Room not found")
 
     messages = await chat_repo.get_messages(room_id, limit=limit, before_event_id=before_event_id)
@@ -313,7 +314,7 @@ async def send_message(
 ) -> JSONResponse:
     _require_matrix_enabled()
     room = await chat_repo.get_room(room_id)
-    if not room:
+    if not room or not await chat_access.can_access_room(room, current_user):
         raise HTTPException(status_code=404, detail="Room not found")
     if room["status"] == "closed":
         raise HTTPException(status_code=400, detail="Cannot send message to closed room")
@@ -740,6 +741,8 @@ async def revoke_invite(
     current_user: dict = Depends(get_current_user),
 ) -> JSONResponse:
     _require_matrix_enabled()
+    if not await chat_access.is_chat_staff(current_user):
+        raise HTTPException(status_code=403, detail="Staff only")
     invite = await chat_repo.get_invite(invite_token=invite_token)
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")

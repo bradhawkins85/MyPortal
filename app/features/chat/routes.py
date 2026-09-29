@@ -20,6 +20,7 @@ from app.repositories import site_settings as site_settings_repo
 from app.repositories import users as user_repo
 from app.security.encryption import encrypt_secret
 from app.security.session import SessionData
+from app.services import chat_access
 from app.services import matrix as matrix_service
 from app.services import role_switching
 from app.services import tray as tray_service
@@ -134,7 +135,7 @@ async def chat_room_page(
         return RedirectResponse("/login", status_code=303)
 
     room = await chat_repo.get_room(room_id)
-    if not room:
+    if not room or not await chat_access.can_access_room(room, current_user):
         raise HTTPException(status_code=404, detail="Chat room not found")
 
     messages = await chat_repo.get_messages(room_id, limit=50)
