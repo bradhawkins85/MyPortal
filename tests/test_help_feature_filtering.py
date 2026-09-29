@@ -95,3 +95,17 @@ def test_unknown_module_state_falls_back_to_availability():
     )
 
     assert is_active("module:xero")
+
+
+def test_keep_inactive_flags_instead_of_dropping():
+    sections = service.filter_sections(
+        service.list_sections(), _check(packs={"tickets"}), keep_inactive=True
+    )
+    flags = {
+        f"{article['section_slug']}/{article['name']}": article["inactive"]
+        for section in sections
+        for article in section["articles"]
+    }
+
+    assert flags["tickets/IMAP Setup"] is True
+    assert flags["getting-started/Home"] is False

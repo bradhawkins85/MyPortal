@@ -63,7 +63,8 @@ automations, and cannot call their owned external services. Their database
 configuration is intentionally retained.
 
 Help articles that document an unavailable feature pack, or a module that is
-unavailable or switched off under Modules, are hidden from **Help**. The mapping
+unavailable or switched off under Modules, are hidden from **Help**. Super
+administrators still see them, marked **Inactive**. The mapping
 lives in `app/features/help/requirements.py`.
 
 ### Valid feature-pack slugs

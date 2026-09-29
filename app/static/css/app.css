@@ -9181,6 +9181,15 @@ dialog.modal:not([open]) {
   outline: none;
 }
 
+.help__inactive-badge {
+  margin-left: 0.35rem;
+  vertical-align: middle;
+}
+
+.help__content > .alert {
+  margin-bottom: 1rem;
+}
+
 .help__nav-item--active .help__nav-link {
   color: var(--color-text-primary);
   background: var(--color-surface-3);

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pathlib
 from collections.abc import Callable, Iterable
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 import nh3
 from markdown_it import MarkdownIt
@@ -53,6 +53,8 @@ class HelpArticle(TypedDict):
     section: str
     section_slug: str
     path: pathlib.Path
+    # Set by ``filter_sections`` when the documented feature is not active.
+    inactive: NotRequired[bool]
 
 
 class HelpSection(TypedDict):
@@ -159,11 +161,24 @@ def article_visible(article: HelpArticle, is_active: RequirementCheck) -> bool:
     )
 
 
-def filter_sections(sections: Iterable[HelpSection], is_active: RequirementCheck) -> list[HelpSection]:
-    """Drop articles for inactive features, and sections left without articles."""
+def filter_sections(
+    sections: Iterable[HelpSection],
+    is_active: RequirementCheck,
+    *,
+    keep_inactive: bool = False,
+) -> list[HelpSection]:
+    """Drop articles for inactive features, and sections left without articles.
+
+    With ``keep_inactive`` every article is kept and those for inactive
+    features are flagged ``inactive`` instead (used for super administrators).
+    """
     filtered: list[HelpSection] = []
     for section in sections:
-        articles = [article for article in section["articles"] if article_visible(article, is_active)]
+        articles: list[HelpArticle] = []
+        for article in section["articles"]:
+            visible = article_visible(article, is_active)
+            if visible or keep_inactive:
+                articles.append(HelpArticle(**{**article, "inactive": not visible}))
         if articles:
             filtered.append(HelpSection(name=section["name"], slug=section["slug"], articles=articles))
     return filtered
