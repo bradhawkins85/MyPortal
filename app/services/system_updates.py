@@ -38,6 +38,7 @@ _CHECK_CACHE_SECONDS = 600
 # Both host jobs poll every minute, so a request nobody claimed in this long
 # means the host job is not installed; withdraw it rather than leave it queued.
 _UNCLAIMED_REQUEST_SECONDS = 15 * 60
+_REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
 _TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 _check_cache: dict[str, Any] = {"at": 0.0, "value": None}
@@ -182,6 +183,93 @@ def expire_unclaimed_requests() -> None:
     )
 
 
+async def _installed_revision() -> str:
+    if deployment_type() == "docker":
+        return _installed_version()
+    from app.services.scheduler import scheduler_service
+
+    return await scheduler_service._get_git_ref("HEAD") or ""
+
+
+async def _github_revision_is_older(target: str, installed: str) -> bool:
+    repo = os.getenv("MYPORTAL_REPO", "").strip() or "bradhawkins85/MyPortal"
+    api = (os.getenv("MYPORTAL_GITHUB_API", "").strip() or "https://api.github.com").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=_CHECK_TIMEOUT_SECONDS) as client:
+            response = await client.get(
+                f"{api}/repos/{repo}/compare/{target}...{installed}",
+                headers={"Accept": "application/vnd.github+json"},
+            )
+            response.raise_for_status()
+            # "ahead": the installed revision contains the target and more.
+            return response.json().get("status") == "ahead"
+    except (httpx.HTTPError, ValueError) as exc:
+        log_error("Could not compare system update revisions", error=str(exc))
+        return False
+
+
+async def _target_is_older(target: str, installed: str) -> bool:
+    """Return whether ``installed`` already supersedes an update's ``target``.
+
+    An equal target is never older: during a rolling upgrade the new release
+    serves requests before the host job reports the update as finished.
+    """
+    if not target or not installed or target == installed:
+        return False
+    if deployment_type() == "docker":
+        return _version_newer(installed, target)
+    if not (_REVISION_RE.fullmatch(target) and _REVISION_RE.fullmatch(installed)):
+        return False
+    from app.services.scheduler import scheduler_service
+
+    try:
+        rc, _, _ = await scheduler_service._run_git("merge-base", "--is-ancestor", target, installed)
+    except OSError:
+        rc = -1
+    if rc in (0, 1):
+        return rc == 0
+    # Releases have no .git and the control checkout may be unreadable, or may
+    # not have fetched either revision yet: ask GitHub instead.
+    return await _github_revision_is_older(target, installed)
+
+
+async def fail_superseded_updates() -> None:
+    """Fail queued or running updates whose target is older than what is installed.
+
+    A host job that died mid-upgrade (or could not report its result) leaves
+    its update active forever, which blocks every later request.
+    """
+    active = [
+        record for record in system_update_history.list_updates()
+        if record.get("status") in {"pending", "running"}
+    ]
+    if not active:
+        return
+    installed = await _installed_revision()
+    for record in active:
+        target = str(record.get("target_revision") or "")
+        if not await _target_is_older(target, installed):
+            continue
+        if record.get("status") == "pending":
+            try:
+                _FLAG_PATH.unlink()
+            except OSError:
+                pass
+        try:
+            system_update_history.update(
+                str(record["id"]), status="failed", completed=True,
+                error=(
+                    f"Superseded: MyPortal is already on {installed[:12]}, which is newer "
+                    f"than this update's target {target[:12]}. The host job did not report "
+                    "a result for this update."
+                ),
+            )
+        except (KeyError, ValueError):
+            continue
+        log_info("Superseded system update marked as failed", update_id=record.get("id"),
+                 target=target, installed=installed)
+
+
 async def request_update() -> dict[str, Any]:
     """Queue an upgrade for the host coordinator.
 
@@ -190,6 +278,7 @@ async def request_update() -> dict[str, Any]:
     returned instead of queuing a second one.
     """
     expire_unclaimed_requests()
+    await fail_superseded_updates()
     active = system_update_history.find_active()
     if active:
         return {"record": active, "message": "An update is already in progress.", "created": False}

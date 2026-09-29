@@ -567,3 +567,85 @@ def test_system_updates_has_its_own_administration_menu_item():
 
     groups = {group["label"]: group for group in build_default_sidebar_preferences()["groups"]}
     assert "/admin/system-updates" in groups["Administration"]["items"]
+
+
+# ---------------------------------------------------------------------------
+# Superseded updates
+# ---------------------------------------------------------------------------
+
+
+def _running_update(target: str) -> dict:
+    record = system_update_history.create_pending(
+        requested_at=datetime.now(timezone.utc).isoformat(), target_revision=target, source="web",
+    )
+    return system_update_history.update(record["id"], status="running")
+
+
+def test_docker_update_older_than_installed_is_failed_and_unblocks_requests(monkeypatch, history):
+    _docker(monkeypatch, installed="v1.1.0", latest="v1.2.0")
+    stuck = _running_update("v1.0.0")
+
+    result = asyncio.run(system_updates.request_update())
+
+    failed = system_update_history.get(stuck["id"])
+    assert failed["status"] == "failed"
+    assert "Superseded" in failed["error"]
+    assert result["created"] is True
+    assert result["record"]["target_revision"] == "v1.2.0"
+
+
+def test_update_targeting_installed_version_stays_active(monkeypatch, history):
+    # A rolling upgrade serves the new release before the host reports success.
+    _docker(monkeypatch, installed="v1.1.0", latest="v1.1.0")
+    current = _running_update("v1.1.0")
+
+    asyncio.run(system_updates.fail_superseded_updates())
+
+    assert system_update_history.get(current["id"])["status"] == "running"
+
+
+def _baremetal(monkeypatch, *, installed: str, ancestor_rc: int):
+    from app.services.scheduler import scheduler_service
+
+    monkeypatch.delenv("MYPORTAL_DEPLOYMENT", raising=False)
+
+    async def head(ref):
+        return installed
+
+    async def run_git(*args):
+        assert args[:2] == ("merge-base", "--is-ancestor")
+        return ancestor_rc, "", ""
+
+    monkeypatch.setattr(scheduler_service, "_get_git_ref", head)
+    monkeypatch.setattr(scheduler_service, "_run_git", run_git)
+
+
+def test_baremetal_update_behind_installed_revision_is_failed(monkeypatch, history):
+    _baremetal(monkeypatch, installed="b" * 40, ancestor_rc=0)
+    stuck = _running_update("a" * 40)
+
+    asyncio.run(system_updates.fail_superseded_updates())
+
+    assert system_update_history.get(stuck["id"])["status"] == "failed"
+
+
+def test_baremetal_update_ahead_of_installed_revision_stays_active(monkeypatch, history):
+    _baremetal(monkeypatch, installed="b" * 40, ancestor_rc=1)
+    upgrading = _running_update("a" * 40)
+
+    asyncio.run(system_updates.fail_superseded_updates())
+
+    assert system_update_history.get(upgrading["id"])["status"] == "running"
+
+
+def test_baremetal_asks_github_when_git_cannot_compare(monkeypatch, history):
+    _baremetal(monkeypatch, installed="b" * 40, ancestor_rc=128)
+    seen = []
+    _fake_github(monkeypatch, "", seen=seen)
+    monkeypatch.setattr(_FakeResponse, "json", lambda self: {"status": "ahead"}, raising=False)
+    stuck = _running_update("a" * 40)
+
+    asyncio.run(system_updates.fail_superseded_updates())
+
+    assert seen and seen[0].endswith(f"/compare/{'a' * 40}...{'b' * 40}")
+    assert system_update_history.get(stuck["id"])["status"] == "failed"

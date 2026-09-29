@@ -1,0 +1,7 @@
+{
+  "guid": "9be83ac4-8769-42c5-a556-07a940cb4c1f",
+  "occurred_at": "2026-09-29T11:45Z",
+  "change_type": "Fix",
+  "summary": "System updates stuck as queued or running are marked failed once MyPortal is already on a newer version than their target, so they no longer block new updates",
+  "content_hash": ""
+}
