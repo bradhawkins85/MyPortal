@@ -119,7 +119,11 @@ def configure_component_availability(
     known_feature_packs: Iterable[str],
     known_modules: Iterable[str],
 ) -> ComponentAvailability:
-    """Validate and install the process-wide deployment policy."""
+    """Install the process-wide deployment policy.
+
+    Unknown slugs (typically typos in ``.env``) are logged and ignored so a
+    configuration mistake never prevents the application from starting.
+    """
 
     packs = frozenset(parse_slug_list(disabled_feature_packs))
     modules = frozenset(parse_slug_list(disabled_modules))
@@ -127,18 +131,21 @@ def configure_component_availability(
         packs - set(known_feature_packs) - set(CORE_COMPONENTS_BY_SLUG)
     )
     unknown_modules = sorted(modules - set(known_modules))
-    errors: list[str] = []
-    if unknown_packs:
-        errors.append(
-            "DISABLED_FEATURE_PACKS contains unknown slug(s): "
-            + ", ".join(unknown_packs)
-        )
-    if unknown_modules:
-        errors.append(
-            "DISABLED_MODULES contains unknown slug(s): " + ", ".join(unknown_modules)
-        )
-    if errors:
-        raise AvailabilityConfigurationError("; ".join(errors))
+    if unknown_packs or unknown_modules:
+        from app.core.logging import log_warning
+
+        if unknown_packs:
+            log_warning(
+                "DISABLED_FEATURE_PACKS contains unknown slug(s); ignoring them",
+                unknown=unknown_packs,
+            )
+        if unknown_modules:
+            log_warning(
+                "DISABLED_MODULES contains unknown slug(s); ignoring them",
+                unknown=unknown_modules,
+            )
+        packs -= set(unknown_packs)
+        modules -= set(unknown_modules)
 
     global _availability
     _availability = ComponentAvailability(packs, modules)

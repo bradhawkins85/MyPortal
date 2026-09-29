@@ -19,9 +19,11 @@ environment file):
 | `DISABLED_FEATURE_PACKS` | Comma-separated feature-pack slugs | all packs available |
 | `DISABLED_MODULES` | Comma-separated module slugs | all modules available |
 
-Whitespace and duplicate entries are ignored. Slugs are case-sensitive and an
-unknown slug prevents startup with an actionable configuration error rather
-than silently producing a partially reduced deployment. Changes require an
+Whitespace and duplicate entries are ignored. Slugs are case-sensitive. An
+unknown slug (for example a typo) does not prevent startup: it is logged as a
+warning naming the offending slug(s) and ignored, while every valid slug in
+the list is still disabled. Run `scripts/onboarding_wizard.py --check` to spot
+such mistakes. Changes require an
 application restart; hot reload does not change deployment availability.
 
 To disable one feature pack:

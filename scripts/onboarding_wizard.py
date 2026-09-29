@@ -1127,7 +1127,7 @@ def run_check(env: EnvFile, *, docker: bool, verbose: bool = False, out=sys.stdo
     for key, known in ((DISABLED_PACKS_KEY, packs), (DISABLED_MODULES_KEY, modules)):
         unknown = [slug for slug in slug_list(values.get(key)) if slug not in known]
         if unknown:
-            emit("error", f"{key} contains unknown slug(s): {', '.join(unknown)} (MyPortal will not start).")
+            emit("warn", f"{key} contains unknown slug(s): {', '.join(unknown)} (they will be ignored at startup).")
 
     print("\nFeatures", file=out)
     disabled_names = []

@@ -293,11 +293,17 @@ class Settings(BaseSettings):
             - set(_DEFAULT_FEATURE_PACK_SLUGS)
             - set(CORE_COMPONENT_SLUGS)
         )
-        if unknown:
-            raise ValueError(
-                "DISABLED_FEATURE_PACKS contains unknown slug(s): " + ", ".join(unknown)
-            )
-        return value
+        if not unknown:
+            return value
+        # A typo must not stop the portal from starting: ignore the unknown
+        # slug(s) and keep disabling the valid ones.
+        from app.core.logging import log_warning
+
+        log_warning(
+            "DISABLED_FEATURE_PACKS contains unknown slug(s); ignoring them",
+            unknown=unknown,
+        )
+        return ",".join(slug for slug in parse_slug_list(value) if slug not in unknown)
 
     @field_validator("feature_packs", mode="before")
     @classmethod
