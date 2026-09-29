@@ -1649,21 +1649,26 @@ class SchedulerService:
         await self._run_task(task, force_restart=True)
 
     async def run_system_update(
-        self, *, force_restart: bool = False, scheduled: bool = False
+        self, *, force_restart: bool = False, scheduled: bool = False,
+        source: str | None = None,
     ) -> str | None:
         """Public helper to execute the system update script.
 
         This wraps the private implementation so that other parts of the
         application can reuse the same update mechanism used by scheduled
-        tasks.
+        tasks.  ``source="web"`` is an administrator's "Update now" request,
+        which follows the scheduled rolling workflow so it is tracked in the
+        update history instead of being hot-reloaded or forcing a restart.
         """
         return await self._run_system_update(
-            force_restart=force_restart, scheduled=scheduled
+            force_restart=force_restart, scheduled=scheduled, source=source
         )
 
     async def _run_system_update(
-        self, *, force_restart: bool = False, scheduled: bool = False
+        self, *, force_restart: bool = False, scheduled: bool = False,
+        source: str | None = None,
     ) -> str | None:
+        tracked = scheduled or source == "web"
         if os.getenv("MYPORTAL_DEPLOYMENT", "").strip().lower() == "docker":
             # Containers carry no Git checkout; releases are applied by
             # scripts/myportal-docker.sh on the host.
@@ -1691,7 +1696,7 @@ class SchedulerService:
             # coordinator. Manual callers retain their existing mode semantics.
             requested_mode = (
                 "rolling"
-                if scheduled
+                if tracked
                 else self._resolve_requested_upgrade_mode(force_restart=force_restart)
             )
             changed_files: list[str] | None = None
@@ -1708,7 +1713,7 @@ class SchedulerService:
             # This avoids dropping connections for routine pack-only
             # updates.  Any failure or ambiguity falls through to the
             # full-restart flag-file path below.
-            if not force_restart and not scheduled:
+            if not force_restart and not tracked:
                 hot_reload_message = await self._try_feature_pack_hot_reload(
                     local_head=local_head,
                     remote_head=remote_head,
@@ -1721,7 +1726,8 @@ class SchedulerService:
             history = system_update_history.create_pending(
                 requested_at=timestamp,
                 target_revision=remote_head,
-                source="scheduled" if scheduled else "manual",
+                source=source or ("scheduled" if scheduled else "manual"),
+                mode=requested_mode,
             )
             requested_reason = (
                 "manual_restart_requested"

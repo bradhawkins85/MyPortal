@@ -129,11 +129,33 @@ validate_flag_file
   output_file=$(mktemp "${FLAG_DIR}/system-update-output.XXXXXX")
   chmod 600 "$output_file"
   trap 'rm -f "$output_file"' EXIT
+  progress_pid=""
   if [[ -n "$update_id" ]]; then
     PYTHONPATH="$PROJECT_ROOT" python3 "$REPORT_HELPER" "$update_id" running
+    # Publish the output so far while the upgrade runs, so administrators can
+    # follow it live from the System updates page.
+    (
+      # Finish an in-flight report before exiting so it can never land after
+      # the final result; "sleep & wait" lets the signal interrupt the pause.
+      trap 'exit 0' TERM
+      while :; do
+        sleep "${SYSTEM_UPDATE_PROGRESS_INTERVAL:-5}" & wait $!
+        PYTHONPATH="$PROJECT_ROOT" python3 "$REPORT_HELPER" "$update_id" running --output-file "$output_file" >/dev/null 2>&1 || true
+      done
+    ) &
+    progress_pid=$!
+    trap 'kill "$progress_pid" 2>/dev/null || true; rm -f "$output_file"' EXIT
   fi
+  stop_progress_reports() {
+    if [[ -n "$progress_pid" ]]; then
+      kill "$progress_pid" 2>/dev/null || true
+      wait "$progress_pid" 2>/dev/null || true
+      progress_pid=""
+    fi
+  }
   echo "Update flag found at $UPDATE_FLAG_FILE. Running upgrade helper in ${upgrade_mode} mode." >&2
   if bash -lc "$(build_upgrade_command "$upgrade_mode")" > >(tee -a "$output_file") 2> >(tee -a "$output_file" >&2); then
+    stop_progress_reports
     rm -f "$UPDATE_FLAG_FILE"
     if [[ -n "$update_id" ]]; then
       PYTHONPATH="$PROJECT_ROOT" python3 "$REPORT_HELPER" "$update_id" succeeded --output-file "$output_file"
@@ -141,6 +163,7 @@ validate_flag_file
     echo "Upgrade helper completed successfully; cleared $UPDATE_FLAG_FILE" >&2
   else
     status=$?
+    stop_progress_reports
     # A future schedule may retry, but this request is terminal. Removing the
     # flag prevents an interrupted/failed update from looping forever.
     rm -f "$UPDATE_FLAG_FILE"
