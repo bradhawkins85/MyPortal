@@ -7043,6 +7043,7 @@ async def admin_system_updates(request: Request):
     if redirect:
         return redirect
     system_updates_service.expire_unclaimed_requests()
+    await system_updates_service.fail_superseded_updates()
     updates = system_update_history.list_updates()
     update_check = await system_updates_service.check_for_update(
         refresh=request.query_params.get("refresh") == "1"
