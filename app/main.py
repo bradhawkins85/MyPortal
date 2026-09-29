@@ -105,7 +105,7 @@ from app.api.routes import (
     features as features_api,
     defender as defender_api,
 )
-from app.api.dependencies.auth import require_super_admin
+from app.api.dependencies.auth import is_user_active, require_super_admin
 from uuid import uuid4
 
 from app.core.config import get_settings, get_templates_config
@@ -719,8 +719,10 @@ app.add_middleware(
 _rate_limit_redis = get_redis_client()
 endpoint_limiter = EndpointRateLimiter(redis_client=_rate_limit_redis)
 
-# Login: 5 attempts per 15 minutes per IP
-endpoint_limiter.add_limit("/api/auth/login", "POST", limit=5, window_seconds=900)
+# Login: per-IP ceiling on the real login route (the router is mounted at
+# /auth). The per-email counter in the login handler still applies on top.
+endpoint_limiter.add_limit("/auth/login", "POST", limit=20, window_seconds=900)
+endpoint_limiter.add_limit("/auth/register", "POST", limit=10, window_seconds=3600)
 endpoint_limiter.add_limit(
     "/api/tray/ticket-form/fallback", "POST", limit=10, window_seconds=3600
 )
@@ -729,18 +731,16 @@ endpoint_limiter.add_limit("/auth/passkeys/authenticate/verify", "POST", limit=1
 endpoint_limiter.add_limit("/auth/passkeys/register/options", "POST", limit=10, window_seconds=300)
 endpoint_limiter.add_limit("/auth/passkeys/register/verify", "POST", limit=10, window_seconds=300)
 
-# Password reset: 3 requests per hour per email
+# Password reset: 3 requests per hour per client IP
 def _password_reset_key(request: Request) -> str:
-    """Generate rate limit key based on email from query params or IP fallback."""
-    try:
-        email = request.query_params.get("email")
-        if email:
-            return f"reset:{email.lower()}"
-        # For POST requests with JSON bodies the body is consumed by FastAPI
-        # before middleware runs, so fall back to the validated client IP.
-        return get_client_ip(request, default="anonymous") or "anonymous"
-    except Exception:
-        return get_client_ip(request, default="anonymous") or "anonymous"
+    """Key reset requests on the validated client IP.
+
+    The handler reads the email from the request body, so keying on any
+    caller-supplied value (such as a query parameter) would let each request
+    pick a fresh bucket.
+    """
+    ip = get_client_ip(request, default="anonymous") or "anonymous"
+    return f"reset:{ip}"
 
 endpoint_limiter.add_limit(
     "/api/auth/password/forgot",
@@ -777,11 +777,16 @@ for path in upload_paths:
 # General HTTP traffic: per authenticated browser session, with IP fallback for
 # unauthenticated requests. Keying authenticated traffic by IP caused busy NATs,
 # office networks, and reverse proxies to share a single bucket across many users.
-def _general_rate_limit_key(request: Request) -> str:
-    session_token = request.cookies.get(settings.session_cookie_name)
-    if session_token:
-        digest = hashlib.sha256(session_token.encode("utf-8")).hexdigest()
-        return f"session:{digest}"
+# Only a session that actually validates earns its own bucket; otherwise a
+# client could send a random cookie value on every request to dodge the limit.
+async def _general_rate_limit_key(request: Request) -> str:
+    if request.cookies.get(settings.session_cookie_name):
+        try:
+            session = await session_manager.load_session(request)
+        except Exception:  # pragma: no cover - fall back to IP keying
+            session = None
+        if session is not None:
+            return f"session:{session.id}"
     ip = get_client_ip(request, default="anonymous") or "anonymous"
     return f"ip:{ip}"
 
@@ -1084,6 +1089,27 @@ async def pwa_service_worker() -> Response:
     return response
 
 
+class _DownloadOnlyStaticFiles(StaticFiles):
+    """Serve user-uploaded files as inert downloads.
+
+    Files under ``static/uploads`` were uploaded by users (legacy port
+    documents, legacy ticket attachments), so they must never be rendered by
+    the browser as HTML/SVG/XML/script on the portal origin.
+    """
+
+    def file_response(self, full_path, stat_result, scope, status_code: int = 200) -> Response:
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Content-Security-Policy"] = "sandbox; default-src 'none'"
+        if response.status_code != status.HTTP_304_NOT_MODIFIED:
+            response.headers["Content-Type"] = "application/octet-stream"
+            response.headers["Content-Disposition"] = "attachment"
+        return response
+
+
+# Must be mounted before ``/static`` so user uploads never reach the generic
+# static handler, which serves files inline with a guessed media type.
+app.mount("/static/uploads", _DownloadOnlyStaticFiles(directory=str(_uploads_path)), name="static-uploads")
 app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), name="static")
 
 
@@ -1114,9 +1140,47 @@ async def release_cache_headers(request: Request, call_next: Any) -> Response:
 
 @app.websocket("/ws/refresh")
 async def refresh_updates(websocket: WebSocket) -> None:
-    """Maintain a websocket connection for realtime refresh notifications."""
+    """Maintain a websocket connection for realtime refresh notifications.
 
-    await refresh_notifier.connect(websocket)
+    The handshake must carry a valid portal session cookie and, when the
+    browser sends an ``Origin`` header, it must match the request host or the
+    configured portal URL (cross-site websocket hijacking protection).  The
+    authenticated identity is attached to the connection so chat events are
+    only delivered to users who can access the room.
+    """
+
+    from urllib.parse import urlsplit
+
+    from app.services.realtime import ConnectionAccess
+
+    origin = (websocket.headers.get("origin") or "").strip()
+    if origin:
+        origin_host = urlsplit(origin).netloc.lower()
+        allowed_hosts = {
+            (websocket.headers.get("host") or "").strip().lower(),
+            (websocket.headers.get("x-forwarded-host") or "").split(",")[0].strip().lower(),
+        }
+        if settings.portal_url:
+            allowed_hosts.add(urlsplit(settings.portal_url.unicode_string()).netloc.lower())
+        allowed_hosts.discard("")
+        if not origin_host or origin_host not in allowed_hosts:
+            await websocket.close(code=4403)
+            return
+
+    try:
+        session = await session_manager.load_session(websocket)  # type: ignore[arg-type]
+    except Exception as exc:  # pragma: no cover - defensive guard for DB failures
+        log_error("Failed to load session for refresh websocket", error=str(exc))
+        session = None
+    user = await user_repo.get_user_by_id(session.user_id) if session else None
+    if not session or not user:
+        await websocket.close(code=4401)
+        return
+
+    is_privileged = bool(user.get("is_super_admin")) or await _is_helpdesk_technician(user)
+    access = ConnectionAccess(user_id=int(user["id"]), is_privileged=is_privileged)
+
+    await refresh_notifier.connect(websocket, access=access)
     try:
         while True:
             # Keep the connection open and consume incoming messages so we
@@ -1328,6 +1392,9 @@ async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] 
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
         return None, RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    if not is_user_active(user):
+        await session_manager.revoke_session(session)
+        return None, RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
     if (
         request.url.path not in TOTP_ENROLLMENT_ALLOWED_PAGE_PATHS
         and await _user_requires_totp_enrollment(user)
@@ -1535,12 +1602,49 @@ async def _require_administration_access(
     return user, membership, None
 
 
+_UPLOAD_INLINE_IMAGE_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+
+
+def _classify_private_upload(sanitized_path: PurePosixPath) -> tuple[bool, bool] | None:
+    """Return ``(allowed_public, is_inline_image)`` for an ``/uploads`` path.
+
+    Only directories the portal actually links through ``/uploads`` are
+    served: product images (``shop/``), knowledge base inline images
+    (``knowledge-base/<file>``), Essential 8 evidence
+    (``compliance/essential8/``) and legacy top-level raster images.  Other
+    private stores (ticket attachments, KB attachments, SMB1001 evidence,
+    asset photos, report covers, ...) have dedicated, access-controlled
+    download endpoints and are never exposed here.  ``None`` means "not found".
+    """
+
+    parts = sanitized_path.parts
+    is_image = sanitized_path.suffix.lower() in _UPLOAD_INLINE_IMAGE_TYPES
+    if len(parts) == 1:
+        return (False, True) if is_image else None
+    if len(parts) == 2 and parts[0] == "shop":
+        return (False, True) if is_image else None
+    if len(parts) == 2 and parts[0] == "knowledge-base":
+        return (True, True) if is_image else None
+    if len(parts) == 3 and parts[:2] == ("compliance", "essential8"):
+        return (False, is_image)
+    return None
+
+
 @app.get("/uploads/{file_path:path}", response_class=FileResponse, include_in_schema=False)
 async def serve_private_upload(file_path: str, request: Request):
     """Serve product images stored in the legacy private uploads directory."""
 
     sanitized_path = _sanitize_upload_path(file_path)
-    is_public_kb_image = sanitized_path.parts and sanitized_path.parts[0] == "knowledge-base"
+    classification = _classify_private_upload(sanitized_path)
+    if classification is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    is_public_kb_image, is_inline_image = classification
 
     if not is_public_kb_image:
         _, redirect = await _require_authenticated_user(request)
@@ -1548,8 +1652,22 @@ async def serve_private_upload(file_path: str, request: Request):
             return redirect
 
     resolved_path = _resolve_private_upload(sanitized_path)
-    headers = {"Cache-Control": "public, max-age=86400"}
-    return FileResponse(resolved_path, headers=headers)
+    headers = {
+        "Cache-Control": "public, max-age=86400" if is_public_kb_image else "private, max-age=86400",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if is_inline_image:
+        media_type = _UPLOAD_INLINE_IMAGE_TYPES[sanitized_path.suffix.lower()]
+        return FileResponse(resolved_path, media_type=media_type, headers=headers)
+    # Anything that is not a known raster image is forced to download so it
+    # can never be rendered as active content on the portal origin.
+    return FileResponse(
+        resolved_path,
+        media_type="application/octet-stream",
+        filename=resolved_path.name,
+        content_disposition_type="attachment",
+        headers=headers,
+    )
 
 
 def _to_iso(dt: Any) -> str | None:
@@ -2525,6 +2643,11 @@ async def _get_optional_user(
     request.state.session = session
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
+        return None, None
+    if not is_user_active(user):
+        await session_manager.revoke_session(session)
+        return None, None
+    if await _user_requires_totp_enrollment(user):
         return None, None
     user = await role_switching.apply_selected_role(request, user, session)
     request.state.active_company_id = session.active_company_id
@@ -6387,12 +6510,23 @@ async def profile_m365_contact_phones(request: Request, name: str = Query(..., m
 
 @app.post("/api/tickets/{ticket_id}/requester/mobile", response_class=JSONResponse)
 async def attach_ticket_requester_mobile(request: Request, ticket_id: int):
-    _, redirect = await _require_authenticated_user(request)
+    user, redirect = await _require_authenticated_user(request)
     if redirect:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
     ticket = await tickets_repo.get_ticket(ticket_id)
-    if not ticket or ticket.get("requester_staff_id") is None:
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester contact not found")
+    # Helpdesk technicians (and super admins) may update any requester's
+    # number; otherwise only the ticket's own requester may change theirs.
+    if not await _is_helpdesk_technician(user, request):
+        try:
+            is_requester = int(ticket.get("requester_id")) == int(user.get("id"))
+        except (TypeError, ValueError):
+            is_requester = False
+        if not is_requester:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester contact not found")
+    if ticket.get("requester_staff_id") is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester contact not found")
 
     payload = await request.json()
@@ -6611,6 +6745,7 @@ async def admin_users_action(request: Request, user_id: int, action: str):
 
     if action == "deactivate":
         updated = await user_repo.update_user(user_id, is_active=0)
+        await auth_repo.deactivate_sessions_for_user(user_id)
         await audit_service.record(
             action="user.deactivate",
             request=request,

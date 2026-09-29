@@ -434,6 +434,9 @@ prepare_production_directories() {
   install -d -m 0755 "$DEPLOY_ROOT"
   install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" /var/log/myportal
   install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" /var/lib/myportal
+  # Root-only working area for the update coordinator (plan, locks, captured
+  # output). It must not be writable by the service account.
+  install -d -m 0700 -o root -g root /var/lib/myportal-updater
 }
 
 check_control_checkout() {
@@ -465,9 +468,13 @@ install_update_cron() {
 # the MyPortal admin UI (the application writes the system_update flag).
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-* * * * * root ${SCRIPT_DIR}/process_update_flag.sh >> /var/log/myportal/process_update_flag.log 2>&1
+# Root output goes to a root-owned log: /var/log/myportal belongs to the
+# service account, which could otherwise redirect this append with a symlink.
+* * * * * root ${SCRIPT_DIR}/process_update_flag.sh >> /var/log/myportal-updater.log 2>&1
 CRON
   chmod 644 "$UPDATE_CRON_FILE"
+  # Upgrade output can name hosts and paths; keep the log private to root.
+  [[ -e /var/log/myportal-updater.log ]] || install -m 0600 -o root -g root /dev/null /var/log/myportal-updater.log
   if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
     systemctl enable --now cron >/dev/null 2>&1 || true
   fi

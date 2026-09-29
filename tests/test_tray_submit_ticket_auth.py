@@ -94,10 +94,10 @@ async def test_tray_submit_ticket_matches_requester_by_phone_when_email_is_unkno
     created: dict[str, object] = {}
     phone_lookups: list[str] = []
 
-    async def fake_get_device_by_uid(device_uid: str):
+    async def fake_get_device_by_uid(token_hash: str):
         return {
             "id": 123,
-            "uid": device_uid,
+            "uid": "device-abc",
             "status": "active",
             "company_id": 456,
             "asset_id": None,
@@ -109,7 +109,7 @@ async def test_tray_submit_ticket_matches_requester_by_phone_when_email_is_unkno
 
     async def fake_get_user_by_phone(phone: str):
         phone_lookups.append(phone)
-        return {"id": 42}
+        return {"id": 42, "company_id": 456}
 
     async def fake_get_staff_by_company_and_email(company_id: int, email: str):
         return None
@@ -125,7 +125,7 @@ async def test_tray_submit_ticket_matches_requester_by_phone_when_email_is_unkno
         return {"id": 789, "ticket_number": "T-789"}
 
     monkeypatch.setattr(
-        tray_routes.tray_repo, "get_device_by_uid", fake_get_device_by_uid
+        tray_routes.tray_repo, "get_device_by_auth_hash", fake_get_device_by_uid
     )
     monkeypatch.setattr(
         tray_routes.users_repo, "get_user_by_email", fake_get_user_by_email
@@ -159,7 +159,7 @@ async def test_tray_submit_ticket_matches_requester_by_phone_when_email_is_unkno
         phone="+1 (555) 010-1234",
         subject="Help",
     )
-    await tray_routes.tray_submit_ticket(payload, SimpleNamespace(headers={}))  # type: ignore[arg-type]
+    await tray_routes.tray_submit_ticket(payload, SimpleNamespace(headers={"Authorization": "Bearer token-abc"}))  # type: ignore[arg-type]
 
     assert phone_lookups == ["+1 (555) 010-1234"]
     assert created["requester_id"] == 42
@@ -174,10 +174,10 @@ async def test_tray_submit_ticket_matches_company_staff_by_email(monkeypatch):
     created: dict[str, object] = {}
     phone_lookups: list[str] = []
 
-    async def fake_get_device_by_uid(device_uid: str):
+    async def fake_get_device_by_uid(token_hash: str):
         return {
             "id": 123,
-            "uid": device_uid,
+            "uid": "device-abc",
             "status": "active",
             "company_id": 456,
             "asset_id": None,
@@ -206,7 +206,7 @@ async def test_tray_submit_ticket_matches_company_staff_by_email(monkeypatch):
         return {"id": 789, "ticket_number": "T-789"}
 
     monkeypatch.setattr(
-        tray_routes.tray_repo, "get_device_by_uid", fake_get_device_by_uid
+        tray_routes.tray_repo, "get_device_by_auth_hash", fake_get_device_by_uid
     )
     monkeypatch.setattr(
         tray_routes.users_repo, "get_user_by_email", fake_get_user_by_email
@@ -241,7 +241,7 @@ async def test_tray_submit_ticket_matches_company_staff_by_email(monkeypatch):
         subject="Help",
         description="Broken",
     )
-    await tray_routes.tray_submit_ticket(payload, SimpleNamespace(headers={}))  # type: ignore[arg-type]
+    await tray_routes.tray_submit_ticket(payload, SimpleNamespace(headers={"Authorization": "Bearer token-abc"}))  # type: ignore[arg-type]
 
     assert phone_lookups == []
     assert created["requester_id"] is None
@@ -257,17 +257,17 @@ async def test_tray_submit_ticket_prefers_email_match_over_phone(monkeypatch):
 
     created: dict[str, object] = {}
 
-    async def fake_get_device_by_uid(device_uid: str):
+    async def fake_get_device_by_uid(token_hash: str):
         return {
             "id": 123,
-            "uid": device_uid,
+            "uid": "device-abc",
             "status": "active",
-            "company_id": None,
+            "company_id": 456,
             "asset_id": None,
         }
 
     async def fake_get_user_by_email(email: str):
-        return {"id": 10}
+        return {"id": 10, "company_id": 456}
 
     async def fail_get_user_by_phone(phone: str):
         raise AssertionError("phone lookup must not run after an email match")
@@ -283,7 +283,7 @@ async def test_tray_submit_ticket_prefers_email_match_over_phone(monkeypatch):
         return {"id": 789, "ticket_number": "T-789"}
 
     monkeypatch.setattr(
-        tray_routes.tray_repo, "get_device_by_uid", fake_get_device_by_uid
+        tray_routes.tray_repo, "get_device_by_auth_hash", fake_get_device_by_uid
     )
     monkeypatch.setattr(
         tray_routes.users_repo, "get_user_by_email", fake_get_user_by_email
@@ -312,7 +312,7 @@ async def test_tray_submit_ticket_prefers_email_match_over_phone(monkeypatch):
         phone="555-0100",
         subject="Help",
     )
-    await tray_routes.tray_submit_ticket(payload, SimpleNamespace(headers={}))  # type: ignore[arg-type]
+    await tray_routes.tray_submit_ticket(payload, SimpleNamespace(headers={"Authorization": "Bearer token-abc"}))  # type: ignore[arg-type]
 
     assert created["requester_id"] == 10
 
@@ -326,10 +326,10 @@ async def test_tray_submit_syncro_ticket_keeps_contact_details_when_contact_matc
 
     created_payload: dict[str, object] = {}
 
-    async def fake_get_device_by_uid(device_uid: str):
+    async def fake_get_device_by_uid(token_hash: str):
         return {
             "id": 123,
-            "uid": device_uid,
+            "uid": "device-abc",
             "status": "active",
             "company_id": 456,
             "asset_id": None,
@@ -349,7 +349,7 @@ async def test_tray_submit_syncro_ticket_keeps_contact_details_when_contact_matc
         return {"id": 987, "number": "S-987"}
 
     monkeypatch.setattr(
-        tray_routes.tray_repo, "get_device_by_uid", fake_get_device_by_uid
+        tray_routes.tray_repo, "get_device_by_auth_hash", fake_get_device_by_uid
     )
     monkeypatch.setattr(
         tray_routes.tq_service,
@@ -368,7 +368,7 @@ async def test_tray_submit_syncro_ticket_keeps_contact_details_when_contact_matc
     )
     monkeypatch.setattr(tray_routes.syncro_service, "create_ticket", fake_create_ticket)
 
-    request = SimpleNamespace(headers={})
+    request = SimpleNamespace(headers={"Authorization": "Bearer token-abc"})
     payload = TrayTicketSubmitRequest(
         device_uid="device-abc",
         name="Jane Contact",
@@ -389,3 +389,75 @@ async def test_tray_submit_syncro_ticket_keeps_contact_details_when_contact_matc
     assert "**Phone:** 555-0100" in comment
     assert "**Email:** jane@example.com" in comment
     assert "Broken" in comment
+
+
+@pytest.mark.anyio
+async def test_tray_submit_ticket_requires_bearer_token(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.api.routes import tray as tray_routes
+    from app.schemas.tray import TrayTicketSubmitRequest
+
+    async def fail_get_device_by_uid(device_uid: str):
+        raise AssertionError("device_uid must not be used to authenticate")
+
+    monkeypatch.setattr(tray_routes.tray_repo, "get_device_by_uid", fail_get_device_by_uid)
+
+    payload = TrayTicketSubmitRequest(
+        device_uid="device-abc", name="Jane", email="jane@example.com", subject="Help"
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await tray_routes.tray_submit_ticket(payload, SimpleNamespace(headers={}))  # type: ignore[arg-type]
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_tray_submit_ticket_ignores_requester_from_other_company(monkeypatch):
+    from app.api.routes import tray as tray_routes
+    from app.schemas.tray import TrayTicketSubmitRequest
+
+    created: dict[str, object] = {}
+
+    async def fake_get_device_by_auth_hash(token_hash: str):
+        return {"id": 123, "status": "active", "company_id": 456, "asset_id": None}
+
+    async def fake_get_user_by_email(email: str):
+        return {"id": 99, "company_id": 777}
+
+    async def fake_get_user_by_phone(phone: str):
+        return {"id": 98, "company_id": 777}
+
+    async def fake_get_user_company(user_id: int, company_id: int):
+        return None
+
+    async def fake_none(*args, **kwargs):
+        return None
+
+    async def fake_questions(company_id):
+        return []
+
+    async def fake_resolve_status_or_default(status):
+        return "open"
+
+    async def fake_create_ticket(**kwargs):
+        created.update(kwargs)
+        return {"id": 789, "ticket_number": "T-789"}
+
+    monkeypatch.setattr(tray_routes.tray_repo, "get_device_by_auth_hash", fake_get_device_by_auth_hash)
+    monkeypatch.setattr(tray_routes.users_repo, "get_user_by_email", fake_get_user_by_email)
+    monkeypatch.setattr(tray_routes.users_repo, "get_user_by_phone", fake_get_user_by_phone)
+    monkeypatch.setattr(tray_routes.user_company_repo, "get_user_company", fake_get_user_company)
+    monkeypatch.setattr(tray_routes.staff_repo, "get_staff_by_company_and_email", fake_none)
+    monkeypatch.setattr(tray_routes.tq_service, "get_questions_for_company", fake_questions)
+    monkeypatch.setattr(tray_routes.tickets_service, "resolve_status_or_default", fake_resolve_status_or_default)
+    monkeypatch.setattr(tray_routes.tickets_service, "create_ticket", fake_create_ticket)
+
+    payload = TrayTicketSubmitRequest(
+        name="Mallory", email="victim@other.example", phone="555-0100", subject="Help"
+    )
+    await tray_routes.tray_submit_ticket(
+        payload, SimpleNamespace(headers={"Authorization": "Bearer token-abc"})  # type: ignore[arg-type]
+    )
+
+    assert created["requester_id"] is None
+    assert created["company_id"] == 456

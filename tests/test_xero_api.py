@@ -30,6 +30,11 @@ def mock_startup(monkeypatch):
     monkeypatch.setattr(scheduler_service, "start", fake_start)
     monkeypatch.setattr(scheduler_service, "stop", fake_stop)
     monkeypatch.setattr(main_module.settings, "enable_csrf", False)
+    from app.api.dependencies.auth import require_super_admin
+
+    app.dependency_overrides[require_super_admin] = lambda: {"id": 1, "is_super_admin": True}
+    yield
+    app.dependency_overrides.pop(require_super_admin, None)
 
 
 def test_xero_callback_accepts_payload(monkeypatch):

@@ -168,7 +168,9 @@ is serving, it removes `myportal.service`.
 | `/usr/local/sbin/myportal-upgrade` | Runs `scripts/upgrade.sh` from the control checkout |
 | `/opt/myportal/current` | The serving release |
 | `/opt/myportal/shared` | Uploads, update state and other persistent data |
-| `/var/log/myportal/` | Application log and the update cron log |
+| `/var/log/myportal/` | Application log |
+| `/var/log/myportal-updater.log` | Log of the root update cron job (`process_update_flag.sh`) |
+| `/var/lib/myportal-updater` | Root-only working directory of the update coordinator (deployment plan, locks, captured output) |
 
 Check health with `curl http://localhost/readyz`, and view logs with
 `journalctl -u 'myportal@*'`.

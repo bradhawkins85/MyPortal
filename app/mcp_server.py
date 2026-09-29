@@ -15,6 +15,7 @@ Security Features:
 
 from __future__ import annotations
 
+import hmac
 import json
 import re
 import time
@@ -217,7 +218,9 @@ async def _validate_token(websocket: WebSocket) -> tuple[bool, str | None]:
     if not token:
         return False, "Missing authentication token"
 
-    if token != settings.mcp_token:
+    if not hmac.compare_digest(
+        token.encode("utf-8"), str(settings.mcp_token).encode("utf-8")
+    ):
         return False, "Invalid authentication token"
 
     return True, None

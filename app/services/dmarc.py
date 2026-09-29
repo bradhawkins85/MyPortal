@@ -1,12 +1,12 @@
 """Defensive DMARC aggregate (RUA) and forensic (RUF) report ingestion."""
 from __future__ import annotations
 
-import gzip
 import hashlib
 import io
 import re
 import secrets
 import zipfile
+import zlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.message import Message
@@ -107,6 +107,27 @@ def _safe_xml(data: bytes, limits: IngestionLimits) -> bytes:
     return data
 
 
+def _bounded_gunzip(payload: bytes, limit: int) -> bytes:
+    """Decompress gzip ``payload`` without ever producing more than ``limit`` bytes."""
+
+    output = bytearray()
+    remaining = payload
+    while remaining:
+        decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        try:
+            chunk = decompressor.decompress(remaining, limit - len(output) + 1)
+        except zlib.error as exc:
+            raise DmarcInputError("Invalid gzip attachment") from exc
+        output.extend(chunk)
+        if len(output) > limit or decompressor.unconsumed_tail:
+            raise DmarcInputError("Expanded attachment exceeds limit")
+        if not decompressor.eof:
+            raise DmarcInputError("Invalid gzip attachment")
+        # Concatenated gzip members are valid; trailing zero padding is ignored.
+        remaining = decompressor.unused_data.lstrip(b"\x00")
+    return bytes(output)
+
+
 def unpack_attachment(filename: str, payload: bytes, limits: IngestionLimits | None = None) -> list[tuple[str, bytes]]:
     limits = limits or IngestionLimits()
     if len(payload) > limits.compressed_bytes:
@@ -115,10 +136,7 @@ def unpack_attachment(filename: str, payload: bytes, limits: IngestionLimits | N
     if lower.endswith(".xml"):
         return [(filename, _safe_xml(payload, limits))]
     if lower.endswith((".gz", ".gzip")):
-        try:
-            data = gzip.decompress(payload)
-        except (OSError, EOFError) as exc:
-            raise DmarcInputError("Invalid gzip attachment") from exc
+        data = _bounded_gunzip(payload, limits.expanded_bytes)
         if data.startswith((b"PK\x03\x04", b"\x1f\x8b")):
             raise DmarcInputError("Nested archives are not accepted")
         return [(filename.rsplit(".", 1)[0], _safe_xml(data, limits))]

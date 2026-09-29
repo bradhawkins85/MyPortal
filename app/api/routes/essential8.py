@@ -45,15 +45,25 @@ async def _get_company_membership(user: dict, company_id: int) -> dict | None:
     return await user_company_repo.get_user_company(user_id, company_id)
 
 
+async def _assert_company_member(
+    user: dict,
+    company_id: int,
+    detail: str = "You can only view compliance for your own company",
+) -> dict | None:
+    """Require a super admin or an active membership in ``company_id``."""
+    if user.get("is_super_admin", False):
+        return await _get_company_membership(user, company_id)
+    membership = await _get_company_membership(user, company_id)
+    if not membership:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+    return membership
+
+
 async def _assert_company_compliance_access(user: dict, company_id: int, *, write: bool = False) -> dict | None:
     is_super_admin = bool(user.get("is_super_admin", False))
-    user_company_id = user.get("company_id")
-    membership = await _get_company_membership(user, company_id)
-    if not is_super_admin and user_company_id != company_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only access compliance for your own company",
-        )
+    membership = await _assert_company_member(
+        user, company_id, "You can only access compliance for your own company"
+    )
     if is_super_admin:
         return membership
     if not membership or not membership.get("can_view_compliance"):
@@ -169,15 +179,8 @@ async def list_company_compliance(
     user: dict = Depends(get_current_user),
 ):
     """List compliance records for a company"""
-    # Super admins can view any company, regular users can only view their own
-    is_super_admin = user.get("is_super_admin", False)
-    user_company_id = user.get("company_id")
-    
-    if not is_super_admin and user_company_id != company_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only view compliance for your own company",
-        )
+    # Super admins can view any company; other users need an active membership.
+    await _assert_company_member(user, company_id, "You can only view compliance for your own company")
     
     records = await essential8_repo.list_company_compliance(
         company_id=company_id,
@@ -196,15 +199,8 @@ async def get_company_compliance_summary(
     user: dict = Depends(get_current_user),
 ):
     """Get a summary of compliance status for a company"""
-    # Super admins can view any company, regular users can only view their own
-    is_super_admin = user.get("is_super_admin", False)
-    user_company_id = user.get("company_id")
-    
-    if not is_super_admin and user_company_id != company_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only view compliance for your own company",
-        )
+    # Super admins can view any company; other users need an active membership.
+    await _assert_company_member(user, company_id, "You can only view compliance for your own company")
     
     summary = await essential8_repo.get_company_compliance_summary(company_id)
     return summary
@@ -275,15 +271,8 @@ async def get_company_compliance(
     user: dict = Depends(get_current_user),
 ):
     """Get a specific compliance record for a company and control"""
-    # Super admins can view any company, regular users can only view their own
-    is_super_admin = user.get("is_super_admin", False)
-    user_company_id = user.get("company_id")
-    
-    if not is_super_admin and user_company_id != company_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only view compliance for your own company",
-        )
+    # Super admins can view any company; other users need an active membership.
+    await _assert_company_member(user, company_id, "You can only view compliance for your own company")
     
     record = await essential8_repo.get_company_compliance(
         company_id=company_id,
@@ -350,15 +339,8 @@ async def list_compliance_audit(
     user: dict = Depends(get_current_user),
 ):
     """List audit trail for compliance changes"""
-    # Super admins can view any company, regular users can only view their own
-    is_super_admin = user.get("is_super_admin", False)
-    user_company_id = user.get("company_id")
-    
-    if not is_super_admin and user_company_id != company_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only view audit trail for your own company",
-        )
+    # Super admins can view any company; other users need an active membership.
+    await _assert_company_member(user, company_id, "You can only view audit trail for your own company")
     
     audit = await essential8_repo.list_compliance_audit(
         company_id=company_id,
@@ -401,14 +383,7 @@ async def get_control_with_requirements(
     """Get a control with all its requirements grouped by maturity level"""
     # If company_id is provided, check permissions
     if company_id:
-        is_super_admin = user.get("is_super_admin", False)
-        user_company_id = user.get("company_id")
-        
-        if not is_super_admin and user_company_id != company_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can only view compliance for your own company",
-            )
+        await _assert_company_member(user, company_id, "You can only view compliance for your own company")
     
     control_data = await essential8_repo.get_control_with_requirements(
         control_id=control_id,

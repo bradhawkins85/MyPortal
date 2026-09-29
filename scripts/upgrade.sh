@@ -71,6 +71,14 @@ READY_REQUEST_TIMEOUT="${MYPORTAL_READY_REQUEST_TIMEOUT:-10}"
 DRAIN_SECONDS="${MYPORTAL_DRAIN_SECONDS:-15}"
 SMOKE_PATH="${MYPORTAL_SMOKE_PATH:-/healthz}"
 SYSTEM_UPDATE_STATUS_FILE="${SHARED_ROOT}/state/system_update.status"
+# shared/state is writable by the service account (root:myportal 0770), which
+# can create, rename or symlink any entry in it. Root-only artifacts (the
+# deployment plan, the lock, staged status files) therefore live in this
+# root-owned 0700 directory, and files the application must read are
+# published into shared/state with install(1), which replaces a planted
+# symlink instead of writing through it.
+UPDATER_STATE_DIR="${MYPORTAL_UPDATER_STATE_DIR:-/var/lib/myportal-updater}"
+UPDATE_CRON_FILE="${MYPORTAL_UPDATE_CRON_FILE:-/etc/cron.d/myportal-update}"
 REQUESTED_UPGRADE_MODE="rolling"
 RESTART_MODE="rolling"
 UPGRADE_READY_WAIT_SECONDS=0
@@ -105,10 +113,41 @@ done
 resolve_requested_upgrade_mode() { printf '%s' "${APP_UPGRADE_MODE:-$REQUESTED_UPGRADE_MODE}"; }
 resolve_effective_upgrade_mode() { printf '%s' rolling; }
 
+ensure_updater_state_dir() {
+  if [[ -L "$UPDATER_STATE_DIR" ]]; then
+    echo "Refusing to use symlinked updater state directory ${UPDATER_STATE_DIR}." >&2
+    return 1
+  fi
+  [[ -d "$UPDATER_STATE_DIR" ]] || install -d -m 0700 "$UPDATER_STATE_DIR"
+  if [[ $EUID -eq 0 ]]; then
+    chown root:root "$UPDATER_STATE_DIR"
+  fi
+  chmod 0700 "$UPDATER_STATE_DIR"
+}
+
+# Copy a root-staged file into the service-writable state directory. install
+# unlinks an existing destination (including a planted symlink) and creates
+# the file exclusively; the final rename replaces the directory entry and
+# never follows a symlink either.
+publish_state_file() {
+  local source="$1" destination="$2" staging owner=()
+  staging="$(dirname "$destination")/.$(basename "$destination").$$.tmp"
+  if [[ $EUID -eq 0 ]] && getent group "$SERVICE_USER" >/dev/null 2>&1; then
+    owner=(-o root -g "$SERVICE_USER")
+  fi
+  install -m 0640 ${owner[@]+"${owner[@]}"} "$source" "$staging" && mv -Tf "$staging" "$destination"
+}
+
+# Values interpolated into the key=value status file must stay on one line.
+single_line() { printf '%s' "${1//[$'\r\n']/ }"; }
+
 write_upgrade_status() {
-  local status="$1" message="$2" reason="${3:-immutable_release}"
+  local status="$1" message reason
+  message=$(single_line "$2")
+  reason=$(single_line "${3:-immutable_release}")
   mkdir -p "$(dirname "$SYSTEM_UPDATE_STATUS_FILE")"
-  local tmp="${SYSTEM_UPDATE_STATUS_FILE}.$$"
+  ensure_updater_state_dir
+  local tmp="${UPDATER_STATE_DIR}/system_update.status.$$"
   cat >"$tmp" <<EOF
 started_at=${UPGRADE_STARTED_AT}
 finished_at=$(date --iso-8601=seconds)
@@ -116,12 +155,18 @@ status=${status}
 mode=${RESTART_MODE}
 requested_mode=${REQUESTED_UPGRADE_MODE}
 reason=${reason}
-deployment_plan=${DEPLOYMENT_PLAN}
+deployment_plan=$(single_line "$DEPLOYMENT_PLAN")
 steps=${STEP_REPORT}
 message=${message}
 ready_wait_seconds=${UPGRADE_READY_WAIT_SECONDS}
 EOF
-  chmod 640 "$tmp" && mv -f "$tmp" "$SYSTEM_UPDATE_STATUS_FILE"
+  chmod 600 "$tmp"
+  # Reporting is best-effort: a status file the application tampered with
+  # must not abort (or roll back) an otherwise healthy deployment.
+  if ! publish_state_file "$tmp" "$SYSTEM_UPDATE_STATUS_FILE"; then
+    echo "WARNING: could not publish upgrade status to ${SYSTEM_UPDATE_STATUS_FILE}." >&2
+  fi
+  rm -f -- "$tmp"
 }
 
 record_step() {
@@ -149,11 +194,35 @@ plan_field() {
 
 generate_deployment_plan() {
   local base="$1" target="$2"
-  DEPLOYMENT_PLAN_FILE="${SHARED_ROOT}/state/deployment_plan.json"
+  # Root re-reads the plan (including changed_paths used to publish files), so
+  # it must never live where the service account could replace it.
+  ensure_updater_state_dir
+  DEPLOYMENT_PLAN_FILE="${UPDATER_STATE_DIR}/deployment_plan.json"
+  rm -f -- "${SHARED_ROOT}/state/deployment_plan.json"  # legacy location
   PYTHONPATH="$PROJECT_ROOT" python3 -m app.services.deployment_plan "$base" "$target" >"$DEPLOYMENT_PLAN_FILE"
   DEPLOYMENT_PLAN=$(<"$DEPLOYMENT_PLAN_FILE")
   DEPLOYMENT_ACTION=$(plan_field action)
   DEPLOYMENT_REASON=$(plan_field reason)
+  case "$DEPLOYMENT_ACTION" in
+    no-op|static-publish|template-reload|feature-pack-reload|tray-publish|migration-only|staged-cutover) ;;
+    *) echo "Deployment planner returned an unknown action: ${DEPLOYMENT_ACTION}" >&2; return 1 ;;
+  esac
+  if [[ ! "$DEPLOYMENT_REASON" =~ ^[A-Za-z0-9_.-]{1,128}$ ]]; then
+    echo "Deployment planner returned an invalid reason." >&2
+    return 1
+  fi
+}
+
+# changed_paths come from git, but they become filesystem paths below root-
+# owned trees, so refuse anything that could leave the destination.
+validate_relative_path() {
+  local path="$1"
+  case "$path" in
+    ""|/*|*$'\n'*|*$'\r'*) return 1 ;;
+  esac
+  case "/${path}/" in
+    */../*|*/./*|*//*) return 1 ;;
+  esac
 }
 
 resolve_plan_base() {
@@ -182,6 +251,10 @@ publish_paths_without_worker_reload() {
   mkdir -p "$destination"
   while IFS= read -r path; do
     [[ -n "$path" ]] || continue
+    if ! validate_relative_path "$path"; then
+      echo "Refusing to publish unsafe path from the deployment plan: ${path}" >&2
+      return 1
+    fi
     mkdir -p "$destination/$(dirname "$path")"
     git show "${revision}:${path}" >"$destination/$path"
     for release in "$(readlink -f "$INSTANCE_ROOT/blue" 2>/dev/null || true)" \
@@ -910,6 +983,20 @@ install_upgrade_command() {
   mv -f "$staging" "$command_path"
 }
 
+migrate_update_cron_log() {
+  # Older installers appended this root job's output to a file inside
+  # /var/log/myportal, which the service account owns and could replace with
+  # a symlink. Point existing cron entries at a root-owned log instead.
+  local legacy="/var/log/myportal/process_update_flag.log" staging
+  [[ -f "$UPDATE_CRON_FILE" && ! -L "$UPDATE_CRON_FILE" ]] || return 0
+  grep -qF "$legacy" "$UPDATE_CRON_FILE" || return 0
+  staging="${UPDATE_CRON_FILE}.new.$$"
+  sed "s|${legacy}|/var/log/myportal-updater.log|g" "$UPDATE_CRON_FILE" >"$staging"
+  chmod 0644 "$staging"
+  mv -f "$staging" "$UPDATE_CRON_FILE"
+  echo "Moved the update cron log to /var/log/myportal-updater.log." >&2
+}
+
 retire_legacy_service() {
   # Installations made by the original installer ran a single-checkout
   # myportal.service on port 8000. Once a blue/green slot is serving, that
@@ -936,8 +1023,12 @@ if [[ ! "$FEATURE_PACK_RELOAD_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 mkdir -p "$SHARED_ROOT/state"
-exec 9>"$SHARED_ROOT/state/upgrade.lock"
+ensure_updater_state_dir
+# The lock lives in the root-only directory: opening it in shared/state would
+# truncate whatever file a planted symlink pointed at.
+exec 9>"$UPDATER_STATE_DIR/upgrade.lock"
 flock 9
+migrate_update_cron_log || echo "Warning: could not move the update cron log out of /var/log/myportal." >&2
 install_upgrade_command || echo "Warning: could not install the myportal-upgrade command." >&2
 record_control_checkout || echo "Warning: could not record MYPORTAL_CONTROL_CHECKOUT in ${ENV_FILE}." >&2
 validate_origin_remote "$(git config --get remote.origin.url)"
@@ -998,7 +1089,8 @@ case "$DEPLOYMENT_ACTION" in
     reload_flag="${SHARED_ROOT}/state/feature_pack_reload.flag"
     reload_result="${SHARED_ROOT}/state/feature_pack_reload.${request_id}.result"
     rm -f "$reload_result"
-    python3 - "$DEPLOYMENT_PLAN_FILE" "$request_id" "$TARGET_REVISION" "$RELEASE_DIR" "$reload_flag.tmp" <<'PY'
+    reload_staging="${UPDATER_STATE_DIR}/feature_pack_reload.flag.$$"
+    python3 - "$DEPLOYMENT_PLAN_FILE" "$request_id" "$TARGET_REVISION" "$RELEASE_DIR" "$reload_staging" <<'PY'
 import json, os, sys
 plan_file, request_id, revision, release_path, output = sys.argv[1:]
 with open(plan_file, encoding="utf-8") as handle:
@@ -1014,14 +1106,20 @@ with open(output, "w", encoding="utf-8") as handle:
     handle.flush()
     os.fsync(handle.fileno())
 PY
-    mv -f "$reload_flag.tmp" "$reload_flag"
+    publish_state_file "$reload_staging" "$reload_flag"
+    rm -f -- "$reload_staging"
     write_upgrade_status reloading "Waiting for feature-pack activation acknowledgement for ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
     reload_deadline=$((SECONDS + FEATURE_PACK_RELOAD_TIMEOUT))
     reload_acknowledged=false
     while ((SECONDS < reload_deadline)); do
       if [[ -f "$reload_result" ]] && python3 - "$reload_result" "$request_id" "$TARGET_REVISION" "$DEPLOYMENT_PLAN_FILE" <<'PY'
-import json, sys
-result = json.load(open(sys.argv[1], encoding="utf-8"))
+import json, os, stat, sys
+# Written by the service account: never follow a symlink or block on a FIFO.
+fd = os.open(sys.argv[1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+with os.fdopen(fd, encoding="utf-8") as handle:
+    if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+        raise SystemExit(1)
+    result = json.loads(handle.read(1 << 20))
 expected = sorted(json.load(open(sys.argv[4], encoding="utf-8"))["feature_packs"])
 ok = result.get("request_id") == sys.argv[2] and result.get("revision") == sys.argv[3]
 ok = ok and result.get("status") == "succeeded"

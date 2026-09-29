@@ -83,12 +83,23 @@ async def create_session(
 
 
 async def get_session_by_token(token: str) -> Optional[dict[str, Any]]:
+    # Only the digest is looked up. Matching the raw value as well would let
+    # anyone who can read ``user_sessions`` replay the stored digest as a
+    # cookie, which defeats hashing the token in the first place.
     token_hash = _hash_session_token(token)
     row = await db.fetch_one(
-        "SELECT * FROM user_sessions WHERE session_token = %s OR session_token = %s",
-        (token_hash, token),
+        "SELECT * FROM user_sessions WHERE session_token = %s",
+        (token_hash,),
     )
     return row
+
+
+async def rotate_session_token(session_id: int, token: str) -> None:
+    """Store the digest of a freshly issued raw *token* for a session."""
+    await db.execute(
+        "UPDATE user_sessions SET session_token = %s WHERE id = %s",
+        (_hash_session_token(token), session_id),
+    )
 
 
 async def get_session_by_id(session_id: int) -> Optional[dict[str, Any]]:
@@ -157,6 +168,22 @@ async def update_session(
 
 async def deactivate_session(session_id: int) -> None:
     await update_session(session_id, is_active=False)
+
+
+async def deactivate_sessions_for_user(
+    user_id: int, *, except_session_id: int | None = None
+) -> None:
+    """Revoke every active session a user holds, optionally keeping one."""
+    if except_session_id is None:
+        await db.execute(
+            "UPDATE user_sessions SET is_active = 0 WHERE user_id = %s AND is_active = 1",
+            (user_id,),
+        )
+        return
+    await db.execute(
+        "UPDATE user_sessions SET is_active = 0 WHERE user_id = %s AND is_active = 1 AND id <> %s",
+        (user_id, except_session_id),
+    )
 
 
 async def list_active_sessions_for_user(user_id: int) -> list[dict[str, Any]]:
@@ -239,6 +266,13 @@ async def mark_password_reset_token_used(token: str) -> None:
     await db.execute(
         "UPDATE password_tokens SET used = 1 WHERE token = %s",
         (token,),
+    )
+
+
+async def invalidate_password_reset_tokens_for_user(user_id: int) -> None:
+    await db.execute(
+        "UPDATE password_tokens SET used = 1 WHERE user_id = %s AND used = 0",
+        (user_id,),
     )
 
 

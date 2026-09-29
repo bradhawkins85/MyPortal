@@ -37,7 +37,7 @@ class TestPermissionChecks:
                 "is_super_admin": False,
             }
             
-            with patch("app.repositories.company_memberships.user_has_permission") as mock_has_perm:
+            with patch("app.api.routes.bcp.user_has_company_permission") as mock_has_perm:
                 mock_has_perm.return_value = False
                 
                 # Should raise 403
@@ -68,7 +68,7 @@ class TestPermissionChecks:
                 "is_super_admin": False,
             }
             
-            with patch("app.repositories.company_memberships.user_has_permission") as mock_has_perm:
+            with patch("app.api.routes.bcp.user_has_company_permission") as mock_has_perm:
                 mock_has_perm.return_value = False
                 
                 # Should raise 403
@@ -99,7 +99,7 @@ class TestPermissionChecks:
                 "is_super_admin": False,
             }
             
-            with patch("app.repositories.company_memberships.user_has_permission") as mock_has_perm:
+            with patch("app.api.routes.bcp.user_has_company_permission") as mock_has_perm:
                 mock_has_perm.return_value = False
                 
                 # Should raise 403
@@ -162,7 +162,7 @@ class TestPermissionChecks:
                 "is_super_admin": False,
             }
             
-            with patch("app.repositories.company_memberships.user_has_permission") as mock_has_perm:
+            with patch("app.api.routes.bcp.user_has_company_permission") as mock_has_perm:
                 mock_has_perm.return_value = True
                 
                 # Should succeed
@@ -284,6 +284,14 @@ class TestRiskCRUD:
             patch(
                 "app.api.routes.bcp._require_bcp_edit",
                 new=AsyncMock(return_value=({"id": 7}, 42)),
+            ),
+            patch(
+                "app.api.routes.bcp.bcp_repo.get_plan_by_company",
+                new=AsyncMock(return_value={"id": 3, "company_id": 42}),
+            ),
+            patch(
+                "app.api.routes.bcp.bcp_repo.get_risk_by_id",
+                new=AsyncMock(return_value={"id": 1, "plan_id": 3}),
             ),
             patch(
                 "app.api.routes.bcp.bcp_repo.delete_risk",

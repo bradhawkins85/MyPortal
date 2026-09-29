@@ -245,9 +245,18 @@ def test_baremetal_coordinator_reports_progress_while_upgrading(tmp_path):
 
     subprocess.run(
         ["bash", str(scripts / "process_update_flag.sh")], check=True, capture_output=True, text=True,
-        env={**os.environ, "MYPORTAL_SHARED_ROOT": str(tmp_path / "none"), "SYSTEM_UPDATE_PROGRESS_INTERVAL": "0.2"},
+        env={
+            **os.environ, "MYPORTAL_SHARED_ROOT": str(tmp_path / "none"),
+            "MYPORTAL_UPDATER_STATE_DIR": str(tmp_path / "updater"),
+            "SYSTEM_UPDATE_PROGRESS_INTERVAL": "0.2",
+        },
     )
 
+    # Root-only artifacts (lock, captured output) never touch the
+    # service-writable state directory; output reaches the helper on stdin.
+    assert sorted(p.name for p in state.iterdir()) == []
+    assert oct((tmp_path / "updater").stat().st_mode & 0o777) == "0o700"
+    assert not list((tmp_path / "updater").glob("system-update-output.*"))
     reports = log.read_text().splitlines()
     assert reports[0] == f"{update_id} running|"
     assert any(line.startswith(f"{update_id} running|step-one") for line in reports[1:-1])

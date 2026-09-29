@@ -82,12 +82,21 @@ async def first_accessible_company_id(user: Mapping[str, Any]) -> int | None:
 
     try:
         raw_company = user.get("company_id")
-        if raw_company is not None:
-            return int(raw_company)
+        preferred = int(raw_company) if raw_company is not None else None
     except (TypeError, ValueError):
-        return None
+        preferred = None
 
     companies = await list_accessible_companies(user)
+    # Only honour the stored default company when the user can actually
+    # access it; otherwise a stale or tampered value would open a session in
+    # another tenant.
+    if preferred is not None:
+        for company in companies:
+            try:
+                if int(company.get("company_id")) == preferred:
+                    return preferred
+            except (TypeError, ValueError):
+                continue
     for company in companies:
         company_id = company.get("company_id")
         try:

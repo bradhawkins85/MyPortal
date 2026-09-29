@@ -42,6 +42,19 @@ def test_malformed_missing_and_oversized_rejected():
     with pytest.raises(DmarcInputError): parse_aggregate_xml(b"<feedback/>")
     with pytest.raises(DmarcInputError): unpack_attachment("a.xml", XML, IngestionLimits(compressed_bytes=10))
 
+def test_gzip_bomb_rejected_without_full_expansion():
+    bomb = gzip.compress(b"\x00" * (8 * 1024 * 1024))
+    with pytest.raises(DmarcInputError, match="exceeds limit"):
+        unpack_attachment("report.xml.gz", bomb, IngestionLimits(expanded_bytes=1024))
+
+
+def test_gzip_concatenated_members_and_invalid_data():
+    assert unpack_attachment("r.xml.gz", gzip.compress(XML[:10]) + gzip.compress(XML[10:]))[0][1] == XML
+    with pytest.raises(DmarcInputError, match="Invalid gzip"):
+        unpack_attachment("r.xml.gz", b"not gzip")
+    with pytest.raises(DmarcInputError, match="Invalid gzip"):
+        unpack_attachment("r.xml.gz", gzip.compress(XML)[:-12])
+
 def test_reporting_address_does_not_expose_company_id():
     assert reporting_address("abcdefghijklmnop", "Reports.Example") == "DMARC+abcdefghijklmnop@reports.example"
 

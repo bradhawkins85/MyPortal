@@ -45,3 +45,50 @@ def test_blank_history_dir_setting_uses_default(monkeypatch, tmp_path):
 
     monkeypatch.setenv("MYPORTAL_SYSTEM_UPDATE_HISTORY_DIR", "/srv/history")
     assert system_update_history._resolve_history_dir(tmp_path) == Path("/srv/history")
+
+
+def test_symlinked_record_is_never_read_or_rewritten(monkeypatch, tmp_path):
+    import json
+
+    import pytest
+
+    history = tmp_path / "history"
+    history.mkdir()
+    monkeypatch.setattr(system_update_history, "_HISTORY_DIR", history)
+    update_id = "0b5a3c1e-9a0f-4d7e-8a3b-5d2f1c0e9a7b"
+    secret = tmp_path / "root-only.json"
+    secret.write_text(json.dumps({"id": update_id, "status": "running", "output": "secret"}))
+    (history / f"{update_id}.json").symlink_to(secret)
+
+    with pytest.raises(KeyError):
+        system_update_history.get(update_id)
+    with pytest.raises(KeyError):
+        system_update_history.update(update_id, status="succeeded", output="x")
+    assert system_update_history.list_updates() == []
+    assert "secret" in secret.read_text()
+
+
+def test_symlinked_history_directory_is_refused(monkeypatch, tmp_path):
+    import pytest
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    link = tmp_path / "history"
+    link.symlink_to(elsewhere)
+    monkeypatch.setattr(system_update_history, "_HISTORY_DIR", link)
+
+    with pytest.raises(OSError):
+        system_update_history.create_pending(
+            requested_at="2026-09-22T01:00:00+00:00", target_revision="abc", source="manual",
+        )
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_records_are_private_to_the_writer(monkeypatch, tmp_path):
+    monkeypatch.setattr(system_update_history, "_HISTORY_DIR", tmp_path)
+    record = system_update_history.create_pending(
+        requested_at="2026-09-22T01:00:00+00:00", target_revision="abc", source="manual",
+    )
+    path = tmp_path / f"{record['id']}.json"
+    assert oct(path.stat().st_mode & 0o777) == "0o600"
+    assert [p.name for p in tmp_path.iterdir()] == [path.name]

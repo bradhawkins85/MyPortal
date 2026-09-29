@@ -438,7 +438,7 @@ async def view_cart(
         sku = str(product.get("sku") or item.get("product_sku") or "")
         vendor_sku = product.get("vendor_sku")
         description = product.get("description")
-        description_html = main_module.sanitize_rich_text(str(description or "")).html
+        description_html = main_module.sanitize_rich_text(str(description or ""), allow_embeds=True).html
         image_url = product.get("image_url")
         subscription_category_id = product.get("subscription_category_id")
         stored_coterm_enabled = _is_truthy(item.get("coterm_enabled"))

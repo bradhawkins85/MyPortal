@@ -86,6 +86,14 @@ _INLINE_IMAGE_EXTENSIONS = {
 
 _BLOCKLIST_THUMBNAIL_SIZE = (256, 256)
 
+# Extensions that browsers may render as active content (HTML/SVG/XML/script).
+# Stored files never keep these so a guessed media type cannot turn an
+# attachment into script on the portal origin.
+_DANGEROUS_STORED_EXTENSIONS = {
+    "html", "htm", "xhtml", "xht", "svg", "svgz", "xml", "xsl", "xslt",
+    "rdf", "shtml", "js", "mjs",
+}
+
 
 def create_blocklist_thumbnail(contents: bytes, mime_type: str | None) -> tuple[bytes | None, str | None]:
     """Create a small, inert JPEG preview for blocklisted raster images."""
@@ -140,6 +148,8 @@ def _generate_secure_filename(original_filename: str) -> str:
         # Limit extension length and sanitize
         extension = extension[:10]
         extension = "".join(c for c in extension if c.isalnum())
+        if extension in _DANGEROUS_STORED_EXTENSIONS:
+            extension = "bin"
     
     # Generate random filename
     random_name = secrets.token_urlsafe(32)

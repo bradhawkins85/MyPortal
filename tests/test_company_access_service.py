@@ -194,9 +194,27 @@ async def test_super_admin_db_pool_not_initialised_on_second_call_returns_empty(
 @pytest.mark.anyio
 async def test_first_accessible_company_id_from_user_dict(monkeypatch):
     user = {"id": 1, "is_super_admin": False, "company_id": 99}
+    monkeypatch.setattr(
+        user_company_repo,
+        "list_companies_for_user",
+        AsyncMock(return_value=[{"company_id": 7}, {"company_id": 99}]),
+    )
 
     result = await company_access_service.first_accessible_company_id(user)
     assert result == 99
+
+
+@pytest.mark.anyio
+async def test_first_accessible_company_id_ignores_inaccessible_default(monkeypatch):
+    user = {"id": 1, "is_super_admin": False, "company_id": 99}
+    monkeypatch.setattr(
+        user_company_repo,
+        "list_companies_for_user",
+        AsyncMock(return_value=[{"company_id": 7}]),
+    )
+
+    result = await company_access_service.first_accessible_company_id(user)
+    assert result == 7
 
 
 @pytest.mark.anyio

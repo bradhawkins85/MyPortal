@@ -1135,8 +1135,15 @@
     if (!confirmRemoval) {
       return;
     }
+    const currentPassword = await promptForPassword(`Enter your current password to remove "${device.name}"`);
+    if (!currentPassword) {
+      return;
+    }
     try {
-      await requestJson(`/auth/totp/${device.id}`, { method: 'DELETE' });
+      await requestJson(`/auth/totp/${device.id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ current_password: currentPassword }),
+      });
       totpDevices = totpDevices.filter((entry) => entry.id !== device.id);
       renderTotpDevices();
     } catch (error) {
@@ -1173,12 +1180,20 @@
       }
 
       const nameValue = verifyName ? verifyName.value.trim() : '';
+      let currentPassword = null;
+      if (totpDevices.length > 0) {
+        currentPassword = await promptForPassword('Enter your current password to add this authenticator');
+        if (!currentPassword) {
+          return;
+        }
+      }
       try {
         const response = await requestJson('/auth/totp/verify', {
           method: 'POST',
           body: JSON.stringify({
             code: normalisedCode,
             name: nameValue || null,
+            current_password: currentPassword,
           }),
         });
         totpDevices.push({ id: response.id, name: response.name || 'Authenticator' });

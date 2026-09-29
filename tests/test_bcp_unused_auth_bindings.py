@@ -20,6 +20,14 @@ async def test_delete_distribution_entry_still_awaits_auth_before_delete(monkeyp
     delete_entry = AsyncMock(return_value=True)
 
     monkeypatch.setattr(bcp, "_require_bcp_edit", require_edit)
+    monkeypatch.setattr(
+        bcp.bcp_repo, "get_plan_by_company", AsyncMock(return_value={"id": 9})
+    )
+    monkeypatch.setattr(
+        bcp.bcp_repo,
+        "get_distribution_entry_by_id",
+        AsyncMock(return_value={"id": 55, "plan_id": 9}),
+    )
     monkeypatch.setattr(bcp.bcp_repo, "delete_distribution_entry", delete_entry)
 
     response = await bcp.delete_distribution_entry(request, 55)

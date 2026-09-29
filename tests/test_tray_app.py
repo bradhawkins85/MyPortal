@@ -1466,10 +1466,10 @@ def test_tray_submit_ticket_passes_external_reference(monkeypatch, run):
     from app.api.routes import tray as tray_routes
     from app.schemas.tray import TrayTicketSubmitRequest
 
-    async def fake_get_device_by_uid(uid):
+    async def fake_get_device_by_auth_hash(token_hash):
         return {
             "id": 1,
-            "device_uid": uid,
+            "device_uid": "device-1",
             "company_id": None,
             "asset_id": None,
             "status": "active",
@@ -1491,7 +1491,7 @@ def test_tray_submit_ticket_passes_external_reference(monkeypatch, run):
         return {"id": 77, "ticket_number": "TKT-77"}
 
     monkeypatch.setattr(
-        tray_routes.tray_repo, "get_device_by_uid", fake_get_device_by_uid
+        tray_routes.tray_repo, "get_device_by_auth_hash", fake_get_device_by_auth_hash
     )
     monkeypatch.setattr(
         tray_routes.users_repo, "get_user_by_email", fake_get_user_by_email
@@ -1511,7 +1511,7 @@ def test_tray_submit_ticket_passes_external_reference(monkeypatch, run):
     )
 
     class RequestWithoutAuth:
-        headers = {}
+        headers = {"Authorization": "Bearer device-token"}
 
     result = run(
         tray_routes.tray_submit_ticket(
