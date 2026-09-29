@@ -12,9 +12,28 @@ from pathlib import Path
 from typing import Any
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_shared_root = os.getenv("MYPORTAL_SHARED_ROOT")
-if not _shared_root and str(_PROJECT_ROOT).startswith("/opt/myportal/"):
-    _shared_root = "/opt/myportal/shared"
+_DEFAULT_SHARED_ROOT = Path("/opt/myportal/shared")
+
+
+def _default_shared_root(project_root: Path, default_shared: Path) -> str | None:
+    """Locate the shared state tree when MYPORTAL_SHARED_ROOT is not set.
+
+    The application runs from a release below /opt/myportal, but the update
+    coordinator imports this module from the control checkout, which older
+    installations cloned into /opt/myportal itself. Both must resolve to the
+    same history directory, so an existing shared state tree wins over the
+    checkout's own var/ directory.
+    """
+    if str(project_root).startswith(f"{default_shared.parent}/"):
+        return str(default_shared)
+    if (default_shared / "state").is_dir():
+        return str(default_shared)
+    return None
+
+
+_shared_root = os.getenv("MYPORTAL_SHARED_ROOT") or _default_shared_root(
+    _PROJECT_ROOT, _DEFAULT_SHARED_ROOT
+)
 _default_history_dir = (
     Path(_shared_root) / "state/system-updates"
     if _shared_root else _PROJECT_ROOT / "var/state/system-updates"
