@@ -198,8 +198,11 @@ async def update_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     data = payload.model_dump(exclude_unset=True)
-    if "is_super_admin" in data and not current_user.get("is_super_admin"):
-        data.pop("is_super_admin")
+    if not current_user.get("is_super_admin"):
+        # A user's default company decides which tenant their session opens
+        # in, so only super admins may change it.
+        data.pop("is_super_admin", None)
+        data.pop("company_id", None)
     updated = await user_repo.update_user(user_id, **data)
     metadata: dict[str, object] | None = None
     if "is_super_admin" in data and bool(user.get("is_super_admin")) != bool(data["is_super_admin"]):

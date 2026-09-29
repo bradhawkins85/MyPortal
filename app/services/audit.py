@@ -7,6 +7,7 @@ from fastapi import Request
 
 from app.core.logging import get_request_context, log_audit_event, log_error
 from app.repositories import audit_logs as audit_repo
+from app.security.client_ip import get_client_ip
 from app.services.audit_diff import diff as compute_diff
 from app.services.audit_diff import redact
 
@@ -60,12 +61,9 @@ def _determine_event_type(action: str) -> str:
 def _extract_ip(request: Request | None) -> str | None:
     if request is None:
         return None
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return None
+    # Honour forwarded headers only from TRUSTED_PROXIES so the recorded
+    # address cannot be spoofed by the caller.
+    return get_client_ip(request, default=None)
 
 
 def _extract_request_id(request: Request | None) -> str | None:

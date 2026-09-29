@@ -128,6 +128,13 @@ class TOTPSetupResponse(BaseModel):
 class TOTPVerifyRequest(BaseModel):
     code: str
     name: Optional[str] = None
+    # Required when the account already has an authenticator, so a stolen
+    # session cannot silently add a second factor the attacker controls.
+    current_password: Optional[str] = Field(default=None, max_length=128)
+
+
+class TOTPDeleteRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
 
 
 class TOTPAuthenticator(BaseModel):

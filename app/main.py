@@ -105,7 +105,7 @@ from app.api.routes import (
     features as features_api,
     defender as defender_api,
 )
-from app.api.dependencies.auth import require_super_admin
+from app.api.dependencies.auth import is_user_active, require_super_admin
 from uuid import uuid4
 
 from app.core.config import get_settings, get_templates_config
@@ -719,8 +719,10 @@ app.add_middleware(
 _rate_limit_redis = get_redis_client()
 endpoint_limiter = EndpointRateLimiter(redis_client=_rate_limit_redis)
 
-# Login: 5 attempts per 15 minutes per IP
-endpoint_limiter.add_limit("/api/auth/login", "POST", limit=5, window_seconds=900)
+# Login: per-IP ceiling on the real login route (the router is mounted at
+# /auth). The per-email counter in the login handler still applies on top.
+endpoint_limiter.add_limit("/auth/login", "POST", limit=20, window_seconds=900)
+endpoint_limiter.add_limit("/auth/register", "POST", limit=10, window_seconds=3600)
 endpoint_limiter.add_limit(
     "/api/tray/ticket-form/fallback", "POST", limit=10, window_seconds=3600
 )
@@ -729,18 +731,16 @@ endpoint_limiter.add_limit("/auth/passkeys/authenticate/verify", "POST", limit=1
 endpoint_limiter.add_limit("/auth/passkeys/register/options", "POST", limit=10, window_seconds=300)
 endpoint_limiter.add_limit("/auth/passkeys/register/verify", "POST", limit=10, window_seconds=300)
 
-# Password reset: 3 requests per hour per email
+# Password reset: 3 requests per hour per client IP
 def _password_reset_key(request: Request) -> str:
-    """Generate rate limit key based on email from query params or IP fallback."""
-    try:
-        email = request.query_params.get("email")
-        if email:
-            return f"reset:{email.lower()}"
-        # For POST requests with JSON bodies the body is consumed by FastAPI
-        # before middleware runs, so fall back to the validated client IP.
-        return get_client_ip(request, default="anonymous") or "anonymous"
-    except Exception:
-        return get_client_ip(request, default="anonymous") or "anonymous"
+    """Key reset requests on the validated client IP.
+
+    The handler reads the email from the request body, so keying on any
+    caller-supplied value (such as a query parameter) would let each request
+    pick a fresh bucket.
+    """
+    ip = get_client_ip(request, default="anonymous") or "anonymous"
+    return f"reset:{ip}"
 
 endpoint_limiter.add_limit(
     "/api/auth/password/forgot",
@@ -777,11 +777,16 @@ for path in upload_paths:
 # General HTTP traffic: per authenticated browser session, with IP fallback for
 # unauthenticated requests. Keying authenticated traffic by IP caused busy NATs,
 # office networks, and reverse proxies to share a single bucket across many users.
-def _general_rate_limit_key(request: Request) -> str:
-    session_token = request.cookies.get(settings.session_cookie_name)
-    if session_token:
-        digest = hashlib.sha256(session_token.encode("utf-8")).hexdigest()
-        return f"session:{digest}"
+# Only a session that actually validates earns its own bucket; otherwise a
+# client could send a random cookie value on every request to dodge the limit.
+async def _general_rate_limit_key(request: Request) -> str:
+    if request.cookies.get(settings.session_cookie_name):
+        try:
+            session = await session_manager.load_session(request)
+        except Exception:  # pragma: no cover - fall back to IP keying
+            session = None
+        if session is not None:
+            return f"session:{session.id}"
     ip = get_client_ip(request, default="anonymous") or "anonymous"
     return f"ip:{ip}"
 
@@ -1327,6 +1332,9 @@ async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] 
         return None, RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
+        return None, RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    if not is_user_active(user):
+        await session_manager.revoke_session(session)
         return None, RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
     if (
         request.url.path not in TOTP_ENROLLMENT_ALLOWED_PAGE_PATHS
@@ -2525,6 +2533,11 @@ async def _get_optional_user(
     request.state.session = session
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
+        return None, None
+    if not is_user_active(user):
+        await session_manager.revoke_session(session)
+        return None, None
+    if await _user_requires_totp_enrollment(user):
         return None, None
     user = await role_switching.apply_selected_role(request, user, session)
     request.state.active_company_id = session.active_company_id
@@ -6611,6 +6624,7 @@ async def admin_users_action(request: Request, user_id: int, action: str):
 
     if action == "deactivate":
         updated = await user_repo.update_user(user_id, is_active=0)
+        await auth_repo.deactivate_sessions_for_user(user_id)
         await audit_service.record(
             action="user.deactivate",
             request=request,

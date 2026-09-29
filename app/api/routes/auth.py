@@ -52,6 +52,7 @@ from app.schemas.auth import (
     TOTPAuthenticator,
     TOTPListResponse,
     TOTPSetupResponse,
+    TOTPDeleteRequest,
     TOTPVerifyRequest,
 )
 from app.schemas.users import UserResponse
@@ -873,6 +874,10 @@ async def password_reset(
 
     await user_repo.set_user_password(record["user_id"], payload.password)
     await auth_repo.mark_password_reset_token_used(payload.token)
+    # A reset is how users recover from a compromised account, so end every
+    # existing session and retire any other outstanding reset links.
+    await auth_repo.invalidate_password_reset_tokens_for_user(int(record["user_id"]))
+    await auth_repo.deactivate_sessions_for_user(int(record["user_id"]))
     await audit_service.record(
         action="auth.password.reset",
         request=request,
@@ -905,6 +910,12 @@ async def change_password(
         )
 
     await user_repo.set_user_password(current_user["id"], payload.new_password)
+    session = getattr(request.state, "session", None)
+    await auth_repo.deactivate_sessions_for_user(
+        int(current_user["id"]),
+        except_session_id=getattr(session, "id", None),
+    )
+    await auth_repo.invalidate_password_reset_tokens_for_user(int(current_user["id"]))
     await audit_service.record(
         action="auth.password.change",
         request=request,
@@ -974,6 +985,9 @@ async def verify_totp(
     if not secret:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No pending TOTP secret")
 
+    if await auth_repo.user_has_totp_authenticator(int(current_user["id"])):
+        _require_password_reauthentication(current_user, payload.current_password or "")
+
     totp = pyotp.TOTP(secret)
     if not totp.verify(payload.code, valid_window=1):
         await audit_service.record(
@@ -1010,9 +1024,11 @@ async def verify_totp(
 )
 async def delete_totp(
     authenticator_id: int,
+    payload: TOTPDeleteRequest,
     request: Request,
     current_user: dict = Depends(get_current_user),
 ) -> Response:
+    _require_password_reauthentication(current_user, payload.current_password)
     if await auth_repo.count_totp_authenticators(current_user["id"]) <= 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

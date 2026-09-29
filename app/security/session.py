@@ -127,6 +127,18 @@ class SessionManager:
         session.csrf_token = new_token
         return session
 
+    async def rotate_session_token(self, session: SessionData) -> SessionData:
+        """Issue a new raw token for an existing session.
+
+        Only the digest of a session token is stored, so a session restored
+        from its database record has no usable raw token. Rotating gives the
+        browser a fresh token while keeping the session's state.
+        """
+        new_token = secrets_token()
+        await auth_repo.rotate_session_token(session.id, new_token)
+        session.session_token = new_token
+        return session
+
     async def store_pending_totp_secret(self, session: SessionData, secret: str) -> None:
         encrypted = encrypt_secret(secret)
         await auth_repo.update_session(session.id, pending_totp_secret=encrypted)

@@ -1457,6 +1457,21 @@ async def get_staff(
 ):
     if current_user is None and api_key_record is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    # Same policy as listing a company's staff: API keys, super admins and
+    # helpdesk technicians only. Staff records carry PII and the helpdesk
+    # identity-verification code.
+    if current_user is not None and not current_user.get("is_super_admin"):
+        try:
+            user_id_int = int(current_user.get("id"))
+        except (TypeError, ValueError):
+            user_id_int = None
+        if user_id_int is None or not await membership_repo.user_has_permission(
+            user_id_int, "helpdesk.technician"
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions to view staff",
+            )
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
