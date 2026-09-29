@@ -12,7 +12,7 @@ from .routes import router as message_templates_router
 
 PACK = FeaturePack(
     slug="message_templates",
-    version="1.0.0",
+    version="1.0.1",
     routers=(message_templates_router,),
 )
 
