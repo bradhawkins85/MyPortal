@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import re
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from html import escape
 from io import BytesIO
@@ -80,6 +82,41 @@ def _totp_qr_code_data_uri(provisioning_uri: str) -> str:
     image.save(buffer, format="PNG")
     encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
     return f"data:image/png;base64,{encoded}"
+
+def _matching_totp_step(
+    secret: str,
+    code: str | None,
+    last_used_step: int | None,
+    *,
+    at: float | None = None,
+) -> int | None:
+    """Return the time-step *code* is valid for, or ``None``.
+
+    Accepts the current step and one either side (clock drift), but never a
+    step at or before *last_used_step*, so an accepted code cannot be
+    replayed while it is still inside its validity window.
+    """
+    candidate = str(code or "").strip()
+    if not candidate:
+        return None
+    totp = pyotp.TOTP(secret)
+    current = int(at if at is not None else time.time()) // totp.interval
+    floor = int(last_used_step) if last_used_step is not None else None
+    for step in (current - 1, current, current + 1):
+        if floor is not None and step <= floor:
+            continue
+        if hmac.compare_digest(totp.generate_otp(step), candidate):
+            return step
+    return None
+
+
+async def _verify_and_claim_totp(devices: list[dict[str, Any]], code: str | None) -> bool:
+    for device in devices:
+        step = _matching_totp_step(device["secret"], code, device.get("last_used_step"))
+        if step is not None and await auth_repo.claim_totp_step(int(device["id"]), step):
+            return True
+    return False
+
 
 def _html_to_text(html: str) -> str:
     text = re.sub(r"<\s*br\s*/?\s*>", "\n", html, flags=re.IGNORECASE)
@@ -638,12 +675,7 @@ async def login(
                 metadata={"authentication_method": "password_totp", "outcome": "failure", "reason": "totp_required"},
             )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="TOTP code required")
-        verified = False
-        for device in totp_devices:
-            totp = pyotp.TOTP(device["secret"])
-            if totp.verify(payload.totp_code, valid_window=1):
-                verified = True
-                break
+        verified = await _verify_and_claim_totp(totp_devices, payload.totp_code)
         if not verified:
             _log_login_failure(request, payload.email, "invalid_totp")
             await audit_service.record(
@@ -993,8 +1025,8 @@ async def verify_totp(
     if await auth_repo.user_has_totp_authenticator(int(current_user["id"])):
         _require_password_reauthentication(current_user, payload.current_password or "")
 
-    totp = pyotp.TOTP(secret)
-    if not totp.verify(payload.code, valid_window=1):
+    enrolment_step = _matching_totp_step(secret, payload.code, None)
+    if enrolment_step is None:
         await audit_service.record(
             action="auth.mfa.verify",
             request=request,
@@ -1006,8 +1038,9 @@ async def verify_totp(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid TOTP code")
 
     name = payload.name or "Authenticator"
+    # Record the enrolment code's step so it cannot also be used to sign in.
     authenticator = await auth_repo.create_totp_authenticator(
-        user_id=current_user["id"], name=name, secret=secret
+        user_id=current_user["id"], name=name, secret=secret, last_used_step=enrolment_step
     )
     await session_manager.clear_pending_totp_secret(session)
     await audit_service.record_create(

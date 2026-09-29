@@ -9,3 +9,7 @@
 -- their raw value, so a stored digest can never be replayed as a token.
 ALTER TABLE password_tokens ADD COLUMN IF NOT EXISTS token_hashed TINYINT(1) NOT NULL DEFAULT 0;
 ALTER TABLE account_verification_tokens ADD COLUMN IF NOT EXISTS token_hashed TINYINT(1) NOT NULL DEFAULT 0;
+-- The last TOTP time-step accepted for each authenticator. Codes for that
+-- step or any earlier one are rejected so a captured code cannot be replayed
+-- inside its validity window.
+ALTER TABLE user_totp_authenticators ADD COLUMN IF NOT EXISTS last_used_step BIGINT NULL;

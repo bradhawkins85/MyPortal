@@ -326,14 +326,39 @@ async def invalidate_account_verification_tokens_for_user(user_id: int) -> None:
 
 async def get_totp_authenticators(user_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
-        "SELECT id, name, secret FROM user_totp_authenticators WHERE user_id = %s",
+        "SELECT id, name, secret, last_used_step FROM user_totp_authenticators WHERE user_id = %s",
         (user_id,),
     )
     decoded: list[dict[str, Any]] = []
     for row in rows:
         secret = decrypt_secret(row["secret"])
-        decoded.append({"id": row["id"], "name": row["name"], "secret": secret})
+        decoded.append(
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "secret": secret,
+                "last_used_step": row.get("last_used_step"),
+            }
+        )
     return decoded
+
+
+async def claim_totp_step(authenticator_id: int, step: int) -> bool:
+    """Record *step* as used for an authenticator, refusing replays.
+
+    The update only succeeds when *step* is newer than the last accepted
+    step, so a code (or an earlier one) cannot be used twice, even by two
+    concurrent requests.
+    """
+    updated = await db.execute_rowcount(
+        """
+        UPDATE user_totp_authenticators
+        SET last_used_step = %s
+        WHERE id = %s AND (last_used_step IS NULL OR last_used_step < %s)
+        """,
+        (step, authenticator_id, step),
+    )
+    return updated > 0
 
 
 async def count_totp_authenticators(user_id: int) -> int:
@@ -351,15 +376,15 @@ async def user_has_totp_authenticator(user_id: int) -> bool:
 
 
 async def create_totp_authenticator(
-    *, user_id: int, name: str, secret: str
+    *, user_id: int, name: str, secret: str, last_used_step: int | None = None
 ) -> dict[str, Any]:
     encrypted = encrypt_secret(secret)
     await db.execute(
         """
-        INSERT INTO user_totp_authenticators (user_id, name, secret)
-        VALUES (%s, %s, %s)
+        INSERT INTO user_totp_authenticators (user_id, name, secret, last_used_step)
+        VALUES (%s, %s, %s, %s)
         """,
-        (user_id, name, encrypted),
+        (user_id, name, encrypted, last_used_step),
     )
     rows = await db.fetch_all(
         "SELECT id, name, secret FROM user_totp_authenticators WHERE user_id = %s ORDER BY id DESC LIMIT 1",
