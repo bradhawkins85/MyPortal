@@ -220,7 +220,7 @@ ensure_private_dir
   trap 'rm -f "$output_file"' EXIT
   progress_pid=""
   if [[ -n "$update_id" ]]; then
-    report_update "$update_id" running </dev/null
+    report_update "$update_id" running </dev/null || echo "Warning: could not record that update ${update_id} is running." >&2
     # Publish the output so far while the upgrade runs, so administrators can
     # follow it live from the System updates page.
     (
@@ -247,7 +247,7 @@ ensure_private_dir
     stop_progress_reports
     rm -f "$UPDATE_FLAG_FILE"
     if [[ -n "$update_id" ]]; then
-      report_update "$update_id" succeeded --output-file - <"$output_file"
+      report_update "$update_id" succeeded --output-file - <"$output_file" || echo "Warning: could not record the result of update ${update_id}." >&2
     fi
     echo "Upgrade helper completed successfully; cleared $UPDATE_FLAG_FILE" >&2
   else
@@ -257,7 +257,7 @@ ensure_private_dir
     # flag prevents an interrupted/failed update from looping forever.
     rm -f "$UPDATE_FLAG_FILE"
     if [[ -n "$update_id" ]]; then
-      report_update "$update_id" failed --output-file - --error "Upgrade helper exited with status ${status}." <"$output_file"
+      report_update "$update_id" failed --output-file - --error "Upgrade helper exited with status ${status}." <"$output_file" || echo "Warning: could not record the result of update ${update_id}." >&2
     fi
     echo "Error: upgrade helper exited with status ${status}. Cleared the consumed update flag." >&2
     exit "$status"
