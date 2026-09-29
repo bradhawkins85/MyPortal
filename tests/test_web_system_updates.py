@@ -615,3 +615,37 @@ def test_baremetal_coordinator_upgrades_even_when_reporting_fails(tmp_path):
     assert marker.exists()
     assert not flag.exists()
     assert "could not record" in result.stderr
+
+
+def _verify_release_sources(release: Path) -> subprocess.CompletedProcess[str]:
+    script = (ROOT / "scripts/upgrade.sh").read_text()
+    start = script.index("verify_release_sources() {")
+    end = script.index("\n}\n", script.index("\nPY\n", start)) + 3
+    program = script[start:end] + f"verify_release_sources {str(release)!r}\n"
+    return subprocess.run(["bash", "-c", program], text=True, capture_output=True)
+
+
+def test_upgrade_refuses_a_release_with_syntax_errors(tmp_path):
+    release = tmp_path / "6b54065a"
+    (release / "app/services").mkdir(parents=True)
+    (release / "app/services/ok.py").write_text("x = 1\n")
+    (release / "app/services/realtime.py").write_text(
+        "def f(v):\n    try:\n        int(v)\n    except ValueError:\n        continue\n"
+    )
+    result = _verify_release_sources(release)
+    assert result.returncode == 1
+    assert "app/services/realtime.py:5: 'continue' not properly in loop" in result.stderr
+    assert not list(release.rglob("*.pyc"))
+
+
+def test_upgrade_accepts_a_release_that_compiles(tmp_path):
+    release = tmp_path / "release"
+    (release / "app").mkdir(parents=True)
+    (release / "app/main.py").write_text("x = 1\n")
+    (release / "manage.py").write_text("print('ok')\n")
+    assert _verify_release_sources(release).returncode == 0
+
+
+def test_repository_sources_compile():
+    release_result = _verify_release_sources(ROOT)
+    assert release_result.returncode == 0, release_result.stderr
