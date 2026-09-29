@@ -162,6 +162,19 @@ async def _resolve_ticket_actor(
     )
 
 
+async def _resolve_integration_ticket_actor(
+    actor: dict[str, Any] = Depends(_resolve_ticket_actor),
+) -> dict[str, Any]:
+    """Resolve an actor for integration webhooks (API key or helpdesk staff)."""
+    user = actor.get("user")
+    if user is not None and not await _has_helpdesk_permission(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Helpdesk technician privileges or an API key are required",
+        )
+    return actor
+
+
 def _encode_ticket_cursor(
     updated_at: datetime | None, ticket_id: int | None
 ) -> str | None:
@@ -814,7 +827,7 @@ async def create_ticket(
 async def create_tacticalrmm_ticket(
     payload: TacticalRMMTicketCreate,
     request: Request,
-    actor: dict = Depends(_resolve_ticket_actor),
+    actor: dict = Depends(_resolve_integration_ticket_actor),
 ) -> TicketDetail:
     """Create a ticket from TRMM identifiers rather than MyPortal IDs."""
     alert_id = str(payload.alert_id).strip()
@@ -926,7 +939,7 @@ async def create_tacticalrmm_ticket(
 async def resolve_tacticalrmm_ticket(
     payload: TacticalRMMTicketResolve,
     request: Request,
-    actor: dict = Depends(_resolve_ticket_actor),
+    actor: dict = Depends(_resolve_integration_ticket_actor),
 ) -> TicketDetail:
     """Resolve the MyPortal ticket associated with a resolved TRMM alert."""
     alert_id = str(payload.alert_id).strip()
