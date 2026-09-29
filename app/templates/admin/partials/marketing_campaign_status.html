@@ -1,0 +1,6 @@
+{% set _status = campaign.status %}
+{% if _status == 'draft' %}<span class="status status--neutral">Draft</span>
+{% elif _status == 'sending' %}<span class="status status--info">Sending</span>
+{% elif _status == 'completed' %}<span class="status status--success">Completed</span>
+{% elif _status == 'cancelled' %}<span class="status status--danger">Cancelled</span>
+{% else %}<span class="status status--neutral">{{ _status }}</span>{% endif %}

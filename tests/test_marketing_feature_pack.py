@@ -24,6 +24,20 @@ EXPECTED = {
     ("POST", "/admin/marketing/pages/{page_id}/delete"),
     ("POST", "/admin/marketing/pages/{page_id}/sections"),
     ("POST", "/admin/marketing/sections/{section_id}/delete"),
+    ("GET", "/admin/marketing/campaigns"),
+    ("GET", "/admin/marketing/campaigns/new"),
+    ("POST", "/admin/marketing/campaigns"),
+    ("GET", "/admin/marketing/campaigns/{campaign_id}"),
+    ("GET", "/admin/marketing/campaigns/{campaign_id}/edit"),
+    ("POST", "/admin/marketing/campaigns/{campaign_id}"),
+    ("GET", "/admin/marketing/campaigns/{campaign_id}/preview"),
+    ("POST", "/admin/marketing/campaigns/{campaign_id}/test"),
+    ("POST", "/admin/marketing/campaigns/{campaign_id}/send"),
+    ("POST", "/admin/marketing/campaigns/{campaign_id}/cancel"),
+    ("POST", "/admin/marketing/campaigns/{campaign_id}/delete"),
+    ("POST", "/admin/marketing/opt-outs/remove"),
+    ("GET", "/marketing/unsubscribe/{token}"),
+    ("POST", "/marketing/unsubscribe/{token}"),
 }
 
 

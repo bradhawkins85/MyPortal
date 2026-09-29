@@ -1538,6 +1538,57 @@ async def _find_existing_ticket_for_reply(
     return None
 
 
+async def _match_marketing_campaign_reply(
+    *,
+    subject: str,
+    from_email: str | None,
+    related_message_ids: list[str] | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Return ``(open reply ticket, campaign recipient)`` for a marketing email reply.
+
+    Sending a campaign never creates tickets; the first reply from a recipient
+    does, and later replies from them continue that ticket while it is open.
+    """
+
+    try:
+        from app.services import marketing_campaigns as marketing_campaigns_service
+
+        recipient = await marketing_campaigns_service.match_inbound_reply(
+            subject=subject,
+            from_email=from_email,
+            related_message_ids=related_message_ids,
+        )
+    except Exception as exc:  # pragma: no cover - never block mailbox imports
+        log_error("Marketing campaign reply lookup failed", error=str(exc))
+        return None, None
+    if not recipient:
+        return None, None
+    ticket_id = recipient.get("reply_ticket_id")
+    if ticket_id:
+        ticket = await tickets_repo.get_ticket(int(ticket_id))
+        if ticket and not _ticket_is_closed(ticket):
+            return ticket, recipient
+    return None, recipient
+
+
+async def _link_marketing_campaign_reply(
+    recipient: Mapping[str, Any] | None,
+    ticket: Mapping[str, Any] | None,
+    *,
+    is_new_ticket: bool,
+) -> None:
+    if not recipient or not isinstance(ticket, Mapping) or ticket.get("id") is None:
+        return
+    try:
+        from app.services import marketing_campaigns as marketing_campaigns_service
+
+        await marketing_campaigns_service.link_reply(
+            recipient, int(ticket["id"]), new_ticket=is_new_ticket
+        )
+    except Exception as exc:  # pragma: no cover - the ticket itself already exists
+        log_error("Failed to link marketing campaign reply", ticket_id=ticket.get("id"), error=str(exc))
+
+
 async def _resolve_existing_reply_author_id(
     ticket: Mapping[str, Any],
     from_email: str | None,
@@ -1871,6 +1922,13 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 related_message_ids=related_message_ids,
                 message_body=body,
             )
+            campaign_reply: dict[str, Any] | None = None
+            if not existing_ticket:
+                existing_ticket, campaign_reply = await _match_marketing_campaign_reply(
+                    subject=subject,
+                    from_email=from_email_addr,
+                    related_message_ids=related_message_ids,
+                )
             
             ticket: Mapping[str, Any] | None = None
             is_new_ticket = False
@@ -1898,7 +1956,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         assigned_user_id=None,
                         priority="normal",
                         status=None,
-                        category="email",
+                        category="marketing" if campaign_reply else "email",
                         module_slug="imap",
                         external_reference=_normalise_ticket_external_reference(message_id),
                         initial_reply_author_id=requester_id,
@@ -1952,6 +2010,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     error=error_text,
                 )
                 continue
+            await _link_marketing_campaign_reply(
+                campaign_reply, ticket, is_new_ticket=is_new_ticket
+            )
             ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
             if isinstance(ticket_id, int):
                 # For existing tickets (replies), always add a conversation entry

@@ -821,6 +821,9 @@ app.add_middleware(
     CSRFMiddleware,
     exempt_paths=(
         "/api/webhooks/smtp2go",
+        # Unsubscribe links authenticate with the recipient's unguessable
+        # token and must accept RFC 8058 one-click POSTs from mail clients.
+        "/marketing/unsubscribe/",
         "/api/integration-modules/uptimekuma/alerts",
         "/api/integration-modules/trello/webhook",
         "/api/integration-modules/xero/webhook",

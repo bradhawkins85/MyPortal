@@ -1326,6 +1326,25 @@ async def process_webhook_event(
             )
             return None
 
+        if reply_id is None:
+            # Marketing campaign emails are not ticket replies; update the
+            # campaign recipient and file the event under its tracking id.
+            try:
+                from app.services import marketing_campaigns as marketing_campaigns_service
+
+                campaign_tracking_id = await marketing_campaigns_service.record_smtp2go_event(
+                    smtp2go_message_id, internal_event_type, occurred_at
+                )
+            except Exception as campaign_exc:  # pragma: no cover - defensive
+                campaign_tracking_id = None
+                logger.warning(
+                    "Failed to record SMTP2Go event for marketing campaign",
+                    smtp2go_message_id=smtp2go_message_id,
+                    error=str(campaign_exc),
+                )
+            if campaign_tracking_id:
+                tracking_id = campaign_tracking_id
+
         # If we still don't have a tracking ID, fall back to a generated value to satisfy NOT NULL constraint
         if not tracking_id:
             tracking_id = f"smtp2go-{smtp2go_message_id or 'unknown'}"
