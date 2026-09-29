@@ -224,7 +224,7 @@
             </a>
           </li>
           {% endif %}
-          {% if has_authenticated_user %}
+          {% if has_authenticated_user and llm_search_available %}
           <li class="menu__item">
             <a href="/search" {% if current_path.startswith('/search') %}aria-current="page"{% endif %}>
               <span class="menu__icon" aria-hidden="true">

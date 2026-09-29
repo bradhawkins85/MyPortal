@@ -111,6 +111,14 @@ class ComponentAvailability:
 
 _availability = ComponentAvailability()
 
+RAG_COMPONENT_SLUG = "rag_index"
+
+
+def rag_available() -> bool:
+    """Return False when the RAG feature pack is disabled for this deployment."""
+
+    return get_component_availability().feature_pack_available(RAG_COMPONENT_SLUG)
+
 
 def configure_component_availability(
     *,

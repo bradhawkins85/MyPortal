@@ -2428,6 +2428,23 @@ async def list_modules() -> list[dict[str, Any]]:
     return result
 
 
+def llm_module_ready(module: Mapping[str, Any] | None) -> bool:
+    """Return True when the LLM (``ollama``) module is enabled and configured."""
+
+    if not module or not module.get("enabled"):
+        return False
+    settings = module.get("settings")
+    if not isinstance(settings, Mapping):
+        return False
+    return bool(str(settings.get("base_url") or "").strip())
+
+
+async def llm_available() -> bool:
+    """Return True when LLM-backed features such as AI search can run."""
+
+    return llm_module_ready(await get_module("ollama", redact=False))
+
+
 async def get_module_settings(slug: str) -> dict[str, Any] | None:
     module = await module_repo.get_module(slug)
     if not module:

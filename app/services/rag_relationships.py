@@ -12,6 +12,7 @@ from loguru import logger
 from app.core.config import get_settings
 from app.repositories import rag_relationships as rel_repo
 from app.services import modules as modules_service
+from app.services.component_availability import rag_available
 
 
 try:
@@ -141,7 +142,7 @@ def utcnow() -> datetime:
 
 async def on_document_indexed(document_id: int, *, content_changed: bool) -> int:
     settings = get_settings()
-    if not settings.enable_background_relationships:
+    if not settings.enable_background_relationships or not rag_available():
         return 0
     if not content_changed:
         return 0
@@ -394,7 +395,7 @@ def parse_relationship_response(value: Any, *, min_score: float) -> dict[str, An
 
 async def evaluate_next_batch(*, limit: int | None = None) -> int:
     settings = get_settings()
-    if not settings.enable_background_relationships:
+    if not settings.enable_background_relationships or not rag_available():
         return 0
     if await rel_repo.matching_paused() or _evaluator_in_backoff():
         return 0

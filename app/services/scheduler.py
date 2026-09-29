@@ -43,7 +43,7 @@ from app.services import value_templates
 from app.services import webhook_monitor
 from app.services import system_update_history
 from app.services.deployment_plan import build_deployment_plan
-from app.services.component_availability import get_component_availability
+from app.services.component_availability import get_component_availability, rag_available
 from app.services.component_availability import DEPLOYMENT_DISABLED_REASON
 from app.services import xero as xero_service
 from app.services import service_status as service_status_service
@@ -161,6 +161,12 @@ def _normalise_cron_day_field(day_field: str) -> str:
     return ",".join(normalised_parts)
 
 
+def _is_rag_command(command: object) -> bool:
+    """Return True for scheduled commands owned by the RAG feature pack."""
+
+    return str(command or "").startswith("rag_")
+
+
 class SchedulerService:
     def __init__(self) -> None:
         settings = get_settings()
@@ -204,7 +210,10 @@ class SchedulerService:
         }
         availability = get_component_availability()
         registered = 0
+        rag_enabled = rag_available()
         for task in tasks:
+            if not rag_enabled and _is_rag_command(task.get("command")):
+                continue
             owners = module_capabilities.modules_for_command(str(task.get("command") or ""))
             # Shared commands remain usable while at least one owner is both
             # deployment-available and operationally enabled.
@@ -666,6 +675,18 @@ class SchedulerService:
         async with db.acquire_lock(lock_name, timeout=1) as lock_acquired:
             if not lock_acquired:
                 # Another worker is already executing this task, skip silently
+                return
+
+            if _is_rag_command(command) and not rag_available():
+                now = datetime.now(timezone.utc)
+                await scheduled_tasks_repo.record_task_run(
+                    int(task_id),
+                    status="skipped",
+                    started_at=now,
+                    finished_at=now,
+                    duration_ms=0,
+                    details="RAG feature pack is disabled",
+                )
                 return
 
             # Admission is deliberately inside the execution lock.  A module

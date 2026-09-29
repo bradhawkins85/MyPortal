@@ -19,6 +19,7 @@ from app.schemas.agent import (
     AgentFeedbackRequest,
 )
 from app.services import agent as agent_service
+from app.services import modules as modules_service
 from app.core.database import db
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
@@ -31,7 +32,17 @@ router = APIRouter(prefix="/api/agent", tags=["Agent"])
 _RAG_INDEX_TASKS: dict[int, asyncio.Task[None]] = {}
 
 
-@router.post("/query", response_model=AgentQueryResponse)
+async def require_llm_search() -> None:
+    """Hide AI search endpoints unless the LLM module is enabled and configured."""
+
+    if not await modules_service.llm_available():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Search requires the LLM module to be enabled and configured",
+        )
+
+
+@router.post("/query", response_model=AgentQueryResponse, dependencies=[Depends(require_llm_search)])
 async def query_agent(
     payload: AgentQueryRequest,
     request: Request,
@@ -89,7 +100,7 @@ async def quality_export(_: dict = Depends(require_super_admin)) -> Response:
                     headers={"Content-Disposition": "attachment; filename=ai-quality-summary.csv"})
 
 
-@router.post("/query/stream")
+@router.post("/query/stream", dependencies=[Depends(require_llm_search)])
 async def stream_agent_query(
     payload: AgentQueryRequest,
     request: Request,
@@ -166,7 +177,7 @@ async def stream_agent_query(
     )
 
 
-@router.get("/saved-searches", response_model=list[AgentSavedSearchItem])
+@router.get("/saved-searches", response_model=list[AgentSavedSearchItem], dependencies=[Depends(require_llm_search)])
 async def list_saved_searches(
     current_user: dict = Depends(get_current_user),
 ) -> list[AgentSavedSearchItem]:
@@ -180,7 +191,7 @@ async def list_saved_searches(
     return [AgentSavedSearchItem(**item) for item in records]
 
 
-@router.post("/saved-searches", response_model=AgentSavedSearchItem)
+@router.post("/saved-searches", response_model=AgentSavedSearchItem, dependencies=[Depends(require_llm_search)])
 async def create_saved_search(
     payload: AgentSavedSearchCreateRequest,
     current_user: dict = Depends(get_current_user),
@@ -202,7 +213,7 @@ async def create_saved_search(
     return AgentSavedSearchItem(**item)
 
 
-@router.delete("/saved-searches/{saved_search_id}")
+@router.delete("/saved-searches/{saved_search_id}", dependencies=[Depends(require_llm_search)])
 async def delete_saved_search(
     saved_search_id: int,
     current_user: dict = Depends(get_current_user),
