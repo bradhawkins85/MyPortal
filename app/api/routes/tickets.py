@@ -38,6 +38,7 @@ from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import ticket_tasks as ticket_tasks_repo
 from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
 from app.schemas.tickets import (
     LabourTypeCreateRequest,
@@ -2120,6 +2121,40 @@ async def upload_ticket_attachment(
     return TicketAttachment(**attachment)
 
 
+async def _can_view_ticket_attachments(
+    ticket_id: int, ticket: dict, current_user: dict
+) -> bool:
+    """Return whether a non-helpdesk user may view a ticket's attachments.
+
+    Mirrors the portal ticket page: the requester, a watcher, or a member of
+    the ticket's company with company-wide ticket access (``menu.tickets``
+    write).
+    """
+
+    try:
+        current_user_id_int = int(current_user.get("id"))
+    except (TypeError, ValueError):
+        return False
+    if ticket.get("requester_id") == current_user_id_int:
+        return True
+    if await tickets_repo.is_ticket_watcher(ticket_id, current_user_id_int):
+        return True
+    try:
+        ticket_company_id = int(ticket.get("company_id"))
+    except (TypeError, ValueError):
+        return False
+    membership = await user_company_repo.get_user_company(
+        current_user_id_int, ticket_company_id
+    )
+    if not membership:
+        return False
+    from app import main as main_module
+
+    return main_module._membership_menu_can(
+        current_user, membership, "menu.tickets", write=True
+    )
+
+
 @router.get("/{ticket_id}/attachments/{attachment_id}/download")
 async def download_ticket_attachment(
     ticket_id: int,
@@ -2149,24 +2184,15 @@ async def download_ticket_attachment(
             status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
         )
 
-    if access_level == "closed" and not has_helpdesk_access:
-        requester_id = ticket.get("requester_id")
-        current_user_id = current_user.get("id")
-        try:
-            current_user_id_int = int(current_user_id)
-        except (TypeError, ValueError):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
-            )
-
-        if requester_id != current_user_id_int:
-            is_watcher = await tickets_repo.is_ticket_watcher(
-                ticket_id, current_user_id_int
-            )
-            if not is_watcher:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
-                )
+    # Non-restricted attachments (``open`` and ``closed``) are visible to
+    # anyone who can view the ticket itself; unauthenticated sharing of
+    # ``open`` attachments goes through the signed token route instead.
+    if not has_helpdesk_access and not await _can_view_ticket_attachments(
+        ticket_id, ticket, current_user
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
 
     # Get file path. Email ingestion previously wrote files to the legacy
     # static uploads directory while records pointed at ticket attachments.
