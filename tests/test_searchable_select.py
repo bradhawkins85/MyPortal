@@ -48,3 +48,13 @@ def test_searchable_select_script_parses():
         pytest.skip("node is not installed")
     result = subprocess.run([node, "--check", str(SCRIPT)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_admin_ticket_detail_dropdowns_are_all_searchable():
+    # Short lists (priority, change type, labour type) stay native by default,
+    # so the ticket page opts every dropdown in to keep the fields consistent.
+    template = (TEMPLATES_DIR / "admin" / "ticket_detail.html").read_text(encoding="utf-8")
+    selects = re.findall(r"<select\b[^>]*>", template)
+    assert selects
+    offenders = [tag for tag in selects if 'data-searchable="on"' not in tag]
+    assert offenders == []
