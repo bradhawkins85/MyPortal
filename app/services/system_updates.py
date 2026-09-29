@@ -253,8 +253,15 @@ async def fail_superseded_updates() -> None:
         if record.get("status") == "pending":
             try:
                 _FLAG_PATH.unlink()
-            except OSError:
+            except FileNotFoundError:
                 pass
+            except OSError as exc:
+                log_error(
+                    "Failed to remove pending system update flag for superseded update",
+                    update_id=record.get("id"),
+                    flag_path=str(_FLAG_PATH),
+                    error=str(exc),
+                )
         try:
             system_update_history.update(
                 str(record["id"]), status="failed", completed=True,
