@@ -29,6 +29,8 @@ app/static/tray/*.json
 tray/chat-shell/build/*.icns
 tray/chat-shell/build/*.iconset/
 tray/signing/
+# Local Go builds; release builds go to dist/.
+tray/*.exe
 *.pfx
 *.pfx.base64
 
