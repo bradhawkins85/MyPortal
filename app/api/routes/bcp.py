@@ -3159,6 +3159,8 @@ async def webhook_start_incident(request: Request):
     try:
         body = await request.body()
         payload = json.loads(body.decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise json.JSONDecodeError("Expected a JSON object", body.decode("utf-8", errors="replace"), 0)
     except json.JSONDecodeError as exc:
         await webhook_monitor.log_incoming_webhook(
             name="BCP Incident Webhook - Invalid JSON",
@@ -3179,12 +3181,14 @@ async def webhook_start_incident(request: Request):
     source = payload.get("source", "Other")
     message = payload.get("message", "External alert triggered incident")
     api_key = payload.get("api_key")
+    # Never persist the shared secret in the webhook monitor log.
+    log_payload = {key: value for key, value in payload.items() if key != "api_key"}
     
     if not company_id:
         await webhook_monitor.log_incoming_webhook(
             name="BCP Incident Webhook - Missing company_id",
             source_url=source_url,
-            payload=payload,
+            payload=log_payload,
             headers=request_headers,
             response_status=400,
             response_body="company_id is required",
@@ -3195,13 +3199,15 @@ async def webhook_start_incident(request: Request):
             detail="company_id is required"
         )
     
-    # TODO: Validate API key against stored keys
-    # For now, we'll just check if it's provided
+    # Accept the key from the payload (legacy integrations) or the standard
+    # X-API-Key header, and validate it against the stored API keys.
     if not api_key:
+        api_key = request.headers.get("x-api-key")
+    if not api_key or not isinstance(api_key, str):
         await webhook_monitor.log_incoming_webhook(
             name="BCP Incident Webhook - Missing API key",
             source_url=source_url,
-            payload=payload,
+            payload=log_payload,
             headers=request_headers,
             response_status=401,
             response_body="api_key is required",
@@ -3211,6 +3217,22 @@ async def webhook_start_incident(request: Request):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="api_key is required"
         )
+
+    from app.api.dependencies.api_keys import _lookup_api_key
+
+    try:
+        await _lookup_api_key(request, api_key)
+    except HTTPException as exc:
+        await webhook_monitor.log_incoming_webhook(
+            name="BCP Incident Webhook - Invalid API key",
+            source_url=source_url,
+            payload=log_payload,
+            headers=request_headers,
+            response_status=exc.status_code,
+            response_body=str(exc.detail),
+            error_message="API key rejected",
+        )
+        raise
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -3218,7 +3240,7 @@ async def webhook_start_incident(request: Request):
         await webhook_monitor.log_incoming_webhook(
             name="BCP Incident Webhook - Plan not found",
             source_url=source_url,
-            payload=payload,
+            payload=log_payload,
             headers=request_headers,
             response_status=404,
             response_body=f"No BCP plan found for company_id {company_id}",
@@ -3240,7 +3262,7 @@ async def webhook_start_incident(request: Request):
         await webhook_monitor.log_incoming_webhook(
             name=f"BCP Incident Webhook - {source}",
             source_url=source_url,
-            payload=payload,
+            payload=log_payload,
             headers=request_headers,
             response_status=200,
             response_body=json.dumps(response_data),
@@ -3278,7 +3300,7 @@ async def webhook_start_incident(request: Request):
     await webhook_monitor.log_incoming_webhook(
         name=f"BCP Incident Started - {source}",
         source_url=source_url,
-        payload=payload,
+        payload=log_payload,
         headers=request_headers,
         response_status=200,
         response_body=json.dumps(response_data),
