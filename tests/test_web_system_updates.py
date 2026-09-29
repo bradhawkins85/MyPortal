@@ -285,8 +285,9 @@ def _run_process_requests(tmp_path: Path, flag_contents: str, *, upgrade_to: str
     fake.chmod(0o755)
     snippet = f'''
 require_root() {{ :; }}
-compose() {{
-  # Simulate "docker compose exec/run" against a fake container.
+compose() {{ :; }}
+app_exec() {{
+  # Simulate "docker exec" into the serving application container.
   local args="$*"
   case "$args" in
     *"sh -c"*) [[ -f "{flag}" ]] && cat "{flag}" ;;
