@@ -34,6 +34,12 @@ _PLACEHOLDER_SECRETS: frozenset[str] = frozenset(
     }
 )
 
+# Environments that may run with weak secrets, but only when ENVIRONMENT is
+# set explicitly (the implicit ``development`` default does not count).
+_SECRET_CHECK_EXEMPT_ENVIRONMENTS: frozenset[str] = frozenset(
+    {"development", "dev", "test", "testing"}
+)
+
 # Minimum byte length required for cryptographic secrets used in production.
 _MIN_PRODUCTION_SECRET_LENGTH: int = 32
 _MARKETING_ELEMENT_PLACEHOLDER_SAMPLE: str = "element"
@@ -855,16 +861,20 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _enforce_production_secret_strength(self) -> "Settings":
-        """Refuse to boot in production with weak or placeholder secrets.
+        """Refuse to boot with weak or placeholder secrets.
 
-        In non-production environments (``development``, ``test``) these checks
-        are skipped so tests and local work are not disrupted. The same
+        The checks apply in every environment (including an unset
+        ``ENVIRONMENT``, ``staging`` and so on) and are skipped only when
+        ``ENVIRONMENT`` is *explicitly* set to ``development`` or ``test`` so
+        local work and the test suite are not disrupted. Relying on the
+        ``development`` default no longer bypasses the check. The same
         validation is applied to ``SESSION_SECRET`` and ``TOTP_ENCRYPTION_KEY``
         because both are used for authenticated encryption / signing.
         """
 
         environment = (self.environment or "").strip().lower()
-        if environment != "production":
+        explicitly_set = "environment" in self.model_fields_set
+        if explicitly_set and environment in _SECRET_CHECK_EXEMPT_ENVIRONMENTS:
             return self
 
         errors: list[str] = []
@@ -884,7 +894,7 @@ class Settings(BaseSettings):
 
         if errors:
             raise ValueError(
-                "Refusing to start in production with weak secrets: "
+                f"Refusing to start (ENVIRONMENT={environment or 'unset'}) with weak secrets: "
                 + "; ".join(errors)
                 + ". Generate strong values with "
                 + '`python -c "import secrets; print(secrets.token_urlsafe(48))"` '
