@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 
 from app.core.database import db
 from app.core.logging import log_info
@@ -196,6 +198,41 @@ async def list_active_sessions_for_user(user_id: int) -> list[dict[str, Any]]:
         (user_id,),
     )
     return list(rows)
+
+
+_FIRST_USER_LOCK_NAME = "myportal_first_user_registration"
+_FIRST_USER_LOCK_TIMEOUT_SECONDS = 10
+_local_first_user_lock = asyncio.Lock()
+
+
+@asynccontextmanager
+async def first_user_registration_lock() -> AsyncIterator[None]:
+    """Serialise creation of the initial super administrator.
+
+    MySQL uses a named ``GET_LOCK`` held on one pooled connection, so the
+    bootstrap is exclusive across workers and hosts. SQLite development mode
+    runs in a single process, where an in-process lock is sufficient.
+    """
+    if db.is_sqlite() or not db.is_connected():
+        async with _local_first_user_lock:
+            yield
+        return
+
+    async with db.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT GET_LOCK(%s, %s)",
+                (_FIRST_USER_LOCK_NAME, _FIRST_USER_LOCK_TIMEOUT_SECONDS),
+            )
+            row = await cursor.fetchone()
+        if not row or row[0] != 1:
+            raise RuntimeError("Could not obtain the first-user registration lock")
+        try:
+            yield
+        finally:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT RELEASE_LOCK(%s)", (_FIRST_USER_LOCK_NAME,))
+                await cursor.fetchone()
 
 
 def _parse_window_start(value: Any) -> datetime:
