@@ -551,3 +551,42 @@ def test_switch_proxy_reloads_a_running_proxy(tmp_path):
     lines = calls.read_text(encoding="utf-8").splitlines()
     assert "compose up -d --no-deps proxy" in lines
     assert "docker exec proxy-id nginx -s reload" in lines
+
+
+def _compose_download_harness(tmp_path, *, checksum: str) -> str:
+    # Stub curl: resolve "latest" to v2.40.0 and serve the binary and checksum.
+    return (
+        f'BINARY_BODY="compose-binary"; CHECKSUM_BODY="{checksum}"\n'
+        "curl() {\n"
+        '  local out="" url="" arg\n'
+        '  while (($#)); do\n'
+        '    case "$1" in -o) out="$2"; shift 2;; -w) shift 2;; -*) shift;; *) url="$1"; shift;; esac\n'
+        "  done\n"
+        '  case "$url" in\n'
+        '    */latest) printf "%s" "https://github.com/docker/compose/releases/tag/v2.40.0";;\n'
+        '    */download/v2.40.0/docker-compose-linux-x86_64) printf "%s" "$BINARY_BODY" >"$out";;\n'
+        '    */download/v2.40.0/docker-compose-linux-x86_64.sha256) printf "%s\\n" "$CHECKSUM_BODY" >"$out";;\n'
+        "    *) return 22;;\n"
+        "  esac\n"
+        "}\n"
+        f'install_compose_binary "{tmp_path}/plugins" x86_64\n'
+    )
+
+
+def test_compose_binary_installs_only_when_checksum_matches(tmp_path):
+    import hashlib
+
+    digest = hashlib.sha256(b"compose-binary").hexdigest()
+    result = _run(_compose_download_harness(tmp_path, checksum=f"{digest} *docker-compose-linux-x86_64"))
+    assert result.returncode == 0, result.stderr
+    installed = tmp_path / "plugins" / "docker-compose"
+    assert installed.read_bytes() == b"compose-binary"
+    assert os.access(installed, os.X_OK)
+
+
+@pytest.mark.parametrize("checksum", ["0" * 64 + " *docker-compose-linux-x86_64", "", "not-a-checksum"])
+def test_compose_binary_fails_closed_on_checksum_mismatch(tmp_path, checksum):
+    result = _run(_compose_download_harness(tmp_path, checksum=checksum))
+    assert result.returncode != 0
+    assert "Checksum verification failed" in result.stderr
+    assert not (tmp_path / "plugins" / "docker-compose").exists()

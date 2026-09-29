@@ -225,13 +225,38 @@ install_compose_plugin() {
     dnf -y -q install docker-compose-plugin >/dev/null 2>&1 || true
   fi
   if ! docker compose version >/dev/null 2>&1; then
-    local arch plugin_dir=/usr/local/lib/docker/cli-plugins
-    arch=$(uname -m)
-    install -d -m 0755 "$plugin_dir"
-    curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${arch}" \
-      -o "${plugin_dir}/docker-compose"
-    chmod 0755 "${plugin_dir}/docker-compose"
+    install_compose_binary /usr/local/lib/docker/cli-plugins "$(uname -m)"
   fi
+}
+
+# Download the Compose v2 plugin binary from Docker's latest GitHub release and
+# install it only if it matches the .sha256 file published with that release.
+install_compose_binary() {
+  local plugin_dir="$1" arch="$2" releases="https://github.com/docker/compose/releases"
+  local latest tag asset workdir expected actual
+  # Resolve "latest" once so the binary and its checksum come from one release.
+  latest=$(curl -fsSL -o /dev/null -w '%{url_effective}' "${releases}/latest") \
+    || die "Could not resolve the latest Docker Compose release."
+  tag=${latest##*/}
+  [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "Unexpected Docker Compose release tag: ${tag}"
+  [[ "$arch" =~ ^[A-Za-z0-9_]+$ ]] || die "Unsupported architecture: ${arch}"
+  asset="docker-compose-linux-${arch}"
+  workdir=$(mktemp -d)
+  if ! curl -fsSL "${releases}/download/${tag}/${asset}" -o "${workdir}/${asset}" \
+    || ! curl -fsSL "${releases}/download/${tag}/${asset}.sha256" -o "${workdir}/${asset}.sha256"; then
+    rm -rf "$workdir"
+    die "Could not download Docker Compose ${tag} (${asset})."
+  fi
+  expected=$(awk 'NR == 1 { print tolower($1) }' "${workdir}/${asset}.sha256")
+  actual=$(sha256sum "${workdir}/${asset}" | awk '{ print $1 }')
+  if [[ ! "$expected" =~ ^[0-9a-f]{64}$ || "$expected" != "$actual" ]]; then
+    rm -rf "$workdir"
+    die "Checksum verification failed for Docker Compose ${tag} (${asset}); not installing it."
+  fi
+  install -d -m 0755 "$plugin_dir"
+  install -m 0755 "${workdir}/${asset}" "${plugin_dir}/docker-compose"
+  rm -rf "$workdir"
+  info "Installed Docker Compose ${tag} (sha256 ${actual})."
 }
 
 ensure_docker() {
