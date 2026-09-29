@@ -1197,20 +1197,16 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
     """Persistent connection used by the tray client.
 
     The handshake authenticates with a bearer auth_token supplied via the
-    ``Authorization`` header, the ``X-Tray-Token`` header, or the ``token``
-    query parameter (the latter for environments where headers cannot be
-    set on a websocket open).  Messages are JSON; the protocol is documented
-    in ``docs/tray_app.md``.
+    ``Authorization`` header or the ``X-Tray-Token`` header.  A ``?token=``
+    query parameter is deliberately not accepted: the tray client always
+    sends a header, and query strings end up in proxy and access logs.
+    Messages are JSON; the protocol is documented in ``docs/tray_app.md``.
     """
 
     from app.repositories import tray as tray_repo
     from app.services import tray as tray_service
 
-    token = (
-        websocket.headers.get("X-Tray-Token")
-        or websocket.query_params.get("token")
-        or ""
-    )
+    token = websocket.headers.get("X-Tray-Token") or ""
     if not token:
         auth_header = websocket.headers.get("Authorization", "")
         if auth_header.lower().startswith("bearer "):

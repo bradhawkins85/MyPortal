@@ -530,7 +530,12 @@ async def _attempt_event(event: dict[str, Any]) -> None:
     safe_headers = _redact_headers(headers, sensitive=_SENSITIVE_HEADERS)
     payload = event.get("payload")
     request_body = _prepare_request_body(payload)
-    log_info("Delivering webhook", event_id=event_id, attempt=attempt, url=event.get("target_url"))
+    log_info(
+        "Delivering webhook",
+        event_id=event_id,
+        attempt=attempt,
+        url=sanitise_url(str(event.get("target_url") or "")),
+    )
     response_status: int | None = None
     response_body: str | None = None
     response_headers: dict[str, Any] | None = None

@@ -82,7 +82,7 @@ Migrations are applied automatically at startup and are idempotent.
 | `/api/tray/enrol` | POST | Install token in JSON body | Exchange the install token for a per-device `auth_token` |
 | `/api/tray/config` | GET | Bearer auth_token | Resolved menu + branding + env-var allowlist + chat toggle |
 | `/api/tray/heartbeat` | POST | Bearer auth_token | Liveness ping; updates console user, IP, agent version |
-| `/ws/tray/{device_uid}` | WS | Bearer/`X-Tray-Token`/`?token=` | Bidirectional command channel |
+| `/ws/tray/{device_uid}` | WS | Bearer/`X-Tray-Token` header | Bidirectional command channel |
 | `/api/tray/{device_uid}/chat/start` | POST | Authenticated technician | Create a Matrix room and push `chat_open` |
 | `/api/tray/admin/install-tokens` | GET / POST | Super admin | List / create install tokens |
 | `/api/tray/admin/install-tokens/{id}/revoke` | POST | Super admin | Revoke an install token |
