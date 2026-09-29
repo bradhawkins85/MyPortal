@@ -117,6 +117,17 @@ where yours is, run:
 sudo grep MYPORTAL_CONTROL_CHECKOUT /etc/myportal.env
 ```
 
+Installations made before `MYPORTAL_CONTROL_CHECKOUT` existed were usually
+cloned into `/opt/myportal`. The portal falls back to `/opt/myportal` (and
+`/opt/myportal/control`) when the setting is missing, and the next run of
+`upgrade.sh` records the real path. To set it yourself, add this line to
+`/etc/myportal.env` (or the checkout's `.env` on very old installations) and
+restart the service:
+
+```bash
+MYPORTAL_CONTROL_CHECKOUT=/opt/myportal
+```
+
 You can also start updates from the portal (Admin → Scheduled tasks → System
 updates) without logging in to the server. Docker installations have no
 control checkout: use `sudo myportal-docker upgrade` or the portal instead.
