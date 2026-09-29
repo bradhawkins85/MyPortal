@@ -101,3 +101,33 @@ def test_store_port_document_persists_pdf(tmp_path: Path):
     assert stored_path.read_bytes() == data
     assert size == len(data)
     assert original_name == "manifest.pdf"
+
+
+@pytest.mark.parametrize("filename", ["x.xsl", "x.rdf", "x.shtml", "x.xht", "x.exe", "noext"])
+def test_store_port_document_rejects_non_allowlisted_extensions(tmp_path: Path, filename: str):
+    uploads_root = tmp_path / "private_uploads"
+    upload = _make_upload(b"<x/>", filename, "application/octet-stream")
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(store_port_document(port_id=1, upload=upload, uploads_root=uploads_root))
+
+    assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+
+
+def test_port_document_resolver_confines_paths(tmp_path: Path, monkeypatch):
+    from app.api.routes import ports
+
+    private_root = tmp_path / "private_uploads"
+    legacy_root = tmp_path / "static" / "uploads"
+    (private_root / "ports" / "1").mkdir(parents=True)
+    (legacy_root / "ports" / "2").mkdir(parents=True)
+    (private_root / "ports" / "1" / "a.pdf").write_bytes(b"%PDF")
+    (legacy_root / "ports" / "2" / "b.pdf").write_bytes(b"%PDF")
+    (private_root / "secret.txt").write_text("secret")
+    monkeypatch.setattr(ports, "_uploads_root", private_root)
+    monkeypatch.setattr(ports, "_legacy_uploads_root", legacy_root)
+
+    assert ports._resolve_port_document_path("private_uploads/ports/1/a.pdf") is not None
+    assert ports._resolve_port_document_path("uploads/ports/2/b.pdf") is not None
+    assert ports._resolve_port_document_path("private_uploads/secret.txt") is None
+    assert ports._resolve_port_document_path("private_uploads/ports/../secret.txt") is None

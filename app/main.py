@@ -1089,6 +1089,27 @@ async def pwa_service_worker() -> Response:
     return response
 
 
+class _DownloadOnlyStaticFiles(StaticFiles):
+    """Serve user-uploaded files as inert downloads.
+
+    Files under ``static/uploads`` were uploaded by users (legacy port
+    documents, legacy ticket attachments), so they must never be rendered by
+    the browser as HTML/SVG/XML/script on the portal origin.
+    """
+
+    def file_response(self, full_path, stat_result, scope, status_code: int = 200) -> Response:
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Content-Security-Policy"] = "sandbox; default-src 'none'"
+        if response.status_code != status.HTTP_304_NOT_MODIFIED:
+            response.headers["Content-Type"] = "application/octet-stream"
+            response.headers["Content-Disposition"] = "attachment"
+        return response
+
+
+# Must be mounted before ``/static`` so user uploads never reach the generic
+# static handler, which serves files inline with a guessed media type.
+app.mount("/static/uploads", _DownloadOnlyStaticFiles(directory=str(_uploads_path)), name="static-uploads")
 app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), name="static")
 
 

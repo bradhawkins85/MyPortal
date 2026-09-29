@@ -86,3 +86,25 @@ def test_ticket_attachment_dangerous_extensions_are_neutralised(name):
 
 def test_ticket_attachment_safe_extension_kept():
     assert ticket_attachments._generate_secure_filename("report.pdf").endswith(".pdf")
+
+
+def test_static_uploads_are_served_as_inert_downloads(tmp_path: Path):
+    from starlette.applications import Starlette
+    from starlette.routing import Mount
+    from starlette.testclient import TestClient
+
+    (tmp_path / "ports").mkdir()
+    (tmp_path / "ports" / "evil.xsl").write_text("<xsl:stylesheet/>")
+    static_app = Starlette(
+        routes=[Mount("/static/uploads", app_main._DownloadOnlyStaticFiles(directory=str(tmp_path)))]
+    )
+    response = TestClient(static_app).get("/static/uploads/ports/evil.xsl")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/octet-stream"
+    assert response.headers["content-disposition"] == "attachment"
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_static_uploads_mounted_before_generic_static():
+    mounts = [getattr(route, "path", None) for route in app_main.app.routes]
+    assert mounts.index("/static/uploads") < mounts.index("/static")
