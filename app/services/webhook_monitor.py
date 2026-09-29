@@ -12,6 +12,7 @@ import httpx
 from app.core.logging import log_error, log_info
 from app.repositories import webhook_events as webhook_repo
 from app.services.monitored_http import sanitise_body, sanitise_headers, sanitise_url
+from app.services.outbound_url_guard import redirect_guard_hooks
 
 _STAFF_WORKFLOW_RESUME_SOURCE = "staff_workflow_http_post"
 
@@ -535,7 +536,15 @@ async def _attempt_event(event: dict[str, Any]) -> None:
     response_headers: dict[str, Any] | None = None
     error_message: str | None = None
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        # Every hop (initial request and each redirect) is re-validated so a
+        # webhook target cannot bounce the server to loopback/link-local or
+        # cloud metadata addresses.  Private LAN targets remain allowed because
+        # webhook destinations are configured by administrators.
+        async with httpx.AsyncClient(
+            timeout=10.0,
+            follow_redirects=True,
+            event_hooks=redirect_guard_hooks(),
+        ) as client:
             response = await client.post(
                 str(event["target_url"]),
                 json=payload,
