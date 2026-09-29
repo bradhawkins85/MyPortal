@@ -8,7 +8,7 @@ request and runs the existing upgrade tooling:
 * bare metal: ``scripts/process_update_flag.sh`` (root cron) runs
   ``scripts/upgrade.sh`` against ``origin/main``;
 * Docker: ``myportal-docker process-requests`` (root cron) reads the request
-  through ``docker compose exec`` and runs ``myportal-docker upgrade`` to the
+  through ``docker exec`` and runs ``myportal-docker upgrade`` to the
   latest published GitHub release.
 
 Neither host job takes a target, mode or command from the request beyond the

@@ -37,12 +37,18 @@ MYPORTAL_BUILD_CA_FILE="${MYPORTAL_BUILD_CA_FILE:-}"
 MYPORTAL_BUILD_NETWORK="${MYPORTAL_BUILD_NETWORK:-}"
 MYPORTAL_HEALTH_TIMEOUT="${MYPORTAL_HEALTH_TIMEOUT:-600}"
 MYPORTAL_BACKUPS_TO_KEEP="${MYPORTAL_BACKUPS_TO_KEEP:-10}"
+# The nginx image that fronts the blue and green application containers. It
+# needs nginx 1.27.3 or newer (dynamic "resolve" upstream servers).
+MYPORTAL_PROXY_IMAGE="${MYPORTAL_PROXY_IMAGE:-nginx:1.28-alpine}"
+# Seconds the previous slot keeps running after cutover, so requests it is
+# still serving can finish.
+MYPORTAL_DRAIN_SECONDS="${MYPORTAL_DRAIN_SECONDS:-10}"
 
 INSTALLED_SCRIPT="/usr/local/bin/myportal-docker"
 AUTO_UPGRADE_CRON="/etc/cron.d/myportal-docker-upgrade"
 WEB_UPGRADE_CRON="/etc/cron.d/myportal-docker-requests"
 # Where the portal queues upgrade requests, inside the app container's state
-# volume. The host only ever reaches it through "docker compose exec".
+# volume. The host only reaches it with "docker exec" in the serving container.
 CONTAINER_UPDATE_FLAG="/app/var/state/system_update.flag"
 SCRIPT_ASSET="myportal-docker.sh"
 
@@ -51,6 +57,9 @@ PROJECT_ENV="${MYPORTAL_DIR}/.env"            # compose variables (versions, por
 APP_ENV="${MYPORTAL_DIR}/myportal.env"        # application configuration
 DB_ENV="${MYPORTAL_DIR}/mariadb.env"          # database container credentials
 BACKUP_DIR="${MYPORTAL_DIR}/backups"
+PROXY_DIR="${MYPORTAL_DIR}/proxy"             # nginx configuration (generated)
+# Matches "name:" in the compose file; used to find containers by label.
+COMPOSE_PROJECT="myportal"
 
 # ---------------------------------------------------------------------------
 # Output helpers
@@ -70,8 +79,11 @@ Commands:
         Install Docker if needed and deploy MyPortal (default: latest release,
         port 80 on all addresses).
   upgrade [--version TAG] [--yes]
-        Upgrade to the latest GitHub release (or TAG). Backs up the database
-        first and rolls back if the new release is not healthy.
+        Upgrade to the latest GitHub release (or TAG) without downtime. Backs
+        up the database, starts the release in the idle blue/green slot and
+        switches the proxy to it only once it is healthy.
+  rollback [--yes]     Switch back to the previous release, which is kept in
+                       the idle slot after an upgrade.
   check                Report the installed and latest release. Exits 0 when
                        up to date and 10 when an upgrade is available.
   status               Show the containers and the running release.
@@ -80,7 +92,8 @@ Commands:
   logs [ARGS...]       Follow the application logs (docker compose logs ARGS).
   backup               Back up the database and uploaded files.
   restore-db FILE      Restore a database backup (.sql.gz) made by this script.
-  restart              Restart MyPortal (applies changes to myportal.env).
+  restart              Restart MyPortal without downtime (applies changes to
+                       myportal.env).
   setup [--check | --list | --feature NAME]
         Run the onboarding wizard: choose which feature packs and modules are
         enabled and configure their settings in myportal.env. Re-run it at any
@@ -368,22 +381,56 @@ services:
       retries: 30
       start_period: 30s
 
-  app:
-    image: ${MYPORTAL_IMAGE}
+  # Blue/green application slots. One serves through the proxy; the other is
+  # stopped and keeps the previous release for 'myportal-docker rollback'.
+  # An upgrade starts the new release in the idle slot and switches the proxy
+  # only once it is healthy. Start slots by name: 'docker compose up -d'
+  # without service names would start both.
+  app_blue:
+    image: ${BLUE_IMAGE}
     restart: unless-stopped
     env_file: myportal.env
     environment:
       DB_HOST: db
       DB_PORT: "3306"
+      PORT: "8000"
+      APP_INSTANCE_ID: blue
+      # Only the proxy can reach the slots, so trust its network.
+      TRUSTED_PROXIES: ${APP_TRUSTED_PROXIES}
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "${HTTP_BIND}:${HTTP_PORT}:8000"
     volumes:
       - private_uploads:/app/private_uploads
       - uploads:/app/app/static/uploads
       - state:/app/var
+
+  app_green:
+    image: ${GREEN_IMAGE}
+    restart: unless-stopped
+    env_file: myportal.env
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      PORT: "8000"
+      APP_INSTANCE_ID: green
+      TRUSTED_PROXIES: ${APP_TRUSTED_PROXIES}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - private_uploads:/app/private_uploads
+      - uploads:/app/app/static/uploads
+      - state:/app/var
+
+  proxy:
+    image: ${PROXY_IMAGE}
+    restart: unless-stopped
+    ports:
+      - "${HTTP_BIND}:${HTTP_PORT}:8080"
+    volumes:
+      # A directory, not single files, so atomically replaced files are seen.
+      - ./proxy:/etc/nginx/conf.d:ro
 
 volumes:
   db_data:
@@ -462,24 +509,372 @@ install_script_copy() {
 }
 
 # ---------------------------------------------------------------------------
-# Health, backup and restore
+# Blue/green slots and the proxy
+#
+# Two application services, app_blue and app_green, share the database and
+# volumes. An nginx proxy publishes the HTTP port and forwards to the active
+# slot, named in proxy/active-slot.inc. A release is started in the idle slot
+# while the active one keeps serving, and the proxy is switched (a graceful
+# nginx reload) only once the new release reports ready. The previous slot is
+# then stopped but kept, so 'rollback' can switch back to it.
+#
+# ACTIVE_SLOT in .env is empty on installations made before blue/green: they
+# still run a single "app" service that publishes the port itself, and are
+# converted by their next upgrade or restart.
 # ---------------------------------------------------------------------------
-wait_for_release() {
-  # Wait until /readyz reports "ok" for the expected release.
-  local tag="$1" port waited=0 body=""
-  port=$(get_setting "$PROJECT_ENV" HTTP_PORT)
-  info "Waiting for MyPortal ${tag} to become ready (migrations run on first start)…"
-  while ((waited < MYPORTAL_HEALTH_TIMEOUT)); do
-    body=$(curl -fsS --max-time 10 "http://127.0.0.1:${port}/readyz" 2>/dev/null || true)
-    if [[ "$body" == *'"status":"ok"'* && "$body" == *"\"version\":\"${tag}\""* ]]; then
+active_slot() {
+  get_setting "$PROJECT_ENV" ACTIVE_SLOT
+}
+
+other_slot() {
+  if [[ "$1" == blue ]]; then printf green; else printf blue; fi
+}
+
+slot_key() {
+  # slot_key SLOT NAME -> the .env key holding NAME for SLOT, e.g. BLUE_IMAGE.
+  printf '%s_%s' "$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')" "$2"
+}
+
+app_service() {
+  # The compose service serving the portal.
+  local slot
+  slot=$(active_slot)
+  if [[ -n "$slot" ]]; then printf 'app_%s' "$slot"; else printf app; fi
+}
+
+service_container() {
+  # service_container SERVICE -> ID of its running container (empty if none).
+  # Found by label rather than through compose, so it also finds the
+  # pre-blue/green "app" container after the compose file was rewritten.
+  docker ps -q --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" \
+    --filter "label=com.docker.compose.service=$1" 2>/dev/null | head -n1
+}
+
+app_exec() {
+  # app_exec COMMAND...: run COMMAND in the serving application container,
+  # with standard input attached.
+  local container
+  container=$(service_container "$(app_service)")
+  [[ -n "$container" ]] || return 1
+  docker exec -i -e PYTHONPATH=/app "$container" "$@"
+}
+
+ensure_slot_settings() {
+  # Fill in the .env keys the compose file needs. Both slots always name an
+  # image, because Compose rejects a service without one.
+  local image
+  image=$(get_setting "$PROJECT_ENV" MYPORTAL_IMAGE)
+  [[ -n "$(get_setting "$PROJECT_ENV" PROXY_IMAGE)" ]] || set_setting "$PROJECT_ENV" PROXY_IMAGE "$MYPORTAL_PROXY_IMAGE"
+  [[ -n "$(get_setting "$PROJECT_ENV" BLUE_IMAGE)" ]] || set_setting "$PROJECT_ENV" BLUE_IMAGE "$image"
+  [[ -n "$(get_setting "$PROJECT_ENV" GREEN_IMAGE)" ]] || set_setting "$PROJECT_ENV" GREEN_IMAGE "$image"
+  grep -q '^APP_TRUSTED_PROXIES=' "$PROJECT_ENV" || set_setting "$PROJECT_ENV" APP_TRUSTED_PROXIES ""
+}
+
+refresh_app_trusted_proxies() {
+  # The slots are reachable only on the project network, through the proxy,
+  # so they trust that network's forwarding headers. The network exists once
+  # the database has been started.
+  local subnets
+  subnets=$(docker network inspect "${COMPOSE_PROJECT}_default" \
+    --format '{{range .IPAM.Config}}{{.Subnet}},{{end}}' 2>/dev/null || true)
+  subnets="${subnets%,}"
+  [[ -n "$subnets" ]] || die "could not determine the subnet of the ${COMPOSE_PROJECT}_default Docker network."
+  set_setting "$PROJECT_ENV" APP_TRUSTED_PROXIES "$subnets"
+}
+
+write_active_slot() {
+  # Atomically point the proxy's upstream at SLOT; nginx re-reads it on reload.
+  local tmp
+  tmp=$(mktemp "${PROXY_DIR}/.active-slot.XXXXXX")
+  printf '# Managed by myportal-docker.\nserver app_%s:8000 resolve;\n' "$1" >"$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "${PROXY_DIR}/active-slot.inc"
+}
+
+write_proxy_config() {
+  # Generate the nginx configuration. TRUSTED_PROXIES from myportal.env now
+  # applies here: requests from those addresses may name the client and the
+  # scheme; everything else is described by the proxy itself.
+  install -d -m 0755 "$PROXY_DIR"
+  local entry realip="" geo="" tmp
+  local -a entries=()
+  IFS=',' read -r -a entries <<<"$(get_setting "$APP_ENV" TRUSTED_PROXIES | tr -d "\"' \t\r")"
+  for entry in "${entries[@]}"; do
+    [[ -n "$entry" ]] || continue
+    if [[ "$entry" =~ ^[0-9A-Fa-f.:]+(/[0-9]{1,3})?$ ]]; then
+      realip+="    set_real_ip_from ${entry};"$'\n'
+      geo+="    ${entry} 1;"$'\n'
+    else
+      warn "ignoring TRUSTED_PROXIES entry '${entry}' in ${APP_ENV}: not an IP address or network."
+    fi
+  done
+
+  tmp=$(mktemp "${PROXY_DIR}/.myportal.XXXXXX")
+  {
+    cat <<'NGINX'
+# Generated by myportal-docker; rewritten on every upgrade and restart.
+# Forwards to the active blue/green slot named in active-slot.inc.
+
+# Docker's embedded DNS: slots are resolved when they start, so the proxy
+# runs even while a slot is being replaced.
+resolver 127.0.0.11 valid=5s ipv6=off;
+
+upstream myportal_app {
+    zone myportal_app 64k;
+    include /etc/nginx/conf.d/active-slot.inc;
+    keepalive 16;
+}
+
+map $http_upgrade $myportal_connection {
+    default upgrade;
+    ""      "";
+}
+
+# Whether the request came from a reverse proxy listed in TRUSTED_PROXIES.
+geo $realip_remote_addr $myportal_trusted_proxy {
+    default 0;
+NGINX
+    printf '%s' "$geo"
+    cat <<'NGINX'
+}
+
+map "$myportal_trusted_proxy:$http_x_forwarded_proto" $myportal_forwarded_proto {
+    default   $scheme;
+    "1:https" https;
+    "1:http"  http;
+}
+
+server {
+    listen 8080;
+    server_tokens off;
+
+    # Uploads and responses stream through unchanged, as when MyPortal was
+    # reached directly; the application enforces its own limits.
+    client_max_body_size 0;
+    proxy_request_buffering off;
+    proxy_buffering off;
+
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive on;
+NGINX
+    printf '%s' "$realip"
+    cat <<'NGINX'
+
+    location / {
+        proxy_pass http://myportal_app;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $myportal_connection;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $myportal_forwarded_proto;
+        proxy_connect_timeout 10s;
+        # Long enough for websockets and slow reports.
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        error_page 502 504 =503 /myportal-unavailable.html;
+    }
+
+    location = /myportal-unavailable.html {
+        internal;
+        root /etc/nginx/conf.d;
+        add_header Retry-After 15 always;
+        add_header Cache-Control "no-store" always;
+    }
+}
+NGINX
+  } >"$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "${PROXY_DIR}/myportal.conf"
+
+  cat >"${PROXY_DIR}/myportal-unavailable.html" <<'HTML'
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="15">
+<title>MyPortal is restarting</title>
+<style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1rem;color:#1f2937}</style>
+</head>
+<body>
+<h1>MyPortal is restarting</h1>
+<p>The portal is temporarily unavailable. This page reloads automatically.</p>
+</body>
+</html>
+HTML
+  chmod 0644 "${PROXY_DIR}/myportal-unavailable.html"
+  [[ -f "${PROXY_DIR}/active-slot.inc" ]] || write_active_slot "${1:-blue}"
+}
+
+switch_proxy() {
+  # switch_proxy SLOT: send new requests to SLOT. Requests in flight finish on
+  # the previous slot (nginx reloads gracefully). When nginx rejects the
+  # change, the previous slot stays active and this returns non-zero.
+  local slot="$1" include="${PROXY_DIR}/active-slot.inc" previous="" container
+  [[ ! -f "$include" ]] || previous=$(sed -n 's/^server app_\([a-z]*\):.*/\1/p' "$include")
+  write_active_slot "$slot"
+  # Creates the proxy, or recreates it when its compose definition changed.
+  if compose up -d --no-deps proxy >&2; then
+    container=$(service_container proxy)
+    if [[ -n "$container" ]] && docker exec "$container" nginx -t >/dev/null 2>&1 \
+      && docker exec "$container" nginx -s reload >/dev/null 2>&1; then
       return 0
     fi
+    [[ -z "$container" ]] || docker exec "$container" nginx -t >&2 || true
+  fi
+  warn "could not switch the proxy to the ${slot} slot."
+  if [[ -n "$previous" ]]; then
+    write_active_slot "$previous"
+    container=$(service_container proxy)
+    [[ -z "$container" ]] || docker exec "$container" nginx -s reload >/dev/null 2>&1 || true
+  fi
+  return 1
+}
+
+stop_legacy_app() {
+  # Pre-blue/green installations run one "app" container publishing the port.
+  local container
+  container=$(service_container app)
+  [[ -z "$container" ]] || docker stop "$container" >/dev/null
+}
+
+remove_legacy_app() {
+  docker ps -aq --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" \
+    --filter "label=com.docker.compose.service=app" | xargs -r docker rm -f >/dev/null
+}
+
+deploy_release() {
+  # deploy_release IMAGE TAG: run TAG in the idle slot and switch the proxy to
+  # it once it is ready. The serving slot is untouched until then; if TAG
+  # does not become ready it keeps serving and this returns non-zero.
+  local image="$1" tag="$2" active idle idle_image_key previous_idle_image
+  active=$(active_slot)
+  idle=$(other_slot "$active")
+  idle_image_key=$(slot_key "$idle" IMAGE)
+  previous_idle_image=$(get_setting "$PROJECT_ENV" "$idle_image_key")
+
+  if [[ -z "$active" ]] && grep -Eqs '^[[:space:]]+app:[[:space:]]*$' "${MYPORTAL_DIR}/docker-compose.override.yml"; then
+    warn "${MYPORTAL_DIR}/docker-compose.override.yml changes the 'app' service, which blue/green replaces with 'app_blue' and 'app_green' (and 'proxy', which now publishes the port). Move those changes to the new services, then rerun."
+    return 1
+  fi
+  # Until the conversion succeeds, a pre-blue/green installation keeps its
+  # compose file, so its commands keep working if this fails.
+  [[ -n "$active" || ! -f "$COMPOSE_FILE" ]] || cp -p "$COMPOSE_FILE" "${COMPOSE_FILE}.single"
+  # Callers test this function's status, which turns off "set -e" inside it.
+  write_compose_file || return 1
+  ensure_slot_settings || return 1
+  write_proxy_config "$idle" || return 1
+  compose up -d db >&2 || return 1
+  refresh_app_trusted_proxies || return 1
+  set_setting "$PROJECT_ENV" "$idle_image_key" "$image" || return 1
+  # Recreated even when the image is unchanged, so 'restart' applies
+  # myportal.env changes.
+  info "Starting MyPortal ${tag} in the ${idle} slot${active:+ while the ${active} slot keeps serving}…"
+  if ! compose up -d --no-deps --force-recreate "app_${idle}" >&2 || ! wait_for_service "app_${idle}" "$tag"; then
+    compose stop "app_${idle}" >/dev/null 2>&1 || true
+    set_setting "$PROJECT_ENV" "$idle_image_key" "$previous_idle_image"
+    [[ ! -f "${COMPOSE_FILE}.single" ]] || mv -f "${COMPOSE_FILE}.single" "$COMPOSE_FILE"
+    return 1
+  fi
+
+  if [[ -z "$active" && -n "$(service_container app)" ]]; then
+    # Converting a pre-blue/green installation: the old container holds the
+    # port the proxy needs, so this one cutover has a short interruption.
+    info "Switching to the blue/green layout; the portal is unavailable for a few seconds…"
+    stop_legacy_app
+  fi
+  if ! switch_proxy "$idle" || ! wait_for_proxy "$tag"; then
+    if [[ -n "$active" ]]; then
+      switch_proxy "$active" || true
+    else
+      compose stop proxy >/dev/null 2>&1 || true
+      compose stop "app_${idle}" >/dev/null 2>&1 || true
+      if [[ -f "${COMPOSE_FILE}.single" ]]; then
+        mv -f "${COMPOSE_FILE}.single" "$COMPOSE_FILE"
+        compose up -d app >&2 || true
+      fi
+    fi
+    compose stop "app_${idle}" >/dev/null 2>&1 || true
+    set_setting "$PROJECT_ENV" "$idle_image_key" "$previous_idle_image"
+    return 1
+  fi
+
+  set_setting "$PROJECT_ENV" ACTIVE_SLOT "$idle"
+  set_setting "$PROJECT_ENV" "$(slot_key "$idle" VERSION)" "$tag"
+  set_setting "$PROJECT_ENV" MYPORTAL_IMAGE "$image"
+  set_setting "$PROJECT_ENV" MYPORTAL_VERSION "$tag"
+  info "MyPortal ${tag} is now serving from the ${idle} slot."
+  if [[ -n "$active" ]]; then
+    info "Letting the ${active} slot finish its requests (${MYPORTAL_DRAIN_SECONDS}s), then stopping it…"
+    sleep "$MYPORTAL_DRAIN_SECONDS"
+    compose stop "app_${active}" >&2 || warn "could not stop the ${active} slot."
+  else
+    remove_legacy_app
+    rm -f "${COMPOSE_FILE}.single"
+    # The previous release was not kept in a slot, so there is nothing to
+    # roll back to until the next upgrade.
+    set_setting "$PROJECT_ENV" "$(slot_key "$(other_slot "$idle")" IMAGE)" "$image"
+    set_setting "$PROJECT_ENV" "$(slot_key "$(other_slot "$idle")" VERSION)" ""
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Health, backup and restore
+# ---------------------------------------------------------------------------
+release_ready() {
+  # release_ready BODY TAG: true when a /readyz body reports TAG as ready.
+  [[ "$1" == *'"status":"ok"'* && "$1" == *"\"version\":\"$2\""* ]]
+}
+
+READYZ_PROGRAM='import urllib.error, urllib.request
+try:
+    response = urllib.request.urlopen("http://127.0.0.1:8000/readyz", timeout=8)
+except urllib.error.HTTPError as exc:
+    response = exc
+print(response.read().decode("utf-8", "replace"))'
+
+wait_for_service() {
+  # wait_for_service SERVICE TAG: wait until the application in SERVICE
+  # reports TAG as ready. The slots publish no port, so ask from inside.
+  local service="$1" tag="$2" waited=0 body="" container
+  info "Waiting for MyPortal ${tag} to become ready in ${service} (migrations run on first start)…"
+  while ((waited < MYPORTAL_HEALTH_TIMEOUT)); do
+    container=$(service_container "$service")
+    body=""
+    [[ -z "$container" ]] || body=$(docker exec "$container" python -c "$READYZ_PROGRAM" 2>/dev/null || true)
+    release_ready "$body" "$tag" && return 0
     sleep 5
     waited=$((waited + 5))
   done
   warn "MyPortal ${tag} did not become ready within ${MYPORTAL_HEALTH_TIMEOUT}s (last response: ${body:-none})."
-  compose logs --tail 40 app >&2 || true
+  compose logs --tail 40 "$service" >&2 || true
   return 1
+}
+
+wait_for_proxy() {
+  # wait_for_proxy TAG: confirm the proxy serves TAG.
+  local tag="$1" waited=0 body="" container
+  while ((waited < 60)); do
+    container=$(service_container proxy)
+    body=""
+    [[ -z "$container" ]] \
+      || body=$(docker exec "$container" wget -qO- -T 10 http://127.0.0.1:8080/readyz 2>/dev/null || true)
+    release_ready "$body" "$tag" && return 0
+    sleep 2
+    waited=$((waited + 2))
+  done
+  warn "the proxy does not serve MyPortal ${tag} (last response: ${body:-none})."
+  compose logs --tail 20 proxy >&2 || true
+  return 1
+}
+
+wait_for_release() {
+  # Wait until the serving application reports TAG as ready.
+  local tag="$1"
+  wait_for_service "$(app_service)" "$tag" || return 1
+  [[ -z "$(active_slot)" ]] || wait_for_proxy "$tag"
 }
 
 backup_database() {
@@ -542,18 +937,15 @@ cmd_install() {
   [[ -f "$APP_ENV" ]] || write_initial_configuration "$port" "$bind"
   set_setting "$PROJECT_ENV" HTTP_PORT "$port"
   set_setting "$PROJECT_ENV" HTTP_BIND "$bind"
-  write_compose_file
 
   local image
   image=$(obtain_image "$version")
   set_setting "$PROJECT_ENV" MYPORTAL_IMAGE "$image"
 
-  compose up -d
-  if ! wait_for_release "$version"; then
-    die "the installation did not become healthy. Inspect it with 'docker compose --project-directory ${MYPORTAL_DIR} logs app', then rerun install."
+  # Records the release only once healthy, so a failed attempt can be rerun.
+  if ! deploy_release "$image" "$version"; then
+    die "the installation did not become healthy. Inspect it with 'docker compose --project-directory ${MYPORTAL_DIR} logs app_blue', then rerun install."
   fi
-  # Recorded only once healthy, so a failed attempt can simply be rerun.
-  set_setting "$PROJECT_ENV" MYPORTAL_VERSION "$version"
   install_script_copy "$version"
   if [[ -x "$INSTALLED_SCRIPT" ]]; then
     install_web_upgrade_cron
@@ -621,6 +1013,16 @@ self_update() {
   rm -f "$candidate"
 }
 
+take_deploy_lock() {
+  # One upgrade, rollback or restart at a time, whether from the shell, the
+  # nightly job or the portal. The descriptor and variable survive the
+  # self-update exec.
+  [[ -z "${MYPORTAL_UPGRADE_LOCKED:-}" ]] || return 0
+  exec 9>"$(dirname "$PROJECT_ENV")/.upgrade.lock"
+  flock -n 9 || die "another upgrade, rollback or restart is already running."
+  export MYPORTAL_UPGRADE_LOCKED=1
+}
+
 cmd_upgrade() {
   local version="" explicit=false assume_yes=false
   local -a original_args=("$@")
@@ -634,13 +1036,7 @@ cmd_upgrade() {
   require_root
   require_installed
   ensure_docker
-  if [[ -z "${MYPORTAL_UPGRADE_LOCKED:-}" ]]; then
-    # One upgrade at a time, whether from the shell, the nightly job or the
-    # portal. The descriptor and variable survive the self-update exec.
-    exec 9>"$(dirname "$PROJECT_ENV")/.upgrade.lock"
-    flock -n 9 || die "another upgrade is already running."
-    export MYPORTAL_UPGRADE_LOCKED=1
-  fi
+  take_deploy_lock
   adopt_web_upgrades
 
   local current
@@ -680,32 +1076,64 @@ cmd_upgrade() {
   fi
 
   info "Upgrading MyPortal ${current} -> ${version}."
-  local image previous_image backup
-  image=$(obtain_image "$version")        # before any downtime
-  previous_image=$(get_setting "$PROJECT_ENV" MYPORTAL_IMAGE)
-  write_compose_file
+  local image backup
+  image=$(obtain_image "$version")
   compose up -d db
   backup=$(backup_database "before-${version}")
 
-  set_setting "$PROJECT_ENV" MYPORTAL_IMAGE "$image"
-  set_setting "$PROJECT_ENV" MYPORTAL_VERSION "$version"
-  compose up -d
-  if wait_for_release "$version"; then
+  # The new release starts in the idle slot while ${current} keeps serving.
+  if deploy_release "$image" "$version"; then
     set_setting "$PROJECT_ENV" FAILED_VERSION ""
     prune_backups
     info "MyPortal ${version} is running. Database backup: ${backup}"
+    [[ -z "$(get_setting "$PROJECT_ENV" "$(slot_key "$(other_slot "$(active_slot)")" VERSION)")" ]] \
+      || info "${current} is kept in the idle slot; 'myportal-docker rollback' switches back to it."
     return 0
   fi
 
-  warn "rolling back to ${current}."
   set_setting "$PROJECT_ENV" FAILED_VERSION "$version"
-  set_setting "$PROJECT_ENV" MYPORTAL_IMAGE "$previous_image"
-  set_setting "$PROJECT_ENV" MYPORTAL_VERSION "$current"
-  compose up -d
   if wait_for_release "$current"; then
-    die "the upgrade to ${version} failed and ${current} was restored. The database was backed up before the upgrade to ${backup}; if ${current} misbehaves after the partial migration, restore it with 'myportal-docker restore-db ${backup}'."
+    die "the upgrade to ${version} failed; ${current} is still serving. The database was backed up before the upgrade to ${backup}; if ${current} misbehaves after a partial migration, restore it with 'myportal-docker restore-db ${backup}'."
   fi
-  die "the upgrade to ${version} failed and ${current} did not recover. Restore the database with 'myportal-docker restore-db ${backup}'."
+  die "the upgrade to ${version} failed and ${current} is not ready. Restore the database with 'myportal-docker restore-db ${backup}'."
+}
+
+cmd_rollback() {
+  local assume_yes=false
+  while (($#)); do
+    case "$1" in
+      --yes|-y) assume_yes=true; shift ;;
+      *) die "unknown option for rollback: $1" ;;
+    esac
+  done
+  require_root
+  require_installed
+  ensure_docker
+  take_deploy_lock
+
+  local active idle current version image
+  active=$(active_slot)
+  [[ -n "$active" ]] || die "no previous release is kept yet; one is kept from the next upgrade on."
+  idle=$(other_slot "$active")
+  current=$(get_setting "$PROJECT_ENV" MYPORTAL_VERSION)
+  version=$(get_setting "$PROJECT_ENV" "$(slot_key "$idle" VERSION)")
+  image=$(get_setting "$PROJECT_ENV" "$(slot_key "$idle" IMAGE)")
+  [[ -n "$version" && "$version" != "$current" ]] \
+    || die "no previous release is kept (a restart or first upgrade replaces it). Restore an older release with 'myportal-docker upgrade --version TAG'."
+  docker image inspect "$image" >/dev/null 2>&1 \
+    || die "the image of ${version} (${image}) is no longer on this host. Use 'myportal-docker upgrade --version ${version}' instead."
+
+  if [[ "$assume_yes" != true && -t 0 ]]; then
+    local answer
+    read -r -p "Switch MyPortal from ${current} back to ${version}? Changes ${current} made to the database stay. [y/N] " answer
+    [[ "$answer" =~ ^[Yy] ]] || die "rollback cancelled."
+  fi
+  info "Rolling MyPortal back from ${current} to ${version}."
+  deploy_release "$image" "$version" || die "${version} did not become ready; ${current} is still serving."
+  # Unattended and portal upgrades would otherwise reinstall it tonight.
+  set_setting "$PROJECT_ENV" FAILED_VERSION "$current"
+  info "MyPortal ${version} is serving again. Unattended upgrades skip ${current}; install it again with 'myportal-docker upgrade --version ${current}'."
+  info "If ${version} misbehaves with the database as ${current} left it, restore the backup taken before that upgrade (in ${BACKUP_DIR}) with 'myportal-docker restore-db FILE'."
 }
 
 cmd_self_update() {
@@ -742,8 +1170,18 @@ cmd_check() {
 
 cmd_status() {
   require_installed
-  printf 'Installed release: %s\nImage:             %s\n\n' \
+  printf 'Installed release: %s\nImage:             %s\n' \
     "$(get_setting "$PROJECT_ENV" MYPORTAL_VERSION)" "$(get_setting "$PROJECT_ENV" MYPORTAL_IMAGE)"
+  local active previous
+  active=$(active_slot)
+  if [[ -n "$active" ]]; then
+    previous=$(get_setting "$PROJECT_ENV" "$(slot_key "$(other_slot "$active")" VERSION)")
+    printf 'Serving slot:      %s\n' "$active"
+    if [[ -n "$previous" && "$previous" != "$(get_setting "$PROJECT_ENV" MYPORTAL_VERSION)" ]]; then
+      printf 'Previous release:  %s (%s slot, stopped; myportal-docker rollback)\n' "$previous" "$(other_slot "$active")"
+    fi
+  fi
+  printf '\n'
   compose ps
   local port
   port=$(get_setting "$PROJECT_ENV" HTTP_PORT)
@@ -758,7 +1196,7 @@ cmd_backup() {
   db=$(backup_database "$version")
   files="${BACKUP_DIR}/files-${version}-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
   info "Backing up uploaded files to ${files}…"
-  compose exec -T app tar -czf - -C /app private_uploads app/static/uploads var >"$files"
+  app_exec tar -czf - -C /app private_uploads app/static/uploads var >"$files"
   chmod 0600 "$files"
   prune_backups
   cat <<EOF
@@ -774,8 +1212,10 @@ cmd_restore_db() {
   require_root
   require_installed
   [[ -f "$file" ]] || die "usage: myportal-docker restore-db BACKUP.sql.gz"
+  local service
+  service=$(app_service)
   info "Stopping MyPortal and restoring ${file}…"
-  compose stop app
+  compose stop "$service"
   compose up -d db
   local waited=0
   until compose exec -T db healthcheck.sh --connect >/dev/null 2>&1; do
@@ -783,16 +1223,23 @@ cmd_restore_db() {
     sleep 2; waited=$((waited + 2))
   done
   gunzip -c "$file" | compose exec -T db sh -c 'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"'
-  compose up -d app
+  compose up -d "$service"
   wait_for_release "$(get_setting "$PROJECT_ENV" MYPORTAL_VERSION)" || die "MyPortal did not become ready after the restore."
   info "Database restored."
 }
 
 cmd_restart() {
+  # Start the installed release afresh in the idle slot and switch to it, so
+  # configuration changes apply without downtime. This replaces the previous
+  # release kept for rollback.
   require_root
   require_installed
-  compose up -d --force-recreate app
-  wait_for_release "$(get_setting "$PROJECT_ENV" MYPORTAL_VERSION)" || die "MyPortal did not become ready."
+  ensure_docker
+  take_deploy_lock
+  local current
+  current=$(get_setting "$PROJECT_ENV" MYPORTAL_VERSION)
+  deploy_release "$(get_setting "$PROJECT_ENV" MYPORTAL_IMAGE)" "$current" \
+    || die "MyPortal ${current} did not become ready with the current configuration; the running container was left serving. Check ${APP_ENV}."
 }
 
 cmd_setup() {
@@ -856,7 +1303,7 @@ EOF
 #
 # The portal never gets root or the Docker socket. Its only capability is to
 # drop a request file in its own state volume. This root job reads that file
-# through "docker compose exec" (so a symlink planted in the volume cannot
+# through "docker exec" (so a symlink planted in the volume cannot
 # redirect a host path), takes nothing from it but a UUID to report progress
 # against, and runs the same 'upgrade --yes' as the nightly job: the latest
 # published release, with a backup and automatic rollback.
@@ -895,7 +1342,7 @@ cmd_web_upgrades() {
     off)
       rm -f "$WEB_UPGRADE_CRON"
       set_setting "$PROJECT_ENV" WEB_UPGRADES off
-      compose exec -T app rm -f "$CONTAINER_UPDATE_FLAG" >/dev/null 2>&1 || true
+      app_exec rm -f "$CONTAINER_UPDATE_FLAG" >/dev/null 2>&1 || true
       info "Upgrades from the portal are disabled."
       ;;
     status)
@@ -913,13 +1360,13 @@ report_update() {
   # report_update FILE UPDATE_ID STATUS [--error MESSAGE]
   # Record progress in the portal's update history, with FILE as the output.
   # The helper runs inside the container as its service account, so the host
-  # never writes into the volume. While the app container is being replaced,
+  # never writes into the volume. Should no application container be running,
   # a one-off container records the final result instead.
   local file="$1"; shift
   local -a helper=(/app/scripts/system_update_report.py "$@" --output-file -)
-  compose exec -T -e PYTHONPATH=/app app python "${helper[@]}" <"$file" >/dev/null 2>&1 && return 0
+  app_exec python "${helper[@]}" <"$file" >/dev/null 2>&1 && return 0
   [[ "${REPORT_EXEC_ONLY:-}" != 1 ]] || return 0
-  compose run --rm --no-deps -T -e PYTHONPATH=/app --entrypoint python app "${helper[@]}" <"$file" >/dev/null 2>&1 \
+  compose run --rm --no-deps -T -e PYTHONPATH=/app --entrypoint python "$(app_service)" "${helper[@]}" <"$file" >/dev/null 2>&1 \
     || warn "could not record the upgrade result in the portal."
 }
 
@@ -931,12 +1378,12 @@ cmd_process_requests() {
   flock -n 8 || return 0
 
   local request update_id
-  request=$(compose exec -T app sh -c \
+  request=$(app_exec sh -c \
     'f="$1"; if [ -f "$f" ] && [ ! -L "$f" ]; then head -c 4096 "$f"; fi' sh "$CONTAINER_UPDATE_FLAG" \
-    2>/dev/null) || return 0
+    </dev/null 2>/dev/null) || return 0
   [[ -n "$request" ]] || return 0
   # Claim the request before acting on it, so a failure can never loop.
-  compose exec -T app rm -f "$CONTAINER_UPDATE_FLAG" >/dev/null 2>&1 || true
+  app_exec rm -f "$CONTAINER_UPDATE_FLAG" </dev/null >/dev/null 2>&1 || true
   update_id=$(printf '%s\n' "$request" | sed -n 's/^update_id=//p' | head -n1 | tr -d '[:space:]')
   if [[ ! "$update_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
     warn "ignoring an upgrade request without a valid identifier."
@@ -1046,10 +1493,10 @@ hash_password() {
   # so the stored format always matches the running release.
   local program='import sys; from app.security.passwords import hash_password; sys.stdout.write(hash_password(sys.stdin.read()))'
   local hash
-  if compose exec -T app true >/dev/null 2>&1; then
-    hash=$(compose exec -T app python -c "$program")
+  if app_exec true </dev/null >/dev/null 2>&1; then
+    hash=$(app_exec python -c "$program")
   else
-    hash=$(compose run --rm --no-deps -T app python -c "$program" 2>/dev/null)
+    hash=$(compose run --rm --no-deps -T "$(app_service)" python -c "$program" 2>/dev/null)
   fi
   # Only the portal's PBKDF2 format is accepted; it also makes the value safe
   # to place in SQL.
@@ -1236,12 +1683,13 @@ main() {
   case "$command" in
     install) cmd_install "$@" ;;
     upgrade|update) cmd_upgrade "$@" ;;
+    rollback) cmd_rollback "$@" ;;
     check) cmd_check ;;
     self-update) cmd_self_update ;;
     status) cmd_status ;;
     logs)
       require_installed
-      if (($#)); then compose logs "$@" app; else compose logs --follow app; fi
+      if (($#)); then compose logs "$@" "$(app_service)"; else compose logs --follow "$(app_service)"; fi
       ;;
     backup) cmd_backup ;;
     restore-db) cmd_restore_db "$@" ;;
