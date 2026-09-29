@@ -233,14 +233,91 @@ def campaign_fields_from_form(form: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+# ``company_ids`` below is the set of companies a user may market to, or
+# ``None`` for Super Admins, who may use every company and any sender address.
+
+
+def _in_scope(company_id: Any, company_ids: set[int] | None) -> bool:
+    if company_ids is None:
+        return True
+    try:
+        return int(company_id) in company_ids
+    except (TypeError, ValueError):
+        return False
+
+
+async def audience_scope_error(audience: Mapping[str, Any] | None, company_ids: set[int] | None) -> str | None:
+    """Explain why an audience reaches outside ``company_ids``, or return ``None``.
+
+    Outside Super Admins, an audience must name its companies (not "all
+    active companies"), every chosen or excluded company must be in scope, and
+    every "also send to" address must belong to a contact at one of them.
+    """
+
+    if company_ids is None:
+        return None
+    audience = normalise_audience(audience)
+    if audience["company_mode"] != "selected":
+        return "Choose the companies to send to. Only Super Admins can send to all companies."
+    chosen = audience["company_ids"] + audience["exclude_company_ids"]
+    if any(company_id not in company_ids for company_id in chosen):
+        return "You can only choose companies you have marketing access to."
+    include_emails = audience["include_emails"]
+    if include_emails:
+        found = await campaign_repo.find_staff_by_emails(include_emails)
+        allowed_emails = {
+            str(row.get("email") or "").lower() for row in found if _in_scope(row.get("company_id"), company_ids)
+        }
+        if any(email not in allowed_emails for email in include_emails):
+            return "Extra addresses must belong to contacts at companies you have marketing access to."
+    return None
+
+
+def sender_allowed(sender_email: str | None, company_ids: set[int] | None) -> bool:
+    """Only Super Admins may choose a sender; others use the configured default."""
+
+    if company_ids is None or not sender_email:
+        return True
+    return normalise_email(sender_email) == default_sender()
+
+
+def sender_scope_error(sender_email: str | None, company_ids: set[int] | None) -> str | None:
+    if sender_allowed(sender_email, company_ids):
+        return None
+    default = default_sender()
+    if default:
+        return f"Only Super Admins can change the sender. Leave it blank to send from {default}."
+    return "Only Super Admins can change the sender address."
+
+
+async def campaign_scope_error(campaign: Mapping[str, Any], company_ids: set[int] | None) -> str | None:
+    return await audience_scope_error(campaign.get("audience"), company_ids) or sender_scope_error(
+        campaign.get("sender_email"), company_ids
+    )
+
+
+async def campaign_in_scope(campaign: Mapping[str, Any], company_ids: set[int] | None) -> bool:
+    """Return whether a user limited to ``company_ids`` may see the campaign."""
+
+    return await audience_scope_error(campaign.get("audience"), company_ids) is None
+
+
 def _full_name(contact: Mapping[str, Any]) -> str:
     return " ".join(
         part for part in (str(contact.get("first_name") or "").strip(), str(contact.get("last_name") or "").strip()) if part
     )
 
 
-async def resolve_audience(campaign: Mapping[str, Any]) -> dict[str, Any]:
-    """Return the recipients a campaign would send to, plus who was left out and why."""
+async def resolve_audience(
+    campaign: Mapping[str, Any],
+    *,
+    company_ids: set[int] | None = None,
+) -> dict[str, Any]:
+    """Return the recipients a campaign would send to, plus who was left out and why.
+
+    With ``company_ids``, contacts outside those companies are dropped
+    entirely so they are never previewed or queued.
+    """
 
     audience = normalise_audience(campaign.get("audience"))
     contacts = await campaign_repo.find_audience_contacts(audience)
@@ -260,6 +337,8 @@ async def resolve_audience(campaign: Mapping[str, Any]) -> dict[str, Any]:
     excluded: list[dict[str, Any]] = []
     seen: set[str] = set()
     for contact in contacts:
+        if not _in_scope(contact.get("company_id"), company_ids):
+            continue
         email = normalise_email(contact.get("email"))
         entry = {
             "staff_id": contact.get("staff_id"),
@@ -470,12 +549,20 @@ def _validate_ready(campaign: Mapping[str, Any]) -> None:
         raise CampaignError("Set a sender address on the campaign or configure SMTP_FROM.")
 
 
-async def send_test(campaign: Mapping[str, Any], to_email: str) -> None:
+async def send_test(
+    campaign: Mapping[str, Any],
+    to_email: str,
+    *,
+    company_ids: set[int] | None = None,
+) -> None:
     address = normalise_email(to_email)
     if not address:
         raise CampaignError("Your account does not have a valid email address for the test send.")
+    scope_error = await campaign_scope_error(campaign, company_ids)
+    if scope_error:
+        raise CampaignError(scope_error)
     _validate_ready(campaign)
-    resolved = await resolve_audience(campaign)
+    resolved = await resolve_audience(campaign, company_ids=company_ids)
     sample = resolved["recipients"][0] if resolved["recipients"] else {"email": address}
     contact = await contact_for(sample)
     token = "0" * 32
@@ -486,14 +573,17 @@ async def send_test(campaign: Mapping[str, Any], to_email: str) -> None:
         raise CampaignError("The test email was not sent. Check the email settings and blocklist.")
 
 
-async def queue_campaign(campaign_id: int) -> int:
+async def queue_campaign(campaign_id: int, *, company_ids: set[int] | None = None) -> int:
     campaign = await campaign_repo.get_campaign(campaign_id)
     if not campaign:
         raise CampaignError("Campaign not found.")
     if campaign.get("status") != "draft":
         raise CampaignError("Only draft campaigns can be sent.")
+    scope_error = await campaign_scope_error(campaign, company_ids)
+    if scope_error:
+        raise CampaignError(scope_error)
     _validate_ready(campaign)
-    resolved = await resolve_audience(campaign)
+    resolved = await resolve_audience(campaign, company_ids=company_ids)
     if not resolved["recipients"]:
         raise CampaignError("No recipients match this audience.")
     now = datetime.now(timezone.utc)
