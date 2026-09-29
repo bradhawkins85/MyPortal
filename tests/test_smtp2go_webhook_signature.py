@@ -454,9 +454,11 @@ def _direct_request(body: bytes):
     return request
 
 
-def test_webhook_rejected_when_secret_not_configured():
+def test_webhook_rejected_when_secret_not_configured(monkeypatch):
     """Without a configured secret the webhook fails closed."""
     from fastapi import HTTPException
+
+    monkeypatch.delenv("SMTP2GO_WEBHOOK_SECRET", raising=False)
     from app.features.smtp.routes import smtp2go_webhook
 
     body = json.dumps(DELIVERED_EVENT).encode("utf-8")
@@ -484,3 +486,24 @@ def test_webhook_fails_closed_when_settings_error():
             asyncio.run(smtp2go_webhook(_direct_request(body), "sig"))
     assert exc_info.value.status_code == 503
     mock_process.assert_not_called()
+
+
+def test_webhook_uses_environment_secret_when_module_secret_empty(monkeypatch):
+    """SMTP2GO_WEBHOOK_SECRET is honoured when the module row has no secret."""
+    from fastapi import HTTPException
+    from app.features.smtp.routes import smtp2go_webhook
+
+    monkeypatch.setenv("SMTP2GO_WEBHOOK_SECRET", "env-secret-123")
+    body = json.dumps(DELIVERED_EVENT).encode("utf-8")
+    good = compute_timestamp_signature(body, "env-secret-123", str(int(time.time())))
+    with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
+        mock_settings.return_value = {'api_key': 'k', 'webhook_secret': ''}
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(smtp2go_webhook(_direct_request(body), "t=1,v1=bad"))
+        assert exc_info.value.status_code == 401
+        with patch('app.features.smtp.routes.verify_webhook_signature', new_callable=AsyncMock) as mock_verify:
+            mock_verify.return_value = False
+            with pytest.raises(HTTPException):
+                asyncio.run(smtp2go_webhook(_direct_request(body), good))
+            assert mock_verify.call_args[0][2] == "env-secret-123"

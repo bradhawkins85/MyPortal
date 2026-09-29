@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import time
+import os
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -220,7 +221,13 @@ async def smtp2go_webhook(
 
     try:
         module_settings = await modules_service.get_module_settings('smtp2go')
-        webhook_secret = module_settings.get('webhook_secret') if module_settings else None
+        webhook_secret = (
+            str(module_settings.get('webhook_secret') or '').strip() if module_settings else ''
+        )
+        if not webhook_secret:
+            # Deployments commonly set the secret only in the environment, and
+            # a module row saved before it was set holds an empty value.
+            webhook_secret = os.getenv('SMTP2GO_WEBHOOK_SECRET', '').strip()
         disable_signature_verification = bool(
             module_settings.get('disable_webhook_signature_verification')
         ) if module_settings else False
@@ -231,7 +238,7 @@ async def smtp2go_webhook(
         if not webhook_secret and not disable_signature_verification:
             logger.warning(
                 "SMTP2Go webhook rejected: no webhook_secret is configured for the smtp2go module. "
-                "Set the webhook secret in the SMTP2Go module settings to accept events."
+                "Set SMTP2GO_WEBHOOK_SECRET or the webhook secret in the SMTP2Go module settings to accept events."
             )
             await webhook_monitor.log_incoming_webhook(
                 name="SMTP2Go Webhook - Secret Not Configured",
