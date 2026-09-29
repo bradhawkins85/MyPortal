@@ -1,0 +1,7 @@
+{
+  "guid": "b70fff21-2edf-4b56-a7fb-c46194fe628d",
+  "occurred_at": "2026-09-29T00:00Z",
+  "change_type": "Feature",
+  "summary": "Help only lists articles for active feature packs and enabled modules, and Docker images now include the docs/wiki help articles.",
+  "content_hash": "a96441e81e7e81f2e74a2aacf0685b698e7b6bf25a25d73b6cc045fb4b43ce68"
+}

@@ -13,7 +13,9 @@ test_venv
 test_env
 tests
 evals
-docs
+# docs/wiki is served in-app by the Help feature pack.
+docs/*
+!docs/wiki
 wiki
 tray
 var

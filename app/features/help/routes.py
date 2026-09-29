@@ -4,6 +4,9 @@ Provides:
 
 * ``GET /help``                              – Help index listing all sections and articles.
 * ``GET /help/{section_slug}/{article_slug}`` – Renders a single help article.
+
+Articles documenting a feature pack or module that is not active are hidden
+(see ``requirements.py``).
 """
 
 from __future__ import annotations
@@ -13,7 +16,14 @@ import re
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 
-from .service import find_article, list_sections, render_article
+from .service import (
+    article_visible,
+    filter_sections,
+    find_article,
+    list_sections,
+    load_requirement_check,
+    render_article,
+)
 
 
 router = APIRouter(tags=["Help"])
@@ -46,7 +56,8 @@ async def help_index(request: Request):
     if redirect:
         return redirect
 
-    sections = list_sections()
+    is_active = await load_requirement_check()
+    sections = filter_sections(list_sections(), is_active)
     return await main_module._render_template(
         "help/index.html",
         request,
@@ -72,12 +83,14 @@ async def help_article(request: Request, section_slug: str, article_slug: str):
     _validate_slug(section_slug, "section")
     _validate_slug(article_slug, "article")
 
+    is_active = await load_requirement_check()
     article = find_article(section_slug, article_slug)
-    if not article:
+    # Articles for inactive feature packs or modules are hidden entirely.
+    if not article or not article_visible(article, is_active):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
 
     content_html = render_article(article)
-    sections = list_sections()
+    sections = filter_sections(list_sections(), is_active)
 
     return await main_module._render_template(
         "help/article.html",

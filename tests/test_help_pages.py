@@ -178,3 +178,27 @@ def test_worker_scaling_article_is_available_from_help(patched_dependencies):
     assert article_response.status_code == 200
     assert "Recommended limits" in article_response.text
     assert "Conservative ceiling without dedicated load testing" in article_response.text
+
+
+def test_help_hides_articles_for_inactive_features(patched_dependencies, monkeypatch):
+    from app.services import component_availability
+
+    with TestClient(app) as client:
+        # Applied after startup so pack loading is unaffected.
+        monkeypatch.setattr(
+            component_availability,
+            "_availability",
+            component_availability.ComponentAvailability(
+                disabled_feature_packs=frozenset({"tickets"})
+            ),
+        )
+        index_response = client.get("/help")
+        hidden_response = client.get("/help/tickets/imap-setup")
+        shown_response = client.get("/help/getting-started/home")
+
+    assert index_response.status_code == 200
+    assert "/help/tickets/" not in index_response.text
+    assert "/help/getting-started/home" in index_response.text
+    assert hidden_response.status_code == 404
+    assert shown_response.status_code == 200
+    assert "/help/tickets/" not in shown_response.text
