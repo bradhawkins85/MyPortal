@@ -42,10 +42,11 @@ async def list_pause_statuses(template_id: int) -> list[str]:
 
 
 async def create_template(*, name: str, description: str, enabled: bool,
-                          targets: list[tuple[str, int, int]], pause_statuses: list[str]) -> None:
+                          targets: list[tuple[str, int, int]], pause_statuses: list[str],
+                          business_hours_only: bool = False) -> None:
     template_id = await db.execute_returning_lastrowid(
-        "INSERT INTO sla_templates (name,description,enabled) VALUES (%s,%s,%s)",
-        (name, description or None, enabled),
+        "INSERT INTO sla_templates (name,description,enabled,business_hours_only) VALUES (%s,%s,%s,%s)",
+        (name, description or None, enabled, 1 if business_hours_only else 0),
     )
     for priority, response, resolution in targets:
         await db.execute(
@@ -58,6 +59,13 @@ async def create_template(*, name: str, description: str, enabled: bool,
             "INSERT INTO sla_template_pause_statuses (template_id,status) VALUES (%s,%s)",
             (template_id, status),
         )
+
+
+async def set_business_hours_only(template_id: int, enabled: bool) -> None:
+    await db.execute(
+        "UPDATE sla_templates SET business_hours_only=%s WHERE id=%s",
+        (1 if enabled else 0, template_id),
+    )
 
 
 async def assign_to_company(company_id: int, template_id: int) -> None:
@@ -89,7 +97,7 @@ async def list_ticket_sla_source(ticket_ids: Sequence[int]) -> list[dict[str, An
     query = (
         "SELECT t.id, t.company_id, t.created_at, t.closed_at, t.status, "  # nosec B608
         "CASE WHEN target.id IS NOT NULL THEN s.id END AS sla_id, "
-        "s.name AS sla_name, target.response_minutes, target.resolution_minutes, "
+        "s.name AS sla_name, s.business_hours_only, target.response_minutes, target.resolution_minutes, "
         "pause.status AS sla_pause_status, "
         "MIN(CASE WHEN tr.is_internal=0 THEN tr.created_at END) AS first_response_at "
         "FROM tickets t "
@@ -101,7 +109,7 @@ async def list_ticket_sla_source(ticket_ids: Sequence[int]) -> list[dict[str, An
         "ON pause.template_id=s.id AND LOWER(pause.status)=LOWER(COALESCE(t.status,'')) "
         "LEFT JOIN ticket_replies tr ON tr.ticket_id=t.id "
         f"WHERE t.id IN ({placeholders}) "
-        "GROUP BY t.id,t.company_id,t.created_at,t.closed_at,t.status,s.id,s.name,target.response_minutes,target.resolution_minutes,pause.status"
+        "GROUP BY t.id,t.company_id,t.created_at,t.closed_at,t.status,s.id,s.name,s.business_hours_only,target.response_minutes,target.resolution_minutes,pause.status"
     )
     return await db.fetch_all(
         query,

@@ -91,6 +91,8 @@ async def _render_automation_form(
         "triggerFiltersRaw": "",
         "actionModule": "",
         "actionPayloadRaw": "",
+        "businessHoursMode": "",
+        "businessHoursSource": "company",
     }
     if form_values:
         for key, value in form_values.items():
@@ -179,6 +181,8 @@ def _automation_to_form_values(automation: Mapping[str, Any]) -> dict[str, Any]:
         "triggerFiltersRaw": "",
         "actionModule": str(automation.get("action_module") or ""),
         "actionPayloadRaw": "",
+        "businessHoursMode": str(automation.get("business_hours_mode") or ""),
+        "businessHoursSource": str(automation.get("business_hours_source") or "company"),
     }
     scheduled_time = automation.get("scheduled_time")
     if scheduled_time and isinstance(scheduled_time, datetime):
@@ -236,6 +240,17 @@ def _parse_automation_form_submission(
     )
     action_module_raw = _get_str_value("actionModule").strip()
     action_payload_raw = _get_str_value("actionPayload").strip()
+    business_hours_mode_raw = _get_str_value("businessHoursMode").strip().lower()
+    allowed_modes = {"pause", "skip"} if kind_normalised == "event" else {"skip"}
+    business_hours_mode = (
+        business_hours_mode_raw if business_hours_mode_raw in allowed_modes else None
+    )
+    business_hours_source_raw = _get_str_value("businessHoursSource").strip().lower()
+    business_hours_source = (
+        ("global" if business_hours_source_raw == "global" else "company")
+        if business_hours_mode
+        else None
+    )
 
     form_state = {
         "name": name,
@@ -251,6 +266,8 @@ def _parse_automation_form_submission(
         "triggerFiltersMode": trigger_filters_mode,
         "actionModule": action_module_raw,
         "actionPayloadRaw": action_payload_raw,
+        "businessHoursMode": business_hours_mode or "",
+        "businessHoursSource": business_hours_source or "company",
     }
 
     if not name:
@@ -435,6 +452,8 @@ def _parse_automation_form_submission(
         "action_module": action_module,
         "action_payload": action_payload,
         "status": status_value,
+        "business_hours_mode": business_hours_mode,
+        "business_hours_source": business_hours_source,
     }
 
     return data, form_state, None, status.HTTP_200_OK

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block header_title %}Business hours{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="card card--panel admin-grid__full">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title">Global schedule</h2>
+        <p class="card__subtitle">
+          Your organisation's opening hours. Companies without their own schedule inherit these hours.
+          {% if business_hours_company_override_count %}{{ business_hours_company_override_count }} {{ 'company has' if business_hours_company_override_count == 1 else 'companies have' }} custom hours.{% endif %}
+        </p>
+      </div>
+      <span class="status status--{{ 'neutral' if not business_hours_status.configured else ('success' if business_hours_status.open else 'warning') }}">
+        {{ business_hours_status.label }}{% if business_hours_status.local_time %} · {{ business_hours_status.local_time }}{% endif %}
+      </span>
+    </div>
+    <div class="card__body">
+      {% if not business_hours_configured %}
+        <p class="form-help">No business hours are saved yet, so MyPortal treats every moment as open. Automations using business hours run immediately and SLA timers run around the clock until you save a schedule.</p>
+      {% endif %}
+      <form action="/admin/business-hours" method="post" class="form">
+        {% include "partials/csrf.html" %}
+        {% set bh_rows = business_hours_rows %}
+        {% set bh_timezone = business_hours_timezone %}
+        {% set bh_timezones = business_hours_timezones %}
+        {% set bh_prefix = "global-business-hours" %}
+        {% include "partials/business_hours_fields.html" %}
+        <div class="form-actions"><button class="button" type="submit">Save business hours</button></div>
+      </form>
+    </div>
+  </section>
+
+  <section class="card card--panel admin-grid__full">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title">Closures and public holidays</h2>
+        <p class="card__subtitle">Days you are closed all day. Companies with custom hours include these unless they opt out.</p>
+      </div>
+    </div>
+    <div class="card__body">
+      {% if business_hours_closures %}
+        <div class="table-wrapper">
+          <table class="table">
+            <thead><tr><th scope="col">Date</th><th scope="col">Name</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+            <tbody>
+              {% for closure in business_hours_closures %}
+                <tr>
+                  <td>{{ closure.closure_date.isoformat() if closure.closure_date else '' }}</td>
+                  <td>{{ closure.name or '—' }}</td>
+                  <td>
+                    <form action="/admin/business-hours/closures/{{ closure.id }}/delete" method="post">
+                      {% include "partials/csrf.html" %}
+                      <button class="button button--ghost" type="submit">Remove</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="text-muted">No closures have been added.</p>
+      {% endif %}
+      <form action="/admin/business-hours/closures" method="post" class="form">
+        {% include "partials/csrf.html" %}
+        <div class="form-field">
+          <label class="form-label required" for="global-closure-date">Date</label>
+          <input class="form-input" type="date" id="global-closure-date" name="closureDate" required />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="global-closure-name">Name</label>
+          <input class="form-input" id="global-closure-name" name="closureName" maxlength="150" placeholder="Christmas Day" />
+        </div>
+        <div class="form-actions"><button class="button button--secondary" type="submit">Add closure</button></div>
+      </form>
+    </div>
+  </section>
+</div>
+{% endblock %}

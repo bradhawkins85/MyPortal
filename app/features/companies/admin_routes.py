@@ -13,7 +13,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
-from . import handlers
+from . import business_hours_handlers, handlers
 
 router = APIRouter(tags=["Companies"])
 
@@ -67,6 +67,46 @@ _add("/admin/companies/{company_id}/sla", handlers.admin_save_company_sla, ["POS
 _add("/admin/companies/{company_id}/sla/delete", handlers.admin_delete_company_sla, ["POST"], response_class=HTMLResponse)
 _add("/admin/sla-templates", handlers.admin_sla_templates_page, ["GET"], response_class=HTMLResponse)
 _add("/admin/sla-templates", handlers.admin_create_sla_template, ["POST"], response_class=HTMLResponse)
+_add(
+    "/admin/sla-templates/{template_id}/business-hours",
+    handlers.admin_update_sla_template_business_hours,
+    ["POST"],
+    response_class=HTMLResponse,
+)
+
+# --- Business hours ------------------------------------------------------------
+_add("/admin/business-hours", business_hours_handlers.admin_business_hours_page, ["GET"], response_class=HTMLResponse)
+_add("/admin/business-hours", business_hours_handlers.admin_save_business_hours, ["POST"], response_class=HTMLResponse)
+_add(
+    "/admin/business-hours/closures",
+    business_hours_handlers.admin_add_business_hours_closure,
+    ["POST"],
+    response_class=HTMLResponse,
+)
+_add(
+    "/admin/business-hours/closures/{closure_id}/delete",
+    business_hours_handlers.admin_delete_business_hours_closure,
+    ["POST"],
+    response_class=HTMLResponse,
+)
+_add(
+    "/admin/companies/{company_id}/business-hours",
+    business_hours_handlers.admin_save_company_business_hours,
+    ["POST"],
+    response_class=HTMLResponse,
+)
+_add(
+    "/admin/companies/{company_id}/business-hours/closures",
+    business_hours_handlers.admin_add_company_business_hours_closure,
+    ["POST"],
+    response_class=HTMLResponse,
+)
+_add(
+    "/admin/companies/{company_id}/business-hours/closures/{closure_id}/delete",
+    business_hours_handlers.admin_delete_company_business_hours_closure,
+    ["POST"],
+    response_class=HTMLResponse,
+)
 
 # --- Company staff field configuration ---------------------------------------
 _add(

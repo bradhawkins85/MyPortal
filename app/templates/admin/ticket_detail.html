@@ -39,7 +39,7 @@
           {% set tag_status_value = ticket.ai_tags_status if ticket.ai_tags_status is not none else 'skipped' %}
           {% set tag_status_lower = tag_status_value | lower %}
           {% set ticket_status_label = ticket_status_label_map.get(ticket_status, ticket_status.replace('_', ' ').title()) %}
-          <p class="management__meta">SLA: <span class="status status--{{ 'danger' if ticket_sla.state == 'breached' else ('warning' if ticket_sla.state == 'at_risk' else ('success' if ticket_sla.state in ['met','on_track'] else 'neutral')) }}">{{ ticket_sla.name ~ ' · ' if ticket_sla.name else '' }}{{ ticket_sla.label }}</span>{% if ticket_sla.paused %} &middot; Timer paused{% endif %}{% if ticket_sla.resolution_due_at %} &middot; Resolution due <span data-utc="{{ ticket_sla.resolution_due_at.isoformat() }}">{{ ticket_sla.resolution_due_at.isoformat() }}</span>{% endif %}</p>
+          <p class="management__meta">SLA: <span class="status status--{{ 'danger' if ticket_sla.state == 'breached' else ('warning' if ticket_sla.state == 'at_risk' else ('success' if ticket_sla.state in ['met','on_track'] else 'neutral')) }}">{{ ticket_sla.name ~ ' · ' if ticket_sla.name else '' }}{{ ticket_sla.label }}</span>{% if ticket_sla.paused %} &middot; Timer paused{% if ticket_sla.paused_reason == 'outside_business_hours' %} (outside business hours){% endif %}{% endif %}{% if ticket_sla.resolution_due_at %} &middot; Resolution due <span data-utc="{{ ticket_sla.resolution_due_at.isoformat() }}">{{ ticket_sla.resolution_due_at.isoformat() }}</span>{% endif %}</p>
         </div>
         <div class="management__header-actions">
           <a href="/admin/tickets" class="button button--ghost">Back to tickets</a>
@@ -100,10 +100,23 @@
             <summary class="card__header card__header--collapsible">
               <h2 class="card__title">Ticket details</h2>
               <div class="card__collapsible-meta">
+                {% if ticket_business_hours and ticket_business_hours.configured %}
+                  <span
+                    class="status status--{{ 'success' if ticket_business_hours.open else 'warning' }}"
+                    title="{{ 'Company' if ticket_business_hours.source == 'company' else 'Global' }} business hours ({{ ticket_business_hours.timezone }}), local time {{ ticket_business_hours.local_time }}{% if ticket_business_hours.next_change_local %}. {{ 'Closes' if ticket_business_hours.open else 'Opens' }} {{ ticket_business_hours.next_change_local }}{% endif %}"
+                    data-ticket-business-hours
+                  >Customer {{ 'open' if ticket_business_hours.open else 'closed' }}</span>
+                {% endif %}
                 <span class="card__toggle-icon" aria-hidden="true"></span>
               </div>
             </summary>
             <div class="card-collapsible__content">
+            {% if ticket_deferred_automations %}
+              <p class="form-help" data-ticket-deferred-automations>
+                Waiting for business hours:
+                {% for deferred in ticket_deferred_automations %}{{ deferred.automation_name }}{% if deferred.run_after %} (<span data-utc="{{ deferred.run_after.isoformat() }}">{{ deferred.run_after.isoformat() }}</span>){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+              </p>
+            {% endif %}
             <form id="ticket-details-form" action="/admin/tickets/{{ ticket.id }}/details" method="post" class="form card__form ticket-details-form" data-ticket-details-autosave>
               {% if csrf_token %}
                 <input type="hidden" name="_csrf" value="{{ csrf_token }}" />

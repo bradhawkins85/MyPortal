@@ -128,6 +128,7 @@
                 <p class="form-help" data-filter-builder-error hidden></p>
                 <p class="form-help">Use ticket fields such as <code>ticket.status</code>, <code>ticket.body</code>, <code>ticket.age_days</code>, <code>ticket.updated_age_hours</code>, <code>ticket.in_status_age_hours</code>, and <code>ticket.last_reply_age_hours</code>. Use Advanced JSON for complex nested logic.</p>
               </div>
+              {% set kind = "scheduled" %}{% include "partials/automation_business_hours.html" %}
               <div class="form-field" data-automation-actions>
                 <label class="form-label">Scheduled actions</label>
                 <p class="form-help">Define one or more module executions. Actions run once per matching ticket and can use templates such as <code>{{ '{{ ticket.id }}' }}</code>.</p>

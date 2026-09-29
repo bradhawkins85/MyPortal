@@ -18,6 +18,16 @@ class AutomationBase(BaseModel):
     action_module: Optional[str] = Field(default=None, max_length=64)
     action_payload: Optional[dict[str, Any]] = None
     status: str = Field(default="inactive", pattern=r"^(active|inactive)$")
+    business_hours_mode: Optional[str] = Field(
+        default=None,
+        pattern=r"^(pause|skip)$",
+        description="Outside business hours: 'pause' holds event runs until opening, 'skip' drops them.",
+    )
+    business_hours_source: Optional[str] = Field(
+        default=None,
+        pattern=r"^(company|global)$",
+        description="Whose hours apply: the ticket's company (falling back to global) or the global schedule.",
+    )
 
 
 class AutomationCreate(AutomationBase):
@@ -38,6 +48,8 @@ class AutomationUpdate(BaseModel):
     action_module: Optional[str] = Field(default=None, max_length=64)
     action_payload: Optional[dict[str, Any]] = None
     status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
+    business_hours_mode: Optional[str] = Field(default=None, pattern=r"^(pause|skip)$")
+    business_hours_source: Optional[str] = Field(default=None, pattern=r"^(company|global)$")
 
 
 class AutomationResponse(AutomationBase):
