@@ -178,3 +178,64 @@ def test_worker_scaling_article_is_available_from_help(patched_dependencies):
     assert article_response.status_code == 200
     assert "Recommended limits" in article_response.text
     assert "Conservative ceiling without dedicated load testing" in article_response.text
+
+
+def test_help_hides_articles_for_inactive_features(patched_dependencies, monkeypatch):
+    from app.services import component_availability
+
+    with TestClient(app) as client:
+        # Applied after startup so pack loading is unaffected.
+        monkeypatch.setattr(
+            component_availability,
+            "_availability",
+            component_availability.ComponentAvailability(
+                disabled_feature_packs=frozenset({"tickets"})
+            ),
+        )
+        index_response = client.get("/help")
+        hidden_response = client.get("/help/tickets/imap-setup")
+        shown_response = client.get("/help/getting-started/home")
+
+    assert index_response.status_code == 200
+    assert "/help/tickets/" not in index_response.text
+    assert "/help/getting-started/home" in index_response.text
+    assert hidden_response.status_code == 404
+    assert shown_response.status_code == 200
+    assert "/help/tickets/" not in shown_response.text
+
+
+def test_super_admin_sees_inactive_articles_marked(patched_dependencies, monkeypatch):
+    from app.services import component_availability
+
+    async def fake_require_menu_page_access(request, key, *, write=False, detail=""):
+        return {"id": 1, "email": "admin@example.com", "is_super_admin": True}, None
+
+    base_context = main_module._build_base_context
+
+    async def fake_build_base_context(request, user, *, extra=None):
+        # Render the standard (non-admin) chrome; only the help route needs
+        # to see the super-admin flag.
+        return await base_context(request, {**user, "is_super_admin": False}, extra=extra)
+
+    monkeypatch.setattr(main_module, "_require_menu_page_access", fake_require_menu_page_access)
+    monkeypatch.setattr(main_module, "_build_base_context", fake_build_base_context)
+
+    with TestClient(app) as client:
+        monkeypatch.setattr(
+            component_availability,
+            "_availability",
+            component_availability.ComponentAvailability(
+                disabled_feature_packs=frozenset({"tickets"})
+            ),
+        )
+        index_response = client.get("/help")
+        inactive_response = client.get("/help/tickets/imap-setup")
+        active_response = client.get("/help/getting-started/home")
+
+    assert index_response.status_code == 200
+    assert "/help/tickets/imap-setup" in index_response.text
+    assert "help__inactive-badge" in index_response.text
+    assert inactive_response.status_code == 200
+    assert "not active on this portal" in inactive_response.text
+    assert active_response.status_code == 200
+    assert "not active on this portal" not in active_response.text
