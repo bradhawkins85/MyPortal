@@ -112,7 +112,15 @@ async def test_admin_deactivate_invalidates_verification_tokens(monkeypatch):
     monkeypatch.setattr(
         main_module.auth_repo, "invalidate_account_verification_tokens_for_user", fake_invalidate
     )
-    monkeypatch.setattr("app.services.audit.record", fake_record)
+    # Another test can leave app.services without its audit attribute, so
+    # patch the module object and re-attach it to the package.
+    import importlib
+
+    import app.services as services_package
+
+    audit_module = importlib.import_module("app.services.audit")
+    monkeypatch.setattr(services_package, "audit", audit_module, raising=False)
+    monkeypatch.setattr(audit_module, "record", fake_record)
     monkeypatch.setattr(main_module, "flash_redirect", lambda *args, **kwargs: SimpleNamespace(args=args))
 
     await main_module.admin_users_action(SimpleNamespace(), 22, "deactivate")
