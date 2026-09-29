@@ -70,6 +70,8 @@ scripts; see [Setup and Installation](docs/wiki/getting-started/Setup%20and%20In
 # Production: nginx on port 80, MariaDB, immutable blue/green releases
 sudo git clone https://github.com/bradhawkins85/MyPortal /opt/myportal/control
 sudo /opt/myportal/control/scripts/install_production.sh
+# Later updates: the portal's System updates page, or
+sudo myportal-upgrade
 
 # Development: editable install, isolated database, optional service on port 8000
 sudo scripts/install_development.sh

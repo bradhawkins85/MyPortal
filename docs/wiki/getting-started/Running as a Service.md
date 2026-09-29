@@ -43,8 +43,9 @@ journalctl -u 'myportal@*' -f
 # Apply configuration changes made in /etc/myportal.env
 sudo systemctl restart myportal@blue.service myportal@green.service
 
-# Deploy the latest origin/main
-sudo /opt/myportal/control/scripts/upgrade.sh
+# Deploy the latest origin/main (runs scripts/upgrade.sh from the control
+# checkout recorded as MYPORTAL_CONTROL_CHECKOUT in /etc/myportal.env)
+sudo myportal-upgrade
 ```
 
 `APP_UPGRADE_MODE`, `SYSTEMD_SERVICE_NAME` and `APP_RESTART_COMMAND` are only

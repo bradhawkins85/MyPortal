@@ -449,3 +449,95 @@ def test_release_revision_falls_back_to_release_directory_name(monkeypatch, tmp_
     (release / "version.txt").write_text("20260313061816\n")
     monkeypatch.setattr(scheduler_module, "_PROJECT_ROOT", release)
     assert scheduler_module._release_revision() == REVISION
+
+
+def test_upgrade_installs_stable_command_for_the_control_checkout(tmp_path):
+    script = (ROOT / "scripts/upgrade.sh").read_text()
+    start = script.index("install_upgrade_command() {")
+    end = script.index("\n}\n", start) + 3
+    checkout = tmp_path / "my checkout"
+    command = tmp_path / "bin" / "myportal-upgrade"
+    program = (
+        f'PROJECT_ROOT={str(checkout)!r}; SCRIPT_DIR={str(checkout / "scripts")!r}\n'
+        + script[start:end]
+        + "install_upgrade_command\n"
+    )
+    subprocess.run(["bash", "-c", program], check=True,
+                   env={**os.environ, "MYPORTAL_UPGRADE_COMMAND": str(command)})
+    (checkout / "scripts").mkdir(parents=True)
+    fake = checkout / "scripts" / "upgrade.sh"
+    fake.write_text('#!/usr/bin/env bash\necho "ran $*"\n')
+    fake.chmod(0o755)
+    result = subprocess.run([str(command), "--rolling"], text=True, capture_output=True, check=True)
+    assert result.stdout == "ran --rolling\n"
+
+
+def test_docs_use_the_stable_upgrade_command():
+    for rel in (
+        "docs/wiki/getting-started/Zero Downtime Upgrades.md",
+        "docs/wiki/getting-started/Setup and Installation.md",
+        "docs/wiki/getting-started/Running as a Service.md",
+        "wiki/Setup-and-Installation.md",
+        "wiki/Systemd-Service.md",
+    ):
+        text = (ROOT / rel).read_text()
+        assert "/opt/myportal/control/scripts/upgrade.sh" not in text, rel
+        assert "myportal-upgrade" in text, rel
+
+
+def _run_record_control_checkout(env_file: Path, checkout: Path) -> subprocess.CompletedProcess[str]:
+    script = (ROOT / "scripts/upgrade.sh").read_text()
+    start = script.index("record_control_checkout() {")
+    end = script.index("\nPY\n}\n", start) + 6
+    program = (
+        f"ENV_FILE={str(env_file)!r}; PROJECT_ROOT={str(checkout)!r}\n"
+        + script[start:end]
+        + "record_control_checkout\n"
+    )
+    return subprocess.run(["bash", "-c", program], text=True, capture_output=True, check=True)
+
+
+@pytest.mark.parametrize(
+    "existing",
+    ["", "MYPORTAL_CONTROL_CHECKOUT=\n", "MYPORTAL_CONTROL_CHECKOUT=/nowhere\n"],
+)
+def test_upgrade_records_missing_or_stale_control_checkout(tmp_path, existing):
+    checkout = tmp_path / "opt-myportal"
+    (checkout / ".git").mkdir(parents=True)
+    env_file = tmp_path / "myportal.env"
+    env_file.write_text(f"DB_HOST=localhost\n{existing}")
+    env_file.chmod(0o640)
+    _run_record_control_checkout(env_file, checkout)
+    text = env_file.read_text()
+    assert f"MYPORTAL_CONTROL_CHECKOUT={checkout}\n" in text
+    assert text.count("MYPORTAL_CONTROL_CHECKOUT=") == 1
+    assert text.startswith("DB_HOST=localhost\n")
+    assert oct(env_file.stat().st_mode & 0o777) == "0o640"
+
+
+def test_upgrade_keeps_a_valid_control_checkout(tmp_path):
+    other = tmp_path / "elsewhere"
+    (other / ".git").mkdir(parents=True)
+    env_file = tmp_path / "myportal.env"
+    env_file.write_text(f"MYPORTAL_CONTROL_CHECKOUT={other}\n")
+    _run_record_control_checkout(env_file, tmp_path / "checkout")
+    assert env_file.read_text() == f"MYPORTAL_CONTROL_CHECKOUT={other}\n"
+
+
+def test_git_context_falls_back_to_default_checkouts(monkeypatch, tmp_path):
+    from app.services import scheduler as scheduler_module
+
+    release = tmp_path / "release"
+    release.mkdir()
+    legacy = tmp_path / "opt-myportal"
+    (legacy / ".git").mkdir(parents=True)
+    monkeypatch.setattr(scheduler_module, "_PROJECT_ROOT", release)
+    monkeypatch.setattr(scheduler_module, "_DEFAULT_CONTROL_CHECKOUTS", (str(legacy),))
+    monkeypatch.delenv("MYPORTAL_CONTROL_CHECKOUT", raising=False)
+    assert scheduler_module._git_context() == (legacy, ["-c", f"safe.directory={legacy}"])
+    monkeypatch.setenv("MYPORTAL_CONTROL_CHECKOUT", str(tmp_path / "missing"))
+    assert scheduler_module._git_context()[0] == legacy
+
+
+def test_env_example_suggests_legacy_control_checkout():
+    assert "\nMYPORTAL_CONTROL_CHECKOUT=/opt/myportal\n" in (ROOT / ".env.example").read_text()

@@ -37,8 +37,18 @@ sudo nginx -t
 Run the upgrade coordinator:
 
 ```console
-sudo /opt/myportal/control/scripts/upgrade.sh --rolling
+sudo myportal-upgrade --rolling
 ```
+
+`myportal-upgrade` is a small wrapper, installed and refreshed by every run of
+`scripts/upgrade.sh`, that runs the coordinator from your control checkout. The
+checkout is wherever you cloned the repository (`/opt/myportal/control` in the
+installation guide); `MYPORTAL_CONTROL_CHECKOUT` in `/etc/myportal.env` records
+it. On a server deployed before the wrapper existed, run
+`sudo <control checkout>/scripts/upgrade.sh --rolling` once and the wrapper is
+installed. Super administrators can also start the same upgrade from the
+portal's System updates page. Docker installations are upgraded with
+`myportal-docker upgrade` instead; see the Docker guide.
 
 The coordinator installs `deploy/nginx/myportal-bluegreen.conf` using the
 host's `sites-available`/`sites-enabled` layout when present, or `conf.d` on

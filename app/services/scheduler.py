@@ -82,6 +82,7 @@ _FEATURE_PACK_RELOAD_RESULT_PATH = (
     _PROJECT_ROOT / "var" / "state" / "feature_pack_reload.result"
 )
 _FEATURE_PACK_RELOAD_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9_.-]{1,160}\Z")
+_DEFAULT_CONTROL_CHECKOUTS = ("/opt/myportal", "/opt/myportal/control")
 _GIT_REVISION_RE = re.compile(r"[0-9a-f]{40,64}\Z")
 
 
@@ -112,9 +113,12 @@ def _git_context() -> tuple[Path, list[str]]:
 
     if (_PROJECT_ROOT / ".git").exists():
         return _PROJECT_ROOT, []
-    control = os.getenv("MYPORTAL_CONTROL_CHECKOUT", "").strip()
-    if control and (Path(control) / ".git").exists():
-        return Path(control), ["-c", f"safe.directory={control}"]
+    configured = os.getenv("MYPORTAL_CONTROL_CHECKOUT", "").strip()
+    # Older installations predate the setting; they were cloned into
+    # /opt/myportal, and the installation guide now uses /opt/myportal/control.
+    for control in (configured, *_DEFAULT_CONTROL_CHECKOUTS):
+        if control and (Path(control) / ".git").exists():
+            return Path(control), ["-c", f"safe.directory={control}"]
     return _PROJECT_ROOT, []
 _FEATURE_PACK_SLUG_RE = re.compile(r"[a-z][a-z0-9_]*\Z")
 

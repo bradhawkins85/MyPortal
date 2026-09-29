@@ -862,6 +862,54 @@ require_host_prerequisites() {
   fi
 }
 
+record_control_checkout() {
+  # Installations made before MYPORTAL_CONTROL_CHECKOUT existed lack it (or
+  # carry a stale path), which stops the portal's System updates page from
+  # finding the checkout. Record this checkout; the file is rewritten in place
+  # so its root:myportal ownership and 0640 mode are kept.
+  [[ -f "$ENV_FILE" ]] || return 0
+  CONTROL_ENV_FILE="$ENV_FILE" CONTROL_CHECKOUT="$PROJECT_ROOT" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["CONTROL_ENV_FILE"])
+checkout = os.environ["CONTROL_CHECKOUT"]
+key = "MYPORTAL_CONTROL_CHECKOUT"
+lines = path.read_text(encoding="utf-8").splitlines()
+for index, line in enumerate(lines):
+    if line.strip().startswith("#") or "=" not in line or line.split("=", 1)[0].strip() != key:
+        continue
+    current = line.split("=", 1)[1].strip().strip("'\"")
+    if current and (Path(current) / ".git").exists():
+        raise SystemExit(0)
+    lines[index] = f"{key}={checkout}"
+    break
+else:
+    lines.append(f"{key}={checkout}")
+with path.open("r+", encoding="utf-8") as handle:
+    handle.write("\n".join(lines) + "\n")
+    handle.truncate()
+print(f"Recorded {key}={checkout} in {path}.")
+PY
+}
+
+install_upgrade_command() {
+  # Give administrators a stable command, because the control checkout can
+  # live anywhere (/opt/myportal/control is only the documented default).
+  # Refreshed on every run so it follows the checkout if it moves.
+  local command_path="${MYPORTAL_UPGRADE_COMMAND:-/usr/local/sbin/myportal-upgrade}" staging
+  install -d -m 0755 "$(dirname "$command_path")" 2>/dev/null || return 0
+  staging=$(mktemp "${command_path}.XXXXXX") || return 0
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf '# Installed by scripts/upgrade.sh: deploy the latest origin/main from the\n'
+    printf '# MyPortal control checkout at %s.\n' "$PROJECT_ROOT"
+    printf 'exec %q "$@"\n' "${SCRIPT_DIR}/upgrade.sh"
+  } >"$staging"
+  chmod 0755 "$staging"
+  mv -f "$staging" "$command_path"
+}
+
 retire_legacy_service() {
   # Installations made by the original installer ran a single-checkout
   # myportal.service on port 8000. Once a blue/green slot is serving, that
@@ -890,6 +938,8 @@ fi
 mkdir -p "$SHARED_ROOT/state"
 exec 9>"$SHARED_ROOT/state/upgrade.lock"
 flock 9
+install_upgrade_command || echo "Warning: could not install the myportal-upgrade command." >&2
+record_control_checkout || echo "Warning: could not record MYPORTAL_CONTROL_CHECKOUT in ${ENV_FILE}." >&2
 validate_origin_remote "$(git config --get remote.origin.url)"
 validate_required_configuration
 UPGRADE_STARTED_AT=$(date --iso-8601=seconds)
