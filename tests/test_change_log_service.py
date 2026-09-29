@@ -221,3 +221,29 @@ async def test_sync_cache_moves_to_var_state_for_read_only_release(tmp_path, mon
     assert (tmp_path / "var" / "state" / "change-log-cache.json").is_file()
     assert not (changes_dir / ".change-log-cache").exists()
     assert len(repo.upserts) == 1
+
+
+@pytest.mark.anyio
+async def test_sync_leaves_committed_change_files_untouched(tmp_path):
+    """Rewriting tracked files leaves the control checkout unable to fast-forward."""
+
+    repo = _RepositoryStub()
+    changes_dir = tmp_path / "changes"
+    changes_dir.mkdir()
+    guid = "33333333-3333-4333-8333-333333333333"
+    entry_path = changes_dir / f"{guid}.json"
+    original = json.dumps(
+        {
+            "guid": guid,
+            "occurred_at": "2025-10-23T01:20Z",
+            "change_type": "Fix",
+            "summary": "Committed entry",
+            "content_hash": "",
+        }
+    )
+    entry_path.write_text(original, encoding="utf-8")
+
+    await change_log_service.sync_change_log_sources(base_path=tmp_path, repository=repo)
+
+    assert [item["summary"] for item in repo.upserts] == ["Committed entry"]
+    assert entry_path.read_text(encoding="utf-8") == original

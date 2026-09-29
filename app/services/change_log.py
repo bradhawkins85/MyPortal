@@ -258,22 +258,16 @@ async def _persist_entries(entries: Sequence[ChangeLogEntry], *, changes_dir: Pa
         entry.file_path = target_path
         entry.source = str(target_path)
 
-        desired = entry.to_json()
-        should_write = True
-        if target_path.exists():
-            try:
-                current = json.loads(target_path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                should_write = True
-            else:
-                should_write = current != desired
-        if should_write:
-            # Normalising the source file is best-effort: production releases
-            # are read-only, and the database record below is authoritative.
+        # Existing change files are committed sources: rewriting them would
+        # leave a checkout with local modifications that block `git merge`.
+        # Only entries without a file (from changes.md) get one written, which
+        # is best-effort because production releases are read-only; the
+        # database record below is authoritative either way.
+        if not target_path.exists():
             try:
                 _write_change_file(entry, target_path)
             except OSError as exc:
-                log_debug("Change log file left unnormalised", file=str(target_path), error=str(exc))
+                log_debug("Change log file not written", file=str(target_path), error=str(exc))
 
         try:
             await repository.upsert_change(
