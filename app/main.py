@@ -1543,12 +1543,49 @@ async def _require_administration_access(
     return user, membership, None
 
 
+_UPLOAD_INLINE_IMAGE_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+
+
+def _classify_private_upload(sanitized_path: PurePosixPath) -> tuple[bool, bool] | None:
+    """Return ``(allowed_public, is_inline_image)`` for an ``/uploads`` path.
+
+    Only directories the portal actually links through ``/uploads`` are
+    served: product images (``shop/``), knowledge base inline images
+    (``knowledge-base/<file>``), Essential 8 evidence
+    (``compliance/essential8/``) and legacy top-level raster images.  Other
+    private stores (ticket attachments, KB attachments, SMB1001 evidence,
+    asset photos, report covers, ...) have dedicated, access-controlled
+    download endpoints and are never exposed here.  ``None`` means "not found".
+    """
+
+    parts = sanitized_path.parts
+    is_image = sanitized_path.suffix.lower() in _UPLOAD_INLINE_IMAGE_TYPES
+    if len(parts) == 1:
+        return (False, True) if is_image else None
+    if len(parts) == 2 and parts[0] == "shop":
+        return (False, True) if is_image else None
+    if len(parts) == 2 and parts[0] == "knowledge-base":
+        return (True, True) if is_image else None
+    if len(parts) == 3 and parts[:2] == ("compliance", "essential8"):
+        return (False, is_image)
+    return None
+
+
 @app.get("/uploads/{file_path:path}", response_class=FileResponse, include_in_schema=False)
 async def serve_private_upload(file_path: str, request: Request):
     """Serve product images stored in the legacy private uploads directory."""
 
     sanitized_path = _sanitize_upload_path(file_path)
-    is_public_kb_image = sanitized_path.parts and sanitized_path.parts[0] == "knowledge-base"
+    classification = _classify_private_upload(sanitized_path)
+    if classification is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    is_public_kb_image, is_inline_image = classification
 
     if not is_public_kb_image:
         _, redirect = await _require_authenticated_user(request)
@@ -1556,8 +1593,22 @@ async def serve_private_upload(file_path: str, request: Request):
             return redirect
 
     resolved_path = _resolve_private_upload(sanitized_path)
-    headers = {"Cache-Control": "public, max-age=86400"}
-    return FileResponse(resolved_path, headers=headers)
+    headers = {
+        "Cache-Control": "public, max-age=86400" if is_public_kb_image else "private, max-age=86400",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if is_inline_image:
+        media_type = _UPLOAD_INLINE_IMAGE_TYPES[sanitized_path.suffix.lower()]
+        return FileResponse(resolved_path, media_type=media_type, headers=headers)
+    # Anything that is not a known raster image is forced to download so it
+    # can never be rendered as active content on the portal origin.
+    return FileResponse(
+        resolved_path,
+        media_type="application/octet-stream",
+        filename=resolved_path.name,
+        content_disposition_type="attachment",
+        headers=headers,
+    )
 
 
 def _to_iso(dt: Any) -> str | None:
