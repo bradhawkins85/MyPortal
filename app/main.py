@@ -2380,6 +2380,9 @@ async def _build_base_context(
             if bool(module.get("enabled"))
         ),
         "syncro_module_enabled": bool((module_lookup or {}).get("syncro", {}).get("enabled")),
+        "llm_search_available": modules_service.llm_module_ready(
+            (module_lookup or {}).get("ollama")
+        ),
         "enable_auto_refresh": bool(settings.enable_auto_refresh),
         "matrix_chat_enabled": settings.matrix_enabled,
         "is_impersonating": is_impersonating,
@@ -2491,6 +2494,7 @@ async def _build_public_context(
         "integration_modules": {},
         "module_enabled": {},
         "enabled_module_slugs": frozenset(),
+        "llm_search_available": False,
     }
     if extra:
         context.update(extra)
@@ -2998,12 +3002,6 @@ async def on_startup() -> None:
             log_info("BCP default template bootstrapped")
     log_info("Application startup phase complete", phase="local_bootstrap_tasks")
 
-    global _rag_relationship_stop, _rag_relationship_tasks
-    _rag_relationship_stop = asyncio.Event()
-    _rag_relationship_tasks = []
-    if settings.enable_background_relationships and settings.rag_relationship_workers > 0:
-        for _ in range(settings.rag_relationship_workers):
-            _rag_relationship_tasks.append(asyncio.create_task(rag_relationship_service.relationship_worker(_rag_relationship_stop)))
     if settings.matrix_enabled:
         from app.services import matrix_sync, matrix_ai_waiting_assistant
         import asyncio as _asyncio
@@ -3036,6 +3034,19 @@ async def on_startup() -> None:
         for error in capability_errors:
             log_error("Module capability validation failed", error=error)
         raise RuntimeError("Invalid module capability registry: " + "; ".join(capability_errors))
+
+    # Relationship workers are part of the RAG feature pack; a disabled pack
+    # means no worker is started at all.
+    global _rag_relationship_stop, _rag_relationship_tasks
+    _rag_relationship_stop = asyncio.Event()
+    _rag_relationship_tasks = []
+    if (
+        settings.enable_background_relationships
+        and settings.rag_relationship_workers > 0
+        and availability.feature_pack_available("rag_index")
+    ):
+        for _ in range(settings.rag_relationship_workers):
+            _rag_relationship_tasks.append(asyncio.create_task(rag_relationship_service.relationship_worker(_rag_relationship_stop)))
 
     await scheduler_service.start()
     async def _mailbox_sync_job(job: dict[str, Any]) -> dict[str, Any]:
@@ -3262,6 +3273,11 @@ async def ai_search_page(request: Request):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return redirect
+    if not await modules_service.llm_available():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Search requires the LLM module to be enabled and configured",
+        )
     return await _render_template(
         "search.html",
         request,
