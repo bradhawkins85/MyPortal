@@ -404,6 +404,29 @@ async def _require_plan_object(
     return obj
 
 
+async def _require_company_user(company_id: int, user_id: int | None, label: str = "User") -> None:
+    """Reject user ids that are not super admins or members of ``company_id``.
+
+    Stops a plan editor from attaching arbitrary accounts from other
+    companies to their plan's roles and reviews (which would also expose
+    those users' names and emails on the plan pages).
+    """
+    if user_id is None:
+        return
+    from app.repositories import user_companies as user_company_repo
+    from app.repositories import users as user_repo
+
+    target = await user_repo.get_user_by_id(user_id)
+    if target and target.get("is_super_admin"):
+        return
+    if target and await user_company_repo.get_user_company(user_id, company_id):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"{label} must be a member of this company",
+    )
+
+
 async def _require_role_assignment(company_id: int, assignment_id: int) -> dict[str, Any]:
     """Load a role assignment and ensure its role belongs to the company's plan."""
     assignment = await bcp_repo.get_role_assignment_by_id(assignment_id)
@@ -1177,6 +1200,9 @@ async def create_review_item_endpoint(
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
     
+    await _require_company_user(company_id, reviewed_by_user_id, "Reviewer")
+    await _require_company_user(company_id, approved_by_user_id, "Approver")
+
     # Parse review date
     try:
         from datetime import datetime
@@ -1240,6 +1266,8 @@ async def update_review_item_endpoint(
     before = await _require_plan_object(
         company_id, bcp_repo.get_review_item_by_id, review_id, "Review item"
     )
+    await _require_company_user(company_id, reviewed_by_user_id, "Reviewer")
+    await _require_company_user(company_id, approved_by_user_id, "Approver")
     updated = await bcp_repo.update_review_item(
         review_id,
         review_date=review_date_obj,
@@ -1424,7 +1452,8 @@ async def assign_user_to_role(
     """Assign a user to a BCP role."""
     user, company_id = await _require_bcp_edit(request)
     await _require_plan_object(company_id, bcp_repo.get_role_by_id, role_id, "Role")
-    
+    await _require_company_user(company_id, user_id)
+
     assignment = await bcp_repo.create_role_assignment(
         role_id,
         user_id,
@@ -1457,7 +1486,8 @@ async def update_role_assignment_endpoint(
     """Update a role assignment."""
     user, company_id = await _require_bcp_edit(request)
     before = await _require_role_assignment(company_id, assignment_id)
-    
+    await _require_company_user(company_id, user_id)
+
     updated = await bcp_repo.update_role_assignment(
         assignment_id,
         user_id=user_id,
@@ -3556,6 +3586,7 @@ async def create_recovery_action_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="RTO hours must be non-negative"
         )
+    await _require_company_user(company_id, owner_id or None, "Owner")
     if critical_activity_id:
         await _require_plan_object(
             company_id, bcp_repo.get_critical_activity_by_id, critical_activity_id, "Activity"
@@ -3634,6 +3665,7 @@ async def update_recovery_action_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="RTO hours must be non-negative"
         )
+    await _require_company_user(company_id, owner_id or None, "Owner")
     if critical_activity_id:
         await _require_plan_object(
             company_id, bcp_repo.get_critical_activity_by_id, critical_activity_id, "Activity"
