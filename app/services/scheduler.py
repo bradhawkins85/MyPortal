@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from app.services.cron_expression import parse as parse_cron_expression
@@ -92,8 +93,12 @@ def _release_revision() -> str | None:
     try:
         value = (_PROJECT_ROOT / "version.txt").read_text(encoding="utf-8").strip()
     except OSError:
-        return None
-    return value if _GIT_REVISION_RE.fullmatch(value) else None
+        value = ""
+    if _GIT_REVISION_RE.fullmatch(value):
+        return value
+    # scripts/upgrade.sh names each release directory after its revision.
+    name = _PROJECT_ROOT.resolve().name
+    return name if _GIT_REVISION_RE.fullmatch(name) else None
 
 
 def _git_context() -> tuple[Path, list[str]]:
@@ -2232,19 +2237,33 @@ class SchedulerService:
         return _truncate_output(stdout)
 
     async def _get_remote_main_ref(self) -> str | None:
+        ref = await self._ls_remote_main_ref()
+        if ref:
+            return ref
+        # Immutable releases carry no .git directory, and the service account
+        # often cannot read the control checkout (for example when it lives
+        # under /root or /home, which the unit's ProtectHome hides). Ask the
+        # GitHub API for the head of main instead.
+        return await _github_main_ref()
+
+    async def _ls_remote_main_ref(self) -> str | None:
         cwd, options = _git_context()
-        process = await asyncio.create_subprocess_exec(
-            "git",
-            *options,
-            "ls-remote",
-            "--heads",
-            "origin",
-            "main",
-            stdout=PIPE,
-            stderr=PIPE,
-            cwd=str(cwd),
-        )
-        stdout, stderr = await process.communicate()
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "git",
+                *options,
+                "ls-remote",
+                "--heads",
+                "origin",
+                "main",
+                stdout=PIPE,
+                stderr=PIPE,
+                cwd=str(cwd),
+            )
+            stdout, stderr = await process.communicate()
+        except OSError as exc:
+            log_error("Failed to query GitHub for latest main ref", error=str(exc))
+            return None
         if process.returncode != 0:
             stderr_preview = _truncate_output(stderr)
             log_error(
@@ -2256,6 +2275,29 @@ class SchedulerService:
             return None
         first_line = response.splitlines()[0]
         return first_line.split()[0] if first_line.split() else None
+
+
+async def _github_main_ref() -> str | None:
+    """Return the head of ``main`` from the GitHub API, or ``None``."""
+
+    repo = os.getenv("MYPORTAL_REPO", "").strip() or "bradhawkins85/MyPortal"
+    api = (os.getenv("MYPORTAL_GITHUB_API", "").strip() or "https://api.github.com").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(
+                f"{api}/repos/{repo}/commits/main",
+                headers={"Accept": "application/vnd.github.sha"},
+            )
+            response.raise_for_status()
+    except httpx.HTTPError as exc:
+        log_error("Failed to query the GitHub API for latest main ref", error=str(exc))
+        return None
+    ref = response.text.strip()
+    if not _GIT_REVISION_RE.fullmatch(ref):
+        log_error("GitHub API returned an unexpected main ref", ref=_truncate_output(ref))
+        return None
+    log_info("Resolved latest main ref from the GitHub API", repo=repo, ref=ref)
+    return ref
 
 
 scheduler_service = SchedulerService()

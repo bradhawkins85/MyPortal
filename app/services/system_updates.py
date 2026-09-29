@@ -70,8 +70,9 @@ def _version_newer(candidate: str, current: str) -> bool:
 
 
 async def _latest_release_tag() -> str:
-    repo = os.getenv("MYPORTAL_REPO", "bradhawkins85/MyPortal").strip()
-    api = os.getenv("MYPORTAL_GITHUB_API", "https://api.github.com").rstrip("/")
+    # .env.example ships these blank; blank means "use the default".
+    repo = os.getenv("MYPORTAL_REPO", "").strip() or "bradhawkins85/MyPortal"
+    api = (os.getenv("MYPORTAL_GITHUB_API", "").strip() or "https://api.github.com").rstrip("/")
     async with httpx.AsyncClient(timeout=_CHECK_TIMEOUT_SECONDS) as client:
         response = await client.get(
             f"{api}/repos/{repo}/releases/latest",
@@ -98,9 +99,14 @@ async def _check_baremetal() -> dict[str, Any]:
     from app.services.scheduler import scheduler_service
 
     installed = await scheduler_service._get_git_ref("HEAD") or ""
+    if not installed:
+        raise RuntimeError(
+            "the installed revision is unknown (version.txt does not hold a Git "
+            "revision and the control checkout could not be read)"
+        )
     latest = await scheduler_service._get_remote_main_ref() or ""
-    if not installed or not latest:
-        raise RuntimeError("Unable to compare the installed revision with origin/main.")
+    if not latest:
+        raise RuntimeError("neither the control checkout nor the GitHub API reported the latest revision")
     return {"installed": installed, "latest": latest, "available": installed != latest}
 
 
@@ -121,7 +127,10 @@ async def check_for_update(*, refresh: bool = False) -> dict[str, Any]:
         result.update(await asyncio.wait_for(check, timeout=_CHECK_TIMEOUT_SECONDS))
     except Exception as exc:  # network, git or GitHub failures are reported, not raised
         log_error("System update check failed", error=str(exc))
-        result["error"] = "Could not check for updates. Try again shortly."
+        reason = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
+        if isinstance(exc, asyncio.TimeoutError):
+            reason = "timed out"
+        result["error"] = f"Could not check for updates: {reason}. See the application log for details."
     _check_cache.update(at=now, value=result)
     return result
 

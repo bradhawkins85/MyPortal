@@ -336,3 +336,116 @@ def test_docker_script_documents_web_upgrades():
     result = subprocess.run(["bash", str(DOCKER_SCRIPT), "help"], text=True, capture_output=True, check=False)
     assert "web-upgrades on|off|status" in result.stdout
     assert "process-requests" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Bare-metal version check without a readable control checkout
+# ---------------------------------------------------------------------------
+
+REVISION = "a" * 40
+
+
+class _FakeResponse:
+    def __init__(self, text, status=200):
+        self.text = text
+        self.status_code = status
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import httpx
+
+            raise httpx.HTTPStatusError("boom", request=None, response=None)
+
+
+def _fake_github(monkeypatch, text, status=200, seen=None):
+    import httpx
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url, headers=None):
+            if seen is not None:
+                seen.append(url)
+            return _FakeResponse(text, status)
+
+    monkeypatch.setattr(httpx, "AsyncClient", Client)
+
+
+def test_remote_ref_falls_back_to_github_api_when_git_fails(monkeypatch):
+    from app.services.scheduler import SchedulerService
+
+    service = SchedulerService()
+
+    async def no_git():
+        return None
+
+    monkeypatch.setattr(service, "_ls_remote_main_ref", no_git)
+    monkeypatch.setenv("MYPORTAL_REPO", "")  # blank, as shipped in .env.example
+    seen = []
+    _fake_github(monkeypatch, REVISION + "\n", seen=seen)
+    assert asyncio.run(service._get_remote_main_ref()) == REVISION
+    assert seen == ["https://api.github.com/repos/bradhawkins85/MyPortal/commits/main"]
+
+
+def test_remote_ref_rejects_unexpected_github_response(monkeypatch):
+    from app.services.scheduler import SchedulerService
+
+    service = SchedulerService()
+
+    async def no_git():
+        return None
+
+    monkeypatch.setattr(service, "_ls_remote_main_ref", no_git)
+    _fake_github(monkeypatch, "<html>rate limited</html>")
+    assert asyncio.run(service._get_remote_main_ref()) is None
+
+
+def test_ls_remote_handles_unreachable_checkout(monkeypatch, tmp_path):
+    from app.services import scheduler as scheduler_module
+    from app.services.scheduler import SchedulerService
+
+    monkeypatch.setattr(scheduler_module, "_git_context", lambda: (tmp_path / "missing", []))
+    assert asyncio.run(SchedulerService()._ls_remote_main_ref()) is None
+
+
+def test_baremetal_check_reports_the_reason(monkeypatch):
+    from app.services.scheduler import scheduler_service
+
+    monkeypatch.delenv("MYPORTAL_DEPLOYMENT", raising=False)
+    system_updates._check_cache.update(at=0.0, value=None)
+
+    async def head(ref):
+        return REVISION
+
+    async def remote():
+        return None
+
+    monkeypatch.setattr(scheduler_service, "_get_git_ref", head)
+    monkeypatch.setattr(scheduler_service, "_get_remote_main_ref", remote)
+    result = asyncio.run(system_updates.check_for_update(refresh=True))
+    assert "GitHub API" in result["error"]
+
+    async def newer():
+        return "b" * 40
+
+    monkeypatch.setattr(scheduler_service, "_get_remote_main_ref", newer)
+    result = asyncio.run(system_updates.check_for_update(refresh=True))
+    assert result["error"] is None
+    assert result["available"] is True
+
+
+def test_release_revision_falls_back_to_release_directory_name(monkeypatch, tmp_path):
+    from app.services import scheduler as scheduler_module
+
+    release = tmp_path / REVISION
+    release.mkdir()
+    (release / "version.txt").write_text("20260313061816\n")
+    monkeypatch.setattr(scheduler_module, "_PROJECT_ROOT", release)
+    assert scheduler_module._release_revision() == REVISION
