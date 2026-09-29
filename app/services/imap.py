@@ -13,7 +13,6 @@ from urllib.parse import unquote
 from email.header import decode_header, make_header
 from email.utils import getaddresses, parsedate_to_datetime
 from html import escape
-from pathlib import Path
 from typing import Any, Mapping
 
 from app.core.database import db
@@ -1658,13 +1657,6 @@ async def _record_message(
         error=error,
         processed_at=datetime.now(timezone.utc),
     )
-
-
-def _get_upload_directory() -> Path:
-    """Get the base upload directory for ticket attachments."""
-    base_dir = Path(__file__).parent.parent / "static" / "uploads" / "tickets"
-    base_dir.mkdir(parents=True, exist_ok=True)
-    return base_dir
 
 
 def _generate_secure_filename(original_filename: str) -> str:

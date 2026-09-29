@@ -1095,7 +1095,21 @@ class _DownloadOnlyStaticFiles(StaticFiles):
     Files under ``static/uploads`` were uploaded by users (legacy port
     documents, legacy ticket attachments), so they must never be rendered by
     the browser as HTML/SVG/XML/script on the portal origin.
+
+    Legacy ticket attachments (``static/uploads/tickets``) are never served
+    here: they are only reachable through the access-controlled ticket
+    attachment endpoints (which fall back to the legacy folder until
+    ``manage.py migrate-legacy-ticket-attachments`` has moved them).
     """
+
+    _BLOCKED_TOP_LEVEL_DIRS = frozenset({"tickets"})
+
+    def get_path(self, scope) -> str:
+        path = super().get_path(scope)
+        parts = Path(path).parts
+        if parts and parts[0].lower() in self._BLOCKED_TOP_LEVEL_DIRS:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        return path
 
     def file_response(self, full_path, stat_result, scope, status_code: int = 200) -> Response:
         response = super().file_response(full_path, stat_result, scope, status_code)
