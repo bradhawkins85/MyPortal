@@ -966,6 +966,36 @@ print(f"Recorded {key}={checkout} in {path}.")
 PY
 }
 
+verify_release_sources() {
+  # Refuse a release whose Python does not even parse (for example a stray
+  # "continue" outside a loop) before migrations run or any slot restarts.
+  # Compiles in memory only: the release directory is read-only.
+  local release="$1" interpreter="${1}/.venv/bin/python"
+  [[ -x "$interpreter" ]] || interpreter=python3
+  if ! "$interpreter" - "$release" <<'PY'
+import sys
+from pathlib import Path
+
+release = Path(sys.argv[1])
+errors = []
+for top in ("app", "migrations", "scripts", "manage.py"):
+    root = release / top
+    paths = [root] if root.is_file() else sorted(root.rglob("*.py")) if root.is_dir() else []
+    for path in paths:
+        try:
+            compile(path.read_bytes(), str(path.relative_to(release)), "exec", dont_inherit=True)
+        except SyntaxError as exc:
+            errors.append(f"{exc.filename}:{exc.lineno}: {exc.msg}")
+if errors:
+    print("Python syntax errors in this release:", *errors, sep="\n  ", file=sys.stderr)
+    sys.exit(1)
+PY
+  then
+    echo "Release ${release##*/} does not compile; the serving release was left unchanged." >&2
+    return 1
+  fi
+}
+
 install_upgrade_command() {
   # Give administrators a stable command, because the control checkout can
   # live anywhere (/opt/myportal/control is only the documented default).
@@ -1085,6 +1115,10 @@ case "$DEPLOYMENT_ACTION" in
     # Candidate code is imported from the same immutable release used by a
     # normal cutover.  The active link and control checkout remain untouched.
     prepare_release "$TARGET_REVISION" "$RELEASE_DIR"
+    if ! verify_release_sources "$RELEASE_DIR"; then
+      write_upgrade_status failed "Release ${TARGET_REVISION} has Python syntax errors; it was not deployed." "$DEPLOYMENT_REASON"
+      exit 1
+    fi
     request_id="${TARGET_REVISION}-$$-$(date +%s)"
     reload_flag="${SHARED_ROOT}/state/feature_pack_reload.flag"
     reload_result="${SHARED_ROOT}/state/feature_pack_reload.${request_id}.result"
@@ -1169,6 +1203,10 @@ esac
 
 write_upgrade_status preparing "Preparing immutable release ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
 prepare_release "$TARGET_REVISION" "$RELEASE_DIR"
+if ! verify_release_sources "$RELEASE_DIR"; then
+  write_upgrade_status failed "Release ${TARGET_REVISION} has Python syntax errors; it was not deployed." "$DEPLOYMENT_REASON"
+  exit 1
+fi
 # The inactive slot may still point at a release produced before persistent
 # upload links were introduced. Repair both assigned releases before systemd
 # can start or roll back either one; otherwise an old worker loops while trying
