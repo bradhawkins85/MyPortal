@@ -404,6 +404,23 @@ async def _require_plan_object(
     return obj
 
 
+async def _list_company_users(company_id: int) -> list[dict[str, Any]]:
+    """Users that may be picked on this company's plan: members and super admins."""
+    from app.repositories import user_companies as user_company_repo
+    from app.repositories import users as user_repo
+
+    member_ids = {
+        int(assignment["user_id"])
+        for assignment in await user_company_repo.list_assignments(company_id)
+        if assignment.get("user_id") is not None
+    }
+    return [
+        member
+        for member in await user_repo.list_users()
+        if member.get("is_super_admin") or int(member["id"]) in member_ids
+    ]
+
+
 async def _require_company_user(company_id: int, user_id: int | None, label: str = "User") -> None:
     """Reject user ids that are not super admins or members of ``company_id``.
 
@@ -841,7 +858,7 @@ async def bcp_recovery(
             action["rto_humanized"] = "-"
     
     # Get all users for owner filter dropdown
-    all_users = await user_repo.list_users()
+    all_users = await _list_company_users(company_id)
     
     # Get all critical activities for activity filter
     activities = await bcp_repo.list_critical_activities(plan["id"], sort_by="name")
@@ -1013,7 +1030,7 @@ async def bcp_schedules(request: Request):
     # Get training and review items
     training_items = await bcp_repo.list_training_items(plan["id"])
     review_items = await bcp_repo.list_review_items(plan["id"])
-    all_users = await user_repo.list_users()
+    all_users = await _list_company_users(company_id)
     users_by_id = {member["id"]: member for member in all_users}
     for item in review_items:
         item["reviewer"] = users_by_id.get(item.get("reviewed_by_user_id"))
@@ -1348,7 +1365,7 @@ async def bcp_roles(request: Request):
             assignment["user"] = user_data
     
     # Get all users for assignment dropdown
-    all_users = await user_repo.list_users()
+    all_users = await _list_company_users(company_id)
     collaboration_audit = await audit_log_repo.list_audit_logs(
         entity_type="bcp_role_assignment",
         metadata_filters={"company_id": company_id},
