@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
 from app.repositories import compliance_checks as repo
+from app.repositories import user_companies as user_company_repo
 from app.schemas.compliance_checks import (
     AssignmentCreate,
     AssignmentResponse,
@@ -28,11 +29,18 @@ from app.schemas.compliance_checks import (
 router = APIRouter(prefix="/api/compliance-checks", tags=["Compliance Checks"])
 
 
-def _assert_company_access(user: dict, company_id: int) -> None:
-    """Raise 403 if a non-super-admin tries to access another company's data."""
+async def _assert_company_access(user: dict, company_id: int) -> None:
+    """Raise 403 unless the user is a super admin or a member of ``company_id``."""
     if user.get("is_super_admin"):
         return
-    if user.get("company_id") != company_id:
+    membership = None
+    try:
+        user_id = int(user.get("id"))
+    except (TypeError, ValueError):
+        user_id = None
+    if user_id is not None:
+        membership = await user_company_repo.get_user_company(user_id, company_id)
+    if not membership:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only access compliance checks for your own company",
@@ -208,7 +216,7 @@ async def list_assignments(
     user: dict = Depends(get_current_user),
 ):
     """List compliance check assignments for a company."""
-    _assert_company_access(user, company_id)
+    await _assert_company_access(user, company_id)
     return await repo.list_assignments(
         company_id,
         status=status_filter,
@@ -228,7 +236,7 @@ async def get_assignment_summary(
     user: dict = Depends(get_current_user),
 ):
     """Get a summary of compliance check assignments for a company."""
-    _assert_company_access(user, company_id)
+    await _assert_company_access(user, company_id)
     return await repo.get_assignment_summary(company_id)
 
 
@@ -244,7 +252,7 @@ async def create_assignment(
     user: dict = Depends(get_current_user),
 ):
     """Assign a compliance check to a company."""
-    _assert_company_access(user, company_id)
+    await _assert_company_access(user, company_id)
 
     existing = await repo.get_assignment_by_check(company_id, payload.check_id)
     if existing:
@@ -274,7 +282,7 @@ async def bulk_assign_by_category(
     user: dict = Depends(get_current_user),
 ):
     """Assign all active checks from a category to a company (skips already-assigned checks)."""
-    _assert_company_access(user, company_id)
+    await _assert_company_access(user, company_id)
     created_count = await repo.bulk_assign_by_category(company_id, payload.category_id)
     return {"message": "Bulk assignment complete", "created_count": created_count}
 
@@ -290,7 +298,7 @@ async def get_assignment(
     user: dict = Depends(get_current_user),
 ):
     """Get a specific compliance check assignment."""
-    _assert_company_access(user, company_id)
+    await _assert_company_access(user, company_id)
     assignment = await repo.get_assignment(company_id, assignment_id)
     if not assignment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
@@ -309,7 +317,7 @@ async def update_assignment(
     user: dict = Depends(get_current_user),
 ):
     """Update a compliance check assignment (status, evidence, notes, review schedule)."""
-    _assert_company_access(user, company_id)
+    await _assert_company_access(user, company_id)
     existing = await repo.get_assignment(company_id, assignment_id)
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
@@ -362,7 +370,7 @@ async def list_evidence(
     user: dict = Depends(get_current_user),
 ):
     """List evidence items for a compliance check assignment."""
-    _assert_company_access(user, company_id)
+    await _assert_company_access(user, company_id)
     assignment = await repo.get_assignment(company_id, assignment_id)
     if not assignment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
@@ -382,7 +390,7 @@ async def add_evidence(
     user: dict = Depends(get_current_user),
 ):
     """Add an evidence item to a compliance check assignment."""
-    _assert_company_access(user, company_id)
+    await _assert_company_access(user, company_id)
     assignment = await repo.get_assignment(company_id, assignment_id)
     if not assignment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
@@ -408,7 +416,7 @@ async def delete_evidence(
     user: dict = Depends(get_current_user),
 ):
     """Delete an evidence item from a compliance check assignment."""
-    _assert_company_access(user, company_id)
+    await _assert_company_access(user, company_id)
     assignment = await repo.get_assignment(company_id, assignment_id)
     if not assignment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
@@ -432,7 +440,7 @@ async def list_audit(
     user: dict = Depends(get_current_user),
 ):
     """List audit history for a compliance check assignment."""
-    _assert_company_access(user, company_id)
+    await _assert_company_access(user, company_id)
     assignment = await repo.get_assignment(company_id, assignment_id)
     if not assignment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
