@@ -59,17 +59,23 @@ def test_settings_excludes_multiple_disabled_packs(monkeypatch):
     assert "tickets" in configured
 
 
-def test_unknown_slugs_raise_actionable_configuration_error():
-    with pytest.raises(AvailabilityConfigurationError) as exc_info:
-        configure_component_availability(
-            disabled_feature_packs="missing-pack",
-            disabled_modules="missing-module",
-            known_feature_packs=("trello",),
-            known_modules=("trello",),
-        )
-    message = str(exc_info.value)
-    assert "DISABLED_FEATURE_PACKS contains unknown slug(s): missing-pack" in message
-    assert "DISABLED_MODULES contains unknown slug(s): missing-module" in message
+def test_unknown_slugs_are_ignored_without_blocking_startup():
+    policy = configure_component_availability(
+        disabled_feature_packs="missing-pack,trello",
+        disabled_modules="missing-module,trello",
+        known_feature_packs=("trello",),
+        known_modules=("trello",),
+    )
+    assert policy.disabled_feature_packs == frozenset({"trello"})
+    assert policy.disabled_modules == frozenset({"trello"})
+
+
+def test_settings_ignore_unknown_disabled_feature_pack(monkeypatch):
+    monkeypatch.setenv("DISABLED_FEATURE_PACKS", "not-a-real-pack,trello")
+    settings = Settings()
+    assert settings.disabled_feature_packs == "trello"
+    assert "trello" not in settings.feature_packs.split(",")
+    assert "tickets" in settings.feature_packs.split(",")
 
 
 def test_environment_overrides_database_enabled_flag():
