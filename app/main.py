@@ -6767,6 +6767,9 @@ async def admin_users_action(request: Request, user_id: int, action: str):
     if action == "deactivate":
         updated = await user_repo.update_user(user_id, is_active=0)
         await auth_repo.deactivate_sessions_for_user(user_id)
+        # An unused signup verification link would otherwise re-activate
+        # the account.
+        await auth_repo.invalidate_account_verification_tokens_for_user(user_id)
         await audit_service.record(
             action="user.deactivate",
             request=request,

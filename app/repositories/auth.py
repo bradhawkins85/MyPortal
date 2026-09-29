@@ -242,30 +242,43 @@ async def clear_login_attempts(identifier: str) -> None:
     )
 
 
+# Password reset and account verification tokens are single-use bearer
+# secrets, so only their SHA-256 digest is stored (as for session tokens).
+# Rows written before digests were introduced have ``token_hashed = 0`` and
+# are matched by their raw value until they expire; a hashed row is matched
+# only by the digest of the presented token, so a digest read from the
+# database cannot itself be replayed as a token.
+_TOKEN_MATCH_SQL = "((token = %s AND token_hashed = 1) OR (token = %s AND token_hashed = 0))"
+
+
+def _token_match_params(token: str) -> tuple[str, str]:
+    return (_hash_session_token(token), token)
+
+
 async def create_password_reset_token(
     *, user_id: int, token: str, expires_at: datetime
 ) -> None:
     await db.execute(
         """
-        INSERT INTO password_tokens (token, user_id, expires_at, used)
-        VALUES (%s, %s, %s, 0)
+        INSERT INTO password_tokens (token, user_id, expires_at, used, token_hashed)
+        VALUES (%s, %s, %s, 0, 1)
         """,
-        (token, user_id, expires_at),
+        (_hash_session_token(token), user_id, expires_at),
     )
 
 
 async def get_password_reset_token(token: str) -> Optional[dict[str, Any]]:
     row = await db.fetch_one(
-        "SELECT * FROM password_tokens WHERE token = %s",
-        (token,),
+        f"SELECT * FROM password_tokens WHERE {_TOKEN_MATCH_SQL}",  # nosec B608
+        _token_match_params(token),
     )
     return row
 
 
 async def mark_password_reset_token_used(token: str) -> None:
     await db.execute(
-        "UPDATE password_tokens SET used = 1 WHERE token = %s",
-        (token,),
+        f"UPDATE password_tokens SET used = 1 WHERE {_TOKEN_MATCH_SQL}",  # nosec B608
+        _token_match_params(token),
     )
 
 
@@ -281,25 +294,33 @@ async def create_account_verification_token(
 ) -> None:
     await db.execute(
         """
-        INSERT INTO account_verification_tokens (token, user_id, expires_at, used)
-        VALUES (%s, %s, %s, 0)
+        INSERT INTO account_verification_tokens (token, user_id, expires_at, used, token_hashed)
+        VALUES (%s, %s, %s, 0, 1)
         """,
-        (token, user_id, expires_at),
+        (_hash_session_token(token), user_id, expires_at),
     )
 
 
 async def get_account_verification_token(token: str) -> Optional[dict[str, Any]]:
     row = await db.fetch_one(
-        "SELECT * FROM account_verification_tokens WHERE token = %s",
-        (token,),
+        f"SELECT * FROM account_verification_tokens WHERE {_TOKEN_MATCH_SQL}",  # nosec B608
+        _token_match_params(token),
     )
     return row
 
 
 async def mark_account_verification_token_used(token: str) -> None:
     await db.execute(
-        "UPDATE account_verification_tokens SET used = 1 WHERE token = %s",
-        (token,),
+        f"UPDATE account_verification_tokens SET used = 1 WHERE {_TOKEN_MATCH_SQL}",  # nosec B608
+        _token_match_params(token),
+    )
+
+
+async def invalidate_account_verification_tokens_for_user(user_id: int) -> None:
+    """Retire every outstanding signup verification link for a user."""
+    await db.execute(
+        "UPDATE account_verification_tokens SET used = 1 WHERE user_id = %s AND used = 0",
+        (user_id,),
     )
 
 

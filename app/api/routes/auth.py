@@ -561,8 +561,13 @@ async def verify_email(token: str, _: None = Depends(require_database)) -> Respo
     if expires_at and datetime.utcnow() > ensure_datetime(expires_at):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification link")
 
+    # Only a never-verified signup reaches this point (a verified account
+    # returned above), so the link can complete signup but can never
+    # re-enable an account an administrator deactivated after verification.
+    # Deactivation also retires outstanding links for unverified accounts.
     await user_repo.update_user(record["user_id"], is_active=1, email_verified_at=datetime.utcnow())
     await auth_repo.mark_account_verification_token_used(token)
+    await auth_repo.invalidate_account_verification_tokens_for_user(int(record["user_id"]))
     return RedirectResponse(url="/login?verified=1", status_code=status.HTTP_303_SEE_OTHER)
 
 
