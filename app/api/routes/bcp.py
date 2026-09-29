@@ -11,10 +11,10 @@ from fastapi import APIRouter, Form, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.api.dependencies.auth import get_current_session
+from app.api.dependencies.bc_rbac import user_has_company_permission
 from app.core.config import get_settings
 from app.repositories import bcp as bcp_repo
 from app.repositories import assets as asset_repo
-from app.repositories import company_memberships as membership_repo
 from app.security.flash import flash_redirect
 from app.security.session import SessionData
 from app.services import audit
@@ -235,6 +235,14 @@ async def _resolve_session(request: Request, session: SessionData | None) -> Ses
     return await get_current_session(request)
 
 
+def _active_company_id(request: Request, session: SessionData) -> int | None:
+    """Return the active company for this request (request state, then session)."""
+    active_company_id = getattr(request.state, "active_company_id", None)
+    if active_company_id is None:
+        active_company_id = getattr(session, "active_company_id", None)
+    return active_company_id
+
+
 async def _require_bcp_view(
     request: Request,
     session: SessionData | None = None,
@@ -257,13 +265,15 @@ async def _require_bcp_view(
     
     # Check BCP view permission. The membership repository expands tri-state
     # menu permissions and the continuity.access alias for backward compatibility.
-    has_permission = await membership_repo.user_has_permission(session.user_id, "bcp:view")
-    if not has_permission:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP view permission required")
-    
-    active_company_id = getattr(request.state, "active_company_id", None)
+    active_company_id = _active_company_id(request, session)
     if active_company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected")
+
+    # Evaluate the permission on the membership for the active company only;
+    # a grant in another company must not unlock this company's BCP.
+    has_permission = await user_has_company_permission(session.user_id, active_company_id, "bcp:view")
+    if not has_permission:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP view permission required")
     
     return user, active_company_id
 
@@ -291,13 +301,15 @@ async def _require_bcp_edit(
         return user, active_company_id
     
     # Check BCP edit permission
-    has_permission = await membership_repo.user_has_permission(session.user_id, "bcp:edit")
-    if not has_permission:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP edit permission required")
-    
-    active_company_id = getattr(request.state, "active_company_id", None)
+    active_company_id = _active_company_id(request, session)
     if active_company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected")
+
+    # Evaluate the permission on the membership for the active company only;
+    # a grant in another company must not unlock this company's BCP.
+    has_permission = await user_has_company_permission(session.user_id, active_company_id, "bcp:edit")
+    if not has_permission:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP edit permission required")
     
     return user, active_company_id
 
@@ -325,13 +337,15 @@ async def _require_bcp_incident_run(
         return user, active_company_id
     
     # Check BCP incident:run permission
-    has_permission = await membership_repo.user_has_permission(session.user_id, "bcp:incident:run")
-    if not has_permission:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP incident:run permission required")
-    
-    active_company_id = getattr(request.state, "active_company_id", None)
+    active_company_id = _active_company_id(request, session)
     if active_company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected")
+
+    # Evaluate the permission on the membership for the active company only;
+    # a grant in another company must not unlock this company's BCP.
+    has_permission = await user_has_company_permission(session.user_id, active_company_id, "bcp:incident:run")
+    if not has_permission:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP incident:run permission required")
     
     return user, active_company_id
 
@@ -357,13 +371,15 @@ async def _require_bcp_export(
         return user, active_company_id
     
     # Check BCP export permission
-    has_permission = await membership_repo.user_has_permission(session.user_id, "bcp:export")
-    if not has_permission:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP export permission required")
-
-    active_company_id = getattr(request.state, "active_company_id", None)
+    active_company_id = _active_company_id(request, session)
     if active_company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected")
+
+    # Evaluate the permission on the membership for the active company only;
+    # a grant in another company must not unlock this company's BCP.
+    has_permission = await user_has_company_permission(session.user_id, active_company_id, "bcp:export")
+    if not has_permission:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP export permission required")
 
     return user, active_company_id
 
@@ -458,7 +474,7 @@ async def bcp_overview(request: Request):
             "dependency_count": len(dependencies),
             "approved_review_count": sum(1 for item in review_items if item.get("approval_status") == "Approved"),
             "has_bcp_planning_gaps": has_bcp_planning_gaps,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
             "bcp_compliance_help_url": settings.bcp_compliance_marketing_url,
         },
     )
@@ -581,7 +597,7 @@ async def bcp_risks(request: Request, severity: str = Query(None), heatmap_filte
             "impact_scale": get_impact_scale(),
             "active_severity_filter": severity,
             "active_heatmap_filter": heatmap_filter,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
             "available_global_risks": [item for item in await bcp_repo.list_global_risks(company_id) if not item["assigned"]],
         },
     )
@@ -664,7 +680,7 @@ async def bcp_bia(request: Request, sort_by: str = Query("importance")):
             "activities": activities,
             "dependencies": dependencies,
             "sort_by": sort_by,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
             "available_global_bias": [item for item in await bcp_repo.list_global_bia_assessments(company_id) if not item["assigned"]],
         },
     )
@@ -747,7 +763,7 @@ async def bcp_incident(request: Request, tab: str = Query("checklist")):
             "roles": roles,
             "event_log": event_log,
             "active_tab": tab if tab in {"checklist", "contacts", "event-log", "after-action"} else "checklist",
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
@@ -833,7 +849,7 @@ async def bcp_recovery(
             "owner_filter": owner_filter,
             "status_filter": status_filter,
             "activity_filter": activity_filter,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
             "now": datetime.now(timezone.utc),
         },
     )
@@ -880,7 +896,7 @@ async def bcp_contacts(request: Request):
             "recovery_contacts_preview": recovery_contacts[:6],
             "recovery_contacts_count": len(recovery_contacts),
             "can_edit": user.get("is_super_admin")
-            or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
 
@@ -990,7 +1006,7 @@ async def bcp_schedules(request: Request):
             "training_items": training_items,
             "review_items": review_items,
             "all_users": all_users,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
@@ -1321,7 +1337,7 @@ async def bcp_roles(request: Request):
             "roles": roles,
             "all_users": all_users,
             "collaboration_audit": collaboration_audit,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
@@ -2044,7 +2060,7 @@ async def bcp_insurance(request: Request):
             "title": "Insurance Policies",
             "plan": plan,
             "policies": policies,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
@@ -2239,7 +2255,7 @@ async def bcp_backups(request: Request):
             "title": "Data Backup Strategy",
             "plan": plan,
             "backups": backups,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
@@ -2431,7 +2447,7 @@ async def bcp_bia_edit(request: Request, activity_id: int):
             "title": f"Edit Critical Activity: {activity['name']}",
             "plan": plan,
             "activity": activity,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
@@ -3302,7 +3318,7 @@ async def bcp_evacuation(request: Request):
             "title": "Evacuation Procedures",
             "plan": plan,
             "evacuation": evacuation,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
@@ -3375,7 +3391,7 @@ async def bcp_emergency_kit(request: Request, tab: str = Query("documents")):
             "document_items": document_items,
             "equipment_items": equipment_items,
             "active_tab": tab,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
@@ -3876,7 +3892,7 @@ async def bcp_recovery_checklist(request: Request):
             "plan": plan,
             "active_incident": active_incident,
             "checklist_items": checklist_with_ticks,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
@@ -3912,7 +3928,7 @@ async def bcp_recovery_contacts(request: Request):
             "title": "Recovery Contacts",
             "plan": plan,
             "contacts": contacts,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
@@ -4071,7 +4087,7 @@ async def bcp_insurance_claims(request: Request):
             "title": "Insurance Claims",
             "plan": plan,
             "claims": claims,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
@@ -4248,7 +4264,7 @@ async def bcp_market_changes(request: Request):
             "title": "Market Assessment",
             "plan": plan,
             "changes": changes,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
@@ -4438,7 +4454,7 @@ async def bcp_wellbeing(request: Request):
             "title": "Staff Wellbeing Support",
             "plan": plan,
             "wellbeing_resources": wellbeing_resources,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
@@ -4476,7 +4492,7 @@ async def bcp_seed_info(request: Request):
             "title": "BCP Seed Data Information",
             "plan": plan,
             "seed_docs": seed_docs,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     

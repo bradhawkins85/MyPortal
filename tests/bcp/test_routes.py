@@ -37,7 +37,7 @@ class TestPermissionChecks:
                 "is_super_admin": False,
             }
             
-            with patch("app.repositories.company_memberships.user_has_permission") as mock_has_perm:
+            with patch("app.api.routes.bcp.user_has_company_permission") as mock_has_perm:
                 mock_has_perm.return_value = False
                 
                 # Should raise 403
@@ -68,7 +68,7 @@ class TestPermissionChecks:
                 "is_super_admin": False,
             }
             
-            with patch("app.repositories.company_memberships.user_has_permission") as mock_has_perm:
+            with patch("app.api.routes.bcp.user_has_company_permission") as mock_has_perm:
                 mock_has_perm.return_value = False
                 
                 # Should raise 403
@@ -99,7 +99,7 @@ class TestPermissionChecks:
                 "is_super_admin": False,
             }
             
-            with patch("app.repositories.company_memberships.user_has_permission") as mock_has_perm:
+            with patch("app.api.routes.bcp.user_has_company_permission") as mock_has_perm:
                 mock_has_perm.return_value = False
                 
                 # Should raise 403
@@ -162,7 +162,7 @@ class TestPermissionChecks:
                 "is_super_admin": False,
             }
             
-            with patch("app.repositories.company_memberships.user_has_permission") as mock_has_perm:
+            with patch("app.api.routes.bcp.user_has_company_permission") as mock_has_perm:
                 mock_has_perm.return_value = True
                 
                 # Should succeed
