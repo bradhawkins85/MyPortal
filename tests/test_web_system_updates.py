@@ -550,3 +550,20 @@ def test_git_context_falls_back_to_default_checkouts(monkeypatch, tmp_path):
 
 def test_env_example_suggests_legacy_control_checkout():
     assert "\nMYPORTAL_CONTROL_CHECKOUT=/opt/myportal\n" in (ROOT / ".env.example").read_text()
+
+
+def test_system_updates_has_its_own_administration_menu_item():
+    base = (ROOT / "app/templates/base.html").read_text()
+    admin_block = base[base.index('<li class="menu__heading" role="presentation">Administration</li>'):]
+    assert 'href="/admin/system-updates"' in admin_block
+    assert ">System Updates</span>" in admin_block
+    # Super-admin only: the link sits inside the is_super_admin block.
+    super_admin = admin_block[admin_block.index("{% if is_super_admin %}"):]
+    assert 'href="/admin/system-updates"' in super_admin
+    scheduled = (ROOT / "app/templates/admin/scheduled_tasks.html").read_text()
+    assert "/admin/system-updates" not in scheduled
+
+    from app.repositories.sidebar_preferences import build_default_sidebar_preferences
+
+    groups = {group["label"]: group for group in build_default_sidebar_preferences()["groups"]}
+    assert "/admin/system-updates" in groups["Administration"]["items"]

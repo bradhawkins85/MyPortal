@@ -128,8 +128,8 @@ restart the service:
 MYPORTAL_CONTROL_CHECKOUT=/opt/myportal
 ```
 
-You can also start updates from the portal (Admin → Scheduled tasks → System
-updates) without logging in to the server. Docker installations have no
+You can also start updates from the portal (Administration → System Updates
+in the left menu) without logging in to the server. Docker installations have no
 control checkout: use `sudo myportal-docker upgrade` or the portal instead.
 
 The upgrade prepares the new release, runs migrations and verifies the idle

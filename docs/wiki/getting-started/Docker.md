@@ -76,8 +76,8 @@ sudo myportal-docker auto-upgrade on    # or off
 
 ### Upgrading from the portal
 
-Super administrators can start an upgrade from **Admin → Scheduled tasks →
-System updates**. The page shows the installed and latest release; **Update
+Super administrators can start an upgrade from **Administration → System
+Updates** in the left menu. The page shows the installed and latest release; **Update
 now** queues a request and opens a page that follows the upgrade output live
 until it succeeds or fails.
 
