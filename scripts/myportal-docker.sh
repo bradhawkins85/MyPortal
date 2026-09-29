@@ -708,16 +708,34 @@ HTML
   [[ -f "${PROXY_DIR}/active-slot.inc" ]] || write_active_slot "${1:-blue}"
 }
 
+proxy_instance() {
+  # Identifies the running proxy container and when it started (empty if none).
+  local container
+  container=$(service_container proxy)
+  [[ -z "$container" ]] || docker inspect -f '{{.Id}} {{.State.StartedAt}}' "$container" 2>/dev/null
+}
+
 switch_proxy() {
   # switch_proxy SLOT: send new requests to SLOT. Requests in flight finish on
   # the previous slot (nginx reloads gracefully). When nginx rejects the
   # change, the previous slot stays active and this returns non-zero.
-  local slot="$1" include="${PROXY_DIR}/active-slot.inc" previous="" container
+  local slot="$1" include="${PROXY_DIR}/active-slot.inc" previous="" container before
   [[ ! -f "$include" ]] || previous=$(sed -n 's/^server app_\([a-z]*\):.*/\1/p' "$include")
   write_active_slot "$slot"
+  before=$(proxy_instance)
   # Creates the proxy, or recreates it when its compose definition changed.
-  if compose up -d --no-deps proxy >&2; then
+  # A stopped proxy is always replaced: one left over from a failed attempt
+  # can have lost its network, and could then never resolve the slots.
+  local -a recreate=()
+  [[ -n "$before" ]] || recreate=(--force-recreate)
+  if compose up -d --no-deps "${recreate[@]}" proxy >&2; then
     container=$(service_container proxy)
+    if [[ -n "$container" && "$(proxy_instance)" != "$before" ]]; then
+      # Just started, so it read the new slot at startup. Signalling nginx
+      # while it starts makes it exit ("Address in use"), so don't reload;
+      # wait_for_proxy confirms it serves.
+      return 0
+    fi
     if [[ -n "$container" ]] && docker exec "$container" nginx -t >/dev/null 2>&1 \
       && docker exec "$container" nginx -s reload >/dev/null 2>&1; then
       return 0
@@ -789,7 +807,7 @@ deploy_release() {
     if [[ -n "$active" ]]; then
       switch_proxy "$active" || true
     else
-      compose stop proxy >/dev/null 2>&1 || true
+      compose rm -sf proxy >/dev/null 2>&1 || true
       compose stop "app_${idle}" >/dev/null 2>&1 || true
       if [[ -f "${COMPOSE_FILE}.single" ]]; then
         mv -f "${COMPOSE_FILE}.single" "$COMPOSE_FILE"
@@ -828,9 +846,12 @@ release_ready() {
   [[ "$1" == *'"status":"ok"'* && "$1" == *"\"version\":\"$2\""* ]]
 }
 
+# Ignores HTTP_PROXY and similar settings: the request never leaves the
+# container.
 READYZ_PROGRAM='import urllib.error, urllib.request
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 try:
-    response = urllib.request.urlopen("http://127.0.0.1:8000/readyz", timeout=8)
+    response = opener.open("http://127.0.0.1:8000/readyz", timeout=8)
 except urllib.error.HTTPError as exc:
     response = exc
 print(response.read().decode("utf-8", "replace"))'
@@ -838,15 +859,21 @@ print(response.read().decode("utf-8", "replace"))'
 wait_for_service() {
   # wait_for_service SERVICE TAG: wait until the application in SERVICE
   # reports TAG as ready. The slots publish no port, so ask from inside.
-  local service="$1" tag="$2" waited=0 body="" container
+  local service="$1" tag="$2" body="" container state start=$SECONDS report=$((SECONDS + 60))
   info "Waiting for MyPortal ${tag} to become ready in ${service} (migrations run on first start)…"
-  while ((waited < MYPORTAL_HEALTH_TIMEOUT)); do
+  # Timed by the clock: each check can itself take several seconds.
+  while ((SECONDS - start < MYPORTAL_HEALTH_TIMEOUT)); do
     container=$(service_container "$service")
     body=""
     [[ -z "$container" ]] || body=$(docker exec "$container" python -c "$READYZ_PROGRAM" 2>/dev/null || true)
     release_ready "$body" "$tag" && return 0
+    if ((SECONDS >= report)); then
+      state=$(docker ps -a --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" \
+        --filter "label=com.docker.compose.service=${service}" --format '{{.Status}}' 2>/dev/null | head -n1)
+      info "Still waiting for ${service} after $((SECONDS - start))s (container: ${state:-missing}; /readyz: ${body:-no response})."
+      report=$((SECONDS + 60))
+    fi
     sleep 5
-    waited=$((waited + 5))
   done
   warn "MyPortal ${tag} did not become ready within ${MYPORTAL_HEALTH_TIMEOUT}s (last response: ${body:-none})."
   compose logs --tail 40 "$service" >&2 || true
@@ -855,15 +882,14 @@ wait_for_service() {
 
 wait_for_proxy() {
   # wait_for_proxy TAG: confirm the proxy serves TAG.
-  local tag="$1" waited=0 body="" container
-  while ((waited < 60)); do
+  local tag="$1" body="" container start=$SECONDS
+  while ((SECONDS - start < 60)); do
     container=$(service_container proxy)
     body=""
     [[ -z "$container" ]] \
-      || body=$(docker exec "$container" wget -qO- -T 10 http://127.0.0.1:8080/readyz 2>/dev/null || true)
+      || body=$(docker exec "$container" wget -Y off -qO- -T 10 http://127.0.0.1:8080/readyz 2>/dev/null || true)
     release_ready "$body" "$tag" && return 0
     sleep 2
-    waited=$((waited + 2))
   done
   warn "the proxy does not serve MyPortal ${tag} (last response: ${body:-none})."
   compose logs --tail 20 proxy >&2 || true
