@@ -286,6 +286,14 @@ class TestRiskCRUD:
                 new=AsyncMock(return_value=({"id": 7}, 42)),
             ),
             patch(
+                "app.api.routes.bcp.bcp_repo.get_plan_by_company",
+                new=AsyncMock(return_value={"id": 3, "company_id": 42}),
+            ),
+            patch(
+                "app.api.routes.bcp.bcp_repo.get_risk_by_id",
+                new=AsyncMock(return_value={"id": 1, "plan_id": 3}),
+            ),
+            patch(
                 "app.api.routes.bcp.bcp_repo.delete_risk",
                 new=AsyncMock(return_value=True),
             ) as mock_delete,
