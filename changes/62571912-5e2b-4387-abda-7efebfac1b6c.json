@@ -1,0 +1,7 @@
+{
+  "guid": "62571912-5e2b-4387-abda-7efebfac1b6c",
+  "occurred_at": "2026-09-29T00:00Z",
+  "change_type": "Feature",
+  "summary": "Replace long scrolling dropdowns and Ctrl/Cmd-click multi-selects platform-wide with type-to-search pickers modelled on the product up-sell search.",
+  "content_hash": "32bdf60f687921124dd3784f92963e44ce2e6fbad9b0dc5c41e6dc3711d2fde2"
+}

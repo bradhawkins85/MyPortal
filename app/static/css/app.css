@@ -14741,3 +14741,290 @@ progress {
   margin: 0.25rem 0 0;
   padding-left: 1rem;
 }
+
+/* ---------------------------------------------------------------------------
+   Searchable selects (static/js/searchable_select.js)
+   Long dropdowns and multi-selects become type-to-search boxes; the native
+   <select> stays in the DOM, visually hidden, as the form value.
+   ------------------------------------------------------------------------- */
+select.ss-native {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.ss {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  box-sizing: border-box;
+  min-width: min(12rem, 100%);
+  min-height: 2.5rem;
+  padding: 0.25rem 3.4rem 0.25rem var(--space-gap-base);
+  border-radius: 0.6rem;
+  border: 1px solid var(--hf-line-strong);
+  background: rgba(8, 13, 20, 0.72);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+  color: #f8fafc;
+  font-size: 0.95rem;
+  cursor: text;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ss.form-input,
+.ss.input {
+  padding: 0.25rem 3.4rem 0.25rem var(--space-gap-base);
+  min-height: 2.5rem;
+}
+
+.ss[hidden] {
+  display: none !important;
+}
+
+.ss:hover {
+  border-color: rgba(148, 163, 184, 0.5);
+}
+
+.ss--focused,
+.ss--open {
+  border-color: var(--hf-accent);
+  box-shadow: 0 0 0 3px var(--hf-accent-ring);
+}
+
+.ss--invalid {
+  border-color: var(--hf-danger);
+}
+
+.ss--disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ss__chips {
+  display: contents;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ss__chip {
+  max-width: 100%;
+  padding: 0.15rem 0.5rem;
+}
+
+.ss__chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss__input {
+  flex: 1 1 6rem;
+  min-width: 4rem;
+  width: 100%;
+  padding: 0.25rem 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  outline: none;
+  box-shadow: none;
+  text-overflow: ellipsis;
+}
+
+.ss--single .ss__input {
+  cursor: pointer;
+}
+
+.ss--single.ss--open .ss__input,
+.ss--single.ss--focused .ss__input {
+  cursor: text;
+}
+
+.ss__input:focus,
+.ss__input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.ss__input::placeholder {
+  color: var(--hf-muted);
+  opacity: 1;
+}
+
+.ss--single.ss--open .ss__input:focus,
+.ss__input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.ss__input::placeholder {
+  color: rgba(148, 163, 184, 0.7);
+}
+
+.ss__input:disabled {
+  cursor: not-allowed;
+}
+
+.ss__chevron {
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-top: -0.4rem;
+  border-right: 2px solid var(--hf-muted);
+  border-bottom: 2px solid var(--hf-muted);
+  transform: rotate(45deg);
+  pointer-events: none;
+  transition: transform 0.15s ease, margin-top 0.15s ease;
+}
+
+.ss--open .ss__chevron {
+  margin-top: -0.1rem;
+  transform: rotate(225deg);
+}
+
+.ss__clear {
+  position: absolute;
+  top: 50%;
+  right: 1.9rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: -0.625rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--hf-muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ss__clear:hover {
+  color: #f8fafc;
+  background: rgba(148, 163, 184, 0.18);
+}
+
+.ss__clear[hidden] {
+  display: none;
+}
+
+.ss__panel {
+  position: fixed;
+  z-index: 10050;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 0.6rem;
+  border: 1px solid var(--hf-line-strong);
+  background: var(--hf-panel-raised, #1b2533);
+  box-shadow: var(--hf-shadow-lg);
+  cursor: default;
+}
+
+.ss__panel[hidden] {
+  display: none;
+}
+
+.ss__list {
+  position: relative;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0;
+  padding: 0.3rem;
+  list-style: none;
+}
+
+.ss__group {
+  padding: 0.45rem 0.6rem 0.2rem;
+  color: var(--hf-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ss__option {
+  position: relative;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.4rem;
+  color: #e2e8f0;
+  font-size: 0.92rem;
+  line-height: 1.35;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.ss__panel--multiple .ss__option {
+  padding-left: 1.9rem;
+}
+
+.ss__panel--multiple .ss__option::before {
+  content: '';
+  position: absolute;
+  top: 0.55rem;
+  left: 0.55rem;
+  width: 0.85rem;
+  height: 0.85rem;
+  box-sizing: border-box;
+  border: 1.5px solid var(--hf-muted);
+  border-radius: 0.2rem;
+}
+
+.ss__panel--multiple .ss__option--selected::before {
+  border-color: var(--hf-accent);
+  background: var(--hf-accent);
+  box-shadow: inset 0 0 0 2px var(--hf-panel-raised, #1b2533);
+}
+
+.ss__option--active {
+  background: rgba(56, 189, 248, 0.16);
+  color: #f8fafc;
+}
+
+.ss__panel--single .ss__option--selected {
+  color: #bae6fd;
+  font-weight: 600;
+}
+
+.ss__option--placeholder {
+  color: var(--hf-muted);
+  font-style: italic;
+}
+
+.ss__option--disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ss__status {
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--hf-line);
+  color: var(--hf-muted);
+  font-size: 0.85rem;
+}
+
+.ss__status[hidden] {
+  display: none;
+}
+
+.ss__list:empty + .ss__status {
+  border-top: 0;
+}

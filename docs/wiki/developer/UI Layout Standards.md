@@ -158,6 +158,20 @@ Each column in the `columns` list passed to `data_table` / `table_column_picker`
   for all create/edit screens.
 - Prefer grouped form fields over JSON textareas. Where a JSON editor is still
   in use (some automation/webhook screens), it should be tracked for migration.
+- Dropdowns are enhanced automatically by `static/js/searchable_select.js`
+  (loaded in `base.html`), using the same search-then-pick pattern as the
+  shop product up-sell picker:
+  - every `<select multiple>` becomes a search box with removable chips —
+    never ask users to Ctrl/Cmd+click;
+  - a single `<select>` with more than 10 options (or a `size` listbox)
+    becomes a type-to-search combobox. Short selects stay native.
+  - The native `<select>` stays in the DOM (visually hidden) and remains the
+    submitted value, so write page JS against it as usual: setting `.value`,
+    `option.selected`, replacing options or toggling `disabled`/`hidden` is
+    reflected automatically, and `change` events fire on it.
+  - `data-searchable="on"` forces enhancement, `data-searchable="off"` opts
+    out, `data-searchable-threshold="N"` changes the option threshold and
+    `data-searchable-placeholder="…"` sets the search prompt.
 
 ## 8. Mobile
 
