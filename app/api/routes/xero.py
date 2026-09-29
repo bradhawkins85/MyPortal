@@ -14,10 +14,10 @@ import httpx
 from app.services.monitored_http import monitored_client
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
-from itsdangerous import URLSafeSerializer
-from itsdangerous import BadSignature
+from itsdangerous import BadSignature, URLSafeTimedSerializer
 from loguru import logger
 
+from app.api.dependencies.auth import require_super_admin
 from app.api.dependencies.modules import require_module_enabled
 from app.core.config import Settings, get_settings
 from app.security.flash import flash_redirect
@@ -58,8 +58,12 @@ def _build_xero_redirect_uri() -> str:
     return "/xero/callback"
 
 
-def _get_state_serializer() -> URLSafeSerializer:
-    return URLSafeSerializer(_get_settings().secret_key, salt="xero-oauth")
+# OAuth state tokens are only valid for this long (seconds).
+_STATE_MAX_AGE_SECONDS = 600
+
+
+def _get_state_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(_get_settings().secret_key, salt="xero-oauth")
 
 
 def _verify_xero_webhook_signature(body: bytes, signature: str | None, webhook_key: str | None) -> bool:
@@ -289,7 +293,9 @@ async def probe_callback(request: Request) -> XeroCallbackResponse:
 
 
 @router.get("/tenants", response_model=XeroTenantListResponse, name="xero_list_tenants")
-async def list_tenants() -> XeroTenantListResponse:
+async def list_tenants(
+    current_user: dict = Depends(require_super_admin),
+) -> XeroTenantListResponse:
     """List available Xero tenants (organizations) for the configured credentials.
     
     Returns:
@@ -404,6 +410,7 @@ async def xero_connect(request: Request):
     state = _get_state_serializer().dumps(
         {
             "user_id": session_data.user_id,
+            "session_id": session_data.id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     )
@@ -446,10 +453,37 @@ async def xero_callback(
     if not code or not state:
         return flash_redirect("/admin/modules", "invalid response", "error")
 
-    # Verify state token
+    # Verify state token (signed, time-limited) and bind it to the logged-in
+    # super admin who started the flow, so a forged or leaked callback URL
+    # cannot connect an attacker-controlled Xero tenant.
     try:
-        state_data = _get_state_serializer().loads(state)
+        state_data = _get_state_serializer().loads(state, max_age=_STATE_MAX_AGE_SECONDS)
     except BadSignature:
+        return flash_redirect("/admin/modules", "invalid state", "error")
+    if not isinstance(state_data, dict):
+        return flash_redirect("/admin/modules", "invalid state", "error")
+
+    session_data = await session_manager.load_session(request)
+    if not session_data:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    user = await user_repo.get_user_by_id(session_data.user_id)
+    if not user or not user.get("is_super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super administrators can configure Xero integration",
+        )
+    try:
+        state_user_id = int(state_data.get("user_id"))
+    except (TypeError, ValueError):
+        state_user_id = None
+    state_session_id = state_data.get("session_id")
+    if state_user_id != session_data.user_id or (
+        state_session_id is not None and state_session_id != session_data.id
+    ):
+        log_error(
+            "Xero OAuth callback state does not match the current session",
+            session_user_id=session_data.user_id,
+        )
         return flash_redirect("/admin/modules", "invalid state", "error")
 
     credentials = await modules_service.get_xero_credentials()
