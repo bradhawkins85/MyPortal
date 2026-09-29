@@ -1140,9 +1140,47 @@ async def release_cache_headers(request: Request, call_next: Any) -> Response:
 
 @app.websocket("/ws/refresh")
 async def refresh_updates(websocket: WebSocket) -> None:
-    """Maintain a websocket connection for realtime refresh notifications."""
+    """Maintain a websocket connection for realtime refresh notifications.
 
-    await refresh_notifier.connect(websocket)
+    The handshake must carry a valid portal session cookie and, when the
+    browser sends an ``Origin`` header, it must match the request host or the
+    configured portal URL (cross-site websocket hijacking protection).  The
+    authenticated identity is attached to the connection so chat events are
+    only delivered to users who can access the room.
+    """
+
+    from urllib.parse import urlsplit
+
+    from app.services.realtime import ConnectionAccess
+
+    origin = (websocket.headers.get("origin") or "").strip()
+    if origin:
+        origin_host = urlsplit(origin).netloc.lower()
+        allowed_hosts = {
+            (websocket.headers.get("host") or "").strip().lower(),
+            (websocket.headers.get("x-forwarded-host") or "").split(",")[0].strip().lower(),
+        }
+        if settings.portal_url:
+            allowed_hosts.add(urlsplit(settings.portal_url.unicode_string()).netloc.lower())
+        allowed_hosts.discard("")
+        if not origin_host or origin_host not in allowed_hosts:
+            await websocket.close(code=4403)
+            return
+
+    try:
+        session = await session_manager.load_session(websocket)  # type: ignore[arg-type]
+    except Exception as exc:  # pragma: no cover - defensive guard for DB failures
+        log_error("Failed to load session for refresh websocket", error=str(exc))
+        session = None
+    user = await user_repo.get_user_by_id(session.user_id) if session else None
+    if not session or not user:
+        await websocket.close(code=4401)
+        return
+
+    is_privileged = bool(user.get("is_super_admin")) or await _is_helpdesk_technician(user)
+    access = ConnectionAccess(user_id=int(user["id"]), is_privileged=is_privileged)
+
+    await refresh_notifier.connect(websocket, access=access)
     try:
         while True:
             # Keep the connection open and consume incoming messages so we
