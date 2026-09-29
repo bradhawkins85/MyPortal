@@ -49,7 +49,11 @@ async def _default_room_member_ids(room_id: int) -> set[int] | None:
         try:
             allowed.add(int(creator))
         except (TypeError, ValueError):
-            pass
+            log_warning(
+                "Ignoring invalid chat room creator id during realtime access resolution",
+                room_id=room_id,
+                creator=creator,
+            )
     for participant in await chat_repo.get_participants(room_id):
         user_id = participant.get("user_id") if isinstance(participant, Mapping) else None
         if user_id is None or participant.get("left_at"):
@@ -77,7 +81,8 @@ def _chat_room_ids(payload: Mapping[str, Any]) -> set[int]:
             if raw is not None:
                 room_ids.add(int(raw))
         except (TypeError, ValueError):
-            pass
+            # Ignore invalid room_id values during best-effort room id extraction.
+            continue
     return room_ids
 
 

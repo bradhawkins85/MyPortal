@@ -50,6 +50,8 @@ async def can_access_room(room: dict[str, Any], user: dict[str, Any]) -> bool:
             if int(creator_id) == user_id:
                 return True
         except (TypeError, ValueError):
-            pass
+            # Invalid creator id should not grant creator-based access.
+            # Fall back to participant-based access check below.
+            creator_id = None
     participant = await chat_repo.get_participant(int(room["id"]), user_id=user_id)
     return participant is not None
