@@ -198,6 +198,33 @@ async def list_active_sessions_for_user(user_id: int) -> list[dict[str, Any]]:
     return list(rows)
 
 
+def _parse_window_start(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    text = str(value)
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+
+
+async def get_login_attempt_count(identifier: str, *, window_seconds: int) -> int:
+    """Return attempts recorded for *identifier* in its current window.
+
+    Unlike :func:`register_login_attempt` this does not record an attempt,
+    so callers can check a failure counter before deciding to add to it.
+    """
+    row = await db.fetch_one(
+        "SELECT * FROM login_rate_limits WHERE identifier = %s",
+        (identifier,),
+    )
+    if not row:
+        return 0
+    if datetime.utcnow() - _parse_window_start(row["window_start"]) > timedelta(seconds=window_seconds):
+        return 0
+    return int(row["attempts"] or 0)
+
+
 async def register_login_attempt(
     identifier: str, *, window_seconds: int, max_attempts: int
 ) -> bool:
@@ -213,12 +240,8 @@ async def register_login_attempt(
         )
         return True
 
-    window_start = row["window_start"]
+    window_start_dt = _parse_window_start(row["window_start"])
     attempts = int(row["attempts"])
-    if isinstance(window_start, datetime):
-        window_start_dt = window_start
-    else:
-        window_start_dt = datetime.strptime(str(window_start), "%Y-%m-%d %H:%M:%S")
 
     if now - window_start_dt > timedelta(seconds=window_seconds):
         await db.execute(

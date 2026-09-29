@@ -58,7 +58,7 @@ from app.schemas.auth import (
     TOTPVerifyRequest,
 )
 from app.schemas.users import UserResponse
-from app.security.passwords import verify_password
+from app.security.passwords import get_dummy_password_hash, verify_password
 from app.security.session import SessionData, ensure_datetime, session_manager
 from app.services import company_access
 from app.services import audit as audit_service
@@ -73,6 +73,24 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 settings = get_settings()
 LOGIN_RATE_LIMIT_WINDOW = 300  # 5 minutes
 LOGIN_RATE_LIMIT_ATTEMPTS = 5
+# Per-account failed sign-in limit, independent of the client address.
+ACCOUNT_LOCKOUT_WINDOW = 900  # 15 minutes
+ACCOUNT_LOCKOUT_ATTEMPTS = 10
+_ACCOUNT_LOCKOUT_PREFIX = "account:"
+
+
+def _account_lockout_identifier(email: str) -> str:
+    return f"{_ACCOUNT_LOCKOUT_PREFIX}{str(email or '').strip().lower()}"
+
+
+async def _record_account_login_failure(account_identifier: str) -> None:
+    # register_login_attempt increments the counter; the limit it reports is
+    # enforced by the check at the start of the next sign-in.
+    await auth_repo.register_login_attempt(
+        account_identifier,
+        window_seconds=ACCOUNT_LOCKOUT_WINDOW,
+        max_attempts=ACCOUNT_LOCKOUT_ATTEMPTS,
+    )
 
 
 def _totp_qr_code_data_uri(provisioning_uri: str) -> str:
@@ -630,8 +648,26 @@ async def login(
         _log_login_failure(request, payload.email, "rate_limited")
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many login attempts")
 
+    # The per-IP limit above does not stop guessing spread across many
+    # addresses, so failures are also counted per account (keyed on the
+    # email alone, whether or not it is registered). A locked account gets
+    # the same generic error as a wrong password.
+    account_identifier = _account_lockout_identifier(payload.email)
+    failures = await auth_repo.get_login_attempt_count(
+        account_identifier, window_seconds=ACCOUNT_LOCKOUT_WINDOW
+    )
+    if failures >= ACCOUNT_LOCKOUT_ATTEMPTS:
+        verify_password(payload.password, get_dummy_password_hash())
+        _log_login_failure(request, payload.email, "account_locked")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
     user = await user_repo.get_user_by_email(payload.email)
-    if not user or not verify_password(payload.password, user["password_hash"]):
+    # Always run one password check, against a dummy hash for unknown
+    # accounts, so response timing does not reveal which emails exist.
+    stored_hash = (user or {}).get("password_hash") or get_dummy_password_hash()
+    password_ok = verify_password(payload.password, stored_hash)
+    if not user or not user.get("password_hash") or not password_ok:
+        await _record_account_login_failure(account_identifier)
         _log_login_failure(request, payload.email, "invalid_credentials")
         # Do not create database audit rows for arbitrary unknown identifiers:
         # that would provide an attacker with an unbounded audit-log write
@@ -677,6 +713,9 @@ async def login(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="TOTP code required")
         verified = await _verify_and_claim_totp(totp_devices, payload.totp_code)
         if not verified:
+            # Count wrong codes toward the account lockout so TOTP guessing
+            # with a known password is bounded too.
+            await _record_account_login_failure(account_identifier)
             _log_login_failure(request, payload.email, "invalid_totp")
             await audit_service.record(
                 action="auth.login.fail", request=request, user_id=int(user["id"]),
@@ -685,6 +724,7 @@ async def login(
             )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid TOTP code")
 
+    await auth_repo.clear_login_attempts(account_identifier)
     await auth_repo.clear_login_attempts(identifier)
     return await _complete_login_response(
         request=request,
