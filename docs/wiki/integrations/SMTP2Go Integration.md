@@ -125,7 +125,7 @@ Supported event types:
 ### Security
 
 1. **API Authentication**: API key stored in encrypted module settings
-2. **Webhook Verification**: HMAC-SHA256 signature verification
+2. **Webhook Verification**: HMAC-SHA256 signature verification. A webhook secret must be configured; without one the endpoint returns `503` and logs a warning. Timestamped signatures older or newer than 5 minutes are rejected, and verification failures (including errors loading settings) fail closed.
 3. **Secrets Management**: Environment variables for configuration
 4. **Data Storage**: JSON serialization for webhook data
 
