@@ -22,7 +22,15 @@ running. That is expected.
 Hardening applied by the unit:
 
 - Runs as the unprivileged `myportal` account.
-- `NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=full` and `ProtectHome=true`.
+- `NoNewPrivileges`, `PrivateTmp`, `PrivateDevices`, `ProtectSystem=full` and
+  `ProtectHome=true`.
+- Kernel and namespace hardening: `ProtectKernelTunables`,
+  `ProtectKernelModules`, `ProtectKernelLogs`, `ProtectControlGroups`,
+  `RestrictSUIDSGID`, `RestrictNamespaces`, `RestrictRealtime`,
+  `LockPersonality`, `SystemCallArchitectures=native`, an empty
+  `CapabilityBoundingSet`, and `RestrictAddressFamilies` limited to
+  `AF_UNIX AF_INET AF_INET6 AF_NETLINK`. `MemoryDenyWriteExecute` is not set
+  because cffi (WeasyPrint) and the PowerShell fallback need it off.
 - Release directories are read-only. Only `/opt/myportal/shared` (uploads and
   state) and `/var/log/myportal` are writable by the service.
 - Configuration comes from `/etc/myportal.env` (`root:myportal`, mode 0640).

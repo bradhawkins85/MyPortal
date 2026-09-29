@@ -7,11 +7,15 @@ Wants=network-online.target
 Type=simple
 User=myportal
 Group=myportal
-WorkingDirectory=/opt/myportal
+# Run from the release currently promoted by scripts/upgrade.sh. Each release
+# carries its own virtualenv under <release>/.venv.
+WorkingDirectory=/opt/myportal/current
 EnvironmentFile=/etc/myportal.env
 EnvironmentFile=-/etc/myportal.voice-monitor.%i.env
 RuntimeDirectory=myportal
-ExecStart=/opt/myportal/.venv/bin/python -m app.workers.voice_monitor --health-file=/run/myportal/voice-monitor-%i.health
+# Several worker instances share /run/myportal; keep it when one of them stops.
+RuntimeDirectoryPreserve=yes
+ExecStart=/opt/myportal/current/.venv/bin/python -m app.workers.voice_monitor --health-file=/run/myportal/voice-monitor-%i.health
 ExecStop=/bin/kill -s TERM $MAINPID
 TimeoutStopSec=35
 Restart=on-failure
@@ -23,7 +27,24 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/opt/myportal /run/myportal
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+# PrivateDevices is not set: the SIP provider runs baresip, whose default
+# configuration may open audio devices. MemoryDenyWriteExecute is not set
+# because cffi-based dependencies need writable executable memory.
+# Release immutability is enforced by ownership and read-only file modes, as
+# for myportal@.service; shared state and the health marker are writable.
+ReadOnlyPaths=/opt/myportal/instances
+ReadWritePaths=/opt/myportal/shared /run/myportal
 
 [Install]
 WantedBy=multi-user.target

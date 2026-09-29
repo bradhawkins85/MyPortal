@@ -51,8 +51,25 @@ Restart=always
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
+# ProtectSystem=full (read-only /usr, /boot, /efi and /etc) rather than strict:
+# the application also writes caches and logs under /var (for example the
+# WeasyPrint/fontconfig cache and /var/log/myportal), which strict would block.
 ProtectSystem=full
 ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+# MemoryDenyWriteExecute is intentionally not set: cffi (WeasyPrint) and the
+# optional PowerShell (.NET JIT) fallback need writable executable memory.
 # Release immutability is enforced by ownership and read-only filesystem modes.
 # Do not bind-mount the release tree read-only: upload paths inside each release
 # are symlinks into the writable shared tree and must remain writable.
