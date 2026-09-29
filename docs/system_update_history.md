@@ -35,7 +35,21 @@ the result page refreshes it live. The page keeps polling while the portal
 restarts. A request that no host job picks up within 15 minutes is marked
 failed with instructions for enabling the host job.
 
-History is stored as mode `0640` JSON files under
+On bare metal the shared state directory is writable by the `myportal`
+service account, so the root job treats everything in it as untrusted: its
+lock, the deployment plan and the captured upgrade output live in the
+root-only `/var/lib/myportal-updater` (mode `0700`, created by the installer
+and by `upgrade.sh` when missing), the flag is read once without following
+symlinks, and files the application reads (`system_update.status`,
+`feature_pack_reload.flag`) are published as `root:myportal 0640` with
+`install`, which replaces a planted symlink rather than writing through it.
+History records are written by `scripts/system_update_report.py` running as
+the service account (`runuser -u myportal`), with the output streamed on
+standard input, exactly as the Docker host job does inside its container. The
+cron job logs to the root-owned `/var/log/myportal-updater.log`; `upgrade.sh`
+migrates existing cron entries that still log under `/var/log/myportal`.
+
+History is stored as mode `0600` JSON files under
 `MYPORTAL_SYSTEM_UPDATE_HISTORY_DIR`. In production, leave that setting empty to
 use `$MYPORTAL_SHARED_ROOT/state/system-updates`, which survives release
 cutovers. For installations without `MYPORTAL_SHARED_ROOT`, set an absolute

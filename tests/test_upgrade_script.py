@@ -1054,3 +1054,107 @@ def test_rollback_targets_are_not_shadowed_by_failing_helper():
 
     assert result.returncode != 0
     assert result.stdout.strip() == "rollback blue green [] true"
+
+
+# ---------------------------------------------------------------------------
+# shared/state is writable by the service account: root must never write,
+# lock, or re-read through entries the application can replace.
+# ---------------------------------------------------------------------------
+
+def _status_functions() -> str:
+    return SCRIPT[
+        SCRIPT.index("ensure_updater_state_dir() {") : SCRIPT.index("\nrecord_step()")
+    ]
+
+
+def test_status_publication_replaces_planted_symlink_without_following_it(tmp_path):
+    state = tmp_path / "state"
+    state.mkdir()
+    victim = tmp_path / "victim"
+    victim.write_text("root-owned contents\n")
+    status = state / "system_update.status"
+    status.symlink_to(victim)
+    private = tmp_path / "private"
+    program = (
+        "set -Eeuo pipefail\nSERVICE_USER=nobody-such-user\n"
+        f'UPDATER_STATE_DIR="{private}"\nSYSTEM_UPDATE_STATUS_FILE="{status}"\n'
+        "UPGRADE_STARTED_AT=now RESTART_MODE=rolling REQUESTED_UPGRADE_MODE=rolling\n"
+        "DEPLOYMENT_PLAN='{}' STEP_REPORT='' UPGRADE_READY_WAIT_SECONDS=0\n"
+        + _status_functions()
+        # A predictable staging name must not be followed either.
+        + f'\nln -s "{victim}" "{state}/.system_update.status.$$.tmp"\n'
+        + "write_upgrade_status succeeded $'done\\ninjected=1' reason_ok\n"
+    )
+    result = subprocess.run(["bash", "-c", program], text=True, capture_output=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+    assert victim.read_text() == "root-owned contents\n"
+    assert not status.is_symlink()
+    contents = status.read_text()
+    assert "status=succeeded" in contents
+    assert "\ninjected=1" not in contents
+    assert oct(private.stat().st_mode & 0o777) == "0o700"
+    assert list(private.iterdir()) == []
+
+
+def test_root_only_artifacts_live_outside_service_writable_state():
+    assert 'UPDATER_STATE_DIR="${MYPORTAL_UPDATER_STATE_DIR:-/var/lib/myportal-updater}"' in SCRIPT
+    assert 'DEPLOYMENT_PLAN_FILE="${UPDATER_STATE_DIR}/deployment_plan.json"' in SCRIPT
+    assert 'exec 9>"$UPDATER_STATE_DIR/upgrade.lock"' in SCRIPT
+    assert "state/upgrade.lock" not in SCRIPT
+    assert '"$reload_flag.tmp"' not in SCRIPT
+    assert 'publish_state_file "$reload_staging" "$reload_flag"' in SCRIPT
+    assert "os.O_NOFOLLOW | os.O_NONBLOCK" in SCRIPT
+
+
+def test_changed_paths_cannot_escape_publication_directory():
+    function = SCRIPT[
+        SCRIPT.index("validate_relative_path() {") : SCRIPT.index("\nresolve_plan_base()")
+    ]
+    checks = {
+        "app/static/css/site.css": 0,
+        "app/static/../../etc/cron.d/x": 1,
+        "/etc/passwd": 1,
+        "app/static/./x": 1,
+        "app//static/x": 1,
+        "": 1,
+    }
+    for path, expected in checks.items():
+        result = subprocess.run(
+            ["bash", "-c", function + '\nvalidate_relative_path "$1"', "_", path],
+            capture_output=True, check=False,
+        )
+        assert result.returncode == expected, path
+    publish = SCRIPT[SCRIPT.index("publish_paths_without_worker_reload() {") :]
+    assert publish.index('validate_relative_path "$path"') < publish.index(
+        'git show "${revision}:${path}"'
+    )
+
+
+def test_deployment_plan_action_and_reason_are_validated():
+    plan = SCRIPT[
+        SCRIPT.index("generate_deployment_plan() {") : SCRIPT.index("validate_relative_path() {")
+    ]
+    assert "Deployment planner returned an unknown action" in plan
+    assert '"$DEPLOYMENT_REASON" =~ ^[A-Za-z0-9_.-]{1,128}$' in plan
+
+
+def test_legacy_update_cron_log_is_moved_to_root_owned_path(tmp_path):
+    function = SCRIPT[
+        SCRIPT.index("migrate_update_cron_log() {") : SCRIPT.index("\nretire_legacy_service()")
+    ]
+    cron = tmp_path / "myportal-update"
+    cron.write_text(
+        "* * * * * root /opt/myportal/control/scripts/process_update_flag.sh"
+        " >> /var/log/myportal/process_update_flag.log 2>&1\n"
+    )
+    result = subprocess.run(
+        [
+            "bash", "-c",
+            f'set -Eeuo pipefail\nUPDATE_CRON_FILE="{cron}"\n' + function + "\nmigrate_update_cron_log",
+        ],
+        text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert ">> /var/log/myportal-updater.log 2>&1" in cron.read_text()
+    assert "/var/log/myportal/" not in cron.read_text()
