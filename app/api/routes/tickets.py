@@ -2256,13 +2256,14 @@ async def download_open_attachment(token: str):
                 status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
             )
 
+    # Let Starlette build Content-Disposition: it percent-encodes the name
+    # (RFC 5987 ``filename*``) so quotes/CR/LF in the stored original
+    # filename cannot break out of the header value.
     return FileResponse(
         path=file_path,
-        filename=attachment.get("original_filename"),
+        filename=attachment.get("original_filename") or "download",
         media_type=attachment.get("mime_type") or "application/octet-stream",
-        headers={
-            "Content-Disposition": f'attachment; filename="{attachment.get("original_filename", "download")}"'
-        },
+        content_disposition_type="attachment",
     )
 
 
