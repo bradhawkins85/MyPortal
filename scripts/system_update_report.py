@@ -27,10 +27,20 @@ def main() -> None:
             output = args.output_file.read_text(encoding="utf-8", errors="replace")
         except OSError:
             output = "Update output was unavailable."
-    system_update_history.update(
-        args.update_id, status=args.status, output=output or None,
-        error=args.error, completed=args.status in {"succeeded", "failed"},
-    )
+    try:
+        system_update_history.update(
+            args.update_id, status=args.status, output=output or None,
+            error=args.error, completed=args.status in {"succeeded", "failed"},
+        )
+    except (KeyError, ValueError):
+        # Report the problem in one line; the coordinator treats reporting as
+        # best effort and must carry on with the upgrade.
+        print(
+            f"No system update record {args.update_id} in "
+            f"{system_update_history._HISTORY_DIR}; history was not updated.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

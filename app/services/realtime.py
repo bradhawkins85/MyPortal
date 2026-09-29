@@ -82,7 +82,7 @@ def _chat_room_ids(payload: Mapping[str, Any]) -> set[int]:
                 room_ids.add(int(raw))
         except (TypeError, ValueError):
             # Ignore invalid room_id values during best-effort room id extraction.
-            continue
+            pass
     return room_ids
 
 

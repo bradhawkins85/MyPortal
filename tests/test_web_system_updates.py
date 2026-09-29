@@ -550,3 +550,68 @@ def test_git_context_falls_back_to_default_checkouts(monkeypatch, tmp_path):
 
 def test_env_example_suggests_legacy_control_checkout():
     assert "\nMYPORTAL_CONTROL_CHECKOUT=/opt/myportal\n" in (ROOT / ".env.example").read_text()
+
+
+# ---------------------------------------------------------------------------
+# Coordinator and application agree on the history directory
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("project", "shared_state_exists", "expected"),
+    [
+        # A release below /opt/myportal (the running application).
+        ("opt/myportal/releases/abc", False, "shared"),
+        # The control checkout cloned into /opt/myportal on older installs.
+        ("opt/myportal", True, "shared"),
+        # A development checkout on a host without the shared tree.
+        ("home/dev/MyPortal", False, None),
+    ],
+)
+def test_history_dir_matches_between_release_and_control_checkout(tmp_path, project, shared_state_exists, expected):
+    base = tmp_path
+    shared = base / "opt/myportal/shared"
+    if shared_state_exists:
+        (shared / "state").mkdir(parents=True)
+    # Point the default at the temporary tree while keeping the same layout.
+    project_root = base / project
+    result = system_update_history._default_shared_root(project_root, shared)
+    assert result == (str(shared) if expected == "shared" else None)
+
+
+def test_report_helper_explains_a_missing_record(history):
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/system_update_report.py"),
+         "597b18ed-eb3e-4e19-b9d6-98ad85c7a34d", "running"],
+        text=True, capture_output=True,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "MYPORTAL_SYSTEM_UPDATE_HISTORY_DIR": str(history)},
+    )
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert "No system update record 597b18ed" in result.stderr
+
+
+@pytest.mark.skipif(shutil.which("flock") is None, reason="flock is required")
+def test_baremetal_coordinator_upgrades_even_when_reporting_fails(tmp_path):
+    project = tmp_path / "project"
+    scripts = project / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copy(ROOT / "scripts/process_update_flag.sh", scripts)
+    (scripts / "system_update_report.py").write_text("import sys\nsys.exit(1)\n")
+    marker = tmp_path / "upgraded"
+    (scripts / "upgrade.sh").write_text(f"#!/usr/bin/env bash\ntouch {marker}\n")
+    (scripts / "upgrade.sh").chmod(0o755)
+    state = project / "var/state"
+    state.mkdir(parents=True)
+    flag = state / "system_update.flag"
+    flag.write_text("update_id=597b18ed-eb3e-4e19-b9d6-98ad85c7a34d\nrequested_mode=rolling\n")
+    flag.chmod(0o600)
+
+    result = subprocess.run(
+        ["bash", str(scripts / "process_update_flag.sh")], capture_output=True, text=True,
+        env={**os.environ, "MYPORTAL_SHARED_ROOT": str(tmp_path / "none"),
+             "MYPORTAL_UPDATER_STATE_DIR": str(tmp_path / "updater")},
+    )
+    assert result.returncode == 0, result.stderr
+    assert marker.exists()
+    assert not flag.exists()
+    assert "could not record" in result.stderr
