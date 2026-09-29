@@ -12903,6 +12903,12 @@ a.stat-strip__stat:focus-visible {
   z-index: 1;
 }
 
+.marketing-campaign-stat-strip .stat-strip__stat-value {
+  font-size: clamp(1rem, 2vw, 1.35rem);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
 /* --- Header menu (Actions ▾ disclosure) ------------------------------------ */
 
 .header-actions {
