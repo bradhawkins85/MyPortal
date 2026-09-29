@@ -272,7 +272,7 @@
       {% if can_edit_asset_relationships %}
       <form method="post" action="/assets/{{ asset.id }}/relationships">
         <div class="form-group"><label class="form-label" for="relationship-type">Relationship</label><select class="input" id="relationship-type" name="relationship_type" required>{% for value, label in relationship_types.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
-        <div class="form-group" data-record-picker><label class="form-label" for="relationship-target-search">Find a record</label><input class="input" id="relationship-target-search" type="search" placeholder="Search by name, type, status, URL or network" autocomplete="off" data-record-picker-search><select class="input" id="relationship-target" name="target_key" required size="6" data-record-picker-options><option value="">Select an accessible record</option>{% for item in relationship_targets %}<option value="{{ item.key }}">{{ item.type }} — {{ item.label }} · {{ item.context }}</option>{% endfor %}</select><small class="form-help">Only active records in this company that you can access are shown.</small></div>
+        <div class="form-group"><label class="form-label" for="relationship-target">Find a record</label><select class="input" id="relationship-target" name="target_key" required data-searchable="on" data-searchable-placeholder="Search by name, type, status, URL or network"><option value="">Select an accessible record</option>{% for item in relationship_targets %}<option value="{{ item.key }}">{{ item.type }} — {{ item.label }} · {{ item.context }}</option>{% endfor %}</select><small class="form-help">Only active records in this company that you can access are shown.</small></div>
         <button class="button button--primary" type="submit">Add relationship</button>
       </form>
       {% endif %}
@@ -289,4 +289,4 @@
 </div>
 {% include "partials/csrf.html" %}
 {% endblock %}
-{% block scripts %}<script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script><script src="{{ static_url('/static/js/record_picker.js') }}" defer></script>{% if can_edit_network_map %}<script src="{{ static_url('/static/js/network_map.js') }}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script>{% if can_edit_network_map %}<script src="{{ static_url('/static/js/network_map.js') }}" defer></script>{% endif %}{% endblock %}
