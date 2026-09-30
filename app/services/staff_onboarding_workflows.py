@@ -35,6 +35,7 @@ from app.services import system_variables
 from app.services import webhook_monitor
 from app.services import tickets as tickets_service
 from app.security.api_keys import hash_api_key
+from app.security.encryption import decrypt_secret, encrypt_secret
 
 STATE_REQUESTED = "requested"
 STATE_AWAITING_APPROVAL = "awaiting_approval"
@@ -3473,6 +3474,10 @@ async def _execute_policy_steps(
             for name in patch.get("secret_vars") or []:
                 secret_vars.add(str(name))
 
+    await _apply_webhook_callback_values(
+        execution_id=execution_id, vars_map=vars_map, secret_vars=secret_vars
+    )
+
     for index, step in enumerate(steps):
         step_name = str(
             step.get("_workflow_step_name") or step.get("name") or f"step_{index + 1}"
@@ -3864,6 +3869,7 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
     staff_id: int,
     execution_id: int,
     initiated_by_user_id: int | None,
+    forced_failure: WorkflowStepError | None = None,
 ) -> dict[str, Any]:
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
@@ -3957,6 +3963,8 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
         )
 
     try:
+        if forced_failure is not None:
+            raise forced_failure
         execution_result = await _execute_policy_steps(
             execution_id=execution_id,
             company_id=company_id,
@@ -4695,6 +4703,259 @@ async def confirm_external_checkpoint_and_resume(
     )
 
 
+WEBHOOK_OUTCOME_SUCCESS = "success"
+WEBHOOK_OUTCOME_FAILED = "failed"
+_WEBHOOK_VALUE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$")
+_WEBHOOK_RESERVED_VAR_NAMES = frozenset(
+    {
+        "company_id",
+        "company_name",
+        "staff_id",
+        "staff_email",
+        "staff_first_name",
+        "staff_last_name",
+        "staff_full_name",
+        "staff_custom_fields",
+        "requestor_email",
+    }
+)
+_WEBHOOK_RESERVED_VAR_PREFIXES = (
+    "staff.",
+    "staff_custom_fields.",
+    "custom_fields.",
+    "system.",
+    "now.",
+    "offboarding.",
+)
+_WEBHOOK_MAX_VALUES = 50
+_WEBHOOK_MAX_VALUES_BYTES = 32_768
+
+
+def _validate_webhook_value_name(name: Any) -> str:
+    text = str(name or "").strip()
+    if not _WEBHOOK_VALUE_NAME_PATTERN.fullmatch(text):
+        raise ValueError(
+            f"Invalid value name '{text}': use 1-64 letters, numbers, '_', '-' or '.'"
+        )
+    lowered = text.lower()
+    if lowered in _WEBHOOK_RESERVED_VAR_NAMES or lowered.startswith(
+        _WEBHOOK_RESERVED_VAR_PREFIXES
+    ):
+        raise ValueError(f"Value name '{text}' is reserved by the workflow")
+    return text
+
+
+def _normalise_webhook_values(
+    values: dict[str, Any] | None,
+    secret_values: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Validate callback values and split them into plain and secret sets.
+
+    Names that look sensitive (password, token, secret...) are treated as
+    secret even when sent in ``values`` so they never land in logs unredacted.
+    """
+    plain: dict[str, Any] = {}
+    secret: dict[str, str] = {}
+    for raw_name, value in (values or {}).items():
+        name = _validate_webhook_value_name(raw_name)
+        if _is_secret_var(name):
+            secret[name] = value if isinstance(value, str) else json.dumps(value)
+        else:
+            plain[name] = value
+    for raw_name, value in (secret_values or {}).items():
+        name = _validate_webhook_value_name(raw_name)
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"Secret value '{name}' must be a string")
+        plain.pop(name, None)
+        secret[name] = value or ""
+    if len(plain) + len(secret) > _WEBHOOK_MAX_VALUES:
+        raise ValueError(f"No more than {_WEBHOOK_MAX_VALUES} values may be supplied")
+    encoded_size = len(json.dumps(plain, default=str)) + sum(
+        len(item) for item in secret.values()
+    )
+    if encoded_size > _WEBHOOK_MAX_VALUES_BYTES:
+        raise ValueError("Callback values are too large")
+    return plain, secret
+
+
+async def _apply_webhook_callback_values(
+    *,
+    execution_id: int,
+    vars_map: dict[str, Any],
+    secret_vars: set[str],
+) -> None:
+    """Load values returned by external scripts via Pause For Webhook callbacks."""
+    checkpoints = (
+        await workflow_repo.list_external_checkpoints_for_execution_ids([execution_id])
+    ).get(execution_id, [])
+    for checkpoint in checkpoints:
+        if str(checkpoint.get("status") or "") != "confirmed":
+            continue
+        raw_payload = checkpoint.get("callback_payload_json")
+        if isinstance(raw_payload, str):
+            try:
+                raw_payload = json.loads(raw_payload)
+            except (TypeError, json.JSONDecodeError):
+                continue
+        if not isinstance(raw_payload, dict):
+            continue
+        plain_values = raw_payload.get("values")
+        if isinstance(plain_values, dict):
+            for name, value in plain_values.items():
+                vars_map[str(name)] = value
+        encrypted_values = raw_payload.get("secret_values_encrypted")
+        if isinstance(encrypted_values, dict):
+            for name, ciphertext in encrypted_values.items():
+                try:
+                    vars_map[str(name)] = decrypt_secret(str(ciphertext))
+                except Exception as exc:  # noqa: BLE001
+                    log_warning(
+                        "Unable to decrypt workflow webhook secret value",
+                        execution_id=execution_id,
+                        name=str(name),
+                        error=str(exc),
+                    )
+                    continue
+                secret_vars.add(str(name))
+
+
+def _workflow_webhook_url(webhook_public_id: str) -> str:
+    settings = get_settings()
+    base_url = (
+        str(settings.public_base_url or settings.portal_url or "").strip().rstrip("/")
+    )
+    webhook_path = f"/api/staff/workflow-webhooks/{webhook_public_id}"
+    return f"{base_url}{webhook_path}" if base_url else webhook_path
+
+
+def _verify_webhook_post_key(checkpoint: dict[str, Any], post_key: str) -> None:
+    expected_hash = str(checkpoint.get("webhook_post_key_hash") or "")
+    if not expected_hash or not secrets.compare_digest(
+        expected_hash, hash_api_key(post_key)
+    ):
+        raise PermissionError("Invalid webhook POST key")
+
+
+def _staff_detail_for_external_script(
+    staff: dict[str, Any], custom_fields: dict[str, Any]
+) -> dict[str, Any]:
+    detail: dict[str, Any] = {
+        "id": int(staff.get("id") or 0),
+        "companyId": int(staff.get("company_id") or 0),
+        "firstName": staff.get("first_name"),
+        "lastName": staff.get("last_name"),
+        "email": staff.get("email"),
+        "mobilePhone": staff.get("mobile_phone"),
+        "dateOnboarded": _serialise_dt(staff.get("date_onboarded")),
+        "dateOffboarded": _serialise_dt(staff.get("date_offboarded")),
+        "street": staff.get("street"),
+        "city": staff.get("city"),
+        "state": staff.get("state"),
+        "postcode": staff.get("postcode"),
+        "country": staff.get("country"),
+        "department": staff.get("department"),
+        "jobTitle": staff.get("job_title"),
+        "orgCompany": staff.get("org_company"),
+        "managerName": staff.get("manager_name"),
+        "accountAction": staff.get("account_action"),
+        "requestNotes": staff.get("request_notes"),
+        "requestedAt": _serialise_dt(staff.get("requested_at")),
+        "approvedAt": _serialise_dt(staff.get("approved_at")),
+        "customFields": dict(custom_fields or {}),
+    }
+    if str(staff.get("offboarding_out_of_office") or "").strip() or staff.get(
+        "offboarding_email_forward_to"
+    ) or staff.get("offboarding_mailbox_grant_emails"):
+        grant_emails: list[str] = []
+        raw_grant = staff.get("offboarding_mailbox_grant_emails")
+        if isinstance(raw_grant, str) and raw_grant.strip():
+            try:
+                parsed_grant = json.loads(raw_grant)
+            except (TypeError, json.JSONDecodeError):
+                parsed_grant = []
+            if isinstance(parsed_grant, list):
+                grant_emails = [str(item) for item in parsed_grant if item]
+        elif isinstance(raw_grant, list):
+            grant_emails = [str(item) for item in raw_grant if item]
+        detail["offboarding"] = {
+            "outOfOfficeMessage": staff.get("offboarding_out_of_office"),
+            "emailForwardTo": staff.get("offboarding_email_forward_to"),
+            "mailboxGrantEmails": grant_emails,
+        }
+    return detail
+
+
+async def list_pending_webhook_checkpoints(
+    *,
+    webhook_public_id: str,
+    post_key: str,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """List workflows paused on a Pause For Webhook step for an external script.
+
+    Authenticated by the same per-step POST key used to resume the workflow, so a
+    script can only see the workflows it is allowed to resume.
+    """
+    checkpoints = await workflow_repo.list_pending_external_checkpoints_by_webhook_id(
+        webhook_public_id,
+        waiting_states=(STATE_WAITING_EXTERNAL, STATE_OFFBOARDING_WAITING_EXTERNAL),
+        limit=limit,
+    )
+    if not checkpoints:
+        return []
+    for checkpoint in checkpoints:
+        _verify_webhook_post_key(checkpoint, post_key)
+
+    staff_ids_by_company: dict[int, list[int]] = {}
+    for checkpoint in checkpoints:
+        staff_ids_by_company.setdefault(int(checkpoint["company_id"]), []).append(
+            int(checkpoint["staff_id"])
+        )
+    custom_fields_by_staff: dict[int, dict[str, Any]] = {}
+    for company_id, staff_ids in staff_ids_by_company.items():
+        custom_fields_by_staff.update(
+            await staff_custom_fields_repo.get_all_staff_field_values(
+                company_id, staff_ids
+            )
+        )
+    company_names: dict[int, str | None] = {}
+    for company_id in staff_ids_by_company:
+        company = await company_repo.get_company_by_id(company_id)
+        company_names[company_id] = (company or {}).get("name")
+
+    webhook_url = _workflow_webhook_url(webhook_public_id)
+    items: list[dict[str, Any]] = []
+    for checkpoint in checkpoints:
+        staff_id = int(checkpoint["staff_id"])
+        staff = await staff_repo.get_staff_by_id(staff_id)
+        if not staff:
+            continue
+        company_id = int(checkpoint["company_id"])
+        items.append(
+            {
+                "executionId": int(checkpoint["execution_id"]),
+                "companyId": company_id,
+                "companyName": company_names.get(company_id),
+                "staffId": staff_id,
+                "direction": str(
+                    checkpoint.get("execution_direction") or DIRECTION_ONBOARDING
+                ),
+                "workflowKey": checkpoint.get("execution_workflow_key"),
+                "state": checkpoint.get("execution_state"),
+                "stepName": _external_checkpoint_step_name(
+                    {"current_step": checkpoint.get("execution_current_step")}
+                ),
+                "pausedAt": _serialise_dt(checkpoint.get("created_at")),
+                "requestedAt": _serialise_dt(checkpoint.get("execution_requested_at")),
+                "resumeUrl": webhook_url,
+                "staff": _staff_detail_for_external_script(
+                    staff, custom_fields_by_staff.get(staff_id, {})
+                ),
+            }
+        )
+    return items
+
+
 async def confirm_webhook_checkpoint_and_resume(
     *,
     webhook_public_id: str,
@@ -4703,7 +4964,15 @@ async def confirm_webhook_checkpoint_and_resume(
     callback_payload: dict[str, Any] | None,
     company_id: int | None = None,
     staff_id: int | None = None,
+    values: dict[str, Any] | None = None,
+    secret_values: dict[str, Any] | None = None,
+    outcome: str = WEBHOOK_OUTCOME_SUCCESS,
+    error_message: str | None = None,
 ) -> dict[str, Any]:
+    outcome = str(outcome or WEBHOOK_OUTCOME_SUCCESS).strip().lower()
+    if outcome not in {WEBHOOK_OUTCOME_SUCCESS, WEBHOOK_OUTCOME_FAILED}:
+        raise ValueError("outcome must be 'success' or 'failed'")
+    plain_values, secret_value_map = _normalise_webhook_values(values, secret_values)
     checkpoint = await workflow_repo.get_pending_external_checkpoint_by_webhook_id(
         webhook_public_id=webhook_public_id,
         company_id=company_id,
@@ -4711,21 +4980,30 @@ async def confirm_webhook_checkpoint_and_resume(
     )
     if not checkpoint:
         raise ValueError("Invalid or already completed webhook URL")
-    expected_hash = str(checkpoint.get("webhook_post_key_hash") or "")
-    if not expected_hash or not secrets.compare_digest(
-        expected_hash, hash_api_key(post_key)
-    ):
-        raise ValueError("Invalid webhook POST key")
+    try:
+        _verify_webhook_post_key(checkpoint, post_key)
+    except PermissionError as exc:
+        raise ValueError(str(exc)) from exc
     company_id = int(checkpoint["company_id"])
     staff_id = int(checkpoint["staff_id"])
     execution_id = int(checkpoint["execution_id"])
+    stored_payload: dict[str, Any] = {
+        "payload": callback_payload or {},
+        "outcome": outcome,
+        "values": plain_values,
+        "secret_values_encrypted": {
+            name: encrypt_secret(value) for name, value in secret_value_map.items()
+        },
+    }
+    if error_message:
+        stored_payload["error"] = error_message
     await workflow_repo.confirm_external_checkpoint(
         int(checkpoint["id"]),
         source=source[:128],
         callback_timestamp=_utc_now_naive(),
         proof_reference_id=webhook_public_id,
         payload_hash=None,
-        callback_payload=callback_payload or {},
+        callback_payload=stored_payload,
         confirmed_by_api_key_id=None,
     )
     await audit_service.log_action(
@@ -4737,21 +5015,54 @@ async def confirm_webhook_checkpoint_and_resume(
             "company_id": company_id,
             "execution_id": execution_id,
             "webhook_public_id": webhook_public_id,
+            "outcome": outcome,
+            "value_names": sorted([*plain_values, *secret_value_map]),
         },
     )
     execution = await workflow_repo.get_execution_by_id(execution_id) or {
         "id": execution_id
     }
-    await _mark_external_checkpoint_step_success(
-        execution_record=execution,
-        source=source,
-        response_payload={"webhook_public_id": webhook_public_id},
-    )
+    step_response = {
+        "webhook_public_id": webhook_public_id,
+        "outcome": outcome,
+        "values": {
+            **plain_values,
+            **{name: "***redacted***" for name in secret_value_map},
+        },
+    }
+    forced_failure: WorkflowStepError | None = None
+    if outcome == WEBHOOK_OUTCOME_FAILED:
+        step_name = _external_checkpoint_step_name(execution)
+        error_text = (
+            str(error_message or "").strip()
+            or "External script reported failure via workflow webhook"
+        )
+        await workflow_repo.append_step_log(
+            execution_id=execution_id,
+            step_name=step_name,
+            status="failed",
+            attempt=1,
+            request_payload={"source": source, "current_step": execution.get("current_step")},
+            response_payload=step_response,
+            error_message=error_text,
+        )
+        forced_failure = WorkflowStepError(
+            error_text,
+            step_name=step_name,
+            request_payload={"source": source, "outcome": outcome},
+        )
+    else:
+        await _mark_external_checkpoint_step_success(
+            execution_record=execution,
+            source=source,
+            response_payload=step_response,
+        )
     result = await resume_staff_onboarding_workflow_after_external_confirmation(
         company_id=company_id,
         staff_id=staff_id,
         execution_id=execution_id,
         initiated_by_user_id=None,
+        forced_failure=forced_failure,
     )
     result.setdefault("company_id", company_id)
     result.setdefault("staff_id", staff_id)

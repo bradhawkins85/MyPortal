@@ -14,6 +14,15 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _mock_external_checkpoints(monkeypatch):
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "list_external_checkpoints_for_execution_ids",
+        AsyncMock(return_value={}),
+    )
+
+
 @pytest.mark.anyio
 async def test_http_post_step_supports_query_headers_and_json_string(monkeypatch):
     captured_request: dict[str, object] = {}
