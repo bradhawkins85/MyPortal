@@ -573,6 +573,11 @@
       });
     });
 
+    if (flags.openAddStaffModal && addModal) {
+      resetAddStaffForm();
+      openModal(addModal);
+    }
+
     const editCustomFieldInputs = new Map();
     const editCustomFieldGroups = new Map();
     let currentEditStaffId = null;

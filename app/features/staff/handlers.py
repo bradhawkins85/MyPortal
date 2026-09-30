@@ -744,8 +744,29 @@ async def staff_page(
         "manual_onedrive_export_enabled": bool(
             str((company_record or {}).get("onedrive_export_drive_id") or "").strip()
         ),
+        "open_add_staff_modal": bool(
+            can_edit_staff
+            and getattr(getattr(request, "state", None), "open_add_staff_modal", False)
+        ),
     }
     return await _render_template("staff/index.html", request, user, extra=extra)
+
+
+async def staff_add_page(
+    request: Request,
+    enabled: str = "",
+    department: str = "",
+    show_ex_staff: str = "",
+):
+    """Render the staff page with the add staff member modal opened on load."""
+
+    request.state.open_add_staff_modal = True
+    return await staff_page(
+        request,
+        enabled=enabled,
+        department=department,
+        show_ex_staff=show_ex_staff,
+    )
 
 
 async def staff_member_tickets(staff_id: int, request: Request) -> JSONResponse:

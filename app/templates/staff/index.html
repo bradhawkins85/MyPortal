@@ -937,7 +937,8 @@
   'isHelpdeskTechnician': is_helpdesk_technician,
   'offboardingEmailForwardingEnabled': offboarding_email_forwarding_enabled,
   'hasM365': has_m365,
-  'manualOneDriveExportEnabled': manual_onedrive_export_enabled
+  'manualOneDriveExportEnabled': manual_onedrive_export_enabled,
+  'openAddStaffModal': open_add_staff_modal | default(false)
 } | tojson }}</script>
 <script type="application/json" id="active-staff-for-offboarding">{{ active_staff_for_offboarding | tojson }}</script>
 
