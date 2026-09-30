@@ -52,6 +52,7 @@
             <th scope="col" data-sort="string">Mobile</th>
             <th scope="col" data-sort="string">Department</th>
             <th scope="col" data-sort="date">Start date</th>
+            <th scope="col" data-sort="string">Requested by</th>
             <th scope="col" data-sort="date">Requested at</th>
             <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
           </tr>
@@ -66,6 +67,12 @@
               <td data-label="Department">{{ req.department or '—' }}</td>
               <td data-label="Start date" data-value="{{ req.date_onboarded or '' }}" data-utc="{{ req.date_onboarded or '' }}">
                 {% if req.date_onboarded %}{{ req.date_onboarded }}{% else %}<span class="text-muted">—</span>{% endif %}
+              </td>
+              <td data-label="Requested by">
+                {% if req.requested_by_name or req.requested_by_email %}
+                  {{ req.requested_by_name or req.requested_by_email }}
+                  {% if req.requested_by_email and req.requested_by_name != req.requested_by_email %}<div class="text-muted text-small">{{ req.requested_by_email }}</div>{% endif %}
+                {% else %}<span class="text-muted">—</span>{% endif %}
               </td>
               <td data-label="Requested at" data-value="{{ req.requested_at or '' }}" data-utc="{{ req.requested_at or '' }}">
                 {% if req.requested_at %}{{ req.requested_at }}{% else %}<span class="text-muted">—</span>{% endif %}

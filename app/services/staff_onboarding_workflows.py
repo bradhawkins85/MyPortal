@@ -440,6 +440,22 @@ async def resolve_approver_user_ids(
     return sorted(designated_ids | permission_based_ids | company_admin_ids)
 
 
+def requested_by_details(user: dict[str, Any] | None) -> tuple[str | None, str | None]:
+    """Return the (name, email) snapshot stored against a staff request."""
+    if not user:
+        return None, None
+    email = str(user.get("email") or "").strip() or None
+    name = " ".join(
+        part
+        for part in (
+            str(user.get("first_name") or "").strip(),
+            str(user.get("last_name") or "").strip(),
+        )
+        if part
+    ) or email
+    return name, email
+
+
 async def notify_staff_approval_requested(
     *,
     company_id: int,
@@ -4860,6 +4876,9 @@ def _staff_detail_for_external_script(
         "accountAction": staff.get("account_action"),
         "requestNotes": staff.get("request_notes"),
         "requestedAt": _serialise_dt(staff.get("requested_at")),
+        "requestedByUserId": _coerce_positive_int(staff.get("requested_by_user_id")),
+        "requestedByName": staff.get("requested_by_name"),
+        "requestedByEmail": staff.get("requested_by_email"),
         "approvedAt": _serialise_dt(staff.get("approved_at")),
         "customFields": dict(custom_fields or {}),
     }
@@ -4883,6 +4902,21 @@ def _staff_detail_for_external_script(
             "mailboxGrantEmails": grant_emails,
         }
     return detail
+
+
+async def _with_requested_by_details(staff: dict[str, Any]) -> dict[str, Any]:
+    """Fill the requester name/email snapshot for rows created before it existed."""
+    if staff.get("requested_by_name") and staff.get("requested_by_email"):
+        return staff
+    requester_id = _coerce_positive_int(staff.get("requested_by_user_id"))
+    if requester_id is None:
+        return staff
+    name, email = requested_by_details(await user_repo.get_user_by_id(requester_id))
+    return {
+        **staff,
+        "requested_by_name": staff.get("requested_by_name") or name,
+        "requested_by_email": staff.get("requested_by_email") or email,
+    }
 
 
 async def list_pending_webhook_checkpoints(
@@ -4930,6 +4964,7 @@ async def list_pending_webhook_checkpoints(
         staff = await staff_repo.get_staff_by_id(staff_id)
         if not staff:
             continue
+        staff = await _with_requested_by_details(staff)
         company_id = int(checkpoint["company_id"])
         items.append(
             {
@@ -4947,6 +4982,8 @@ async def list_pending_webhook_checkpoints(
                 ),
                 "pausedAt": _serialise_dt(checkpoint.get("created_at")),
                 "requestedAt": _serialise_dt(checkpoint.get("execution_requested_at")),
+                "requestedByName": staff.get("requested_by_name"),
+                "requestedByEmail": staff.get("requested_by_email"),
                 "resumeUrl": webhook_url,
                 "staff": _staff_detail_for_external_script(
                     staff, custom_fields_by_staff.get(staff_id, {})

@@ -171,6 +171,8 @@ class StaffWorkflowPendingWebhookItem(BaseModel):
     step_name: Optional[str] = Field(default=None, alias="stepName")
     paused_at: Optional[str] = Field(default=None, alias="pausedAt")
     requested_at: Optional[str] = Field(default=None, alias="requestedAt")
+    requested_by_name: Optional[str] = Field(default=None, alias="requestedByName")
+    requested_by_email: Optional[str] = Field(default=None, alias="requestedByEmail")
     resume_url: str = Field(alias="resumeUrl")
     staff: dict[str, Any]
 
@@ -206,6 +208,8 @@ class StaffRequestResponse(BaseModel):
     custom_fields: dict[str, Any] = Field(default_factory=dict)
     status: str = "pending"
     requested_by_user_id: Optional[int] = None
+    requested_by_name: Optional[str] = None
+    requested_by_email: Optional[str] = None
     requested_at: Optional[datetime] = None
     approved_by_user_id: Optional[int] = None
     approved_at: Optional[datetime] = None
@@ -249,6 +253,8 @@ class StaffResponse(BaseModel):
     onboarding_completed_at: Optional[datetime] = None
     approval_status: str = "pending"
     requested_by_user_id: Optional[int] = None
+    requested_by_name: Optional[str] = None
+    requested_by_email: Optional[str] = None
     requested_at: Optional[datetime] = None
     approved_by_user_id: Optional[int] = None
     approved_at: Optional[datetime] = None

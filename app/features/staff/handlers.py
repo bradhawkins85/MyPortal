@@ -3144,6 +3144,9 @@ async def create_staff_member(request: Request):
             custom_values[key] = str(raw_value or "").strip() or None
 
     requester_id = int(user["id"]) if user.get("id") is not None else None
+    requested_by_name, requested_by_email = (
+        staff_onboarding_workflow_service.requested_by_details(user)
+    )
 
     created = await staff_requests_repo.create_request(
         company_id=company_id,
@@ -3157,6 +3160,8 @@ async def create_staff_member(request: Request):
         request_notes=None,
         custom_fields=custom_values or None,
         requested_by_user_id=requester_id,
+        requested_by_name=requested_by_name,
+        requested_by_email=requested_by_email,
         requested_at=datetime.now(tz=timezone.utc),
     )
 
@@ -3590,6 +3595,9 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         if not notes
         else f"Type: {offboarding_type}\n\nNotes: {notes}"
     )
+    requested_by_name, requested_by_email = (
+        staff_onboarding_workflow_service.requested_by_details(user)
+    )
 
     updated = await staff_repo.update_staff(
         staff_id,
@@ -3618,6 +3626,8 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         onboarding_completed_at=existing.get("onboarding_completed_at"),
         approval_status="pending",
         requested_by_user_id=int(user["id"]) if user.get("id") is not None else None,
+        requested_by_name=requested_by_name,
+        requested_by_email=requested_by_email,
         requested_at=datetime.now(tz=timezone.utc),
         approved_by_user_id=None,
         approved_at=None,
