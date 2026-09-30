@@ -1,133 +1,134 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
 
 {% block header_title %}<span class="header__title-text">Message templates</span>{% endblock %}
 
 {% block header_actions %}
   {{ page_header_actions([
-    {"label": "New template", "type": "link", "variant": "primary", "href": "/admin/message-templates/new"}
+    {"label": "+ New template", "type": "link", "variant": "primary", "href": "/admin/message-templates/new"}
   ]) }}
 {% endblock %}
 
 {% block content %}
-  <div class="admin-grid">
-    <section class="card card--panel">
-      <header class="card__header card__header--actions">
-        <form method="get" class="card__controls card__controls--compact" aria-label="Filter message templates">
-          <input type="search" class="form-input" name="search" value="{{ filters.search or '' }}" placeholder="Search templates" aria-label="Search templates" />
-          <label class="visually-hidden" for="content-type-filter">Content type</label>
-          <select id="content-type-filter" class="form-input" name="content_type">
-            <option value="">All content types</option>
-            {% for option in content_type_options %}
-              <option value="{{ option.value }}" {% if option.value == filters.content_type %}selected{% endif %}>{{ option.label }}</option>
-            {% endfor %}
-          </select>
-          <button type="submit" class="button">Apply</button>
-        </form>
-      </header>
-      <div class="table-wrapper">
-        <table class="table" id="message-templates-table" data-table data-table-id="message-templates">
-          <thead>
-            <tr>
-              <th scope="col" data-sort="string" data-column-key="slug">Slug</th>
-              <th scope="col" data-sort="string" data-column-key="name">Name</th>
-              <th scope="col" data-sort="string" data-column-key="description">Description</th>
-              <th scope="col" data-sort="string" data-column-key="content_type">Content type</th>
-              <th scope="col" data-sort="date" data-column-key="updated">Updated</th>
-              <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for template in templates %}
-              <tr
-                data-template-id="{{ template.id }}"
-                data-template-json="message-template-{{ template.id }}-data"
-              >
-                <td data-label="Slug" data-column-key="slug">{{ template.slug }}</td>
-                <td data-label="Name" data-column-key="name">{{ template.name }}</td>
-                <td data-label="Description" data-column-key="description">{{ template.description or '—' }}</td>
-                <td data-label="Content type" data-column-key="content_type">{{ template.content_type }}</td>
-                <td data-label="Updated" data-value="{{ template.updated_at_iso or '' }}" data-column-key="updated">
-                  {% if template.updated_at_iso %}
-                    <span data-utc="{{ template.updated_at_iso }}"></span>
-                  {% else %}
-                    <span class="text-muted">—</span>
-                  {% endif %}
-                </td>
-                <td class="table__actions" data-column-key="actions">
-                  <details class="header-title-menu__dropdown" data-header-menu>
-                    <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
-                      Actions
-                      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
-                        <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
-                      </svg>
-                      <span class="visually-hidden">Toggle row actions menu</span>
-                    </summary>
-                    <ul class="header-title-menu__list" role="menu">
-                      <li class="header-title-menu__item" role="none">
-                        <a
-                          class="header-title-menu__link"
-                          role="menuitem"
-                          href="/admin/message-templates/{{ template.id }}/edit"
-                        >Edit</a>
-                      </li>
+  {% set has_filters = filters.search or filters.content_type %}
+  {{ counter_strip([
+    {"label": "HTML", "value": template_counts.html, "variant": "info"},
+    {"label": "Plain text", "value": template_counts.text, "variant": "neutral"},
+    {"label": "Used by MyPortal emails", "value": template_counts.system, "variant": "success", "title": "Templates MyPortal looks up by key for its built-in emails"}
+  ], total=template_counts.total, total_label="Templates" if not has_filters else "Matching") }}
 
-                      <li class="header-title-menu__item" role="none">
-                        <button
-                          type="button"
-                          class="header-title-menu__link"
-                          role="menuitem"
-                          data-template-clone
-                        >Clone</button>
-                      </li>
-                      <li class="header-title-menu__item" role="none">
-                        <button
-                          type="button"
-                          class="header-title-menu__link header-title-menu__link--danger"
-                          role="menuitem"
-                          data-template-delete
-                        >Delete</button>
-                      </li>
-                    </ul>
-                  </details>
-                </td>
-              </tr>
-              <script type="application/json" id="message-template-{{ template.id }}-data" hidden>
-                {{ {
-                  "id": template.id,
-                  "slug": template.slug,
-                  "name": template.name,
-                  "description": template.description,
-                  "content_type": template.content_type,
-                  "content": template.content
-                } | tojson }}
-              </script>
-            {% else %}
-              <tr>
-                <td colspan="6" class="table__empty">No message templates have been created yet.</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+  <section class="card card--panel mt" aria-label="Message templates">
+    <form method="get" class="scf-toolbar" role="search" aria-label="Filter message templates" data-mt-filter data-mt-server-filtered="{{ 'true' if has_filters else 'false' }}">
+      <input
+        type="search"
+        class="form-input scf-toolbar__search"
+        name="search"
+        value="{{ filters.search or '' }}"
+        placeholder="Search by name, key or description"
+        aria-label="Search templates"
+        data-mt-search
+      />
+      <div class="mt-segmented" role="group" aria-label="Format">
+        <label class="mt-segmented__option">
+          <input type="radio" name="content_type" value="" {% if not filters.content_type %}checked{% endif %} data-mt-type />
+          <span>All</span>
+        </label>
+        {% for option in content_type_options %}
+          <label class="mt-segmented__option">
+            <input type="radio" name="content_type" value="{{ option.value }}" {% if option.value == filters.content_type %}checked{% endif %} data-mt-type />
+            <span>{{ option.label }}</span>
+          </label>
+        {% endfor %}
       </div>
-    </section>
-  </div>
+      <button type="submit" class="button button--ghost" data-mt-apply>Filter</button>
+    </form>
+
+    {% if templates %}
+      <ul class="scf-list" data-mt-list>
+        {% for template in templates %}
+          {% set is_html = template.content_type == 'text/html' %}
+          <li
+            class="scf-item mt-item"
+            data-mt-item
+            data-mt-type="{{ template.content_type }}"
+            data-mt-search-text="{{ [template.name, template.slug, template.description or '', template.system_use or ''] | join(' ') }}"
+            data-template-id="{{ template.id }}"
+            data-template-name="{{ template.name }}"
+            data-template-system="{{ template.system_use or '' }}"
+          >
+            <span class="scf-type-icon mt-type-icon mt-type-icon--{{ 'html' if is_html else 'text' }}" aria-hidden="true"></span>
+            <div class="scf-item__main">
+              <div class="scf-item__heading">
+                <a class="scf-item__label" href="/admin/message-templates/{{ template.id }}/edit">{{ template.name }}</a>
+                <code class="scf-item__key">{{ template.slug }}</code>
+              </div>
+              {% if template.description %}<p class="scf-item__help">{{ template.description }}</p>{% endif %}
+              <ul class="scf-item__chips" aria-label="Template summary">
+                <li class="scf-chip">{{ 'HTML' if is_html else 'Plain text' }}</li>
+                {% if template.system_use %}<li class="scf-chip scf-chip--logic">Used for {{ template.system_use | lower }}</li>{% endif %}
+                {% if template.updated_at_iso %}<li class="scf-chip scf-chip--quiet">Updated <time datetime="{{ template.updated_at_iso }}" data-utc="{{ template.updated_at_iso }}" data-mt-date>{{ template.updated_at_iso }}</time></li>{% endif %}
+              </ul>
+            </div>
+            <div class="scf-item__actions mt-item__actions">
+              <button
+                type="button"
+                class="mt-token"
+                data-mt-copy="{{ '{{ template.' ~ template.slug ~ ' }}' }}"
+                title="Copy the token that inserts this template into automations and other templates"
+              ><span class="visually-hidden">Copy token for {{ template.name }}: </span>{{ '{{ template.' ~ template.slug ~ ' }}' }}</button>
+              <a class="button button--ghost button--small" href="/admin/message-templates/{{ template.id }}/edit">Edit<span class="visually-hidden"> {{ template.name }}</span></a>
+              <button type="button" class="button button--ghost button--small" data-mt-clone>Duplicate<span class="visually-hidden"> {{ template.name }}</span></button>
+              <button type="button" class="scf-icon-button scf-icon-button--danger" data-mt-delete aria-haspopup="dialog" aria-controls="mt-delete-modal" aria-label="Delete {{ template.name }}" title="Delete">
+                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zm-3 6h12l-1 11a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 9zm4 2v8h2v-8h-2zm4 0v8h2v-8h-2z"/></svg>
+              </button>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="scf-empty scf-empty--search" data-mt-no-results hidden>No templates match your search.</p>
+    {% elif has_filters %}
+      <div class="scf-empty">
+        <p class="scf-empty__title">No templates match these filters</p>
+        <p class="text-muted">Try a different search, or show every template.</p>
+        <a class="button button--ghost" href="/admin/message-templates">Clear filters</a>
+      </div>
+    {% else %}
+      <div class="scf-empty">
+        <p class="scf-empty__title">No message templates yet</p>
+        <p class="text-muted">Write an email or notification once, then reuse it in automations, campaigns and MyPortal's own emails with a single token.</p>
+        <a class="button" href="/admin/message-templates/new">+ Create your first template</a>
+      </div>
+    {% endif %}
+  </section>
+
+  <details class="card card--panel card-collapsible mt-about">
+    <summary class="card__header card__header--collapsible">
+      <div>
+        <h2 class="card__title">How message templates work</h2>
+        <p class="card__subtitle">Where templates are used and how variables are filled in.</p>
+      </div>
+      <span class="card__toggle-icon" aria-hidden="true"></span>
+    </summary>
+    <div class="card-collapsible__content">
+      <div class="card__body card__body--stacked">
+        <ul class="list">
+          <li>Insert a template into an automation payload, SMS, ntfy notification or another template with <code>{{ '{{ template.your-key }}' }}</code> or <code>{{ '{{ TEMPLATE_YOUR_KEY }}' }}</code>.</li>
+          <li>Variables such as <code>{{ '{{ user.first_name }}' }}</code> or <code>{{ '{{ ticket.number }}' }}</code> are filled in from whatever sends the message. A variable with no value is left blank.</li>
+          <li>MyPortal's sign-up, staff invitation and renewal reminder emails look for templates with specific keys. Renaming or deleting one of those makes MyPortal send its built-in wording instead.</li>
+          <li>Variable values in HTML templates are escaped, but the template itself is sent exactly as written.</li>
+        </ul>
+        <p>
+          See the <a href="/docs/message-templates" target="_blank" rel="noopener">message template documentation</a> for the full list of variables.
+        </p>
+      </div>
+    </div>
+  </details>
+
+  {% include "partials/message_template_delete_modal.html" %}
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
-  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
-  <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
-  <script>
-    // Allow row-level action dropdowns to overflow the table wrapper.
-    document.addEventListener('DOMContentLoaded', function () {
-      document.querySelectorAll('#message-templates-table [data-header-menu]').forEach(function (menu) {
-        const wrapper = menu.closest('.table-wrapper');
-        if (!wrapper) return;
-        menu.addEventListener('toggle', function () {
-          wrapper.style.overflow = menu.open ? 'visible' : '';
-        });
-      });
-    });
-  </script>
+  <script src="{{ static_url('/static/js/message_templates.js') }}" defer></script>
 {% endblock %}

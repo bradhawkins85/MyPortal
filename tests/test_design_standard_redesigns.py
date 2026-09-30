@@ -340,3 +340,117 @@ def test_totp_enrolment_keeps_script_hooks():
     ):
         assert hook in html, hook
     assert html.count('class="totp-step"') == 3
+
+
+def _message_template_page(page: str, **context) -> str:
+    source = (TEMPLATES / page).read_text()
+    imports = "".join(line + "\n" for line in source.splitlines() if line.startswith("{% from "))
+    body = source[source.index("{% block content %}") + len("{% block content %}") :]
+    body = body[: body.index("{% endblock %}\n\n{% block scripts %}")]
+    return _env().from_string(imports + body).render(**context)
+
+
+def _message_template_form_context(template: dict) -> dict:
+    from app.features.message_templates import routes
+
+    return {
+        "template": template,
+        "content_type_options": routes._content_type_options(),
+        "default_content_type": template.get("content_type") or "text/plain",
+        "common_variables": routes._variable_options(routes._COMMON_VARIABLES),
+        "system_uses": routes._system_uses_payload(),
+    }
+
+
+def test_message_templates_list_renders_items_tokens_and_delete_modal():
+    from app.features.message_templates import routes
+
+    templates = [
+        {"id": 1, "slug": "signup_verification", "name": "Verify email", "description": "Sent at sign-up",
+         "content_type": "text/html", "updated_at_iso": "2026-09-30T10:00:00+00:00",
+         "system_use": "Sign-up verification email"},
+        {"id": 2, "slug": "ticket.resolved", "name": "Resolved", "description": None,
+         "content_type": "text/plain", "updated_at_iso": None, "system_use": None},
+    ]
+    html = _message_template_page(
+        "admin/message_templates.html",
+        templates=templates,
+        filters={"search": "", "content_type": ""},
+        content_type_options=routes._content_type_options(),
+        template_counts={"total": 2, "html": 1, "text": 1, "system": 1},
+    )
+
+    assert html.count("data-mt-item") == 2
+    assert 'data-mt-copy="{{ template.ticket.resolved }}"' in html
+    assert "Used for sign-up verification email" in html
+    assert 'data-template-system="Sign-up verification email"' in html
+    assert 'href="/admin/message-templates/2/edit"' in html
+    assert "stat-strip" in html and "Used by MyPortal emails" in html
+    assert '<div class="modal" id="mt-delete-modal" role="dialog" aria-modal="true"' in html
+    assert "<dialog" not in html
+
+
+def test_message_templates_list_empty_states():
+    from app.features.message_templates import routes
+
+    context = {
+        "templates": [],
+        "content_type_options": routes._content_type_options(),
+        "template_counts": {"total": 0, "html": 0, "text": 0, "system": 0},
+    }
+    empty = _message_template_page(
+        "admin/message_templates.html", filters={"search": "", "content_type": ""}, **context
+    )
+    filtered = _message_template_page(
+        "admin/message_templates.html", filters={"search": "zzz", "content_type": ""}, **context
+    )
+
+    assert "+ Create your first template" in empty
+    assert "No templates match these filters" in filtered
+    assert 'data-mt-server-filtered="true"' in filtered
+
+
+def test_message_template_editor_offers_variables_for_system_templates():
+    html = _message_template_page(
+        "admin/message_template_form.html",
+        **_message_template_form_context(
+            {"id": 4, "slug": "staff_invitation", "name": "Invite", "content_type": "text/html",
+             "content": "<p>Hi {{ user.first_name }}</p>"}
+        ),
+    )
+
+    assert 'data-mt-var="{{ invitation.link }}"' in html
+    assert "MyPortal sends this as the <strong data-mt-system-label>staff invitation email</strong>" in html
+    assert 'value="text/html" checked' in html
+    assert "Save changes" in html and "data-mt-delete" in html
+    assert 'id="mt-delete-modal"' in html
+    data = _json_block(html, "mt-editor-data")
+    assert "signup_verification" in data["systemUses"]
+
+
+def test_message_template_editor_for_new_template():
+    html = _message_template_page(
+        "admin/message_template_form.html", **_message_template_form_context({})
+    )
+
+    assert "Create template" in html
+    assert 'data-mt-var="{{ company.name }}"' in html
+    assert 'data-mt-var="{{ invitation.link }}"' not in html
+    assert 'value="text/plain" checked' in html
+    assert "mt-delete-modal" not in html
+
+
+def test_message_template_system_uses_match_the_slugs_myportal_sends():
+    from app.features.message_templates.routes import SYSTEM_TEMPLATE_USES
+    from app.services import subscription_renewals
+
+    sources = Path("app/api/routes/auth.py").read_text() + Path("app/features/staff/handlers.py").read_text()
+    assert '_render_email_template("signup_verification"' in sources
+    assert '"staff_invitation", template_context' in sources
+    renewal_slugs = {
+        subscription_renewals._RENEWAL_TEMPLATE_SLUG,
+        subscription_renewals._MONTHLY_RENEWAL_TEMPLATE_SLUG,
+        subscription_renewals._THIRD_PARTY_ANNUAL_TEMPLATE_SLUG,
+        subscription_renewals._THIRD_PARTY_MONTHLY_TEMPLATE_SLUG,
+    }
+    assert renewal_slugs | {"signup_verification", "staff_invitation"} == set(SYSTEM_TEMPLATE_USES)
