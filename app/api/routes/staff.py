@@ -387,6 +387,9 @@ async def create_staff_request(
         if current_user is not None and current_user.get("id") is not None
         else None
     )
+    requested_by_name, requested_by_email = (
+        staff_onboarding_workflow_service.requested_by_details(current_user)
+    )
     created = await staff_requests_repo.create_request(
         company_id=company_id,
         first_name=str(payload_data.get("first_name") or "").strip(),
@@ -400,6 +403,8 @@ async def create_staff_request(
         request_notes=str(payload_data.get("request_notes") or "").strip() or None,
         custom_fields=custom_fields or None,
         requested_by_user_id=requester_id,
+        requested_by_name=requested_by_name,
+        requested_by_email=requested_by_email,
         requested_at=datetime.now(tz=timezone.utc),
     )
     approver_user_ids = await staff_onboarding_workflow_service.notify_staff_approval_requested(
@@ -491,6 +496,8 @@ async def approve_staff_request_entry(
             onboarding_completed_at=None,
             approval_status="approved",
             requested_by_user_id=staff_request.get("requested_by_user_id"),
+            requested_by_name=staff_request.get("requested_by_name"),
+            requested_by_email=staff_request.get("requested_by_email"),
             requested_at=staff_request.get("requested_at"),
             approved_by_user_id=approver_id,
             approved_at=now,
@@ -515,6 +522,8 @@ async def approve_staff_request_entry(
             approved_at=now,
             approval_notes=approval_comment,
             requested_by_user_id=staff_request.get("requested_by_user_id"),
+            requested_by_name=staff_request.get("requested_by_name"),
+            requested_by_email=staff_request.get("requested_by_email"),
             requested_at=staff_request.get("requested_at"),
         )
         staff_id = int(created_staff["id"])
@@ -1560,6 +1569,8 @@ async def update_staff(
         onboarding_completed_at=data.get("onboarding_completed_at"),
         approval_status=data.get("approval_status"),
         requested_by_user_id=data.get("requested_by_user_id"),
+        requested_by_name=data.get("requested_by_name"),
+        requested_by_email=data.get("requested_by_email"),
         requested_at=data.get("requested_at"),
         approved_by_user_id=data.get("approved_by_user_id"),
         approved_at=data.get("approved_at"),

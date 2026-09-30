@@ -44,6 +44,8 @@ step, oldest first. A wrong POST key returns `403`; an empty array means nothing
     "stepName": "Create AD account",
     "pausedAt": "2026-09-30T01:00:00",
     "requestedAt": "2026-09-29T23:00:00",
+    "requestedByName": "Sam Manager",
+    "requestedByEmail": "sam.manager@example.com",
     "resumeUrl": "https://portal.example.com/api/staff/workflow-webhooks/{webhookId}",
     "staff": {
       "id": 1001,
@@ -54,6 +56,9 @@ step, oldest first. A wrong POST key returns `403`; an empty array means nothing
       "jobTitle": "Analyst",
       "dateOnboarded": "2026-10-05T00:00:00",
       "requestNotes": "Needs a laptop",
+      "requestedByUserId": 42,
+      "requestedByName": "Sam Manager",
+      "requestedByEmail": "sam.manager@example.com",
       "customFields": { "needs_vpn": true, "cost_centre": "OPS" }
     }
   }
@@ -61,7 +66,9 @@ step, oldest first. A wrong POST key returns `403`; an empty array means nothing
 ```
 
 `staff` also contains `mobilePhone`, address fields, `orgCompany`, `managerName`, `accountAction`,
-`requestedAt` and `approvedAt`. Offboarding items include an `offboarding` object with
+`requestedAt` and `approvedAt`. `requestedByName`/`requestedByEmail` identify the MyPortal user who
+submitted the onboarding or offboarding request (they are `null` when the request came from an API
+key rather than a signed-in user). Offboarding items include an `offboarding` object with
 `outOfOfficeMessage`, `emailForwardTo` and `mailboxGrantEmails` when they were captured. Custom
 fields are keyed by their internal name.
 

@@ -280,3 +280,75 @@ async def test_list_pending_webhook_returns_empty_without_pending(monkeypatch):
         )
         == []
     )
+
+
+@pytest.mark.anyio
+async def test_list_pending_webhook_includes_requester_snapshot(listing_mocks, monkeypatch):
+    monkeypatch.setattr(
+        workflows.staff_repo,
+        "get_staff_by_id",
+        AsyncMock(
+            return_value={
+                "id": 1001,
+                "company_id": 9,
+                "first_name": "Jane",
+                "last_name": "Starter",
+                "requested_by_user_id": 42,
+                "requested_by_name": "Sam Manager",
+                "requested_by_email": "sam.manager@example.com",
+            }
+        ),
+    )
+    get_user = AsyncMock()
+    monkeypatch.setattr(workflows.user_repo, "get_user_by_id", get_user)
+
+    items = await staff_routes.list_pending_workflow_webhooks(
+        webhook_public_id="public-id", post_key=POST_KEY, limit=100, _=None
+    )
+    dumped = items[0].model_dump(by_alias=True)
+    assert dumped["requestedByName"] == "Sam Manager"
+    assert dumped["requestedByEmail"] == "sam.manager@example.com"
+    assert dumped["staff"]["requestedByUserId"] == 42
+    assert dumped["staff"]["requestedByName"] == "Sam Manager"
+    assert dumped["staff"]["requestedByEmail"] == "sam.manager@example.com"
+    get_user.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_list_pending_webhook_falls_back_to_requesting_user(listing_mocks, monkeypatch):
+    monkeypatch.setattr(
+        workflows.staff_repo,
+        "get_staff_by_id",
+        AsyncMock(
+            return_value={
+                "id": 1001,
+                "company_id": 9,
+                "first_name": "Jane",
+                "last_name": "Starter",
+                "requested_by_user_id": 42,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        workflows.user_repo,
+        "get_user_by_id",
+        AsyncMock(
+            return_value={
+                "id": 42,
+                "first_name": "Sam",
+                "last_name": "Manager",
+                "email": "sam.manager@example.com",
+            }
+        ),
+    )
+
+    items = await workflows.list_pending_webhook_checkpoints(
+        webhook_public_id="public-id", post_key=POST_KEY
+    )
+    assert items[0]["requestedByName"] == "Sam Manager"
+    assert items[0]["staff"]["requestedByEmail"] == "sam.manager@example.com"
+
+
+def test_requested_by_details_uses_email_when_name_missing():
+    assert workflows.requested_by_details({"email": " a@b.test "}) == ("a@b.test", "a@b.test")
+    assert workflows.requested_by_details(None) == (None, None)
