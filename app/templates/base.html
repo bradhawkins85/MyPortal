@@ -1284,7 +1284,7 @@
         const SIDEBAR_GROUP_KEY_PREFIX = '__group__:';
         const enabledModules = {{ module_enabled | default({}) | tojson }};
         const sidebarItemRegistry = new Map();
-        let activeSidebarPreferences = { order: [], hidden: [], groups: [] };
+        let activeSidebarPreferences = { navigation_style: 'sidebar', order: [], hidden: [], groups: [] };
         const sidebarDefaultPreferences = {{ (sidebar_default_preferences() if sidebar_default_preferences is defined else {'order': [], 'hidden': [], 'groups': []}) | tojson }};
 
         // Shared with the profile page editor so both render the same glyphs.
@@ -1467,10 +1467,12 @@
             return;
           }
           activeSidebarPreferences = {
+            navigation_style: preferences?.navigation_style === 'top' ? 'top' : 'sidebar',
             order: Array.isArray(preferences?.order) ? preferences.order : [],
             hidden: Array.isArray(preferences?.hidden) ? preferences.hidden : [],
             groups: Array.isArray(preferences?.groups) ? preferences.groups : [],
           };
+          document.body.classList.toggle('navigation--top', activeSidebarPreferences.navigation_style === 'top');
           sidebarMenuRoot.querySelectorAll(':scope > .menu__item--custom-group').forEach((group) => group.remove());
           sidebarItemRegistry.forEach((element) => {
             element.classList.remove('menu__custom-group-child');
