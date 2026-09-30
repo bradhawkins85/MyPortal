@@ -1,0 +1,7 @@
+{
+  "guid": "e5283fb9-96f8-44c0-a29d-3c1b324f77ab",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "Fix",
+  "summary": "Keep page headers in normal flow below horizontal top navigation so they no longer overlap page content.",
+  "content_hash": "233a4e4938a1a2904318d7a078b90d3b0760dcef076a974c06b532e1fa35d0ef"
+}

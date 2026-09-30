@@ -6708,7 +6708,7 @@ async def test_remediate_dynamic_guest_group_creates_security_group():
     assert success is True
     assert created == [
         (
-            bp_service._GROUPS_LIST_URL,
+            bp_service._GROUPS_URL,
             {
                 "displayName": "Guest Users",
                 "description": "Dynamic security group containing all guest users.",

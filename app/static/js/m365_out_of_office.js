@@ -201,6 +201,13 @@
       });
     }
     selects.forEach((input) => input.addEventListener('change', refreshBulk));
+    root.querySelector('[data-oof-select-visible]').addEventListener('click', (event) => {
+      const visible = selects.filter((input) => !input.closest('[data-oof-item]').hidden);
+      const shouldSelect = visible.some((input) => !input.checked);
+      visible.forEach((input) => { input.checked = shouldSelect; });
+      event.currentTarget.textContent = shouldSelect ? 'Clear shown' : 'Select all shown';
+      refreshBulk();
+    });
     root.querySelector('[data-oof-bulk-clear]').addEventListener('click', () => {
       selects.forEach((input) => { input.checked = false; });
       refreshBulk();

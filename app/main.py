@@ -582,6 +582,32 @@ def _scheduled_task_command_label(command: str) -> str:
         return f"Sync Microsoft 365 mailbox {account_id}"
     return command.replace("_", " ").replace(":", " ").strip().title()
 
+
+_TASK_COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Microsoft 365", ("sync_m365_", "refresh_m365_", "m365_mail_sync:")),
+    ("Staff and assets", ("sync_staff", "sync_assets", "sync_tactical_assets", "update_mac_vendors")),
+    ("Billing and Xero", (
+        "sync_to_xero", "generate_invoice", "unbill_time_entries",
+        "send_price_change_notifications", "process_subscription_renewals",
+    )),
+    ("Tickets", ("create_scheduled_ticket",)),
+    ("Calls and transcription", (
+        "sync_recordings", "sync_unifi_talk_recordings", "queue_transcriptions", "process_transcription",
+    )),
+    ("AI knowledge", ("rag_",)),
+    ("Security and monitoring", (
+        "sync_huntress", "refresh_website_checks", "refresh_dns_records",
+    )),
+)
+
+
+def _scheduled_task_command_group(command: str) -> str:
+    """Return the plain-language category a scheduled task command belongs to."""
+    for group, prefixes in _TASK_COMMAND_GROUPS:
+        if command.startswith(prefixes):
+            return group
+    return "Maintenance"
+
 app = FastAPI(
     title=settings.app_name,
     description=(
@@ -3968,10 +3994,27 @@ async def m365_best_practices_page(request: Request):
     catalog = m365_best_practices_service.list_best_practices()
     enabled_ids = await m365_best_practices_service.get_enabled_check_ids()
     enabled_catalog = [bp for bp in catalog if bp["id"] in enabled_ids]
+    excluded_ids = await m365_best_practices_service.get_company_exclusions(company_id)
+    excluded_results = [
+        {
+            "check_id": bp["id"],
+            "check_name": bp.get("name") or bp["id"],
+            "description": bp.get("description", ""),
+            "status": "excluded",
+            "details": "Excluded for this company.",
+            "run_at": None,
+            "is_cis_benchmark": bool(bp.get("is_cis_benchmark")),
+            "cis_group": bp.get("cis_group", ""),
+            "risk_score": bp.get("risk_score", 0),
+            "risk_severity": bp.get("risk_severity", "medium"),
+        }
+        for bp in enabled_catalog
+        if bp["id"] in excluded_ids
+    ]
     extra = {
         "title": "M365 Best Practices",
         "company": company,
-        "results": results,
+        "results": [*results, *excluded_results],
         "secure_score": secure_score,
         "catalog": enabled_catalog,
         "batch_scopes": m365_best_practices_service.get_batch_remediation_scopes(results),
@@ -4096,6 +4139,36 @@ async def run_single_m365_best_practice_check(request: Request, check_id: str):
     except m365_service.M365Error as exc:
         return flash_redirect("/m365/best-practices", str(exc), "error")
     return flash_redirect("/m365/best-practices", "Check evaluated", "success")
+
+
+@app.post("/m365/best-practices/exclude/{check_id}", response_class=RedirectResponse)
+async def exclude_m365_best_practice_check(request: Request, check_id: str):
+    """Exclude one best-practice check for the current company."""
+    user, membership, _, company_id, redirect = await _load_m365_best_practices_context(
+        request, super_admin_only=True,
+    )
+    if redirect:
+        return redirect
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
+    known_ids = {bp["id"] for bp in m365_best_practices_service.list_best_practices()}
+    if check_id not in known_ids:
+        return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
+
+    excluded_ids = await m365_best_practices_service.get_company_exclusions(company_id)
+    excluded_ids.add(check_id)
+    await m365_best_practices_service.save_company_exclusions(company_id, excluded_ids)
+    log_info(
+        "M365 best practice excluded for company",
+        company_id=company_id,
+        check_id=check_id,
+        user_id=user.get("id"),
+    )
+    return flash_redirect(
+        "/m365/best-practices",
+        "Best practice excluded for this company",
+        "success",
+    )
 
 
 @app.post("/m365/best-practices/remediate/{check_id}", response_class=RedirectResponse)
@@ -4415,11 +4488,23 @@ async def save_m365_best_practices_settings(request: Request):
     auto_remediate_ids = {value for value in form.getlist("auto_remediate")}
     create_ticket_on_fail_ids = {value for value in form.getlist("create_ticket_on_fail")}
     excluded_ids = {value for value in form.getlist("excluded")}
-    await m365_best_practices_service.set_enabled_checks(
-        enabled_ids,
-        auto_remediate_ids,
-        create_ticket_on_fail_ids,
-    )
+    try:
+        await m365_best_practices_service.set_enabled_checks(
+            enabled_ids,
+            auto_remediate_ids,
+            create_ticket_on_fail_ids,
+        )
+    except m365_best_practices_service.PolicySelectionError as exc:
+        log_info(
+            "M365 best practice settings rejected",
+            user_id=user.get("id"),
+            reason=str(exc),
+        )
+        return flash_redirect(
+            "/m365/best-practices/settings",
+            str(exc),
+            "error",
+        )
     await m365_best_practices_service.save_company_exclusions(company_id, excluded_ids)
     log_info(
         "M365 best practice settings updated",
@@ -7017,6 +7102,9 @@ async def admin_scheduled_tasks(
             task, timezone_name=settings.default_timezone
         )
         serialised_task["next_run_iso"] = _to_iso(next_run)
+        command = str(task.get("command") or "")
+        serialised_task["command_label"] = _scheduled_task_command_label(command) if command else "Task"
+        serialised_task["command_group"] = _scheduled_task_command_group(command)
         raw_company_id = task.get("company_id")
         company_key: int | None = None
         if raw_company_id is not None:
@@ -7059,7 +7147,11 @@ async def admin_scheduled_tasks(
         "refresh_website_checks", "refresh_dns_records",
     )
     command_options = [
-        {"value": command, "label": _scheduled_task_command_label(command)}
+        {
+            "value": command,
+            "label": _scheduled_task_command_label(command),
+            "group": _scheduled_task_command_group(command),
+        }
         for command in available_commands
     ]
     command_options = [o for o in command_options if o["value"] not in disabled_commands_global]
@@ -7067,7 +7159,11 @@ async def admin_scheduled_tasks(
     for command in sorted(existing_commands):
         if command and command not in {option["value"] for option in command_options} and command not in disabled_commands_global:
             command_options.append(
-                {"value": str(command), "label": _scheduled_task_command_label(str(command))}
+                {
+                    "value": str(command),
+                    "label": _scheduled_task_command_label(str(command)),
+                    "group": _scheduled_task_command_group(str(command)),
+                }
             )
     command_options.sort(key=lambda option: option["label"].casefold())
 
@@ -7091,6 +7187,7 @@ async def admin_scheduled_tasks(
         "command_options": command_options,
         "company_options": company_options,
         "bulk_company_options": bulk_company_options,
+        "schedule_timezone": settings.default_timezone or "UTC",
     }
     return await _render_template("admin/scheduled_tasks.html", request, current_user, extra=extra)
 

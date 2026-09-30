@@ -317,6 +317,10 @@ _DEFAULT_POLICY_PROFILES: dict[str, str] = {
 }
 
 
+class PolicySelectionError(ValueError):
+    """Raised when enabled best practices request incompatible policy values."""
+
+
 def _validate_policy_selection(check_ids: set[str]) -> None:
     """Reject enabled controls that require different values on one property."""
     selected: dict[tuple[str, str], tuple[str, Any, str]] = {}
@@ -328,7 +332,7 @@ def _validate_policy_selection(check_ids: set[str]) -> None:
             value = desired.get("value")
             previous = selected.get(key)
             if previous and previous[1] != value:
-                raise ValueError(
+                raise PolicySelectionError(
                     "Conflicting policy controls: "
                     f"{previous[0]} requires {key[0]}.{key[1]}={previous[1]!r}, "
                     f"but {check_id} requires {value!r}. Select one policy profile."
@@ -916,9 +920,9 @@ _USERS_LIST_URL = (
     ",accountEnabled,assignedLicenses"
     "&$top=999"
 )
+_GROUPS_URL = "https://graph.microsoft.com/v1.0/groups"
 _GROUPS_LIST_URL = (
-    "https://graph.microsoft.com/v1.0/groups"
-    "?$select=id,displayName,visibility,groupTypes,membershipRule"
+    _GROUPS_URL + "?$select=id,displayName,visibility,groupTypes,membershipRule"
     "&$top=999"
 )
 _GROUP_URL_TMPL = "https://graph.microsoft.com/v1.0/groups/{group_id}"
@@ -7210,6 +7214,11 @@ async def save_company_exclusions(company_id: int, excluded_check_ids: set[str])
     )
 
 
+async def get_company_exclusions(company_id: int) -> set[str]:
+    """Return the check IDs excluded for one company."""
+    return await bp_repo.get_company_exclusions(company_id)
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -8587,7 +8596,7 @@ async def _remediate_create_dynamic_guest_group(graph_token: str) -> bool:
 
     await _graph_post(
         graph_token,
-        _GROUPS_LIST_URL,
+        _GROUPS_URL,
         {
             "displayName": "Guest Users",
             "description": "Dynamic security group containing all guest users.",
@@ -9930,6 +9939,7 @@ __all__ = [
     "get_create_ticket_on_fail_check_ids",
     "reset_enabled_results_to_unknown",
     "set_enabled_checks",
+    "get_company_exclusions",
     "save_company_exclusions",
     "run_best_practices",
     "run_single_check",

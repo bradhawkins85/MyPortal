@@ -3692,7 +3692,6 @@
     bindModal({ modalId: 'create-ticket-modal', triggerSelector: '[data-create-ticket-modal-open]' });
     bindModal({ modalId: 'canned-response-create-modal', triggerSelector: '[data-canned-response-create-open]' });
     bindModal({ modalId: 'create-api-key-modal', triggerSelector: '[data-create-api-key-modal-open]' });
-    bindModal({ modalId: 'create-issue-modal', triggerSelector: '[data-create-issue-modal-open]' });
     bindModal({
       modalId: 'edit-ticket-statuses-modal',
       triggerSelector: '[data-edit-ticket-statuses-open]',

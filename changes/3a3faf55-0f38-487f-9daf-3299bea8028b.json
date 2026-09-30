@@ -1,0 +1,7 @@
+{
+  "guid": "3a3faf55-0f38-487f-9daf-3299bea8028b",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "Improvement",
+  "summary": "Use standard action dropdowns for Microsoft 365 best-practice checks and allow company-level exclusion directly from each check.",
+  "content_hash": "00d3cd179e6291f4b69e98742d5b22f06dd706dd94932a462bfc23e64c87346d"
+}
