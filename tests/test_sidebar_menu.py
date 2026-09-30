@@ -252,7 +252,9 @@ def test_top_navigation_dropdowns_are_exclusive_and_aligned():
     assert "const selectedLink = event.target.closest('.menu__submenu a[href]');" in base_template
     assert "body.navigation--top .menu__item--expandable:hover > .menu__submenu" in stylesheet
     top_header_rule = stylesheet.split("body.navigation--top .layout__header {", 1)[1].split("}", 1)[0]
+    assert "position: relative" in top_header_rule
     assert "top: auto" in top_header_rule
+    assert "position: sticky" not in top_header_rule
     assert "top: 4.5rem" not in top_header_rule
 
 

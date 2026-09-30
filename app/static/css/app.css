@@ -655,8 +655,10 @@ body.navigation--top .layout__main {
 }
 
 body.navigation--top .layout__header {
-  /* The top navigation participates in normal flow. Offsetting this relative
-   * header moved it over the page content while leaving an empty gap behind. */
+  /* Keep the page header in normal flow below the horizontal navigation.
+   * The tablet breakpoint otherwise makes it sticky, allowing it to overlap
+   * the first content section after the page is scrolled. */
+  position: relative;
   top: auto;
 }
 
