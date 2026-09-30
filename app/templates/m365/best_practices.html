@@ -151,7 +151,7 @@
           <th data-column-key="check" data-sort="string">Check</th>
           <th data-column-key="details" data-sort="string">Details</th>
           <th data-column-key="evaluated" data-sort="date" style="white-space:nowrap">Last evaluated</th>
-          {% if show_actions or has_ticket_actions %}<th class="table__actions" data-column-filter-disabled style="width:14rem">Actions</th>{% endif %}
+          {% if show_actions or has_ticket_actions %}<th class="table__actions" data-column-filter-disabled style="width:8rem">Actions</th>{% endif %}
         </tr>
       </thead>
       <tbody>
@@ -281,33 +281,44 @@
           </td>
           {% if show_actions or has_ticket_actions %}
           <td>
-            {% if has_ticket_actions and check.status == "fail" %}
-            <form method="post" action="/m365/best-practices/ticket/{{ check.check_id }}" style="display:inline">
-              {% if csrf_token %}
-              <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-              {% endif %}
-              <button type="submit" class="button button--small button--primary"
-                      title="Create a support ticket for this failed check">Create ticket</button>
-            </form>
-            {% endif %}
-            {% if show_actions %}
-            <form method="post" action="/m365/best-practices/check/{{ check.check_id }}" style="display:inline">
-              {% if csrf_token %}
-              <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-              {% endif %}
-              <button type="submit" class="button button--small button--ghost"
-                      title="Re-evaluate this check now">Check</button>
-            </form>
-            {% if check.status == "fail" and check.has_remediation %}
-            <form method="post" action="/m365/best-practices/remediate/{{ check.check_id }}" style="display:inline">
-              {% if csrf_token %}
-              <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-              {% endif %}
-              <button type="submit" class="button button--small button--warning"
-                      title="Run automated remediation via PowerShell">Remediate</button>
-            </form>
-            {% endif %}
-            {% endif %}
+            {% set row_menu_id = 'bp-actions-menu-' ~ check.check_id %}
+            <div class="header-menu" data-header-menu>
+              <button type="button"
+                      class="button button--ghost button--small header-menu__button"
+                      data-header-menu-toggle
+                      aria-haspopup="menu"
+                      aria-expanded="false"
+                      aria-controls="{{ row_menu_id }}">
+                <span>Actions</span>
+                <svg class="header-menu__chevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14">
+                  <path fill="currentColor" d="M5.5 7.5 10 12l4.5-4.5z" />
+                </svg>
+              </button>
+              <div id="{{ row_menu_id }}" class="header-menu__panel" role="menu" data-header-menu-panel hidden>
+                {% if has_ticket_actions and check.status == "fail" %}
+                <form method="post" action="/m365/best-practices/ticket/{{ check.check_id }}" class="header-menu__form">
+                  {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                  <button type="submit" class="header-menu__item" role="menuitem" title="Create a support ticket for this failed check">Create ticket</button>
+                </form>
+                {% endif %}
+                {% if show_actions %}
+                <form method="post" action="/m365/best-practices/check/{{ check.check_id }}" class="header-menu__form">
+                  {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                  <button type="submit" class="header-menu__item" role="menuitem" title="Re-evaluate this check now">Check</button>
+                </form>
+                {% if check.status == "fail" and check.has_remediation %}
+                <form method="post" action="/m365/best-practices/remediate/{{ check.check_id }}" class="header-menu__form">
+                  {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                  <button type="submit" class="header-menu__item" role="menuitem" title="Run automated remediation via PowerShell">Remediate</button>
+                </form>
+                {% endif %}
+                <form method="post" action="/m365/best-practices/exclude/{{ check.check_id }}" class="header-menu__form">
+                  {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                  <button type="submit" class="header-menu__item" role="menuitem" title="Skip this check for this company">Exclude</button>
+                </form>
+                {% endif %}
+              </div>
+            </div>
           </td>
           {% endif %}
         </tr>

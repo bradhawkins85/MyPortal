@@ -219,6 +219,27 @@ def test_failed_checks_show_manual_support_ticket_action():
     )
 
     assert 'action="/m365/best-practices/ticket/bp_test"' in html
+
+
+def test_super_admin_check_actions_use_standard_dropdown_with_exclude():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+                "has_remediation": True,
+            }
+        ],
+        is_super_admin=True,
+    )
+
+    assert 'class="button button--ghost button--small header-menu__button"' in html
+    assert 'id="bp-actions-menu-bp_test"' in html
+    assert 'action="/m365/best-practices/exclude/bp_test"' in html
+    assert '>Exclude</button>' in html
     assert "Create ticket" in html
 
 
