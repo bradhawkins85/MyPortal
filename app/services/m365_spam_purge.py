@@ -175,13 +175,12 @@ async def _require_purview_preflight(company_id: int) -> None:
     if result["ready"]:
         return
     failed = ", ".join(
-        check["label"] for check in result["checks"] if check["status"] != "Passed"
+        check["label"] for check in result["checks"]
+        if check["status"] in {"Failed", "Requires Admin Action"}
     )
     raise m365_service.M365Error(
-        "Purview preflight did not pass: " + failed
-        + ". The retained app-only route is an unsupported legacy migration path; "
-        "do not repeatedly repair consent. Open Office 365 Diagnostics for the "
-        "supported interactive administrator workflow.",
+        "Purview preflight did not pass: " + (failed or "Purview organization unavailable")
+        + ". Open Office 365 Diagnostics for the remediation steps.",
         http_status=503,
     )
 
