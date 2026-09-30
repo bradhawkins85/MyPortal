@@ -491,14 +491,15 @@ async def _check_sspr_enabled(token: str) -> dict[str, Any]:
         data = await _graph_get(
             token,
             "https://graph.microsoft.com/v1.0/policies/authorizationPolicy"
-            "?$select=allowedToUseSspr,defaultUserRolePermissions",
+            "?$select=allowedToUseSSPR",
         )
         policy = _unwrap_singleton_policy(data, _endpoint)
-        # allowedToUseSspr may be a direct property of authorizationPolicy or
-        # nested inside defaultUserRolePermissions depending on the API version.
-        allowed = policy.get("allowedToUseSspr")
-        if allowed is None:
-            allowed = policy.get("defaultUserRolePermissions", {}).get("allowedToUseSspr")
+        # Graph returns the property as ``allowedToUseSSPR``; match the name
+        # case-insensitively so casing differences cannot hide the value.
+        allowed = next(
+            (value for key, value in policy.items() if key.lower() == "allowedtousesspr"),
+            None,
+        )
         if allowed is True:
             return _pass(check_id, check_name, "SSPR is enabled for users.")
         if allowed is False:
