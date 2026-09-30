@@ -137,8 +137,8 @@ Rules:
 
 ## UI and Frontend Guidelines
 
-The canonical layout, table, form, and theming rules live in
-[`docs/ui_layout_standards.md`](../docs/ui_layout_standards.md). All new pages
+The canonical layout, table, form, modal and theming rules live in
+[`docs/wiki/developer/Design Guidelines.md`](../docs/wiki/developer/Design%20Guidelines.md). All new pages
 and components must follow that document; the bullets below are a quick
 reference and must stay consistent with it.
 
@@ -175,8 +175,9 @@ fields editor", these are the files meant. Follow these principles:
 #### List first, edit in a focused modal
 
 - The page shows a scannable, grouped, searchable list; creating or editing
-  happens in a modal (`<dialog>` with `showModal()`, or the `.modal` pattern)
-  opened from a primary "+ Add …" button or the item itself.
+  happens in a `<div class="modal" role="dialog" … hidden>` modal (never a
+  `<dialog>`; see *Modals* in the Design Guidelines) opened from a primary
+  "+ Add …" button or the item itself.
 - Group related items under headings (custom fields by group, racks under
   *Cabinets*) and give lists a client-side search with a "No results"
   message.

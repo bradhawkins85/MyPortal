@@ -1,4 +1,5 @@
-"""Audit MyPortal templates against the gold standards in ``docs/design.md``.
+"""Audit MyPortal templates against the gold standards in
+``docs/wiki/developer/Design Guidelines.md``.
 
 Usage::
 
@@ -34,6 +35,22 @@ SKIP_PATHS: set[str] = {
     "bcp/export/bcp_pdf.html",
 }
 SKIP_PREFIXES: tuple[str, ...] = ("macros/", "partials/", "chat/_message")
+
+
+def _element_block(text: str, tag: str, offset: int) -> str:
+    """Return the element starting at ``offset`` up to its matching close tag.
+
+    Nested elements of the same tag are counted so a modal's inner
+    ``<div>`` wrappers don't end the block early. 4000 chars is a generous
+    fallback when no matching close tag is found.
+    """
+    pattern = re.compile(rf"<(/?){tag}\b[^>]*>", re.IGNORECASE)
+    depth = 0
+    for match in pattern.finditer(text, offset):
+        depth += -1 if match.group(1) else 1
+        if depth == 0:
+            return text[offset : match.end()]
+    return text[offset : offset + 4000]
 
 
 def classify(rel: str, text: str) -> dict:
@@ -109,14 +126,7 @@ def classify(rel: str, text: str) -> dict:
         tag = m.group(1)
         snippet = m.group(0)
         offset = m.start()
-        end = text.find("</" + tag + ">", offset)
-        # +3 accounts for the "</" and ">" characters that bookend the closing tag.
-        # 4000 chars is a generous fallback when no closing tag is found.
-        block = (
-            text[offset : end + len(tag) + 3]
-            if end != -1
-            else text[offset : offset + 4000]
-        )
+        block = _element_block(text, tag, offset)
         problems: list[str] = []
         if tag == "dialog":
             problems.append("uses <dialog> not <div>")
@@ -126,8 +136,6 @@ def classify(rel: str, text: str) -> dict:
             problems.append("missing aria-modal")
         if "aria-labelledby" not in snippet and tag == "div":
             problems.append("missing aria-labelledby")
-        if 'aria-hidden="true"' not in snippet and tag == "div":
-            problems.append("missing aria-hidden")
         if (
             tag == "div"
             and " hidden" not in snippet
@@ -194,7 +202,7 @@ def render_markdown(rows: list[dict]) -> None:
     print(
         "template under `app/templates/` against the gold standards in"
     )
-    print("[`docs/design.md`](design.md).")
+    print("[`docs/wiki/developer/Design Guidelines.md`](wiki/developer/Design%20Guidelines.md).")
     print()
     print(
         "Each row records a programmatic verdict for the three primary"
@@ -283,12 +291,12 @@ def render_markdown(rows: list[dict]) -> None:
     )
     print(
         "`<div class=\"modal\" role=\"dialog\" aria-modal=\"true\" "
-        "aria-labelledby=\"…\" aria-hidden=\"true\" hidden>` pattern with the"
+        "aria-labelledby=\"…\" hidden>` pattern with the"
     )
     print(
-        "`modal__close` / `modal__title` / `modal__subtitle` / `.form-actions`"
+        "`modal__header` / `modal__title` / `modal__close` / `modal__body` / `modal__footer`"
     )
-    print("structure documented in `docs/design.md` §3.")
+    print("structure documented in the Modals section of `docs/wiki/developer/Design Guidelines.md`.")
     print()
     for r in sorted(modal_fails, key=lambda x: x["rel"]):
         print(f"- [ ] `{r['rel']}` — {r['modals']}")
@@ -372,7 +380,7 @@ def render_markdown(rows: list[dict]) -> None:
         "   and verifies it is a `<div>`, has `role=\"dialog\"`, `aria-modal`,"
     )
     print(
-        "   `aria-labelledby`, `aria-hidden`, the `hidden` attribute, a"
+        "   `aria-labelledby`, the `hidden` attribute, a"
     )
     print(
         "   `modal__close` button, a `modal__title` heading, and a"

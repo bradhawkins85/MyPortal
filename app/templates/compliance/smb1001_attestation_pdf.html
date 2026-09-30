@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SMB1001 attestation report — {{ company.name }}</title>
+  <style>
+    @page { size: A4 landscape; margin: 14mm; @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 8pt; color: #64748b; } }
+    body { color: #172033; font: 9pt/1.4 sans-serif; }
+    h1 { margin: 0 0 2mm; font-size: 22pt; }
+    h2 { margin: 7mm 0 3mm; font-size: 14pt; }
+    .muted { color: #526078; }
+    .summary { display: flex; gap: 4mm; margin: 6mm 0; }
+    .summary div { flex: 1; padding: 4mm; border: 1px solid #d9e0ea; border-radius: 2mm; }
+    .summary span { display: block; color: #526078; font-size: 8pt; text-transform: uppercase; }
+    .summary strong { display: block; margin-top: 1mm; font-size: 15pt; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { padding: 2.2mm; border-bottom: 1px solid #d9e0ea; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+    th { background: #eef2f7; font-size: 8pt; text-transform: uppercase; }
+    tr { break-inside: avoid; }
+    .code { width: 8%; } .control { width: 22%; } .status { width: 10%; } .dates { width: 14%; } .evidence { width: 24%; }
+    ul { margin: 0; padding-left: 4mm; }
+    .declaration { margin-top: 7mm; padding: 4mm; border: 1px solid #9ba8ba; }
+  </style>
+</head>
+<body>
+  <h1>SMB1001 attestation report</h1>
+  <p><strong>{{ company.name }}</strong><br><span class="muted">Snapshot generated {{ generated_at.strftime('%d %B %Y at %H:%M UTC') }}</span></p>
+  {% set achieved = progress.achieved_tier %}
+  <div class="summary">
+    <div><span>Current achieved level</span><strong>{{ achieved.name if achieved else 'None yet' }}</strong></div>
+    <div><span>Target level</span><strong>{% for tier in progress.tiers if tier.tier_level == progress.target_tier %}{{ tier.name }}{% endfor %}</strong></div>
+    <div><span>Target progress</span><strong>{{ progress.target_percentage }}%</strong>{{ progress.target_done }} of {{ progress.target_total }} controls</div>
+    <div><span>Overall progress</span><strong>{{ progress.overall_percentage }}%</strong>{{ progress.overall_done }} of {{ progress.overall_total }} controls</div>
+  </div>
+
+  <h2>Control record and documented evidence</h2>
+  <table>
+    <thead><tr><th class="code">Code / tier</th><th class="control">Control</th><th class="status">Status</th><th class="dates">Review dates</th><th class="evidence">Documented evidence</th><th>Notes</th></tr></thead>
+    <tbody>
+    {% for control in controls %}
+      <tr>
+        <td>{{ control.code }}<br><span class="muted">Tier {{ control.tier_level }}</span></td>
+        <td><strong>{{ control.name }}</strong><br><span class="muted">{{ control.domain_label }}</span></td>
+        <td>{{ control.status | replace('_', ' ') | title }}</td>
+        <td>Last reviewed: {{ control.record.last_reviewed_date or 'Not recorded' }}<br>Target: {{ control.record.target_compliance_date or 'Not recorded' }}<br>Updated: {{ control.record.updated_at[:10] if control.record.updated_at else 'Not recorded' }}</td>
+        <td>
+          {% if control.evidence_files %}<ul>{% for evidence in control.evidence_files %}<li><strong>{{ evidence.title }}</strong> (v{{ evidence.version_number }}){% if evidence.description %}: {{ evidence.description }}{% endif %}{% if evidence.created_at %} — {{ evidence.created_at[:10] }}{% endif %}</li>{% endfor %}</ul>{% endif %}
+          {% if control.record.evidence %}<div>{{ control.record.evidence }}</div>{% endif %}
+          {% if not control.evidence_files and not control.record.evidence %}<span class="muted">No evidence documented</span>{% endif %}
+        </td>
+        <td>{{ control.record.notes or '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="declaration"><strong>Attestation note.</strong> This report is a point-in-time export of records held in MyPortal. The achieved level is calculated from controls marked Compliant or Not applicable. It does not itself constitute independent certification.</div>
+</body>
+</html>

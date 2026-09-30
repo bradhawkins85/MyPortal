@@ -53,6 +53,7 @@ def test_default_layout_groups_menu_logically():
     groups = {group["id"]: group for group in defaults["groups"]}
 
     assert defaults["version"] == SIDEBAR_LAYOUT_VERSION
+    assert defaults["navigation_style"] == "sidebar"
     assert defaults["order"][:3] == ["/", "/search", "/notifications"]
     assert "/m365" in defaults["order"]
     assert "/tickets" in groups["__group__:default-support"]["items"]
@@ -93,6 +94,16 @@ def test_resolve_stored_preferences_respects_saved_layouts():
         {"order": [], "groups": [{"id": "__group__:mine", "label": "Mine", "items": ["/shop"]}]}
     )
     assert [group["id"] for group in custom["groups"]] == ["__group__:mine"]
+
+    top = resolve_stored_preferences(
+        {"version": 1, "navigation_style": "top", "order": ["/"], "groups": []}
+    )
+    assert top["navigation_style"] == "top"
+
+    invalid = resolve_stored_preferences(
+        {"version": 1, "navigation_style": "floating", "order": ["/"], "groups": []}
+    )
+    assert invalid["navigation_style"] == "sidebar"
 
 
 def test_reset_deletes_saved_layout_and_returns_default(monkeypatch):

@@ -446,20 +446,81 @@ column grid for multi-field screens.
 
 ### Modals
 
+**Reference implementation:** the *Staff custom fields* editor
+(`#staff-custom-field-modal` in `app/templates/admin/company_edit.html`, driven
+by `app/static/js/staff_custom_fields_admin.js`). The Add staff member editor in
+`app/templates/staff/index.html` follows the same pattern.
+
+Every popup modal is a `<div>`, not a `<dialog>`. The shared handler in
+`app/static/js/main.js` closes open modals on Escape, backdrop click and any
+`[data-modal-close]` control by setting `hidden`. `docs/design_audit_scan.py`
+flags `<dialog class="modal">` as non-conforming, so convert any existing
+`<dialog>` modals when you touch the page.
+
+The rack management page (`app/templates/infrastructure/racks.html`) still
+uses an older native `<dialog class="dialog">` component. Follow its layout
+principles, but build new modals with the `.modal` pattern below.
+
 ```html
-<dialog class="modal" id="my-modal">
-  <div class="modal__content">
-    <button class="modal__close" aria-label="Close">×</button>
-    <h2 class="modal__title">Title</h2>
+<div
+  class="modal"
+  id="thing-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="thing-modal-title"
+  hidden
+>
+  <form class="modal__panel" method="post" action="/route" novalidate>
+    {% include "partials/csrf.html" %}
+
+    <header class="modal__header">
+      <div>
+        <h2 class="modal__title" id="thing-modal-title">Add thing</h2>
+        <p class="text-muted">One sentence saying what saving will do.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close thing editor"></button>
+    </header>
+
     <div class="modal__body">
-      <!-- form or content -->
+      <div class="form-field">
+        <label class="form-label" for="thing-name">Name</label>
+        <input id="thing-name" name="name" class="form-input" />
+      </div>
     </div>
-  </div>
-</dialog>
+
+    <footer class="modal__footer">
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button button--primary">Save thing</button>
+    </footer>
+  </form>
+</div>
 ```
 
-Prefer `<dialog>` over `<div role="dialog">`. The overlay and panel are styled
-separately — the `<dialog>` itself provides the backdrop via `.modal` rules.
+Add `.modal__panel--wide` for multi-section editors. A short confirmation or
+read-only modal with no form may use a single `.modal__content` wrapper in
+place of the panel, keeping the same outer attributes, close button and title.
+
+The trigger carries a `data-<name>-modal-open` attribute and points at the
+modal with `aria-controls` and `aria-haspopup="dialog"`.
+
+Rules:
+
+- The outer element is a `<div class="modal">` with `role="dialog"`,
+  `aria-modal="true"`, `aria-labelledby` and the `hidden` attribute. Never
+  hide a modal with `style="display:none"`.
+- `hidden` already removes a closed modal from the accessibility tree, so
+  `aria-hidden` is not required. If a page sets `aria-hidden="true"`, its JS
+  must switch it to `false` on open, or screen readers will skip the modal.
+- The `id` of the `.modal__title` heading matches `aria-labelledby`.
+- The `.modal__close` button carries `data-modal-close` and an `aria-label`
+  naming what it closes.
+- Forms in modals include `{% include "partials/csrf.html" %}`. Put fields
+  in `.modal__body` and actions in `.modal__footer`: ghost Cancel, then the
+  primary submit. Destructive confirmations use `button--danger`.
+- Use `.form-grid` for pairs of related fields (priority and status, start and
+  end date).
+- Never nest a modal inside a host page `<form>`; the modal's form is
+  self-contained.
 
 ## Do's and Don'ts
 
@@ -473,7 +534,8 @@ separately — the `<dialog>` itself provides the backdrop via `.modal` rules.
 - ✅ Use `<span data-utc="…">` for all displayed timestamps.
 - ✅ Render status with `.status.status--<variant>` pills.
 - ✅ Use the `data_table` / `table_toolbar` macros for every data table.
-- ✅ Use `<dialog class="modal">` for all overlay dialogs.
+- ✅ Use the `<div class="modal" role="dialog" … hidden>` pattern for all
+  overlay dialogs (see Modals above).
 - ✅ Ensure every interactive element has a visible focus style (the default
   ring uses `rgba(148,163,184,0.35)` — keep it or strengthen it).
 

@@ -27,6 +27,13 @@ DONE_STATUSES = frozenset({"compliant", "not_applicable"})
 HELP_STATUSES = frozenset({"not_started", "in_progress", "non_compliant"})
 MAX_TIER = 5
 
+# Hawkins IT Solutions provides every portal company with the managed IT
+# support required by TM-01.  This is an effective reporting status rather
+# than a stored attestation so historical records and audit data are retained.
+MANAGED_COMPLIANT_CONTROLS: dict[str, str] = {
+    "TM-01": "Compliant through engaged IT support from Hawkins IT Solutions.",
+}
+
 DOMAINS: dict[str, str] = {
     "technology": "Technology management",
     "access": "Access management",
@@ -454,6 +461,32 @@ def derive_status_from_essential8(level_statuses: Iterable[str]) -> Optional[str
     return None
 
 
+async def count_importable_essential8_controls(company_id: int) -> int:
+    """Return how many SMB1001 controls can currently import E8 progress."""
+
+    e8_controls = await essential8_repo.list_essential8_controls()
+    control_id_by_order = {int(row["control_order"]): int(row["id"]) for row in e8_controls}
+    e8_levels = await essential8_repo.get_per_maturity_statuses_for_company(company_id)
+    controls = await list_controls()
+    compliance_map = await list_company_compliance(company_id)
+
+    importable = 0
+    for control in controls:
+        sources = ESSENTIAL8_MAPPINGS.get(control["code"])
+        if not sources:
+            continue
+        existing = compliance_map.get(int(control["id"]))
+        if existing and (existing.get("status") or "not_started") != "not_started":
+            continue
+        statuses = [
+            (e8_levels.get(control_id_by_order.get(order)) or {}).get(level, "not_started")
+            for order, level in sources
+        ]
+        if derive_status_from_essential8(statuses):
+            importable += 1
+    return importable
+
+
 async def import_essential8_progress(company_id: int, *, user_id: Optional[int] = None) -> dict[str, Any]:
     """Convert a company's Essential 8 progress into SMB1001 control statuses.
 
@@ -530,7 +563,18 @@ async def get_company_overview(company_id: int) -> dict[str, Any]:
     compliance_map = await list_company_compliance(company_id)
     profile = await get_profile(company_id) or {"company_id": company_id, "target_tier": 1}
     for control in controls:
-        record = compliance_map.get(int(control["id"]))
+        control_id = int(control["id"])
+        managed_reason = MANAGED_COMPLIANT_CONTROLS.get(control["code"])
+        if managed_reason:
+            stored_record = compliance_map.get(control_id)
+            record = {**(stored_record or {}), "status": "compliant"}
+            compliance_map[control_id] = record
+            control["status_locked"] = True
+            control["status_reason"] = managed_reason
+        else:
+            record = compliance_map.get(control_id)
+            control["status_locked"] = False
+            control["status_reason"] = ""
         control["compliance"] = record
         control["status"] = (record or {}).get("status") or "not_started"
         control["essential8_mapped"] = control["code"] in ESSENTIAL8_MAPPINGS
@@ -841,6 +885,7 @@ __all__ = [
     "get_control",
     "get_profile",
     "import_essential8_progress",
+    "count_importable_essential8_controls",
     "list_company_compliance",
     "list_control_audit",
     "list_controls",

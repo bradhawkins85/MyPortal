@@ -22,6 +22,7 @@ from typing import Any, Iterable, Mapping
 
 from loguru import logger
 
+from app.core.config import get_settings
 from app.core.database import db
 
 
@@ -62,6 +63,17 @@ def _normalise_role(value: Any) -> str:
         return "to"
     text = str(value).strip().lower()
     return text if text in _VALID_ROLES else "to"
+
+
+def is_outbound_audit_recipient(value: Any) -> bool:
+    """Return whether *value* is the environment-configured audit BCC.
+
+    Audit mailbox activity is operational oversight, not recipient engagement,
+    and must never contribute to the status shown on a ticket reply.
+    """
+    email = _normalise_email(value)
+    audit_email = _normalise_email(get_settings().outbound_audit_bcc)
+    return bool(email and audit_email and email == audit_email)
 
 
 async def record_recipients(
@@ -109,7 +121,7 @@ async def record_recipients(
             return out
         for raw in addresses:
             email = _normalise_email(raw)
-            if not email:
+            if not email or is_outbound_audit_recipient(email):
                 continue
             key = (email, role)
             if key in seen:
@@ -252,7 +264,7 @@ async def get_recipients_for_reply(reply_id: int) -> list[dict[str, Any]]:
         )
         return []
 
-    return [dict(row) for row in rows]
+    return [dict(row) for row in rows if not is_outbound_audit_recipient(row.get("recipient_email"))]
 
 
 async def get_m365_terminal_operation(*, reply_id: int, recipient_email: str) -> dict[str, Any] | None:
@@ -377,16 +389,22 @@ async def get_recipient_count_map(reply_ids: Iterable[int]) -> dict[int, int]:
     # generated locally (no caller input flows into the query string), so
     # this is safe from SQL injection.
     placeholders = []
-    params: dict[str, int] = {}
+    params: dict[str, Any] = {}
     for index, reply_id in enumerate(unique_ids):
         key = f"rid_{index}"
         placeholders.append(f":{key}")
         params[key] = reply_id
+    audit_email = _normalise_email(get_settings().outbound_audit_bcc)
+    audit_filter = ""
+    if audit_email:
+        audit_filter = "AND LOWER(recipient_email) <> :audit_email "
+        params["audit_email"] = audit_email
     query = (
         "SELECT ticket_reply_id, COUNT(*) AS recipient_count "  # nosec B608
         "FROM ticket_reply_email_recipients "
         f"WHERE ticket_reply_id IN ({', '.join(placeholders)}) "
-        "GROUP BY ticket_reply_id"
+        + audit_filter
+        + "GROUP BY ticket_reply_id"
     )
     try:
         rows = await db.fetch_all(query, params)
@@ -463,7 +481,7 @@ async def update_recipient_event(
     the recipient address and no fallback ``ticket_reply_id``).
     """
     normalised_email = _normalise_email(recipient_email)
-    if not normalised_email:
+    if not normalised_email or is_outbound_audit_recipient(normalised_email):
         # Without a recipient address we cannot meaningfully update a single
         # row; skip rather than mutating every recipient on the message.
         return None
