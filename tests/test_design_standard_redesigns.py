@@ -123,3 +123,33 @@ def test_scheduled_task_pages_use_structured_ticket_payload():
         assert "JSON Payload</label>" not in source, template
         assert "scheduled_ticket_payload('task'" in source, template
         assert "scheduled_ticket_payload.js" in source, template
+
+
+def test_mail_filter_macro_renders_builder_around_filter_json():
+    stored = {"all": [{"field": "from.domain", "equals": "example.com"}]}
+    html = _env().from_string(
+        '{% from "macros/mail_filter.html" import mail_filter_field %}'
+        "{{ mail_filter_field(value) }}"
+    ).render(value=stored)
+
+    assert "data-mail-filter" in html
+    assert "Only emails that match rules" in html
+    match = re.search(r'<textarea[^>]*name="filterQuery"[^>]*>(.*?)</textarea>', html, re.S)
+    assert match
+    assert json.loads(match.group(1).replace("&#34;", '"').replace("&quot;", '"')) == stored
+
+
+def test_mailbox_pages_use_mail_filter_builder():
+    for template in ("admin/imap.html", "admin/m365_mail.html"):
+        source = (TEMPLATES / template).read_text()
+        assert "Message filter (JSON)" not in source, template
+        assert "mail_filter_field(editing_account.filter_query if is_editing else none)" in source
+        assert "mail_filter_builder.js" in source, template
+
+
+def test_smtp2go_campaigns_render_list_and_editor():
+    source = (TEMPLATES / "admin/smtp2go.html").read_text()
+    assert "data-ab-campaigns" in source
+    assert 'id="abc-modal"' in source
+    assert 'name="abCampaignsRaw"' in source
+    assert "smtp2go_campaigns.js" in source

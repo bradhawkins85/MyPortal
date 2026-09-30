@@ -81,7 +81,7 @@
           <p class="card__subtitle">Tune rate-limit retries, delayed non-engagement checks, and A/B winner selection inputs.</p>
         </div>
       </header>
-      <form action="/admin/modules/smtp2go/settings" method="post" class="form-grid">
+      <form action="/admin/modules/smtp2go/settings" method="post" class="form-grid" data-abc-form>
         {% include "partials/csrf.html" %}
         <div class="form-field">
           <label class="form-label" for="smtp2go-rate-limit-max-retries">Rate-limit max retries</label>
@@ -95,10 +95,28 @@
           <label class="form-label" for="smtp2go-not-engaged-delay">Not engaged delay (seconds)</label>
           <input id="smtp2go-not-engaged-delay" class="form-input" type="number" min="0" name="notEngagedDelaySeconds" value="{{ smtp2go_settings.get('not_engaged_delay_seconds', 86400) }}" />
         </div>
-        <div class="form-field form-field--wide">
-          <label class="form-label" for="smtp2go-ab-campaigns">A/B campaigns JSON</label>
-          <textarea id="smtp2go-ab-campaigns" class="form-input" name="abCampaignsRaw" rows="12">{{ smtp2go_settings.get('ab_campaigns', []) | tojson(indent=2) }}</textarea>
-          <p class="form-help">Provide campaign variants with sent/delivered/opened/clicked/bounced counts for automatic winner promotion decisions.</p>
+        <div class="form-field form-field--wide abc" data-ab-campaigns>
+          <div class="abc__head">
+            <div>
+              <span class="form-label" id="abc-title">A/B campaigns</span>
+              <p class="form-help">Compare email variants and pick a winner automatically once each has enough sends.</p>
+            </div>
+            <button type="button" class="button button--ghost button--small" data-abc-create hidden aria-haspopup="dialog" aria-controls="abc-modal">+ Add campaign</button>
+          </div>
+          <ul class="scf-list abc__list" data-abc-list aria-labelledby="abc-title" hidden></ul>
+          <div class="scf-empty" data-abc-empty hidden>
+            <p class="scf-empty__title">No A/B campaigns yet</p>
+            <p class="text-muted">Add a campaign with two or more variants to see which subject line or template gets more opens or clicks.</p>
+            <button type="button" class="button" data-abc-create aria-haspopup="dialog" aria-controls="abc-modal">+ Add your first campaign</button>
+          </div>
+          <p class="sif-status text-muted" role="status" aria-live="polite" data-abc-status></p>
+          <details class="stp__advanced" data-abc-advanced open>
+            <summary>Advanced: edit as JSON</summary>
+            <label class="visually-hidden" for="smtp2go-ab-campaigns">A/B campaigns JSON</label>
+            <textarea id="smtp2go-ab-campaigns" class="form-input form-input--textarea stp__json" name="abCampaignsRaw" rows="10" spellcheck="false">{{ smtp2go_settings.get('ab_campaigns', []) | tojson(indent=2) }}</textarea>
+            <p class="form-help">A list of campaigns, each with <code>name</code>, <code>winner_metric</code>, <code>minimum_sample_size</code> and <code>variants</code> holding sent/delivered/opened/clicked/bounced counts.</p>
+          </details>
+          <p class="scf-error" data-abc-error hidden></p>
         </div>
         <div class="form-actions">
           <button type="submit" class="button">Save settings</button>
@@ -201,4 +219,75 @@
       </div>
     </section>
   </div>
+  <div class="modal scf-modal" id="abc-modal" role="dialog" aria-modal="true" aria-labelledby="abc-modal-title" hidden>
+    <form class="modal__panel modal__panel--wide scf-editor abc-editor" data-abc-editor novalidate>
+      <header class="modal__header scf-editor__header">
+        <div>
+          <p class="scf-preview__eyebrow">A/B campaign</p>
+          <h2 class="modal__title" id="abc-modal-title" data-abc-modal-title>Add campaign</h2>
+          <p class="scf-editor__subtitle">Enter each variant's counts from SMTP2Go. The winner is picked once at least two variants reach the minimum sample.</p>
+        </div>
+        <button type="button" class="modal__close" data-modal-close aria-label="Close campaign editor"></button>
+      </header>
+      <div class="modal__body scf-editor__body">
+        <div class="scf-editor__main abc-editor__main">
+          <div class="form-field">
+            <label class="form-label" for="abc-name">Campaign name</label>
+            <input class="form-input" id="abc-name" maxlength="255" placeholder="e.g. October newsletter subject test" autocomplete="off" data-abc-input="name" />
+          </div>
+          <fieldset class="scf-fieldset">
+            <legend class="form-label">Pick the winner by</legend>
+            <div class="scf-choice-list abc-metrics" data-abc-metrics>
+              <label class="scf-choice">
+                <input type="radio" name="abc_metric" value="click_rate" data-abc-metric />
+                <span><strong>Click rate</strong><span class="text-muted">Most clicks per email sent.</span></span>
+              </label>
+              <label class="scf-choice">
+                <input type="radio" name="abc_metric" value="open_rate" data-abc-metric />
+                <span><strong>Open rate</strong><span class="text-muted">Most opens per email sent.</span></span>
+              </label>
+            </div>
+          </fieldset>
+          <div class="form-field">
+            <label class="form-label" for="abc-minimum">Minimum sends per variant</label>
+            <input class="form-input abc-editor__number" id="abc-minimum" type="number" min="1" step="1" data-abc-input="minimum_sample_size" />
+            <p class="form-help">A variant only counts once it has at least this many sent or delivered emails.</p>
+          </div>
+          <section aria-labelledby="abc-variants-title">
+            <h3 class="scf-panel__title" id="abc-variants-title">Variants</h3>
+            <div class="abc-variants" role="table" aria-labelledby="abc-variants-title">
+              <div class="abc-variant abc-variant--head" role="row">
+                <span role="columnheader">Name</span>
+                <span role="columnheader">Sent</span>
+                <span role="columnheader">Delivered</span>
+                <span role="columnheader">Opened</span>
+                <span role="columnheader">Clicked</span>
+                <span role="columnheader">Bounced</span>
+                <span role="columnheader"><span class="visually-hidden">Remove</span></span>
+              </div>
+              <div data-abc-variants role="rowgroup"></div>
+            </div>
+            <button type="button" class="button button--ghost button--small" data-abc-variant-add>+ Add variant</button>
+            <p class="scf-error" data-abc-editor-error hidden></p>
+          </section>
+        </div>
+        <aside class="scf-preview" aria-label="Live results">
+          <p class="scf-preview__eyebrow">Live results</p>
+          <div class="scf-preview__card abc-preview" data-abc-preview></div>
+          <ul class="scf-preview__rules" data-abc-preview-rules></ul>
+        </aside>
+      </div>
+      <footer class="modal__footer scf-editor__footer">
+        <button type="button" class="button button--danger" data-abc-delete hidden>Delete campaign</button>
+        <span class="scf-editor__spacer"></span>
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        <button type="submit" class="button" data-abc-submit>Save campaign</button>
+      </footer>
+    </form>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/smtp2go_campaigns.js') }}" defer></script>
 {% endblock %}

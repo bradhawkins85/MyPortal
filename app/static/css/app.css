@@ -15485,6 +15485,279 @@ body.scf-modal-open {
   }
 }
 
+/* Mailbox "which emails to import" rule builder (IMAP and Microsoft 365) */
+.mfb__ui {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+}
+
+.mfb__ui[hidden],
+.mfb__rules[hidden],
+.mfb .scf-error[hidden],
+.mfb__complex[hidden] {
+  display: none;
+}
+
+.mfb__modes {
+  margin-bottom: 0;
+}
+
+.mfb__rules {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-roomy);
+}
+
+.mfb__group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-gap-tight);
+}
+
+.mfb__group-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--hf-copy-strong);
+}
+
+.mfb__match.form-input {
+  width: auto;
+  padding-block: 0.25rem;
+}
+
+.mfb__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mfb__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 2.25rem;
+  gap: var(--space-gap-tight);
+  align-items: start;
+  padding: var(--space-gap-tight);
+  border: 1px solid var(--hf-line-soft);
+  border-radius: var(--hf-radius-md);
+}
+
+.mfb__row > :nth-child(3) {
+  grid-column: 1 / 3;
+  grid-row: 2;
+}
+
+.mfb__row > [data-mfb-remove] {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.mfb__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+}
+
+.mfb__novalue {
+  display: none;
+}
+
+.mfb__summary {
+  margin: 0;
+}
+
+.mfb__summary:empty {
+  display: none;
+}
+
+/* SMTP2Go A/B campaigns list + editor */
+.abc {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+}
+
+.abc [hidden] {
+  display: none !important;
+}
+
+.abc__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-gap-base);
+}
+
+.abc__head .form-help {
+  margin: 0.2rem 0 0;
+}
+
+.abc__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-accent-soft);
+  color: var(--hf-accent-strong);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.abc-metrics {
+  margin-bottom: 0;
+}
+
+.abc-editor input.abc-editor__number {
+  max-width: 8rem;
+}
+
+.abc-editor__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-roomy);
+}
+
+.abc-variants {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+  margin: var(--space-gap-tight) 0 var(--space-gap-base);
+}
+
+.abc-variants > [role="rowgroup"] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+}
+
+.abc-variant {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) repeat(5, minmax(0, 1fr)) 2.25rem;
+  gap: var(--space-gap-tight);
+  align-items: center;
+}
+
+.abc-variant__cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.abc-variant__cell-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.abc-variant--head {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hf-muted);
+}
+
+.abc-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.abc-bar + .abc-bar {
+  margin-top: var(--space-gap-tight);
+}
+
+.abc-bar__label {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-gap-tight);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.abc-bar__value {
+  flex: 0 0 auto;
+  color: var(--hf-muted);
+}
+
+.abc-bar--winner .abc-bar__value {
+  color: var(--hf-success);
+}
+
+.abc-bar__track {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hf-muted) 18%, transparent);
+  overflow: hidden;
+}
+
+.abc-bar__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--hf-accent);
+}
+
+.abc-bar--winner .abc-bar__fill {
+  background: var(--hf-success);
+}
+
+.abc-bar--waiting .abc-bar__fill {
+  background: var(--hf-line-strong);
+}
+
+.abc-bar__meta {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .abc-variant--head {
+    display: none;
+  }
+
+  .abc-variant {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding-bottom: var(--space-gap-tight);
+    border-bottom: 1px solid var(--hf-line-soft);
+  }
+
+  .abc-variant > [data-abc-variant-field="name"] {
+    grid-column: 1 / 3;
+  }
+
+  .abc-variant > [data-abc-variant-remove] {
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
+  }
+
+  .abc-variant__cell-label {
+    position: static;
+    width: auto;
+    height: auto;
+    clip: auto;
+    font-size: 0.72rem;
+    color: var(--hf-muted);
+  }
+}
+
 /* Staff intake fields (built-in onboarding questions) — reuses the .scf-* editor */
 .sif-stats {
   display: grid;

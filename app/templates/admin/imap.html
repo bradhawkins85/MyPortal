@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/mail_filter.html" import mail_filter_field %}
 
 {% block header_title %}IMAP mailboxes{% endblock %}
 
@@ -57,14 +58,7 @@
           <input type="text" name="scheduleCron" class="form-input" value="{{ editing_account.schedule_cron if is_editing else '*/15 * * * *' }}" maxlength="100" required />
           <span class="form-help">Cron expression evaluated in the configured timezone.</span>
         </label>
-        <label class="form-field">
-          <span class="form-label">Message filter (JSON)</span>
-          <textarea name="filterQuery" class="form-input form-input--textarea" rows="8" placeholder='{"all": [{"field": "from.domain", "equals": "example.com"}]}'>{% if is_editing and editing_account.filter_query %}{{ editing_account.filter_query | tojson(indent=2) }}{% endif %}</textarea>
-          <span class="form-help">
-            Optional JSON rules that control which emails this mailbox processes.
-            <a href="/docs/imap-filters" target="_blank" rel="noopener">View filter examples</a>.
-          </span>
-        </label>
+        {{ mail_filter_field(editing_account.filter_query if is_editing else none) }}
         <label class="form-field">
           <span class="form-label">Link to company</span>
           <select name="companyId" class="form-input">
@@ -196,4 +190,9 @@
       </div>
     </section>
   </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/mail_filter_builder.js') }}" defer></script>
 {% endblock %}
