@@ -82,6 +82,7 @@ func main() {
 
 	// Connect to IPC server in background.
 	go connectIPC()
+	go runOutlookSignatureWorker()
 
 	// systray.Run blocks until Quit is called.
 	systray.Run(onTrayReady, onTrayExit)
@@ -390,6 +391,7 @@ func handleIPCMessages(conn net.Conn) {
 			// Re-read cached config. Menu rebuild on config_changed is deferred
 			// until a systray library version that exposes ResetMenu is adopted.
 			gConfig = loadCachedConfig()
+			triggerOutlookSignatureSync()
 			if trayReady.Load() {
 				systray.SetTooltip(trayTooltip(gConfig))
 			} else {

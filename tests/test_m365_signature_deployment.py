@@ -124,3 +124,79 @@ async def test_roaming_status_and_postpone(exchange, monkeypatch):
 
     monkeypatch.setattr(deployment.m365_service, "_exo_invoke_command", failing)
     assert await deployment.get_roaming_signature_status(7) == {"postponed": None, "error": "forbidden"}
+
+
+@pytest.mark.anyio
+async def test_classic_outlook_renders_only_company_staff_addresses(exchange, monkeypatch):
+    monkeypatch.setattr(
+        deployment.companies_repo, "get_email_domains_for_company", _async(["example.com"])
+    )
+    monkeypatch.setattr(
+        deployment.signatures_service,
+        "get_primary_template",
+        _async({"id": 9, "slug": "standard", "html_content": "H", "text_content": "T"}),
+    )
+
+    async def fake_staff(company_id, email):
+        return {
+            "ada@example.com": {"id": 1, "enabled": True, "is_ex_staff": False},
+            "former@example.com": {"id": 3, "enabled": True, "is_ex_staff": True},
+        }.get(email.casefold())
+
+    monkeypatch.setattr(deployment.staff_repo, "get_staff_by_company_and_email", fake_staff)
+
+    result = await deployment.render_classic_outlook_signatures(
+        7, ["Ada@Example.com", "ada@example.com", "someone@other.com", "former@example.com", "nobody@example.com"]
+    )
+
+    assert result["template_slug"] == "standard"
+    assert [(s["address"], s["name"], s["html"], s["text"]) for s in result["signatures"]] == [
+        ("Ada@Example.com", "MyPortal (Ada@Example.com)", "<p>H:1</p>", "T:1")
+    ]
+    assert len(result["signatures"][0]["hash"]) == 64
+    assert set(result["skipped"]) == {"someone@other.com", "former@example.com", "nobody@example.com"}
+
+
+@pytest.mark.anyio
+async def test_classic_outlook_without_active_template_skips_everything(exchange, monkeypatch):
+    monkeypatch.setattr(
+        deployment.companies_repo, "get_email_domains_for_company", _async(["example.com"])
+    )
+    monkeypatch.setattr(deployment.signatures_service, "get_primary_template", _async(None))
+
+    result = await deployment.render_classic_outlook_signatures(7, ["ada@example.com"])
+
+    assert result == {
+        "template_slug": None,
+        "signatures": [],
+        "skipped": {"ada@example.com": "No active signature template"},
+    }
+
+
+@pytest.mark.anyio
+async def test_tray_endpoint_requires_company_opt_in(monkeypatch):
+    from app.api.routes import tray as tray_routes
+    from app.schemas.tray import TrayOutlookSignaturesRequest
+
+    companies = {1: {"id": 1, "classic_outlook_signatures_enabled": 0}, 2: {"id": 2, "classic_outlook_signatures_enabled": 1}}
+    monkeypatch.setattr(
+        tray_routes.companies_repo, "get_company_by_id", lambda company_id: _async(companies.get(company_id))()
+    )
+    calls = []
+
+    async def fake_render(company_id, addresses):
+        calls.append((company_id, addresses))
+        return {"template_slug": "standard", "signatures": [], "skipped": {}}
+
+    monkeypatch.setattr(
+        tray_routes.signature_deploy_service, "render_classic_outlook_signatures", fake_render
+    )
+    payload = TrayOutlookSignaturesRequest(addresses=["ada@example.com"])
+
+    disabled = await tray_routes.get_outlook_signatures(payload, device={"company_id": 1})
+    unassigned = await tray_routes.get_outlook_signatures(payload, device={"company_id": None})
+    enabled = await tray_routes.get_outlook_signatures(payload, device={"company_id": 2})
+
+    assert disabled.enabled is False and unassigned.enabled is False
+    assert enabled.enabled is True and enabled.template_slug == "standard"
+    assert calls == [(2, ["ada@example.com"])]

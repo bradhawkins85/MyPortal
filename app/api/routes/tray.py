@@ -57,6 +57,8 @@ from app.schemas.tray import (
     TrayEnrolRequest,
     TrayEnrolResponse,
     TrayHeartbeatRequest,
+    TrayOutlookSignaturesRequest,
+    TrayOutlookSignaturesResponse,
     NetworkScanRequest,
     TrayInstallTokenCreate,
     TrayInstallTokenResponse,
@@ -76,6 +78,7 @@ from app.schemas.tray import (
 from app.services import audit as audit_service
 from app.services import chat_ticket_sync
 from app.services import chat_ntfy_notifications
+from app.services import m365_signature_deployment as signature_deploy_service
 from app.services import matrix as matrix_service
 from app.services import matrix_ai_waiting_assistant
 from app.services import tacticalrmm as tacticalrmm_service
@@ -409,6 +412,33 @@ async def get_device_config(
             if item
         ],
     )
+
+
+@router.post(
+    "/outlook-signatures",
+    response_model=TrayOutlookSignaturesResponse,
+    summary="Render the active signature for this device's Classic Outlook accounts",
+)
+async def get_outlook_signatures(
+    payload: TrayOutlookSignaturesRequest,
+    device: dict = Depends(get_current_tray_device),
+) -> TrayOutlookSignaturesResponse:
+    """Return rendered signatures for Outlook accounts found on the device.
+
+    Signatures are only returned when the device's company has opted in, and
+    only for addresses on that company's email domains that match an active
+    staff record, so a device cannot read signatures for another company.
+    """
+    company_id = device.get("company_id")
+    company = (
+        await companies_repo.get_company_by_id(int(company_id)) if company_id else None
+    )
+    if not company or not company.get("classic_outlook_signatures_enabled"):
+        return TrayOutlookSignaturesResponse(enabled=False)
+    result = await signature_deploy_service.render_classic_outlook_signatures(
+        int(company_id), payload.addresses
+    )
+    return TrayOutlookSignaturesResponse(enabled=True, **result)
 
 
 @router.post("/network-scan", summary="Upload network discovery results")
