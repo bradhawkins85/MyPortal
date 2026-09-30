@@ -15758,6 +15758,484 @@ body.scf-modal-open {
   }
 }
 
+/* Microsoft 365 signature management (list + editor workspace) */
+.sig [hidden],
+.sig-editor [hidden] {
+  display: none !important;
+}
+
+.sig-stats__primary dd {
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.sig-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+  gap: var(--space-gap-base);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sig-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-panel);
+}
+
+.sig-card:hover,
+.sig-card:focus-within {
+  border-color: var(--hf-accent-ring);
+}
+
+.sig-card--muted .sig-card__thumb {
+  opacity: 0.6;
+}
+
+.sig-card__thumb {
+  position: relative;
+  display: block;
+  text-decoration: none;
+  height: 9.5rem;
+  overflow: hidden;
+  border-bottom: 1px solid var(--hf-line);
+  background: #fff;
+}
+
+.sig-card__frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  pointer-events: none;
+}
+
+.sig-card__empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.sig-card__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: var(--space-gap-base);
+}
+
+.sig-card .scf-item__label {
+  text-decoration: none;
+}
+
+.sig-card__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-tight);
+  margin-top: auto;
+  font-size: 0.8rem;
+}
+
+.sig-card__actions {
+  display: inline-flex;
+  gap: var(--space-gap-tight);
+}
+
+.sig-card__actions a.button {
+  text-decoration: none;
+}
+
+.sig-state--active,
+.sig-state--published {
+  color: var(--hf-copy-strong);
+  background: color-mix(in srgb, var(--hf-success) 22%, transparent);
+}
+
+.sig-state--scheduled {
+  color: var(--hf-copy-strong);
+  background: color-mix(in srgb, var(--hf-accent) 22%, transparent);
+}
+
+.sig-state--draft,
+.sig-state--ended,
+.sig-state--disabled {
+  color: var(--hf-muted);
+}
+
+.sig-about > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--hf-muted);
+}
+
+.sig-editor.card {
+  padding: 0;
+  overflow: visible;
+}
+
+.sig-editor__header.modal__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-gap-base);
+  padding: calc(var(--space-gap-roomy) * 1.25) calc(var(--space-gap-roomy) * 1.5) var(--space-gap-base) !important;
+  border-bottom: 1px solid var(--hf-line);
+}
+
+.sig-editor__body.modal__body {
+  grid-template-columns: minmax(0, 1fr) 22rem;
+  padding: var(--space-gap-roomy) calc(var(--space-gap-roomy) * 1.5);
+}
+
+.sig-editor .modal__footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  align-items: center;
+  border-radius: 0 0 var(--hf-radius-lg) var(--hf-radius-lg);
+  background: var(--hf-panel);
+}
+
+.sig-editor__dirty:empty {
+  display: none;
+}
+
+.sig-editor__surface {
+  min-height: 12rem;
+}
+
+.sig-editor__label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-tight);
+}
+
+.sig-editor input.sig-editor__narrow {
+  max-width: 8rem;
+}
+
+.sig-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-roomy);
+}
+
+.sig-panel + .sig-panel {
+  margin-top: var(--space-gap-roomy);
+}
+
+.sig-vars__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.35rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sig-var {
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--hf-line);
+  border-radius: 999px;
+  background: var(--hf-accent-soft);
+  color: var(--hf-accent-strong);
+  font-family: var(--font-monospace, ui-monospace, monospace);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.sig-var:hover,
+.sig-var:focus-visible {
+  border-color: var(--hf-accent-ring);
+  outline: none;
+}
+
+.sig-preview {
+  gap: var(--space-gap-base);
+}
+
+.sig-preview__frame-wrap {
+  overflow: hidden;
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+  background: #fff;
+}
+
+.sig-preview__frame {
+  display: block;
+  width: 100%;
+  height: 13rem;
+  border: 0;
+}
+
+.sig-token-sample {
+  padding: 0 0.2rem;
+  border-radius: 0.2rem;
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.sig-preview__staff {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+  padding-top: var(--space-gap-base);
+  border-top: 1px solid var(--hf-line);
+}
+
+.sig-preview__result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+}
+
+.sig-preview__missing p {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+}
+
+.sig-preview__text {
+  margin: 0;
+  padding: var(--space-gap-tight);
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+  white-space: pre-wrap;
+  font-size: 0.8rem;
+}
+
+@media (max-width: 900px) {
+  .sig-editor__body.modal__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sig-preview.scf-preview {
+    position: static;
+  }
+}
+
+/* Microsoft 365 Out of Office */
+.oof [hidden],
+.oof-editor [hidden] {
+  display: none !important;
+}
+
+.oof-results--failed {
+  border-color: color-mix(in srgb, var(--hf-warning) 50%, transparent);
+}
+
+.oof-results__list {
+  gap: 0.35rem;
+}
+
+.oof__toolbar {
+  gap: var(--space-gap-tight);
+}
+
+.oof__filter.form-input {
+  width: auto;
+}
+
+.oof__bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-gap-tight);
+  padding: var(--space-gap-tight) var(--space-gap-base);
+  border: 1px solid var(--hf-accent-ring);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-accent-soft);
+  font-weight: 600;
+}
+
+.oof-item {
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+}
+
+.oof-item--readonly {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.oof-item.is-selected {
+  background: var(--hf-accent-soft);
+}
+
+.oof-item__select {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  cursor: pointer;
+}
+
+.oof-item__select input {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.oof-item__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 999px;
+  background: var(--hf-accent-soft);
+  color: var(--hf-accent-strong);
+  font-weight: 700;
+}
+
+.oof-item__name {
+  font-weight: 600;
+  color: var(--hf-copy-strong);
+}
+
+.oof-item__excerpt {
+  font-style: italic;
+}
+
+.oof-status--on {
+  color: var(--hf-copy-strong);
+  background: color-mix(in srgb, var(--hf-success) 22%, transparent);
+}
+
+.oof-status--scheduled {
+  color: var(--hf-copy-strong);
+  background: color-mix(in srgb, var(--hf-accent) 22%, transparent);
+}
+
+.oof-status--off,
+.oof-status--disabled {
+  color: var(--hf-muted);
+}
+
+.oof-editor__main {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space-gap-roomy) * 1.25);
+}
+
+.oof-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+}
+
+.oof-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-tight);
+}
+
+.oof-section .scf-panel__title {
+  margin: 0;
+}
+
+.oof-who {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+}
+
+.oof-who__list {
+  max-height: 14rem;
+  overflow: auto;
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+}
+
+.oof-who__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-gap-tight);
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--hf-line-soft);
+  cursor: pointer;
+}
+
+.oof-who__row:last-child {
+  border-bottom: 0;
+}
+
+.oof-who__row > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.oof-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.oof-preset {
+  font-family: inherit;
+}
+
+.oof-audience {
+  margin-bottom: 0;
+}
+
+.oof-external {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+}
+
+.oof-counter {
+  text-align: right;
+}
+
+.oof-mail {
+  overflow: hidden;
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-panel);
+}
+
+.oof-mail__subject {
+  margin: 0;
+  padding: 0.55rem 0.75rem 0;
+  font-weight: 600;
+  color: var(--hf-copy-strong);
+}
+
+.oof-mail__to {
+  margin: 0;
+  padding: 0 0.75rem 0.5rem;
+  border-bottom: 1px solid var(--hf-line-soft);
+  font-size: 0.78rem;
+}
+
+.oof-mail__body {
+  max-height: 12rem;
+  overflow: auto;
+  padding: 0.6rem 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 640px) {
+  .oof-item {
+    grid-template-columns: auto auto minmax(0, 1fr);
+  }
+
+  .oof-item .scf-item__actions {
+    grid-column: 3;
+  }
+}
+
 /* Staff intake fields (built-in onboarding questions) — reuses the .scf-* editor */
 .sif-stats {
   display: grid;

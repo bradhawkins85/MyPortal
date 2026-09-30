@@ -153,3 +153,112 @@ def test_smtp2go_campaigns_render_list_and_editor():
     assert 'id="abc-modal"' in source
     assert 'name="abCampaignsRaw"' in source
     assert "smtp2go_campaigns.js" in source
+
+
+def _page_env() -> jinja2.Environment:
+    """Render full pages against a minimal stand-in for base.html."""
+
+    class _Loader(jinja2.FileSystemLoader):
+        def get_source(self, environment, template):
+            if template == "base.html":
+                source = (
+                    "{% block header_actions %}{% endblock %}"
+                    "{% block content %}{% endblock %}{% block scripts %}{% endblock %}"
+                )
+                return source, None, lambda: True
+            return super().get_source(environment, template)
+
+    env = jinja2.Environment(loader=_Loader(str(TEMPLATES)), autoescape=True)
+    env.globals["static_url"] = lambda path: path
+    return env
+
+
+def test_signature_list_renders_cards_with_sandboxed_thumbnails():
+    from datetime import date
+
+    templates = [
+        {"id": 1, "name": "Standard", "slug": "standard", "description": "", "status": "published",
+         "priority": 5, "is_default": True, "schedule_start_on": None, "schedule_end_on": None,
+         "html_content": '<p class="x">{{staff.first_name}} "quoted"</p>', "text_content": "x",
+         "updated_at": None},
+        {"id": 2, "name": "Holidays", "slug": "holidays", "description": "", "status": "published",
+         "priority": 9, "is_default": False, "schedule_start_on": date(2026, 12, 1),
+         "schedule_end_on": date(2026, 12, 31), "html_content": "", "text_content": "",
+         "updated_at": None},
+    ]
+    html = _page_env().get_template("m365/signatures.html").render(
+        templates=templates,
+        current_primary=templates[0],
+        schedule_timezone="UTC",
+        schedule_today=date(2026, 9, 30),
+        csrf_token="t",
+    )
+
+    assert 'sandbox=""' in html
+    # Signature HTML is escaped inside srcdoc so it can't break out of the attribute.
+    assert "&lt;p class=&#34;x&#34;&gt;" in html
+    assert "In use today" in html
+    assert "Scheduled" in html
+    assert 'datetime="2026-12-01"' in html
+    assert "No plain-text version" in html
+    assert "strftime" not in (TEMPLATES / "m365/signatures.html").read_text()
+
+
+def test_signature_editor_renders_tabs_preview_and_delete_form():
+    html = _page_env().get_template("m365/signatures_form.html").render(
+        template_record={"id": 4, "status": "published"},
+        form_values={"slug": "standard", "name": "Standard", "description": "", "html_content": "<p>Hi</p>",
+                     "text_content": "", "priority": "0", "is_default": "", "schedule_start_on": "",
+                     "schedule_end_on": ""},
+        preview={"html": "<p>Jane</p>", "text": "Jane", "missing_tokens": ["staff.job_title"]},
+        preview_staff=[{"id": 7, "label": "Jane", "email": "jane@example.com"}],
+        selected_staff_id=7,
+        variable_suggestions=["{{staff.first_name}}"],
+        schedule_timezone="UTC",
+        csrf_token="t",
+    )
+
+    assert 'data-sig-tab="schedule"' in html
+    assert 'data-sig-unsaved="true"' in html
+    assert 'action="/m365/signatures/4/delete" id="sig-delete-form"' in html
+    assert 'action="/m365/signatures/4/disable"' in html
+    assert 'data-sig-var="{{staff.first_name}}"' in html
+    assert "staff.job_title" in html
+
+
+def test_out_of_office_renders_mailbox_cards_and_editor():
+    mailboxes = [
+        {"display_name": "Jane Doe", "user_principal_name": "jane@example.com"},
+        {"display_name": "Dan Wu", "user_principal_name": "dan@example.com"},
+    ]
+    states = [
+        {"mailbox": "Jane@example.com", "success": True, "error": None, "setting": {
+            "status": "scheduled", "externalAudience": "contactsOnly",
+            "internalReplyMessage": "<p>On leave</p>", "externalReplyMessage": "Away",
+            "scheduledStartDateTime": {"dateTime": "2026-10-01T00:00:00", "timeZone": "UTC"},
+            "scheduledEndDateTime": {"dateTime": "2026-10-05T00:00:00", "timeZone": "UTC"},
+        }},
+        {"mailbox": "dan@example.com", "success": False, "setting": None, "error": "Access denied"},
+    ]
+    env = _page_env()
+    html = env.get_template("m365/out_of_office.html").render(
+        mailboxes=mailboxes, states=states, state_error=None, outcomes=[], submitted={},
+        can_write=True, csrf_token="t",
+    )
+
+    assert 'data-mailbox="jane@example.com"' in html
+    assert "Colleagues + external contacts" in html
+    assert "Couldn't read: Access denied" in html
+    assert 'id="oof-modal"' in html
+    assert 'name="mailboxes" value="dan@example.com"' in html
+    data = _json_block(html, "oof-data")
+    assert data["mailboxes"][0]["setting"]["externalAudience"] == "contactsOnly"
+    assert data["canWrite"] is True
+
+    read_only = env.get_template("m365/out_of_office.html").render(
+        mailboxes=mailboxes, states=states, state_error=None, outcomes=[], submitted={},
+        can_write=False, csrf_token="t",
+    )
+    assert 'id="oof-modal"' not in read_only
+    assert "data-oof-select" not in read_only
+    assert "read-only access" in read_only

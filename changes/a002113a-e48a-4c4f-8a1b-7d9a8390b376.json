@@ -1,0 +1,7 @@
+{
+  "guid": "a002113a-e48a-4c4f-8a1b-7d9a8390b376",
+  "occurred_at": "2026-09-30T10:00Z",
+  "change_type": "Feature",
+  "summary": "Redesign Signature management with signature cards showing a live thumbnail, status and schedule, and a tabbed editor with click-to-insert variables, a highlighted live design preview, staff previews beside the editor and an unsaved-changes guard",
+  "content_hash": "67fd90dcdf2418a0a4f0a2aff7007997a0dc4b5722d7bcd913927318870b4f8d"
+}

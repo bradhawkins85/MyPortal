@@ -237,6 +237,7 @@ async def signatures_page(request: Request):
             "title": "Signature management",
             "current_primary": current_primary,
             "schedule_timezone": signatures_service.get_schedule_timezone_name(),
+            "schedule_today": signatures_service.current_schedule_date(),
             "templates": templates,
         },
     )
