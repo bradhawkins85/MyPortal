@@ -582,6 +582,32 @@ def _scheduled_task_command_label(command: str) -> str:
         return f"Sync Microsoft 365 mailbox {account_id}"
     return command.replace("_", " ").replace(":", " ").strip().title()
 
+
+_TASK_COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Microsoft 365", ("sync_m365_", "refresh_m365_", "m365_mail_sync:")),
+    ("Staff and assets", ("sync_staff", "sync_assets", "sync_tactical_assets", "update_mac_vendors")),
+    ("Billing and Xero", (
+        "sync_to_xero", "generate_invoice", "unbill_time_entries",
+        "send_price_change_notifications", "process_subscription_renewals",
+    )),
+    ("Tickets", ("create_scheduled_ticket",)),
+    ("Calls and transcription", (
+        "sync_recordings", "sync_unifi_talk_recordings", "queue_transcriptions", "process_transcription",
+    )),
+    ("AI knowledge", ("rag_",)),
+    ("Security and monitoring", (
+        "sync_huntress", "refresh_website_checks", "refresh_dns_records",
+    )),
+)
+
+
+def _scheduled_task_command_group(command: str) -> str:
+    """Return the plain-language category a scheduled task command belongs to."""
+    for group, prefixes in _TASK_COMMAND_GROUPS:
+        if command.startswith(prefixes):
+            return group
+    return "Maintenance"
+
 app = FastAPI(
     title=settings.app_name,
     description=(
@@ -7074,6 +7100,9 @@ async def admin_scheduled_tasks(
             task, timezone_name=settings.default_timezone
         )
         serialised_task["next_run_iso"] = _to_iso(next_run)
+        command = str(task.get("command") or "")
+        serialised_task["command_label"] = _scheduled_task_command_label(command) if command else "Task"
+        serialised_task["command_group"] = _scheduled_task_command_group(command)
         raw_company_id = task.get("company_id")
         company_key: int | None = None
         if raw_company_id is not None:
@@ -7116,7 +7145,11 @@ async def admin_scheduled_tasks(
         "refresh_website_checks", "refresh_dns_records",
     )
     command_options = [
-        {"value": command, "label": _scheduled_task_command_label(command)}
+        {
+            "value": command,
+            "label": _scheduled_task_command_label(command),
+            "group": _scheduled_task_command_group(command),
+        }
         for command in available_commands
     ]
     command_options = [o for o in command_options if o["value"] not in disabled_commands_global]
@@ -7124,7 +7157,11 @@ async def admin_scheduled_tasks(
     for command in sorted(existing_commands):
         if command and command not in {option["value"] for option in command_options} and command not in disabled_commands_global:
             command_options.append(
-                {"value": str(command), "label": _scheduled_task_command_label(str(command))}
+                {
+                    "value": str(command),
+                    "label": _scheduled_task_command_label(str(command)),
+                    "group": _scheduled_task_command_group(str(command)),
+                }
             )
     command_options.sort(key=lambda option: option["label"].casefold())
 
@@ -7148,6 +7185,7 @@ async def admin_scheduled_tasks(
         "command_options": command_options,
         "company_options": company_options,
         "bulk_company_options": bulk_company_options,
+        "schedule_timezone": settings.default_timezone or "UTC",
     }
     return await _render_template("admin/scheduled_tasks.html", request, current_user, extra=extra)
 
