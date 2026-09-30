@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "auth/_auth_macros.html" import auth_hero, password_input %}
 
 {% set is_first = is_first_user | default(False) %}
 {% set title = "Create super administrator" if is_first else "Create your account" %}
@@ -22,147 +23,109 @@
 </li>
 {% endblock %}
 
-{% block header_actions %}
-<a class="button-link" href="/login">Already registered?</a>
-{% endblock %}
-
 {% block content %}
-<div class="auth-card">
-  <header class="auth-card__header">
-    <h1 class="auth-card__title">
-      {% if is_first %}
-        Create the first account
-      {% else %}
-        Create your account
-      {% endif %}
-    </h1>
-    <p class="auth-card__subtitle">
-      {% if is_first %}
-        Set up the super administrator who will manage users, companies, and security settings for {{ app_name }}.
-      {% else %}
-        Sign up to raise tickets, track your own requests, and reply to public updates from the support team.
-      {% endif %}
-    </p>
-  </header>
-  <form
-    class="auth-form"
-    method="post"
-    data-auth-form
-    data-endpoint="/auth/register"
-    data-loading-text="Creating account&hellip;"
-    data-success-redirect="/"
-    novalidate
-  >
-    {% include "partials/csrf.html" %}
-    <div class="form-grid">
-      <div class="form-field">
-        <label class="form-label" for="register-first-name">First name</label>
-        <div class="form-input-wrapper">
-          <input
-            id="register-first-name"
-            class="form-input"
-            type="text"
-            name="first_name"
-            autocomplete="given-name"
-            placeholder="Alex"
-            required
-          />
+<div class="auth-shell">
+  {% if is_first %}
+    {{ auth_hero(app_name, "Let's set up " ~ app_name ~ ".", [
+      ("You're the first person here", " — this account becomes the super administrator."),
+      ("Invite everyone else later", " — add companies, staff and permissions from the admin area."),
+      ("Protect it well", " — use a long, unique password and add a passkey after signing in."),
+    ]) }}
+  {% else %}
+    {{ auth_hero(app_name, "Get help without the back-and-forth.", [
+      ("Raise tickets in seconds", " — describe the problem once and we'll take it from there."),
+      ("Follow every update", " — see replies from the support team and answer in the same thread."),
+      ("Everything in one place", " — tickets, replies and updates stay together."),
+    ]) }}
+  {% endif %}
+
+  <section class="auth-card" aria-labelledby="register-title">
+    <header class="auth-card__header">
+      <p class="auth-card__eyebrow">{{ 'First-time setup' if is_first else app_name }}</p>
+      <h1 class="auth-card__title" id="register-title">
+        {% if is_first %}Create the first account{% else %}Create your account{% endif %}
+      </h1>
+      <p class="auth-card__subtitle">
+        {% if is_first %}
+          Set up the super administrator who will manage users, companies, and security settings for {{ app_name }}.
+        {% else %}
+          Sign up to raise tickets, track your own requests, and reply to public updates from the support team.
+        {% endif %}
+      </p>
+    </header>
+    <form
+      class="auth-form"
+      method="post"
+      data-auth-form
+      data-endpoint="/auth/register"
+      data-loading-text="Creating account&hellip;"
+      data-success-redirect="/"
+      novalidate
+    >
+      {% include "partials/csrf.html" %}
+      <div class="auth-form__row">
+        <div class="form-field">
+          <label class="form-label" for="register-first-name">First name</label>
+          <input id="register-first-name" class="form-input" type="text" name="first_name" autocomplete="given-name" placeholder="Alex" required />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="register-last-name">Last name</label>
+          <input id="register-last-name" class="form-input" type="text" name="last_name" autocomplete="family-name" placeholder="Rivera" required />
         </div>
       </div>
       <div class="form-field">
-        <label class="form-label" for="register-last-name">Last name</label>
-        <div class="form-input-wrapper">
-          <input
-            id="register-last-name"
-            class="form-input"
-            type="text"
-            name="last_name"
-            autocomplete="family-name"
-            placeholder="Rivera"
-            required
-          />
-        </div>
+        <label class="form-label" for="register-email">Work email</label>
+        <input id="register-email" class="form-input" type="email" name="email" autocomplete="email" required placeholder="you@company.com" aria-describedby="register-email-help" />
+        <p class="form-help" id="register-email-help">You'll use this to sign in.</p>
       </div>
-    </div>
-    <div class="form-field">
-      <label class="form-label" for="register-email">Work email</label>
-      <div class="form-input-wrapper">
-        <input
-          id="register-email"
-          class="form-input"
-          type="email"
-          name="email"
-          autocomplete="email"
-          required
-          placeholder="admin@example.com"
-        />
-      </div>
-    </div>
-    <div class="form-field">
-      <label class="form-label" for="register-password">Password</label>
-      <div class="form-input-wrapper">
-        <input
-          id="register-password"
-          class="form-input"
-          type="password"
-          name="password"
-          autocomplete="new-password"
-          minlength="12"
-          required
-          placeholder="Use a strong password"
-        />
-      </div>
-      <p class="form-help">Passwords must be at least 12 characters and will be stored using bcrypt hashing.</p>
-    </div>
-    <div class="form-grid">
       <div class="form-field">
-        <label class="form-label" for="register-phone">Mobile phone (optional)</label>
-        <div class="form-input-wrapper">
-          <input
-            id="register-phone"
-            class="form-input"
-            type="tel"
-            name="mobile_phone"
-            autocomplete="tel"
-            placeholder="+61 400 000 000"
-          />
-        </div>
+        <label class="form-label" for="register-password">Password</label>
+        {{ password_input('register-password', 'password', 'new-password', 'At least 12 characters', 12, 'register-password-rules') }}
+        <ul class="auth-rules" id="register-password-rules" data-password-rules aria-live="polite">
+          <li data-rule="length">At least 12 characters</li>
+          <li data-rule="mixed" data-rule-optional>Upper and lower case letters <span class="scf-optional">recommended</span></li>
+          <li data-rule="symbol" data-rule-optional>A number or symbol <span class="scf-optional">recommended</span></li>
+        </ul>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="register-confirm-password">Confirm password</label>
+        {{ password_input('register-confirm-password', 'confirm_password', 'new-password', 'Type it again', 12) }}
+        <p class="form-help auth-match" data-password-match aria-live="polite"></p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="register-phone">Mobile phone <span class="scf-optional">optional</span></label>
+        <input id="register-phone" class="form-input" type="tel" name="mobile_phone" autocomplete="tel" placeholder="+61 400 000 000" aria-describedby="register-phone-help" />
+        <p class="form-help" id="register-phone-help">Added to your contact details.</p>
       </div>
       {% if is_first %}
-      <div class="form-field">
-        <label class="form-label" for="register-company">Company ID (optional)</label>
-        <div class="form-input-wrapper">
-          <input
-            id="register-company"
-            class="form-input"
-            type="number"
-            min="1"
-            step="1"
-            name="company_id"
-            placeholder="1234"
-          />
-        </div>
-      </div>
+        <details class="auth-advanced">
+          <summary>Link to an existing company <span class="scf-optional">optional</span></summary>
+          <div class="form-field">
+            <label class="form-label" for="register-company">Company ID</label>
+            <input id="register-company" class="form-input auth-form__code" type="number" min="1" step="1" name="company_id" placeholder="1234" aria-describedby="register-company-help" />
+            <p class="form-help" id="register-company-help">Only if the company already exists in the database. You can associate the super administrator with a company now or later from the admin area.</p>
+          </div>
+        </details>
       {% endif %}
-    </div>
-    {% if is_first %}
-    <p class="form-help">You can associate the super administrator with a company now or later from the admin area.</p>
-    {% else %}
-    <p class="form-help">After signing in you'll be able to submit tickets and follow your own conversations with the team.</p>
+      <div class="form-success" role="status" data-auth-success hidden></div>
+      <div class="form-error" role="alert" data-auth-error hidden></div>
+      <div class="form-reset-prompt" role="status" data-account-setup-reset hidden>
+        <p data-account-setup-reset-message></p>
+        <button type="button" class="button button--secondary" data-account-setup-reset-submit>Send password reset</button>
+      </div>
+      <button type="submit" class="button auth-card__wide" data-auth-submit>{{ 'Create administrator account' if is_first else 'Create account' }}</button>
+      <p class="form-help auth-card__fineprint">Passwords are stored using bcrypt hashing{% if not is_first %}. After signing in you'll be able to submit tickets and follow your own conversations with the team{% endif %}.</p>
+    </form>
+
+    {% if not is_first %}
+      <p class="auth-card__footer">Already have an account? <a href="/login">Sign in</a></p>
     {% endif %}
-    <div class="form-success" role="status" data-auth-success hidden></div>
-    <div class="form-error" role="alert" data-auth-error hidden></div>
-    <div class="form-reset-prompt" role="status" data-account-setup-reset hidden>
-      <p data-account-setup-reset-message></p>
-      <button type="button" class="button button--secondary" data-account-setup-reset-submit>Send password reset</button>
-    </div>
-    <div class="form-actions">
-      <button type="submit" class="button" data-auth-submit>Create account</button>
-    </div>
-  </form>
+  </section>
 </div>
+<noscript><p class="alert alert--warning auth-noscript">Creating an account needs JavaScript. Turn it on in your browser to continue.</p></noscript>
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ static_url('/static/js/auth_ui.js') }}" defer></script>
 <script type="module" src="{{ static_url('/static/js/auth.js') }}"></script>
 {% endblock %}

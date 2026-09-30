@@ -1,0 +1,7 @@
+{
+  "guid": "f044122d-b3ae-4218-a407-1bc337046819",
+  "occurred_at": "2026-09-30T09:00Z",
+  "change_type": "Feature",
+  "summary": "Replace the SMTP2Go A/B campaigns JSON box with a campaign list and editor that shows each variant's rates and the current winner as you type, keeping the JSON under Advanced",
+  "content_hash": "f62e545b103612d48a592b41c832839523fd863b6966b368376959222fe83808"
+}

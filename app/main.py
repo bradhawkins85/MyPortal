@@ -8473,10 +8473,14 @@ async def admin_tray_ticket_questions_page(request: Request):
     for q in questions:
         q["conditions"] = cond_index.get(int(q["id"]), [])
 
+    from app.repositories import companies as companies_repo
+
+    companies = await companies_repo.list_companies()
     params = request.query_params
     extra = {
         "title": "Ticket intake questions",
         "questions": questions,
+        "companies": companies,
         "success_message": params.get("success"),
         "error_message": params.get("error"),
     }
