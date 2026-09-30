@@ -43,7 +43,7 @@
     data-auth-form
     data-endpoint="/auth/login"
     data-loading-text="Signing in&hellip;"
-    data-success-redirect="/"
+    data-success-redirect="{{ next_path or '/' }}"
     novalidate
   >
     {% include "partials/csrf.html" %}

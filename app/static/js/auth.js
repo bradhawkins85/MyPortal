@@ -65,7 +65,9 @@ function initPasskeyLogin() {
       if (!verifyResponse.ok) {
         throw new Error(verifyResult.detail || 'Passkey sign-in failed.');
       }
-      window.location.assign(verifyResult.redirect || '/');
+      const loginForm = document.querySelector('[data-auth-form][data-success-redirect]');
+      const fallbackRedirect = (loginForm && loginForm.dataset.successRedirect) || '/';
+      window.location.assign(verifyResult.redirect || fallbackRedirect);
     } catch (error) {
       if (errorContainer) {
         errorContainer.hidden = false;
