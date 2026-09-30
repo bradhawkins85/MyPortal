@@ -1529,6 +1529,15 @@
             const isCurrentPage = row.element.querySelector('a[aria-current="page"]');
             row.element.hidden = hidden.has(row.key) && !isCurrentPage;
           });
+          if (activeSidebarPreferences.navigation_style === 'top') {
+            let activeDropdownFound = false;
+            sidebarMenuRoot.querySelectorAll(':scope > .menu__item--expandable').forEach((item) => {
+              const containsCurrentPage = Boolean(item.querySelector('a[aria-current="page"]'));
+              const keepOpen = containsCurrentPage && !activeDropdownFound;
+              setMenuItemExpanded(item, keepOpen);
+              if (keepOpen) activeDropdownFound = true;
+            });
+          }
           document.dispatchEvent(new CustomEvent('myportal:sidebar-updated'));
         };
 
@@ -1638,6 +1647,11 @@
             return;
           }
           const expanded = !menuItem.classList.contains('menu__item--expanded');
+          if (document.body.classList.contains('navigation--top') && expanded) {
+            sidebarMenuRoot.querySelectorAll(':scope > .menu__item--expandable').forEach((item) => {
+              if (item !== menuItem) setMenuItemExpanded(item, false);
+            });
+          }
           setMenuItemExpanded(menuItem, expanded);
           if (menuItem.classList.contains('menu__item--custom-group')) {
             const groupId = menuItem.dataset.menuKey;
@@ -1645,6 +1659,18 @@
             else openSidebarGroups.delete(groupId);
             saveOpenSidebarGroups();
           }
+        });
+
+        // A top-navigation submenu is transient: choosing a destination or
+        // clicking elsewhere closes it instead of leaving several panels open.
+        document.addEventListener('click', (event) => {
+          if (!document.body.classList.contains('navigation--top')) return;
+          const selectedLink = event.target.closest('.menu__submenu a[href]');
+          const clickedInsideMenu = event.target.closest('.layout__sidebar .menu');
+          if (!selectedLink && clickedInsideMenu) return;
+          sidebarMenuRoot?.querySelectorAll(':scope > .menu__item--expandable').forEach((item) => {
+            setMenuItemExpanded(item, false);
+          });
         });
       })();
     </script>
