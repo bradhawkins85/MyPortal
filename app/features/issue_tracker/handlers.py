@@ -206,7 +206,9 @@ async def admin_create_issue(request: Request):
     except ValueError:
         status_value = issues_service.DEFAULT_STATUS
 
-    company_ids_raw = form.getlist("company_ids")
+    # The create form posts ``companyIds``; ``company_ids`` is still accepted
+    # for older clients.
+    company_ids_raw = [*form.getlist("companyIds"), *form.getlist("company_ids")]
     selected_companies: list[int] = []
     for raw in company_ids_raw:
         company_id_value = _coerce_company_id(raw)
@@ -242,8 +244,15 @@ async def admin_update_issue(issue_id: int, request: Request):
 
     _, allowed_company_ids = await _accessible_company_options(current_user)
     issue = await issues_repo.get_issue_by_id(issue_id, company_ids=allowed_company_ids)
-    if not issue or not issue.get("assignments"):
+    if not issue:
         return flash_redirect("/admin/issues", 'Issue not found.', "error")
+    if not issue.get("assignments"):
+        # Issues not linked to any company yet are shared and can be edited
+        # (and linked) by anyone with tracker access. Issues linked only to
+        # companies outside this user's scope stay out of reach.
+        unscoped = await issues_repo.get_issue_by_id(issue_id)
+        if not unscoped or unscoped.get("assignments"):
+            return flash_redirect("/admin/issues", 'Issue not found.', "error")
 
     form = await request.form()
     name = str(form.get("name", "")).strip()
