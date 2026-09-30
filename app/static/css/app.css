@@ -20375,3 +20375,117 @@ a.sch-item__company:focus-visible {
   flex: 0 0 auto;
   width: auto;
 }
+
+/* Scheduled tasks: status tiles filter the list (same pattern as M365 best practices). */
+.sch-filter-strip {
+  margin-bottom: var(--space-gap-base, 1rem);
+}
+
+.sch-filter-tile {
+  cursor: pointer;
+  border: none;
+  font: inherit;
+  text-align: left;
+}
+
+.sch-filter-tile:focus-visible {
+  outline: 2px solid var(--color-accent, #38bdf8);
+  outline-offset: 2px;
+}
+
+.sch-filter-tile[aria-pressed="true"] {
+  outline: 2px solid var(--color-accent, #38bdf8);
+  outline-offset: 2px;
+  transform: translateY(-2px);
+}
+
+/* Scheduled tasks: task-type show/hide dropdown. */
+.sch-types {
+  position: relative;
+}
+
+.sch-types__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-gap-tight, 0.5rem);
+  width: auto;
+  list-style: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sch-types__toggle::-webkit-details-marker {
+  display: none;
+}
+
+.sch-types__toggle::after {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-left: 0.25rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+  opacity: 0.7;
+}
+
+.sch-types.is-filtered .sch-types__toggle {
+  border-color: var(--hf-accent);
+  color: var(--hf-copy-strong);
+}
+
+.sch-types__panel {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 16rem;
+  padding: 0.5rem;
+  border: 1px solid var(--hf-line-strong);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-panel);
+  box-shadow: 0 24px 50px -20px rgba(15, 23, 42, 0.85);
+}
+
+.sch-types__actions {
+  display: flex;
+  gap: var(--space-gap-tight, 0.5rem);
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--hf-line);
+}
+
+.sch-types__list {
+  display: flex;
+  flex-direction: column;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.sch-types__option {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--hf-radius-sm);
+  font-size: 0.875rem;
+  color: var(--hf-copy);
+  cursor: pointer;
+}
+
+.sch-types__option:hover {
+  background: var(--hf-accent-soft);
+  color: var(--hf-copy-strong);
+}
+
+.sch-types__option span:first-of-type {
+  flex: 1 1 auto;
+}
+
+.sch-types__count {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--hf-muted);
+}

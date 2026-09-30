@@ -13,6 +13,29 @@
   };
   const FILTER_SESSION_KEY = 'portal.scheduled-tasks.filter';
   const SORT_STORAGE_KEY = 'portal.scheduled-tasks.sort';
+  const STATUS_STORAGE_KEY = 'portal.scheduled-tasks.statuses';
+  const HIDDEN_TYPES_STORAGE_KEY = 'portal.scheduled-tasks.hidden-types';
+
+  function readStoredList(key) {
+    try {
+      const value = JSON.parse(localStorage.getItem(key) || '[]');
+      return Array.isArray(value) ? value.filter((entry) => typeof entry === 'string') : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function writeStoredList(key, values) {
+    try {
+      if (values.length) {
+        localStorage.setItem(key, JSON.stringify(values));
+      } else {
+        localStorage.removeItem(key);
+      }
+    } catch (error) {
+      /* storage unavailable; the filter still works for this page view */
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Cron parsing, description and next-run calculation (croniter semantics)
@@ -548,11 +571,7 @@
   function saveListState() {
     try {
       const search = document.querySelector('[data-sch-search]');
-      const filter = document.querySelector('[data-sch-filter]');
-      sessionStorage.setItem(FILTER_SESSION_KEY, JSON.stringify({
-        q: search ? search.value : '',
-        filter: filter ? filter.value : '',
-      }));
+      sessionStorage.setItem(FILTER_SESSION_KEY, JSON.stringify({ q: search ? search.value : '' }));
     } catch (error) {
       /* storage unavailable */
     }
@@ -735,11 +754,16 @@
 
   function initList(root, items) {
     const search = root.querySelector('[data-sch-search]');
-    const filter = root.querySelector('[data-sch-filter]');
     const sort = root.querySelector('[data-sch-sort]');
     const groups = Array.from(root.querySelectorAll('[data-sch-group]'));
     const noResults = root.querySelector('[data-sch-no-results]');
     const dueStat = root.querySelector('[data-sch-stat="due"]');
+    const strip = root.querySelector('[data-sch-filter-strip]');
+    const tiles = strip ? Array.from(strip.querySelectorAll('[data-sch-status]')) : [];
+    const clearTile = strip ? strip.querySelector('[data-sch-status-clear]') : null;
+    const typesMenu = root.querySelector('[data-sch-types]');
+    const typeBoxes = typesMenu ? Array.from(typesMenu.querySelectorAll('[data-sch-type]')) : [];
+    const typesLabel = typesMenu ? typesMenu.querySelector('[data-sch-types-label]') : null;
     const dayMs = 86400000;
 
     const isDue = (item) => {
@@ -751,14 +775,19 @@
       dueStat.textContent = String(items.filter(isDue).length);
     }
 
+    const availableStatuses = new Set(tiles.map((tile) => tile.getAttribute('data-sch-status')));
+    let statuses = new Set(readStoredList(STATUS_STORAGE_KEY).filter((value) => availableStatuses.has(value)));
+    const availableTypes = new Set(typeBoxes.map((box) => box.value));
+    const hiddenTypes = new Set(readStoredList(HIDDEN_TYPES_STORAGE_KEY).filter((value) => availableTypes.has(value)));
+    typeBoxes.forEach((box) => {
+      box.checked = !hiddenTypes.has(box.value);
+    });
+
     try {
       const saved = JSON.parse(sessionStorage.getItem(FILTER_SESSION_KEY) || 'null');
       sessionStorage.removeItem(FILTER_SESSION_KEY);
       if (saved && search) {
         search.value = saved.q || '';
-      }
-      if (saved && filter && Array.from(filter.options).some((option) => option.value === saved.filter)) {
-        filter.value = saved.filter;
       }
     } catch (error) {
       /* storage unavailable */
@@ -772,12 +801,12 @@
       /* storage unavailable */
     }
 
-    function matchesFilter(item, value) {
+    function matchesStatus(item, value) {
       switch (value) {
+        case 'succeeded':
         case 'failed':
-          return item.getAttribute('data-status') === 'failed';
         case 'never':
-          return item.getAttribute('data-status') === 'never';
+          return item.getAttribute('data-last-status') === value;
         case 'due':
           return isDue(item);
         case 'paused':
@@ -787,6 +816,87 @@
         default:
           return true;
       }
+    }
+
+    function matchesStatuses(item) {
+      if (!statuses.size) {
+        return true;
+      }
+      return Array.from(statuses).some((value) => matchesStatus(item, value));
+    }
+
+    function syncControls() {
+      tiles.forEach((tile) => {
+        tile.setAttribute('aria-pressed', statuses.has(tile.getAttribute('data-sch-status')) ? 'true' : 'false');
+      });
+      if (clearTile) {
+        clearTile.setAttribute('aria-pressed', statuses.size ? 'false' : 'true');
+      }
+      if (typesLabel) {
+        const shown = typeBoxes.filter((box) => box.checked).length;
+        typesLabel.textContent = shown === typeBoxes.length
+          ? 'All task types'
+          : shown === 0
+            ? 'No task types'
+            : `${shown} of ${typeBoxes.length} task types`;
+      }
+      if (typesMenu) {
+        typesMenu.classList.toggle('is-filtered', typeBoxes.some((box) => !box.checked));
+      }
+    }
+
+    tiles.forEach((tile) => {
+      tile.addEventListener('click', () => {
+        const value = tile.getAttribute('data-sch-status');
+        statuses = new Set(statuses);
+        if (statuses.has(value)) {
+          statuses.delete(value);
+        } else {
+          statuses.add(value);
+        }
+        writeStoredList(STATUS_STORAGE_KEY, Array.from(statuses));
+        refresh();
+      });
+    });
+    if (clearTile) {
+      clearTile.addEventListener('click', () => {
+        statuses = new Set();
+        writeStoredList(STATUS_STORAGE_KEY, []);
+        refresh();
+      });
+    }
+
+    function saveTypes() {
+      writeStoredList(HIDDEN_TYPES_STORAGE_KEY, typeBoxes.filter((box) => !box.checked).map((box) => box.value));
+      refresh();
+    }
+    typeBoxes.forEach((box) => box.addEventListener('change', saveTypes));
+    if (typesMenu) {
+      const setAll = (checked) => {
+        typeBoxes.forEach((box) => {
+          box.checked = checked;
+        });
+        saveTypes();
+      };
+      const showAll = typesMenu.querySelector('[data-sch-types-all]');
+      const hideAll = typesMenu.querySelector('[data-sch-types-none]');
+      if (showAll) {
+        showAll.addEventListener('click', () => setAll(true));
+      }
+      if (hideAll) {
+        hideAll.addEventListener('click', () => setAll(false));
+      }
+      document.addEventListener('click', (event) => {
+        if (typesMenu.open && !typesMenu.contains(event.target)) {
+          typesMenu.open = false;
+        }
+      });
+      typesMenu.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && typesMenu.open) {
+          typesMenu.open = false;
+          typesMenu.querySelector('summary').focus();
+        }
+      });
     }
 
     function sortKey(item, mode) {
@@ -819,11 +929,13 @@
 
     function refresh() {
       const query = search ? search.value.trim().toLocaleLowerCase() : '';
-      const filterValue = filter ? filter.value : '';
+      const shownTypes = new Set(typeBoxes.filter((box) => box.checked).map((box) => box.value));
+      syncControls();
       let visibleTotal = 0;
       items.forEach((item) => {
         const text = (item.getAttribute('data-search-text') || '').toLocaleLowerCase();
-        const visible = (!query || text.includes(query)) && matchesFilter(item, filterValue);
+        const typeShown = !typeBoxes.length || shownTypes.has(item.getAttribute('data-type'));
+        const visible = (!query || text.includes(query)) && typeShown && matchesStatuses(item);
         item.hidden = !visible;
         if (!visible) {
           const checkbox = item.querySelector('[data-scheduled-tasks-row-checkbox]');
@@ -852,9 +964,6 @@
 
     if (search) {
       search.addEventListener('input', refresh);
-    }
-    if (filter) {
-      filter.addEventListener('change', refresh);
     }
     if (sort) {
       sort.addEventListener('change', () => {

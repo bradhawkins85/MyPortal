@@ -620,6 +620,18 @@ def test_scheduled_tasks_render_grouped_list_with_editor_modals():
     assert data["tasks"][0]["cron"] == "1 15 L * *"
     assert data["commandDefaults"]["generate_invoice"] == "1 0 L * *"
     assert "scheduled_tasks.js" in html and "automation.js" not in html
+    # The stat strip filters the list: each tile is a toggle button keyed to a row attribute.
+    assert 'data-sch-filter-strip' in html
+    tiles = re.findall(r'data-sch-status="([a-z]+)" aria-pressed="false"', html)
+    # Tiles only appear when they would match something (no task has succeeded here).
+    assert tiles == ["failed", "never", "due", "paused", "hidden"]
+    assert 'data-sch-status-clear aria-pressed="true"' in html
+    assert 'data-last-status="failed"' in html and 'data-last-status="never"' in html
+    # Task types can be shown or hidden from a checklist dropdown.
+    assert 'data-sch-types' in html
+    types = re.findall(r'<input type="checkbox" value="([^"]+)" data-sch-type checked', html)
+    assert types == ["Sync staff directory", "Sync to Xero"]
+    assert 'data-type="Sync to Xero"' in html
 
 
 def test_scheduled_tasks_empty_state_offers_first_task():
@@ -628,4 +640,5 @@ def test_scheduled_tasks_empty_state_offers_first_task():
     )
     assert "No active scheduled tasks" in html
     assert "+ Add your first task" in html
-    assert 'href="?show_inactive=1"' in html
+    # Paused tasks stay reachable from the toolbar switch.
+    assert 'name="show_inactive" value="1" data-sch-show-inactive' in html
