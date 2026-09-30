@@ -287,6 +287,42 @@ def test_save_best_practice_settings_includes_create_ticket_on_fail(monkeypatch)
     save_exclusions.assert_awaited_once_with(99, {"bp_other"})
 
 
+def test_exclude_check_action_preserves_existing_company_exclusions(monkeypatch):
+    async def fake_context(request, super_admin_only=False):
+        assert super_admin_only is True
+        return {"id": 7, "is_super_admin": True}, {}, {"id": 99}, 99, None
+
+    get_exclusions = AsyncMock(return_value={"bp_existing"})
+    save_exclusions = AsyncMock()
+    monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "list_best_practices",
+        lambda: [{"id": "bp_test", "name": "Test check"}],
+    )
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "get_company_exclusions",
+        get_exclusions,
+    )
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "save_company_exclusions",
+        save_exclusions,
+    )
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post("/m365/best-practices/exclude/bp_test")
+
+    assert response.status_code == 303
+    get_exclusions.assert_awaited_once_with(99)
+    save_exclusions.assert_awaited_once_with(99, {"bp_existing", "bp_test"})
+    assert _decode_flash_cookie(response) == {
+        "message": "Best practice excluded for this company",
+        "variant": "success",
+    }
+
+
 def test_can_manage_m365_account_exclusions_helper_covers_all_permission_branches():
     assert main_module._can_manage_m365_account_exclusions(
         {"is_super_admin": True}, {"is_admin": False}

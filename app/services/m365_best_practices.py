@@ -7210,6 +7210,11 @@ async def save_company_exclusions(company_id: int, excluded_check_ids: set[str])
     )
 
 
+async def get_company_exclusions(company_id: int) -> set[str]:
+    """Return the check IDs excluded for one company."""
+    return await bp_repo.get_company_exclusions(company_id)
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -9930,6 +9935,7 @@ __all__ = [
     "get_create_ticket_on_fail_check_ids",
     "reset_enabled_results_to_unknown",
     "set_enabled_checks",
+    "get_company_exclusions",
     "save_company_exclusions",
     "run_best_practices",
     "run_single_check",

@@ -4098,6 +4098,36 @@ async def run_single_m365_best_practice_check(request: Request, check_id: str):
     return flash_redirect("/m365/best-practices", "Check evaluated", "success")
 
 
+@app.post("/m365/best-practices/exclude/{check_id}", response_class=RedirectResponse)
+async def exclude_m365_best_practice_check(request: Request, check_id: str):
+    """Exclude one best-practice check for the current company."""
+    user, membership, _, company_id, redirect = await _load_m365_best_practices_context(
+        request, super_admin_only=True,
+    )
+    if redirect:
+        return redirect
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
+    known_ids = {bp["id"] for bp in m365_best_practices_service.list_best_practices()}
+    if check_id not in known_ids:
+        return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
+
+    excluded_ids = await m365_best_practices_service.get_company_exclusions(company_id)
+    excluded_ids.add(check_id)
+    await m365_best_practices_service.save_company_exclusions(company_id, excluded_ids)
+    log_info(
+        "M365 best practice excluded for company",
+        company_id=company_id,
+        check_id=check_id,
+        user_id=user.get("id"),
+    )
+    return flash_redirect(
+        "/m365/best-practices",
+        "Best practice excluded for this company",
+        "success",
+    )
+
+
 @app.post("/m365/best-practices/remediate/{check_id}", response_class=RedirectResponse)
 async def remediate_m365_best_practice(request: Request, check_id: str):
     """Run automated remediation for a single best-practice check."""
