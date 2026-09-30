@@ -311,6 +311,41 @@ async def admin_update_issue(issue_id: int, request: Request):
     return flash_redirect("/admin/issues", 'Issue updated.', "success")
 
 
+async def admin_delete_issue(issue_id: int, request: Request):
+    from app.core.logging import log_info
+    from app.repositories import issues as issues_repo
+
+    current_user, redirect = await _main()._require_issue_tracker_access(request)
+    if redirect:
+        return redirect
+
+    issue = await issues_repo.get_issue_by_id(issue_id)
+    if not issue:
+        return flash_redirect("/admin/issues", "Issue not found.", "error")
+
+    _, allowed_company_ids = await _accessible_company_options(current_user)
+    linked_company_ids = {
+        company_id
+        for assignment in issue.get("assignments", [])
+        if (company_id := _coerce_company_id(assignment.get("company_id"))) is not None
+    }
+    if not linked_company_ids.issubset(allowed_company_ids):
+        return flash_redirect(
+            "/admin/issues",
+            "Issue could not be deleted because it is linked to a company you cannot manage.",
+            "error",
+        )
+
+    await issues_repo.delete_issue(issue_id)
+    log_info(
+        "Issue deleted via admin",
+        issue_id=issue_id,
+        name=issue.get("name"),
+        deleted_by=_main()._get_current_user_id(current_user),
+    )
+    return flash_redirect("/admin/issues", "Issue deleted.", "success")
+
+
 async def admin_update_issue_assignment_status(
     issue_id: int,
     assignment_id: int,
