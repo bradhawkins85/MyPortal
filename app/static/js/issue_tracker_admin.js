@@ -135,6 +135,7 @@
     const previewName = modal.querySelector('[data-iss-preview-name]');
     const previewDescription = modal.querySelector('[data-iss-preview-description]');
     const previewRules = modal.querySelector('[data-iss-preview-rules]');
+    const deleteButton = modal.querySelector('[data-iss-delete]');
 
     const companies = (data.companies || []).map((company) => ({ id: String(company.id), name: company.name }));
     const statusLabels = new Map((data.statuses || []).map((status) => [status.value, status.label]));
@@ -269,6 +270,9 @@
         : 'Name the problem once, then link every company it affects.';
       submitButton.textContent = editing ? 'Save changes' : 'Create issue';
       submitButton.disabled = false;
+      deleteButton.hidden = !editing;
+      deleteButton.disabled = false;
+      deleteButton.formAction = editing ? `/admin/issues/${encodeURIComponent(issue.id)}/delete` : '/admin/issues';
 
       nameInput.value = editing ? issue.name : '';
       descriptionInput.value = editing ? issue.description : '';
@@ -383,6 +387,16 @@
     statusInputs.forEach((input) => input.addEventListener('change', renderPreview));
 
     form.addEventListener('submit', (event) => {
+      if (event.submitter === deleteButton) {
+        if (!window.confirm(`Delete “${state.issue.name}” and all of its company status records? This cannot be undone.`)) {
+          event.preventDefault();
+          return;
+        }
+        state.snapshot = serializeState();
+        deleteButton.disabled = true;
+        deleteButton.textContent = 'Deleting…';
+        return;
+      }
       const error = nameError();
       if (error) {
         event.preventDefault();

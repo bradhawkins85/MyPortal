@@ -92,7 +92,7 @@
         The checks here summarise the standard. Confirm the exact wording against the current SMB1001 edition before attesting.
       </div>
 
-      {% if can_manage and has_essential8_records and feature_pack_available('essential8') %}
+      {% if can_manage and essential8_import_count > 0 and feature_pack_available('essential8') %}
       <div class="compliance-form__actions">
         <button type="button" class="button button--ghost button--small" id="smb1001-import-e8">Import Essential 8 progress</button>
         <span class="form__hint">
@@ -162,11 +162,14 @@
               <form class="compliance-form" data-control-form="{{ control.id }}">
                 <div class="form-field">
                   <label for="smb-status-{{ control.id }}" class="form-label">Status</label>
-                  <select id="smb-status-{{ control.id }}" class="form-input" {% if not can_manage %}disabled{% endif %}>
+                  <select id="smb-status-{{ control.id }}" class="form-input" {% if not can_manage or control.status_locked %}disabled{% endif %}>
                     {% for value, label in [('not_started', 'Not started'), ('in_progress', 'In progress'), ('compliant', 'Compliant'), ('non_compliant', 'Non-compliant'), ('not_applicable', 'Not applicable')] %}
                     <option value="{{ value }}" {% if control.status == value %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                   </select>
+                  {% if control.status_reason %}
+                  <p class="form-help">{{ control.status_reason }}</p>
+                  {% endif %}
                 </div>
                 <div class="form-field">
                   <label for="smb-evidence-{{ control.id }}" class="form-label">Evidence</label>

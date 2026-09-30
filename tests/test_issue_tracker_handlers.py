@@ -101,3 +101,53 @@ def test_update_allows_issue_with_no_links_but_not_one_linked_elsewhere(monkeypa
     result = asyncio.run(handlers.admin_update_issue(2, _Request(form)))
     assert result == ("/admin/issues", "Issue not found.", "error")
     assert assigned == [(1, 5)]
+
+
+def test_delete_issue_removes_accessible_issue(monkeypatch):
+    _patch_common(monkeypatch, [5, 6])
+    deleted = []
+
+    async def _get(issue_id):
+        return {
+            "issue_id": issue_id,
+            "name": "Outage",
+            "assignments": [{"company_id": 5}, {"company_id": 6}],
+        }
+
+    async def _delete(issue_id):
+        deleted.append(issue_id)
+
+    monkeypatch.setattr(issues_repo, "get_issue_by_id", _get)
+    monkeypatch.setattr(issues_repo, "delete_issue", _delete)
+
+    result = asyncio.run(handlers.admin_delete_issue(42, _Request([])))
+
+    assert result == ("/admin/issues", "Issue deleted.", "success")
+    assert deleted == [42]
+
+
+def test_delete_issue_rejects_hidden_company_assignment(monkeypatch):
+    _patch_common(monkeypatch, [5])
+    deleted = []
+
+    async def _get(issue_id):
+        return {
+            "issue_id": issue_id,
+            "name": "Outage",
+            "assignments": [{"company_id": 5}, {"company_id": 99}],
+        }
+
+    async def _delete(issue_id):
+        deleted.append(issue_id)
+
+    monkeypatch.setattr(issues_repo, "get_issue_by_id", _get)
+    monkeypatch.setattr(issues_repo, "delete_issue", _delete)
+
+    result = asyncio.run(handlers.admin_delete_issue(42, _Request([])))
+
+    assert result == (
+        "/admin/issues",
+        "Issue could not be deleted because it is linked to a company you cannot manage.",
+        "error",
+    )
+    assert deleted == []
