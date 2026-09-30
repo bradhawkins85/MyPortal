@@ -19,7 +19,7 @@ from .admin_routes import router as admin_router
 
 PACK = FeaturePack(
     slug="companies",
-    version="1.1.1",
+    version="1.2.0",
     routers=(admin_router,),
 )
 
