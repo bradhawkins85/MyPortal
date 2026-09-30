@@ -144,6 +144,25 @@ def test_signature_templates_compile_and_expose_designer_copy():
     assert "purify.min.js" in source
 
 
+def test_signature_editor_renders_each_field_only_once():
+    source = (ROOT / "app" / "templates" / "m365" / "signatures_form.html").read_text(
+        encoding="utf-8"
+    )
+
+    for field_id in (
+        "signature-html-value",
+        "signature-text-content",
+        "signature-priority",
+        "signature-default",
+        "signature-schedule-start",
+        "signature-schedule-end",
+        "preview-staff-id",
+    ):
+        assert source.count(f'id="{field_id}"') == 1
+
+    assert source.count("data-sig-editor") == 1
+
+
 def test_pick_primary_template_prefers_priority_then_default_then_schedule():
     primary = m365_signatures.pick_primary_template(
         [
