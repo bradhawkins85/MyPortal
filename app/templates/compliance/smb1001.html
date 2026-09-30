@@ -25,6 +25,7 @@
       {% if company %}
       <div class="management__header-actions compliance__header-actions">
         <span class="tag tag--muted">{{ company.name }}</span>
+        <a href="/compliance/attestation-report.pdf" class="button button--primary button--small">Export attestation PDF</a>
         {% if has_essential8_records and feature_pack_available('essential8') %}
         <a href="/compliance/essential8" class="button button--ghost button--small">Legacy Essential 8 records</a>
         {% endif %}

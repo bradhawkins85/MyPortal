@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime, timezone
 from functools import lru_cache
+import re
 import unicodedata
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from app.core.config import get_settings
 from app.repositories import companies as company_repo
@@ -258,6 +261,77 @@ async def compliance_page(request: Request):
         "can_manage": bool(user.get("is_super_admin")) or bool(membership and membership.get("is_admin")),
     }
     return await main_module._render_template("compliance/smb1001.html", request, user, extra=extra)
+
+
+def _safe_attestation_filename(company_name: str) -> str:
+    safe_name = "".join(
+        character if character.isalnum() or character in ("-", "_") else "_"
+        for character in company_name.strip().replace(" ", "_")
+    ).strip("_")
+    safe_name = re.sub(r"_+", "_", safe_name) or "company"
+    return f"SMB1001_attestation_{safe_name}_{datetime.now(timezone.utc):%Y%m%d}.pdf"
+
+
+@router.get("/compliance/attestation-report.pdf", summary="Export the current SMB1001 attestation report")
+async def smb1001_attestation_report(request: Request):
+    """Export the company's current SMB1001 position and supporting evidence."""
+    user, _membership, company, company_id, redirect = await _load_compliance_context(request)
+    if redirect:
+        return redirect
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    try:
+        from weasyprint import HTML  # type: ignore
+    except (ImportError, OSError) as exc:  # pragma: no cover - system dependency
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="PDF export is temporarily unavailable.",
+        ) from exc
+
+    await smb1001_repo.ensure_company_profile(company_id, user_id=user.get("id"))
+    overview = await smb1001_repo.get_company_overview(company_id)
+    evidence_map = await smb1001_repo.list_evidence_map(company_id)
+    controls = []
+    for control in overview["controls"]:
+        item = dict(control)
+        item["record"] = control.get("compliance") or {}
+        item["evidence_files"] = evidence_map.get(int(control["id"]), [])
+        controls.append(item)
+
+    generated_at = datetime.now(timezone.utc)
+    template = _main().templates.get_template("compliance/smb1001_attestation_pdf.html")
+    rendered_html = template.render(
+        company=company,
+        progress=overview["progress"],
+        controls=controls,
+        generated_at=generated_at,
+    )
+    pdf_bytes = await asyncio.to_thread(
+        lambda: HTML(string=rendered_html, base_url=str(request.base_url)).write_pdf()
+    )
+    await audit_service.record(
+        action="smb1001.attestation_report.export_pdf",
+        request=request,
+        user_id=user.get("id"),
+        entity_type="company",
+        entity_id=company_id,
+        metadata={
+            "company_id": company_id,
+            "achieved_tier": (overview["progress"].get("achieved_tier") or {}).get("name"),
+            "format": "pdf",
+        },
+    )
+    filename = _safe_attestation_filename(str(company.get("name") or f"company_{company_id}"))
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.post("/compliance/smb1001/{control_id}/ticket", response_class=HTMLResponse)

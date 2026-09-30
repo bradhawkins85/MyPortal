@@ -586,6 +586,43 @@ def test_report_section_templates_render():
     assert 'href="/marketing/mfa"' in body and "to reach Silver" in body
 
 
+def test_attestation_pdf_template_includes_level_evidence_and_review_dates():
+    import app.main as main_module
+
+    body = main_module.templates.env.get_template("compliance/smb1001_attestation_pdf.html").render(
+        company={"name": "Acme & Co"},
+        generated_at=__import__("datetime").datetime(2026, 9, 30, 12, 0),
+        progress={
+            "achieved_tier": {"name": "Bronze"},
+            "target_tier": 2,
+            "target_percentage": 50,
+            "target_done": 5,
+            "target_total": 10,
+            "overall_percentage": 25,
+            "overall_done": 5,
+            "overall_total": 20,
+            "tiers": [{"tier_level": 2, "name": "Silver"}],
+        },
+        controls=[{
+            "code": "AM-03", "tier_level": 1, "name": "MFA", "domain_label": "Access management",
+            "status": "compliant", "record": {"last_reviewed_date": "2026-09-29", "target_compliance_date": None,
+                                                     "updated_at": "2026-09-30T10:00:00", "evidence": "Configuration checked", "notes": "Reviewed"},
+            "evidence_files": [{"title": "MFA configuration", "version_number": 2,
+                                "description": "Admin export", "created_at": "2026-09-28T10:00:00"}],
+        }],
+    )
+    assert "Current achieved level" in body and "Bronze" in body
+    assert "MFA configuration" in body and "Configuration checked" in body
+    assert "2026-09-29" in body and "Not recorded" in body
+
+
+def test_attestation_pdf_filename_is_safe():
+    filename = compliance_routes._safe_attestation_filename(' Acme / "North" ')
+    assert filename.startswith("SMB1001_attestation_Acme_North_")
+    assert filename.endswith(".pdf")
+    assert '"' not in filename and "/" not in filename
+
+
 # ---------------------------------------------------------------------------
 # Evidence API
 # ---------------------------------------------------------------------------
