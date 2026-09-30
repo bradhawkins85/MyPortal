@@ -161,11 +161,14 @@
               <form class="compliance-form" data-control-form="{{ control.id }}">
                 <div class="form-field">
                   <label for="smb-status-{{ control.id }}" class="form-label">Status</label>
-                  <select id="smb-status-{{ control.id }}" class="form-input" {% if not can_manage %}disabled{% endif %}>
+                  <select id="smb-status-{{ control.id }}" class="form-input" {% if not can_manage or control.status_locked %}disabled{% endif %}>
                     {% for value, label in [('not_started', 'Not started'), ('in_progress', 'In progress'), ('compliant', 'Compliant'), ('non_compliant', 'Non-compliant'), ('not_applicable', 'Not applicable')] %}
                     <option value="{{ value }}" {% if control.status == value %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                   </select>
+                  {% if control.status_reason %}
+                  <p class="form-help">{{ control.status_reason }}</p>
+                  {% endif %}
                 </div>
                 <div class="form-field">
                   <label for="smb-evidence-{{ control.id }}" class="form-label">Evidence</label>

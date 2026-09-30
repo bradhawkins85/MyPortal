@@ -27,6 +27,13 @@ DONE_STATUSES = frozenset({"compliant", "not_applicable"})
 HELP_STATUSES = frozenset({"not_started", "in_progress", "non_compliant"})
 MAX_TIER = 5
 
+# Hawkins IT Solutions provides every portal company with the managed IT
+# support required by TM-01.  This is an effective reporting status rather
+# than a stored attestation so historical records and audit data are retained.
+MANAGED_COMPLIANT_CONTROLS: dict[str, str] = {
+    "TM-01": "Compliant through engaged IT support from Hawkins IT Solutions.",
+}
+
 DOMAINS: dict[str, str] = {
     "technology": "Technology management",
     "access": "Access management",
@@ -530,7 +537,18 @@ async def get_company_overview(company_id: int) -> dict[str, Any]:
     compliance_map = await list_company_compliance(company_id)
     profile = await get_profile(company_id) or {"company_id": company_id, "target_tier": 1}
     for control in controls:
-        record = compliance_map.get(int(control["id"]))
+        control_id = int(control["id"])
+        managed_reason = MANAGED_COMPLIANT_CONTROLS.get(control["code"])
+        if managed_reason:
+            stored_record = compliance_map.get(control_id)
+            record = {**(stored_record or {}), "status": "compliant"}
+            compliance_map[control_id] = record
+            control["status_locked"] = True
+            control["status_reason"] = managed_reason
+        else:
+            record = compliance_map.get(control_id)
+            control["status_locked"] = False
+            control["status_reason"] = ""
         control["compliance"] = record
         control["status"] = (record or {}).get("status") or "not_started"
         control["essential8_mapped"] = control["code"] in ESSENTIAL8_MAPPINGS

@@ -260,6 +260,29 @@ async def test_overview_reports_achieved_tier(sqlite_db, monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
+async def test_overview_always_reports_tm01_compliant(sqlite_db, monkeypatch):
+    _no_essential8(monkeypatch)
+    await smb1001_repo.ensure_company_profile(1)
+    controls = {control["code"]: control for control in await smb1001_repo.list_controls()}
+    tm01 = controls["TM-01"]
+    await smb1001_repo.save_company_control_compliance(
+        1, tm01["id"], status="non_compliant", notes="Historical manual status"
+    )
+
+    overview = await smb1001_repo.get_company_overview(1)
+
+    reported_tm01 = next(control for control in overview["controls"] if control["code"] == "TM-01")
+    assert reported_tm01["status"] == "compliant"
+    assert reported_tm01["compliance"]["status"] == "compliant"
+    assert reported_tm01["status_locked"] is True
+    assert "Hawkins IT Solutions" in reported_tm01["status_reason"]
+    assert overview["progress"]["tiers"][0]["counts"]["compliant"] >= 1
+    # Reporting the managed status must not rewrite historical attestations.
+    stored = await smb1001_repo.get_company_control_compliance(1, tm01["id"])
+    assert stored["status"] == "non_compliant"
+
+
+@pytest.mark.anyio("asyncio")
 async def test_compliance_page_renders_smb1001(monkeypatch):
     captured: dict[str, object] = {}
 
@@ -491,11 +514,11 @@ async def test_recommendations_cover_outstanding_controls_to_target(sqlite_db, m
     result = await smb1001_repo.list_recommendations(1)
 
     tiers = {row["tier_level"] for row in result["recommendations"]}
-    assert tiers == {1, 2}
-    first = next(row for row in result["recommendations"] if row["control_id"] == bronze[0]["id"])
-    assert first["recommendation"] == "IT support plan"
-    assert first["url"] == "https://example.com/it"
-    assert result["total"] == 1 + len(await smb1001_repo.list_controls(tier_level=2))
+    # TM-01 is fulfilled by Hawkins IT Solutions and is no longer an
+    # outstanding Bronze recommendation.
+    assert tiers == {2}
+    assert all(row["control_id"] != bronze[0]["id"] for row in result["recommendations"])
+    assert result["total"] == len(await smb1001_repo.list_controls(tier_level=2))
     assert result["horizon_tier"] == "Silver"
 
 
