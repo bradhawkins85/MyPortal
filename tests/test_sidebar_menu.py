@@ -248,9 +248,10 @@ def test_top_navigation_dropdowns_are_exclusive_and_aligned():
     stylesheet = Path("app/static/css/app.css").read_text()
 
     assert "if (item !== menuItem) setMenuItemExpanded(item, false);" in base_template
-    assert "let activeDropdownFound = false;" in base_template
+    assert "setMenuItemExpanded(item, false);" in base_template
+    assert "let activeDropdownFound = false;" not in base_template
     assert "const selectedLink = event.target.closest('.menu__submenu a[href]');" in base_template
-    assert "body.navigation--top .menu__item--expandable:hover > .menu__submenu" in stylesheet
+    assert "body.navigation--top .menu__item--expandable:hover > .menu__submenu" not in stylesheet
     top_header_rule = stylesheet.split("body.navigation--top .layout__header {", 1)[1].split("}", 1)[0]
     assert "position: relative" in top_header_rule
     assert "top: auto" in top_header_rule
