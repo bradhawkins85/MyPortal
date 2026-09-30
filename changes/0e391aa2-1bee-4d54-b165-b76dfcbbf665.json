@@ -1,0 +1,7 @@
+{
+  "guid": "0e391aa2-1bee-4d54-b165-b76dfcbbf665",
+  "occurred_at": "2026-09-30T06:00Z",
+  "change_type": "Feature",
+  "summary": "Redesign the Add and Edit staff member modals with tabs, a live preview, inline validation and an unsaved-changes guard",
+  "content_hash": "af1091ee268ec60f9ef4451f7b92aa8147f6f257a95b52a59b8258b1866b9227"
+}
