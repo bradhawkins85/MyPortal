@@ -36,7 +36,7 @@ def test_teams_rejects_unsupported_commands_before_starting_process():
     with pytest.raises(providers.ProviderCommandError) as exc:
         asyncio.run(providers.invoke_teams_command(
             tenant_id="tenant", graph_token="secret-a", teams_token="secret-b",
-            command="Set-CsTeamsMeetingPolicy", parameters={},
+            command="Remove-CsTeamsMeetingPolicy", parameters={},
         ))
     assert exc.value.kind == "unsupported"
     assert "secret" not in str(exc.value)
