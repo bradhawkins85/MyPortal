@@ -303,19 +303,14 @@ async def record_m365_delivery(*, reply_id: int, recipient_email: str,
 
 async def refresh_m365_read_status(reply_id: int) -> None:
     """Refresh unread direct-delivery rows from Graph on demand."""
-    module_row = await db.fetch_one(
-        """SELECT enabled, settings
-             FROM modules
-            WHERE slug = :slug
-            LIMIT 1""",
-        {"slug": "m365-direct-delivery"},
-    )
-    if not module_row:
+    from app.repositories import integration_modules as modules_repo
+
+    module = await modules_repo.get_module("m365-direct-delivery")
+    if not module or not module.get("enabled"):
         return
-    module_enabled = bool(module_row["enabled"])
-    module_settings = module_row["settings"] or {}
-    if not module_enabled:
-        return
+    module_settings = module.get("settings")
+    if not isinstance(module_settings, dict):
+        module_settings = {}
     if not module_settings.get("track_read_status", True):
         return
     rows = await db.fetch_all(
