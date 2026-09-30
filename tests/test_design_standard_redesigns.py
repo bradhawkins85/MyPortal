@@ -345,85 +345,88 @@ def test_totp_enrolment_keeps_script_hooks():
     assert html.count('class="totp-step"') == 3
 
 
-def _render_roles(roles):
-    from app.security.menu_permissions import catalogue_for_api
+def _issue_tracker_context(**overrides):
+    from types import SimpleNamespace
 
-    env = _env()
-    template = env.get_template("admin/roles.html")
-    context = template.new_context({
-        "roles": roles,
-        "menu_permission_catalogue": catalogue_for_api(),
-        "companies": [],
-        "overview_company_id": None,
-        "overview_role_id": None,
-        "published_content_overview": [],
-        "counter_strip": env.get_template("macros/counters.html").module.counter_strip,
-    })
-    return "".join(template.blocks["content"](context))
-
-
-def test_roles_page_renders_catalogue_and_grouped_access_editor():
-    html = _render_roles([
-        {"id": 1, "name": "Staff", "description": "Everyday staff", "is_system": True,
-         "member_count": 12, "permissions": {"menu.tickets": "read", "menu.dashboard": "read"}},
-        {"id": 7, "name": "Helpdesk", "description": None, "is_system": False,
-         "member_count": 0, "permissions": {"menu.admin.technician": "write", "menu.tickets": "write"}},
-    ])
-
-    assert 'data-role-edit="7"' in html and 'data-role-clone="1"' in html
-    assert "12 members" in html and "Not assigned" in html
-    assert "rol-chip--elevated" in html  # Technician is called out on the list
-    assert 'class="modal scf-modal" id="role-modal" role="dialog"' in html
-    # Every catalogue permission gets one radio group; tickets and technician keep their wording.
-    ticket_row = html[html.index('data-role-perm="menu.tickets"'):]
-    ticket_row = ticket_row[: ticket_row.index("</li>")]
-    assert ">Own<" in ticket_row and ">All<" in ticket_row
-    tech_row = html[html.index('data-role-perm="menu.admin.technician"'):]
-    tech_row = tech_row[: tech_row.index("</li>")]
-    assert ">No<" in tech_row and ">Yes<" in tech_row and 'value="read"' not in tech_row
-    data = _json_block(html, "role-editor-data")
-    assert data["roles"][1] == {
-        "id": 7, "name": "Helpdesk", "description": "",
-        "permissions": {"menu.admin.technician": "write", "menu.tickets": "write"},
-        "isSystem": False, "members": 0,
-    }
-    assert {"key": "menu.tickets", "levels": ["none", "read", "write"]}.items() <= data["catalogue"][
-        [item["key"] for item in data["catalogue"]].index("menu.tickets")
-    ].items()
-
-
-def test_roles_page_empty_state_offers_first_role():
-    html = _render_roles([])
-
-    assert "No roles yet" in html
-    assert "+ Add your first role" in html
-def _scheduled_tasks_context(**overrides):
-    tasks = [
-        {"id": 1, "name": "Acme — Sync to Xero", "command": "sync_to_xero", "command_label": "Sync to Xero",
-         "command_group": "Billing and Xero", "company_id": 42, "company_name": "Acme",
-         "company_edit_url": "/admin/companies/42/edit", "cron": "1 15 L * *", "description": None,
-         "active": True, "exclude_from_calendar": False, "max_retries": 12, "retry_backoff_seconds": 300,
-         "last_status": "failed", "last_error": "Xero token expired", "last_run_iso": "2026-09-01T15:01:00+00:00",
-         "next_run_iso": "2026-09-30T15:01:00+00:00"},
-        {"id": 2, "name": "All companies — Sync staff directory", "command": "sync_staff",
-         "command_label": "Sync staff directory", "command_group": "Staff and assets", "company_id": None,
-         "company_name": "All companies", "company_edit_url": None, "cron": "30 3 * * *",
-         "description": "Nightly", "active": False, "exclude_from_calendar": True, "max_retries": 0,
-         "retry_backoff_seconds": 60, "last_status": None, "last_error": None, "last_run_iso": None,
-         "next_run_iso": None},
+    statuses = [
+        {"value": "new", "label": "New"},
+        {"value": "investigating", "label": "Investigating"},
+        {"value": "monitoring", "label": "Monitoring"},
+        {"value": "resolved", "label": "Resolved"},
+    ]
+    issues = [
+        {"issue_id": 1, "name": "M365 outage", "description": "Sign-in fails", "updated_at_iso": "2026-09-30T01:00:00+00:00",
+         "assignments": [
+             {"assignment_id": 11, "company_id": 5, "company_name": "Acme", "status": "investigating", "updated_at_iso": None},
+             {"assignment_id": 12, "company_id": 6, "company_name": "Globex", "status": "resolved", "updated_at_iso": None},
+         ]},
+        {"issue_id": 2, "name": "Printer driver", "description": None, "updated_at_iso": None,
+         "assignments": [
+             {"assignment_id": 21, "company_id": 5, "company_name": "Acme", "status": "monitoring", "updated_at_iso": None},
+         ]},
+        {"issue_id": 3, "name": "Old VPN", "description": None, "updated_at_iso": None, "assignments": []},
     ]
     context = {
-        "tasks": tasks,
-        "show_inactive": True,
-        "upgrade_status": {"configured_mode": "graceful"},
-        "command_options": [
-            {"value": "sync_staff", "label": "Sync staff directory", "group": "Staff and assets"},
-            {"value": "create_scheduled_ticket", "label": "Create scheduled ticket", "group": "Tickets"},
-            {"value": "sync_to_xero", "label": "Sync to Xero", "group": "Billing and Xero"},
-        ],
-        "company_options": [{"value": "", "label": "All companies"}, {"value": "42", "label": "Acme"}],
-        "bulk_company_options": [{"value": "42", "label": "Acme"}],
-        "schedule_timezone": "Australia/Brisbane",
+        "request": SimpleNamespace(url=SimpleNamespace(path="/admin/issues", query="")),
+        "issues": issues,
+        "issue_count": len(issues),
+        "issue_status_options": statuses,
+        "selected_status": None,
+        "selected_company_id": None,
+        "search_term": "",
+        "company_options": [{"id": 5, "name": "Acme"}, {"id": 6, "name": "Globex"}],
+        "editing_issue": None,
+        "csrf_token": "t",
+    }
+    context.update(overrides)
+    return context
+
+
+def test_issue_tracker_renders_issue_list_stats_and_editor():
+    html = _page_env().get_template("admin/issues.html").render(**_issue_tracker_context())
+
+    # One row per issue (not per company), with its health and company statuses.
+    assert html.count("data-iss-item") == 3
+    assert "iss-item--active" in html and "iss-item--monitoring" in html and "iss-item--unlinked" in html
+    assert 'action="/admin/issues/1/assignments/11/status"' in html
+    assert 'action="/admin/issues/1/assignments/12/delete"' in html
+    assert "stat-strip__stat--total" in html
+    assert 'href="/admin/issues?issueId=2" data-iss-edit="2"' in html
+    assert 'data-iss-delete hidden>Delete issue</button>' in html
+    # Standard popup modal pattern.
+    assert re.search(r'<div class="modal scf-modal" id="iss-modal" role="dialog" aria-modal="true" '
+                     r'aria-labelledby="iss-modal-title" aria-hidden="true" hidden>', html)
+    assert 'name="companyIds"' in html
+    data = _json_block(html, "iss-editor-data")
+    assert data["openIssueId"] is None
+    assert data["issues"][0]["assignments"][1] == {"company_id": 6, "company_name": "Globex", "status": "resolved"}
+
+
+def test_issue_tracker_empty_and_filtered_states():
+    empty = _page_env().get_template("admin/issues.html").render(
+        **_issue_tracker_context(issues=[], issue_count=0)
+    )
+    assert "No issues yet" in empty
+    assert "+ Create your first issue" in empty
+
+    filtered = _page_env().get_template("admin/issues.html").render(
+        **_issue_tracker_context(issues=[], issue_count=0, selected_status="resolved")
+    )
+    assert "No issues match these filters" in filtered
+    assert "Matching issues" in filtered
+
+
+def test_issue_tracker_opens_editor_for_requested_issue():
+    context = _issue_tracker_context()
+    editing = dict(context["issues"][2], issue_id=9, name="Hidden by filters")
+    html = _page_env().get_template("admin/issues.html").render(
+        **dict(context, editing_issue=editing)
+    )
+    data = _json_block(html, "iss-editor-data")
+    assert data["openIssueId"] == 9
+    assert data["issues"][-1]["name"] == "Hidden by filters"
+
+
 def test_service_status_admin_renders_service_list_and_editor():
     from datetime import datetime
 
@@ -489,37 +492,89 @@ def test_service_status_admin_empty_state_offers_first_service():
     assert "No services yet" in html
     assert "+ Add your first service" in html
     assert 'id="public-pages-modal"' not in html
-def _issue_tracker_context(**overrides):
-    from types import SimpleNamespace
 
-    statuses = [
-        {"value": "new", "label": "New"},
-        {"value": "investigating", "label": "Investigating"},
-        {"value": "monitoring", "label": "Monitoring"},
-        {"value": "resolved", "label": "Resolved"},
-    ]
-    issues = [
-        {"issue_id": 1, "name": "M365 outage", "description": "Sign-in fails", "updated_at_iso": "2026-09-30T01:00:00+00:00",
-         "assignments": [
-             {"assignment_id": 11, "company_id": 5, "company_name": "Acme", "status": "investigating", "updated_at_iso": None},
-             {"assignment_id": 12, "company_id": 6, "company_name": "Globex", "status": "resolved", "updated_at_iso": None},
-         ]},
-        {"issue_id": 2, "name": "Printer driver", "description": None, "updated_at_iso": None,
-         "assignments": [
-             {"assignment_id": 21, "company_id": 5, "company_name": "Acme", "status": "monitoring", "updated_at_iso": None},
-         ]},
-        {"issue_id": 3, "name": "Old VPN", "description": None, "updated_at_iso": None, "assignments": []},
+
+def _render_roles(roles):
+    from app.security.menu_permissions import catalogue_for_api
+
+    env = _env()
+    template = env.get_template("admin/roles.html")
+    context = template.new_context({
+        "roles": roles,
+        "menu_permission_catalogue": catalogue_for_api(),
+        "companies": [],
+        "overview_company_id": None,
+        "overview_role_id": None,
+        "published_content_overview": [],
+        "counter_strip": env.get_template("macros/counters.html").module.counter_strip,
+    })
+    return "".join(template.blocks["content"](context))
+
+
+def test_roles_page_renders_catalogue_and_grouped_access_editor():
+    html = _render_roles([
+        {"id": 1, "name": "Staff", "description": "Everyday staff", "is_system": True,
+         "member_count": 12, "permissions": {"menu.tickets": "read", "menu.dashboard": "read"}},
+        {"id": 7, "name": "Helpdesk", "description": None, "is_system": False,
+         "member_count": 0, "permissions": {"menu.admin.technician": "write", "menu.tickets": "write"}},
+    ])
+
+    assert 'data-role-edit="7"' in html and 'data-role-clone="1"' in html
+    assert "12 members" in html and "Not assigned" in html
+    assert "rol-chip--elevated" in html  # Technician is called out on the list
+    assert 'class="modal scf-modal" id="role-modal" role="dialog"' in html
+    # Every catalogue permission gets one radio group; tickets and technician keep their wording.
+    ticket_row = html[html.index('data-role-perm="menu.tickets"'):]
+    ticket_row = ticket_row[: ticket_row.index("</li>")]
+    assert ">Own<" in ticket_row and ">All<" in ticket_row
+    tech_row = html[html.index('data-role-perm="menu.admin.technician"'):]
+    tech_row = tech_row[: tech_row.index("</li>")]
+    assert ">No<" in tech_row and ">Yes<" in tech_row and 'value="read"' not in tech_row
+    data = _json_block(html, "role-editor-data")
+    assert data["roles"][1] == {
+        "id": 7, "name": "Helpdesk", "description": "",
+        "permissions": {"menu.admin.technician": "write", "menu.tickets": "write"},
+        "isSystem": False, "members": 0,
+    }
+    assert {"key": "menu.tickets", "levels": ["none", "read", "write"]}.items() <= data["catalogue"][
+        [item["key"] for item in data["catalogue"]].index("menu.tickets")
+    ].items()
+
+
+def test_roles_page_empty_state_offers_first_role():
+    html = _render_roles([])
+
+    assert "No roles yet" in html
+    assert "+ Add your first role" in html
+
+
+def _scheduled_tasks_context(**overrides):
+    tasks = [
+        {"id": 1, "name": "Acme — Sync to Xero", "command": "sync_to_xero", "command_label": "Sync to Xero",
+         "command_group": "Billing and Xero", "company_id": 42, "company_name": "Acme",
+         "company_edit_url": "/admin/companies/42/edit", "cron": "1 15 L * *", "description": None,
+         "active": True, "exclude_from_calendar": False, "max_retries": 12, "retry_backoff_seconds": 300,
+         "last_status": "failed", "last_error": "Xero token expired", "last_run_iso": "2026-09-01T15:01:00+00:00",
+         "next_run_iso": "2026-09-30T15:01:00+00:00"},
+        {"id": 2, "name": "All companies — Sync staff directory", "command": "sync_staff",
+         "command_label": "Sync staff directory", "command_group": "Staff and assets", "company_id": None,
+         "company_name": "All companies", "company_edit_url": None, "cron": "30 3 * * *",
+         "description": "Nightly", "active": False, "exclude_from_calendar": True, "max_retries": 0,
+         "retry_backoff_seconds": 60, "last_status": None, "last_error": None, "last_run_iso": None,
+         "next_run_iso": None},
     ]
     context = {
-        "request": SimpleNamespace(url=SimpleNamespace(path="/admin/issues", query="")),
-        "issues": issues,
-        "issue_count": len(issues),
-        "issue_status_options": statuses,
-        "selected_status": None,
-        "selected_company_id": None,
-        "search_term": "",
-        "company_options": [{"id": 5, "name": "Acme"}, {"id": 6, "name": "Globex"}],
-        "editing_issue": None,
+        "tasks": tasks,
+        "show_inactive": True,
+        "upgrade_status": {"configured_mode": "graceful"},
+        "command_options": [
+            {"value": "sync_staff", "label": "Sync staff directory", "group": "Staff and assets"},
+            {"value": "create_scheduled_ticket", "label": "Create scheduled ticket", "group": "Tickets"},
+            {"value": "sync_to_xero", "label": "Sync to Xero", "group": "Billing and Xero"},
+        ],
+        "company_options": [{"value": "", "label": "All companies"}, {"value": "42", "label": "Acme"}],
+        "bulk_company_options": [{"value": "42", "label": "Acme"}],
+        "schedule_timezone": "Australia/Brisbane",
         "csrf_token": "t",
     }
     context.update(overrides)
@@ -574,46 +629,3 @@ def test_scheduled_tasks_empty_state_offers_first_task():
     assert "No active scheduled tasks" in html
     assert "+ Add your first task" in html
     assert 'href="?show_inactive=1"' in html
-def test_issue_tracker_renders_issue_list_stats_and_editor():
-    html = _page_env().get_template("admin/issues.html").render(**_issue_tracker_context())
-
-    # One row per issue (not per company), with its health and company statuses.
-    assert html.count("data-iss-item") == 3
-    assert "iss-item--active" in html and "iss-item--monitoring" in html and "iss-item--unlinked" in html
-    assert 'action="/admin/issues/1/assignments/11/status"' in html
-    assert 'action="/admin/issues/1/assignments/12/delete"' in html
-    assert "stat-strip__stat--total" in html
-    assert 'href="/admin/issues?issueId=2" data-iss-edit="2"' in html
-    assert 'data-iss-delete hidden>Delete issue</button>' in html
-    # Standard popup modal pattern.
-    assert re.search(r'<div class="modal scf-modal" id="iss-modal" role="dialog" aria-modal="true" '
-                     r'aria-labelledby="iss-modal-title" aria-hidden="true" hidden>', html)
-    assert 'name="companyIds"' in html
-    data = _json_block(html, "iss-editor-data")
-    assert data["openIssueId"] is None
-    assert data["issues"][0]["assignments"][1] == {"company_id": 6, "company_name": "Globex", "status": "resolved"}
-
-
-def test_issue_tracker_empty_and_filtered_states():
-    empty = _page_env().get_template("admin/issues.html").render(
-        **_issue_tracker_context(issues=[], issue_count=0)
-    )
-    assert "No issues yet" in empty
-    assert "+ Create your first issue" in empty
-
-    filtered = _page_env().get_template("admin/issues.html").render(
-        **_issue_tracker_context(issues=[], issue_count=0, selected_status="resolved")
-    )
-    assert "No issues match these filters" in filtered
-    assert "Matching issues" in filtered
-
-
-def test_issue_tracker_opens_editor_for_requested_issue():
-    context = _issue_tracker_context()
-    editing = dict(context["issues"][2], issue_id=9, name="Hidden by filters")
-    html = _page_env().get_template("admin/issues.html").render(
-        **dict(context, editing_issue=editing)
-    )
-    data = _json_block(html, "iss-editor-data")
-    assert data["openIssueId"] == 9
-    assert data["issues"][-1]["name"] == "Hidden by filters"
