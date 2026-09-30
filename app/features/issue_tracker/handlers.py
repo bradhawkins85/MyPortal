@@ -306,8 +306,9 @@ async def admin_update_issue(issue_id: int, request: Request):
         issue_id=issue_id,
         updated_by=_main()._get_current_user_id(current_user),
     )
-    url = f"/admin/issues?issueId={issue_id}"
-    return flash_redirect(url, 'Issue updated.', "success")
+    # Back to the list: ?issueId= reopens the editor, which only makes sense
+    # after a failed save.
+    return flash_redirect("/admin/issues", 'Issue updated.', "success")
 
 
 async def admin_update_issue_assignment_status(

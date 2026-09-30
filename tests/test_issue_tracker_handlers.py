@@ -94,7 +94,7 @@ def test_update_allows_issue_with_no_links_but_not_one_linked_elsewhere(monkeypa
 
     form = [("name", "Unlinked"), ("newCompanyIds", "5"), ("newCompanyStatus", "new")]
     result = asyncio.run(handlers.admin_update_issue(1, _Request(form)))
-    assert result == ("/admin/issues?issueId=1", "Issue updated.", "success")
+    assert result == ("/admin/issues", "Issue updated.", "success")
     assert assigned == [(1, 5)]
 
     form = [("name", "Elsewhere"), ("newCompanyIds", "5")]
