@@ -920,9 +920,9 @@ _USERS_LIST_URL = (
     ",accountEnabled,assignedLicenses"
     "&$top=999"
 )
+_GROUPS_URL = "https://graph.microsoft.com/v1.0/groups"
 _GROUPS_LIST_URL = (
-    "https://graph.microsoft.com/v1.0/groups"
-    "?$select=id,displayName,visibility,groupTypes,membershipRule"
+    _GROUPS_URL + "?$select=id,displayName,visibility,groupTypes,membershipRule"
     "&$top=999"
 )
 _GROUP_URL_TMPL = "https://graph.microsoft.com/v1.0/groups/{group_id}"
@@ -8596,7 +8596,7 @@ async def _remediate_create_dynamic_guest_group(graph_token: str) -> bool:
 
     await _graph_post(
         graph_token,
-        _GROUPS_LIST_URL,
+        _GROUPS_URL,
         {
             "displayName": "Guest Users",
             "description": "Dynamic security group containing all guest users.",
