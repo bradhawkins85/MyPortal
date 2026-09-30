@@ -28,25 +28,51 @@
   </header>
 
   <div class="card__body card__body--stacked">
-    <dl class="sif-stats sch-stats" aria-label="Scheduled task summary">
-      <div class="sif-stats__item"><dt>{{ 'Tasks' if show_inactive else 'Active tasks' }}</dt><dd>{{ tasks | length }}</dd></div>
-      <div class="sif-stats__item{% if failing_tasks %} sch-stats__item--danger{% endif %}"><dt>Failed last run</dt><dd>{{ failing_tasks | length }}</dd></div>
-      <div class="sif-stats__item"><dt>Due in 24 hours</dt><dd data-sch-stat="due">—</dd></div>
-      <div class="sif-stats__item"><dt>Paused</dt><dd>{% if show_inactive %}{{ paused_tasks | length }}{% else %}<a href="?show_inactive=1">Show</a>{% endif %}</dd></div>
-    </dl>
+    {% set succeeded_tasks = tasks | selectattr('last_status', 'equalto', 'succeeded') | list %}
+    {% set never_run_tasks = tasks | rejectattr('last_status') | list %}
+    {% set calendar_hidden_tasks = tasks | selectattr('exclude_from_calendar') | list %}
+    {% macro sch_filter_tile(key, label, count, variant, hint) -%}
+      <button type="button" class="stat-strip__stat stat-strip__stat--{{ variant }} sch-filter-tile" data-sch-status="{{ key }}" aria-pressed="false" title="Show only {{ hint }}">
+        <span class="stat-strip__stat-label">{{ label }}</span>
+        <span class="stat-strip__stat-value"{% if count is none %} data-sch-stat="{{ key }}"{% endif %}>{{ '—' if count is none else count }}</span>
+      </button>
+    {%- endmacro %}
+    <div class="stat-strip sch-filter-strip" role="group" aria-label="Filter tasks by status" data-sch-filter-strip>
+      <button type="button" class="stat-strip__stat stat-strip__stat--total sch-filter-tile" data-sch-status-clear aria-pressed="true" title="Show every task">
+        <span class="stat-strip__stat-label">{{ 'Tasks' if show_inactive else 'Active tasks' }}</span>
+        <span class="stat-strip__stat-value">{{ tasks | length }}</span>
+      </button>
+      {% if succeeded_tasks %}{{ sch_filter_tile('succeeded', 'Succeeded', succeeded_tasks | length, 'success', 'tasks whose last run succeeded') }}{% endif %}
+      {% if failing_tasks %}{{ sch_filter_tile('failed', 'Failed last run', failing_tasks | length, 'danger', 'tasks whose last run failed') }}{% endif %}
+      {% if never_run_tasks %}{{ sch_filter_tile('never', 'Never run', never_run_tasks | length, 'neutral', 'tasks that have never run') }}{% endif %}
+      {% if tasks %}{{ sch_filter_tile('due', 'Due in 24 hours', none, 'info', 'tasks due to run in the next 24 hours') }}{% endif %}
+      {% if show_inactive and paused_tasks %}{{ sch_filter_tile('paused', 'Paused', paused_tasks | length, 'warning', 'paused tasks') }}{% endif %}
+      {% if calendar_hidden_tasks %}{{ sch_filter_tile('hidden', 'Hidden from calendar', calendar_hidden_tasks | length, 'neutral', 'tasks hidden from the schedule calendar') }}{% endif %}
+    </div>
 
     <div class="scf-toolbar sch-toolbar">
       <input type="search" class="form-input scf-toolbar__search" placeholder="Search tasks, companies or commands" aria-label="Search tasks" data-sch-search />
       <div class="sch-toolbar__filters">
-        <label class="visually-hidden" for="sch-filter">Show</label>
-        <select class="form-input" id="sch-filter" data-sch-filter>
-          <option value="">All tasks</option>
-          <option value="failed">Failed last run</option>
-          <option value="never">Never run</option>
-          <option value="due">Due in 24 hours</option>
-          {% if show_inactive %}<option value="paused">Paused</option>{% endif %}
-          <option value="hidden">Hidden from calendar</option>
-        </select>
+        {% if tasks %}
+          <details class="sch-types" data-sch-types>
+            <summary class="form-input sch-types__toggle"><span data-sch-types-label>All task types</span></summary>
+            <div class="sch-types__panel" role="group" aria-label="Task types to show">
+              <div class="sch-types__actions">
+                <button type="button" class="button button--ghost button--small" data-sch-types-all>Show all</button>
+                <button type="button" class="button button--ghost button--small" data-sch-types-none>Hide all</button>
+              </div>
+              <div class="sch-types__list">
+                {% for group in tasks | groupby('command_label') %}
+                  <label class="sch-types__option">
+                    <input type="checkbox" value="{{ group.grouper }}" data-sch-type checked />
+                    <span>{{ group.grouper }}</span>
+                    <span class="sch-types__count">{{ group.list | length }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+            </div>
+          </details>
+        {% endif %}
         <label class="visually-hidden" for="sch-sort">Sort by</label>
         <select class="form-input" id="sch-sort" data-sch-sort>
           <option value="name">Sort by name</option>
@@ -94,6 +120,8 @@
                   data-sch-item
                   data-task-id="{{ task.id }}"
                   data-status="{{ status }}"
+                  data-last-status="{{ task.last_status or 'never' }}"
+                  data-type="{{ task.command_label }}"
                   data-active="{{ 'true' if task.active else 'false' }}"
                   data-hidden="{{ 'true' if task.exclude_from_calendar else 'false' }}"
                   data-name="{{ task.name }}"
