@@ -4,14 +4,14 @@
 
 {% block header_title %}
   <div class="header__title-content header__title-content--stacked">
-    <span class="header__title-text">Service status catalogue</span>
-    <span class="header__title-meta">Control which customers can see each status tile.</span>
+    <span class="header__title-text">Service status</span>
+    <span class="header__title-meta">Keep customers informed about the services they rely on.</span>
   </div>
 {% endblock %}
 
 {% block header_actions %}
   {% set service_status_actions = [
-    {"label": "Add service", "type": "button", "attrs": {"data-service-modal-open": "add", "aria-haspopup": "dialog", "aria-controls": "service-modal"}}
+    {"label": "Add service", "type": "button", "attrs": {"data-ssa-create": "", "aria-haspopup": "dialog", "aria-controls": "service-modal"}}
   ] %}
   {% if company_options and service_status_public_urls %}
     {% set _ = service_status_actions.append({"label": "Published status pages", "type": "button", "attrs": {"data-public-pages-modal-open": "", "aria-haspopup": "dialog", "aria-controls": "public-pages-modal"}}) %}
@@ -20,151 +20,144 @@
   {{ page_header_actions(service_status_actions, menu_id="service-status-actions") }}
 {% endblock %}
 
+{% macro utc_iso(value) -%}
+  {%- if value.__class__.__name__ == 'datetime' -%}
+    {{ value.isoformat() }}{% if value.tzinfo is none %}Z{% endif %}
+  {%- else -%}
+    {{ value }}
+  {%- endif -%}
+{%- endmacro %}
+
 {% block content %}
-<div class="admin-grid service-status-admin">
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Tracked services</h2>
-        <p class="card__subtitle">Update availability details and adjust company visibility assignments.</p>
-      </div>
-      {% set strip_items = [] %}
-      {% for definition in service_status_definitions %}
-        {% set _ = strip_items.append({
-            "label":   definition.label,
-            "value":   service_status_summary.by_status.get(definition.value, 0),
-            "variant": definition.value,
-        }) %}
-      {% endfor %}
-      {{ counter_strip(strip_items, total=service_status_summary.total, total_label="Total") }}
-    </header>
-    <div class="table-toolbar">
-      <input
-        type="search"
-        class="form-input"
-        placeholder="Filter services"
-        aria-label="Filter service status table"
-        data-table-filter="service-status-table"
-      />
-      <span class="text-muted">{{ service_status_entries|length }} entries</span>
+{% set ssa_defaults = {"operational": 60, "degraded": 15, "partial_outage": 10, "outage": 5, "maintenance": 60} %}
+{% set ssa_inactive_count = service_status_entries | rejectattr("is_active") | list | length %}
+
+{% set strip_items = [] %}
+{% for definition in service_status_definitions %}
+  {% set _ = strip_items.append({
+      "label":   definition.label,
+      "value":   service_status_summary.by_status.get(definition.value, 0),
+      "variant": definition.value,
+  }) %}
+{% endfor %}
+{{ counter_strip(strip_items, total=service_status_summary.total, total_label="Tracked services") }}
+
+<section class="card card--panel ssa" aria-labelledby="ssa-title" data-ssa-root>
+  <header class="card__header card__header--stacked">
+    <div>
+      <h2 class="card__title" id="ssa-title">Tracked services</h2>
+      <p class="card__subtitle">Each service appears as a tile on the service status dashboard for the companies that can see it.</p>
     </div>
-    <div class="table-wrapper">
-      <table class="table" id="service-status-table" data-table data-table-id="service-status">
-        <thead>
-          <tr>
-            <th scope="col" data-sort="string" data-column-key="service">Service</th>
-            <th scope="col" data-sort="string" data-column-key="status">Status</th>
-            <th scope="col" data-sort="string" data-column-key="visibility">Visibility</th>
-            <th scope="col" data-sort="string" data-column-key="updated">Updated</th>
-            <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for service in service_status_entries %}
-            {% set status_meta = service_status_lookup.get(service.status) %}
-            {% set status_label = status_meta.label if status_meta else service.status|title %}
-            {% set variant = status_meta.variant if status_meta else 'status--neutral' %}
-            {% set ai_last_checked = '' %}
-            {% if service.ai_lookup_last_checked_at %}
-              {% if service.ai_lookup_last_checked_at.__class__.__name__ == 'datetime' %}
-                {% set ai_last_checked = service.ai_lookup_last_checked_at.strftime('%d %b %Y %H:%M') %}
-              {% else %}
-                {% set ai_last_checked = service.ai_lookup_last_checked_at | string %}
-              {% endif %}
-            {% endif %}
-            {% set service_payload = {
-              "id": service.id,
-              "name": service.name,
-              "description": service.description or "",
-              "status": service.status,
-              "status_message": service.status_message or "",
-              "display_order": service.display_order,
-              "is_active": service.is_active,
-              "company_ids": service.company_ids,
-              "tags": (service.tags | join(", ")) if service.tags else "",
-              "ai_lookup_enabled": service.ai_lookup_enabled,
-              "ai_lookup_url": service.ai_lookup_url or "",
-              "ai_lookup_prompt": service.ai_lookup_prompt or "",
-              "ai_lookup_model_override": service.ai_lookup_model_override or "",
-              "ai_lookup_frequency_operational": service.ai_lookup_frequency_operational,
-              "ai_lookup_frequency_degraded": service.ai_lookup_frequency_degraded,
-              "ai_lookup_frequency_partial_outage": service.ai_lookup_frequency_partial_outage,
-              "ai_lookup_frequency_outage": service.ai_lookup_frequency_outage,
-              "ai_lookup_frequency_maintenance": service.ai_lookup_frequency_maintenance,
-              "ai_lookup_last_checked_at": ai_last_checked,
-              "ai_lookup_last_status": service.ai_lookup_last_status or "",
-              "ai_lookup_last_message": service.ai_lookup_last_message or ""
-            } %}
-            <tr data-service='{{ service_payload | tojson | e }}'>
-              <td data-label="Service" data-column-key="service">
-                <div class="service-status-admin__name">{{ service.name }}</div>
-                {% if service.description %}
-                  <div class="table__meta">{{ service.description }}</div>
-                {% endif %}
-              </td>
-              <td data-label="Status" data-column-key="status">
-                <span class="status {{ variant }}">{{ status_label }}</span>
-              </td>
-              <td data-label="Visibility" data-column-key="visibility">
-                {% if service.company_ids %}
-                  <ul class="service-status-admin__companies">
-                    {% for company_id in service.company_ids %}
-                      <li>{{ service_status_company_lookup.get(company_id, 'Company #' ~ company_id) }}</li>
-                    {% endfor %}
-                  </ul>
-                {% else %}
-                  <span class="text-muted">All companies</span>
-                {% endif %}
-              </td>
-              <td data-label="Updated" data-column-key="updated">
-                {% if service.updated_at %}
-                  {{ service.updated_at.strftime('%d %b %Y %H:%M') if service.updated_at.__class__.__name__ == 'datetime' else service.updated_at }}
-                {% else %}
-                  —
-                {% endif %}
-              </td>
-              <td class="table__actions" data-column-key="actions">
-                <div class="action-menu">
-                  <button
-                    type="button"
-                    class="button button--ghost button--small"
-                    data-service-modal-open="edit"
-                    aria-haspopup="dialog"
-                    aria-controls="service-modal"
-                  >Edit</button>
-                  <form action="/admin/service-status/{{ service.id }}/delete" method="post" class="inline-form" data-confirm="Delete this service?">
-                    {% include "partials/csrf.html" %}
-                    <button type="submit" class="button button--ghost button--danger button--small">Delete</button>
-                  </form>
-                </div>
-              </td>
-            </tr>
-          {% else %}
-            <tr>
-              <td colspan="5" class="table__empty">No services have been added yet.</td>
-            </tr>
+  </header>
+  <div class="card__body card__body--stacked">
+    {% if service_status_entries %}
+      <div class="scf-toolbar ssa__toolbar">
+        <input type="search" class="form-input scf-toolbar__search" placeholder="Search services, tags or companies" aria-label="Search services" data-ssa-search />
+        <label class="visually-hidden" for="ssa-filter">Show</label>
+        <select class="form-input ssa__filter" id="ssa-filter" data-ssa-filter>
+          <option value="">All services</option>
+          <option value="attention">Needs attention</option>
+          {% for definition in service_status_definitions %}
+            <option value="{{ definition.value }}">{{ definition.label }}</option>
           {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
-</div>
+          {% if ssa_inactive_count %}<option value="inactive">Hidden from dashboards</option>{% endif %}
+        </select>
+        <span class="text-muted ssa__count" data-ssa-count role="status" aria-live="polite">{{ service_status_entries | length }} service{{ 's' if service_status_entries | length != 1 }}</span>
+      </div>
+
+      <ul class="scf-list ssa__list" data-ssa-list>
+        {% for service in service_status_entries %}
+          {% set status_meta = service_status_lookup.get(service.status) %}
+          {% set status_label = status_meta.label if status_meta else service.status|title %}
+          {% set variant = status_meta.variant if status_meta else 'status--neutral' %}
+          {% set company_names = [] %}
+          {% for company_id in service.company_ids %}
+            {% set _ = company_names.append(service_status_company_lookup.get(company_id, 'Company #' ~ company_id)) %}
+          {% endfor %}
+          <li
+            class="scf-item ssa-item{% if not service.is_active %} scf-item--inactive ssa-item--inactive{% endif %}"
+            data-ssa-item
+            data-service-id="{{ service.id }}"
+            data-status="{{ service.status }}"
+            data-active="{{ 'true' if service.is_active else 'false' }}"
+            data-search-text="{{ service.name }} {{ service.description or '' }} {{ service.tags | join(' ') }} {{ company_names | join(' ') }} {{ status_label }}"
+          >
+            <span class="ssa-dot ssa-dot--{{ service.status }}" aria-hidden="true"></span>
+            <div class="scf-item__main">
+              <div class="scf-item__heading">
+                <a class="scf-item__label" href="/admin/service-status?serviceId={{ service.id }}" data-ssa-edit="{{ service.id }}" aria-haspopup="dialog" aria-controls="service-modal">{{ service.name }}</a>
+                <span class="status {{ variant }}">{{ status_label }}</span>
+              </div>
+              {% if service.status_message %}
+                <p class="ssa-item__message">“{{ service.status_message | truncate(160) }}”</p>
+              {% endif %}
+              {% if service.description %}
+                <p class="scf-item__help">{{ service.description }}</p>
+              {% endif %}
+              <ul class="scf-item__chips" aria-label="Service summary">
+                {% if not service.is_active %}
+                  <li class="scf-chip scf-chip--muted">Hidden from dashboards</li>
+                {% endif %}
+                {% if company_names %}
+                  <li class="scf-chip scf-chip--visibility" title="{{ company_names | join(', ') }}">
+                    {% if company_names | length <= 2 %}{{ company_names | join(', ') }}{% else %}{{ company_names[:2] | join(', ') }} + {{ company_names | length - 2 }} more{% endif %}
+                  </li>
+                {% else %}
+                  <li class="scf-chip">All companies</li>
+                {% endif %}
+                {% if service.ai_lookup_enabled %}
+                  {% set current_frequency = service['ai_lookup_frequency_' ~ service.status] if ('ai_lookup_frequency_' ~ service.status) in service else none %}
+                  <li class="scf-chip scf-chip--logic" title="{{ service.ai_lookup_url or 'No lookup URL set' }}">
+                    AI checks{% if current_frequency %} every {{ current_frequency }} min{% endif %}
+                  </li>
+                {% endif %}
+                {% for tag in service.tags[:4] %}
+                  <li class="scf-chip ssa-chip--tag">{{ tag }}</li>
+                {% endfor %}
+                {% if service.tags | length > 4 %}
+                  <li class="scf-chip ssa-chip--tag" title="{{ service.tags[4:] | join(', ') }}">+ {{ service.tags | length - 4 }} tags</li>
+                {% endif %}
+              </ul>
+            </div>
+            <div class="scf-item__actions ssa-item__actions">
+              <span class="ssa-item__updated text-muted">
+                {% if service.updated_at %}Updated <time data-utc="{{ utc_iso(service.updated_at) }}">{{ utc_iso(service.updated_at) }}</time>{% else %}Not updated yet{% endif %}
+              </span>
+              <span class="scf-item__order" title="Dashboard order">#{{ service.display_order }}</span>
+              <a class="button button--ghost button--small" href="/admin/service-status?serviceId={{ service.id }}" data-ssa-edit="{{ service.id }}" aria-haspopup="dialog" aria-controls="service-modal">Edit<span class="visually-hidden"> {{ service.name }}</span></a>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="scf-empty scf-empty--search" data-ssa-no-results hidden>No services match.</p>
+    {% else %}
+      <div class="scf-empty">
+        <p class="scf-empty__title">No services yet</p>
+        <p class="text-muted">Add the services your customers depend on, such as email, internet or line-of-business apps, so they can check their status before raising a ticket.</p>
+        <button type="button" class="button" data-ssa-create aria-haspopup="dialog" aria-controls="service-modal">+ Add your first service</button>
+      </div>
+    {% endif %}
+  </div>
+</section>
 
 {% if company_options and service_status_public_urls %}
-<div class="modal" id="public-pages-modal" role="dialog" aria-modal="true" aria-labelledby="public-pages-modal-title" aria-hidden="true" hidden>
-  <div class="modal__content" role="document">
-    <button type="button" class="modal__close" data-public-pages-modal-close>
-      <span class="visually-hidden">Close published status pages</span>
-      &times;
-    </button>
-    <h2 class="modal__title" id="public-pages-modal-title">Published status pages</h2>
+<div class="modal scf-modal" id="public-pages-modal" role="dialog" aria-modal="true" aria-labelledby="public-pages-modal-title" aria-describedby="public-pages-modal-subtitle" aria-hidden="true" hidden>
+  <div class="modal__panel ssa-links">
+    <header class="modal__header scf-editor__header">
+      <button type="button" class="modal__close" data-modal-close data-public-pages-modal-close aria-label="Close published status pages"></button>
+      <div>
+        <p class="scf-preview__eyebrow">Share</p>
+        <h2 class="modal__title" id="public-pages-modal-title">Published status pages</h2>
+        <p class="scf-editor__subtitle" id="public-pages-modal-subtitle">Each company has a signed link that shows its services without signing in.</p>
+      </div>
+    </header>
     <div class="modal__body">
-      <p class="text-muted">Share signed, company-specific status links without exposing the admin workspace.</p>
-      <div class="table-toolbar">
-        <input type="search" class="form-input" placeholder="Filter published pages" aria-label="Filter published status pages" data-table-filter="service-status-public-links" />
+      <div class="scf-toolbar">
+        <input type="search" class="form-input scf-toolbar__search" placeholder="Filter companies" aria-label="Filter published status pages" data-table-filter="service-status-public-links" />
       </div>
       <div class="table-wrapper">
         <table class="table table--stack-mobile" id="service-status-public-links" data-table data-table-id="service-status-public-links">
+          <caption class="visually-hidden">Public status link for each company</caption>
           <thead>
             <tr>
               <th scope="col" data-sort="string" data-column-key="company">Company</th>
@@ -176,7 +169,12 @@
               {% if company.id in service_status_public_urls %}
               <tr>
                 <td data-label="Company" data-column-key="company">{{ company.name }}</td>
-                <td data-label="Public status link" data-column-key="link"><a href="{{ service_status_public_urls[company.id] }}" target="_blank" rel="noopener noreferrer">{{ service_status_public_urls[company.id] }}</a></td>
+                <td data-label="Public status link" data-column-key="link">
+                  <div class="ssa-links__cell">
+                    <a href="{{ service_status_public_urls[company.id] }}" target="_blank" rel="noopener noreferrer" class="ssa-links__url">{{ service_status_public_urls[company.id] }}</a>
+                    <button type="button" class="button button--ghost button--small" data-ssa-copy="{{ service_status_public_urls[company.id] }}">Copy<span class="visually-hidden"> link for {{ company.name }}</span></button>
+                  </div>
+                </td>
               </tr>
               {% endif %}
             {% endfor %}
@@ -184,31 +182,66 @@
         </table>
       </div>
     </div>
+    <footer class="modal__footer scf-editor__footer">
+      <span class="scf-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-modal-close data-public-pages-modal-close>Done</button>
+    </footer>
   </div>
 </div>
 {% endif %}
 
-{# Secondary forms for edit-only actions (action URLs set dynamically by JS) #}
-<form id="refresh-tags-form" action="/admin/service-status/0/refresh-tags" method="post" class="inline-form">
+{# Edit-only actions post to their own endpoints; JS points them at the open service. #}
+<form id="ssa-refresh-tags-form" action="/admin/service-status/0/refresh-tags" method="post" hidden>
   {% include "partials/csrf.html" %}
 </form>
-<form id="check-now-form" action="/admin/service-status/0/check-now" method="post" class="inline-form">
+<form id="ssa-check-now-form" action="/admin/service-status/0/check-now" method="post" hidden>
+  {% include "partials/csrf.html" %}
+</form>
+<form id="ssa-delete-form" action="/admin/service-status/0/delete" method="post" hidden>
   {% include "partials/csrf.html" %}
 </form>
 
-{# Auto-open data for serviceId redirects (e.g. after tag refresh / check-now errors) #}
+{% set ssa_services = [] %}
+{% for service in service_status_entries %}
+  {% set _ = ssa_services.append({
+    "id": service.id,
+    "name": service.name,
+    "description": service.description or "",
+    "status": service.status,
+    "status_message": service.status_message or "",
+    "display_order": service.display_order,
+    "is_active": true if service.is_active else false,
+    "company_ids": service.company_ids,
+    "tags": service.tags or [],
+    "updated_at": utc_iso(service.updated_at) if service.updated_at else "",
+    "ai_lookup_enabled": true if service.ai_lookup_enabled else false,
+    "ai_lookup_url": service.ai_lookup_url or "",
+    "ai_lookup_prompt": service.ai_lookup_prompt or "",
+    "ai_lookup_model_override": service.ai_lookup_model_override or "",
+    "ai_lookup_frequency_operational": service.ai_lookup_frequency_operational,
+    "ai_lookup_frequency_degraded": service.ai_lookup_frequency_degraded,
+    "ai_lookup_frequency_partial_outage": service.ai_lookup_frequency_partial_outage,
+    "ai_lookup_frequency_outage": service.ai_lookup_frequency_outage,
+    "ai_lookup_frequency_maintenance": service.ai_lookup_frequency_maintenance,
+    "ai_lookup_last_checked_at": utc_iso(service.ai_lookup_last_checked_at) if service.ai_lookup_last_checked_at else "",
+    "ai_lookup_last_status": service.ai_lookup_last_status or "",
+    "ai_lookup_last_message": service.ai_lookup_last_message or "",
+  }) %}
+{% endfor %}
+{% set ssa_editing = none %}
 {% if service_status_editing %}
-  <script type="application/json" id="service-autoopen-data">{{ {
+  {% set ssa_editing = {
     "id": service_status_editing.id,
     "name": service_status_editing.name,
     "description": service_status_editing.description or "",
     "status": service_status_editing.status,
     "status_message": service_status_editing.status_message or "",
     "display_order": service_status_editing.display_order,
-    "is_active": service_status_editing.is_active,
+    "is_active": true if service_status_editing.is_active else false,
     "company_ids": service_status_editing.company_ids,
-    "tags": (service_status_editing.tags | join(", ")) if service_status_editing.tags else "",
-    "ai_lookup_enabled": service_status_editing.ai_lookup_enabled,
+    "tags": service_status_editing.tags or [],
+    "updated_at": utc_iso(service_status_editing.updated_at) if service_status_editing.updated_at else "",
+    "ai_lookup_enabled": true if service_status_editing.ai_lookup_enabled else false,
     "ai_lookup_url": service_status_editing.ai_lookup_url or "",
     "ai_lookup_prompt": service_status_editing.ai_lookup_prompt or "",
     "ai_lookup_model_override": service_status_editing.ai_lookup_model_override or "",
@@ -217,399 +250,222 @@
     "ai_lookup_frequency_partial_outage": service_status_editing.ai_lookup_frequency_partial_outage,
     "ai_lookup_frequency_outage": service_status_editing.ai_lookup_frequency_outage,
     "ai_lookup_frequency_maintenance": service_status_editing.ai_lookup_frequency_maintenance,
-    "ai_lookup_last_checked_at": "",
+    "ai_lookup_last_checked_at": utc_iso(service_status_editing.ai_lookup_last_checked_at) if service_status_editing.ai_lookup_last_checked_at else "",
     "ai_lookup_last_status": service_status_editing.ai_lookup_last_status or "",
-    "ai_lookup_last_message": service_status_editing.ai_lookup_last_message or ""
-  } | tojson }}</script>
+    "ai_lookup_last_message": service_status_editing.ai_lookup_last_message or "",
+  } %}
 {% endif %}
+<script type="application/json" id="service-status-editor-data">{{ {
+  "services": ssa_services,
+  "editing": ssa_editing,
+  "defaultStatus": service_status_default,
+  "frequencyDefaults": ssa_defaults,
+  "statuses": service_status_definitions,
+} | tojson }}</script>
 
-{# Service modal — used for both Add and Edit #}
-<div
-  class="modal"
-  id="service-modal"
-  role="dialog"
-  aria-modal="true"
-  aria-labelledby="service-modal-title"
-  aria-hidden="true"
-  hidden
->
-  <div class="modal__content" role="document">
-    <button type="button" class="modal__close" data-modal-close>
-      <span class="visually-hidden">Close</span>
-      &times;
-    </button>
-    <h2 class="modal__title" id="service-modal-title">Add service</h2>
-    <div class="modal__body">
-      <form id="service-form" action="/admin/service-status" method="post" class="form">
-        {% include "partials/csrf.html" %}
-        <div class="form-field">
-          <label class="form-label" for="modal-service-name">Service name</label>
-          <input
-            id="modal-service-name"
-            name="name"
-            class="form-input"
-            required
-            maxlength="200"
-          />
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="modal-service-description">Description</label>
-          <textarea
-            id="modal-service-description"
-            name="description"
-            class="form-input form-input--textarea"
-            rows="3"
-          ></textarea>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="modal-service-status">Status</label>
-          <select id="modal-service-status" name="status" class="form-input">
-            {% for definition in service_status_definitions %}
-              <option value="{{ definition.value }}" {% if definition.value == service_status_default %}selected{% endif %}>{{ definition.label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="modal-service-status-message">Status message</label>
-          <textarea
-            id="modal-service-status-message"
-            name="status_message"
-            class="form-input form-input--textarea"
-            rows="2"
-          ></textarea>
-          <p class="form-help">Optional short note displayed on the dashboard.</p>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="modal-service-tags">Tags</label>
-          <input
-            id="modal-service-tags"
-            name="tags"
-            class="form-input"
-            placeholder="monitoring, cloud, infrastructure"
-          />
-          <p class="form-help">Comma-separated tags. Auto-generated by AI when creating new services.</p>
-          <button
-            type="submit"
-            form="refresh-tags-form"
-            class="button button--ghost button--small"
-            id="modal-refresh-tags-btn"
-            style="margin-top: 0.5rem;"
-            hidden
-          >🔄 Refresh Tags with AI</button>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="modal-service-companies">Visible to companies</label>
-          <select id="modal-service-companies" name="companyIds" class="form-input" multiple size="6">
-            {% if company_options %}
-              {% for company in company_options %}
-                <option value="{{ company.id }}">{{ company.name }}</option>
+{# Service editor — used for both Add and Edit #}
+<div class="modal scf-modal" id="service-modal" role="dialog" aria-modal="true" aria-labelledby="service-modal-title" aria-describedby="service-modal-subtitle" aria-hidden="true" hidden>
+  <form id="service-form" action="/admin/service-status" method="post" class="modal__panel modal__panel--wide scf-editor ssa-editor" novalidate data-ssa-form>
+    {% include "partials/csrf.html" %}
+    <input type="hidden" name="tags" data-ssa-out="tags" />
+
+    <header class="modal__header scf-editor__header">
+      <button type="button" class="modal__close" data-modal-close aria-label="Close service editor"></button>
+      <div>
+        <p class="scf-preview__eyebrow">Service status</p>
+        <h2 class="modal__title" id="service-modal-title" data-ssa-title>Add service</h2>
+        <p class="scf-editor__subtitle" id="service-modal-subtitle" data-ssa-subtitle>Name the service, set its current status and choose who can see it.</p>
+      </div>
+    </header>
+
+    <nav class="scf-tabs" role="tablist" aria-label="Service settings">
+      <button type="button" class="scf-tab is-active" role="tab" id="ssa-tab-details" aria-controls="ssa-panel-details" aria-selected="true" data-ssa-tab="details">Details<span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="ssa-tab-status" aria-controls="ssa-panel-status" aria-selected="false" tabindex="-1" data-ssa-tab="status">Current status<span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="ssa-tab-visibility" aria-controls="ssa-panel-visibility" aria-selected="false" tabindex="-1" data-ssa-tab="visibility">Who sees it<span class="scf-tab__count" data-ssa-company-count></span><span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="ssa-tab-ai" aria-controls="ssa-panel-ai" aria-selected="false" tabindex="-1" data-ssa-tab="ai">Automatic checks<span class="scf-tab__dot" aria-hidden="true"></span></button>
+    </nav>
+
+    <div class="modal__body scf-editor__body">
+      <div class="scf-editor__main">
+        <section class="scf-panel" id="ssa-panel-details" role="tabpanel" aria-labelledby="ssa-tab-details" data-ssa-panel="details">
+          <div class="scf-grid">
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="modal-service-name">Service name <span class="scf-required" aria-hidden="true">*</span></label>
+              <input id="modal-service-name" name="name" class="form-input" required maxlength="200" autocomplete="off" placeholder="e.g. Microsoft 365 email" data-ssa-input="name" />
+              <p class="scf-error" data-ssa-error="name" hidden></p>
+            </div>
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="modal-service-description">Description <span class="scf-optional">optional</span></label>
+              <textarea id="modal-service-description" name="description" class="form-input form-input--textarea" rows="2" placeholder="What this service is, in words your customers use" data-ssa-input="description"></textarea>
+              <p class="form-help">Shown under the status on the dashboard tile.</p>
+            </div>
+            <div class="form-field scf-grid__full">
+              <div class="ssa-label-row">
+                <label class="form-label" for="modal-service-tags">Tags <span class="scf-optional">optional</span></label>
+                <button type="button" class="button button--ghost button--small" data-ssa-refresh-tags hidden>Suggest tags with AI</button>
+              </div>
+              <div class="scf-tags" data-ssa-tags>
+                <input id="modal-service-tags" class="scf-tags__input" placeholder="Type a tag and press Enter" autocomplete="off" />
+              </div>
+              <p class="form-help" data-ssa-tags-help>Tags link tickets about this service to its status. Leave empty on a new service and AI suggests them.</p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="modal-service-order">Dashboard order</label>
+              <input id="modal-service-order" name="display_order" type="number" inputmode="numeric" step="1" class="form-input" value="0" data-ssa-input="display_order" />
+              <p class="form-help">Lower numbers appear first.</p>
+            </div>
+            <div class="form-field">
+              <span class="form-label">Visibility</span>
+              <label class="scf-switch">
+                <input type="checkbox" id="modal-service-active" name="is_active" value="1" checked data-ssa-input="is_active" />
+                <span class="scf-switch__track" aria-hidden="true"></span>
+                <span>Show on dashboards</span>
+              </label>
+              <p class="form-help">Turn off to hide the service without losing its settings.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="scf-panel" id="ssa-panel-status" role="tabpanel" aria-labelledby="ssa-tab-status" data-ssa-panel="status" hidden>
+          <fieldset class="scf-fieldset">
+            <legend class="form-label">How is the service right now?</legend>
+            <div class="ssa-status-grid">
+              {% for definition in service_status_definitions %}
+                <label class="scf-type-card ssa-status-card ssa-status-card--{{ definition.value }}">
+                  <input type="radio" name="status" value="{{ definition.value }}" data-ssa-input="status" {% if definition.value == service_status_default %}checked{% endif %} />
+                  <span class="ssa-dot ssa-dot--{{ definition.value }}" aria-hidden="true"></span>
+                  <span class="scf-type-card__label">{{ definition.label }}</span>
+                  <span class="scf-type-card__help">{{ definition.description }}</span>
+                </label>
               {% endfor %}
-            {% else %}
-              <option value="" disabled>No companies available</option>
-            {% endif %}
-          </select>
-          <p class="form-help">Leave empty to show the service to every customer.</p>
-        </div>
-        <div class="form-grid">
-          <div class="form-field">
-            <label class="form-label" for="modal-service-order">Display order</label>
-            <input
-              id="modal-service-order"
-              name="display_order"
-              type="number"
-              inputmode="numeric"
-              class="form-input"
-              value="0"
-            />
-          </div>
-          <div class="form-field form-field--checkbox">
-            <label class="form-checkbox">
-              <input type="checkbox" id="modal-service-active" name="is_active" checked />
-              <span>Active</span>
-            </label>
-          </div>
-        </div>
-
-        <details class="form-section-details" id="modal-ai-details">
-          <summary class="form-section-details__summary">AI Lookup</summary>
-          <div class="form-field form-field--checkbox">
-            <label class="form-checkbox">
-              <input
-                type="checkbox"
-                name="ai_lookup_enabled"
-                id="modal-ai-lookup-enabled"
-              />
-              <span>Enable AI lookup</span>
-            </label>
-            <p class="form-help">Periodically fetch a URL and use Ollama to determine service status.</p>
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="modal-ai-lookup-url">Lookup URL</label>
-            <input
-              id="modal-ai-lookup-url"
-              name="ai_lookup_url"
-              class="form-input"
-              type="url"
-              placeholder="https://status.example.com/api/status"
-            />
-            <p class="form-help">URL whose content is passed to the AI model for status analysis.</p>
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="modal-ai-lookup-prompt">AI Prompt</label>
-            <textarea
-              id="modal-ai-lookup-prompt"
-              name="ai_lookup_prompt"
-              class="form-input form-input--textarea"
-              rows="4"
-              placeholder="Analyse the following status page content and determine the current operational state of the service."
-            ></textarea>
-            <p class="form-help">Instructions sent to the AI model along with the URL content.</p>
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="modal-ai-lookup-model">Model override</label>
-            <input
-              id="modal-ai-lookup-model"
-              name="ai_lookup_model_override"
-              class="form-input"
-              placeholder="Leave blank to use the default Ollama model"
-            />
-            <p class="form-help">Override the default Ollama model for this service.</p>
-          </div>
-          <fieldset class="form-fieldset">
-            <legend class="form-fieldset__legend">Lookup frequency (minutes by status)</legend>
-            <div class="form-grid form-grid--3">
-              <div class="form-field">
-                <label class="form-label" for="modal-ai-freq-operational">Operational</label>
-                <input id="modal-ai-freq-operational" name="ai_lookup_frequency_operational" type="number" inputmode="numeric" min="1" class="form-input" value="60" />
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="modal-ai-freq-degraded">Degraded</label>
-                <input id="modal-ai-freq-degraded" name="ai_lookup_frequency_degraded" type="number" inputmode="numeric" min="1" class="form-input" value="15" />
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="modal-ai-freq-partial">Partial outage</label>
-                <input id="modal-ai-freq-partial" name="ai_lookup_frequency_partial_outage" type="number" inputmode="numeric" min="1" class="form-input" value="10" />
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="modal-ai-freq-outage">Outage</label>
-                <input id="modal-ai-freq-outage" name="ai_lookup_frequency_outage" type="number" inputmode="numeric" min="1" class="form-input" value="5" />
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="modal-ai-freq-maintenance">Maintenance</label>
-                <input id="modal-ai-freq-maintenance" name="ai_lookup_frequency_maintenance" type="number" inputmode="numeric" min="1" class="form-input" value="60" />
-              </div>
             </div>
           </fieldset>
-          <p class="form-help" id="modal-ai-last-checked" hidden></p>
-        </details>
+          <div class="form-field">
+            <label class="form-label" for="modal-service-status-message">Message to customers <span class="scf-optional">optional</span></label>
+            <textarea id="modal-service-status-message" name="status_message" class="form-input form-input--textarea" rows="3" placeholder="e.g. Some users can't send email. We're working with Microsoft on a fix." data-ssa-input="status_message"></textarea>
+            <p class="form-help">Say what's affected and what you're doing. Without a message, the dashboard shows the status description.</p>
+          </div>
+          <p class="ssa-note" data-ssa-ai-note hidden></p>
+        </section>
 
-        <div class="form-actions">
-          <button type="submit" class="button button--primary" id="modal-save-btn">Create service</button>
-          <button type="submit" form="check-now-form" class="button button--ghost" id="modal-check-now-btn" hidden>Check Now</button>
-          <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
-        </div>
-      </form>
+        <section class="scf-panel" id="ssa-panel-visibility" role="tabpanel" aria-labelledby="ssa-tab-visibility" data-ssa-panel="visibility" hidden>
+          <div class="scf-panel__intro">
+            <h3 class="scf-panel__title">Which companies see this service?</h3>
+            <p class="text-muted">Customers only see the services shared with their company.</p>
+          </div>
+          <div class="scf-choice-list" role="radiogroup" aria-label="Who sees it">
+            <label class="scf-choice">
+              <input type="radio" name="ssa_visibility_mode" value="everyone" data-ssa-visibility-mode checked />
+              <span><strong>Every company</strong><span class="text-muted">All customers, including companies added later.</span></span>
+            </label>
+            <label class="scf-choice">
+              <input type="radio" name="ssa_visibility_mode" value="restricted" data-ssa-visibility-mode {% if not company_options %}disabled{% endif %} />
+              <span><strong>Only selected companies</strong><span class="text-muted">{% if company_options %}Pick the companies below.{% else %}No companies have been added yet.{% endif %}</span></span>
+            </label>
+          </div>
+          <div class="ssa-companies" data-ssa-companies hidden>
+            <ul class="scf-item__chips" data-ssa-company-chips aria-label="Selected companies"></ul>
+            <input type="search" class="form-input" placeholder="Filter companies" aria-label="Filter companies" data-ssa-company-search />
+            <div class="ssa-companies__list" role="group" aria-label="Companies">
+              {% for company in company_options %}
+                <label class="ssa-companies__row" data-ssa-company-row data-search-text="{{ company.name }}">
+                  <input type="checkbox" name="companyIds" value="{{ company.id }}" data-ssa-company data-name="{{ company.name }}" />
+                  <span>{{ company.name }}</span>
+                </label>
+              {% endfor %}
+            </div>
+            <p class="scf-empty scf-empty--inline" data-ssa-company-no-results hidden>No companies match.</p>
+            <p class="scf-error" data-ssa-error="visibility" hidden></p>
+          </div>
+        </section>
+
+        <section class="scf-panel" id="ssa-panel-ai" role="tabpanel" aria-labelledby="ssa-tab-ai" data-ssa-panel="ai" hidden>
+          <div class="scf-panel__intro">
+            <h3 class="scf-panel__title">Check the status automatically</h3>
+            <p class="text-muted">MyPortal can read a vendor's status page on a schedule and let AI (Ollama) set this service's status for you.</p>
+          </div>
+          <label class="scf-switch">
+            <input type="checkbox" name="ai_lookup_enabled" id="modal-ai-lookup-enabled" value="1" data-ssa-input="ai_lookup_enabled" />
+            <span class="scf-switch__track" aria-hidden="true"></span>
+            <span>Check this service automatically</span>
+          </label>
+          <div class="ssa-ai" data-ssa-ai-settings hidden>
+            <div class="scf-grid">
+              <div class="form-field scf-grid__full">
+                <label class="form-label" for="modal-ai-lookup-url">Status page to read <span class="scf-required" aria-hidden="true">*</span></label>
+                <input id="modal-ai-lookup-url" name="ai_lookup_url" class="form-input" type="url" inputmode="url" placeholder="https://status.example.com" autocomplete="off" data-ssa-input="ai_lookup_url" />
+                <p class="form-help">The page or API whose content the AI reads.</p>
+                <p class="scf-error" data-ssa-error="ai" hidden></p>
+              </div>
+              <div class="form-field scf-grid__full">
+                <label class="form-label" for="modal-ai-lookup-prompt">Instructions for the AI <span class="scf-optional">optional</span></label>
+                <textarea id="modal-ai-lookup-prompt" name="ai_lookup_prompt" class="form-input form-input--textarea" rows="3" placeholder="e.g. Only report problems affecting Exchange Online in Australia." data-ssa-input="ai_lookup_prompt"></textarea>
+                <p class="form-help">Tell it what to look for when a page covers many services.</p>
+              </div>
+              <div class="form-field scf-grid__full">
+                <label class="form-label" for="modal-ai-lookup-model">Model <span class="scf-optional">optional</span></label>
+                <input id="modal-ai-lookup-model" name="ai_lookup_model_override" class="form-input scf-mono" placeholder="Default Ollama model" autocomplete="off" spellcheck="false" data-ssa-input="ai_lookup_model_override" />
+              </div>
+            </div>
+            <fieldset class="scf-fieldset ssa-frequency">
+              <legend class="form-label">How often to check, in minutes</legend>
+              <p class="form-help">Check more often while something is wrong so recovery shows up quickly.</p>
+              <div class="ssa-frequency__grid">
+                {% for key, label in [("operational", "Operational"), ("maintenance", "Maintenance"), ("degraded", "Degraded"), ("partial_outage", "Partial outage"), ("outage", "Major outage")] %}
+                  <label class="ssa-frequency__item" for="modal-ai-freq-{{ key }}">
+                    <span class="ssa-frequency__label"><span class="ssa-dot ssa-dot--{{ key }}" aria-hidden="true"></span>{{ label }}</span>
+                    <span class="ssa-frequency__input">
+                      <input id="modal-ai-freq-{{ key }}" name="ai_lookup_frequency_{{ key }}" type="number" inputmode="numeric" min="1" step="1" class="form-input" value="{{ ssa_defaults[key] }}" data-ssa-input="ai_lookup_frequency_{{ key }}" />
+                      <span class="text-muted" aria-hidden="true">min</span>
+                    </span>
+                  </label>
+                {% endfor %}
+              </div>
+              <p class="scf-sentence" data-ssa-frequency-sentence role="status" aria-live="polite"></p>
+            </fieldset>
+          </div>
+          <div class="ssa-last-check" data-ssa-last-check hidden>
+            <div>
+              <p class="scf-preview__eyebrow">Last check</p>
+              <p class="ssa-last-check__text" data-ssa-last-check-text></p>
+            </div>
+            <button type="button" class="button button--ghost button--small" data-ssa-check-now>Check now</button>
+          </div>
+        </section>
+      </div>
+
+      <aside class="scf-preview ssa-preview" aria-label="Live preview">
+        <p class="scf-preview__eyebrow">What customers see</p>
+        <article class="service-card ssa-preview__card" data-ssa-preview>
+          <header class="service-card__header">
+            <h3 class="service-card__title" data-ssa-preview-name>New service</h3>
+            <span class="status" data-ssa-preview-status></span>
+          </header>
+          <p class="service-card__message" data-ssa-preview-message></p>
+          <p class="service-card__description" data-ssa-preview-description hidden></p>
+          <div class="service-card__tags" data-ssa-preview-tags hidden></div>
+          <footer class="service-card__footer">
+            <span data-ssa-preview-updated>Last Change just now</span>
+            <span class="service-card__ai-icon" data-ssa-preview-ai hidden>AI</span>
+          </footer>
+        </article>
+        <ul class="scf-preview__rules" data-ssa-preview-rules></ul>
+      </aside>
     </div>
-  </div>
+
+    <footer class="modal__footer scf-editor__footer">
+      <button type="button" class="button button--danger" data-ssa-delete hidden>Delete service</button>
+      <span class="scf-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button" data-ssa-save>Create service</button>
+    </footer>
+  </form>
 </div>
+<noscript><p class="alert alert--warning">JavaScript is required to add and edit services.</p></noscript>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
-  <script>
-  (function () {
-    var publicPagesModal = document.getElementById('public-pages-modal');
-    var publicPagesTrigger = null;
-
-    function closePublicPagesModal() {
-      if (!publicPagesModal) { return; }
-      publicPagesModal.hidden = true;
-      publicPagesModal.setAttribute('aria-hidden', 'true');
-      document.removeEventListener('keydown', handlePublicPagesKeydown);
-      if (publicPagesTrigger) { publicPagesTrigger.focus(); }
-      publicPagesTrigger = null;
-    }
-
-    function handlePublicPagesKeydown(event) {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        closePublicPagesModal();
-      }
-    }
-
-    document.querySelectorAll('[data-public-pages-modal-open]').forEach(function (trigger) {
-      trigger.addEventListener('click', function () {
-        if (!publicPagesModal) { return; }
-        publicPagesTrigger = trigger;
-        publicPagesModal.hidden = false;
-        publicPagesModal.setAttribute('aria-hidden', 'false');
-        document.addEventListener('keydown', handlePublicPagesKeydown);
-        var firstControl = publicPagesModal.querySelector('input, button, a');
-        if (firstControl) { firstControl.focus(); }
-      });
-    });
-    if (publicPagesModal) {
-      publicPagesModal.addEventListener('click', function (event) {
-        if (event.target === publicPagesModal || event.target.closest('[data-public-pages-modal-close]')) {
-          closePublicPagesModal();
-        }
-      });
-    }
-
-    var defaultStatus = {{ service_status_default | tojson }};
-
-    var modal = document.getElementById('service-modal');
-    var form = document.getElementById('service-form');
-    if (!modal || !form) { return; }
-
-    var modalTitle = document.getElementById('service-modal-title');
-    var saveBtn = document.getElementById('modal-save-btn');
-    var refreshTagsBtn = document.getElementById('modal-refresh-tags-btn');
-    var checkNowBtn = document.getElementById('modal-check-now-btn');
-    var refreshTagsForm = document.getElementById('refresh-tags-form');
-    var checkNowForm = document.getElementById('check-now-form');
-    var aiLastChecked = document.getElementById('modal-ai-last-checked');
-    var aiDetails = document.getElementById('modal-ai-details');
-
-    var companiesSelect = document.getElementById('modal-service-companies');
-    var activeTrigger = null;
-
-    function openModal(service) {
-      var isEdit = !!service;
-
-      modalTitle.textContent = isEdit ? 'Update service' : 'Add service';
-      saveBtn.textContent = isEdit ? 'Save changes' : 'Create service';
-      form.action = isEdit ? '/admin/service-status/' + service.id : '/admin/service-status';
-
-      if (isEdit) {
-        document.getElementById('modal-service-name').value = service.name || '';
-        document.getElementById('modal-service-description').value = service.description || '';
-        document.getElementById('modal-service-status').value = service.status || defaultStatus;
-        document.getElementById('modal-service-status-message').value = service.status_message || '';
-        document.getElementById('modal-service-tags').value = service.tags || '';
-        document.getElementById('modal-service-order').value = service.display_order != null ? service.display_order : 0;
-        document.getElementById('modal-service-active').checked = !!service.is_active;
-
-        // Company selection
-        var companyIdSet = new Set((service.company_ids || []).map(function (id) { return parseInt(id, 10); }));
-        Array.from(companiesSelect.options).forEach(function (opt) {
-          opt.selected = companyIdSet.has(parseInt(opt.value, 10));
-        });
-
-        // AI lookup fields
-        document.getElementById('modal-ai-lookup-enabled').checked = !!service.ai_lookup_enabled;
-        document.getElementById('modal-ai-lookup-url').value = service.ai_lookup_url || '';
-        document.getElementById('modal-ai-lookup-prompt').value = service.ai_lookup_prompt || '';
-        document.getElementById('modal-ai-lookup-model').value = service.ai_lookup_model_override || '';
-        document.getElementById('modal-ai-freq-operational').value = service.ai_lookup_frequency_operational != null ? service.ai_lookup_frequency_operational : 60;
-        document.getElementById('modal-ai-freq-degraded').value = service.ai_lookup_frequency_degraded != null ? service.ai_lookup_frequency_degraded : 15;
-        document.getElementById('modal-ai-freq-partial').value = service.ai_lookup_frequency_partial_outage != null ? service.ai_lookup_frequency_partial_outage : 10;
-        document.getElementById('modal-ai-freq-outage').value = service.ai_lookup_frequency_outage != null ? service.ai_lookup_frequency_outage : 5;
-        document.getElementById('modal-ai-freq-maintenance').value = service.ai_lookup_frequency_maintenance != null ? service.ai_lookup_frequency_maintenance : 60;
-
-        if (service.ai_lookup_enabled) {
-          aiDetails.open = true;
-        }
-
-        // AI last checked info
-        if (service.ai_lookup_last_checked_at) {
-          var info = 'Last checked: ' + service.ai_lookup_last_checked_at;
-          if (service.ai_lookup_last_status) { info += ' \u2014 AI status: ' + service.ai_lookup_last_status; }
-          if (service.ai_lookup_last_message) { info += ' \u2014 ' + service.ai_lookup_last_message; }
-          aiLastChecked.textContent = info;
-          aiLastChecked.hidden = false;
-        } else {
-          aiLastChecked.hidden = true;
-        }
-
-        // Secondary form actions
-        if (refreshTagsForm) { refreshTagsForm.action = '/admin/service-status/' + service.id + '/refresh-tags'; }
-        if (checkNowForm) { checkNowForm.action = '/admin/service-status/' + service.id + '/check-now'; }
-        if (refreshTagsBtn) { refreshTagsBtn.hidden = false; }
-        if (checkNowBtn) { checkNowBtn.hidden = false; }
-      } else {
-        form.reset();
-        document.getElementById('modal-service-status').value = defaultStatus;
-        document.getElementById('modal-service-order').value = 0;
-        document.getElementById('modal-service-active').checked = true;
-        document.getElementById('modal-ai-freq-operational').value = 60;
-        document.getElementById('modal-ai-freq-degraded').value = 15;
-        document.getElementById('modal-ai-freq-partial').value = 10;
-        document.getElementById('modal-ai-freq-outage').value = 5;
-        document.getElementById('modal-ai-freq-maintenance').value = 60;
-        Array.from(companiesSelect.options).forEach(function (opt) { opt.selected = false; });
-        if (aiLastChecked) { aiLastChecked.hidden = true; }
-        if (refreshTagsBtn) { refreshTagsBtn.hidden = true; }
-        if (checkNowBtn) { checkNowBtn.hidden = true; }
-        aiDetails.open = false;
-      }
-
-      modal.hidden = false;
-      modal.setAttribute('aria-hidden', 'false');
-      document.addEventListener('keydown', handleKeydown);
-      var focusableInputSelector = 'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled])';
-      var first = modal.querySelector(focusableInputSelector) || modal.querySelector('button:not([disabled])');
-      if (first) { first.focus(); }
-    }
-
-    function closeModal() {
-      modal.hidden = true;
-      modal.setAttribute('aria-hidden', 'true');
-      document.removeEventListener('keydown', handleKeydown);
-      if (activeTrigger && typeof activeTrigger.focus === 'function') { activeTrigger.focus(); }
-      activeTrigger = null;
-    }
-
-    function handleKeydown(e) {
-      if (e.key === 'Escape') { e.preventDefault(); closeModal(); }
-    }
-
-    // Close on backdrop click
-    modal.addEventListener('click', function (e) { if (e.target === modal) { closeModal(); } });
-
-    // Close buttons inside modal
-    modal.querySelectorAll('[data-modal-close]').forEach(function (btn) {
-      btn.addEventListener('click', function (e) { e.preventDefault(); closeModal(); });
-    });
-
-    // "Add service" trigger (header button)
-    document.querySelectorAll('[data-service-modal-open="add"]').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.preventDefault();
-        activeTrigger = btn;
-        openModal(null);
-      });
-    });
-
-    // "Edit" trigger buttons on each table row
-    document.querySelectorAll('[data-service-modal-open="edit"]').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.preventDefault();
-        activeTrigger = btn;
-        var row = btn.closest('tr');
-        if (!row || !row.dataset.service) { return; }
-        try {
-          var service = JSON.parse(row.dataset.service);
-          openModal(service);
-        } catch (err) {
-          console.error('Failed to parse service data', err);
-        }
-      });
-    });
-
-    // Auto-open from server-side serviceId redirect (e.g. after tag refresh error)
-    var autoOpenScript = document.getElementById('service-autoopen-data');
-    if (autoOpenScript) {
-      try {
-        var autoService = JSON.parse(autoOpenScript.textContent);
-        if (autoService && autoService.id) {
-          openModal(autoService);
-        }
-      } catch (err) {
-        console.error('Failed to parse auto-open service data', err);
-      }
-    }
-  }());
-  </script>
+  <script src="{{ static_url('/static/js/service_status_admin.js') }}" defer></script>
 {% endblock %}

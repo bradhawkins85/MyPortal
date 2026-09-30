@@ -340,3 +340,70 @@ def test_totp_enrolment_keeps_script_hooks():
     ):
         assert hook in html, hook
     assert html.count('class="totp-step"') == 3
+
+
+def test_service_status_admin_renders_service_list_and_editor():
+    from datetime import datetime
+
+    definitions = [
+        {"value": "operational", "label": "Operational", "description": "Working", "variant": "status--operational"},
+        {"value": "outage", "label": "Major outage", "description": "Down", "variant": "status--outage"},
+    ]
+    service = {
+        "id": 3, "name": "Email", "description": "Exchange Online", "status": "outage",
+        "status_message": "Some users can't send", "display_order": 2, "is_active": False,
+        "company_ids": [1, 2, 9], "tags": ["mail", "m365"], "updated_at": datetime(2026, 9, 1, 3, 4),
+        "ai_lookup_enabled": True, "ai_lookup_url": "https://status.example.com", "ai_lookup_prompt": "",
+        "ai_lookup_model_override": "", "ai_lookup_frequency_operational": 60,
+        "ai_lookup_frequency_degraded": 15, "ai_lookup_frequency_partial_outage": 10,
+        "ai_lookup_frequency_outage": 5, "ai_lookup_frequency_maintenance": 60,
+        "ai_lookup_last_checked_at": None, "ai_lookup_last_status": None, "ai_lookup_last_message": None,
+    }
+    html = _page_env().get_template("admin/service_status.html").render(
+        service_status_entries=[service],
+        service_status_summary={"total": 1, "by_status": {"operational": 0, "outage": 1}},
+        service_status_definitions=definitions,
+        service_status_lookup={d["value"]: d for d in definitions},
+        company_options=[{"id": 1, "name": "Acme"}, {"id": 2, "name": "Globex"}],
+        service_status_company_lookup={1: "Acme", 2: "Globex"},
+        service_status_public_urls={1: "/service-status/public/1/abc"},
+        service_status_editing=service,
+        service_status_default="operational",
+        csrf_token="t",
+    )
+
+    # Edit links work without JavaScript and open the editor with it.
+    assert 'href="/admin/service-status?serviceId=3" data-ssa-edit="3"' in html
+    assert "Acme, Globex + 1 more" in html
+    assert "Hidden from dashboards" in html
+    assert "AI checks every 5 min" in html
+    assert '<time data-utc="2026-09-01T03:04:00Z">' in html
+    assert 'id="service-modal"' in html and 'data-ssa-tab="visibility"' in html
+    assert 'name="companyIds" value="2"' in html
+    assert 'name="status" value="outage"' in html
+    assert 'id="ssa-delete-form"' in html
+    assert "service_status_admin.js" in html
+    data = _json_block(html, "service-status-editor-data")
+    assert data["services"][0]["tags"] == ["mail", "m365"]
+    assert data["editing"]["id"] == 3
+    assert data["frequencyDefaults"]["outage"] == 5
+    assert "strftime" not in (TEMPLATES / "admin/service_status.html").read_text()
+
+
+def test_service_status_admin_empty_state_offers_first_service():
+    html = _page_env().get_template("admin/service_status.html").render(
+        service_status_entries=[],
+        service_status_summary={"total": 0, "by_status": {}},
+        service_status_definitions=[],
+        service_status_lookup={},
+        company_options=[],
+        service_status_company_lookup={},
+        service_status_public_urls={},
+        service_status_editing=None,
+        service_status_default="operational",
+        csrf_token="t",
+    )
+
+    assert "No services yet" in html
+    assert "+ Add your first service" in html
+    assert 'id="public-pages-modal"' not in html

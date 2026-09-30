@@ -10817,53 +10817,281 @@ a.service-card__ai-icon:hover {
   text-decoration: none;
 }
 
-.service-status-admin__stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: var(--space-gap-tight);
+/* ---------------------------------------------------------------------------
+ * Service status admin: service list + modal editor (/admin/service-status)
+ * ------------------------------------------------------------------------ */
+.ssa,
+.ssa-editor {
+  --ssa-operational: var(--hf-success);
+  --ssa-maintenance: #facc15;
+  --ssa-degraded: #fbbf24;
+  --ssa-partial_outage: var(--hf-warning);
+  --ssa-outage: var(--hf-danger);
 }
 
-.service-status-admin__stat {
-  background: rgba(15, 23, 42, 0.8);
-  border-radius: var(--radius-medium);
-  padding: 0.75rem 1rem;
+.ssa [hidden],
+.ssa-links [hidden] {
+  display: none !important;
+}
+
+.ssa .ssa__filter {
+  flex: 0 1 14rem;
+  width: auto;
+  min-width: 11rem;
+}
+
+.ssa__count {
+  margin-left: auto;
+  font-size: 0.85rem;
+}
+
+.ssa-dot {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: var(--hf-muted);
+}
+
+.ssa-item > .ssa-dot {
+  margin-top: 0.45rem;
+}
+
+.ssa-dot--operational { background: var(--ssa-operational); }
+.ssa-dot--maintenance { background: var(--ssa-maintenance); }
+.ssa-dot--degraded { background: var(--ssa-degraded); }
+.ssa-dot--partial_outage { background: var(--ssa-partial_outage); }
+.ssa-dot--outage { background: var(--ssa-outage); }
+
+.ssa-item > .ssa-dot--partial_outage,
+.ssa-item > .ssa-dot--outage {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ssa-outage) 22%, transparent);
+}
+
+.ssa-item .scf-item__label {
+  text-decoration: none;
+}
+
+.ssa-item__message {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--hf-copy);
+  overflow-wrap: anywhere;
+}
+
+.ssa-chip--tag {
+  color: var(--hf-muted);
+}
+
+.ssa-item__actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ssa-item__updated {
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.ssa-item--inactive > .ssa-dot {
+  opacity: 0.45;
+}
+
+/* Published status pages */
+.ssa-links__cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-gap-base);
+  min-width: 0;
+}
+
+.ssa-links__url {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+
+.ssa-links .modal__body {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  gap: var(--space-gap-base);
 }
 
-.service-status-admin__stat-label {
-  font-size: 0.8rem;
-  color: rgba(148, 163, 184, 0.9);
+/* Editor */
+.ssa-editor [hidden] {
+  display: none !important;
 }
 
-.service-status-admin__stat-value {
-  font-size: 1.25rem;
-  font-weight: 700;
-  color: #f8fafc;
+.ssa-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-base);
 }
 
-.service-status-admin__stat--total .service-status-admin__stat-value {
-  color: #38bdf8;
+.ssa-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: var(--space-gap-base);
+  margin-bottom: calc(var(--space-gap-roomy) * 1.5);
 }
 
-.service-status-admin__companies {
-  margin: 0;
-  padding-left: 1.2rem;
-  color: rgba(148, 163, 184, 0.9);
+.ssa-status-card .ssa-dot {
+  width: 0.85rem;
+  height: 0.85rem;
+  margin-bottom: 0.35rem;
 }
 
-.service-status-admin__companies li {
-  margin-bottom: 0.15rem;
+.ssa-status-card--operational.is-selected { border-color: var(--ssa-operational); box-shadow: 0 0 0 1px var(--ssa-operational); background: color-mix(in srgb, var(--ssa-operational) 10%, transparent); }
+.ssa-status-card--maintenance.is-selected { border-color: var(--ssa-maintenance); box-shadow: 0 0 0 1px var(--ssa-maintenance); background: color-mix(in srgb, var(--ssa-maintenance) 10%, transparent); }
+.ssa-status-card--degraded.is-selected { border-color: var(--ssa-degraded); box-shadow: 0 0 0 1px var(--ssa-degraded); background: color-mix(in srgb, var(--ssa-degraded) 10%, transparent); }
+.ssa-status-card--partial_outage.is-selected { border-color: var(--ssa-partial_outage); box-shadow: 0 0 0 1px var(--ssa-partial_outage); background: color-mix(in srgb, var(--ssa-partial_outage) 10%, transparent); }
+.ssa-status-card--outage.is-selected { border-color: var(--ssa-outage); box-shadow: 0 0 0 1px var(--ssa-outage); background: color-mix(in srgb, var(--ssa-outage) 10%, transparent); }
+
+.ssa-note {
+  margin: var(--space-gap-roomy) 0 0;
+  padding: 0.55rem 0.75rem;
+  border-left: 3px solid var(--hf-accent-strong);
+  border-radius: 0 0.4rem 0.4rem 0;
+  background: var(--hf-accent-soft);
+  font-size: 0.85rem;
+  color: var(--hf-copy);
 }
 
-.service-status-admin__companies li:last-child {
-  margin-bottom: 0;
+.ssa-companies {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
 }
 
-.service-status-admin__name {
+.ssa-companies__list {
+  max-height: 16rem;
+  overflow: auto;
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+}
+
+.ssa-companies__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-gap-base);
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--hf-line-soft);
+  cursor: pointer;
+}
+
+.ssa-companies__row:last-child {
+  border-bottom: 0;
+}
+
+.ssa-companies__row:hover,
+.ssa-companies__row:has(input:checked) {
+  background: var(--hf-accent-soft);
+}
+
+.ssa-companies__row input {
+  accent-color: var(--hf-accent);
+}
+
+.ssa-ai {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space-gap-roomy) * 1.5);
+  margin-top: calc(var(--space-gap-roomy) * 1.5);
+}
+
+.ssa-frequency__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.75rem, 1fr));
+  gap: var(--space-gap-base);
+  margin-top: var(--space-gap-base);
+}
+
+.ssa-frequency__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-bg-sunken);
+}
+
+.ssa-frequency__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
   font-weight: 600;
+  color: var(--hf-copy);
+}
+
+.ssa-frequency__input {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ssa-frequency__input .form-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.ssa-last-check {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-roomy);
+  margin-top: calc(var(--space-gap-roomy) * 1.5);
+  padding: var(--space-gap-roomy);
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-bg-sunken);
+}
+
+.ssa-last-check__text {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+  color: var(--hf-copy);
+  overflow-wrap: anywhere;
+}
+
+.ssa-preview__card {
+  pointer-events: none;
+}
+
+.ssa-preview__card .service-card__header {
+  align-items: flex-start;
+}
+
+.ssa-preview__card .status {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.ssa-preview__card:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+@media (max-width: 640px) {
+  .ssa .ssa__filter {
+    flex: 1 1 100%;
+  }
+
+  .ssa__count {
+    margin-left: 0;
+  }
+
+  .ssa-item__actions {
+    justify-content: flex-start;
+  }
+
+  .ssa-last-check {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 @media (max-width: 960px) {
