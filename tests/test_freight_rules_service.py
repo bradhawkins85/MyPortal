@@ -354,3 +354,104 @@ def test_calculate_cart_freight_stops_processing_on_matching_stop_rule():
 
     assert result["freight_total"] == Decimal("45.00")
     assert result["breakdown"][0]["applied_rule_ids"] == [1]
+
+
+def _single_warehouse_product(**overrides):
+    product = {
+        "id": 1,
+        "subscription_category_id": None,
+        "stock_nsw": 5,
+        "stock_qld": 0,
+        "stock_vic": 0,
+        "stock_sa": 0,
+        "stock_wa": 0,
+        "weight": Decimal("2.0"),
+        "length": Decimal("10"),
+        "width": Decimal("10"),
+        "height": Decimal("10"),
+    }
+    product.update(overrides)
+    return product
+
+
+_SIZE_RULES = [
+    {
+        "id": 1,
+        "name": "Large items",
+        "is_default": False,
+        "conditions": [{"type": "item_size", "operator": "in", "value": "large"}],
+        "freight_amount": Decimal("40.00"),
+    },
+    {"id": 2, "name": "Standard", "is_default": True, "conditions": [], "freight_amount": Decimal("10.00")},
+]
+
+
+def test_explicit_item_size_overrides_dimension_classification():
+    product = _single_warehouse_product(item_size="large")
+
+    preview = freight_service.calculate_product_freight_preview(product, _SIZE_RULES)
+
+    assert preview["item_size"] == "large"
+    assert preview["item_size_is_automatic"] is False
+    assert preview["freight_total"] == Decimal("40.00")
+    assert preview["breakdown"][0]["applied_rule_names"] == ["Large items"]
+
+
+def test_automatic_item_size_uses_dimensions():
+    preview = freight_service.calculate_product_freight_preview(
+        _single_warehouse_product(item_size=None), _SIZE_RULES
+    )
+
+    assert preview["item_size"] == "small"
+    assert preview["item_size_is_automatic"] is True
+    assert preview["freight_total"] == Decimal("10.00")
+
+
+def test_digital_delivery_items_are_excluded_from_freight():
+    cart_items = [
+        {"product_id": 1, "quantity": 1, "line_total": Decimal("100.00")},
+        {"product_id": 2, "quantity": 1, "line_total": Decimal("50.00")},
+    ]
+    product_lookup = {
+        1: _single_warehouse_product(id=1, item_size="digital"),
+        2: _single_warehouse_product(id=2),
+    }
+    rules = [{"id": 1, "name": "Freight", "is_default": True, "conditions": [], "freight_amount": Decimal("12.00")}]
+
+    result = freight_service.calculate_cart_freight(cart_items, product_lookup, rules)
+
+    assert result["cart_subtotal"] == Decimal("50.00")
+    assert result["freight_total"] == Decimal("12.00")
+
+    preview = freight_service.calculate_product_freight_preview(product_lookup[1], rules)
+    assert preview["freight_exempt"] is True
+    assert preview["freight_total"] == Decimal("0.00")
+    assert preview["breakdown"] == []
+
+
+def test_preview_weight_drives_item_weight_rules():
+    rules = [
+        {
+            "id": 1,
+            "name": "Heavy",
+            "is_default": False,
+            "conditions": [{"type": "item_weight", "operator": "gte", "value": "20"}],
+            "freight_amount": Decimal("55.00"),
+        },
+        {"id": 2, "name": "Standard", "is_default": True, "conditions": [], "freight_amount": Decimal("10.00")},
+    ]
+
+    light = freight_service.calculate_product_freight_preview(_single_warehouse_product(), rules)
+    heavy = freight_service.calculate_product_freight_preview(
+        _single_warehouse_product(weight=Decimal("25")), rules
+    )
+
+    assert light["freight_total"] == Decimal("10.00")
+    assert heavy["freight_total"] == Decimal("55.00")
+
+
+def test_normalise_item_size_rejects_unknown_values():
+    assert freight_service.normalise_item_size(" Medium ") == "medium"
+    assert freight_service.normalise_item_size("digital") == "digital"
+    assert freight_service.normalise_item_size("huge") is None
+    assert freight_service.normalise_item_size("") is None

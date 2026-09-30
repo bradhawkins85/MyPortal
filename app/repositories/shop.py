@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from decimal import Decimal
 import re
-from typing import Any, Iterable, Literal, Sequence
+from typing import Any, Iterable, Literal, Mapping, Sequence
 
 import aiomysql
 
@@ -1827,6 +1827,9 @@ async def update_product_description(
     return await get_product_by_id(product_id, include_archived=True)
 
 
+_PRODUCT_FREIGHT_COLUMNS: tuple[str, ...] = ("item_size", "weight", "length", "width", "height")
+
+
 async def update_product(
     product_id: int,
     *,
@@ -1855,13 +1858,25 @@ async def update_product(
     scheduled_buy_price: Decimal | None = None,
     price_change_date: Any | None = None,
     product_link: str | None = None,
+    freight: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
+    # Freight fields (item size, weight and dimensions) are only written when
+    # supplied so callers that do not edit them leave stock-feed values intact.
+    freight_assignments = ""
+    freight_params: list[Any] = []
+    if freight is not None:
+        for column in _PRODUCT_FREIGHT_COLUMNS:
+            freight_assignments += f"{column} = %s,\n"
+            freight_params.append(freight.get(column))
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
             await cursor.execute(
                 """
                 UPDATE shop_products
                 SET
+                    """  # nosec B608 - column names come from a fixed allow-list
+                + freight_assignments
+                + """
                     name = %s,
                     sku = %s,
                     vendor_sku = %s,
@@ -1893,6 +1908,7 @@ async def update_product(
                 WHERE id = %s
                 """,
                 (
+                    *freight_params,
                     name,
                     sku,
                     vendor_sku,
@@ -2574,6 +2590,8 @@ def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
     normalised["length"] = _coerce_optional_decimal(row.get("length"))
     normalised["width"] = _coerce_optional_decimal(row.get("width"))
     normalised["height"] = _coerce_optional_decimal(row.get("height"))
+    item_size = str(row.get("item_size") or "").strip().lower()
+    normalised["item_size"] = item_size or None
     normalised["stock"] = _coerce_int(row.get("stock"), default=0)
     normalised["stock_nsw"] = _coerce_int(row.get("stock_nsw"), default=0)
     normalised["stock_qld"] = _coerce_int(row.get("stock_qld"), default=0)
@@ -3077,6 +3095,7 @@ async def list_quote_items(quote_number: str, company_id: int) -> list[dict[str,
             p.length,
             p.width,
             p.height,
+            p.item_size,
             IF(c.is_vip = 1 AND p.vip_price IS NOT NULL, p.vip_price, p.price) AS price
         FROM shop_quotes AS q
         INNER JOIN shop_products AS p ON p.id = q.product_id

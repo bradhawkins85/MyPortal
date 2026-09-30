@@ -14474,6 +14474,11 @@ a.shop-product-card {
 .subscription-form-section .form-section-title { margin: 0 0 1rem; }
 .subscription-form-grid, .product-pricing-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; align-items: start; }
 .product-basic-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; align-items: start; }
+.product-freight-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1rem; align-items: start; }
+.freight-preview { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.75rem; margin-top: 0.75rem; padding: 0.75rem 1rem; border: 1px solid var(--color-border); border-radius: 0.5rem; background: var(--color-surface); }
+.freight-preview__label { color: var(--color-text-muted); font-size: 0.875rem; }
+.freight-preview__amount { font-size: 1.125rem; }
+.freight-preview__detail { flex-basis: 100%; color: var(--color-text-muted); font-size: 0.8rem; }
 .form-field--full { grid-column: 1 / -1; }
 .form-field--link { grid-column: span 2; }
 .product-content-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(16rem, 1fr); gap: 1.5rem; align-items: start; }
@@ -14515,7 +14520,7 @@ a.shop-product-card {
 .dashboard-panel__stat-strip .stat-strip__stat-value { font-size: 1.35rem; }
 @media (max-width: 760px) {
   #create-product-modal .modal__content, #create-subscription-modal .modal__content, #product-edit-modal .modal__content, #subscription-edit-modal .modal__content { width: 100vw; max-width: 100vw; padding: 1.25rem 1rem 0; }
-  .product-basic-grid, .product-content-grid, .product-pricing-grid, .subscription-form-grid, .related-products-grid { grid-template-columns: 1fr; }
+  .product-basic-grid, .product-content-grid, .product-pricing-grid, .product-freight-grid, .subscription-form-grid, .related-products-grid { grid-template-columns: 1fr; }
   .form-field--full, .form-field--link { grid-column: auto; }
   .subscription-form-actions { margin: 0 -1rem; padding: .85rem 1rem; }
   .features-toolbar { align-items: stretch; flex-direction: column; }
