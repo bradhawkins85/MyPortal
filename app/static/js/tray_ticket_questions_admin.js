@@ -53,6 +53,20 @@
     }
   }
 
+  function sanitizeBaseUrl(value) {
+    try {
+      const raw = String(value == null ? '' : value).trim();
+      const resolved = new URL(raw || '/', window.location.origin);
+      const protocolOk = resolved.protocol === 'http:' || resolved.protocol === 'https:';
+      if (!protocolOk || resolved.origin !== window.location.origin) {
+        return '/';
+      }
+      return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+    } catch (error) {
+      return '/';
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     const data = parseJson('tq-editor-data');
     const modal = document.getElementById('tq-modal');
@@ -61,7 +75,7 @@
     }
 
     const form = modal.querySelector('[data-tq-form]');
-    const baseUrl = data.baseUrl;
+    const baseUrl = sanitizeBaseUrl(data.baseUrl);
     const fixedCompanyId = data.companyId == null ? null : Number(data.companyId);
     const questionsById = new Map((data.questions || []).map((q) => [String(q.id), q]));
     const parents = data.parents || [];
