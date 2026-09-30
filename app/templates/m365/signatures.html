@@ -18,13 +18,13 @@
         <h2 class="card__title">MyPortal signature templates</h2>
         <p class="card__subtitle">
           Manage tenant-scoped HTML and plain-text signature templates, preview them against staff data,
-          and publish or disable them for consumers inside MyPortal. Publishing changes a database lifecycle state; it does not deploy a signature to Outlook or other Microsoft 365 clients.
+          publish them, then deploy published templates to Exchange Online mailboxes. Publishing alone does not change any mailbox; use Deploy to apply a signature.
         </p>
       </div>
     </header>
     <div class="card__body card__body--stacked">
       <div class="alert alert--info" role="status">
-        <strong>Lifecycle:</strong> Draft templates are editable but inactive. Published means available for MyPortal use. A published template becomes scheduled or active according to its dates in <strong>{{ schedule_timezone }}</strong>. <strong>Client deployment: not configured</strong> — this workspace does not synchronize Outlook signatures.
+        <strong>Lifecycle:</strong> Draft templates are editable but inactive. Published means available for MyPortal use. A published template becomes scheduled or active according to its dates in <strong>{{ schedule_timezone }}</strong>. <strong>Outlook deployment:</strong> choose Deploy on a published template to apply it to selected mailboxes through Exchange Online. Deployment is a one-off push; redeploy after editing a template.
       </div>
       {% if current_primary %}
         <div class="card card--panel">
@@ -56,7 +56,7 @@
                     {% if item.is_default %}<span class="badge badge--info">Default</span>{% endif %}
                   </td>
                   <td><code>{{ item.slug }}</code></td>
-                  <td>{{ item.status|replace('_', ' ')|title }}{% if item.status == 'published' %}<br><small class="text-muted">{{ 'Active for MyPortal' if current_primary and current_primary.id == item.id else 'Scheduled/available for MyPortal' }} · Outlook deployment: not configured</small>{% endif %}</td>
+                  <td>{{ item.status|replace('_', ' ')|title }}{% if item.status == 'published' %}<br><small class="text-muted">{{ 'Active for MyPortal' if current_primary and current_primary.id == item.id else 'Scheduled/available for MyPortal' }}</small>{% endif %}</td>
                   <td>{{ item.priority or 0 }}</td>
                   <td>
                     {% if item.schedule_start_on or item.schedule_end_on %}
@@ -69,6 +69,7 @@
                   <td>
                     <div class="button-group">
                       <a class="button button--small" href="/m365/signatures/{{ item.id }}/edit">Edit</a>
+                      {% if item.status == 'published' %}<a class="button button--small" href="/m365/signatures/{{ item.id }}/deploy">Deploy</a>{% endif %}
                       <form method="post" action="/m365/signatures/{{ item.id }}/clone" style="display:inline;">
                         {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
                         <button type="submit" class="button button--ghost button--small">Duplicate</button>
@@ -89,10 +90,10 @@
   <section class="card card--panel">
     <header class="card__header card__header--stacked">
       <div>
-        <h2 class="card__title">Current platform boundary</h2>
+        <h2 class="card__title">How deployment works</h2>
         <p class="card__subtitle">
-          This workspace stores and selects templates for MyPortal. It has no supported delivery integration,
-          so actual Outlook deployment status is <strong>not configured</strong> rather than pending or successful.
+          Deploy renders the template for each selected mailbox's staff record and applies it with the Exchange Online
+          <code>Set-MailboxMessageConfiguration</code> cmdlet. This needs the Exchange.ManageAsApp permission and the Exchange Administrator role.
         </p>
       </div>
     </header>
@@ -100,7 +101,9 @@
       <ul class="list">
         <li>HTML and TXT variants are stored separately so administrators can publish rich and plain-text versions independently.</li>
         <li>Preview uses live staff, company, custom-variable, and automation-token data before publication.</li>
-        <li>Existing personal or third-party signatures remain outside MyPortal ownership.</li>
+        <li>Deployed signatures are used by Outlook on the web and the new Outlook. Classic Outlook for Windows and Mac keeps locally stored signatures.</li>
+        <li>If roaming signatures are active in the tenant, Exchange ignores deployed signatures; the Deploy page shows this and can switch the tenant to Exchange-managed signatures.</li>
+        <li>Deploying replaces each selected mailbox's current signature.</li>
       </ul>
     </div>
   </section>

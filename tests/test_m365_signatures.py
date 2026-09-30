@@ -132,6 +132,7 @@ def test_signature_templates_compile_and_expose_designer_copy():
 
     environment.get_template("m365/signatures.html")
     environment.get_template("m365/signatures_form.html")
+    environment.get_template("m365/signatures_deploy.html")
 
     source = (ROOT / "app" / "templates" / "m365" / "signatures_form.html").read_text(
         encoding="utf-8"
