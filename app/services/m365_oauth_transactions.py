@@ -63,6 +63,6 @@ async def consume(transaction_id: str) -> dict[str, Any] | None:
     if not encrypted_payload:
         return None
     try:
-        return json.loads(decrypt_secret(encrypted_payload))
+        return json.loads(decrypt_secret(encrypted_payload, allow_plaintext=False))
     except (InvalidTag, TypeError, ValueError):
         return None

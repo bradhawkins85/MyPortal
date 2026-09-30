@@ -66,6 +66,27 @@ async def migrate(args: argparse.Namespace) -> None:
         )
     finally:
         await db.disconnect()
+    # Filesystem-only and idempotent; never fail the schema phase over it.
+    try:
+        from app.services import ticket_attachments as attachments_service
+
+        attachments_service.migrate_legacy_attachment_files()
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"Legacy ticket attachment migration skipped: {exc}")
+
+
+def migrate_legacy_ticket_attachments(args: argparse.Namespace) -> None:
+    """Move legacy static/uploads/tickets files into private storage (idempotent)."""
+    from app.services import ticket_attachments as attachments_service
+
+    counts = attachments_service.migrate_legacy_attachment_files(dry_run=args.dry_run)
+    prefix = "[dry run] " if args.dry_run else ""
+    print(
+        f"{prefix}moved={counts['moved']} duplicates_removed={counts['duplicates_removed']} "
+        f"conflicts={counts['conflicts']} skipped={counts['skipped']}"
+    )
+    if counts["conflicts"]:
+        raise SystemExit(1)
 
 
 def main() -> None:
@@ -85,11 +106,18 @@ def main() -> None:
     rebuild_parser.add_argument("--changed-only", action="store_true")
     rebuild_parser.add_argument("--company")
     rebuild_parser.add_argument("--document")
+    legacy_parser = sub.add_parser(
+        "migrate-legacy-ticket-attachments",
+        help="move static/uploads/tickets files into private_uploads/tickets",
+    )
+    legacy_parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     if args.command == "migrate":
         asyncio.run(migrate(args))
     elif args.command == "rebuild-rag-relationships":
         asyncio.run(rebuild(args))
+    elif args.command == "migrate-legacy-ticket-attachments":
+        migrate_legacy_ticket_attachments(args)
 
 
 if __name__ == "__main__":

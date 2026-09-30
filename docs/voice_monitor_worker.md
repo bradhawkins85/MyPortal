@@ -28,6 +28,12 @@ per-tenant concurrency limits in each process prevent one tenant from consuming
 all local capacity. Configure instance-specific provider/environment settings in
 `/etc/myportal.voice-monitor.<instance>.env`.
 
+The unit runs `/opt/myportal/current/.venv/bin/python` from the release
+promoted by `scripts/upgrade.sh`, so restart workers after an upgrade to pick
+up new code. It uses the same systemd hardening as `myportal@.service` except
+`PrivateDevices` (baresip may open audio devices), and can write only
+`/opt/myportal/shared` and `/run/myportal` besides the usual `/var` paths.
+
 The service has an independent restart policy, resource limits, 35-second
 shutdown budget, and a health marker under `/run/myportal`. On SIGTERM it stops
 claiming, drains calls, hangs up calls that exceed the grace period, and records

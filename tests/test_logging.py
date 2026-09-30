@@ -60,6 +60,7 @@ def test_configure_logging_writes_application_log_one_line_per_entry(tmp_path):
         {
             "SESSION_SECRET": "test-secret",
             "TOTP_ENCRYPTION_KEY": "test-totp-key",
+            "ENVIRONMENT": "test",
             "APP_LOG_PATH": str(log_path),
             "LOG_ROTATION": "",
             "LOG_RETENTION": "",
@@ -90,6 +91,7 @@ def test_log_level_filters_application_log_entries(tmp_path):
         {
             "SESSION_SECRET": "test-secret",
             "TOTP_ENCRYPTION_KEY": "test-totp-key",
+            "ENVIRONMENT": "test",
             "APP_LOG_PATH": str(log_path),
             "LOG_LEVEL": "WARNING",
             "LOG_ROTATION": "",
@@ -118,6 +120,7 @@ def test_log_level_normalizes_env_value():
         {
             "SESSION_SECRET": "test-secret",
             "TOTP_ENCRYPTION_KEY": "test-totp-key",
+            "ENVIRONMENT": "test",
             "LOG_LEVEL": "warning  # quiet logs",
         },
         clear=True,
@@ -135,6 +138,7 @@ def test_default_application_log_rotation_and_retention():
         {
             "SESSION_SECRET": "test-secret",
             "TOTP_ENCRYPTION_KEY": "test-totp-key",
+            "ENVIRONMENT": "test",
         },
         clear=True,
     ):
@@ -154,6 +158,7 @@ def test_blank_application_log_path_disables_file_sink():
         {
             "SESSION_SECRET": "test-secret",
             "TOTP_ENCRYPTION_KEY": "test-totp-key",
+            "ENVIRONMENT": "test",
             "APP_LOG_PATH": "",
         },
         clear=True,

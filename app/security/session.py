@@ -38,6 +38,11 @@ class SessionManager:
         self.session_cookie_name = self._settings.session_cookie_name
         self.csrf_cookie_name = f"{self.session_cookie_name}_csrf"
         self.session_ttl = timedelta(hours=12)
+        # Sliding the idle expiry on every request would otherwise keep a
+        # session (or a stolen cookie) alive forever, so cap it from creation.
+        self.session_absolute_ttl = timedelta(
+            hours=int(getattr(self._settings, "session_absolute_ttl_hours", 168) or 168)
+        )
 
     def _is_secure(self) -> bool:
         return self._settings.environment.lower() == "production"
@@ -105,13 +110,24 @@ class SessionManager:
         if expires_at and expires_at < now:
             await auth_repo.update_session(record["id"], is_active=False)
             return None
+        absolute_expiry: datetime | None = None
+        if record.get("created_at"):
+            absolute_expiry = ensure_datetime(record.get("created_at")) + self.session_absolute_ttl
+            if absolute_expiry.tzinfo is not None:
+                absolute_expiry = absolute_expiry.replace(tzinfo=None)
+            if absolute_expiry <= now:
+                await auth_repo.update_session(record["id"], is_active=False)
+                return None
         session = self._map_session(record)
+        new_expires_at = now + self.session_ttl
+        if absolute_expiry is not None and absolute_expiry < new_expires_at:
+            new_expires_at = absolute_expiry
         await auth_repo.update_session(
             session.id,
             last_seen_at=now,
-            expires_at=now + self.session_ttl,
+            expires_at=new_expires_at,
         )
-        session.expires_at = now + self.session_ttl
+        session.expires_at = new_expires_at
         session.last_seen_at = now
         request.state.session = session
         request.state.active_company_id = session.active_company_id

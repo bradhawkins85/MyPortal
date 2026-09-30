@@ -78,7 +78,7 @@
         <li class="evidence-list__item">
           <span class="tag tag--muted">v{{ evidence.version_number }}</span>
           <strong>{{ evidence.title }}</strong>
-          <div class="text--muted"><a href="/uploads/{{ evidence.file_path }}" target="_blank" rel="noopener noreferrer">{{ evidence.file_name }}</a>{% if evidence.file_size_bytes %} · {{ evidence.file_size_bytes }} bytes{% endif %}</div>
+          <div class="text--muted"><a href="/api/essential8/companies/{{ evidence.company_id }}/evidence/{{ evidence.id }}/download" rel="noopener noreferrer">{{ evidence.file_name }}</a>{% if evidence.file_size_bytes %} · {{ evidence.file_size_bytes }} bytes{% endif %}</div>
         </li>
         {% endfor %}
       </ul>

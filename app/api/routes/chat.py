@@ -154,7 +154,7 @@ async def list_rooms(
     _require_matrix_enabled()
     user_id = current_user["id"]
     company_id = current_user.get("company_id")
-    is_admin = current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")
+    is_admin = await chat_access.is_chat_staff(current_user)
 
     if is_admin:
         rooms = await chat_repo.list_rooms(status=status)
@@ -211,7 +211,8 @@ async def create_room(
     _require_matrix_enabled()
     user_id = current_user["id"]
     company_id = current_user.get("company_id")
-    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+    is_staff = await chat_access.is_chat_staff(current_user)
+    if not is_staff:
         company = await companies_repo.get_company_by_id(int(company_id)) if company_id is not None else None
         if not _company_customer_chat_enabled(company):
             raise HTTPException(status_code=403, detail="Chat is not enabled for this company")
@@ -259,7 +260,7 @@ async def create_room(
     except Exception as exc:
         log_error("create_room: auto-assign failed", room_id=room["id"], error=str(exc))
 
-    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+    if not is_staff:
         try:
             refreshed_room = await chat_repo.get_room(int(room["id"]))
             if refreshed_room:
@@ -276,7 +277,7 @@ async def create_room(
         new_value={"subject": body.subject},
     )
 
-    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+    if not is_staff:
         await chat_ntfy_notifications.notify_new_chat(room=room, actor=current_user)
 
     return JSONResponse(_serialize(dict(room)), status_code=201)
@@ -360,7 +361,7 @@ async def send_message(
     )
 
     await chat_repo.update_room(room_id, last_message_at=now)
-    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+    if not await chat_access.is_chat_staff(current_user):
         await matrix_ai_waiting_assistant.handle_user_message(room_id, now)
 
     try:
@@ -400,7 +401,7 @@ async def rename_room(
     current_user: dict = Depends(get_current_user),
 ) -> JSONResponse:
     _require_matrix_enabled()
-    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+    if not await chat_access.is_chat_staff(current_user):
         raise HTTPException(status_code=403, detail="Only technicians or admins can rename chats")
 
     room = await chat_repo.get_room(room_id)
@@ -444,7 +445,7 @@ async def create_ticket_from_room(
     current_user: dict = Depends(get_current_user),
 ) -> JSONResponse:
     _require_matrix_enabled()
-    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+    if not await chat_access.is_chat_staff(current_user):
         raise HTTPException(status_code=403, detail="Only technicians or admins can create tickets from chats")
 
     room = await chat_repo.get_room(room_id)
@@ -476,7 +477,7 @@ async def join_room(
     current_user: dict = Depends(get_current_user),
 ) -> JSONResponse:
     _require_matrix_enabled()
-    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+    if not await chat_access.is_chat_staff(current_user):
         raise HTTPException(status_code=403, detail="Only technicians or admins can join rooms")
 
     room = await chat_repo.get_room(room_id)
@@ -542,7 +543,7 @@ async def assign_room(
 ) -> JSONResponse:
     """Assign the calling technician/admin to this room, or force-reassign."""
     _require_matrix_enabled()
-    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+    if not await chat_access.is_chat_staff(current_user):
         raise HTTPException(status_code=403, detail="Only technicians or admins can be assigned")
 
     room = await chat_repo.get_room(room_id)
@@ -603,7 +604,7 @@ async def close_room(
         raise HTTPException(status_code=404, detail="Room not found")
 
     user_id = current_user["id"]
-    is_admin = current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")
+    is_admin = await chat_access.is_chat_staff(current_user)
     if not is_admin and room["created_by_user_id"] != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to close this room")
 
@@ -648,10 +649,7 @@ async def invite_external(
         raise HTTPException(status_code=404, detail="Room not found")
 
     user_id = current_user["id"]
-    is_staff = current_user.get("is_super_admin") or current_user.get(
-        "is_helpdesk_technician"
-    )
-    if not is_staff:
+    if not await chat_access.is_chat_staff(current_user):
         raise HTTPException(status_code=403, detail="Staff only")
 
     invite_domain = _settings.matrix_invite_domain or _settings.matrix_server_name or ""

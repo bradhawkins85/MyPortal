@@ -1095,7 +1095,21 @@ class _DownloadOnlyStaticFiles(StaticFiles):
     Files under ``static/uploads`` were uploaded by users (legacy port
     documents, legacy ticket attachments), so they must never be rendered by
     the browser as HTML/SVG/XML/script on the portal origin.
+
+    Legacy ticket attachments (``static/uploads/tickets``) are never served
+    here: they are only reachable through the access-controlled ticket
+    attachment endpoints (which fall back to the legacy folder until
+    ``manage.py migrate-legacy-ticket-attachments`` has moved them).
     """
+
+    _BLOCKED_TOP_LEVEL_DIRS = frozenset({"tickets"})
+
+    def get_path(self, scope) -> str:
+        path = super().get_path(scope)
+        parts = Path(path).parts
+        if parts and parts[0].lower() in self._BLOCKED_TOP_LEVEL_DIRS:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        return path
 
     def file_response(self, full_path, stat_result, scope, status_code: int = 200) -> Response:
         response = super().file_response(full_path, stat_result, scope, status_code)
@@ -1197,20 +1211,16 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
     """Persistent connection used by the tray client.
 
     The handshake authenticates with a bearer auth_token supplied via the
-    ``Authorization`` header, the ``X-Tray-Token`` header, or the ``token``
-    query parameter (the latter for environments where headers cannot be
-    set on a websocket open).  Messages are JSON; the protocol is documented
-    in ``docs/tray_app.md``.
+    ``Authorization`` header or the ``X-Tray-Token`` header.  A ``?token=``
+    query parameter is deliberately not accepted: the tray client always
+    sends a header, and query strings end up in proxy and access logs.
+    Messages are JSON; the protocol is documented in ``docs/tray_app.md``.
     """
 
     from app.repositories import tray as tray_repo
     from app.services import tray as tray_service
 
-    token = (
-        websocket.headers.get("X-Tray-Token")
-        or websocket.query_params.get("token")
-        or ""
-    )
+    token = websocket.headers.get("X-Tray-Token") or ""
     if not token:
         auth_header = websocket.headers.get("Authorization", "")
         if auth_header.lower().startswith("bearer "):
@@ -1263,17 +1273,24 @@ if settings.mcp_enabled:
 
 
 @app.get(PROTECTED_OPENAPI_PATH, include_in_schema=False)
-async def authenticated_openapi_schema(
-    _: SessionData = Depends(get_current_session),
-) -> JSONResponse:
-    """Return the OpenAPI schema for authenticated users only."""
+async def authenticated_openapi_schema(request: Request) -> JSONResponse:
+    """Return the OpenAPI schema to super admins and helpdesk technicians only.
 
+    The schema enumerates every internal and administrative endpoint, so it is
+    not exposed to customer accounts.
+    """
+
+    user, redirect = await _require_authenticated_user(request)
+    if redirect or not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    if not await _is_helpdesk_technician(user, request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API documentation access denied")
     return JSONResponse(app.openapi())
 
 
 @app.get(SWAGGER_UI_PATH, include_in_schema=False)
 async def authenticated_swagger_ui(request: Request) -> Response:
-    """Render the Swagger UI after verifying the user session."""
+    """Render the Swagger UI for super admins and helpdesk technicians."""
 
     session = await session_manager.load_session(request)
     if not session:
@@ -1281,6 +1298,12 @@ async def authenticated_swagger_ui(request: Request) -> Response:
         login_url = f"/login?next={next_target}"
         redirect = RedirectResponse(url=login_url, status_code=status.HTTP_303_SEE_OTHER)
         return redirect
+
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    if not await _is_helpdesk_technician(user, request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API documentation access denied")
 
     return get_swagger_ui_html(
         openapi_url=PROTECTED_OPENAPI_PATH,
@@ -1648,10 +1671,10 @@ def _classify_private_upload(sanitized_path: PurePosixPath) -> tuple[bool, bool]
 
     Only directories the portal actually links through ``/uploads`` are
     served: product images (``shop/``), knowledge base inline images
-    (``knowledge-base/<file>``), Essential 8 evidence
-    (``compliance/essential8/``) and legacy top-level raster images.  Other
-    private stores (ticket attachments, KB attachments, SMB1001 evidence,
-    asset photos, report covers, ...) have dedicated, access-controlled
+    (``knowledge-base/<file>``) and legacy top-level raster images.  Other
+    private stores (ticket attachments, KB attachments, Essential 8 and
+    SMB1001 evidence, asset photos, report covers, ...) have dedicated,
+    per-company access-controlled
     download endpoints and are never exposed here.  ``None`` means "not found".
     """
 
@@ -1663,8 +1686,6 @@ def _classify_private_upload(sanitized_path: PurePosixPath) -> tuple[bool, bool]
         return (False, True) if is_image else None
     if len(parts) == 2 and parts[0] == "knowledge-base":
         return (True, True) if is_image else None
-    if len(parts) == 3 and parts[:2] == ("compliance", "essential8"):
-        return (False, is_image)
     return None
 
 
@@ -6778,6 +6799,9 @@ async def admin_users_action(request: Request, user_id: int, action: str):
     if action == "deactivate":
         updated = await user_repo.update_user(user_id, is_active=0)
         await auth_repo.deactivate_sessions_for_user(user_id)
+        # An unused signup verification link would otherwise re-activate
+        # the account.
+        await auth_repo.invalidate_account_verification_tokens_for_user(user_id)
         await audit_service.record(
             action="user.deactivate",
             request=request,

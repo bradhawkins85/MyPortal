@@ -70,8 +70,9 @@ jobs:
         run: |
           # Install project dependencies first
           pip install -e .
-          # Run pip-audit and continue even if vulnerabilities are found
-          pip-audit --desc --format json --output pip-audit-results.json || true
+          # Fail the job when a known vulnerability is found. The results are
+          # still displayed and uploaded by the always() steps below.
+          pip-audit --desc --format json --output pip-audit-results.json
 
       - name: Display pip-audit results
         if: always()

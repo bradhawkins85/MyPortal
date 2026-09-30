@@ -193,7 +193,16 @@ async def tracking_status(
         
     Returns:
         Dict with tracking status
+
+    Tracking ids belong to ticket reply emails, so open counts are only
+    disclosed to helpdesk staff (super admins and helpdesk technicians).
     """
+    # Avoid an import cycle with app.api.routes.tickets at module load time.
+    from app.api.routes.tickets import _has_helpdesk_permission
+
+    if not await _has_helpdesk_permission(current_user):
+        raise HTTPException(status_code=403, detail="Helpdesk technician privileges required")
+
     status = await email_tracking.get_tracking_status(tracking_id)
     
     if not status:

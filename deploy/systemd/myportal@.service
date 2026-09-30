@@ -17,6 +17,12 @@
 # fired each job. Ports are intentionally fixed because the deployment
 # coordinator and nginx use this same blue/green mapping for direct readiness
 # checks and cutover.
+#
+# Uvicorn listens on 127.0.0.1 only, so the slots are reachable solely through
+# nginx (and fail2ban's view of its access log). When nginx runs on another
+# host, set MYPORTAL_BIND_HOST in /etc/myportal.env (for example 0.0.0.0) and
+# firewall ports 8001/8002 to the proxy. The address must still accept
+# loopback connections because upgrade.sh checks /readyz on 127.0.0.1.
 
 [Unit]
 Description=MyPortal customer portal (%i instance)
@@ -37,7 +43,7 @@ Group=myportal
 EnvironmentFile=/etc/myportal.env
 EnvironmentFile=-/etc/myportal.%i.env
 Environment=APP_INSTANCE_ID=%i
-ExecStart=/bin/sh -ec 'case %i in blue) port=8001;; green) port=8002;; *) echo "Invalid MyPortal instance %i; use myportal@blue.service or myportal@green.service (one .service suffix)." >&2; exit 64;; esac; release=$$(readlink -f /opt/myportal/instances/%i); test -n "$$release"; cd "$$release"; exec "$$release/.venv/bin/python" -m uvicorn app.main:app --host 0.0.0.0 --port "$$port" --workers 2'
+ExecStart=/bin/sh -ec 'case %i in blue) port=8001;; green) port=8002;; *) echo "Invalid MyPortal instance %i; use myportal@blue.service or myportal@green.service (one .service suffix)." >&2; exit 64;; esac; host="$${MYPORTAL_BIND_HOST:-127.0.0.1}"; release=$$(readlink -f /opt/myportal/instances/%i); test -n "$$release"; cd "$$release"; exec "$$release/.venv/bin/python" -m uvicorn app.main:app --host "$$host" --port "$$port" --workers 2'
 # Graceful reload: SIGHUP causes uvicorn to gracefully restart workers
 # without dropping accepted connections.
 ExecReload=/bin/kill -s HUP $MAINPID
@@ -45,8 +51,25 @@ Restart=always
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
+# ProtectSystem=full (read-only /usr, /boot, /efi and /etc) rather than strict:
+# the application also writes caches and logs under /var (for example the
+# WeasyPrint/fontconfig cache and /var/log/myportal), which strict would block.
 ProtectSystem=full
 ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+# MemoryDenyWriteExecute is intentionally not set: cffi (WeasyPrint) and the
+# optional PowerShell (.NET JIT) fallback need writable executable memory.
 # Release immutability is enforced by ownership and read-only filesystem modes.
 # Do not bind-mount the release tree read-only: upload paths inside each release
 # are symlinks into the writable shared tree and must remain writable.

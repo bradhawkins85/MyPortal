@@ -394,13 +394,23 @@ async def remove_opt_out(email: str, category: str) -> None:
     )
 
 
-async def list_opt_outs(limit: int = 200) -> list[dict[str, Any]]:
-    rows = await db.fetch_all(
+async def list_opt_outs(limit: int = 200, *, company_ids: Iterable[int] | None = None) -> list[dict[str, Any]]:
+    """Return recent opt-outs, optionally only for contacts at ``company_ids``."""
+
+    sql = (
         "SELECT o.*, c.name AS campaign_name FROM marketing_email_opt_outs o "
-        "LEFT JOIN marketing_campaigns c ON c.id = o.campaign_id "
-        "ORDER BY o.created_at DESC LIMIT %s",
-        (int(limit),),
+        "LEFT JOIN marketing_campaigns c ON c.id = o.campaign_id"
     )
+    params: list[Any] = []
+    if company_ids is not None:
+        params = sorted(int(company_id) for company_id in company_ids)
+        if not params:
+            return []
+        sql += (
+            " WHERE EXISTS (SELECT 1 FROM staff s WHERE LOWER(s.email) = LOWER(o.email) "
+            "AND s.company_id IN (" + _placeholders(params) + "))"
+        )
+    rows = await db.fetch_all(sql + " ORDER BY o.created_at DESC LIMIT %s", tuple(params + [int(limit)]))
     return [dict(row) for row in rows]
 
 
@@ -486,10 +496,15 @@ async def find_staff_by_emails(emails: Sequence[str]) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-async def list_company_options() -> list[dict[str, Any]]:
-    rows = await db.fetch_all(
-        "SELECT id, name FROM companies WHERE COALESCE(archived, 0) = 0 ORDER BY name"
-    )
+async def list_company_options(company_ids: Iterable[int] | None = None) -> list[dict[str, Any]]:
+    sql = "SELECT id, name FROM companies WHERE COALESCE(archived, 0) = 0"
+    params: list[Any] = []
+    if company_ids is not None:
+        params = sorted(int(company_id) for company_id in company_ids)
+        if not params:
+            return []
+        sql += " AND id IN (" + _placeholders(params) + ")"
+    rows = await db.fetch_all(sql + " ORDER BY name", tuple(params))
     return [{"id": int(row["id"]), "name": str(row.get("name") or "")} for row in rows]
 
 

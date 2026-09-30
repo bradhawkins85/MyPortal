@@ -45,6 +45,7 @@ def uploads(tmp_path: Path, monkeypatch):
         "tickets/abc.html",
         "knowledge-base/attachments/1/doc.pdf",
         "compliance/smb1001/evidence.pdf",
+        "compliance/essential8/evidence.html",
         "shop/evil.html",
     ],
 )
@@ -60,14 +61,6 @@ async def test_images_served_inline_with_nosniff(uploads):
     assert response.media_type == "image/png"
     assert response.headers["x-content-type-options"] == "nosniff"
     assert "content-disposition" not in response.headers
-
-
-@pytest.mark.asyncio
-async def test_non_image_evidence_forced_to_download(uploads):
-    response = await app_main.serve_private_upload("compliance/essential8/evidence.html", request=None)
-    assert response.media_type == "application/octet-stream"
-    assert response.headers["content-disposition"].startswith("attachment")
-    assert response.headers["x-content-type-options"] == "nosniff"
 
 
 @pytest.mark.asyncio

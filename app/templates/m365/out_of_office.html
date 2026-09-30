@@ -3,13 +3,22 @@
 
 {% block title %}Out of Office{% endblock %}
 {% block header_title %}Out of Office{% endblock %}
-{% block header_actions %}
-  {% set oof_actions = [] %}
-  {% if can_write and mailboxes %}
-    {% set _ = oof_actions.append({"label": "+ Set automatic reply", "type": "button", "variant": "primary", "attrs": {"data-oof-new": "", "aria-haspopup": "dialog", "aria-controls": "oof-modal"}}) %}
-  {% endif %}
-  {% set _ = oof_actions.append({"label": "API documentation", "type": "link", "href": "/docs"}) %}
-  {{ page_header_actions(oof_actions) }}
+{% block header_actions %}{% if is_super_admin or (is_helpdesk_technician | default(false)) %}{{ page_header_actions([{"label":"API documentation","type":"link","href":"/docs"}]) }}{% endif %}{% endblock %}
+
+{% block styles %}
+<style>
+  .oof-grid { display:grid; grid-template-columns:minmax(18rem,.7fr) minmax(0,1.3fr); gap:var(--space-4); }
+  .oof-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-3); }
+  .oof-wide { grid-column:1/-1; }
+  .oof-mailboxes { max-height:22rem; overflow:auto; border:1px solid var(--color-border); border-radius:var(--radius-md); }
+  .oof-mailbox { display:flex; gap:var(--space-2); align-items:flex-start; padding:var(--space-3); border-bottom:1px solid var(--color-border); }
+  .oof-mailbox:last-child { border-bottom:0; }
+  .oof-mailbox span { min-width:0; overflow-wrap:anywhere; }
+  .oof-tools { display:flex; align-items:center; gap:var(--space-2); margin-bottom:var(--space-2); }
+  .oof-results { margin-bottom:var(--space-4); }
+  .oof-actions { display:flex; gap:var(--space-2); flex-wrap:wrap; }
+  @media (max-width:800px) { .oof-grid,.oof-fields { grid-template-columns:1fr; } .oof-wide { grid-column:auto; } }
+</style>
 {% endblock %}
 
 {% block content %}

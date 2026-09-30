@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import re
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from html import escape
 from io import BytesIO
@@ -11,7 +13,7 @@ from typing import Any
 
 import pyotp
 import qrcode
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from loguru import logger
 
@@ -44,7 +46,6 @@ from app.schemas.auth import (
     PasswordResetConfirm,
     PasswordResetRequest,
     PasswordResetStatus,
-    RegistrationConflictResponse,
     RegistrationPendingResponse,
     RegistrationRequest,
     SessionInfo,
@@ -56,7 +57,7 @@ from app.schemas.auth import (
     TOTPVerifyRequest,
 )
 from app.schemas.users import UserResponse
-from app.security.passwords import verify_password
+from app.security.passwords import get_dummy_password_hash, verify_password
 from app.security.session import SessionData, ensure_datetime, session_manager
 from app.services import company_access
 from app.services import audit as audit_service
@@ -71,6 +72,24 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 settings = get_settings()
 LOGIN_RATE_LIMIT_WINDOW = 300  # 5 minutes
 LOGIN_RATE_LIMIT_ATTEMPTS = 5
+# Per-account failed sign-in limit, independent of the client address.
+ACCOUNT_LOCKOUT_WINDOW = 900  # 15 minutes
+ACCOUNT_LOCKOUT_ATTEMPTS = 10
+_ACCOUNT_LOCKOUT_PREFIX = "account:"
+
+
+def _account_lockout_identifier(email: str) -> str:
+    return f"{_ACCOUNT_LOCKOUT_PREFIX}{str(email or '').strip().lower()}"
+
+
+async def _record_account_login_failure(account_identifier: str) -> None:
+    # register_login_attempt increments the counter; the limit it reports is
+    # enforced by the check at the start of the next sign-in.
+    await auth_repo.register_login_attempt(
+        account_identifier,
+        window_seconds=ACCOUNT_LOCKOUT_WINDOW,
+        max_attempts=ACCOUNT_LOCKOUT_ATTEMPTS,
+    )
 
 
 def _totp_qr_code_data_uri(provisioning_uri: str) -> str:
@@ -80,6 +99,41 @@ def _totp_qr_code_data_uri(provisioning_uri: str) -> str:
     image.save(buffer, format="PNG")
     encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
     return f"data:image/png;base64,{encoded}"
+
+def _matching_totp_step(
+    secret: str,
+    code: str | None,
+    last_used_step: int | None,
+    *,
+    at: float | None = None,
+) -> int | None:
+    """Return the time-step *code* is valid for, or ``None``.
+
+    Accepts the current step and one either side (clock drift), but never a
+    step at or before *last_used_step*, so an accepted code cannot be
+    replayed while it is still inside its validity window.
+    """
+    candidate = str(code or "").strip()
+    if not candidate:
+        return None
+    totp = pyotp.TOTP(secret)
+    current = int(at if at is not None else time.time()) // totp.interval
+    floor = int(last_used_step) if last_used_step is not None else None
+    for step in (current - 1, current, current + 1):
+        if floor is not None and step <= floor:
+            continue
+        if hmac.compare_digest(totp.generate_otp(step), candidate):
+            return step
+    return None
+
+
+async def _verify_and_claim_totp(devices: list[dict[str, Any]], code: str | None) -> bool:
+    for device in devices:
+        step = _matching_totp_step(device["secret"], code, device.get("last_used_step"))
+        if step is not None and await auth_repo.claim_totp_step(int(device["id"]), step):
+            return True
+    return False
+
 
 def _html_to_text(html: str) -> str:
     text = re.sub(r"<\s*br\s*/?\s*>", "\n", html, flags=re.IGNORECASE)
@@ -398,123 +452,129 @@ async def _resolve_first_user_company_id(requested_company_id: int | None) -> in
     return int(company["id"])
 
 
-@router.post(
-    "/register",
-    response_model=LoginResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Register a new account",
-    responses={
-        status.HTTP_202_ACCEPTED: {
-            "model": RegistrationPendingResponse,
-            "description": "Registration created and awaiting email verification.",
-        },
-        status.HTTP_409_CONFLICT: {
-            "model": RegistrationConflictResponse,
-            "description": "Registration conflict for an existing account.",
-        },
-    },
+REGISTRATION_PENDING_DETAIL = (
+    "Thanks. Check your email for a link to finish setting up your account "
+    "before signing in."
 )
-async def register(
-    payload: RegistrationRequest,
-    request: Request,
-    _: None = Depends(require_database),
-) -> Response:
-    existing_users = await user_repo.count_users()
-    is_first_user = existing_users == 0
 
-    existing_user = await user_repo.get_user_by_email(payload.email)
-    if existing_user:
-        if int(existing_user.get("force_password_change") or 0) == 1:
-            return JSONResponse(
-                content={
-                    "detail": (
-                        "An account already exists for this email. "
-                        "Send a password reset link to finish setting it up."
-                    ),
-                    "account_setup_reset_available": True,
-                },
-                status_code=status.HTTP_409_CONFLICT,
-            )
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
-    matched_company_id: int | None = None
+def _registration_restricted() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Registration is restricted to approved company domains or existing staff records",
+    )
+
+
+async def _match_registration_company(
+    email: str,
+) -> tuple[int, dict[str, Any] | None]:
+    """Return the company (and any staff record) a self-registration joins.
+
+    Raises 403 when the email matches neither an enabled staff record nor an
+    approved company domain. This depends only on the address, never on
+    whether an account already exists for it.
+    """
+    staff_matches = await staff_repo.list_staff_by_email(email)
+    active_staff_matches = [staff for staff in staff_matches if bool(staff.get("enabled", True))]
     matched_staff: dict[str, Any] | None = None
-    if not is_first_user:
-        staff_matches = await staff_repo.list_staff_by_email(payload.email)
-        active_staff_matches = [staff for staff in staff_matches if bool(staff.get("enabled", True))]
-        if active_staff_matches:
-            matched_staff = active_staff_matches[0]
-            raw_staff_company_id = matched_staff.get("company_id")
-            try:
-                matched_company_id = int(raw_staff_company_id) if raw_staff_company_id is not None else None
-            except (TypeError, ValueError):
-                matched_company_id = None
+    matched_company_id: int | None = None
+    if active_staff_matches:
+        matched_staff = active_staff_matches[0]
+        raw_staff_company_id = matched_staff.get("company_id")
+        try:
+            matched_company_id = int(raw_staff_company_id) if raw_staff_company_id is not None else None
+        except (TypeError, ValueError):
+            matched_company_id = None
 
-        if matched_company_id is None:
-            domain = payload.email.split("@")[-1].strip().lower()
-            matched = await company_repo.get_company_by_email_domain(domain)
-            if not matched:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Registration is restricted to approved company domains or existing staff records",
-                )
+    if matched_company_id is None:
+        domain = email.split("@")[-1].strip().lower()
+        matched = await company_repo.get_company_by_email_domain(domain)
+        if not matched or matched.get("id") is None:
+            raise _registration_restricted()
+        try:
+            matched_company_id = int(matched["id"])
+        except (TypeError, ValueError) as exc:
+            log_error(
+                "Failed to coerce matched company identifier during registration",
+                error=str(exc),
+            )
+            raise _registration_restricted() from exc
 
-            raw_company_id = matched.get("id")
-            if raw_company_id is None:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Registration is restricted to approved company domains or existing staff records",
-                )
+    return matched_company_id, matched_staff
 
-            try:
-                matched_company_id = int(raw_company_id)
-            except (TypeError, ValueError) as exc:
-                log_error(
-                    "Failed to coerce matched company identifier during registration",
-                    error=str(exc),
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Registration is restricted to approved company domains or existing staff records",
-                ) from exc
 
-    first_user_company_id: int | None = None
-    if is_first_user:
-        first_user_company_id = await _resolve_first_user_company_id(payload.company_id)
+async def _notify_existing_account_registration(user: dict[str, Any]) -> None:
+    """Tell an existing account holder someone tried to register their email.
 
+    An invited account that has not been set up yet gets a password link to
+    finish setup (what the sign-up form used to offer inline); anyone else
+    gets a notice pointing at sign-in and password reset.
+    """
+    try:
+        if int(user.get("force_password_change") or 0) == 1:
+            await _issue_password_reset_email(user)
+            return
+        base_url = str(settings.portal_url).rstrip("/") if settings.portal_url else ""
+        login_link = f"{base_url}/login" if base_url else "/login"
+        forgot_link = f"{base_url}/forgot-password" if base_url else "/forgot-password"
+        name = user.get("first_name") or "there"
+        text_body = (
+            f"Hello {name},\n\n"
+            f"Someone tried to create a new {settings.app_name} account with this email "
+            "address, but you already have one.\n\n"
+            f"Sign in: {login_link}\n"
+            f"Forgotten your password? Reset it here: {forgot_link}\n\n"
+            "If this wasn't you, you can ignore this email."
+        )
+        html_body = (
+            f"<p>Hello {escape(name)},</p>"
+            f"<p>Someone tried to create a new {escape(settings.app_name)} account with this "
+            "email address, but you already have one.</p>"
+            f"<p><a href=\"{escape(login_link)}\">Sign in</a> or "
+            f"<a href=\"{escape(forgot_link)}\">reset your password</a>.</p>"
+            "<p>If this wasn't you, you can ignore this email.</p>"
+        )
+        await email_service.send_email(
+            subject=f"You already have a {settings.app_name} account",
+            recipients=[user["email"]],
+            text_body=text_body,
+            html_body=html_body,
+        )
+    except Exception as exc:  # pragma: no cover - background task, log and continue
+        logger.error(
+            "Failed to notify existing account about a registration attempt",
+            user_id=user.get("id"),
+            error=str(exc),
+        )
+
+
+async def _send_signup_verification_email_safely(user: dict[str, Any], token: str) -> None:
+    try:
+        await _send_signup_verification_email(user, token)
+    except Exception as exc:  # pragma: no cover - background task, log and continue
+        logger.error("Failed to send signup verification email", user_id=user.get("id"), error=str(exc))
+
+
+def _registration_pending_response(background_tasks: BackgroundTasks) -> JSONResponse:
+    return JSONResponse(
+        content={"detail": REGISTRATION_PENDING_DETAIL, "verification_required": True},
+        status_code=status.HTTP_202_ACCEPTED,
+        background=background_tasks,
+    )
+
+
+async def _register_first_user(payload: RegistrationRequest, request: Request) -> Response:
+    first_user_company_id = await _resolve_first_user_company_id(payload.company_id)
     created = await user_repo.create_user(
         email=payload.email,
         password=payload.password,
-        first_name=payload.first_name or (matched_staff or {}).get("first_name"),
-        last_name=payload.last_name or (matched_staff or {}).get("last_name"),
-        mobile_phone=payload.mobile_phone or (matched_staff or {}).get("mobile_phone"),
-        company_id=first_user_company_id if is_first_user else matched_company_id,
-        is_super_admin=is_first_user,
+        first_name=payload.first_name,
+        last_name=payload.last_name,
+        mobile_phone=payload.mobile_phone,
+        company_id=first_user_company_id,
+        is_super_admin=True,
     )
-
-    if matched_company_id is not None:
-        await user_company_repo.assign_user_to_company(
-            user_id=created["id"],
-            company_id=matched_company_id,
-        )
-
     await staff_access_service.apply_pending_access_for_user(created)
-
-    if not is_first_user:
-        await user_repo.update_user(created["id"], is_active=0, email_verified_at=None)
-        token = secrets.token_hex(32)
-        expires_at = datetime.utcnow() + timedelta(hours=24)
-        await auth_repo.create_account_verification_token(
-            user_id=created["id"], token=token, expires_at=expires_at
-        )
-        await _send_signup_verification_email(created, token)
-        return JSONResponse(
-            content={
-                "detail": "Account created, please check your email for an account verification link before signing in",
-                "verification_required": True,
-            },
-            status_code=status.HTTP_202_ACCEPTED,
-        )
 
     active_company_id = await _determine_active_company_id(created)
     session = await session_manager.create_session(
@@ -535,6 +595,70 @@ async def register(
     session_manager.apply_session_cookies(response, session, request)
     return response
 
+
+@router.post(
+    "/register",
+    response_model=LoginResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Register a new account",
+    responses={
+        status.HTTP_202_ACCEPTED: {
+            "model": RegistrationPendingResponse,
+            "description": (
+                "Registration accepted; next steps were emailed. The same response "
+                "is returned whether or not the email already has an account."
+            ),
+        },
+    },
+)
+async def register(
+    payload: RegistrationRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    _: None = Depends(require_database),
+) -> Response:
+    # Only one request may create the initial super administrator. Serialise
+    # the bootstrap on a database lock and re-check inside it; a request that
+    # loses the race continues as an ordinary self-registration.
+    if await user_repo.count_users() == 0:
+        async with auth_repo.first_user_registration_lock():
+            if await user_repo.count_users() == 0:
+                return await _register_first_user(payload, request)
+
+    matched_company_id, matched_staff = await _match_registration_company(payload.email)
+
+    # Do not reveal whether the email already has an account: respond exactly
+    # as for a new signup and email the existing account holder instead. The
+    # password hash keeps the work (and timing) the same as creating a user.
+    existing_user = await user_repo.get_user_by_email(payload.email)
+    if existing_user:
+        verify_password(payload.password, get_dummy_password_hash())
+        background_tasks.add_task(_notify_existing_account_registration, existing_user)
+        return _registration_pending_response(background_tasks)
+
+    created = await user_repo.create_user(
+        email=payload.email,
+        password=payload.password,
+        first_name=payload.first_name or (matched_staff or {}).get("first_name"),
+        last_name=payload.last_name or (matched_staff or {}).get("last_name"),
+        mobile_phone=payload.mobile_phone or (matched_staff or {}).get("mobile_phone"),
+        company_id=matched_company_id,
+        is_super_admin=False,
+    )
+    await user_company_repo.assign_user_to_company(
+        user_id=created["id"],
+        company_id=matched_company_id,
+    )
+    await staff_access_service.apply_pending_access_for_user(created)
+
+    await user_repo.update_user(created["id"], is_active=0, email_verified_at=None)
+    token = secrets.token_hex(32)
+    expires_at = datetime.utcnow() + timedelta(hours=24)
+    await auth_repo.create_account_verification_token(
+        user_id=created["id"], token=token, expires_at=expires_at
+    )
+    background_tasks.add_task(_send_signup_verification_email_safely, created, token)
+    return _registration_pending_response(background_tasks)
 
 
 @router.get(
@@ -561,8 +685,13 @@ async def verify_email(token: str, _: None = Depends(require_database)) -> Respo
     if expires_at and datetime.utcnow() > ensure_datetime(expires_at):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification link")
 
+    # Only a never-verified signup reaches this point (a verified account
+    # returned above), so the link can complete signup but can never
+    # re-enable an account an administrator deactivated after verification.
+    # Deactivation also retires outstanding links for unverified accounts.
     await user_repo.update_user(record["user_id"], is_active=1, email_verified_at=datetime.utcnow())
     await auth_repo.mark_account_verification_token_used(token)
+    await auth_repo.invalidate_account_verification_tokens_for_user(int(record["user_id"]))
     return RedirectResponse(url="/login?verified=1", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -588,8 +717,26 @@ async def login(
         _log_login_failure(request, payload.email, "rate_limited")
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many login attempts")
 
+    # The per-IP limit above does not stop guessing spread across many
+    # addresses, so failures are also counted per account (keyed on the
+    # email alone, whether or not it is registered). A locked account gets
+    # the same generic error as a wrong password.
+    account_identifier = _account_lockout_identifier(payload.email)
+    failures = await auth_repo.get_login_attempt_count(
+        account_identifier, window_seconds=ACCOUNT_LOCKOUT_WINDOW
+    )
+    if failures >= ACCOUNT_LOCKOUT_ATTEMPTS:
+        verify_password(payload.password, get_dummy_password_hash())
+        _log_login_failure(request, payload.email, "account_locked")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
     user = await user_repo.get_user_by_email(payload.email)
-    if not user or not verify_password(payload.password, user["password_hash"]):
+    # Always run one password check, against a dummy hash for unknown
+    # accounts, so response timing does not reveal which emails exist.
+    stored_hash = (user or {}).get("password_hash") or get_dummy_password_hash()
+    password_ok = verify_password(payload.password, stored_hash)
+    if not user or not user.get("password_hash") or not password_ok:
+        await _record_account_login_failure(account_identifier)
         _log_login_failure(request, payload.email, "invalid_credentials")
         # Do not create database audit rows for arbitrary unknown identifiers:
         # that would provide an attacker with an unbounded audit-log write
@@ -633,13 +780,11 @@ async def login(
                 metadata={"authentication_method": "password_totp", "outcome": "failure", "reason": "totp_required"},
             )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="TOTP code required")
-        verified = False
-        for device in totp_devices:
-            totp = pyotp.TOTP(device["secret"])
-            if totp.verify(payload.totp_code, valid_window=1):
-                verified = True
-                break
+        verified = await _verify_and_claim_totp(totp_devices, payload.totp_code)
         if not verified:
+            # Count wrong codes toward the account lockout so TOTP guessing
+            # with a known password is bounded too.
+            await _record_account_login_failure(account_identifier)
             _log_login_failure(request, payload.email, "invalid_totp")
             await audit_service.record(
                 action="auth.login.fail", request=request, user_id=int(user["id"]),
@@ -648,6 +793,7 @@ async def login(
             )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid TOTP code")
 
+    await auth_repo.clear_login_attempts(account_identifier)
     await auth_repo.clear_login_attempts(identifier)
     return await _complete_login_response(
         request=request,
@@ -791,19 +937,7 @@ async def get_session(
     return _build_login_response(current_user, session)
 
 
-@router.post(
-    "/password/forgot",
-    response_model=PasswordResetStatus,
-    summary="Request a password reset email",
-)
-async def password_forgot(
-    payload: PasswordResetRequest,
-    _: None = Depends(require_database),
-) -> PasswordResetStatus:
-    user = await user_repo.get_user_by_email(payload.email)
-    if not user:
-        return PasswordResetStatus(detail="If the email is registered, reset instructions have been sent.")
-
+async def _issue_password_reset_email(user: dict[str, Any]) -> None:
     token = secrets.token_hex(32)
     expires_at = datetime.utcnow() + timedelta(hours=1)
     await auth_repo.create_password_reset_token(
@@ -849,7 +983,37 @@ async def password_forgot(
             error=str(exc),
         )
 
-    return PasswordResetStatus(detail="If the email is registered, reset instructions have been sent.")
+
+async def _process_password_reset_request(email: str) -> None:
+    """Look up the account and send a reset link, off the request path."""
+    try:
+        user = await user_repo.get_user_by_email(email)
+        if user:
+            await _issue_password_reset_email(user)
+    except Exception as exc:  # pragma: no cover - background task, log and continue
+        logger.error("Failed to process password reset request", error=str(exc))
+
+
+PASSWORD_RESET_REQUESTED_DETAIL = "If the email is registered, reset instructions have been sent."
+
+
+@router.post(
+    "/password/forgot",
+    response_model=PasswordResetStatus,
+    summary="Request a password reset email",
+)
+async def password_forgot(
+    payload: PasswordResetRequest,
+    background_tasks: BackgroundTasks,
+    _: None = Depends(require_database),
+) -> Response:
+    # The lookup, token and email all happen after the response is sent, so
+    # neither the body nor the timing shows whether the email is registered.
+    background_tasks.add_task(_process_password_reset_request, payload.email)
+    return JSONResponse(
+        content=PasswordResetStatus(detail=PASSWORD_RESET_REQUESTED_DETAIL).model_dump(mode="json"),
+        background=background_tasks,
+    )
 
 
 @router.post(
@@ -988,8 +1152,8 @@ async def verify_totp(
     if await auth_repo.user_has_totp_authenticator(int(current_user["id"])):
         _require_password_reauthentication(current_user, payload.current_password or "")
 
-    totp = pyotp.TOTP(secret)
-    if not totp.verify(payload.code, valid_window=1):
+    enrolment_step = _matching_totp_step(secret, payload.code, None)
+    if enrolment_step is None:
         await audit_service.record(
             action="auth.mfa.verify",
             request=request,
@@ -1001,8 +1165,9 @@ async def verify_totp(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid TOTP code")
 
     name = payload.name or "Authenticator"
+    # Record the enrolment code's step so it cannot also be used to sign in.
     authenticator = await auth_repo.create_totp_authenticator(
-        user_id=current_user["id"], name=name, secret=secret
+        user_id=current_user["id"], name=name, secret=secret, last_used_step=enrolment_step
     )
     await session_manager.clear_pending_totp_secret(session)
     await audit_service.record_create(

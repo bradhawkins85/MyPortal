@@ -587,6 +587,51 @@ def test_systemd_uses_the_ports_checked_by_blue_green_coordinator():
     assert '--port "$$port"' in unit
 
 
+def test_systemd_binds_uvicorn_to_loopback_by_default():
+    unit = (ROOT / "deploy/systemd/myportal@.service").read_text()
+
+    assert "--host 0.0.0.0" not in unit
+    assert 'host="$${MYPORTAL_BIND_HOST:-127.0.0.1}"' in unit
+    assert '--host "$$host"' in unit
+
+
+def test_systemd_units_apply_sandbox_hardening():
+    web = (ROOT / "deploy/systemd/myportal@.service").read_text().splitlines()
+    voice = (
+        (ROOT / "deploy/systemd/myportal-voice-monitor@.service").read_text().splitlines()
+    )
+    common = {
+        "NoNewPrivileges=true",
+        "PrivateTmp=true",
+        "ProtectSystem=full",
+        "ProtectKernelTunables=true",
+        "ProtectKernelModules=true",
+        "ProtectKernelLogs=true",
+        "ProtectControlGroups=true",
+        "RestrictSUIDSGID=true",
+        "RestrictNamespaces=true",
+        "RestrictRealtime=true",
+        "LockPersonality=true",
+        "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK",
+        "CapabilityBoundingSet=",
+        "SystemCallArchitectures=native",
+    }
+    assert common <= set(web)
+    assert common <= set(voice)
+    assert "PrivateDevices=true" in web
+    for unit in (web, voice):
+        assert not any(line.startswith("MemoryDenyWriteExecute") for line in unit)
+
+
+def test_voice_monitor_runs_from_promoted_release_virtualenv():
+    unit = (ROOT / "deploy/systemd/myportal-voice-monitor@.service").read_text()
+
+    assert "/opt/myportal/.venv" not in unit
+    assert "ExecStart=/opt/myportal/current/.venv/bin/python" in unit
+    assert "ReadWritePaths=/opt/myportal/shared /run/myportal" in unit
+    assert "ReadWritePaths=/opt/myportal " not in unit
+
+
 def test_systemd_does_not_wait_for_unsupported_uvicorn_notifications():
     unit = (ROOT / "deploy/systemd/myportal@.service").read_text()
     installer = (ROOT / "scripts/install_environment.sh").read_text()

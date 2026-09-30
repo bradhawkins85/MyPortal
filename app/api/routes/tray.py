@@ -979,7 +979,7 @@ def _issue_ticket_form_token(device: dict[str, Any], mode: str) -> tuple[str, st
 
 def _parse_ticket_form_token(token: str) -> dict[str, Any] | None:
     try:
-        payload = json.loads(decrypt_secret(token))
+        payload = json.loads(decrypt_secret(token, allow_plaintext=False))
     except Exception:
         return None
     try:
@@ -2589,7 +2589,7 @@ def _parse_popup_session(request: Request) -> dict[str, Any] | None:
     if not raw:
         return None
     try:
-        decoded = decrypt_secret(raw)
+        decoded = decrypt_secret(raw, allow_plaintext=False)
         payload = json.loads(decoded)
     except Exception:
         return None

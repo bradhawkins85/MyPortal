@@ -23,6 +23,9 @@ class _DummyAuthRepo:
     async def register_login_attempt(self, identifier: str, *, window_seconds: int, max_attempts: int) -> bool:
         return True
 
+    async def get_login_attempt_count(self, identifier: str, *, window_seconds: int) -> int:
+        return 0
+
     async def clear_login_attempts(self, identifier: str) -> None:
         self.cleared_identifier = identifier
 

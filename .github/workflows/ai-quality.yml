@@ -1,5 +1,7 @@
 name: AI quality evaluation
 on: [pull_request, push]
+permissions:
+  contents: read
 jobs:
   deterministic-evaluation:
     runs-on: ubuntu-latest

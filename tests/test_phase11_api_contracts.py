@@ -66,7 +66,11 @@ def active_session(monkeypatch) -> SessionData:
     return session
 
 
-def test_openapi_documents_phase11_contracts(active_session):
+def test_openapi_documents_phase11_contracts(monkeypatch, active_session):
+    async def fake_require_user(request):
+        return {"id": active_session.user_id, "is_super_admin": True}, None
+
+    monkeypatch.setattr(main_module, "_require_authenticated_user", fake_require_user)
     with TestClient(app) as client:
         response = client.get("/internal/openapi.json")
 

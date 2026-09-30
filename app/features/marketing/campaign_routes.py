@@ -13,16 +13,18 @@ from app.services import audit as audit_service
 from app.services import marketing_campaigns as campaign_service
 from app.services import message_templates as message_templates_service
 
-from .routes import _main, _require_marketing_access
+from .routes import _main, _require_marketing_scope
 
 router = APIRouter(tags=["Marketing"])
 
 _PREVIEW_LIMIT = 500
 
 
-async def _form_options() -> dict[str, Any]:
+async def _form_options(company_ids: set[int] | None) -> dict[str, Any]:
     return {
-        "company_options": await campaign_repo.list_company_options(),
+        "company_options": await campaign_repo.list_company_options(company_ids),
+        "can_target_all_companies": company_ids is None,
+        "can_choose_sender": company_ids is None,
         "asset_field_options": await campaign_repo.list_asset_field_options(),
         "product_options": await campaign_repo.list_product_options(),
         "message_template_options": await message_templates_service.list_templates(limit=500),
@@ -34,14 +36,20 @@ async def _form_options() -> dict[str, Any]:
 async def _render_form(
     request: Request,
     current_user: dict[str, Any],
+    company_ids: set[int] | None,
     *,
     campaign: dict[str, Any] | None,
     values: dict[str, Any] | None = None,
     error_message: str | None = None,
+    status_code: int = status.HTTP_200_OK,
 ):
-    values = values or campaign or {"category": "updates", "business_hours_source": "company"}
+    values = values or campaign or {
+        "category": "updates",
+        "business_hours_source": "company",
+        "audience": {"company_mode": "all" if company_ids is None else "selected"},
+    }
     audience = campaign_service.normalise_audience(values.get("audience"))
-    return await _main()._render_template(
+    response = await _main()._render_template(
         "admin/marketing_campaign_form.html",
         request,
         current_user,
@@ -51,9 +59,11 @@ async def _render_form(
             "campaign_values": values,
             "audience": audience,
             "error_message": error_message,
-            **(await _form_options()),
+            **(await _form_options(company_ids)),
         },
     )
+    response.status_code = status_code
+    return response
 
 
 def _form_values_for_redisplay(form: Any) -> dict[str, Any]:
@@ -68,16 +78,16 @@ def _form_values_for_redisplay(form: Any) -> dict[str, Any]:
     return values
 
 
-async def _get_campaign_or_404(campaign_id: int) -> dict[str, Any]:
+async def _get_campaign_or_404(campaign_id: int, company_ids: set[int] | None) -> dict[str, Any]:
     campaign = await campaign_repo.get_campaign(campaign_id)
-    if not campaign:
+    if not campaign or not await campaign_service.campaign_in_scope(campaign, company_ids):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
     return campaign
 
 
 @router.get("/admin/marketing/campaigns", response_class=HTMLResponse)
 async def admin_marketing_campaigns(request: Request):
-    current_user, redirect = await _require_marketing_access(request)
+    current_user, company_ids, redirect = await _require_marketing_scope(request)
     if redirect:
         return redirect
     return await _main()._render_template(
@@ -86,23 +96,27 @@ async def admin_marketing_campaigns(request: Request):
         current_user,
         extra={
             "title": "Email campaigns",
-            "campaigns": await campaign_repo.list_campaigns(),
-            "opt_outs": await campaign_repo.list_opt_outs(),
+            "campaigns": [
+                campaign
+                for campaign in await campaign_repo.list_campaigns()
+                if await campaign_service.campaign_in_scope(campaign, company_ids)
+            ],
+            "opt_outs": await campaign_repo.list_opt_outs(company_ids=company_ids),
         },
     )
 
 
 @router.get("/admin/marketing/campaigns/new", response_class=HTMLResponse)
 async def admin_marketing_new_campaign(request: Request):
-    current_user, redirect = await _require_marketing_access(request)
+    current_user, company_ids, redirect = await _require_marketing_scope(request)
     if redirect:
         return redirect
-    return await _render_form(request, current_user, campaign=None)
+    return await _render_form(request, current_user, company_ids, campaign=None)
 
 
 @router.post("/admin/marketing/campaigns", response_class=HTMLResponse)
 async def admin_marketing_create_campaign(request: Request):
-    current_user, redirect = await _require_marketing_access(request)
+    current_user, company_ids, redirect = await _require_marketing_scope(request)
     if redirect:
         return redirect
     form = await request.form()
@@ -110,7 +124,20 @@ async def admin_marketing_create_campaign(request: Request):
         fields = campaign_service.campaign_fields_from_form(form)
     except campaign_service.CampaignError as exc:
         values = _form_values_for_redisplay(form)
-        return await _render_form(request, current_user, campaign=None, values=values, error_message=str(exc))
+        return await _render_form(
+            request, current_user, company_ids, campaign=None, values=values, error_message=str(exc)
+        )
+    scope_error = await campaign_service.campaign_scope_error(fields, company_ids)
+    if scope_error:
+        return await _render_form(
+            request,
+            current_user,
+            company_ids,
+            campaign=None,
+            values=_form_values_for_redisplay(form),
+            error_message=scope_error,
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
     campaign_id = await campaign_repo.create_campaign(fields, created_by=int(current_user["id"]))
     await audit_service.record(
         action="marketing.campaign.create",
@@ -129,13 +156,13 @@ async def admin_marketing_create_campaign(request: Request):
 
 @router.get("/admin/marketing/campaigns/{campaign_id}", response_class=HTMLResponse)
 async def admin_marketing_campaign_detail(campaign_id: int, request: Request):
-    current_user, redirect = await _require_marketing_access(request)
+    current_user, company_ids, redirect = await _require_marketing_scope(request)
     if redirect:
         return redirect
-    campaign = await _get_campaign_or_404(campaign_id)
+    campaign = await _get_campaign_or_404(campaign_id, company_ids)
     extra: dict[str, Any] = {"title": campaign["name"], "campaign": campaign}
     if campaign.get("status") == "draft":
-        resolved = await campaign_service.resolve_audience(campaign)
+        resolved = await campaign_service.resolve_audience(campaign, company_ids=company_ids)
         extra.update(
             {
                 "audience_recipients": resolved["recipients"][:_PREVIEW_LIMIT],
@@ -151,7 +178,11 @@ async def admin_marketing_campaign_detail(campaign_id: int, request: Request):
         extra.update(
             {
                 "campaign_stats": await campaign_repo.recipient_stats(campaign_id),
-                "campaign_recipients": await campaign_repo.list_recipients(campaign_id),
+                "campaign_recipients": [
+                    recipient
+                    for recipient in await campaign_repo.list_recipients(campaign_id)
+                    if company_ids is None or recipient.get("company_id") in company_ids
+                ],
             }
         )
     return await _main()._render_template(
@@ -161,23 +192,23 @@ async def admin_marketing_campaign_detail(campaign_id: int, request: Request):
 
 @router.get("/admin/marketing/campaigns/{campaign_id}/edit", response_class=HTMLResponse)
 async def admin_marketing_edit_campaign(campaign_id: int, request: Request):
-    current_user, redirect = await _require_marketing_access(request)
+    current_user, company_ids, redirect = await _require_marketing_scope(request)
     if redirect:
         return redirect
-    campaign = await _get_campaign_or_404(campaign_id)
+    campaign = await _get_campaign_or_404(campaign_id, company_ids)
     if campaign.get("status") != "draft":
         return flash_redirect(
             f"/admin/marketing/campaigns/{campaign_id}", "Only draft campaigns can be edited.", "error"
         )
-    return await _render_form(request, current_user, campaign=campaign)
+    return await _render_form(request, current_user, company_ids, campaign=campaign)
 
 
 @router.post("/admin/marketing/campaigns/{campaign_id}", response_class=HTMLResponse)
 async def admin_marketing_update_campaign(campaign_id: int, request: Request):
-    current_user, redirect = await _require_marketing_access(request)
+    current_user, company_ids, redirect = await _require_marketing_scope(request)
     if redirect:
         return redirect
-    campaign = await _get_campaign_or_404(campaign_id)
+    campaign = await _get_campaign_or_404(campaign_id, company_ids)
     if campaign.get("status") != "draft":
         return flash_redirect(
             f"/admin/marketing/campaigns/{campaign_id}", "Only draft campaigns can be edited.", "error"
@@ -187,18 +218,31 @@ async def admin_marketing_update_campaign(campaign_id: int, request: Request):
         fields = campaign_service.campaign_fields_from_form(form)
     except campaign_service.CampaignError as exc:
         values = _form_values_for_redisplay(form)
-        return await _render_form(request, current_user, campaign=campaign, values=values, error_message=str(exc))
+        return await _render_form(
+            request, current_user, company_ids, campaign=campaign, values=values, error_message=str(exc)
+        )
+    scope_error = await campaign_service.campaign_scope_error(fields, company_ids)
+    if scope_error:
+        return await _render_form(
+            request,
+            current_user,
+            company_ids,
+            campaign=campaign,
+            values=_form_values_for_redisplay(form),
+            error_message=scope_error,
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
     await campaign_repo.update_campaign(campaign_id, fields)
     return flash_redirect(f"/admin/marketing/campaigns/{campaign_id}", "Campaign updated.", "success")
 
 
 @router.get("/admin/marketing/campaigns/{campaign_id}/preview", response_class=HTMLResponse)
 async def admin_marketing_campaign_preview(campaign_id: int, request: Request):
-    current_user, redirect = await _require_marketing_access(request)
+    current_user, company_ids, redirect = await _require_marketing_scope(request)
     if redirect:
         return redirect
-    campaign = await _get_campaign_or_404(campaign_id)
-    resolved = await campaign_service.resolve_audience(campaign)
+    campaign = await _get_campaign_or_404(campaign_id, company_ids)
+    resolved = await campaign_service.resolve_audience(campaign, company_ids=company_ids)
     recipients = resolved["recipients"]
     wanted = campaign_service.normalise_email(request.query_params.get("email"))
     sample = next((r for r in recipients if r["email"] == wanted), None)
@@ -222,12 +266,14 @@ async def admin_marketing_campaign_preview(campaign_id: int, request: Request):
 
 @router.post("/admin/marketing/campaigns/{campaign_id}/test", response_class=HTMLResponse)
 async def admin_marketing_campaign_test(campaign_id: int, request: Request):
-    current_user, redirect = await _require_marketing_access(request)
+    current_user, company_ids, redirect = await _require_marketing_scope(request)
     if redirect:
         return redirect
-    campaign = await _get_campaign_or_404(campaign_id)
+    campaign = await _get_campaign_or_404(campaign_id, company_ids)
     try:
-        await campaign_service.send_test(campaign, str(current_user.get("email") or ""))
+        await campaign_service.send_test(
+            campaign, str(current_user.get("email") or ""), company_ids=company_ids
+        )
     except campaign_service.CampaignError as exc:
         return flash_redirect(f"/admin/marketing/campaigns/{campaign_id}", str(exc), "error")
     except Exception as exc:  # pragma: no cover - transport failures surface to the admin
@@ -243,12 +289,12 @@ async def admin_marketing_campaign_test(campaign_id: int, request: Request):
 
 @router.post("/admin/marketing/campaigns/{campaign_id}/send", response_class=HTMLResponse)
 async def admin_marketing_campaign_send(campaign_id: int, request: Request):
-    current_user, redirect = await _require_marketing_access(request)
+    current_user, company_ids, redirect = await _require_marketing_scope(request)
     if redirect:
         return redirect
-    await _get_campaign_or_404(campaign_id)
+    await _get_campaign_or_404(campaign_id, company_ids)
     try:
-        queued = await campaign_service.queue_campaign(campaign_id)
+        queued = await campaign_service.queue_campaign(campaign_id, company_ids=company_ids)
     except campaign_service.CampaignError as exc:
         return flash_redirect(f"/admin/marketing/campaigns/{campaign_id}", str(exc), "error")
     await audit_service.record(
@@ -268,9 +314,10 @@ async def admin_marketing_campaign_send(campaign_id: int, request: Request):
 
 @router.post("/admin/marketing/campaigns/{campaign_id}/cancel", response_class=HTMLResponse)
 async def admin_marketing_campaign_cancel(campaign_id: int, request: Request):
-    current_user, redirect = await _require_marketing_access(request)
+    current_user, company_ids, redirect = await _require_marketing_scope(request)
     if redirect:
         return redirect
+    await _get_campaign_or_404(campaign_id, company_ids)
     try:
         await campaign_service.cancel_campaign(campaign_id)
     except campaign_service.CampaignError as exc:
@@ -289,10 +336,10 @@ async def admin_marketing_campaign_cancel(campaign_id: int, request: Request):
 
 @router.post("/admin/marketing/campaigns/{campaign_id}/delete", response_class=HTMLResponse)
 async def admin_marketing_campaign_delete(campaign_id: int, request: Request):
-    current_user, redirect = await _require_marketing_access(request)
+    current_user, company_ids, redirect = await _require_marketing_scope(request)
     if redirect:
         return redirect
-    campaign = await _get_campaign_or_404(campaign_id)
+    campaign = await _get_campaign_or_404(campaign_id, company_ids)
     if campaign.get("status") == "sending":
         return flash_redirect(
             f"/admin/marketing/campaigns/{campaign_id}", "Cancel the campaign before deleting it.", "error"
@@ -311,11 +358,15 @@ async def admin_marketing_campaign_delete(campaign_id: int, request: Request):
 
 @router.post("/admin/marketing/opt-outs/remove", response_class=HTMLResponse)
 async def admin_marketing_remove_opt_out(request: Request):
-    current_user, redirect = await _require_marketing_access(request)
+    current_user, company_ids, redirect = await _require_marketing_scope(request)
     if redirect:
         return redirect
     form = await request.form()
     email = campaign_service.normalise_email(form.get("email"))
+    if email and company_ids is not None:
+        contacts = await campaign_repo.find_staff_by_emails([email])
+        if not any(contact.get("company_id") in company_ids for contact in contacts):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opt-out not found")
     if email:
         await campaign_repo.remove_opt_out(email, campaign_service.CATEGORY_SALES)
         await audit_service.record(

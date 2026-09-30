@@ -24,6 +24,7 @@ def test_allowed_origins_empty_string():
         {
             "SESSION_SECRET": "test-secret",
             "TOTP_ENCRYPTION_KEY": "test-totp-key",
+            "ENVIRONMENT": "test",
             "ALLOWED_ORIGINS": "",
         },
     ):
@@ -40,6 +41,7 @@ def test_allowed_origins_single_url():
         {
             "SESSION_SECRET": "test-secret",
             "TOTP_ENCRYPTION_KEY": "test-totp-key",
+            "ENVIRONMENT": "test",
             "ALLOWED_ORIGINS": "https://example.com",
         },
     ):
@@ -56,6 +58,7 @@ def test_allowed_origins_multiple_urls():
         {
             "SESSION_SECRET": "test-secret",
             "TOTP_ENCRYPTION_KEY": "test-totp-key",
+            "ENVIRONMENT": "test",
             "ALLOWED_ORIGINS": "https://example.com,https://app.example.com,https://dashboard.example.com",
         },
     ):
@@ -75,6 +78,7 @@ def test_allowed_origins_with_spaces():
         {
             "SESSION_SECRET": "test-secret",
             "TOTP_ENCRYPTION_KEY": "test-totp-key",
+            "ENVIRONMENT": "test",
             "ALLOWED_ORIGINS": "https://example.com, https://app.example.com , https://dashboard.example.com",
         },
     ):
@@ -95,6 +99,7 @@ def test_allowed_origins_not_set():
         {
             "SESSION_SECRET": "test-secret",
             "TOTP_ENCRYPTION_KEY": "test-totp-key",
+            "ENVIRONMENT": "test",
         },
         clear=True,
     ):
@@ -111,6 +116,7 @@ def test_allowed_origins_wildcard_rejected():
         {
             "SESSION_SECRET": "test-secret",
             "TOTP_ENCRYPTION_KEY": "test-totp-key",
+            "ENVIRONMENT": "test",
             "ALLOWED_ORIGINS": "*",
         },
     ):
@@ -127,6 +133,7 @@ def test_allowed_origins_invalid_url_rejected():
         {
             "SESSION_SECRET": "test-secret",
             "TOTP_ENCRYPTION_KEY": "test-totp-key",
+            "ENVIRONMENT": "test",
             "ALLOWED_ORIGINS": "not-a-url",
         },
     ):

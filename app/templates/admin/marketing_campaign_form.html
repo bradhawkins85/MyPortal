@@ -77,7 +77,12 @@
       </div>
       <div class="form-field">
         <label class="form-label" for="campaign-sender-email">Sender email</label>
+        {% if can_choose_sender %}
         <input id="campaign-sender-email" class="form-input" type="email" name="sender_email" value="{{ values.sender_email or '' }}" placeholder="{{ default_sender or '' }}" />
+        {% else %}
+        <input id="campaign-sender-email" class="form-input" type="email" value="{{ default_sender or '' }}" disabled />
+        <p class="form-help">Campaigns send from the portal's default address. Only Super Admins can change it.</p>
+        {% endif %}
       </div>
       <div class="form-field">
         <label class="form-label" for="campaign-reply-to">Reply-to address</label>
@@ -110,10 +115,12 @@
     <div class="form-grid">
       <fieldset class="form-field form-field--wide">
         <legend class="form-label">Companies</legend>
+        {% if can_target_all_companies %}
         <label class="checkbox">
           <input type="radio" name="company_mode" value="all" {% if audience.company_mode == 'all' %}checked{% endif %} />
           <span>All active companies</span>
         </label>
+        {% endif %}
         <label class="checkbox">
           <input type="radio" name="company_mode" value="selected" {% if audience.company_mode == 'selected' %}checked{% endif %} />
           <span>Only the companies selected below</span>

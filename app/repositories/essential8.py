@@ -1044,6 +1044,22 @@ async def list_requirement_evidence(
     ).get(requirement_id, [])
 
 
+async def get_requirement_evidence(company_id: int, evidence_id: int) -> dict[str, Any] | None:
+    """Return one evidence record scoped to ``company_id``, or ``None``."""
+
+    row = await db.fetch_one(
+        """
+        SELECT
+            id, company_id, requirement_id, version_number, title,
+            file_name, content_type, file_path, file_size_bytes
+        FROM company_essential8_requirement_evidence
+        WHERE id = %(id)s AND company_id = %(company_id)s
+        """,
+        {"id": evidence_id, "company_id": company_id},
+    )
+    return dict(row) if row else None
+
+
 async def list_requirement_evidence_map(
     company_id: int,
     *,

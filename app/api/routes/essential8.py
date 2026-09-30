@@ -8,7 +8,7 @@ from typing import BinaryIO, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app.api.dependencies.auth import require_super_admin, get_current_user
 from app.api.dependencies.database import require_database
@@ -638,6 +638,43 @@ async def list_requirement_evidence(
 ):
     await _assert_company_compliance_access(user, company_id)
     return await essential8_repo.list_requirement_evidence(company_id, requirement_id)
+
+
+def _resolve_requirement_evidence_file(relative_path: str) -> Path | None:
+    """Resolve a stored evidence path, refusing anything outside the E8 evidence folder."""
+
+    from app import main as main_module
+
+    root = _requirement_upload_dir().resolve()
+    candidate = main_module._private_uploads_path.joinpath(*PurePosixPath(relative_path).parts).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    return candidate
+
+
+@router.get("/companies/{company_id}/evidence/{evidence_id}/download")
+async def download_requirement_evidence(
+    company_id: int,
+    evidence_id: int,
+    _: None = Depends(require_database),
+    user: dict = Depends(get_current_user),
+):
+    """Download an evidence file; only users with compliance access to the company can."""
+    await _assert_company_compliance_access(user, company_id)
+    evidence = await essential8_repo.get_requirement_evidence(company_id, evidence_id)
+    path = _resolve_requirement_evidence_file(str(evidence.get("file_path") or "")) if evidence else None
+    if not evidence or path is None or not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence not found")
+    # Always an opaque attachment so uploaded content never renders on the portal origin.
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=str(evidence.get("file_name") or "evidence"),
+        content_disposition_type="attachment",
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+    )
 
 
 @router.post(

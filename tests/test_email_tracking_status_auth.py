@@ -46,7 +46,7 @@ def mock_authenticated_user():
     mock_user = {
         "id": 1,
         "email": "user@example.com",
-        "is_super_admin": False,
+        "is_super_admin": True,
     }
     app.dependency_overrides[auth_dependencies.get_current_user] = lambda: mock_user
     yield mock_user
@@ -205,3 +205,54 @@ def test_tracking_click_rejects_invalid_redirect_token(monkeypatch):
 
     assert response.status_code == 400
     assert "Invalid redirect token" in response.text
+
+
+def test_tracking_status_rejects_non_staff_user(monkeypatch):
+    """Customers must not read open counts for arbitrary tracking ids."""
+    import asyncio
+
+    from fastapi import HTTPException
+
+    from app.api.routes import email_tracking as email_tracking_routes
+    from app.api.routes import tickets as tickets_routes
+
+    async def no_helpdesk(user):
+        return False
+
+    async def fail_lookup(tracking_id: str):  # pragma: no cover - must not run
+        raise AssertionError("tracking status must not be looked up")
+
+    monkeypatch.setattr(tickets_routes, "_has_helpdesk_permission", no_helpdesk)
+    monkeypatch.setattr(email_tracking, "get_tracking_status", fail_lookup)
+
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(
+            email_tracking_routes.tracking_status(
+                "some-id", current_user={"id": 9, "is_super_admin": False}
+            )
+        )
+    assert excinfo.value.status_code == 403
+
+
+def test_tracking_status_allows_helpdesk_technician(monkeypatch):
+    import asyncio
+
+    from app.api.routes import email_tracking as email_tracking_routes
+    from app.api.routes import tickets as tickets_routes
+
+    async def is_helpdesk(user):
+        return True
+
+    async def fake_get_tracking_status(tracking_id: str):
+        return {"sent_at": None, "opened_at": None, "open_count": 2, "is_opened": True}
+
+    monkeypatch.setattr(tickets_routes, "_has_helpdesk_permission", is_helpdesk)
+    monkeypatch.setattr(email_tracking, "get_tracking_status", fake_get_tracking_status)
+
+    result = asyncio.run(
+        email_tracking_routes.tracking_status(
+            "tid", current_user={"id": 3, "is_super_admin": False}
+        )
+    )
+    assert result["found"] is True
+    assert result["open_count"] == 2

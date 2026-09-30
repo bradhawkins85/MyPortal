@@ -51,5 +51,3 @@ tray/*.exe
 /stock-feed.xml
 /StartupProfileData-*
 app/static/uploads/tickets/*
-!app/static/uploads/tickets/mono_call.wav
-!app/static/uploads/tickets/stereo_call.wav

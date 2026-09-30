@@ -7,6 +7,9 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# The weak-secret refusal only relaxes when ENVIRONMENT is explicitly
+# development/test, so the suite declares itself as a test environment.
+os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("SESSION_SECRET", "test-session-secret")
 os.environ.setdefault("TOTP_ENCRYPTION_KEY", "A" * 64)
 os.environ.setdefault("DB_HOST", "localhost")

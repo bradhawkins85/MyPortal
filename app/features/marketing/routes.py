@@ -10,10 +10,12 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.core.logging import log_error
+from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import essential8 as essential8_repo
 from app.repositories import marketing as marketing_repo
 from app.repositories import smb1001 as smb1001_repo
+from app.repositories import user_permissions as user_permissions_repo
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
 from app.services import tickets as tickets_service
@@ -21,6 +23,7 @@ from app.services import tickets as tickets_service
 router = APIRouter(tags=["Marketing"])
 
 _MARKETING_PERMISSION = "marketing.access"
+_SWITCH_ALL_PERMISSION = "company.switch_all"
 _MARKETING_TAG = "marketing"
 _MAIN_MODULE = None
 
@@ -62,6 +65,64 @@ async def _require_marketing_access(
     if not has_access:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Marketing access required")
     return user, None
+
+
+async def _marketing_company_ids(user: Mapping[str, Any]) -> set[int] | None:
+    """Return the companies whose contacts the user may use for marketing.
+
+    ``None`` means every company (Super Admins). Everyone else is limited to
+    the companies where an active membership's role, or a direct grant for
+    that company, includes ``marketing.access``. A technician role that also
+    carries ``company.switch_all`` extends that to every active company.
+    """
+
+    if bool(user.get("is_super_admin")):
+        return None
+    from app.services.role_switching import effective_role_has_permission
+
+    simulated = effective_role_has_permission(_MARKETING_PERMISSION)
+    if simulated is not None:
+        membership = user.get("simulated_membership") or {}
+        try:
+            company_id = int(membership.get("company_id") or 0)
+        except (TypeError, ValueError):
+            company_id = 0
+        return {company_id} if simulated and company_id > 0 else set()
+    try:
+        user_id = int(user.get("id"))
+    except (TypeError, ValueError):
+        return set()
+
+    allowed: set[int] = set()
+    for membership in await membership_repo.list_memberships_for_user(user_id, status="active"):
+        try:
+            company_id = int(membership.get("company_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if company_id <= 0:
+            continue
+        role_permissions = set(membership.get("legacy_permissions") or [])
+        if _MARKETING_PERMISSION in role_permissions:
+            if _SWITCH_ALL_PERMISSION in role_permissions:
+                return {int(company["id"]) for company in await company_repo.list_companies()}
+            allowed.add(company_id)
+        elif _MARKETING_PERMISSION in await user_permissions_repo.list_user_permissions(user_id, company_id):
+            allowed.add(company_id)
+    return allowed
+
+
+async def _require_marketing_scope(
+    request: Request,
+) -> tuple[dict[str, Any] | None, set[int] | None, RedirectResponse | None]:
+    """Like :func:`_require_marketing_access`, plus the user's marketing companies."""
+
+    user, redirect = await _require_marketing_access(request)
+    if redirect or not user:
+        return None, None, redirect
+    company_ids = await _marketing_company_ids(user)
+    if company_ids is not None and not company_ids:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Marketing access required")
+    return user, company_ids, None
 
 
 def _coerce_slug(raw_slug: str) -> str:

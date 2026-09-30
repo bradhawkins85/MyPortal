@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.services.monitored_http import monitored_client
+from app.services.outbound_url_guard import redirect_guard_hooks
 
 from app.core.config import get_settings
 from app.core.logging import log_error, log_warning
@@ -646,6 +647,10 @@ async def run_ai_lookup_for_service(service_id: int) -> dict[str, Any]:
             timeout=30.0,
             follow_redirects=True,
             headers=_AI_LOOKUP_HTTP_HEADERS,
+            # Re-validate every hop (including redirects) at fetch time.  The
+            # lookup URL policy already excludes private ranges, so redirects
+            # are held to the same standard.
+            event_hooks=redirect_guard_hooks(allow_private=False),
         ) as client:
             response = await client.get(lookup_url)
         response.raise_for_status()
