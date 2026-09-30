@@ -297,11 +297,11 @@ async def test_check_sspr_enabled_pass_collection_response():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_check_sspr_enabled_pass_nested_permissions():
-    """SSPR check passes when allowedToUseSspr is inside defaultUserRolePermissions."""
+async def test_check_sspr_enabled_pass_graph_casing():
+    """SSPR check reads Graph's canonical ``allowedToUseSSPR`` property."""
     async def mock_graph_get(token: str, url: str) -> dict:
         if "authorizationPolicy" in url:
-            return {"value": [{"defaultUserRolePermissions": {"allowedToUseSspr": True}}]}
+            return {"value": [{"allowedToUseSSPR": True}]}
         return {}
 
     with patch("app.services.cis_benchmark._graph_get", side_effect=mock_graph_get):

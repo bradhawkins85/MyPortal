@@ -112,3 +112,28 @@ async def test_record_recipients_handles_no_addresses(monkeypatch):
         to=[],
     )
     assert inserted == 0
+
+
+@pytest.mark.asyncio
+async def test_refresh_m365_read_status_uses_integration_modules(monkeypatch):
+    """The module lookup must hit ``integration_modules``; a query against a
+    non-existent ``modules`` table made the recipients popup return a 500."""
+    from app.services import email_recipients
+    from app.repositories import integration_modules
+    from app.core import database
+
+    slugs = []
+
+    async def mock_get_module(slug):
+        slugs.append(slug)
+        return {"slug": slug, "enabled": False, "settings": {}}
+
+    async def fail_fetch_all(query, params=None):  # pragma: no cover - guard
+        raise AssertionError("recipient rows should not be loaded when disabled")
+
+    monkeypatch.setattr(integration_modules, "get_module", mock_get_module)
+    monkeypatch.setattr(database.db, "fetch_all", fail_fetch_all)
+
+    await email_recipients.refresh_m365_read_status(42)
+
+    assert slugs == ["m365-direct-delivery"]

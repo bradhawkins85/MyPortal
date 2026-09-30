@@ -30,6 +30,7 @@ the batch runners in ``cis_benchmark.py``.
 from __future__ import annotations
 
 import asyncio
+import copy
 import csv
 import io
 import re
@@ -38,6 +39,7 @@ import string
 from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Any, Awaitable, Callable, Mapping, Union
+from urllib.parse import quote
 
 import httpx
 
@@ -92,6 +94,7 @@ from app.services.m365 import (
     _graph_get_all,
     _graph_patch,
     _graph_post,
+    _graph_put,
     _parse_client_secret_expires,
     _post_app_role_assignment_with_retry,
     _scc_invoke_command,
@@ -1692,27 +1695,44 @@ async def _check_sharepoint_sign_out_inactive_users(token: str) -> dict[str, Any
     settings = await _get_spo_settings(token)
     if settings is None:
         return _result(check_id, check_name, STATUS_UNKNOWN, _SPO_MISSING_PERM_MSG)
-    enabled = settings.get("idleSignOutEnabled")
-    if enabled is None:
+    # Graph exposes the SPO browser idle sign-out policy as the nested
+    # ``idleSessionSignOut`` object (isEnabled / warnAfterInSeconds /
+    # signOutAfterInSeconds).  Both timers are measured from the start of
+    # inactivity, so the sign-out timer alone is the effective session limit.
+    idle = settings.get("idleSessionSignOut")
+    if not isinstance(idle, dict) or idle.get("isEnabled") is None:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       "Unable to read idleSignOutEnabled from SharePoint tenant settings. "
-                       "Run: Get-SPOTenant | Select SignOutInactiveUsersAfter to verify manually.")
-    if not enabled:
+                       "Unable to read idleSessionSignOut from SharePoint tenant settings. "
+                       "Run: Get-SPOBrowserIdleSignOut to verify manually.")
+    if idle.get("isEnabled") is not True:
         return _result(check_id, check_name, STATUS_FAIL,
                        "Idle session sign-out is not enabled for SharePoint Online. "
-                       "Run: Set-SPOTenant -SignOutInactiveUsersAfter 01:00:00")
-    # CIS recommends the combined timeout (warn + sign-out) does not exceed 1 hour (3600 s).
-    warn_secs = settings.get("idleSignOutWarnAfterSeconds") or 0
-    signout_secs = settings.get("idleSignOutSignOutAfterSeconds") or 0
-    total_secs = int(warn_secs) + int(signout_secs)
-    if total_secs > 3600:
+                       "Run: Set-SPOBrowserIdleSignOut -Enabled $true "
+                       "-WarnAfter (New-TimeSpan -Minutes 45) -SignOutAfter (New-TimeSpan -Hours 1)")
+    try:
+        signout_secs = int(idle.get("signOutAfterInSeconds") or 0)
+    except (TypeError, ValueError):
+        signout_secs = 0
+    if signout_secs <= 0 or signout_secs > _SPO_IDLE_SIGN_OUT_MAX_SECONDS:
         return _result(check_id, check_name, STATUS_FAIL,
-                       f"Idle session sign-out is enabled but the total timeout "
-                       f"({total_secs // 60} min) exceeds the recommended 60 minutes. "
-                       "Run: Set-SPOTenant -SignOutInactiveUsersAfter 01:00:00")
+                       f"Idle session sign-out is enabled but users are signed out after "
+                       f"{signout_secs // 60} min, exceeding the recommended 60 minutes. "
+                       "Run: Set-SPOBrowserIdleSignOut -Enabled $true "
+                       "-WarnAfter (New-TimeSpan -Minutes 45) -SignOutAfter (New-TimeSpan -Hours 1)")
     return _result(check_id, check_name, STATUS_PASS,
-                   f"Idle session sign-out is enabled with a total timeout of "
-                   f"{total_secs // 60} min for SharePoint Online.")
+                   f"Idle session sign-out is enabled; inactive users are signed out after "
+                   f"{signout_secs // 60} min.")
+
+
+# CIS recommends signing inactive browser sessions out of SharePoint within 1 hour.
+_SPO_IDLE_SIGN_OUT_MAX_SECONDS = 3600
+_SPO_IDLE_SIGN_OUT_REMEDIATION_PAYLOAD: dict[str, Any] = {
+    "idleSessionSignOut": {
+        "isEnabled": True,
+        "warnAfterInSeconds": 2700,
+        "signOutAfterInSeconds": _SPO_IDLE_SIGN_OUT_MAX_SECONDS,
+    }
+}
 
 
 # URL for listing organisation-level directory settings (includes password
@@ -2062,7 +2082,10 @@ async def _check_only_org_bypass_lobby(
         return _result(check_id, check_name, STATUS_UNKNOWN,
                        "No Global Teams meeting policy returned.")
     admitted = str(cfg.get("AutoAdmittedUsers") or "").lower()
-    passing_values = {"everyoneincompany", "everyoneincompanyexcludingguests"}
+    # InvitedUsers is stricter than organisation-only admission, so it must
+    # also pass; otherwise this check and bp_invited_users_auto_admitted can
+    # never both be satisfied.
+    passing_values = {"everyoneincompany", "everyoneincompanyexcludingguests", "invitedusers"}
     if admitted in passing_values:
         return _result(check_id, check_name, STATUS_PASS,
                        f"AutoAdmittedUsers='{cfg.get('AutoAdmittedUsers')}'; only org members bypass the lobby.")
@@ -2246,6 +2269,32 @@ async def _check_restrict_anon_users_start_meeting(
     return _result(check_id, check_name, STATUS_FAIL,
                    f"AllowAnonymousUsersToStartMeeting={allow_start}; anonymous users can start Teams meetings without an authenticated organizer. "
                    "Run: Set-CsTeamsMeetingPolicy -Identity Global -AllowAnonymousUsersToStartMeeting $false")
+
+
+def _dialin_lobby_check_factory(check_id: str, check_name: str) -> BestPracticeRunner:
+    """Build a Teams check verifying PSTN callers cannot bypass the lobby."""
+
+    async def _check(tokens: tuple[str, str], tenant_id: str) -> dict[str, Any]:
+        try:
+            data = await _teams_invoke_command(
+                tokens, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
+            )
+        except M365Error as exc:
+            return _result(check_id, check_name, _failure_status(exc),
+                           _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
+        cfg = _exo_first_value(data)
+        if not cfg:
+            return _result(check_id, check_name, STATUS_UNKNOWN,
+                           "No Global Teams meeting policy returned.")
+        bypass = cfg.get("AllowPSTNUsersToBypassLobby")
+        if bypass is False:
+            return _result(check_id, check_name, STATUS_PASS,
+                           "AllowPSTNUsersToBypassLobby=False; dial-in callers wait in the lobby.")
+        return _result(check_id, check_name, STATUS_FAIL,
+                       f"AllowPSTNUsersToBypassLobby={bypass}; dial-in callers can bypass the lobby. "
+                       "Run: Set-CsTeamsMeetingPolicy -Identity Global -AllowPSTNUsersToBypassLobby $false")
+
+    return _check
 
 
 # ---------------------------------------------------------------------------
@@ -3242,13 +3291,25 @@ async def _check_weak_auth_methods_disabled(token: str) -> dict[str, Any]:
                    "Weak methods still enabled: " + ", ".join(issues))
 
 
+_WEAK_AUTH_METHOD_ODATA_TYPES = {
+    "Sms": "#microsoft.graph.smsAuthenticationMethodConfiguration",
+    "Voice": "#microsoft.graph.voiceAuthenticationMethodConfiguration",
+    "Email": "#microsoft.graph.emailAuthenticationMethodConfiguration",
+}
+
+
 async def _remediate_weak_auth_methods_disabled(token: str) -> tuple[bool, str]:
     weak_methods = ("Sms", "Voice", "Email")
     for method in weak_methods:
+        # Graph requires the concrete configuration type on PATCH; without it
+        # the update can be rejected or silently ignored.
         await _graph_patch(
             token,
             f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/{method}",
-            {"state": "disabled"},
+            {
+                "@odata.type": _WEAK_AUTH_METHOD_ODATA_TYPES[method],
+                "state": "disabled",
+            },
         )
 
     latest_details = "Microsoft Graph did not return the updated authentication method policy."
@@ -4303,8 +4364,10 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "Properties → Manage security defaults → Enable."
         ),
         "source": _check_security_defaults,
+        "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "security_defaults",
         "is_cis_benchmark": True,
     },
     {
@@ -4320,7 +4383,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_legacy_auth_blocked,
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "conditional_access_policy",
         "is_cis_benchmark": True,
         "requires_licenses": [CAP_ENTRA_ID_P1],
     },
@@ -4337,7 +4401,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_mfa_conditional_access,
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "conditional_access_policy",
         "is_cis_benchmark": True,
         "requires_licenses": [CAP_ENTRA_ID_P1],
     },
@@ -4353,7 +4418,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_admin_mfa,
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "conditional_access_policy",
         "is_cis_benchmark": True,
         "requires_licenses": [CAP_ENTRA_ID_P1],
     },
@@ -4406,11 +4472,9 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": True,
         "remediation_url": _AUTHORIZATION_POLICY_URL,
-        "remediation_payload": {
-            "defaultUserRolePermissions": {
-                "allowedToUseSspr": True,
-            },
-        },
+        # allowedToUseSSPR is a top-level authorizationPolicy property;
+        # nesting it under defaultUserRolePermissions is rejected by Graph.
+        "remediation_payload": {"allowedToUseSSPR": True},
         "is_cis_benchmark": True,
     },
     {
@@ -4427,7 +4491,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_password_never_expires,
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "domain_password_never_expire",
         "is_cis_benchmark": True,
     },
     {
@@ -4930,7 +4995,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_password_expiry_never_expire,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "domain_password_never_expire",
     },
     {
         "id": "bp_email_otp_disabled",
@@ -4950,7 +5016,10 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_url": (
             f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/Email"
         ),
-        "remediation_payload": {"state": "disabled"},
+        "remediation_payload": {
+            "@odata.type": "#microsoft.graph.emailAuthenticationMethodConfiguration",
+            "state": "disabled",
+        },
     },
     {
         "id": "bp_user_consent_apps_disallowed",
@@ -5083,7 +5152,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_security_defaults_appropriate,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "security_defaults",
     },
     {
         "id": "bp_signin_freq_intune_enrollment",
@@ -5116,7 +5186,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_signin_freq_admin_browser,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "conditional_access_policy",
         "requires_licenses": [CAP_ENTRA_ID_P1],
     },
     {
@@ -5136,7 +5207,13 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "has_remediation": True,
         "remediation_url": _AUTH_METHODS_POLICY_URL,
         "remediation_payload": {
-            "systemCredentialPreferences": {"state": "enabled"}
+            "systemCredentialPreferences": {
+                "@odata.type": "#microsoft.graph.systemCredentialPreferences",
+                "state": "enabled",
+                # Graph rejects enabling the feature without a target.
+                "includeTargets": [{"id": "all_users", "targetType": "group"}],
+                "excludeTargets": [],
+            }
         },
     },
     {
@@ -5210,7 +5287,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_laps_enabled,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "laps_enabled",
         "requires_licenses": [CAP_ENTRA_ID_P1, CAP_INTUNE_LAPS],
     },
     {
@@ -5264,7 +5342,12 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_audit_bypass_disabled_mailboxes,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "foreach_exo_policy",
+        "remediation_get_cmdlet": "Get-MailboxAuditBypassAssociation",
+        "remediation_get_params": {"ResultSize": "Unlimited"},
+        "remediation_cmdlet": "Set-MailboxAuditBypassAssociation",
+        "remediation_params": {"AuditBypassEnabled": False},
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
@@ -5295,6 +5378,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": True,
+        "remediation_type": "audit_log_search_exo",
         "remediation_cmdlet": "Set-AdminAuditLogConfig",
         "remediation_params": {"UnifiedAuditLogIngestionEnabled": True},
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
@@ -5366,6 +5450,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": True,
+        "remediation_type": "foreach_exo_policy",
+        "remediation_get_cmdlet": "Get-HostedOutboundSpamFilterPolicy",
         "remediation_cmdlet": "Set-HostedOutboundSpamFilterPolicy",
         "remediation_params": {"ActionWhenThresholdReached": "BlockUser"},
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
@@ -5516,7 +5602,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "exo",
         "uses_company_email_domains": True,
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "dkim_enabled_exo",
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
@@ -5555,6 +5642,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": True,
+        # Set-OwaMailboxPolicy requires -Identity, so apply it to every policy.
+        "remediation_type": "foreach_owa_mailbox_policy_exo",
         "remediation_cmdlet": "Set-OwaMailboxPolicy",
         "remediation_params": {"WebPartsFrameworkEnabled": False},
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
@@ -5823,7 +5912,9 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_external_content_sharing_restricted,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_url": _SPO_SETTINGS_URL,
+        "remediation_payload": {"sharingCapability": "existingExternalUserSharingOnly"},
         "requires_licenses": [CAP_SHAREPOINT_ONLINE],
     },
     {
@@ -5874,7 +5965,9 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": True,
         "remediation_url": _SPO_SETTINGS_URL,
-        "remediation_payload": {"oneDriveSharingCapability": "existingExternalUserSharingOnly"},
+        # Graph has no OneDrive-specific sharing property; OneDrive sharing can
+        # never be more permissive than the tenant-wide sharingCapability.
+        "remediation_payload": {"sharingCapability": "existingExternalUserSharingOnly"},
         "requires_licenses": [CAP_SHAREPOINT_ONLINE],
     },
     {
@@ -5937,12 +6030,14 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_sharepoint_sign_out_inactive_users,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_url": _SPO_SETTINGS_URL,
+        "remediation_payload": _SPO_IDLE_SIGN_OUT_REMEDIATION_PAYLOAD,
         "requires_licenses": [CAP_SHAREPOINT_ONLINE],
         "is_cis_benchmark": True,
     },
     # ------------------------------------------------------------------
-    # Microsoft Teams (manual-review pending Teams PowerShell client)
+    # Microsoft Teams (evaluated and remediated via the Teams provider)
     # ------------------------------------------------------------------
     {
         "id": "bp_anon_dialin_cannot_start_meeting",
@@ -5959,7 +6054,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_anon_dialin_cannot_start_meeting,
         "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS],
     },
     {
@@ -5973,7 +6069,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_only_org_bypass_lobby,
         "source_type": "teams",
         "default_enabled": False,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS],
         "alternative_group": "teams_global_lobby",
         "policy_profile": "organisation_only",
@@ -5991,7 +6088,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_invited_users_auto_admitted,
         "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS],
         "alternative_group": "teams_global_lobby",
         "policy_profile": "strict_invited_users",
@@ -6005,14 +6103,14 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "preventing unauthorised drop-ins via PSTN."
         ),
         "remediation": "Set-CsTeamsMeetingPolicy -Identity Global -AllowPSTNUsersToBypassLobby $false",
-        "source": _manual_review_factory(
+        "source": _dialin_lobby_check_factory(
             "bp_dialin_cannot_bypass_lobby",
             "Users dialing in can't bypass the lobby",
-            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | Select AllowPSTNUsersToBypassLobby",
         ),
-        "source_type": "graph",
+        "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS, CAP_TEAMS_AUDIO_CONF],
     },
     {
@@ -6027,15 +6125,14 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "Set-CsTeamsMeetingPolicy -Identity Global "
             "-AllowPSTNUsersToBypassLobby $false"
         ),
-        "source": _manual_review_factory(
+        "source": _dialin_lobby_check_factory(
             "bp_restrict_dialin_bypass_lobby",
             "Restrict dial-in users from bypassing a meeting lobby",
-            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | "
-            "Select AllowPSTNUsersToBypassLobby",
         ),
-        "source_type": "graph",
+        "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS, CAP_TEAMS_AUDIO_CONF],
         "is_cis_benchmark": True,
     },
@@ -6050,7 +6147,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_external_participants_no_control,
         "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS],
     },
     {
@@ -6067,7 +6165,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_external_users_cannot_initiate,
         "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS],
     },
     {
@@ -6085,7 +6184,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_teams_external_files_approved_storage,
         "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS],
     },
     {
@@ -6103,7 +6203,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_restrict_anon_users_join_meeting,
         "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS],
     },
     {
@@ -6122,7 +6223,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_restrict_anon_users_start_meeting,
         "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS],
         "is_cis_benchmark": True,
     },
@@ -6145,7 +6247,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_safe_links_office_apps,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "safe_links_policy_exo",
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
     {
@@ -6201,7 +6304,11 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_zap_teams_on,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "foreach_exo_policy",
+        "remediation_get_cmdlet": "Get-TeamsProtectionPolicy",
+        "remediation_cmdlet": "Set-TeamsProtectionPolicy",
+        "remediation_params": {"ZapEnabled": True},
         "requires_licenses": [CAP_DEFENDER_O365_P2, CAP_TEAMS],
     },
     # ------------------------------------------------------------------
@@ -8546,6 +8653,655 @@ async def _remediate_foreach_public_group_graph(
     return all_ok
 
 
+# ---------------------------------------------------------------------------
+# Additional tenant-setting remediations
+# ---------------------------------------------------------------------------
+
+# Microsoft Graph represents "passwords never expire" on a domain as the
+# maximum signed 32-bit integer.
+_NEVER_EXPIRE_PASSWORD_DAYS = 2147483647
+
+
+async def _remediate_domain_password_never_expire(graph_token: str) -> tuple[bool, str]:
+    """Set every verified, cloud-managed domain's passwords to never expire."""
+    domains = await _graph_get_all(
+        graph_token,
+        f"{_DOMAINS_URL}?$select=id,isVerified,authenticationType,passwordValidityPeriodInDays",
+    )
+    updated: list[str] = []
+    federated: list[str] = []
+    failed: list[str] = []
+    for domain in domains:
+        domain_id = str(domain.get("id") or "").strip()
+        if not domain_id or not domain.get("isVerified", True):
+            continue
+        validity = domain.get("passwordValidityPeriodInDays")
+        if validity in (None, 0, _NEVER_EXPIRE_PASSWORD_DAYS):
+            continue
+        if str(domain.get("authenticationType") or "").lower() == "federated":
+            # Federated domains take their password policy from the identity
+            # provider; Graph rejects updates to them.
+            federated.append(domain_id)
+            continue
+        try:
+            await _graph_patch(
+                graph_token,
+                f"{_DOMAINS_URL}/{quote(domain_id, safe='')}",
+                {"passwordValidityPeriodInDays": _NEVER_EXPIRE_PASSWORD_DAYS},
+            )
+            updated.append(domain_id)
+        except M365Error as exc:
+            failed.append(f"{domain_id} ({exc})")
+    if failed:
+        return False, "Unable to update the password policy for: " + "; ".join(failed[:5])
+    if federated:
+        return False, (
+            "Passwords on federated domain(s) "
+            + ", ".join(federated[:5])
+            + " are governed by the federation provider; set them to never expire there."
+        )
+    if not updated:
+        return True, "All verified domains already have non-expiring passwords."
+    return True, "Set passwords to never expire for: " + ", ".join(updated) + "."
+
+
+async def _enabled_conditional_access_policies(graph_token: str) -> list[dict[str, Any]] | None:
+    policies = await _safe_graph_get_all(graph_token, _CA_POLICIES_URL)
+    if policies is None:
+        return None
+    return [p for p in policies if str(p.get("state") or "").lower() == "enabled"]
+
+
+async def _remediate_security_defaults(graph_token: str, check_id: str) -> tuple[bool, str]:
+    """Enable Security Defaults when there is no Conditional Access, disable it when there is.
+
+    Microsoft Entra ID does not allow Security Defaults and enabled Conditional
+    Access policies to coexist, so the correct remediation depends on which
+    identity baseline the tenant is using.
+    """
+    security_defaults = await _graph_get(graph_token, _SECURITY_DEFAULTS_URL)
+    enabled_ca = await _enabled_conditional_access_policies(graph_token)
+    if enabled_ca is None:
+        return False, "Unable to enumerate Conditional Access policies."
+    sd_enabled = bool(security_defaults.get("isEnabled"))
+    if enabled_ca:
+        names = ", ".join(str(p.get("displayName") or "?") for p in enabled_ca[:3])
+        if check_id == "bp_security_defaults":
+            return False, (
+                "Security Defaults cannot be enabled while Conditional Access policies are "
+                f"enabled ({names}). Complete the Conditional Access baseline instead: use the "
+                "'Block legacy authentication', 'Require MFA for all users' and 'Require MFA "
+                "for administrators' remediations."
+            )
+        if not sd_enabled:
+            return True, "Conditional Access is in use and Security Defaults are already disabled."
+        await _graph_patch(graph_token, _SECURITY_DEFAULTS_URL, {"isEnabled": False})
+        return True, (
+            f"Disabled Security Defaults because Conditional Access policies ({names}) "
+            "now provide the tenant's identity baseline."
+        )
+    if sd_enabled:
+        return True, "Security Defaults are already enabled."
+    await _graph_patch(graph_token, _SECURITY_DEFAULTS_URL, {"isEnabled": True})
+    return True, "Enabled Security Defaults for the tenant."
+
+
+# Directory Synchronization Accounts role; Microsoft's Conditional Access
+# templates exclude it so Entra Connect keeps working.
+_ROLE_TEMPLATE_DIRECTORY_SYNC = "d29b2b05-8046-44ba-8758-1e26182fcf32"
+# Microsoft's "Require MFA for administrators" template role set.
+_CA_ADMIN_ROLE_TEMPLATES: tuple[str, ...] = (
+    _ROLE_TEMPLATE_GLOBAL_ADMIN,
+    _ROLE_TEMPLATE_PRIVILEGED_ROLE_ADMIN,
+    _ROLE_TEMPLATE_SECURITY_ADMIN,
+    _ROLE_TEMPLATE_EXCHANGE_ADMIN,
+    _ROLE_TEMPLATE_BILLING_ADMIN,
+    "f28a1f50-f6e7-4571-818b-6a12f2af6b6c",  # SharePoint Administrator
+    "9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3",  # Application Administrator
+    "158c047a-c907-4556-b7ef-446551a6b5f7",  # Cloud Application Administrator
+    "b1be1c3e-b65d-4f19-8427-f6fa0d97feb9",  # Conditional Access Administrator
+    "729827e3-9c14-49f7-bb1b-9608f156bbb8",  # Helpdesk Administrator
+    "966707d0-3269-4727-9be2-8c3a10f19b9d",  # Password Administrator
+    "7be44c8a-adaf-4e2a-84d6-ab2649e08a13",  # Privileged Authentication Administrator
+    "fe930be7-5e62-47db-91af-98c3a49a38b1",  # User Administrator
+)
+_MYPORTAL_CA_POLICY_PREFIX = "MyPortal – "
+
+
+def _ca_policy_templates() -> dict[str, dict[str, Any]]:
+    """Conditional Access policies MyPortal can create, keyed by check ID.
+
+    Break-glass exclusions are added when the policy is created.
+    """
+    admin_roles = list(dict.fromkeys(_CA_ADMIN_ROLE_TEMPLATES))
+    return {
+        "bp_block_legacy_auth": {
+            "displayName": f"{_MYPORTAL_CA_POLICY_PREFIX}Block legacy authentication",
+            "conditions": {
+                "users": {"includeUsers": ["All"]},
+                "applications": {"includeApplications": ["All"]},
+                "clientAppTypes": ["exchangeActiveSync", "other"],
+            },
+            "grantControls": {"operator": "OR", "builtInControls": ["block"]},
+        },
+        "bp_mfa_for_all_users": {
+            "displayName": f"{_MYPORTAL_CA_POLICY_PREFIX}Require MFA for all users",
+            "conditions": {
+                "users": {
+                    "includeUsers": ["All"],
+                    "excludeRoles": [_ROLE_TEMPLATE_DIRECTORY_SYNC],
+                },
+                "applications": {"includeApplications": ["All"]},
+                "clientAppTypes": ["all"],
+            },
+            "grantControls": {"operator": "OR", "builtInControls": ["mfa"]},
+        },
+        "bp_admin_mfa": {
+            "displayName": f"{_MYPORTAL_CA_POLICY_PREFIX}Require MFA for administrators",
+            "conditions": {
+                "users": {"includeRoles": admin_roles},
+                "applications": {"includeApplications": ["All"]},
+                "clientAppTypes": ["all"],
+            },
+            "grantControls": {"operator": "OR", "builtInControls": ["mfa"]},
+        },
+        "bp_signin_freq_admin_browser_no_persist": {
+            "displayName": (
+                f"{_MYPORTAL_CA_POLICY_PREFIX}Admin sign-in frequency and "
+                "non-persistent browser sessions"
+            ),
+            "conditions": {
+                "users": {"includeRoles": admin_roles},
+                "applications": {"includeApplications": ["All"]},
+                "clientAppTypes": ["all"],
+            },
+            "sessionControls": {
+                "signInFrequency": {
+                    "isEnabled": True,
+                    "type": "hours",
+                    "value": _ADMIN_SIGNIN_FREQ_MAX_HOURS,
+                    "authenticationType": "primaryAndSecondaryAuthentication",
+                    "frequencyInterval": "timeBased",
+                },
+                "persistentBrowser": {"isEnabled": True, "mode": "never"},
+            },
+        },
+    }
+
+
+async def _myportal_break_glass_accounts(graph_token: str) -> list[dict[str, str]]:
+    """Return the enabled, cloud-only MyPortal emergency Global Administrators."""
+    roles = await _graph_get(
+        graph_token,
+        "https://graph.microsoft.com/v1.0/directoryRoles"
+        "?$filter=displayName eq 'Global Administrator'&$select=id",
+    )
+    role_values = roles.get("value") or []
+    if not role_values:
+        return []
+    members = await _graph_get_all(
+        graph_token,
+        f"https://graph.microsoft.com/v1.0/directoryRoles/{role_values[0]['id']}/members"
+        "?$select=id,userPrincipalName,onPremisesSyncEnabled,accountEnabled",
+    )
+    return [
+        {"id": str(m["id"]), "upn": str(m.get("userPrincipalName") or "")}
+        for m in members or []
+        if isinstance(m, dict)
+        and m.get("id")
+        and "myportal-emergency-admin" in str(m.get("userPrincipalName") or "").lower()
+        and m.get("accountEnabled")
+        and not m.get("onPremisesSyncEnabled")
+    ]
+
+
+async def _remediate_conditional_access_policy(
+    graph_token: str, check_id: str
+) -> tuple[bool, str]:
+    """Create (or re-enable) the MyPortal Conditional Access policy for a check.
+
+    Every policy excludes the MyPortal break-glass accounts so an error in the
+    policy can never lock the tenant out; remediation refuses to run until
+    those accounts exist.
+    """
+    template = _ca_policy_templates().get(check_id)
+    if template is None:
+        return False, "No Conditional Access template is defined for this check."
+
+    security_defaults = await _safe_graph_get(graph_token, _SECURITY_DEFAULTS_URL)
+    if security_defaults and security_defaults.get("isEnabled"):
+        return False, (
+            "Security Defaults are enabled, and Microsoft Entra ID does not allow "
+            "Conditional Access policies to be enabled alongside them. Security Defaults "
+            "already enforce MFA and block legacy authentication; disable them only once "
+            "you are ready to replace them with the Conditional Access baseline."
+        )
+
+    break_glass = await _myportal_break_glass_accounts(graph_token)
+    if not break_glass:
+        return False, (
+            "No MyPortal emergency access (break-glass) Global Administrator accounts were "
+            "found to exclude from the policy. Run the 'Maintain 2–4 Global Administrators' "
+            "remediation first so the tenant cannot be locked out, then retry."
+        )
+    exclude_ids = [account["id"] for account in break_glass]
+
+    policies = await _graph_get_all(graph_token, _CA_POLICIES_URL)
+    display_name = template["displayName"]
+    existing = next(
+        (p for p in policies if str(p.get("displayName") or "") == display_name), None
+    )
+    if existing:
+        state = str(existing.get("state") or "")
+        if state.lower() == "enabled":
+            return True, f"Conditional Access policy '{display_name}' is already enabled."
+        update: dict[str, Any] = {"state": "enabled"}
+        conditions = copy.deepcopy(existing.get("conditions") or {})
+        users = conditions.get("users") or {}
+        current_excludes = list(users.get("excludeUsers") or [])
+        if not set(exclude_ids) <= set(current_excludes):
+            # ``conditions`` is replaced as a whole on PATCH, so send the full
+            # existing object with the break-glass exclusions merged in.
+            users["excludeUsers"] = list(dict.fromkeys([*current_excludes, *exclude_ids]))
+            conditions["users"] = users
+            update["conditions"] = conditions
+        await _graph_patch(
+            graph_token,
+            f"{_CA_POLICIES_URL}/{quote(str(existing['id']), safe='')}",
+            update,
+        )
+        return True, f"Re-enabled Conditional Access policy '{display_name}'."
+
+    payload = copy.deepcopy(template)
+    payload["state"] = "enabled"
+    payload["conditions"]["users"]["excludeUsers"] = exclude_ids
+    await _graph_post(graph_token, _CA_POLICIES_URL, payload)
+    return True, (
+        f"Created Conditional Access policy '{display_name}', excluding the break-glass "
+        f"account(s): {', '.join(a['upn'] for a in break_glass)}."
+    )
+
+
+async def _remediate_laps_enabled(graph_token: str) -> tuple[bool, str]:
+    """Turn on Microsoft Entra LAPS in the tenant device registration policy.
+
+    ``deviceRegistrationPolicy`` only supports PUT, so the current values of the
+    other required properties are sent back unchanged.
+    """
+    policy = await _graph_get(graph_token, _DEVICE_REG_POLICY_URL)
+    if (policy.get("localAdminPassword") or {}).get("isEnabled") is True:
+        return True, "LAPS is already enabled at the tenant level."
+    payload = {
+        key: policy[key]
+        for key in (
+            "userDeviceQuota",
+            "multiFactorAuthConfiguration",
+            "azureADRegistration",
+            "azureADJoin",
+        )
+        if key in policy
+    }
+    payload["localAdminPassword"] = {"isEnabled": True}
+    await _graph_put(graph_token, _DEVICE_REG_POLICY_URL, payload)
+    return True, (
+        "Enabled Microsoft Entra LAPS for the tenant. Assign an Intune account protection "
+        "(LAPS) policy to devices so their local administrator passwords are rotated."
+    )
+
+
+def _exo_row_identity(row: Mapping[str, Any]) -> str:
+    return str(row.get("Identity") or row.get("Name") or "").strip()
+
+
+async def _remediate_foreach_exo_object(
+    exo_token: str,
+    tenant_id: str,
+    *,
+    get_cmdlet: str,
+    set_cmdlet: str,
+    desired: Mapping[str, Any],
+    get_params: dict[str, Any] | None = None,
+    skip: Callable[[Mapping[str, Any]], bool] | None = None,
+) -> tuple[bool, str]:
+    """Apply *desired* settings to every object returned by *get_cmdlet*.
+
+    Objects that already hold the desired values (or that *skip* rejects, such
+    as read-only preset policies) are left alone, so retries are harmless.
+    """
+    data = await _exo_invoke_command(exo_token, tenant_id, get_cmdlet, get_params)
+    updated: list[str] = []
+    failed: list[str] = []
+    for row in data.get("value") or []:
+        if not isinstance(row, dict) or (skip and skip(row)):
+            continue
+        identity = _exo_row_identity(row)
+        if not identity:
+            continue
+        if all(
+            _coerce_exo_bool(row.get(k)) is v if isinstance(v, bool)
+            else str(row.get(k) or "").lower() == str(v).lower()
+            for k, v in desired.items()
+        ):
+            continue
+        try:
+            await _exo_invoke_command(
+                exo_token,
+                tenant_id,
+                set_cmdlet,
+                {"Identity": identity, **desired},
+            )
+            updated.append(identity)
+        except M365Error as exc:
+            failed.append(f"{identity}: {exc}")
+    if failed:
+        return False, f"{set_cmdlet} failed for " + "; ".join(failed[:3])
+    if not updated:
+        return True, "All objects already had the required settings."
+    return True, f"Updated {len(updated)} object(s) with {set_cmdlet}: " + ", ".join(updated[:5])
+
+
+def _is_preset_security_policy(row: Mapping[str, Any]) -> bool:
+    """Built-in and preset (Standard/Strict) policies cannot be modified."""
+    if _coerce_exo_bool(row.get("IsBuiltInProtection")):
+        return True
+    return str(row.get("RecommendedPolicyType") or "").lower() in {"standard", "strict"}
+
+
+_MYPORTAL_SAFE_LINKS_POLICY = "MyPortal Safe Links"
+_SAFE_LINKS_REMEDIATION_SETTINGS: dict[str, Any] = {
+    "EnableSafeLinksForOffice": True,
+    "EnableSafeLinksForEmail": True,
+    "EnableSafeLinksForTeams": True,
+    "TrackClicks": True,
+    "AllowClickThrough": False,
+    "ScanUrls": True,
+    "EnableForInternalSenders": True,
+    "DeliverMessageAfterScan": True,
+}
+
+
+async def _remediate_safe_links_office_apps(exo_token: str, tenant_id: str) -> tuple[bool, str]:
+    """Create (or correct) a MyPortal Safe Links policy covering every accepted domain."""
+    policies = (await _exo_invoke_command(exo_token, tenant_id, "Get-SafeLinksPolicy")).get("value") or []
+    existing = next(
+        (p for p in policies if isinstance(p, dict)
+         and str(p.get("Name") or p.get("Identity") or "") == _MYPORTAL_SAFE_LINKS_POLICY),
+        None,
+    )
+    if existing:
+        await _exo_invoke_command(
+            exo_token, tenant_id, "Set-SafeLinksPolicy",
+            {"Identity": _MYPORTAL_SAFE_LINKS_POLICY, **_SAFE_LINKS_REMEDIATION_SETTINGS},
+        )
+    else:
+        await _exo_invoke_command(
+            exo_token, tenant_id, "New-SafeLinksPolicy",
+            {"Name": _MYPORTAL_SAFE_LINKS_POLICY, **_SAFE_LINKS_REMEDIATION_SETTINGS},
+        )
+
+    rules = (await _exo_invoke_command(exo_token, tenant_id, "Get-SafeLinksRule")).get("value") or []
+    rule = next(
+        (r for r in rules if isinstance(r, dict)
+         and str(r.get("Name") or r.get("Identity") or "") == _MYPORTAL_SAFE_LINKS_POLICY),
+        None,
+    )
+    if rule is None:
+        accepted = (await _exo_invoke_command(exo_token, tenant_id, "Get-AcceptedDomain")).get("value") or []
+        domains = sorted({
+            str(d.get("DomainName") or d.get("Name") or "").strip()
+            for d in accepted if isinstance(d, dict)
+        } - {""})
+        if not domains:
+            return False, "No accepted domains were returned to scope the Safe Links rule to."
+        await _exo_invoke_command(
+            exo_token, tenant_id, "New-SafeLinksRule",
+            {
+                "Name": _MYPORTAL_SAFE_LINKS_POLICY,
+                "SafeLinksPolicy": _MYPORTAL_SAFE_LINKS_POLICY,
+                "RecipientDomainIs": domains,
+            },
+        )
+    elif str(rule.get("State") or "").lower() == "disabled":
+        await _exo_invoke_command(
+            exo_token, tenant_id, "Enable-SafeLinksRule", {"Identity": _MYPORTAL_SAFE_LINKS_POLICY}
+        )
+    return True, (
+        f"Safe Links policy '{_MYPORTAL_SAFE_LINKS_POLICY}' now protects Office apps, email and "
+        "Teams with click tracking and no click-through for all accepted domains."
+    )
+
+
+async def _remediate_dkim_enabled(
+    exo_token: str, tenant_id: str, email_domains: list[str]
+) -> tuple[bool, str]:
+    """Enable DKIM signing for each MyPortal Email domain.
+
+    Exchange Online refuses to enable DKIM until the two selector CNAME records
+    are published, so for those domains the signing keys are created and the
+    required DNS records are reported instead.
+    """
+    domains = sorted({str(d).strip().lower() for d in email_domains if str(d).strip()})
+    if not domains:
+        return False, "No Email domains are configured for this company in MyPortal."
+    rows = (await _exo_invoke_command(exo_token, tenant_id, "Get-DkimSigningConfig")).get("value") or []
+    configs = {
+        str(r.get("Domain") or r.get("Identity") or "").strip().lower(): r
+        for r in rows if isinstance(r, dict)
+    }
+    enabled: list[str] = []
+    pending_dns: list[str] = []
+    failed: list[str] = []
+    for domain in domains:
+        cfg = configs.get(domain)
+        if cfg and cfg.get("Enabled") is True:
+            continue
+        try:
+            if cfg is None:
+                await _exo_invoke_command(
+                    exo_token, tenant_id, "New-DkimSigningConfig",
+                    {"DomainName": domain, "Enabled": True},
+                )
+            else:
+                await _exo_invoke_command(
+                    exo_token, tenant_id, "Set-DkimSigningConfig",
+                    {"Identity": domain, "Enabled": True},
+                )
+            enabled.append(domain)
+            continue
+        except M365Error as exc:
+            first_error = str(exc)
+        # Enabling failed – most often because the CNAMEs are not published.
+        # Make sure the keys exist so the CNAME targets can be reported.
+        if cfg is None:
+            try:
+                await _exo_invoke_command(
+                    exo_token, tenant_id, "New-DkimSigningConfig",
+                    {"DomainName": domain, "Enabled": False},
+                )
+            except M365Error:
+                failed.append(f"{domain} ({first_error})")
+                continue
+        try:
+            refreshed = _exo_first_value(await _exo_invoke_command(
+                exo_token, tenant_id, "Get-DkimSigningConfig", {"Identity": domain},
+            ))
+        except M365Error:
+            refreshed = cfg or {}
+        cname1 = str(refreshed.get("Selector1CNAME") or "").strip()
+        cname2 = str(refreshed.get("Selector2CNAME") or "").strip()
+        if cname1 and cname2:
+            pending_dns.append(
+                f"{domain}: selector1._domainkey CNAME {cname1}; selector2._domainkey CNAME {cname2}"
+            )
+        else:
+            failed.append(f"{domain} ({first_error})")
+    parts: list[str] = []
+    if enabled:
+        parts.append("Enabled DKIM for " + ", ".join(enabled) + ".")
+    if pending_dns:
+        parts.append(
+            "Publish these DNS records, then re-run the remediation: " + " | ".join(pending_dns) + "."
+        )
+    if failed:
+        parts.append("Unable to enable DKIM for " + "; ".join(failed[:5]) + ".")
+    if not parts:
+        return True, "DKIM is already enabled for every MyPortal Email domain."
+    return not (pending_dns or failed), " ".join(parts)
+
+
+async def _remediate_audit_log_search(exo_token: str, tenant_id: str) -> tuple[bool, str]:
+    """Enable unified audit log ingestion, hydrating the organization first if needed."""
+    params = {"UnifiedAuditLogIngestionEnabled": True}
+    try:
+        await _exo_invoke_command(exo_token, tenant_id, "Set-AdminAuditLogConfig", params)
+    except M365Error as exc:
+        detail = str(exc).lower()
+        if "enable-organizationcustomization" not in detail and "dehydrated" not in detail:
+            raise
+        # Dehydrated tenants must run Enable-OrganizationCustomization before
+        # the audit configuration can be changed.
+        await _exo_invoke_command(exo_token, tenant_id, "Enable-OrganizationCustomization", {})
+        await _exo_invoke_command(exo_token, tenant_id, "Set-AdminAuditLogConfig", params)
+        return True, (
+            "Enabled organization customization and unified audit log ingestion. "
+            "Audit search can take up to an hour to become available."
+        )
+    return True, "Enabled unified audit log ingestion. Audit search can take up to an hour to become available."
+
+
+# Teams remediations run the Set-Cs* cmdlet on the Global policy that the
+# matching check evaluates.
+_TEAMS_REMEDIATIONS: dict[str, tuple[str, dict[str, Any]]] = {
+    "bp_anon_dialin_cannot_start_meeting": (
+        "Set-CsTeamsMeetingPolicy",
+        {"Identity": "Global", "AllowAnonymousUsersToStartMeeting": False,
+         "AllowPSTNUsersToBypassLobby": False},
+    ),
+    "bp_only_org_can_bypass_lobby": (
+        "Set-CsTeamsMeetingPolicy",
+        {"Identity": "Global", "AutoAdmittedUsers": "EveryoneInCompany"},
+    ),
+    "bp_invited_users_auto_admitted": (
+        "Set-CsTeamsMeetingPolicy",
+        {"Identity": "Global", "AutoAdmittedUsers": "InvitedUsers"},
+    ),
+    "bp_dialin_cannot_bypass_lobby": (
+        "Set-CsTeamsMeetingPolicy",
+        {"Identity": "Global", "AllowPSTNUsersToBypassLobby": False},
+    ),
+    "bp_restrict_dialin_bypass_lobby": (
+        "Set-CsTeamsMeetingPolicy",
+        {"Identity": "Global", "AllowPSTNUsersToBypassLobby": False},
+    ),
+    "bp_external_participants_no_control": (
+        "Set-CsTeamsMeetingPolicy",
+        {"Identity": "Global", "AllowExternalParticipantGiveRequestControl": False},
+    ),
+    "bp_restrict_anon_users_join_meeting": (
+        "Set-CsTeamsMeetingPolicy",
+        {"Identity": "Global", "AllowAnonymousUsersToJoinMeeting": False},
+    ),
+    "bp_restrict_anon_users_start_meeting": (
+        "Set-CsTeamsMeetingPolicy",
+        {"Identity": "Global", "AllowAnonymousUsersToStartMeeting": False},
+    ),
+    "bp_external_users_cannot_initiate": (
+        "Set-CsTenantFederationConfiguration",
+        {"AllowFederatedUsers": False},
+    ),
+    "bp_teams_external_files_approved_storage": (
+        "Set-CsTeamsClientConfiguration",
+        {"Identity": "Global", "AllowDropBox": False, "AllowGoogleDrive": False,
+         "AllowBox": False, "AllowShareFile": False, "AllowEgnyte": False},
+    ),
+}
+
+
+async def _run_graph_remediation_with_permission_repair(
+    company_id: int,
+    check_id: str,
+    graph_token: str,
+    action: Callable[[str], Awaitable[tuple[bool, str]]],
+) -> tuple[bool, str]:
+    """Run a Graph remediation, repairing missing app permissions once on 403.
+
+    Remediations can depend on write permissions added to the app baseline
+    after a tenant was connected.  On 403 the stored delegated admin token is
+    used to grant any missing application permissions, then the action is
+    retried exactly once with a fresh app-only token.
+    """
+    try:
+        return await action(graph_token)
+    except M365Error as exc:
+        if exc.http_status != 403:
+            log_error(
+                "M365 best practice Graph remediation failed",
+                company_id=company_id,
+                check_id=check_id,
+                error=str(exc),
+            )
+            return False, str(exc)
+        original = exc
+    granted = False
+    try:
+        delegated_token = await acquire_delegated_token(company_id)
+        if delegated_token:
+            granted = await try_grant_missing_permissions(
+                company_id, access_token=delegated_token
+            )
+    except Exception as grant_exc:  # noqa: BLE001 – preserve original Graph error
+        log_error(
+            "M365 best practice Graph remediation permission repair failed",
+            company_id=company_id,
+            check_id=check_id,
+            error=str(grant_exc),
+        )
+    if not granted:
+        return False, (
+            f"{original} The app is missing a required Microsoft Graph permission; "
+            "click 'Authorize portal access' on the M365 settings page to grant it, then retry."
+        )
+    try:
+        graph_token = await acquire_access_token(company_id, force_client_credentials=True)
+        return await action(graph_token)
+    except M365Error as retry_exc:
+        log_error(
+            "M365 best practice Graph remediation failed after permission repair",
+            company_id=company_id,
+            check_id=check_id,
+            error=str(retry_exc),
+        )
+        return False, str(retry_exc)
+
+
+async def _run_teams_remediation(company_id: int, check_id: str) -> tuple[bool, str]:
+    """Apply the Teams policy change for *check_id* via the Teams provider."""
+    remediation = _TEAMS_REMEDIATIONS.get(check_id)
+    if remediation is None:
+        return False, "No Teams remediation is defined for this check."
+    if not provider_enabled(company_id, "teams"):
+        return False, (
+            "The Microsoft Teams provider is not enabled for this company, so Teams "
+            "settings cannot be changed automatically."
+        )
+    cmdlet, params = remediation
+    try:
+        graph_teams, resource_teams, tenant_id = await _acquire_teams_access_tokens(company_id)
+        await _teams_invoke_command((graph_teams, resource_teams), tenant_id, cmdlet, dict(params))
+    except M365Error as exc:
+        log_error(
+            "M365 best practice Teams remediation failed",
+            company_id=company_id,
+            check_id=check_id,
+            cmdlet=cmdlet,
+            error=str(exc),
+        )
+        if exc.http_status == 403:
+            return False, f"{exc}.{_TEAMS_PERMISSION_HINT}"
+        return False, str(exc)
+    return True, f"Applied {cmdlet} to the tenant's Global Teams configuration."
+
+
 async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     """Attempt automated remediation for a single best-practice check.
 
@@ -8584,6 +9340,16 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     * ``source_type="scc"`` with ``remediation_type="break_glass_alert_policy"`` –
       creates (or re-enables) a Microsoft Purview protection alert policy that
       emails tenant admins whenever a MyPortal-managed break-glass account signs in.
+    * ``source_type="exo"`` with ``remediation_type="foreach_exo_policy"`` –
+      applies ``remediation_params`` to every non-preset object returned by
+      ``remediation_get_cmdlet``; ``safe_links_policy_exo``, ``dkim_enabled_exo``
+      and ``audit_log_search_exo`` run their dedicated helpers.
+    * ``source_type="graph"`` with ``remediation_type`` ``security_defaults``,
+      ``conditional_access_policy``, ``domain_password_never_expire`` or
+      ``laps_enabled`` – dedicated Graph helpers, retried once after repairing
+      missing app permissions on 403.
+    * ``source_type="teams"`` – runs the ``_TEAMS_REMEDIATIONS`` cmdlet through
+      the Teams provider when it is enabled for the company.
     """
     bp = _catalog_map().get(check_id)
     if not bp or not bp.get("has_remediation"):
@@ -8650,7 +9416,9 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
         )
         return {"success": success, "message": outcome_message}
 
-    if source_type == "exo":
+    if source_type == "teams":
+        success, outcome_message = await _run_teams_remediation(company_id, check_id)
+    elif source_type == "exo":
         token_error_message = (
             "Unable to acquire Exchange Online token. "
             "Check that the app credentials are correct."
@@ -8715,6 +9483,48 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                     error=str(exc),
                 )
                 success = False
+        elif bp.get("remediation_type") in {
+            "foreach_exo_policy",
+            "audit_log_search_exo",
+            "safe_links_policy_exo",
+            "dkim_enabled_exo",
+        }:
+            remediation_type = bp.get("remediation_type")
+            try:
+                if remediation_type == "foreach_exo_policy":
+                    success, outcome_message = await _remediate_foreach_exo_object(
+                        exo_token,
+                        tenant_id,
+                        get_cmdlet=bp["remediation_get_cmdlet"],
+                        get_params=bp.get("remediation_get_params"),
+                        set_cmdlet=bp["remediation_cmdlet"],
+                        desired=bp.get("remediation_params") or {},
+                        skip=_is_preset_security_policy,
+                    )
+                elif remediation_type == "audit_log_search_exo":
+                    success, outcome_message = await _remediate_audit_log_search(
+                        exo_token, tenant_id
+                    )
+                elif remediation_type == "safe_links_policy_exo":
+                    success, outcome_message = await _remediate_safe_links_office_apps(
+                        exo_token, tenant_id
+                    )
+                else:
+                    email_domains = await companies_repo.get_email_domains_for_company(
+                        company_id
+                    )
+                    success, outcome_message = await _remediate_dkim_enabled(
+                        exo_token, tenant_id, email_domains
+                    )
+            except M365Error as exc:
+                log_error(
+                    "M365 best practice remediation command failed",
+                    company_id=company_id,
+                    check_id=check_id,
+                    error=str(exc),
+                )
+                success = False
+                outcome_message = str(exc)
         elif bp.get("remediation_type") == "global_quarantine_policy_exo":
             cmdlet = bp.get("remediation_cmdlet", "")
             params = bp.get("remediation_params") or {}
@@ -8985,22 +9795,37 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 )
                 success = False
                 outcome_message = str(exc)
+        elif bp.get("remediation_type") in {
+            "security_defaults",
+            "conditional_access_policy",
+            "domain_password_never_expire",
+            "laps_enabled",
+        }:
+            remediation_type = bp.get("remediation_type")
+
+            async def _graph_action(token: str) -> tuple[bool, str]:
+                if remediation_type == "security_defaults":
+                    return await _remediate_security_defaults(token, check_id)
+                if remediation_type == "conditional_access_policy":
+                    return await _remediate_conditional_access_policy(token, check_id)
+                if remediation_type == "domain_password_never_expire":
+                    return await _remediate_domain_password_never_expire(token)
+                return await _remediate_laps_enabled(token)
+
+            success, outcome_message = await _run_graph_remediation_with_permission_repair(
+                company_id, check_id, graph_token, _graph_action
+            )
         else:
             remediation_url = bp.get("remediation_url", "")
             remediation_payload = bp.get("remediation_payload") or {}
-            try:
-                await _graph_patch(graph_token, remediation_url, remediation_payload)
-                success = True
-            except M365Error as exc:
-                log_error(
-                    "M365 best practice Graph remediation failed",
-                    company_id=company_id,
-                    check_id=check_id,
-                    url=remediation_url,
-                    error=str(exc),
-                )
-                success = False
-                outcome_message = str(exc)
+
+            async def _patch_action(token: str) -> tuple[bool, str]:
+                await _graph_patch(token, remediation_url, remediation_payload)
+                return True, ""
+
+            success, outcome_message = await _run_graph_remediation_with_permission_repair(
+                company_id, check_id, graph_token, _patch_action
+            )
     elif source_type == "scc":
         scc_token_error_message = (
             "Unable to acquire Security & Compliance token. "

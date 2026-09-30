@@ -1,0 +1,7 @@
+{
+  "guid": "6c929434-a853-4f1a-bd89-2cc0cc58b642",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed broken Microsoft 365 best-practice remediations for SSPR, email OTP, weak authentication methods, system-preferred MFA, OneDrive sharing, Outlook add-ins, outbound spam limits and audit log search, and corrected the SharePoint idle sign-out and Teams lobby checks.",
+  "content_hash": "e4f8c74e18eed1bafd8242d9856b82454f9b51c4a04d7a52142deddbbf62b73f"
+}
