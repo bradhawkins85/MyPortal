@@ -626,7 +626,7 @@ body.navigation--top .menu__submenu--expanded {
 }
 
 body.navigation--top .menu__item--expanded > .menu__submenu,
-body.navigation--top .menu__item--expandable:focus-within > .menu__submenu {
+body.navigation--top .menu__item--expandable:hover > .menu__submenu {
   display: flex;
   flex-direction: column;
 }
@@ -655,7 +655,9 @@ body.navigation--top .layout__main {
 }
 
 body.navigation--top .layout__header {
-  top: 4.5rem;
+  /* The top navigation participates in normal flow. Offsetting this relative
+   * header moved it over the page content while leaving an empty gap behind. */
+  top: auto;
 }
 
 @media (max-width: 1024px) {
