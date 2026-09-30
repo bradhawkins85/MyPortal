@@ -1,0 +1,7 @@
+{
+  "guid": "8f5b90c1-07a7-4e09-a513-a76767356f34",
+  "occurred_at": "2026-09-30T15:00Z",
+  "change_type": "Feature",
+  "summary": "Redesign the Webhooks page with queue-state counters that open each filtered view, a tidier delivery log with status pills and inline retry and delete, deletion rules shown as plain-English cards, a guided rule editor with schedule presets and a live summary, and a retention setting that explains what it will delete",
+  "content_hash": "16348fad9f7def2df3dd64df73361392dc98d815a701e6bf60018278eda23ef6"
+}

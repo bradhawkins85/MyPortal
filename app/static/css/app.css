@@ -18115,3 +18115,294 @@ select.ss-native {
 .ss__list:empty + .ss__status {
   border-top: 0;
 }
+
+/* Webhook monitor (/admin/webhooks) */
+.whm-stats {
+  margin-bottom: var(--space-gap-roomy);
+}
+
+.whm-log,
+.whm-cleanup {
+  margin-bottom: var(--space-gap-roomy);
+}
+
+.whm-toolbar {
+  flex-direction: row;
+  align-items: flex-end;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.whm-toolbar .table-toolbar__filters {
+  flex: 1 1 32rem;
+}
+
+.whm-toolbar__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-gap-tight);
+}
+
+.whm-toolbar__direction {
+  width: auto;
+  min-width: 9rem;
+}
+
+.whm-table td {
+  vertical-align: middle;
+}
+
+.whm-table .status,
+.whm-row-actions {
+  white-space: nowrap;
+}
+
+.whm-table td[data-column-key="updated"],
+.whm-table td[data-column-key="next_attempt"] {
+  min-width: 7.5rem;
+  font-size: 0.9rem;
+}
+
+.whm-rules .scf-item {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.whm-event {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.whm-event__name {
+  font-weight: 600;
+}
+
+.whm-direction--icon {
+  width: 1rem;
+  justify-content: center;
+}
+
+.whm-event__id {
+  font-size: 0.8rem;
+  color: var(--hf-muted);
+}
+
+.whm-mono {
+  font-family: var(--font-monospace, ui-monospace, monospace);
+  font-size: 0.85rem;
+}
+
+.whm-direction {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--hf-muted);
+  white-space: nowrap;
+}
+
+.whm-direction::before {
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.whm-direction--incoming::before {
+  content: '↓';
+  color: var(--hf-accent);
+}
+
+.whm-direction--outgoing::before {
+  content: '↑';
+  color: var(--hf-success);
+}
+
+.whm-next {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+  color: var(--hf-muted);
+}
+
+.whm-attempts {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.whm-attempts--exhausted {
+  color: var(--hf-danger);
+  font-weight: 600;
+}
+
+.whm-error {
+  display: inline-block;
+  max-width: 16rem;
+  font-size: 0.85rem;
+  color: var(--hf-danger);
+  overflow-wrap: anywhere;
+}
+
+.whm-row-actions {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: var(--space-gap-tight);
+}
+
+.whm-empty[hidden] {
+  display: none;
+}
+
+.whm-cleanup__body {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space-gap-roomy) * 1.5);
+}
+
+.whm-cleanup__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-base);
+}
+
+.whm-cleanup__heading .scf-panel__title {
+  margin: 0;
+}
+
+.whm-rule__summary code,
+.whm-rules .scf-chip code {
+  font-size: 0.8rem;
+}
+
+.whm-retention {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+  padding-top: calc(var(--space-gap-roomy) * 1.5);
+  border-top: 1px solid var(--hf-line);
+}
+
+.whm-retention__fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-gap-base);
+}
+
+.whm-retention__fields .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.whm-retention__fields .form-input {
+  min-width: 9rem;
+}
+
+.whm-retention.is-disabled .whm-retention__fields .form-field {
+  opacity: 0.55;
+}
+
+.whm-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+  padding-bottom: calc(var(--space-gap-roomy) * 1.5);
+}
+
+.whm-section + .whm-section {
+  padding-top: calc(var(--space-gap-roomy) * 1.5);
+  border-top: 1px solid var(--hf-line);
+}
+
+.whm-section .scf-choice-list {
+  margin-bottom: 0;
+}
+
+.whm-section [hidden] {
+  display: none;
+}
+
+.whm-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-gap-tight);
+}
+
+.whm-conditions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.whm-condition {
+  display: grid;
+  grid-template-columns: 3.25rem minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.1fr) 2.25rem;
+  align-items: center;
+  gap: var(--space-gap-tight);
+  padding: var(--space-gap-tight) var(--space-gap-base);
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-bg-sunken);
+}
+
+.whm-condition__word {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--hf-muted);
+}
+
+.whm-condition .form-input.is-invalid {
+  border-color: var(--hf-danger);
+}
+
+.whm-section .whm-condition__value[hidden] {
+  display: block;
+  visibility: hidden;
+}
+
+.whm-section [data-add-condition] {
+  align-self: flex-start;
+}
+
+.whm-rule-preview .scf-sentence code {
+  font-size: 0.8rem;
+}
+
+
+@media (max-width: 800px) {
+  .whm-condition {
+    grid-template-columns: minmax(0, 1fr) 2.25rem;
+  }
+
+  .whm-condition__word {
+    grid-column: 1 / -1;
+  }
+
+  .whm-condition > .form-input {
+    grid-column: 1;
+  }
+
+  .whm-condition > .scf-icon-button {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .whm-row-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .whm-event {
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+}

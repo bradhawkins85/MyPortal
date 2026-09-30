@@ -340,3 +340,74 @@ def test_totp_enrolment_keeps_script_hooks():
     ):
         assert hook in html, hook
     assert html.count('class="totp-step"') == 3
+
+
+def _render_webhooks(**context) -> str:
+    stub_base = (
+        "{% block header_actions %}{% endblock %}{% block content %}{% endblock %}"
+        "{% block scripts %}{% endblock %}"
+    )
+    env = jinja2.Environment(
+        loader=jinja2.ChoiceLoader(
+            [jinja2.DictLoader({"base.html": stub_base}), jinja2.FileSystemLoader(str(TEMPLATES))]
+        ),
+        autoescape=True,
+    )
+    env.globals["static_url"] = lambda path: path
+    defaults = {
+        "events": [],
+        "webhook_search": "",
+        "webhook_status": "",
+        "webhook_event_limit": 1000,
+        "webhook_event_limit_options": (200, 500, 1000),
+        "webhook_status_counts": {"failed": 2, "pending": 1, "in_progress": 0, "succeeded": 7},
+        "deletion_rules": [],
+        "retention": {"enabled": True, "retention_value": 30, "retention_unit": "days"},
+    }
+    defaults.update(context)
+    return env.get_template("admin/webhooks.html").render(**defaults)
+
+
+def test_webhook_monitor_renders_stats_log_and_rule_summaries():
+    events = [
+        {"id": 5, "name": "ticket.created", "target_url": "https://hooks.example/a", "status": "failed",
+         "direction": "outgoing", "attempt_count": 3, "max_attempts": 3, "last_error": "HTTP 500",
+         "next_attempt_iso": None, "updated_iso": "2026-09-30T10:00:00+00:00"},
+        {"id": 6, "name": "sync", "target_url": "", "status": "in_progress", "direction": "incoming",
+         "attempt_count": 1, "max_attempts": 3, "last_error": None, "next_attempt_iso": None,
+         "updated_iso": None},
+    ]
+    rules = [{"id": 9, "name": "Drop pings", "execution_type": "scheduled", "cron_expression": "0 2 * * *",
+              "enabled": True, "next_run_at": "2026-10-01T02:00:00+00:00", "last_run_at": None,
+              "conditions": [{"field": "status", "operator": "equals", "value": "succeeded"},
+                             {"field": "payload.ping", "operator": "is_not_empty", "value": None}]}]
+    html = _render_webhooks(events=events, deletion_rules=rules)
+
+    # Stat strip totals the whole queue and links each state to its filter.
+    assert 'stat-strip__stat--total' in html and ">10<" in html
+    assert 'href="/admin/webhooks?status=failed&amp;event_limit=1000"' in html
+    # Status pills and exhausted attempts.
+    assert 'status status--error">Failed' in html
+    assert "whm-attempts--exhausted" in html
+    # In-progress rows cannot be deleted mid-delivery.
+    row = html[html.index('data-event-id="6"'):]
+    assert row.index("data-webhook-delete disabled") < row.index("</tr>")
+    # Rules render as a list with a plain-English summary.
+    assert 'data-deletion-rule data-rule=' in html
+    assert "Deletes entries where <code>status</code> is “succeeded” and <code>payload.ping</code> is not empty." in html
+    assert "Entries created more than 30 days ago" in html
+    # Modals follow the div.modal standard.
+    for modal_id in ("webhook-deletion-rule-modal", "webhook-attempts-modal"):
+        assert f'<div class="modal scf-modal" id="{modal_id}" role="dialog" aria-modal="true"' in html
+    assert "<dialog" not in html
+
+
+def test_webhook_monitor_empty_states():
+    html = _render_webhooks()
+    assert 'id="webhooks-table"' not in html
+    assert "No webhook activity recorded" in html
+    assert "No deletion rules yet" in html
+
+    filtered = _render_webhooks(webhook_search="abc", webhook_status="failed")
+    assert "No webhook events match" in filtered
+    assert "Dead-letter queue" in filtered
