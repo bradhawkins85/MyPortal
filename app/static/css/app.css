@@ -15304,6 +15304,280 @@ body.scf-modal-open {
   }
 }
 
+/* Switch used by the .scf editors (custom fields, intake fields, tray questions) */
+.scf-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.scf-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.scf-switch__track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 2.5rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hf-muted) 30%, transparent);
+  box-shadow: inset 0 0 0 1px var(--hf-line);
+  transition: background 0.2s ease;
+}
+
+.scf-switch__track::after {
+  content: '';
+  position: absolute;
+  top: 0.2rem;
+  left: 0.2rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  background: var(--hf-copy-strong);
+  transition: transform 0.2s ease;
+}
+
+.scf-switch input:checked + .scf-switch__track {
+  background: var(--hf-accent-strong);
+}
+
+.scf-switch input:checked + .scf-switch__track::after {
+  transform: translateX(1.1rem);
+  background: var(--hf-panel);
+}
+
+.scf-switch input:focus-visible + .scf-switch__track {
+  outline: 2px solid var(--hf-accent-strong);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scf-switch__track,
+  .scf-switch__track::after {
+    transition: none;
+  }
+}
+
+/* Tray ticket intake questions — reuses the .scf-* editor */
+.tq-scope {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: var(--space-gap-base);
+}
+
+.tq .scf-item__label,
+.tq .scf-item__actions a.button {
+  text-decoration: none;
+}
+
+.tq-type-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.tq-editor input.tq-order {
+  max-width: 8rem;
+}
+
+.tq-option {
+  grid-template-columns: 3.75rem minmax(0, 1fr) 2.25rem;
+}
+
+.tq-conditions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+  margin: 0 0 var(--space-gap-base);
+  padding: 0;
+  list-style: none;
+}
+
+.tq-condition {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1.3fr) minmax(0, 0.7fr) minmax(0, 1fr) 2.25rem;
+  align-items: center;
+  gap: var(--space-gap-tight);
+}
+
+.tq-condition > button:disabled {
+  opacity: 0.4;
+}
+
+@media (max-width: 640px) {
+  .tq-scope,
+  .tq-type-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tq-condition {
+    grid-template-columns: minmax(0, 1fr) 2.25rem;
+    padding-bottom: var(--space-gap-tight);
+    border-bottom: 1px solid var(--hf-line-soft);
+  }
+
+  .tq-condition > * {
+    grid-column: 1;
+  }
+
+  .tq-condition > [data-tq-condition-remove] {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
+/* Scheduled ticket payload editor (Create scheduled ticket tasks) */
+.stp__fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+  margin: 0;
+  padding: var(--space-gap-roomy);
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+}
+
+.stp__fieldset > legend {
+  padding: 0 0.35rem;
+}
+
+.stp__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-gap-base);
+}
+
+.stp__grid[hidden] {
+  display: none;
+}
+
+.stp__full {
+  grid-column: 1 / -1;
+}
+
+.stp .scf-error[hidden] {
+  display: none;
+}
+
+.stp__advanced > summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--hf-muted);
+}
+
+.stp__advanced[open] > summary {
+  margin-bottom: var(--space-gap-tight);
+}
+
+.stp__json {
+  font-family: var(--font-monospace, ui-monospace, monospace);
+  font-size: 0.82rem;
+}
+
+@media (max-width: 640px) {
+  .stp__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Staff intake fields (built-in onboarding questions) — reuses the .scf-* editor */
+.sif-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-gap-base);
+  margin: 0;
+}
+
+.sif-stats__item {
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-panel);
+}
+
+.sif-stats__item dt {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hf-muted);
+}
+
+.sif-stats__item dd {
+  margin: 0.15rem 0 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--hf-copy-strong);
+}
+
+.sif-chip--required {
+  color: var(--hf-copy-strong);
+  background: color-mix(in srgb, var(--hf-accent-strong) 20%, transparent);
+}
+
+.sif-chip--optional {
+  color: var(--hf-copy-strong);
+  background: color-mix(in srgb, var(--hf-success) 18%, transparent);
+}
+
+.sif-chip--hidden {
+  color: var(--hf-muted);
+}
+
+.sif-chip--warning {
+  color: var(--hf-copy-strong);
+  background: color-mix(in srgb, var(--hf-warning) 22%, transparent);
+}
+
+.sif-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+}
+
+.sif-status:empty {
+  display: none;
+}
+
+.sif-editor .scf-editor__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-roomy);
+}
+
+.sif-section {
+  margin: 0;
+}
+
+.sif-presence {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sif-editor .scf-choice:has(input:disabled),
+.sif-editor .scf-type-card:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sif-editor input.sif-order {
+  max-width: 8rem;
+}
+
+@media (max-width: 640px) {
+  .sif-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sif-presence {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .search-workspace {
   max-width: 1100px;
   margin: 0 auto;

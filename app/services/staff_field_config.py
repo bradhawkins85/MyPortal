@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, time, timezone
 from typing import Any
@@ -60,6 +61,37 @@ def _parse_options_text(text: str) -> list[dict[str, str]]:
             label = item
         if not value:
             continue
+        options.append({"value": value, "label": label})
+    return options
+
+
+def _parse_options_json(text: str) -> list[dict[str, str]] | None:
+    """Parse the option builder's ``[{"value", "label"}]`` payload.
+
+    Returns ``None`` when the payload is missing or malformed so callers can
+    fall back to the legacy ``value:Label, …`` text.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(parsed, list):
+        return None
+    options: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in parsed:
+        if isinstance(item, dict):
+            value = str(item.get("value") or "").strip()
+            label = str(item.get("label") or "").strip() or value
+        else:
+            value = str(item or "").strip()
+            label = value
+        if not value or value in seen:
+            continue
+        seen.add(value)
         options.append({"value": value, "label": label})
     return options
 
@@ -206,8 +238,10 @@ async def save_company_staff_field_admin_config(
 
         effective_type = field_type_override or base_type
         if effective_type in {"select", "multiselect"}:
-            options_text = str(form_data.get(f"field_{key}_options") or "")
-            options_by_definition[definition_id] = _parse_options_text(options_text)
+            options = _parse_options_json(str(form_data.get(f"field_{key}_options_json") or ""))
+            if options is None:
+                options = _parse_options_text(str(form_data.get(f"field_{key}_options") or ""))
+            options_by_definition[definition_id] = options
 
     await staff_field_config_repo.upsert_company_staff_field_configs(company_id, configs)
     await staff_field_config_repo.replace_company_staff_field_options(company_id, options_by_definition)

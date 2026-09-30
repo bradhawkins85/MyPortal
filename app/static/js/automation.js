@@ -831,6 +831,10 @@
         jsonPayloadTextarea.value = '';
       }
     }
+    if (jsonPayloadTextarea) {
+      // Let the structured ticket payload editor refresh its fields.
+      jsonPayloadTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+    }
 
     let maxRetriesValue = Number(taskData.max_retries ?? taskData.maxRetries ?? 12);
     if (!Number.isFinite(maxRetriesValue) || maxRetriesValue < 0) {
@@ -1138,7 +1142,7 @@
             return;
           }
         } else {
-          alert('JSON payload is required for scheduled ticket creation.');
+          alert('Enter a subject for the ticket this task creates.');
           return;
         }
       }
@@ -1336,9 +1340,6 @@
       }
       if (jsonPayloadField) {
         jsonPayloadField.hidden = !requiresPayload;
-      }
-      if (jsonPayloadInput) {
-        jsonPayloadInput.required = Boolean(requiresPayload);
       }
     };
 
