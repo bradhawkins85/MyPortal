@@ -4668,7 +4668,7 @@ async def run_purview_preflight(
     *,
     repair: bool = False,
 ) -> dict[str, Any]:
-    """Describe the legacy app-only Purview route without declaring it supported.
+    """Check whether the app-only Purview route can reach the compliance organization.
 
     Graph is authoritative for the EOP resource assignment.  The similarly named
     Office 365 Exchange Online assignment is deliberately never accepted here.
@@ -4677,8 +4677,8 @@ async def run_purview_preflight(
     through the SCC session because those objects are not represented by Entra
     directory roles.
     Microsoft explicitly excludes Purview compliance/eDiscovery cmdlets from
-    app-only authentication support.  The probes below are retained as migration
-    diagnostics only: a successful probe cannot make this execution route ready.
+    app-only authentication support, so a ready result is best-effort: Purview
+    can still reject an individual cmdlet, and that error is surfaced verbatim.
     ``repair`` is accepted for API compatibility, but role-group membership is
     never broadened automatically.
     """
@@ -4917,13 +4917,13 @@ async def run_purview_preflight(
                        None if membership_ok else membership_command + '\n\nGet-RoleGroupMember -Identity "eDiscoveryManager"'),
     ])
     checks.insert(0, _purview_check(
-        "provider_support", "Microsoft-supported execution route", "Unsupported",
+        "provider_support", "Microsoft-supported execution route", "Warning",
         "The configured route uses app-only Security & Compliance PowerShell. "
-        "Microsoft does not support app-only authentication for Purview compliance "
-        "and eDiscovery cmdlets; successful permission or role probes do not change that.",
-        "Use an appropriately licensed administrator in an interactive delegated "
-        "Exchange Online PowerShell session, run Connect-IPPSSession with "
-        "-EnableSearchOnlySession, and perform the reviewed search and purge in "
+        "Microsoft documents app-only eDiscovery cmdlets as best-effort rather than "
+        "supported, so Purview may reject a search or purge even when every probe passes.",
+        "If Purview rejects the request, use an appropriately licensed administrator "
+        "in an interactive Exchange Online PowerShell session, run Connect-IPPSSession "
+        "with -EnableSearchOnlySession, and perform the reviewed search and purge in "
         "Microsoft Purview. Keep the query and remote action name with this request.",
     ))
     checks.extend([
@@ -4949,8 +4949,12 @@ async def run_purview_preflight(
             "role to the interactive operator; do not add it to the application.",
         ),
     ])
+    # A successful live SCC command proves the token, EOP permission and
+    # organization routing. Role-group and registration checks stay advisory:
+    # their parsing can miss valid memberships, and Purview itself returns an
+    # actionable authorization error if the application lacks a role.
     return {
-        "ready": False,
+        "ready": org_ok,
         "execution_route": "legacy_app_only_scc_invokecommand",
         "provider_supported": False,
         "tenant_domain": tenant_domain,
