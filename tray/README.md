@@ -190,6 +190,32 @@ The chat shell binary is installed to:
 - **Windows**: `%ProgramFiles%\MyPortalTray\chat-shell\myportal-tray-chat.exe` (current unpacked Electron install) or `%ProgramFiles%\MyPortalTray\myportal-tray-chat.exe` (legacy single-file install fallback)
 - **macOS**: `/Library/MyPortal/Tray/myportal-tray-chat.app/Contents/MacOS/myportal-tray-chat`
 
+## Classic Outlook signatures
+
+When a company enables **Classic Outlook** sync on the portal's Signature
+management page, the per-user UI agent on Windows keeps each user's Classic
+Outlook signature in line with the company's current primary template
+(`ui/outlook_signatures*.go`). It runs about 45 seconds after the UI starts,
+then hourly and whenever the service relays `config_changed`:
+
+1. Reads the email address of every mail account in the user's Outlook
+   profiles (`HKCU\Software\Microsoft\Office\16.0|15.0\Outlook\Profiles`).
+2. Posts those addresses to `POST /api/tray/outlook-signatures`. The portal
+   renders the signature only for addresses on the company's email domains that
+   match an active staff record, and returns `enabled: false` when the company
+   has not opted in.
+3. Writes `MyPortal (<address>).htm/.rtf/.txt` to the user's signatures folder
+   (`%APPDATA%\Microsoft\Signatures`, or its localised name), only when the
+   content changed or a file is missing.
+4. Sets that signature as the account's new-message and reply/forward default,
+   sets it as the default for accounts added later
+   (`Common\MailSettings\NewSignature`/`ReplySignature`), and turns on the
+   per-user `DisableRoamingSignatures` switches so Outlook's cloud signature
+   sync does not replace the files.
+
+Signatures the user created themselves are never modified or deleted.
+Outlook for Mac keeps signatures in its own database and is not managed.
+
 ## Configuration
 
 ### Network scanning
