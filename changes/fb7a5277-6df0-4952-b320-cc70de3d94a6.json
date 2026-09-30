@@ -1,0 +1,7 @@
+{
+  "guid": "fb7a5277-6df0-4952-b320-cc70de3d94a6",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "Feature",
+  "summary": "Add ASSET_TYPE_MODE (auto, custom or manual) to allow typed-in asset types, reuse previously entered types and draw them with a generic network map icon.",
+  "content_hash": "e43b075bdf3ad12fdf09fefe42711e3a2b2ecb39d2f241fc8953ca7f56500e1e"
+}
