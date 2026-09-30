@@ -74,6 +74,51 @@ def _validate_voice_monitor_calls_per_day(
     return calls_per_day
 
 
+def _parse_optional_measurement(value: Any, label: str) -> Decimal | None:
+    """Parse an optional non-negative weight or dimension from a form value."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = Decimal(value.strip()).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{label} must be a valid number",
+        )
+    if parsed < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{label} must be at least zero",
+        )
+    return parsed
+
+
+def _parse_product_freight_fields(
+    *,
+    item_size: Any,
+    weight: Any,
+    length: Any,
+    width: Any,
+    height: Any,
+) -> dict[str, Any]:
+    from app.services import freight_rules as freight_rules_service
+
+    size_value = item_size.strip().lower() if isinstance(item_size, str) else ""
+    normalised_size = freight_rules_service.normalise_item_size(size_value)
+    if size_value and normalised_size is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid item size selection",
+        )
+    return {
+        "item_size": normalised_size,
+        "weight": _parse_optional_measurement(weight, "Weight"),
+        "length": _parse_optional_measurement(length, "Length"),
+        "width": _parse_optional_measurement(width, "Width"),
+        "height": _parse_optional_measurement(height, "Height"),
+    }
+
+
 def _parse_freight_conditions(form: Any) -> list[dict[str, Any]]:
     conditions: dict[int, dict[str, str]] = {}
     for key, val in form.multi_items():
@@ -667,6 +712,51 @@ async def admin_shop_product_detail_api(request: Request, product_id: int):
     await shop_repo.populate_product_inbound_recommendations(product)
 
     return JSONResponse(content=cast(dict[str, Any], _main()._serialise_for_json(product)))
+
+
+async def admin_shop_product_freight_preview_api(
+    request: Request,
+    product_id: int,
+    item_size: str | None = Query(default=None),
+    weight: str | None = Query(default=None),
+    length: str | None = Query(default=None),
+    width: str | None = Query(default=None),
+    height: str | None = Query(default=None),
+    price: str | None = Query(default=None),
+    quantity: int = Query(default=1, ge=1, le=1000),
+):
+    """Estimate freight for one product using unsaved editor values."""
+    from app.repositories import freight_rules as freight_rules_repo
+    from app.repositories import shop as shop_repo
+    from app.services import freight_rules as freight_rules_service
+
+    _current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    product = await shop_repo.get_product_by_id(product_id, include_archived=True)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    overrides = _parse_product_freight_fields(
+        item_size=item_size,
+        weight=weight,
+        length=length,
+        width=width,
+        height=height,
+    )
+    preview_product = {**product, **overrides}
+    if isinstance(price, str) and price.strip():
+        preview_product["price"] = _parse_optional_measurement(price, "Price")
+
+    rules = await freight_rules_repo.list_rules(active_only=True)
+    preview = freight_rules_service.calculate_product_freight_preview(
+        preview_product,
+        rules,
+        quantity=quantity,
+    )
+    preview["active_rule_count"] = len(rules)
+    return JSONResponse(content=cast(dict[str, Any], _main()._serialise_for_json(preview)))
 
 
 async def admin_shop_product_price_history_api(request: Request, product_id: int):
@@ -1298,6 +1388,7 @@ async def admin_shop_page(
     from app.repositories import stock_feed as stock_feed_repo
     from app.repositories import subscription_categories as subscription_categories_repo
     from app.services import shop as shop_service
+    from app.services import freight_rules as freight_rules_service
 
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
@@ -1364,6 +1455,7 @@ async def admin_shop_page(
         "subscription_categories": subscription_categories,
         "microsoft_sku_mappings": microsoft_sku_mappings,
         "total_count": total_count,
+        "freight_item_size_options": freight_rules_service.ITEM_SIZE_OPTIONS,
     }
     return await _main()._render_template("admin/shop.html", request, current_user, extra=extra)
 
@@ -2376,6 +2468,12 @@ async def admin_update_shop_product(
     scheduled_vip_price: str | None = Form(default=None),
     scheduled_buy_price: str | None = Form(default=None),
     price_change_date: str | None = Form(default=None),
+    freight_fields: str | None = Form(default=None),
+    item_size: str | None = Form(default=None),
+    weight: str | None = Form(default=None),
+    length: str | None = Form(default=None),
+    width: str | None = Form(default=None),
+    height: str | None = Form(default=None),
 ):
     from app.repositories import shop as shop_repo
     from app.repositories import subscription_categories as subscription_categories_repo
@@ -2561,6 +2659,18 @@ async def admin_update_shop_product(
         except (TypeError, InvalidOperation):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Scheduled buy price must be a valid number")
 
+    # Only forms that render the freight section post the marker, so other
+    # callers never clear stock-feed weights and dimensions.
+    freight_payload: dict[str, Any] | None = None
+    if freight_fields == "1":
+        freight_payload = _parse_product_freight_fields(
+            item_size=item_size,
+            weight=weight,
+            length=length,
+            width=width,
+            height=height,
+        )
+
     # Parse price change date
     from datetime import datetime as dt
     price_change_date_value: Any | None = None
@@ -2641,6 +2751,7 @@ async def admin_update_shop_product(
             scheduled_vip_price=scheduled_vip_price_decimal,
             scheduled_buy_price=scheduled_buy_price_decimal,
             price_change_date=price_change_date_value,
+            freight=freight_payload,
         )
     except aiomysql.IntegrityError as exc:
         if stored_path:
