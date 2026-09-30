@@ -1,0 +1,56 @@
+{# Shared pieces for the sign-in and sign-up pages. #}
+
+{% macro brand_mark(class_name='auth-hero__mark') -%}
+<svg class="{{ class_name }}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="auth-mark-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+  </defs>
+  <rect width="120" height="120" rx="28" fill="#0f172a" />
+  <circle cx="60" cy="60" r="42" fill="url(#auth-mark-gradient)" opacity="0.9" />
+  <circle cx="60" cy="60" r="24" fill="#0f172a" opacity="0.95" />
+  <path d="M60 28a32 32 0 0132 32v4a32 32 0 01-32 32 32 32 0 01-32-32v-4a32 32 0 0132-32z" fill="none" stroke="#f8fafc" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity="0.85" />
+  <circle cx="60" cy="60" r="10" fill="#f8fafc" opacity="0.85" />
+</svg>
+{%- endmacro %}
+
+{# The brand panel beside the form. ``points`` is a list of (title, detail). #}
+{% macro auth_hero(app_name, headline, points) -%}
+<aside class="auth-hero" aria-label="About {{ app_name }}">
+  <div class="auth-hero__brand">
+    {{ brand_mark() }}
+    <span class="auth-hero__name">{{ app_name }}</span>
+  </div>
+  <p class="auth-hero__headline">{{ headline }}</p>
+  <ul class="auth-hero__points">
+    {% for point_title, point_detail in points %}
+      <li>
+        <span class="auth-hero__tick" aria-hidden="true"></span>
+        <span><strong>{{ point_title }}</strong>{{ point_detail }}</span>
+      </li>
+    {% endfor %}
+  </ul>
+</aside>
+{%- endmacro %}
+
+{# Password input with a show/hide toggle (enhanced by auth_ui.js). #}
+{% macro password_input(id, name, autocomplete, placeholder='', minlength=none, describedby=none) -%}
+<div class="auth-password" data-password-field>
+  <input
+    id="{{ id }}"
+    class="form-input"
+    type="password"
+    name="{{ name }}"
+    autocomplete="{{ autocomplete }}"
+    required
+    {% if minlength %}minlength="{{ minlength }}"{% endif %}
+    {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}
+    {% if describedby %}aria-describedby="{{ describedby }}"{% endif %}
+  />
+  <button type="button" class="auth-password__toggle" data-password-toggle aria-controls="{{ id }}" aria-pressed="false" hidden>
+    <span data-password-toggle-label>Show</span><span class="visually-hidden"> password</span>
+  </button>
+</div>
+{%- endmacro %}

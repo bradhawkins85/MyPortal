@@ -262,3 +262,48 @@ def test_out_of_office_renders_mailbox_cards_and_editor():
     assert 'id="oof-modal"' not in read_only
     assert "data-oof-select" not in read_only
     assert "read-only access" in read_only
+
+
+def _auth_env() -> jinja2.Environment:
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(TEMPLATES)), autoescape=True)
+    env.globals.update(
+        static_url=lambda path: path,
+        feature_pack_available=lambda *args, **kwargs: False,
+        sidebar_default_preferences=lambda: {"order": [], "hidden": [], "groups": []},
+        deployment_slot=None,
+    )
+    return env
+
+
+def test_login_page_keeps_auth_hooks_and_hides_totp_until_needed():
+    html = _auth_env().get_template("auth/login.html").render(
+        app_name="MyPortal", current_user=None, csrf_token="t", request=None,
+        verification_success=False, next_path="/tickets",
+    )
+
+    assert 'data-endpoint="/auth/login"' in html
+    assert 'data-success-redirect="/tickets"' in html
+    assert "data-passkey-login" in html and "data-auth-passkey-section" in html
+    assert re.search(r'data-totp-field\s+hidden', html)
+    assert "data-auth-toggle-totp" in html
+    assert 'name="totp_code"' in html
+    assert "data-password-toggle" in html
+    assert 'href="/forgot-password"' in html and 'href="/register"' in html
+    assert "auth_ui.js" in html and "passkey_utils.js" in html
+
+
+def test_register_page_variants():
+    env = _auth_env()
+    common = {"app_name": "MyPortal", "current_user": None, "csrf_token": "t", "request": None}
+    html = env.get_template("auth/register.html").render(is_first_user=False, **common)
+    assert 'data-endpoint="/auth/register"' in html
+    assert 'name="confirm_password"' in html
+    assert "data-password-rules" in html
+    assert 'name="company_id"' not in html
+    assert "Already have an account?" in html
+
+    first = env.get_template("auth/register.html").render(is_first_user=True, **common)
+    assert "Create the first account" in first
+    assert "First-time setup" in first
+    assert '<details class="auth-advanced">' in first and 'name="company_id"' in first
+    assert "Already have an account?" not in first
