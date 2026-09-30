@@ -1,0 +1,7 @@
+{
+  "guid": "8447a8ba-a607-4801-8534-2e3ab41fe97b",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "Fix",
+  "summary": "Always report SMB1001 control TM-01 as compliant because Hawkins IT Solutions provides managed IT support.",
+  "content_hash": "354de452989a4f4ef98e311963d0dbd38c10e088c79179bd20e9c26787e95be1"
+}
