@@ -3968,10 +3968,27 @@ async def m365_best_practices_page(request: Request):
     catalog = m365_best_practices_service.list_best_practices()
     enabled_ids = await m365_best_practices_service.get_enabled_check_ids()
     enabled_catalog = [bp for bp in catalog if bp["id"] in enabled_ids]
+    excluded_ids = await m365_best_practices_service.get_company_exclusions(company_id)
+    excluded_results = [
+        {
+            "check_id": bp["id"],
+            "check_name": bp.get("name") or bp["id"],
+            "description": bp.get("description", ""),
+            "status": "excluded",
+            "details": "Excluded for this company.",
+            "run_at": None,
+            "is_cis_benchmark": bool(bp.get("is_cis_benchmark")),
+            "cis_group": bp.get("cis_group", ""),
+            "risk_score": bp.get("risk_score", 0),
+            "risk_severity": bp.get("risk_severity", "medium"),
+        }
+        for bp in enabled_catalog
+        if bp["id"] in excluded_ids
+    ]
     extra = {
         "title": "M365 Best Practices",
         "company": company,
-        "results": results,
+        "results": [*results, *excluded_results],
         "secure_score": secure_score,
         "catalog": enabled_catalog,
         "batch_scopes": m365_best_practices_service.get_batch_remediation_scopes(results),
