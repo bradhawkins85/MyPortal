@@ -1,87 +1,94 @@
 {% extends "base.html" %}
+{% from "auth/_auth_macros.html" import auth_brand %}
 
 {% block header_title %}Secure your account{% endblock %}
 
 {% block sidebar_menu %}{% endblock %}
 
 {% block content %}
-<div class="management management--single totp-enrol" data-layout id="totp-enrol-root">
-  <section class="management__content">
-    <header class="management__header">
-      <div>
-        <h1 class="management__title">Set up two-factor authentication</h1>
-        <p class="management__subtitle">Two-factor authentication is required for every MyPortal account before accessing portal data.</p>
-      </div>
+<div class="auth-shell auth-shell--single auth-shell--wide totp-enrol" id="totp-enrol-root">
+  {{ auth_brand(app_name) }}
+  <section class="auth-card" aria-labelledby="totp-title">
+    <header class="auth-card__header">
+      <p class="auth-card__eyebrow">One more step</p>
+      <h1 class="auth-card__title" id="totp-title">Set up two-factor authentication</h1>
+      <p class="auth-card__subtitle">Two-factor authentication is required for every {{ app_name }} account before accessing portal data. It takes about a minute.</p>
     </header>
 
-    <div class="management__body totp-enrol__body">
-      <div class="management__column">
-        <section class="card card--panel">
-          <header class="card__header card__header--stacked">
-            <div>
-              <h2 class="card__title">Authenticator app enrolment</h2>
-              <p class="card__subtitle">Add MyPortal to an authenticator app, then enter the six-digit code to finish enrolment.</p>
-            </div>
-          </header>
-          <div class="card__body card__body--stacked totp-enrol__card-body">
-            <div class="callout callout--warning" role="status">
-              <strong>Required security step.</strong>
-              Access to the portal is paused until this account has at least one authenticator registered.
-            </div>
+    <ol class="totp-steps">
+      <li class="totp-step">
+        <span class="totp-step__number" aria-hidden="true">1</span>
+        <div class="totp-step__body">
+          <h2 class="totp-step__title">Get an authenticator app</h2>
+          <p class="text-muted">Any app that supports time-based codes works — for example Microsoft Authenticator, Google Authenticator, 1Password or Authy.</p>
+        </div>
+      </li>
 
-            <div class="totp-setup" data-totp-setup>
-              <div class="totp-setup__qr-column">
-                <div class="totp-qr" data-totp-qr-container aria-live="polite" aria-busy="true">
-                  <div class="totp-qr__placeholder" data-totp-qr-placeholder>Generating your QR code…</div>
-                  <img class="totp-qr__image" data-totp-qr alt="QR code for adding this account to an authenticator app" hidden />
-                  <p class="totp-qr__help">Scan this QR code with your authenticator app.</p>
+      <li class="totp-step">
+        <span class="totp-step__number" aria-hidden="true">2</span>
+        <div class="totp-step__body">
+          <h2 class="totp-step__title">Scan this QR code</h2>
+          <p class="text-muted">In the app, choose to add an account, then point your camera at the code.</p>
+          <div class="totp-scan">
+            <div class="totp-qr" data-totp-qr-container aria-live="polite" aria-busy="true">
+              <div class="totp-qr__placeholder" data-totp-qr-placeholder>Generating your QR code…</div>
+              <img class="totp-qr__image" data-totp-qr alt="QR code for adding this account to an authenticator app" hidden />
+            </div>
+            <div class="totp-scan__aside">
+              <button type="button" class="button-link totp-manual-toggle" data-totp-manual-toggle aria-expanded="false" aria-controls="totp-manual-setup">Cannot scan the code?</button>
+              <div class="totp-manual" id="totp-manual-setup" data-totp-manual hidden>
+                <p class="form-help">Enter this secret in your app instead, or open the setup link on this device.</p>
+                <div class="form-field">
+                  <label class="form-label" for="totp-secret">Secret</label>
+                  <div class="totp-copy-row">
+                    <input class="form-input scf-mono" id="totp-secret" name="totpSecret" readonly />
+                    <button type="button" class="button button--ghost button--small" data-copy-target="totp-secret">Copy</button>
+                  </div>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="totp-link">Setup link</label>
+                  <div class="totp-copy-row">
+                    <input class="form-input scf-mono" id="totp-link" name="totpLink" readonly />
+                    <button type="button" class="button button--ghost button--small" data-copy-target="totp-link">Copy</button>
+                  </div>
                 </div>
               </div>
-
-              <div class="totp-setup__form-column">
-                <form class="form totp-enrol-form" id="totp-enrol-form">
-                  <div class="form-field">
-                    <label class="form-label" for="totp-name">Device name <span class="form-label__optional">(optional)</span></label>
-                    <input class="form-input" id="totp-name" name="totpName" maxlength="100" placeholder="e.g. Work phone" />
-                  </div>
-                  <div class="form-field">
-                    <label class="form-label" for="totp-code">Authenticator code</label>
-                    <input class="form-input" id="totp-code" name="totpCode" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" autocorrect="off" autocapitalize="none" required />
-                  </div>
-                </form>
-
-                <button type="button" class="button button--ghost totp-manual-toggle" data-totp-manual-toggle aria-expanded="false" aria-controls="totp-manual-setup">Cannot scan the code?</button>
-
-                <div class="totp-manual" id="totp-manual-setup" data-totp-manual hidden>
-                  <div class="form-field">
-                    <label class="form-label" for="totp-secret">Secret</label>
-                    <div class="totp-copy-row">
-                      <input class="form-input" id="totp-secret" name="totpSecret" readonly />
-                      <button type="button" class="button button--ghost" data-copy-target="totp-secret">Copy</button>
-                    </div>
-                  </div>
-                  <div class="form-field">
-                    <label class="form-label" for="totp-link">Setup link</label>
-                    <div class="totp-copy-row">
-                      <input class="form-input" id="totp-link" name="totpLink" readonly />
-                      <button type="button" class="button button--ghost" data-copy-target="totp-link">Copy</button>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="form-actions totp-enrol__actions">
-                  <button type="submit" class="button" form="totp-enrol-form" data-totp-submit>Verify and continue</button>
-                  <button type="button" class="button button--ghost" data-totp-refresh>Generate new secret</button>
-                  <button type="button" class="button button--secondary" data-logout>Sign out</button>
-                </div>
-              </div>
+              <button type="button" class="button-link totp-refresh" data-totp-refresh>Generate a new QR code</button>
             </div>
           </div>
-        </section>
-      </div>
-    </div>
+        </div>
+      </li>
+
+      <li class="totp-step">
+        <span class="totp-step__number" aria-hidden="true">3</span>
+        <div class="totp-step__body">
+          <h2 class="totp-step__title">Enter the 6-digit code</h2>
+          <p class="text-muted">Type the code the app shows for {{ app_name }}. It changes every 30 seconds.</p>
+          <form class="auth-form totp-enrol-form" id="totp-enrol-form" novalidate>
+            <div class="auth-form__row totp-enrol-form__row">
+              <div class="form-field">
+                <label class="form-label" for="totp-code">Authenticator code</label>
+                <input class="form-input auth-form__code totp-code" id="totp-code" name="totpCode" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" autocorrect="off" autocapitalize="none" required placeholder="123456" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="totp-name">Device name <span class="scf-optional">optional</span></label>
+                <input class="form-input" id="totp-name" name="totpName" maxlength="100" placeholder="e.g. Work phone" aria-describedby="totp-name-help" />
+                <p class="form-help" id="totp-name-help">Helps you tell authenticators apart later.</p>
+              </div>
+            </div>
+          </form>
+        </div>
+      </li>
+    </ol>
+
+    <footer class="totp-enrol__actions">
+      <button type="button" class="button button--ghost" data-logout>Sign out</button>
+      <span class="scf-editor__spacer"></span>
+      <button type="submit" class="button" form="totp-enrol-form" data-totp-submit>Verify and continue</button>
+    </footer>
   </section>
 </div>
+<noscript><p class="alert alert--warning auth-noscript">Setting up two-factor authentication needs JavaScript. Turn it on in your browser to continue.</p></noscript>
 {% endblock %}
 
 {% block scripts %}

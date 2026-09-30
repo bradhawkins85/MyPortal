@@ -158,6 +158,17 @@ async def create_manual_asset(
     )
 
 
+async def list_custom_asset_types(company_id: int) -> list[str]:
+    """Return the distinct custom type names already used by a company's assets."""
+    rows = await db.fetch_all(
+        """SELECT DISTINCT type FROM assets
+           WHERE company_id = %s AND asset_type = %s AND type IS NOT NULL AND type <> ''""",
+        (company_id, asset_types.CUSTOM_KEY),
+    )
+    names = {str(row["type"]).strip() for row in rows if str(row.get("type") or "").strip()}
+    return sorted(names, key=str.casefold)
+
+
 async def update_manual_inventory(
     asset_id: int, *, name: str, type: str | None, status: str | None,
     serial_number: str | None, location: str | None, asset_type: str | None = None,

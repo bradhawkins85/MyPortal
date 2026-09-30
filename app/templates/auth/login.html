@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "auth/_auth_macros.html" import auth_hero, password_input %}
 
 {% set title = "Sign in" %}
 
@@ -22,34 +23,50 @@
 {% endblock %}
 
 {% block content %}
-<div class="auth-card">
-  {% if verification_success %}
-    <div class="alert alert--success" role="status">
-      Your account has been verified successfully. You can now log in.
+<div class="auth-shell">
+  {{ auth_hero(app_name, "Your support portal, in one place.", [
+    ("Raise and follow tickets", " — see every update from the team and reply in the same thread."),
+    ("Everything in one place", " — tickets, replies and updates stay together."),
+    ("Sign in securely", " — use a passkey or add an authenticator app for extra protection."),
+  ]) }}
+
+  <section class="auth-card" aria-labelledby="login-title">
+    {% if verification_success %}
+      <div class="alert alert--success" role="status">
+        Your account has been verified successfully. You can now log in.
+      </div>
+    {% endif %}
+    <header class="auth-card__header">
+      <p class="auth-card__eyebrow">{{ app_name }}</p>
+      <h1 class="auth-card__title" id="login-title">Welcome back</h1>
+      <p class="auth-card__subtitle">Sign in to see your tickets and updates.</p>
+    </header>
+
+    <div class="auth-passkey-section" data-auth-passkey-section>
+    <div class="auth-passkey">
+      <button type="button" class="button button--secondary auth-card__wide auth-passkey__button" data-passkey-login>
+        <svg class="auth-passkey__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 14a5 5 0 1 1 4.9-6H22v4h-2v3h-3v-3h-5.1A5 5 0 0 1 7 14zm0-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg>
+        Sign in with a passkey
+      </button>
+      <p class="form-help" data-passkey-help>Use your fingerprint, face, device PIN or security key if you've set up a passkey.</p>
+      <div class="form-error" role="alert" data-passkey-error hidden></div>
     </div>
-  {% endif %}
-  <header class="auth-card__header">
-    <h1 class="auth-card__title">Welcome back</h1>
-    <p class="auth-card__subtitle">Use your portal credentials to access the dashboard.</p>
-  </header>
-  <div class="form-actions" style="margin-bottom: 1rem;">
-    <button type="button" class="button button--secondary" data-passkey-login>Sign in with a passkey</button>
-  </div>
-  <p class="form-help" data-passkey-help>Use your device biometrics, PIN, or security key if you have already registered a passkey. Your password sign-in option remains available below.</p>
-  <div class="form-error" role="alert" data-passkey-error hidden></div>
-  <form
-    class="auth-form"
-    method="post"
-    data-auth-form
-    data-endpoint="/auth/login"
-    data-loading-text="Signing in&hellip;"
-    data-success-redirect="/"
-    novalidate
-  >
-    {% include "partials/csrf.html" %}
-    <div class="form-field">
-      <label class="form-label" for="login-email">Email address</label>
-      <div class="form-input-wrapper">
+
+    <p class="auth-divider"><span>or use your email</span></p>
+    </div>
+
+    <form
+      class="auth-form"
+      method="post"
+      data-auth-form
+      data-endpoint="/auth/login"
+      data-loading-text="Signing in&hellip;"
+      data-success-redirect="{{ next_path or '/' }}"
+      novalidate
+    >
+      {% include "partials/csrf.html" %}
+      <div class="form-field">
+        <label class="form-label" for="login-email">Email address</label>
         <input
           id="login-email"
           class="form-input"
@@ -60,28 +77,18 @@
           placeholder="you@example.com"
         />
       </div>
-    </div>
-    <div class="form-field">
-      <label class="form-label" for="login-password">Password</label>
-      <div class="form-input-wrapper">
-        <input
-          id="login-password"
-          class="form-input"
-          type="password"
-          name="password"
-          autocomplete="current-password"
-          required
-          minlength="8"
-          placeholder="••••••••"
-        />
+      <div class="form-field">
+        <div class="auth-form__label-row">
+          <label class="form-label" for="login-password">Password</label>
+          <a class="auth-form__aside-link" href="/forgot-password">Forgot password?</a>
+        </div>
+        {{ password_input('login-password', 'password', 'current-password', minlength=8) }}
       </div>
-    </div>
-    <div class="form-field" id="login-totp-field" data-totp-field>
-      <label class="form-label" for="login-totp">Authenticator code</label>
-      <div class="form-input-wrapper">
+      <div class="form-field" id="login-totp-field" data-totp-field hidden>
+        <label class="form-label" for="login-totp">Authenticator code</label>
         <input
           id="login-totp"
-          class="form-input"
+          class="form-input auth-form__code"
           type="text"
           name="totp_code"
           inputmode="numeric"
@@ -91,20 +98,23 @@
           autocorrect="off"
           autocapitalize="none"
           placeholder="123456"
+          aria-describedby="login-totp-help"
         />
+        <p class="form-help" id="login-totp-help">The 6-digit code from your authenticator app.</p>
       </div>
-    </div>
-    <p class="form-help">Forgotten your password? <a href="/forgot-password">Request a reset email</a>.</p>
-    <div class="form-error" role="alert" data-auth-error hidden></div>
-    <div class="form-actions">
-      <a href="/register" class="button button--secondary">Sign up</a>
-      <button type="submit" class="button" data-auth-submit>Sign in</button>
-    </div>
-  </form>
+      <button type="button" class="button-link auth-form__toggle" data-auth-toggle-totp aria-controls="login-totp-field" aria-expanded="false">Use authenticator code</button>
+      <div class="form-error" role="alert" data-auth-error hidden></div>
+      <button type="submit" class="button auth-card__wide" data-auth-submit>Sign in</button>
+    </form>
+
+    <p class="auth-card__footer">New here? <a href="/register">Create an account</a></p>
+  </section>
 </div>
+<noscript><p class="alert alert--warning auth-noscript">Signing in needs JavaScript. Turn it on in your browser to continue.</p></noscript>
 {% endblock %}
 
 {% block scripts %}
 <script src="{{ static_url('/static/js/passkey_utils.js') }}" defer></script>
+<script src="{{ static_url('/static/js/auth_ui.js') }}" defer></script>
 <script type="module" src="{{ static_url('/static/js/auth.js') }}"></script>
 {% endblock %}

@@ -686,6 +686,121 @@
 
     let descriptionSunEditor = null;
 
+    const freightSection = document.getElementById('edit-product-freight-section');
+    const freightItemSizeSelect = document.getElementById('edit-product-item-size');
+    const freightAmountDisplay = document.getElementById('edit-product-freight-amount');
+    const freightDetailDisplay = document.getElementById('edit-product-freight-detail');
+    const freightMeasurementFields = ['weight', 'length', 'width', 'height'];
+    const freightCurrency = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'AUD' });
+    let freightPreviewTimer = null;
+    let freightPreviewController = null;
+
+    function setFreightPreview(amount, detail) {
+      if (freightAmountDisplay) freightAmountDisplay.textContent = amount;
+      if (freightDetailDisplay) freightDetailDisplay.textContent = detail;
+    }
+
+    function setAutomaticItemSizeLabel(sizeLabel) {
+      const autoOption = freightItemSizeSelect ? freightItemSizeSelect.querySelector('option[value=""]') : null;
+      if (!autoOption) return;
+      const baseLabel = autoOption.dataset.autoLabel || 'Automatic (from dimensions)';
+      autoOption.textContent = sizeLabel ? `${baseLabel}: ${sizeLabel}` : baseLabel;
+    }
+
+    function itemSizeLabel(value) {
+      if (!freightItemSizeSelect) return value;
+      const option = freightItemSizeSelect.querySelector(`option[value="${CSS.escape(value || '')}"]`);
+      return option && value ? option.textContent : value;
+    }
+
+    async function refreshFreightPreview() {
+      const productId = Number(editIdField ? editIdField.value : 0);
+      if (!editForm || !freightSection || freightSection.hidden || !productId) return;
+      if (freightPreviewController) freightPreviewController.abort();
+      freightPreviewController = new AbortController();
+      const params = new URLSearchParams();
+      params.set('item_size', freightItemSizeSelect ? freightItemSizeSelect.value : '');
+      freightMeasurementFields.forEach((field) => {
+        const input = editForm.querySelector(`#edit-product-${field}`);
+        params.set(field, input ? input.value : '');
+      });
+      const priceInput = editForm.querySelector('#edit-product-price');
+      if (priceInput && priceInput.value) params.set('price', priceInput.value);
+      setFreightPreview('Calculating…', '');
+      try {
+        const response = await fetch(
+          `/api/admin/shop/products/${productId}/freight-preview?${params.toString()}`,
+          { credentials: 'same-origin', headers: { Accept: 'application/json' }, signal: freightPreviewController.signal },
+        );
+        if (!response.ok) {
+          let message = 'Unable to estimate shipping.';
+          try {
+            const payload = await response.json();
+            if (payload && typeof payload.detail === 'string') message = payload.detail;
+          } catch (error) {
+            // Keep the generic message when the error body is not JSON.
+          }
+          setFreightPreview('—', message);
+          return;
+        }
+        const preview = await response.json();
+        setAutomaticItemSizeLabel(itemSizeLabel(preview.item_size));
+        if (preview.freight_exempt) {
+          setFreightPreview(freightCurrency.format(0), 'Digital delivery items are not charged freight.');
+          return;
+        }
+        if (!preview.active_rule_count) {
+          setFreightPreview(freightCurrency.format(0), 'No active freight rules are configured.');
+          return;
+        }
+        const breakdown = Array.isArray(preview.breakdown) ? preview.breakdown : [];
+        const details = breakdown.map((entry) => {
+          const ruleNames = (entry.applied_rule_names || []).join(', ') || 'no matching rule';
+          return `${entry.dispatch_warehouse}: ${ruleNames} (${freightCurrency.format(Number(entry.amount) || 0)})`;
+        });
+        const sizeText = `Size: ${itemSizeLabel(preview.item_size)}${preview.item_size_is_automatic ? ' (automatic)' : ''}`;
+        setFreightPreview(
+          freightCurrency.format(Number(preview.freight_total) || 0),
+          [sizeText, ...details].join(' · '),
+        );
+      } catch (error) {
+        if (error && error.name === 'AbortError') return;
+        console.error('Unable to estimate shipping', error);
+        setFreightPreview('—', 'Unable to estimate shipping.');
+      }
+    }
+
+    function scheduleFreightPreview() {
+      window.clearTimeout(freightPreviewTimer);
+      freightPreviewTimer = window.setTimeout(refreshFreightPreview, 300);
+    }
+
+    function populateFreightFields(product, isSubscription) {
+      if (!editForm || !freightSection) return;
+      // Subscriptions never ship, so keep their stored values but hide the section.
+      freightSection.hidden = isSubscription;
+      if (freightItemSizeSelect) freightItemSizeSelect.value = product.item_size || '';
+      setAutomaticItemSizeLabel('');
+      freightMeasurementFields.forEach((field) => {
+        const input = editForm.querySelector(`#edit-product-${field}`);
+        if (input) input.value = product[field] != null ? product[field] : '';
+      });
+      setFreightPreview('—', '');
+      if (!isSubscription) refreshFreightPreview();
+    }
+
+    if (editForm && freightSection) {
+      const freightInputs = [
+        freightItemSizeSelect,
+        editForm.querySelector('#edit-product-price'),
+        ...freightMeasurementFields.map((field) => editForm.querySelector(`#edit-product-${field}`)),
+      ].filter(Boolean);
+      freightInputs.forEach((input) => {
+        input.addEventListener('input', scheduleFreightPreview);
+        input.addEventListener('change', scheduleFreightPreview);
+      });
+    }
+
     function sanitizeDescriptionHtml(value) {
       const html = String(value || '');
       if (typeof DOMPurify !== 'undefined') {
@@ -1195,6 +1310,7 @@
         renderInboundLinks(product.linked_from_cross_sell_products, 'cross-sell');
         renderInboundLinks(product.linked_from_upsell_products, 'upsell');
         currentEditProductId = id;
+        populateFreightFields(product, isSubscription);
         if (removeImageInput) removeImageInput.checked = false;
         if (removeImageOption) removeImageOption.hidden = !product.image_url;
         if (imageFilenameDisplay) {

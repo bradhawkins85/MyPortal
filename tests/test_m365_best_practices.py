@@ -911,17 +911,26 @@ async def test_remediate_weak_auth_methods_disabled_waits_for_graph_consistency(
     graph_patch.assert_any_await(
         "graph-token",
         f"{bp_service._AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/Sms",
-        {"state": "disabled"},
+        {
+            "@odata.type": "#microsoft.graph.smsAuthenticationMethodConfiguration",
+            "state": "disabled",
+        },
     )
     graph_patch.assert_any_await(
         "graph-token",
         f"{bp_service._AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/Voice",
-        {"state": "disabled"},
+        {
+            "@odata.type": "#microsoft.graph.voiceAuthenticationMethodConfiguration",
+            "state": "disabled",
+        },
     )
     graph_patch.assert_any_await(
         "graph-token",
         f"{bp_service._AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/Email",
-        {"state": "disabled"},
+        {
+            "@odata.type": "#microsoft.graph.emailAuthenticationMethodConfiguration",
+            "state": "disabled",
+        },
     )
     sleep.assert_awaited_once()
     assert graph_get.await_count == 6
@@ -1083,8 +1092,6 @@ async def test_list_settings_with_catalog_merges_defaults():
 
 def test_manual_review_checks_are_disabled_by_default():
     manual_ids = {
-        "bp_dialin_cannot_bypass_lobby",
-        "bp_restrict_dialin_bypass_lobby",
         "bp_dlp_policies_enabled",
         "bp_dlp_policies_teams",
     }
@@ -1908,7 +1915,7 @@ async def test_remediate_check_unknown_id_returns_failure():
 async def test_remediate_check_non_remediable_check_returns_failure():
     """A check without has_remediation=True must not attempt any external call."""
     result = await bp_service.remediate_check(
-        company_id=1, check_id="bp_security_defaults"
+        company_id=1, check_id="bp_customer_lockbox"
     )
     assert result["success"] is False
 
@@ -5170,9 +5177,11 @@ async def test_check_sharepoint_sign_out_inactive_users_pass():
         "app.services.m365_best_practices._graph_get",
         new_callable=AsyncMock,
         return_value={
-            "idleSignOutEnabled": True,
-            "idleSignOutWarnAfterSeconds": 2700,
-            "idleSignOutSignOutAfterSeconds": 300,
+            "idleSessionSignOut": {
+                "isEnabled": True,
+                "warnAfterInSeconds": 2700,
+                "signOutAfterInSeconds": 3600,
+            },
         },
     ):
         result = await bp_service._check_sharepoint_sign_out_inactive_users("token")
@@ -5184,7 +5193,7 @@ async def test_check_sharepoint_sign_out_inactive_users_fail_disabled():
     with patch(
         "app.services.m365_best_practices._graph_get",
         new_callable=AsyncMock,
-        return_value={"idleSignOutEnabled": False},
+        return_value={"idleSessionSignOut": {"isEnabled": False}},
     ):
         result = await bp_service._check_sharepoint_sign_out_inactive_users("token")
     assert result["status"] == "fail"
@@ -5196,9 +5205,11 @@ async def test_check_sharepoint_sign_out_inactive_users_fail_timeout_too_long():
         "app.services.m365_best_practices._graph_get",
         new_callable=AsyncMock,
         return_value={
-            "idleSignOutEnabled": True,
-            "idleSignOutWarnAfterSeconds": 3600,
-            "idleSignOutSignOutAfterSeconds": 900,
+            "idleSessionSignOut": {
+                "isEnabled": True,
+                "warnAfterInSeconds": 3600,
+                "signOutAfterInSeconds": 7200,
+            },
         },
     ):
         result = await bp_service._check_sharepoint_sign_out_inactive_users("token")
@@ -7124,7 +7135,7 @@ async def test_remediate_onedrive_content_sharing_restricted_success():
         )
 
     assert result["success"] is True
-    assert patched_payloads[0] == {"oneDriveSharingCapability": "existingExternalUserSharingOnly"}
+    assert patched_payloads[0] == {"sharingCapability": "existingExternalUserSharingOnly"}
 
 
 # ---------------------------------------------------------------------------

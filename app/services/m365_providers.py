@@ -39,7 +39,10 @@ PROVIDERS: Mapping[str, ProviderContract] = {
     "teams": ProviderContract(("https://graph.microsoft.com/.default",
         "https://api.interfaces.records.teams.microsoft.com/.default"),
         "MicrosoftTeams", "6.5.0", frozenset({"Get-CsTeamsMeetingPolicy",
-        "Get-CsTenantFederationConfiguration", "Get-CsTeamsClientConfiguration"}),
+        "Get-CsTenantFederationConfiguration", "Get-CsTeamsClientConfiguration",
+        # Best-practice remediations update the same Global configurations.
+        "Set-CsTeamsMeetingPolicy", "Set-CsTenantFederationConfiguration",
+        "Set-CsTeamsClientConfiguration"}),
         "Teams Service Administrator (and Organization.Read.All)"),
     "purview": ProviderContract(("https://ps.compliance.protection.outlook.com/.default",),
         "ExchangeOnlineManagement", "3.7.0", frozenset({"Get-ProtectionAlert",

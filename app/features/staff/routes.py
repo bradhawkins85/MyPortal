@@ -12,6 +12,9 @@ router = APIRouter(tags=["Staff"])
 
 router.add_api_route("/staff", handlers.staff_page, methods=["GET"], response_class=HTMLResponse)
 router.add_api_route(
+    "/staff/addstaff", handlers.staff_add_page, methods=["GET"], response_class=HTMLResponse
+)
+router.add_api_route(
     "/staff/workflows/onboarding",
     handlers.staff_onboarding_workflow_page,
     methods=["GET"],

@@ -14,6 +14,17 @@ WAREHOUSE_STOCK_FIELDS: tuple[tuple[str, str], ...] = (
 _SMALL = "small"
 _MEDIUM = "medium"
 _LARGE = "large"
+ITEM_SIZE_DIGITAL = "digital"
+
+# Admin-selectable item sizes, in display order. A product without an explicit
+# size falls back to classification from its stock-feed dimensions.
+ITEM_SIZE_OPTIONS: tuple[tuple[str, str], ...] = (
+    (_SMALL, "Small"),
+    (_MEDIUM, "Medium"),
+    (_LARGE, "Large"),
+    (ITEM_SIZE_DIGITAL, "Digital Delivery"),
+)
+ITEM_SIZES: frozenset[str] = frozenset(value for value, _label in ITEM_SIZE_OPTIONS)
 
 
 def _to_decimal(value: Any, default: str = "0") -> Decimal:
@@ -52,6 +63,24 @@ def _classify_item_size(product: Mapping[str, Any]) -> str:
     if longest >= Decimal("40") or volume >= Decimal("100000"):
         return _MEDIUM
     return _SMALL
+
+
+def normalise_item_size(value: Any) -> str | None:
+    """Return a known item size key, or ``None`` for automatic sizing."""
+    cleaned = str(value or "").strip().lower()
+    return cleaned if cleaned in ITEM_SIZES else None
+
+
+def resolve_item_size(product: Mapping[str, Any]) -> str:
+    """Return the product's explicit item size, else classify by dimensions."""
+    return normalise_item_size(product.get("item_size")) or _classify_item_size(product)
+
+
+def is_freight_exempt(product: Mapping[str, Any]) -> bool:
+    """Subscriptions and digital delivery items never ship physically."""
+    if product.get("subscription_category_id") is not None:
+        return True
+    return normalise_item_size(product.get("item_size")) == ITEM_SIZE_DIGITAL
 
 
 def _allocate_quantity_by_warehouse(
@@ -223,7 +252,7 @@ def _build_shipments(
         product = product_lookup.get(product_id) or {}
         unit_price = _to_decimal(cart_item.get("unit_price"))
         max_item_weight = _to_decimal(product.get("weight"))
-        item_size = _classify_item_size(product)
+        item_size = resolve_item_size(product)
         for warehouse, allocated_quantity in _allocate_quantity_by_warehouse(quantity, product):
             bucket = shipments.setdefault(
                 warehouse,
@@ -263,14 +292,14 @@ def calculate_cart_freight(
     product_lookup: Mapping[int, Mapping[str, Any]],
     rules: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    # Subscriptions are delivered electronically. Exclude them before both the
-    # shipment and threshold calculations, while leaving physical items in a
-    # mixed cart eligible for their normal freight rules.
+    # Subscriptions and digital delivery items are delivered electronically.
+    # Exclude them before both the shipment and threshold calculations, while
+    # leaving physical items in a mixed cart eligible for their normal rules.
     freight_items = []
     for item in cart_items:
         product_id = _to_int(item.get("product_id"), default=0)
         product = product_lookup.get(product_id) or {}
-        if product.get("subscription_category_id") is None:
+        if not is_freight_exempt(product):
             freight_items.append(item)
 
     cart_subtotal = Decimal("0")
@@ -324,4 +353,36 @@ def calculate_cart_freight(
         "cart_subtotal": cart_subtotal,
         "freight_total": _quantize_money(freight_total),
         "breakdown": breakdown,
+    }
+
+
+def calculate_product_freight_preview(
+    product: Mapping[str, Any],
+    rules: Sequence[Mapping[str, Any]],
+    *,
+    quantity: int = 1,
+) -> dict[str, Any]:
+    """Estimate freight for ``quantity`` of a single product on its own.
+
+    Used by the admin product editor so staff can see how the item size and
+    weight they set interact with the active freight rules.
+    """
+    product_id = _to_int(product.get("id"), default=0) or 1
+    quantity = max(_to_int(quantity, default=1), 1)
+    unit_price = _to_decimal(product.get("price"))
+    cart_items = [
+        {
+            "product_id": product_id,
+            "quantity": quantity,
+            "unit_price": unit_price,
+            "line_total": unit_price * quantity,
+        }
+    ]
+    summary = calculate_cart_freight(cart_items, {product_id: product}, rules)
+    return {
+        **summary,
+        "quantity": quantity,
+        "item_size": resolve_item_size(product),
+        "item_size_is_automatic": normalise_item_size(product.get("item_size")) is None,
+        "freight_exempt": is_freight_exempt(product),
     }

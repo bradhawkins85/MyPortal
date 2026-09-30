@@ -6,25 +6,28 @@
 
 {% block header_actions %}
   {{ page_header_actions([
-    {"label": "Back to Office 365", "type": "link", "href": "/m365"},
-    {"label": "New signature", "type": "link", "href": "/m365/signatures/new"}
+    {"label": "+ New signature", "type": "link", "variant": "primary", "href": "/m365/signatures/new"},
+    {"label": "Back to Office 365", "type": "link", "href": "/m365"}
   ]) }}
 {% endblock %}
 
 {% block content %}
-  <section class="card card--panel">
+  {% set sig_published = templates | selectattr('status', 'equalto', 'published') | list %}
+  {% set sig_drafts = templates | selectattr('status', 'equalto', 'draft') | list %}
+  {% set sig_disabled = templates | selectattr('status', 'equalto', 'disabled') | list %}
+  <section class="card card--panel sig" aria-labelledby="sig-list-title">
     <header class="card__header card__header--stacked">
       <div>
-        <h2 class="card__title">MyPortal signature templates</h2>
+        <h2 class="card__title" id="sig-list-title">Signature templates</h2>
         <p class="card__subtitle">
           Manage tenant-scoped HTML and plain-text signature templates, preview them against staff data,
-          and publish or disable them for consumers inside MyPortal. Publishing changes a database lifecycle state; it does not deploy a signature to Outlook or other Microsoft 365 clients.
+          publish them, then deploy published templates to Exchange Online mailboxes. Publishing alone does not change any mailbox; use Deploy to apply a signature.
         </p>
       </div>
     </header>
     <div class="card__body card__body--stacked">
       <div class="alert alert--info" role="status">
-        <strong>Lifecycle:</strong> Draft templates are editable but inactive. Published means available for MyPortal use. A published template becomes scheduled or active according to its dates in <strong>{{ schedule_timezone }}</strong>. <strong>Client deployment: not configured</strong> — this workspace does not synchronize Outlook signatures.
+        <strong>Lifecycle:</strong> Draft templates are editable but inactive. Published means available for MyPortal use. A published template becomes scheduled or active according to its dates in <strong>{{ schedule_timezone }}</strong>. <strong>Outlook deployment:</strong> choose Deploy on a published template to apply it to selected mailboxes through Exchange Online. Deployment is a one-off push; redeploy after editing a template.
       </div>
       {% if current_primary %}
         <div class="card card--panel">
@@ -56,7 +59,7 @@
                     {% if item.is_default %}<span class="badge badge--info">Default</span>{% endif %}
                   </td>
                   <td><code>{{ item.slug }}</code></td>
-                  <td>{{ item.status|replace('_', ' ')|title }}{% if item.status == 'published' %}<br><small class="text-muted">{{ 'Active for MyPortal' if current_primary and current_primary.id == item.id else 'Scheduled/available for MyPortal' }} · Outlook deployment: not configured</small>{% endif %}</td>
+                  <td>{{ item.status|replace('_', ' ')|title }}{% if item.status == 'published' %}<br><small class="text-muted">{{ 'Active for MyPortal' if current_primary and current_primary.id == item.id else 'Scheduled/available for MyPortal' }}</small>{% endif %}</td>
                   <td>{{ item.priority or 0 }}</td>
                   <td>
                     {% if item.schedule_start_on or item.schedule_end_on %}
@@ -69,6 +72,7 @@
                   <td>
                     <div class="button-group">
                       <a class="button button--small" href="/m365/signatures/{{ item.id }}/edit">Edit</a>
+                      {% if item.status == 'published' %}<a class="button button--small" href="/m365/signatures/{{ item.id }}/deploy">Deploy</a>{% endif %}
                       <form method="post" action="/m365/signatures/{{ item.id }}/clone" style="display:inline;">
                         {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
                         <button type="submit" class="button button--ghost button--small">Duplicate</button>
@@ -80,19 +84,72 @@
             </tbody>
           </table>
         </div>
+
+        <ul class="sig-grid" data-sig-list>
+          {% for item in templates %}
+            {% set is_primary = current_primary and current_primary.id == item.id %}
+            {% set starts = item.schedule_start_on %}
+            {% set ends = item.schedule_end_on %}
+            {% if item.status == 'published' %}
+              {% if is_primary %}{% set state, state_label = 'active', 'In use today' %}
+              {% elif starts and schedule_today < starts %}{% set state, state_label = 'scheduled', 'Scheduled' %}
+              {% elif ends and schedule_today > ends %}{% set state, state_label = 'ended', 'Ended' %}
+              {% else %}{% set state, state_label = 'published', 'Published' %}{% endif %}
+            {% elif item.status == 'disabled' %}{% set state, state_label = 'disabled', 'Disabled' %}
+            {% else %}{% set state, state_label = 'draft', 'Draft' %}{% endif %}
+            <li class="sig-card{% if item.status != 'published' %} sig-card--muted{% endif %}" data-sig-item data-sig-search-text="{{ [item.name, item.slug, item.description or ''] | join(' ') }}">
+              <a class="sig-card__thumb" href="/m365/signatures/{{ item.id }}/edit" tabindex="-1" aria-hidden="true">
+                {% if item.html_content %}
+                  <iframe class="sig-card__frame" sandbox="" loading="lazy" title="" srcdoc="<!doctype html><meta charset='utf-8'><style>body{margin:12px;font:13px/1.4 Arial,sans-serif;color:#1f2937;background:#fff}img{max-width:100%;height:auto}</style>{{ item.html_content }}"></iframe>
+                {% else %}
+                  <span class="sig-card__empty">No HTML design yet</span>
+                {% endif %}
+              </a>
+              <div class="sig-card__body">
+                <div class="scf-item__heading">
+                  <a class="scf-item__label" href="/m365/signatures/{{ item.id }}/edit">{{ item.name }}</a>
+                  <code class="scf-item__key">{{ item.slug }}</code>
+                </div>
+                {% if item.description %}<p class="scf-item__help">{{ item.description }}</p>{% endif %}
+                <ul class="scf-item__chips" aria-label="Signature summary">
+                  <li class="scf-chip sig-state sig-state--{{ state }}">{{ state_label }}</li>
+                  {% if item.is_default %}<li class="scf-chip scf-chip--logic">Default</li>{% endif %}
+                  {% if item.priority %}<li class="scf-chip">Priority {{ item.priority }}</li>{% endif %}
+                  {% if starts or ends %}
+                    <li class="scf-chip">{% if starts %}<time datetime="{{ starts.isoformat() }}" data-sig-date>{{ starts.isoformat() }}</time>{% else %}Now{% endif %} → {% if ends %}<time datetime="{{ ends.isoformat() }}" data-sig-date>{{ ends.isoformat() }}</time>{% else %}no end{% endif %}</li>
+                  {% endif %}
+                  {% if not item.text_content %}<li class="scf-chip sif-chip--warning">No plain-text version</li>{% endif %}
+                </ul>
+                <div class="sig-card__foot">
+                  <span class="text-muted">{% if item.updated_at %}Updated <time data-utc="{{ item.updated_at.isoformat() }}">{{ item.updated_at.isoformat() }}</time>{% endif %}</span>
+                  <span class="sig-card__actions">
+                    <a class="button button--ghost button--small" href="/m365/signatures/{{ item.id }}/edit">Edit<span class="visually-hidden"> {{ item.name }}</span></a>
+                    <form method="post" action="/m365/signatures/{{ item.id }}/clone" class="inline-form">
+                      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                      <button type="submit" class="button button--ghost button--small">Duplicate<span class="visually-hidden"> {{ item.name }}</span></button>
+                    </form>
+                  </span>
+                </div>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+        <p class="scf-empty scf-empty--search" data-sig-no-results hidden>No signatures match your search.</p>
       {% else %}
-        <p class="text-muted">No managed signatures have been created for this tenant yet.</p>
+        <div class="scf-empty">
+          <p class="scf-empty__title">No signatures yet</p>
+          <p class="text-muted">Create a signature once and MyPortal fills in each person's name, title, phone and company details for them.</p>
+          <a class="button" href="/m365/signatures/new">+ Create your first signature</a>
+        </div>
       {% endif %}
-    </div>
-  </section>
 
   <section class="card card--panel">
     <header class="card__header card__header--stacked">
       <div>
-        <h2 class="card__title">Current platform boundary</h2>
+        <h2 class="card__title">How deployment works</h2>
         <p class="card__subtitle">
-          This workspace stores and selects templates for MyPortal. It has no supported delivery integration,
-          so actual Outlook deployment status is <strong>not configured</strong> rather than pending or successful.
+          Deploy renders the template for each selected mailbox's staff record and applies it with the Exchange Online
+          <code>Set-MailboxMessageConfiguration</code> cmdlet. This needs the Exchange.ManageAsApp permission and the Exchange Administrator role.
         </p>
       </div>
     </header>
@@ -100,8 +157,15 @@
       <ul class="list">
         <li>HTML and TXT variants are stored separately so administrators can publish rich and plain-text versions independently.</li>
         <li>Preview uses live staff, company, custom-variable, and automation-token data before publication.</li>
-        <li>Existing personal or third-party signatures remain outside MyPortal ownership.</li>
+        <li>Deployed signatures are used by Outlook on the web and the new Outlook. Classic Outlook for Windows and Mac keeps locally stored signatures.</li>
+        <li>If roaming signatures are active in the tenant, Exchange ignores deployed signatures; the Deploy page shows this and can switch the tenant to Exchange-managed signatures.</li>
+        <li>Deploying replaces each selected mailbox's current signature.</li>
       </ul>
     </div>
   </section>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/m365_signatures.js') }}" defer></script>
 {% endblock %}

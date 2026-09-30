@@ -67,12 +67,17 @@ async def set_out_of_office(payload: OutOfOfficeCreate, request: Request, user: 
         return await oof_service.set_automatic_replies(await _company_id(request), payload)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except m365_service.M365Error as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @oof_router.get("/state", summary="Inspect current automatic reply state")
 async def get_out_of_office_state(request: Request, user: dict = Depends(get_current_user)):
     await _require_oof_access(request, user)
-    return await oof_service.get_automatic_replies(await _company_id(request))
+    try:
+        return await oof_service.get_automatic_replies(await _company_id(request))
+    except m365_service.M365Error as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @oof_router.post("/disable", response_model=list[OutOfOfficeResult], summary="Disable automatic replies")
@@ -82,6 +87,8 @@ async def disable_out_of_office(payload: OutOfOfficeDisable, request: Request, u
         return await oof_service.disable_automatic_replies(await _company_id(request), payload)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except m365_service.M365Error as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.get("/requests", response_model=list[SpamPurgeRequestResponse])

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
+{% from "assets/_type_picker.html" import asset_type_picker %}
 
 {% block header_title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
 {% block title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
@@ -148,7 +149,7 @@
         {% if asset.provenance == 'manual' %}
         <div class="alert alert--info" role="status">Manually documented asset — integrations cannot overwrite it until an authorised match is approved.</div>
         <div class="form-group"><label class="form-label" for="asset-name">Name</label><input class="input" id="asset-name" name="name" maxlength="255" required value="{{ asset.name or '' }}" {% if not can_edit %}disabled{% endif %}></div>
-        <div class="form-group"><label class="form-label" for="asset-type">Type</label><select class="input" id="asset-type" name="asset_type" required {% if not can_edit %}disabled{% endif %}>{% for group in asset_type_groups %}<optgroup label="{{ group.label }}">{% for item in group.types %}<option value="{{ item.key }}" {% if item.key == asset_type.key %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</optgroup>{% endfor %}</select></div>
+        <div class="form-group"><label class="form-label" for="asset-type">Type</label>{{ asset_type_picker(asset_type_mode, asset_type_groups, custom_asset_types, asset_type, asset_type_label, not can_edit) }}</div>
         <div class="form-group"><label class="form-label" for="asset-status">Status</label><input class="input" id="asset-status" name="status" maxlength="255" value="{{ asset.status or '' }}" {% if not can_edit %}disabled{% endif %}></div>
         <div class="form-group"><label class="form-label" for="asset-serial">Serial number</label><input class="input" id="asset-serial" name="serial_number" maxlength="255" value="{{ asset.serial_number or '' }}" {% if not can_edit %}disabled{% endif %}></div>
         {% endif %}
@@ -204,7 +205,7 @@
     <header class="card__header"><h2 class="card__title">{{ 'Manual inventory' if asset.provenance == 'manual' else 'Synced inventory' }}</h2></header>
     <div class="card__body"><dl class="definition-list">
       <dt>Asset ID</dt><dd>{{ asset.id }}</dd><dt>Company</dt><dd>{{ company.name if company else asset.company_id }}</dd>
-      <dt>Type</dt><dd><span class="asset-type-badge"><img src="{{ asset_type.icon }}" alt="" width="20" height="20"> {{ asset_type.label }}</span>{% if asset.provenance != 'manual' and asset.type and asset.type != asset_type.label %} <span class="text-muted">(reported as {{ asset.type }})</span>{% endif %}</dd><dt>Status</dt><dd>{{ asset.status or '—' }}</dd>
+      <dt>Type</dt><dd><span class="asset-type-badge"><img src="{{ asset_type.icon }}" alt="" width="20" height="20"> {{ asset_type_label }}</span>{% if asset.provenance != 'manual' and asset.type and asset.type != asset_type_label %} <span class="text-muted">(reported as {{ asset.type }})</span>{% endif %}</dd><dt>Status</dt><dd>{{ asset.status or '—' }}</dd>
       <dt>Serial number</dt><dd>{{ asset.serial_number or '—' }}</dd><dt>Warranty</dt><dd>{{ asset.warranty_status or '—' }}{% if asset.warranty_end_date %} (ends {{ asset.warranty_end_date }}){% endif %}</dd>
       {% if not customer_safe %}<dt>Syncro ID</dt><dd>{{ asset.syncro_asset_id or '—' }}</dd><dt>Tactical ID</dt><dd>{{ asset.tactical_asset_id or '—' }}</dd>{% endif %}
       <dt>Provenance</dt><dd>{{ 'Manual' if asset.provenance == 'manual' else 'Integration' }}</dd>
@@ -214,7 +215,7 @@
       <label class="form-label" for="asset-type-override">Asset type</label>
       <select class="input" id="asset-type-override" name="asset_type">
         <option value="" {% if asset.asset_type_source != 'manual' %}selected{% endif %}>Automatic from sync ({{ derived_asset_type.label }})</option>
-        {% for group in asset_type_groups %}<optgroup label="{{ group.label }}">{% for item in group.types %}<option value="{{ item.key }}" {% if asset.asset_type_source == 'manual' and item.key == asset_type.key %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</optgroup>{% endfor %}
+        {% for group in synced_asset_type_groups %}<optgroup label="{{ group.label }}">{% for item in group.types %}<option value="{{ item.key }}" {% if asset.asset_type_source == 'manual' and item.key == asset_type.key %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</optgroup>{% endfor %}
       </select>
       <button class="button button--ghost button--small" type="submit">Save type</button>
       <small class="form-help">Sync keeps a type you choose here. Choose Automatic to follow what the integration reports.</small>

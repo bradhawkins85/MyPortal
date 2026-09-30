@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/scheduled_ticket_payload.html" import scheduled_ticket_payload %}
 {% from "macros/header.html" import page_header_actions %}
 
 
@@ -561,277 +562,611 @@
       </div>
     </details>
     {% if is_super_admin %}
-      <details class="card card--panel card-collapsible admin-grid__full" data-staff-field-config-panel>
+      {% set sif_type_labels = {'text': 'Text', 'select': 'Dropdown', 'multiselect': 'Multi-select', 'checkbox': 'Checkbox', 'date': 'Date'} %}
+      {% set sif_core_keys = ['first_name', 'last_name'] %}
+      {% set sif_type_locked_keys = ['first_name', 'last_name', 'email'] %}
+      {% set sif_shown = staff_field_config | selectattr('visible') | list %}
+      {% set sif_required = sif_shown | selectattr('required') | list %}
+      <details class="card card--panel card-collapsible admin-grid__full" data-staff-field-config-panel aria-labelledby="sif-panel-title">
         <summary class="card__header card__header--collapsible card__header--stacked">
           <div>
-            <h2 class="card__title">Staff intake fields</h2>
-            <p class="card__subtitle">Control which staff onboarding fields are visible, required, and their display order.</p>
+            <h2 class="card__title" id="sif-panel-title">Staff intake fields</h2>
+            <p class="card__subtitle">Choose which built-in questions appear on this company's staff onboarding form, whether they must be answered, and in what order.</p>
           </div>
           <div class="card__collapsible-meta" aria-hidden="true">
+            <span class="badge badge--muted">{{ sif_shown | length }} shown · {{ sif_required | length }} required</span>
             <span class="card__toggle-icon"></span>
           </div>
         </summary>
-        <div class="card-collapsible__content">
-          <form action="/admin/companies/{{ company.id }}/staff-fields" method="post" class="form">
+        <div class="card-collapsible__content scf sif">
+          <form action="/admin/companies/{{ company.id }}/staff-fields" method="post" class="sif-form" data-sif-form>
             {% include "partials/csrf.html" %}
-            <div class="table-wrapper">
-              <table class="table staff-field-config-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Field</th>
-                    <th scope="col">Type</th>
-                    <th scope="col">Visible</th>
-                    <th scope="col">Required</th>
-                    <th scope="col">Sort</th>
-                    <th scope="col">Options (select / multiselect only)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for field in staff_field_config %}
+            <div data-sif-outputs></div>
+            {% if staff_field_config %}
+              <dl class="sif-stats" aria-label="Intake field summary">
+                <div class="sif-stats__item"><dt>Shown</dt><dd>{{ sif_shown | length }}</dd></div>
+                <div class="sif-stats__item"><dt>Required</dt><dd>{{ sif_required | length }}</dd></div>
+                <div class="sif-stats__item"><dt>Optional</dt><dd>{{ (sif_shown | length) - (sif_required | length) }}</dd></div>
+                <div class="sif-stats__item"><dt>Hidden</dt><dd>{{ (staff_field_config | length) - (sif_shown | length) }}</dd></div>
+              </dl>
+              <div class="scf-toolbar">
+                <input
+                  type="search"
+                  class="form-input scf-toolbar__search"
+                  placeholder="Search intake fields by label or key"
+                  aria-label="Search staff intake fields"
+                  data-sif-search
+                />
+              </div>
+              <ul class="scf-list" data-sif-list>
+                {% for field in staff_field_config %}
+                  {% set sif_state = 'required' if field.visible and field.required else ('optional' if field.visible else 'hidden') %}
+                  <li
+                    class="scf-item{% if not field.visible %} scf-item--inactive{% endif %}"
+                    data-sif-item
+                    data-sif-search-text="{{ field.label }} {{ field.key }}"
+                  >
+                    <span class="scf-type-icon scf-type-icon--{{ field.type }}" aria-hidden="true"></span>
+                    <div class="scf-item__main">
+                      <div class="scf-item__heading">
+                        <button type="button" class="scf-item__label" data-sif-edit="{{ field.key }}" aria-haspopup="dialog" aria-controls="staff-intake-field-modal">{{ field.label }}</button>
+                        <code class="scf-item__key">{{ field.key }}</code>
+                      </div>
+                      <ul class="scf-item__chips" aria-label="Field summary">
+                        <li class="scf-chip">{{ sif_type_labels.get(field.type, field.type) }}{% if field.type in ('select', 'multiselect') %} · {{ field.options | length }} option{% if field.options | length != 1 %}s{% endif %}{% endif %}</li>
+                        <li class="scf-chip sif-chip--{{ sif_state }}">{{ sif_state | capitalize }}</li>
+                        {% if field.key in sif_core_keys %}<li class="scf-chip scf-chip--muted">Always required</li>{% endif %}
+                        {% if field.type in ('select', 'multiselect') and not field.options %}<li class="scf-chip sif-chip--warning">No options yet</li>{% endif %}
+                      </ul>
+                    </div>
+                    <div class="scf-item__actions">
+                      <span class="scf-item__order" title="Position on the form">#{{ field.sort_order }}</span>
+                      <button type="button" class="button button--ghost button--small" data-sif-edit="{{ field.key }}" aria-haspopup="dialog" aria-controls="staff-intake-field-modal">Edit<span class="visually-hidden"> {{ field.label }}</span></button>
+                    </div>
+                  </li>
+                {% endfor %}
+              </ul>
+              <p class="scf-empty scf-empty--search" data-sif-no-results hidden>No intake fields match your search.</p>
+              <p class="sif-status text-muted" role="status" aria-live="polite" data-sif-status></p>
+            {% else %}
+              <div class="scf-empty">
+                <p class="scf-empty__title">No intake fields available</p>
+                <p class="text-muted">Built-in staff onboarding questions such as name, email and start date appear here once the staff field definitions are installed.</p>
+              </div>
+            {% endif %}
+            <noscript>
+              <p class="form-help">Edit the fields below, then save.</p>
+              <div class="table-wrapper">
+                <table class="table staff-field-config-table">
+                  <caption class="visually-hidden">Staff intake field settings</caption>
+                  <thead>
                     <tr>
-                      <td>{{ field.label }}</td>
-                      <td>
-                        <select
-                          class="form-input"
-                          name="field_{{ field.key }}_type"
-                          {% if field.key in ['first_name', 'last_name', 'email'] %}disabled{% endif %}
-                        >
-                          {% for value in ['text', 'select', 'multiselect', 'checkbox', 'date'] %}
-                            <option value="{{ value }}" {% if field.type == value %}selected{% endif %}>{{ value }}</option>
-                          {% endfor %}
-                        </select>
-                        {% if field.key in ['first_name', 'last_name', 'email'] %}
-                          <input type="hidden" name="field_{{ field.key }}_type" value="{{ field.type }}" />
-                        {% endif %}
-                      </td>
-                      <td>
-                        <input
-                          type="checkbox"
-                          name="field_{{ field.key }}_visible"
-                          value="1"
-                          {% if field.visible %}checked{% endif %}
-                          {% if field.key in ['first_name', 'last_name'] %}disabled{% endif %}
-                        />
-                        {% if field.key in ['first_name', 'last_name'] %}
-                          <input type="hidden" name="field_{{ field.key }}_visible" value="1" />
-                        {% endif %}
-                      </td>
-                      <td>
-                        <input
-                          type="checkbox"
-                          name="field_{{ field.key }}_required"
-                          value="1"
-                          {% if field.required %}checked{% endif %}
-                          {% if field.key in ['first_name', 'last_name'] %}disabled{% endif %}
-                        />
-                        {% if field.key in ['first_name', 'last_name'] %}
-                          <input type="hidden" name="field_{{ field.key }}_required" value="1" />
-                        {% endif %}
-                      </td>
-                      <td>
-                        <input
-                          class="form-input"
-                          type="number"
-                          name="field_{{ field.key }}_sort_order"
-                          value="{{ field.sort_order }}"
-                        />
-                      </td>
-                      <td>
-                        {% if field.type in ('select', 'multiselect') %}
-                          <input
-                            class="form-input"
-                            type="text"
-                            name="field_{{ field.key }}_options"
-                            value="{% for option in field.options %}{{ option.value }}{% if option.label != option.value %}:{{ option.label }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}"
-                            placeholder="value:Label, value2:Label 2"
-                          />
-                        {% else %}
-                          <span class="text-muted">—</span>
-                        {% endif %}
-                      </td>
+                      <th scope="col">Field</th>
+                      <th scope="col">Type</th>
+                      <th scope="col">Visible</th>
+                      <th scope="col">Required</th>
+                      <th scope="col">Sort</th>
+                      <th scope="col">Options</th>
                     </tr>
-                  {% else %}
-                    <tr>
-                      <td colspan="6" class="table__empty">No staff field configuration found.</td>
-                    </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-            <div class="form-actions">
-              <button type="submit" class="button">Save staff field settings</button>
-            </div>
+                  </thead>
+                  <tbody>
+                    {% for field in staff_field_config %}
+                      <tr>
+                        <th scope="row">{{ field.label }}</th>
+                        <td>
+                          {% if field.key in sif_type_locked_keys %}
+                            {{ sif_type_labels.get(field.type, field.type) }}
+                            <input type="hidden" name="field_{{ field.key }}_type" value="{{ field.type }}" />
+                          {% else %}
+                            <select class="form-input" name="field_{{ field.key }}_type" aria-label="{{ field.label }} type">
+                              {% for value, label in sif_type_labels.items() %}
+                                <option value="{{ value }}" {% if field.type == value %}selected{% endif %}>{{ label }}</option>
+                              {% endfor %}
+                            </select>
+                          {% endif %}
+                        </td>
+                        <td>
+                          {% if field.key in sif_core_keys %}
+                            <input type="hidden" name="field_{{ field.key }}_visible" value="1" />Always
+                          {% else %}
+                            <input type="checkbox" name="field_{{ field.key }}_visible" value="1" aria-label="{{ field.label }} visible" {% if field.visible %}checked{% endif %} />
+                          {% endif %}
+                        </td>
+                        <td>
+                          {% if field.key in sif_core_keys %}
+                            <input type="hidden" name="field_{{ field.key }}_required" value="1" />Always
+                          {% else %}
+                            <input type="checkbox" name="field_{{ field.key }}_required" value="1" aria-label="{{ field.label }} required" {% if field.required %}checked{% endif %} />
+                          {% endif %}
+                        </td>
+                        <td>
+                          <input class="form-input" type="number" name="field_{{ field.key }}_sort_order" value="{{ field.sort_order }}" aria-label="{{ field.label }} sort order" />
+                        </td>
+                        <td>
+                          {% if field.type in ('select', 'multiselect') %}
+                            <input
+                              class="form-input"
+                              type="text"
+                              name="field_{{ field.key }}_options"
+                              aria-label="{{ field.label }} options"
+                              value="{% for option in field.options %}{{ option.value }}{% if option.label != option.value %}:{{ option.label }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}"
+                            />
+                          {% else %}
+                            <span class="text-muted">—</span>
+                          {% endif %}
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button">Save staff field settings</button>
+              </div>
+            </noscript>
           </form>
         </div>
       </details>
 
-      <details class="card card--panel card-collapsible admin-grid__full">
+      {% set sif_editor_fields = [] %}
+      {% for field in staff_field_config %}
+        {% set _ = sif_editor_fields.append({
+          'key': field.key,
+          'label': field.label,
+          'type': field.type,
+          'visible': true if field.visible else false,
+          'required': true if field.required else false,
+          'sort_order': field.sort_order,
+          'options': field.options or [],
+        }) %}
+      {% endfor %}
+      <script type="application/json" id="staff-intake-field-editor-data">{{ {'coreKeys': sif_core_keys, 'typeLockedKeys': sif_type_locked_keys, 'fields': sif_editor_fields} | tojson }}</script>
+
+      <div class="modal scf-modal" id="staff-intake-field-modal" role="dialog" aria-modal="true" aria-labelledby="sif-modal-title" hidden>
+        <form class="modal__panel modal__panel--wide scf-editor sif-editor" data-sif-editor novalidate>
+          <header class="modal__header scf-editor__header">
+            <div>
+              <p class="scf-preview__eyebrow">Built-in intake field</p>
+              <h2 class="modal__title" id="sif-modal-title" data-sif-title>Edit intake field</h2>
+              <p class="scf-editor__subtitle" data-sif-subtitle></p>
+            </div>
+            <button type="button" class="modal__close" data-modal-close aria-label="Close intake field editor"></button>
+          </header>
+
+          <div class="modal__body scf-editor__body">
+            <div class="scf-editor__main">
+              <section class="sif-section" aria-labelledby="sif-presence-title">
+                <h3 class="scf-panel__title" id="sif-presence-title">On the onboarding form</h3>
+                <div class="scf-choice-list sif-presence" role="radiogroup" aria-labelledby="sif-presence-title">
+                  <label class="scf-choice">
+                    <input type="radio" name="sif_presence" value="required" data-sif-presence />
+                    <span><strong>Required</strong><span class="text-muted">Shown, and must be answered before submitting.</span></span>
+                  </label>
+                  <label class="scf-choice">
+                    <input type="radio" name="sif_presence" value="optional" data-sif-presence />
+                    <span><strong>Optional</strong><span class="text-muted">Shown, but can be left blank.</span></span>
+                  </label>
+                  <label class="scf-choice">
+                    <input type="radio" name="sif_presence" value="hidden" data-sif-presence />
+                    <span><strong>Hidden</strong><span class="text-muted">Not asked on this company's forms.</span></span>
+                  </label>
+                </div>
+                <p class="form-help" data-sif-core-note hidden>First and last name are always required so every staff record has a name.</p>
+              </section>
+
+              <fieldset class="scf-fieldset sif-section" data-sif-type-fieldset>
+                <legend class="form-label">Answer type</legend>
+                <div class="scf-type-grid">
+                  {% for type_value, type_label, type_help in [
+                    ('text', 'Text', 'Free-form answer'),
+                    ('select', 'Dropdown', 'Pick one option'),
+                    ('multiselect', 'Multi-select', 'Pick any options'),
+                    ('checkbox', 'Checkbox', 'Yes / no'),
+                    ('date', 'Date', 'Calendar date'),
+                  ] %}
+                    <label class="scf-type-card">
+                      <input type="radio" name="sif_type" value="{{ type_value }}" data-sif-type />
+                      <span class="scf-type-icon scf-type-icon--{{ type_value }}" aria-hidden="true"></span>
+                      <span class="scf-type-card__label">{{ type_label }}</span>
+                      <span class="scf-type-card__help">{{ type_help }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+                <p class="form-help" data-sif-type-note hidden>This field's answer type can't be changed because other features rely on it.</p>
+              </fieldset>
+
+              <section class="sif-section" aria-labelledby="sif-options-title" data-sif-options-section hidden>
+                <div class="scf-panel__intro">
+                  <h3 class="scf-panel__title" id="sif-options-title">Choices</h3>
+                  <p class="text-muted">Add the options people can choose from. The label is what they see; the stored value defaults to the label.</p>
+                </div>
+                <div class="scf-options-head" aria-hidden="true">
+                  <span></span><span>Label</span><span>Stored value</span><span></span>
+                </div>
+                <ol class="scf-options" data-sif-options></ol>
+                <div class="scf-options__actions">
+                  <button type="button" class="button button--ghost button--small" data-sif-option-add>+ Add option</button>
+                  <button type="button" class="button button--ghost button--small" data-sif-bulk-toggle aria-expanded="false" aria-controls="sif-bulk">Paste a list</button>
+                </div>
+                <div class="scf-bulk" id="sif-bulk" data-sif-bulk hidden>
+                  <label class="form-label" for="sif-bulk-input">One option per line</label>
+                  <textarea class="form-input" id="sif-bulk-input" rows="5" placeholder="Sales&#10;Marketing&#10;Operations" data-sif-bulk-input></textarea>
+                  <p class="form-help">Use <code>value = Label</code> on a line to set a different stored value.</p>
+                  <div class="scf-bulk__actions">
+                    <button type="button" class="button button--small" data-sif-bulk-apply>Add options</button>
+                    <button type="button" class="button button--ghost button--small" data-sif-bulk-toggle>Cancel</button>
+                  </div>
+                </div>
+                <p class="scf-error" data-sif-error="options" hidden></p>
+              </section>
+
+              <div class="form-field sif-section">
+                <label class="form-label" for="sif-order">Position</label>
+                <input class="form-input sif-order" id="sif-order" type="number" step="1" data-sif-order />
+                <p class="form-help">Lower numbers appear first on the form.</p>
+              </div>
+            </div>
+
+            <aside class="scf-preview" aria-label="Live preview">
+              <p class="scf-preview__eyebrow">Live preview</p>
+              <div class="scf-preview__card" data-sif-preview></div>
+              <ul class="scf-preview__rules" data-sif-preview-rules></ul>
+            </aside>
+          </div>
+
+          <footer class="modal__footer scf-editor__footer">
+            <span class="scf-editor__spacer"></span>
+            <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+            <button type="submit" class="button" data-sif-submit>Save field</button>
+          </footer>
+        </form>
+      </div>
+
+      {% set scf_type_labels = {'text': 'Text', 'select': 'Dropdown', 'multiselect': 'Multi-select', 'checkbox': 'Checkbox', 'date': 'Date'} %}
+      {% set scf_operator_labels = {'is_checked': 'is ticked', 'is_not_checked': 'is not ticked', 'equals': 'is', 'not_equals': 'is not', 'one_of': 'is any of'} %}
+      {% set scf_parent_labels = {} %}
+      {% for field in staff_field_config %}{% set _ = scf_parent_labels.update({field.key: field.label}) %}{% endfor %}
+      {% for field in staff_custom_field_definitions %}{% set _ = scf_parent_labels.update({field.name: field.display_name or field.name}) %}{% endfor %}
+      <details class="card card--panel card-collapsible admin-grid__full" data-staff-custom-fields-panel>
         <summary class="card__header card__header--collapsible card__header--stacked">
           <div>
             <h2 class="card__title">Staff custom fields</h2>
-            <p class="card__subtitle">Manage company-specific custom fields captured on staff records.</p>
+            <p class="card__subtitle">Build the extra questions shown on this company's staff onboarding and edit forms.</p>
           </div>
           <div class="card__collapsible-meta" aria-hidden="true">
+            <span class="badge badge--muted">{{ staff_custom_field_definitions | length }} field{% if staff_custom_field_definitions | length != 1 %}s{% endif %}</span>
             <span class="card__toggle-icon"></span>
           </div>
         </summary>
-        <div class="card-collapsible__content">
-          <form action="/admin/companies/{{ company.id }}/staff-custom-fields" method="post" class="form-grid">
-            {% include "partials/csrf.html" %}
-            <div class="form-field">
-              <label class="form-label" for="new-custom-name">Key</label>
-              <input class="form-input" id="new-custom-name" name="name" placeholder="e.g. shirt_size" required />
+        <div class="card-collapsible__content scf">
+          {% if staff_custom_field_definitions %}
+            <div class="scf-toolbar">
+              <input
+                type="search"
+                class="form-input scf-toolbar__search"
+                placeholder="Search fields by label, key or group"
+                aria-label="Search staff custom fields"
+                data-scf-search
+              />
+              <button type="button" class="button" data-scf-create>+ Add field</button>
             </div>
-            <div class="form-field">
-              <label class="form-label" for="new-custom-display-name">Label</label>
-              <input class="form-input" id="new-custom-display-name" name="display_name" placeholder="Shirt size" />
+            <div class="scf-groups" data-scf-list>
+              {% set scf_ns = namespace(group=None, open=False) %}
+              {% for field in staff_custom_field_definitions %}
+                {% set group_name = (field.field_group or '').strip() %}
+                {% if not scf_ns.open or group_name != scf_ns.group %}
+                  {% if scf_ns.open %}</ul></section>{% endif %}
+                  {% set scf_ns.group = group_name %}
+                  {% set scf_ns.open = True %}
+                  <section class="scf-group" data-scf-group>
+                    <h3 class="scf-group__title">
+                      {% if group_name %}{{ group_name }}{% else %}<span class="text-muted">Ungrouped</span>{% endif %}
+                    </h3>
+                    <ul class="scf-list">
+                {% endif %}
+                <li
+                  class="scf-item{% if not field.is_active %} scf-item--inactive{% endif %}"
+                  data-scf-item
+                  data-scf-search-text="{{ [field.display_name or '', field.name, group_name, field.help_text or ''] | join(' ') }}"
+                >
+                  <span class="scf-type-icon scf-type-icon--{{ field.field_type }}" aria-hidden="true"></span>
+                  <div class="scf-item__main">
+                    <div class="scf-item__heading">
+                      <button type="button" class="scf-item__label" data-scf-edit="{{ field.id }}">{{ field.display_name or field.name }}</button>
+                      <code class="scf-item__key">{{ field.name }}</code>
+                    </div>
+                    {% if field.help_text %}<p class="scf-item__help">{{ field.help_text }}</p>{% endif %}
+                    <ul class="scf-item__chips" aria-label="Field summary">
+                      <li class="scf-chip">{{ scf_type_labels.get(field.field_type, field.field_type) }}{% if field.field_type in ('select', 'multiselect') %} · {{ field.options | length }} option{% if field.options | length != 1 %}s{% endif %}{% endif %}</li>
+                      {% if not field.is_active %}<li class="scf-chip scf-chip--muted">Hidden (inactive)</li>{% endif %}
+                      {% if field.condition_parent_name %}
+                        {% set parent_label = scf_parent_labels.get(field.condition_parent_name, field.condition_parent_name) %}
+                        <li class="scf-chip scf-chip--logic" title="Conditional logic">
+                          {% if field.condition_operator == 'select_map' %}
+                            Options depend on {{ parent_label }}
+                          {% else %}
+                            Shown when {{ parent_label }} {{ scf_operator_labels.get(field.condition_operator or 'is_checked', field.condition_operator) }}{% if field.condition_value and field.condition_operator in ('equals', 'not_equals', 'one_of') %} “{{ field.condition_value | truncate(40) }}”{% endif %}
+                          {% endif %}
+                        </li>
+                      {% endif %}
+                      {% if field.visible_to_job_titles or field.visible_to_requester_emails %}
+                        <li class="scf-chip scf-chip--visibility" title="{{ [field.visible_to_job_titles, field.visible_to_requester_emails] | select | join('; ') }}">Restricted visibility</li>
+                      {% endif %}
+                      {% if field.m365_upn or (field.options | selectattr('m365_upn') | list) %}
+                        <li class="scf-chip scf-chip--m365">M365 synced</li>
+                      {% endif %}
+                    </ul>
+                  </div>
+                  <div class="scf-item__actions">
+                    <span class="scf-item__order" title="Sort order">#{{ field.display_order }}</span>
+                    <button type="button" class="button button--ghost button--small" data-scf-edit="{{ field.id }}">Edit</button>
+                    <button type="button" class="button button--ghost button--small" data-scf-duplicate="{{ field.id }}">Duplicate</button>
+                  </div>
+                </li>
+                {% if loop.last %}</ul></section>{% endif %}
+              {% endfor %}
             </div>
-            <div class="form-field admin-grid__full">
-              <label class="form-label" for="new-custom-help-text">Help text</label>
-              <input class="form-input" id="new-custom-help-text" name="help_text" maxlength="500" placeholder="Optional text shown below the field label on staff forms" />
+            <p class="scf-empty scf-empty--search" data-scf-no-results hidden>No fields match your search.</p>
+          {% else %}
+            <div class="scf-empty">
+              <p class="scf-empty__title">No custom fields yet</p>
+              <p class="text-muted">Add questions such as shirt size, equipment needs or system access to this company's staff onboarding form.</p>
+              <button type="button" class="button" data-scf-create>+ Add your first field</button>
             </div>
-            <div class="form-field">
-              <label class="form-label" for="new-custom-field-type">Type</label>
-              <select class="form-input" id="new-custom-field-type" name="field_type">
-                <option value="text">text</option>
-                <option value="select">select</option>
-                <option value="multiselect">multiselect</option>
-                <option value="checkbox">checkbox</option>
-                <option value="date">date</option>
-              </select>
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="new-custom-field-group">Group</label>
-              <input class="form-input" id="new-custom-field-group" name="field_group" placeholder="e.g. Uniform" />
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="new-custom-display-order">Sort</label>
-              <input class="form-input" id="new-custom-display-order" name="display_order" type="number" value="0" />
-            </div>
-            <div class="form-field admin-grid__full">
-              <label class="form-label" for="new-custom-options">Options (select / multiselect only)</label>
-              <input class="form-input" id="new-custom-options" name="options" placeholder="small:Small|mailbox@example.com, medium:Medium|other@example.com" />
-              <p class="form-help">For M365 multi-select sync, append <code>|UPN</code> or <code>|Group Display Name</code> to each option. Multiple alternatives can be separated with <code>|</code>.</p>
-            </div>
-            <div class="form-field admin-grid__full">
-              <label class="form-label" for="new-custom-m365-upn">M365 mailbox/group UPN (checkbox / select only)</label>
-              <input class="form-input" id="new-custom-m365-upn" name="m365_upn" placeholder="mailbox@example.com" />
-              <p class="form-help">When set, M365 mailbox sync updates this field from the staff member's mailbox memberships without creating tickets. Use <code>|</code> to add display-name alternatives such as <code>Netsuite|Netsuite Users</code>.</p>
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="new-custom-visible-job-titles">Visible to job titles</label>
-              <input class="form-input" id="new-custom-visible-job-titles" name="visible_to_job_titles" placeholder="Manager, Department Manager" />
-              <p class="form-help">Optional comma-separated list. Leave blank to show this field to all requestors.</p>
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="new-custom-visible-requestors">Visible to requestors</label>
-              <input class="form-input" id="new-custom-visible-requestors" name="visible_to_requester_emails" placeholder="manager@example.com, approver@example.com" />
-              <p class="form-help">Optional comma-separated requester email allow-list. Job title and requester lists are combined.</p>
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="new-custom-condition-parent">Conditional parent field key</label>
-              <input class="form-input" id="new-custom-condition-parent" name="condition_parent_name" placeholder="e.g. needs_uniform" />
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="new-custom-condition-operator">Condition</label>
-              <select class="form-input" id="new-custom-condition-operator" name="condition_operator">
-                <option value="is_checked">Checkbox is checked</option>
-                <option value="is_not_checked">Checkbox is not checked</option>
-                <option value="equals">Equals value</option>
-                <option value="not_equals">Not equal to value</option>
-                <option value="one_of">One Of (comma separated)</option>
-                <option value="select_map">Select option map</option>
-              </select>
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="new-custom-condition-value">Condition value</label>
-              <textarea class="form-input" id="new-custom-condition-value" name="condition_value" rows="6" placeholder='equals/not_equals example: sales&#10;one_of example: sales, support, hr&#10;select_map JSON example: {&#10;  &quot;sales&quot;: &quot;a,b,c&quot;,&#10;  &quot;support&quot;: &quot;d,e,f&quot;,&#10;  &quot;fallback&quot;: &quot;other&quot;&#10;}'></textarea>
-            </div>
-            <div class="form-actions admin-grid__full">
-              <button type="submit" class="button">Add custom field</button>
-            </div>
-          </form>
-
-          <div class="table-wrapper">
-            <table class="table staff-custom-fields-table">
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Label</th>
-                  <th>Help text</th>
-                  <th>Type</th>
-                  <th>Group</th>
-                  <th>Sort</th>
-                  <th>Active</th>
-                  <th>Conditional logic</th>
-                  <th>Visibility</th>
-                  <th>Options</th>
-                  <th>M365 mapping</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for field in staff_custom_field_definitions %}
-                  <tr>
-                    <form action="/admin/companies/{{ company.id }}/staff-custom-fields/{{ field.id }}" method="post">
-                      {% include "partials/csrf.html" %}
-                      <td><code>{{ field.name }}</code></td>
-                      <td><input class="form-input" name="display_name" value="{{ field.display_name or '' }}" /></td>
-                      <td><input class="form-input" name="help_text" value="{{ field.help_text or '' }}" maxlength="500" placeholder="Optional help text" /></td>
-                      <td>
-                        <select class="form-input" name="field_type">
-                          {% for value in ['text', 'select', 'multiselect', 'checkbox', 'date'] %}
-                            <option value="{{ value }}" {% if field.field_type == value %}selected{% endif %}>{{ value }}</option>
-                          {% endfor %}
-                        </select>
-                      </td>
-                      <td><input class="form-input" name="field_group" value="{{ field.field_group or '' }}" placeholder="Optional group" /></td>
-                      <td><input class="form-input" type="number" name="display_order" value="{{ field.display_order }}" /></td>
-                      <td><input type="checkbox" name="is_active" value="1" {% if field.is_active %}checked{% endif %} /></td>
-                      <td>
-                        <div class="form-field">
-                          <input class="form-input" name="condition_parent_name" value="{{ field.condition_parent_name or '' }}" placeholder="Parent key" />
-                        </div>
-                        <div class="form-field">
-                          <select class="form-input" name="condition_operator">
-                            {% for condition in ['equals', 'not_equals', 'one_of', 'is_checked', 'is_not_checked', 'select_map'] %}
-                              <option value="{{ condition }}" {% if (field.condition_operator or 'is_checked') == condition %}selected{% endif %}>{{ condition }}</option>
-                            {% endfor %}
-                          </select>
-                        </div>
-                        <div class="form-field">
-                          <textarea class="form-input" name="condition_value" rows="6" placeholder='one_of: sales, support, hr&#10;Use JSON for select_map, e.g. {&quot;sales&quot;:&quot;a,b,c&quot;,&quot;fallback&quot;:&quot;other&quot;}'>{{ field.condition_value or '' }}</textarea>
-                        </div>
-                      </td>
-                      <td>
-                        <div class="form-field">
-                          <label class="form-label">Job titles</label>
-                          <input class="form-input" name="visible_to_job_titles" value="{{ field.visible_to_job_titles or '' }}" placeholder="Manager, Department Manager" />
-                        </div>
-                        <div class="form-field">
-                          <label class="form-label">Requestor emails</label>
-                          <input class="form-input" name="visible_to_requester_emails" value="{{ field.visible_to_requester_emails or '' }}" placeholder="manager@example.com" />
-                        </div>
-                      </td>
-                      <td><input class="form-input" name="options" value="{% for option in field.options %}{{ option.value }}{% if option.label != option.value %}:{{ option.label }}{% endif %}{% if option.m365_upn %}|{{ option.m365_upn }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}" /></td>
-                      <td><input class="form-input" name="m365_upn" value="{{ field.m365_upn or '' }}" placeholder="mailbox@example.com or Group Name" /></td>
-                      <td class="table__actions">
-                        <button type="submit" class="button button--ghost">Save</button>
-                    </form>
-                    <form action="/admin/companies/{{ company.id }}/staff-custom-fields/{{ field.id }}/delete" method="post" class="inline-form">
-                      {% include "partials/csrf.html" %}
-                      <button type="submit" class="button button--danger">Delete</button>
-                    </form>
-                      </td>
-                  </tr>
-                {% else %}
-                  <tr><td colspan="11" class="table__empty">No custom fields defined.</td></tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
+          {% endif %}
         </div>
       </details>
+
+      {% set scf_editor_fields = [] %}
+      {% for field in staff_custom_field_definitions %}
+        {% set _ = scf_editor_fields.append({
+          'id': field.id,
+          'name': field.name,
+          'display_name': field.display_name or '',
+          'help_text': field.help_text or '',
+          'field_type': field.field_type or 'text',
+          'field_group': field.field_group or '',
+          'display_order': field.display_order or 0,
+          'is_active': true if field.is_active else false,
+          'condition_parent_name': field.condition_parent_name or '',
+          'condition_operator': field.condition_operator or '',
+          'condition_value': field.condition_value or '',
+          'visible_to_job_titles': field.visible_to_job_titles or '',
+          'visible_to_requester_emails': field.visible_to_requester_emails or '',
+          'm365_upn': field.m365_upn or '',
+          'options': field.options or [],
+        }) %}
+      {% endfor %}
+      {% set scf_standard_fields = [] %}
+      {% for field in staff_field_config %}
+        {% set _ = scf_standard_fields.append({
+          'key': field.key,
+          'label': field.label,
+          'type': field.type,
+          'options': field.options or [],
+        }) %}
+      {% endfor %}
+      <script type="application/json" id="staff-custom-field-editor-data">{{ {'companyId': company.id, 'fields': scf_editor_fields, 'standardFields': scf_standard_fields} | tojson }}</script>
+
+      <div class="modal scf-modal" id="staff-custom-field-modal" role="dialog" aria-modal="true" aria-labelledby="scf-modal-title" hidden>
+        <form class="modal__panel modal__panel--wide scf-editor" method="post" action="/admin/companies/{{ company.id }}/staff-custom-fields" data-scf-form novalidate>
+          {% include "partials/csrf.html" %}
+          <input type="hidden" name="options_json" data-scf-out="options_json" />
+          <input type="hidden" name="condition_parent_name" data-scf-out="condition_parent_name" />
+          <input type="hidden" name="condition_operator" data-scf-out="condition_operator" />
+          <input type="hidden" name="condition_value" data-scf-out="condition_value" />
+          <input type="hidden" name="visible_to_job_titles" data-scf-out="visible_to_job_titles" />
+          <input type="hidden" name="visible_to_requester_emails" data-scf-out="visible_to_requester_emails" />
+          <input type="hidden" name="m365_upn" data-scf-out="m365_upn" />
+
+          <header class="modal__header scf-editor__header">
+            <div>
+              <h2 class="modal__title" id="scf-modal-title" data-scf-title>Add custom field</h2>
+              <p class="scf-editor__subtitle" data-scf-subtitle>Define the question, then optionally add options, conditions and visibility rules.</p>
+            </div>
+            <button type="button" class="modal__close" data-modal-close aria-label="Close field editor"></button>
+          </header>
+
+          <nav class="scf-tabs" role="tablist" aria-label="Field settings">
+            <button type="button" class="scf-tab is-active" role="tab" id="scf-tab-details" aria-controls="scf-panel-details" aria-selected="true" data-scf-tab="details">Details<span class="scf-tab__dot" aria-hidden="true"></span></button>
+            <button type="button" class="scf-tab" role="tab" id="scf-tab-options" aria-controls="scf-panel-options" aria-selected="false" tabindex="-1" data-scf-tab="options">Options<span class="scf-tab__count" data-scf-options-count></span><span class="scf-tab__dot" aria-hidden="true"></span></button>
+            <button type="button" class="scf-tab" role="tab" id="scf-tab-logic" aria-controls="scf-panel-logic" aria-selected="false" tabindex="-1" data-scf-tab="logic">Show when<span class="scf-tab__dot" aria-hidden="true"></span></button>
+            <button type="button" class="scf-tab" role="tab" id="scf-tab-visibility" aria-controls="scf-panel-visibility" aria-selected="false" tabindex="-1" data-scf-tab="visibility">Who sees it<span class="scf-tab__dot" aria-hidden="true"></span></button>
+            <button type="button" class="scf-tab" role="tab" id="scf-tab-m365" aria-controls="scf-panel-m365" aria-selected="false" tabindex="-1" data-scf-tab="m365">Microsoft 365<span class="scf-tab__dot" aria-hidden="true"></span></button>
+          </nav>
+
+          <div class="modal__body scf-editor__body">
+            <div class="scf-editor__main">
+              <section class="scf-panel" id="scf-panel-details" role="tabpanel" aria-labelledby="scf-tab-details" data-scf-panel="details">
+                <div class="scf-grid">
+                  <div class="form-field scf-grid__full">
+                    <label class="form-label" for="scf-label">Label <span class="scf-required" aria-hidden="true">*</span></label>
+                    <input class="form-input" id="scf-label" name="display_name" maxlength="255" placeholder="e.g. Shirt size" autocomplete="off" data-scf-input="display_name" />
+                    <p class="form-help">The question shown on staff forms.</p>
+                  </div>
+                  <div class="form-field">
+                    <label class="form-label" for="scf-key">Key</label>
+                    <input class="form-input scf-mono" id="scf-key" name="name" maxlength="100" placeholder="shirt_size" autocomplete="off" spellcheck="false" data-scf-input="name" />
+                    <p class="form-help" data-scf-key-help>Generated from the label. Used by conditions, imports and automations.</p>
+                  </div>
+                  <div class="form-field">
+                    <label class="form-label" for="scf-group">Group</label>
+                    <input class="form-input" id="scf-group" name="field_group" maxlength="255" placeholder="e.g. Uniform" list="scf-group-options" autocomplete="off" data-scf-input="field_group" />
+                    <datalist id="scf-group-options" data-scf-group-options></datalist>
+                    <p class="form-help">Fields with the same group are shown together.</p>
+                  </div>
+                  <fieldset class="scf-grid__full scf-fieldset">
+                    <legend class="form-label">Field type</legend>
+                    <div class="scf-type-grid">
+                      {% for type_value, type_label, type_help in [
+                        ('text', 'Text', 'Free-form answer'),
+                        ('select', 'Dropdown', 'Pick one option'),
+                        ('multiselect', 'Multi-select', 'Pick any options'),
+                        ('checkbox', 'Checkbox', 'Yes / no'),
+                        ('date', 'Date', 'Calendar date'),
+                      ] %}
+                        <label class="scf-type-card">
+                          <input type="radio" name="field_type" value="{{ type_value }}" data-scf-input="field_type" {% if loop.first %}checked{% endif %} />
+                          <span class="scf-type-icon scf-type-icon--{{ type_value }}" aria-hidden="true"></span>
+                          <span class="scf-type-card__label">{{ type_label }}</span>
+                          <span class="scf-type-card__help">{{ type_help }}</span>
+                        </label>
+                      {% endfor %}
+                    </div>
+                  </fieldset>
+                  <div class="form-field scf-grid__full">
+                    <label class="form-label" for="scf-help">Help text <span class="scf-optional">optional</span></label>
+                    <textarea class="form-input" id="scf-help" name="help_text" rows="2" maxlength="500" placeholder="Shown under the label to guide whoever fills in the form" data-scf-input="help_text"></textarea>
+                    <p class="form-help scf-counter" data-scf-help-counter>0 / 500</p>
+                  </div>
+                  <div class="form-field">
+                    <label class="form-label" for="scf-order">Sort order</label>
+                    <input class="form-input" id="scf-order" name="display_order" type="number" step="1" value="0" data-scf-input="display_order" />
+                    <p class="form-help">Lower numbers appear first within the group.</p>
+                  </div>
+                  <div class="form-field" data-scf-active-field hidden>
+                    <span class="form-label">Status</span>
+                    <label class="scf-switch">
+                      <input type="checkbox" name="is_active" value="1" data-scf-input="is_active" />
+                      <span class="scf-switch__track" aria-hidden="true"></span>
+                      <span>Active on staff forms</span>
+                    </label>
+                    <p class="form-help">Inactive fields are hidden from forms but keep existing answers.</p>
+                  </div>
+                </div>
+              </section>
+
+              <section class="scf-panel" id="scf-panel-options" role="tabpanel" aria-labelledby="scf-tab-options" data-scf-panel="options" hidden>
+                <div class="scf-panel__intro">
+                  <h3 class="scf-panel__title">Choices</h3>
+                  <p class="text-muted">Add the options people can choose from. The label is what they see; the stored value defaults to the label.</p>
+                </div>
+                <div class="scf-options-head" aria-hidden="true">
+                  <span></span><span>Label</span><span>Stored value</span><span></span>
+                </div>
+                <ol class="scf-options" data-scf-options></ol>
+                <div class="scf-options__actions">
+                  <button type="button" class="button button--ghost button--small" data-scf-option-add>+ Add option</button>
+                  <button type="button" class="button button--ghost button--small" data-scf-bulk-toggle aria-expanded="false">Paste a list</button>
+                </div>
+                <div class="scf-bulk" data-scf-bulk hidden>
+                  <label class="form-label" for="scf-bulk-input">One option per line</label>
+                  <textarea class="form-input" id="scf-bulk-input" rows="5" placeholder="Small&#10;Medium&#10;Large" data-scf-bulk-input></textarea>
+                  <p class="form-help">Use <code>value = Label</code> on a line to set a different stored value.</p>
+                  <div class="scf-bulk__actions">
+                    <button type="button" class="button button--small" data-scf-bulk-apply>Add options</button>
+                    <button type="button" class="button button--ghost button--small" data-scf-bulk-toggle>Cancel</button>
+                  </div>
+                </div>
+                <p class="scf-error" data-scf-error="options" hidden></p>
+              </section>
+
+              <section class="scf-panel" id="scf-panel-logic" role="tabpanel" aria-labelledby="scf-tab-logic" data-scf-panel="logic" hidden>
+                <div class="scf-panel__intro">
+                  <h3 class="scf-panel__title">When should this field appear?</h3>
+                  <p class="text-muted">Show the field only when another answer on the form matches.</p>
+                </div>
+                <div class="scf-choice-list" role="radiogroup" aria-label="Condition mode">
+                  <label class="scf-choice">
+                    <input type="radio" name="scf_condition_mode" value="always" data-scf-condition-mode checked />
+                    <span><strong>Always show</strong><span class="text-muted">The field is always on the form.</span></span>
+                  </label>
+                  <label class="scf-choice">
+                    <input type="radio" name="scf_condition_mode" value="conditional" data-scf-condition-mode />
+                    <span><strong>Only when another field matches</strong><span class="text-muted">Hide the field until a condition is met.</span></span>
+                  </label>
+                </div>
+                <div class="scf-condition" data-scf-condition hidden>
+                  <div class="scf-condition__row">
+                    <span class="scf-condition__word">Show when</span>
+                    <div class="form-field">
+                      <label class="visually-hidden" for="scf-condition-parent">Field to check</label>
+                      <select class="form-input" id="scf-condition-parent" data-scf-condition-parent></select>
+                    </div>
+                    <div class="form-field">
+                      <label class="visually-hidden" for="scf-condition-operator">Condition</label>
+                      <select class="form-input" id="scf-condition-operator" data-scf-condition-operator></select>
+                    </div>
+                  </div>
+                  <div class="scf-condition__value" data-scf-condition-value></div>
+                  <p class="scf-sentence" data-scf-condition-sentence></p>
+                  <p class="scf-error" data-scf-error="logic" hidden></p>
+                </div>
+              </section>
+
+              <section class="scf-panel" id="scf-panel-visibility" role="tabpanel" aria-labelledby="scf-tab-visibility" data-scf-panel="visibility" hidden>
+                <div class="scf-panel__intro">
+                  <h3 class="scf-panel__title">Who can see and fill in this field?</h3>
+                  <p class="text-muted">Limit the field to certain requesters, for example only managers.</p>
+                </div>
+                <div class="scf-choice-list" role="radiogroup" aria-label="Visibility">
+                  <label class="scf-choice">
+                    <input type="radio" name="scf_visibility_mode" value="everyone" data-scf-visibility-mode checked />
+                    <span><strong>Everyone</strong><span class="text-muted">Any requester submitting a staff form.</span></span>
+                  </label>
+                  <label class="scf-choice">
+                    <input type="radio" name="scf_visibility_mode" value="restricted" data-scf-visibility-mode />
+                    <span><strong>Only specific requesters</strong><span class="text-muted">Matching a job title <em>or</em> an email address below.</span></span>
+                  </label>
+                </div>
+                <div class="scf-visibility" data-scf-visibility hidden>
+                  <div class="form-field">
+                    <label class="form-label" for="scf-job-titles-input">Requester job titles</label>
+                    <div class="scf-tags" data-scf-tags="job_titles">
+                      <input class="scf-tags__input" id="scf-job-titles-input" placeholder="Type a job title and press Enter" autocomplete="off" />
+                    </div>
+                  </div>
+                  <div class="form-field">
+                    <label class="form-label" for="scf-emails-input">Requester email addresses</label>
+                    <div class="scf-tags" data-scf-tags="emails">
+                      <input class="scf-tags__input" id="scf-emails-input" type="email" placeholder="name@example.com" autocomplete="off" />
+                    </div>
+                  </div>
+                  <p class="form-help">Press Enter or comma to add each entry. You can paste a comma-separated list.</p>
+                  <p class="scf-error" data-scf-error="visibility" hidden></p>
+                </div>
+              </section>
+
+              <section class="scf-panel" id="scf-panel-m365" role="tabpanel" aria-labelledby="scf-tab-m365" data-scf-panel="m365" hidden>
+                <div class="scf-panel__intro">
+                  <h3 class="scf-panel__title">Sync from Microsoft 365</h3>
+                  <p class="text-muted">Mailbox sync fills this field from each staff member's mailbox or group memberships, without creating tickets.</p>
+                </div>
+                <div data-scf-m365-field>
+                  <div class="form-field">
+                    <label class="form-label" for="scf-m365-input">Mailbox or group</label>
+                    <div class="scf-tags" data-scf-tags="m365">
+                      <input class="scf-tags__input" id="scf-m365-input" placeholder="mailbox@example.com or Group Name" autocomplete="off" />
+                    </div>
+                    <p class="form-help" data-scf-m365-help>Add the mailbox UPN, plus any display-name alternatives. The field is set when the staff member has access to any of them.</p>
+                  </div>
+                </div>
+                <div data-scf-m365-options hidden>
+                  <p class="form-help">Map each option to a mailbox or group. An option is selected when the staff member has access to it. Separate alternatives with <code>|</code>.</p>
+                  <div class="scf-m365-options" data-scf-m365-option-list></div>
+                </div>
+                <p class="scf-empty scf-empty--inline" data-scf-m365-unsupported hidden>Microsoft 365 sync is available for checkbox, dropdown and multi-select fields.</p>
+              </section>
+            </div>
+
+            <aside class="scf-preview" aria-label="Live preview">
+              <p class="scf-preview__eyebrow">Live preview</p>
+              <div class="scf-preview__card" data-scf-preview></div>
+              <ul class="scf-preview__rules" data-scf-preview-rules></ul>
+            </aside>
+          </div>
+
+          <footer class="modal__footer scf-editor__footer">
+            <button type="button" class="button button--danger" data-scf-delete hidden>Delete field</button>
+            <span class="scf-editor__spacer"></span>
+            <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+            <button type="submit" class="button" data-scf-submit>Save field</button>
+          </footer>
+        </form>
+      </div>
+      <form method="post" data-scf-delete-form hidden>
+        {% include "partials/csrf.html" %}
+      </form>
 
       <details class="card card--panel card-collapsible admin-grid__full" data-billing-contacts-panel open>
         <summary class="card__header card__header--collapsible card__header--stacked">
@@ -1751,11 +2086,7 @@
               <textarea class="form-input form-input--textarea" id="task-description" name="description" rows="3"></textarea>
               <p class="form-help" id="task-description-help">Optional description or notes about this automation.</p>
             </div>
-            <div class="form-field" id="task-json-payload-field" style="display: none;">
-              <label class="form-label" for="task-json-payload">JSON Payload</label>
-              <textarea class="form-input form-input--textarea" id="task-json-payload" name="jsonPayload" rows="8" placeholder='{"subject": "Example ticket", "description": "Ticket details", "priority": "normal", "status": "open"}'></textarea>
-              <p class="form-help">JSON configuration for ticket creation. Required fields: subject. Optional: description, priority, status, category, requester_id, assigned_user_id.</p>
-            </div>
+            {{ scheduled_ticket_payload('task', 'style="display: none;"', 'The ticket is created for this company each time the task runs.') }}
             <div class="form-field form-field--inline">
               <label class="form-label" for="task-max-retries">Max retries</label>
               <input class="form-input" id="task-max-retries" name="maxRetries" type="number" min="0" value="12" />
@@ -2106,6 +2437,9 @@
   {% if is_super_admin %}
     <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
     <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
+    <script src="{{ static_url('/static/js/scheduled_ticket_payload.js') }}" defer></script>
+    <script src="{{ static_url('/static/js/staff_custom_fields_admin.js') }}" defer></script>
+    <script src="{{ static_url('/static/js/staff_intake_fields_admin.js') }}" defer></script>
     <script>
       function escapeHtml(text) {
         const div = document.createElement('div');

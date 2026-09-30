@@ -2590,6 +2590,60 @@ async def _graph_patch(
     return response.json()
 
 
+async def _graph_put(
+    access_token: str,
+    url: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Issue a PUT request to Microsoft Graph.  Raises :exc:`M365Error` on failure.
+
+    Some singleton policies (for example ``/policies/deviceRegistrationPolicy``)
+    only support full replacement, so callers must send the complete object.
+    """
+    _validate_graph_url(url)
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
+            response = await client.put(url, headers=headers, json=payload)
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Microsoft Graph PUT timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Microsoft Graph PUT network error ({type(exc).__name__})"
+        ) from exc
+    if response.status_code not in (200, 201, 204):
+        log_error(
+            "Microsoft Graph PUT failed",
+            url=url,
+            status=response.status_code,
+            body=response.text,
+        )
+        graph_error_code: str | None = None
+        graph_error_message: str | None = None
+        try:
+            err = response.json().get("error") or {}
+            if isinstance(err.get("code"), str):
+                graph_error_code = err["code"]
+            if isinstance(err.get("message"), str):
+                graph_error_message = err["message"]
+        except Exception:  # noqa: BLE001
+            pass
+        suffix = f": {graph_error_message}" if graph_error_message else ""
+        raise M365Error(
+            f"Microsoft Graph PUT failed ({response.status_code}){suffix}",
+            http_status=response.status_code,
+            graph_error_code=graph_error_code,
+        )
+    if response.status_code == 204 or not response.text:
+        return {}
+    return response.json()
+
+
 async def _graph_delete(access_token: str, url: str) -> None:
     """Issue a DELETE request to Microsoft Graph.  Raises :exc:`M365Error` on failure."""
     _validate_graph_url(url)

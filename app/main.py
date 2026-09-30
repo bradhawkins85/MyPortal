@@ -15,7 +15,7 @@ from decimal import Decimal
 from html import escape
 from pathlib import Path, PurePosixPath
 from typing import Any
-from urllib.parse import parse_qsl, quote, urlencode
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
@@ -1408,13 +1408,45 @@ async def _user_requires_totp_enrollment(user: Mapping[str, Any]) -> bool:
     return not await auth_repo.user_has_totp_authenticator(user_id_int)
 
 
+def _safe_next_path(value: str | None) -> str | None:
+    """Return ``value`` if it is a safe same-origin path for post-login redirects."""
+
+    if not value:
+        return None
+    candidate = value.strip()
+    if not candidate.startswith("/") or candidate.startswith("//"):
+        return None
+    if "\\" in candidate or any(ord(ch) < 32 for ch in candidate):
+        return None
+    parts = urlsplit(candidate)
+    if parts.scheme or parts.netloc:
+        return None
+    if candidate == "/login" or candidate.startswith(("/login?", "/logout")):
+        return None
+    return candidate
+
+
+def _login_redirect(request: Request) -> RedirectResponse:
+    """Redirect to the login page, remembering the requested page for GET requests."""
+
+    login_url = "/login"
+    if request.method == "GET":
+        target = request.url.path
+        if request.url.query:
+            target = f"{target}?{request.url.query}"
+        next_path = _safe_next_path(target)
+        if next_path and next_path != "/":
+            login_url = f"/login?next={quote(next_path, safe='')}"
+    return RedirectResponse(url=login_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
 async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
     session = await session_manager.load_session(request)
     if not session:
-        return None, RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+        return None, _login_redirect(request)
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
-        return None, RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+        return None, _login_redirect(request)
     if not is_user_active(user):
         await session_manager.revoke_session(session)
         return None, RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
@@ -7067,6 +7099,7 @@ async def admin_system_updates(request: Request):
     if redirect:
         return redirect
     system_updates_service.expire_unclaimed_requests()
+    await system_updates_service.fail_superseded_updates()
     updates = system_update_history.list_updates()
     update_check = await system_updates_service.check_for_update(
         refresh=request.query_params.get("refresh") == "1"
@@ -8464,10 +8497,14 @@ async def admin_tray_ticket_questions_page(request: Request):
     for q in questions:
         q["conditions"] = cond_index.get(int(q["id"]), [])
 
+    from app.repositories import companies as companies_repo
+
+    companies = await companies_repo.list_companies()
     params = request.query_params
     extra = {
         "title": "Ticket intake questions",
         "questions": questions,
+        "companies": companies,
         "success_message": params.get("success"),
         "error_message": params.get("error"),
     }
@@ -11096,12 +11133,13 @@ async def totp_enrollment_page(request: Request):
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
+    next_path = _safe_next_path(request.query_params.get("next"))
     session = await session_manager.load_session(request)
     if session:
         user = await user_repo.get_user_by_id(session.user_id)
         if user and await _user_requires_totp_enrollment(user):
             return RedirectResponse(url=TOTP_ENROLLMENT_PAGE_PATH, status_code=status.HTTP_303_SEE_OTHER)
-        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url=next_path or "/", status_code=status.HTTP_303_SEE_OTHER)
 
     try:
         user_count = await user_repo.count_users()
@@ -11117,6 +11155,7 @@ async def login_page(request: Request):
         extra={
             "title": "Sign in",
             "verification_success": request.query_params.get("verified") == "1",
+            "next_path": next_path or "/",
         },
     )
     return templates.TemplateResponse(context["request"], "auth/login.html", context)

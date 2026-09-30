@@ -22,63 +22,281 @@
 {% endblock %}
 
 {% block content %}
-{% if state_error %}<div class="alert alert--error" role="alert">Current Microsoft 365 state could not be loaded: {{ state_error }}</div>{% endif %}
-{% if outcomes %}
-<section class="card card--panel oof-results" aria-labelledby="outcome-heading">
-  <header class="card__header"><h2 class="card__title" id="outcome-heading">Verified mailbox results</h2></header>
-  <div class="card__body"><ul class="list">
-    {% for result in outcomes %}<li><strong>{{ result.mailbox }}</strong> — {% if result.success %}{{ 'disabled' if completed_action == 'disable' else 'schedule saved' }}{% else %}<span class="text-danger">failed: {{ result.error }}</span>{% endif %}</li>{% endfor %}
-  </ul>{% if outcomes|selectattr('success', 'equalto', false)|list %}<p class="form-help">Submitted values remain below so failed mailboxes can be retried without re-entering the schedule.</p>{% endif %}</div>
-</section>
-{% endif %}
-<form method="post" action="/m365/out-of-office" id="oof-form" class="oof-grid">
-  <section class="card card--panel">
-    <header class="card__header"><div><h2 class="card__title">User mailboxes</h2><p class="card__subtitle">Choose one or more synced user mailboxes.</p></div></header>
-    <div class="card__body">
-      <div class="oof-tools">
-        <input class="input" id="mailbox-filter" type="search" placeholder="Filter mailboxes" aria-label="Filter mailboxes">
-        <button class="button button--ghost button--small" type="button" id="select-all">Select all</button>
-      </div>
-      <div class="oof-mailboxes" id="mailbox-list">
-        {% for mailbox in mailboxes %}
-        <label class="oof-mailbox" data-mailbox-row>
-          <input type="checkbox" name="mailboxes" value="{{ mailbox.user_principal_name }}" {% if mailbox.user_principal_name in (submitted.mailboxes or []) %}checked{% endif %} {% if not can_write %}disabled{% endif %}>
-          <span><strong>{{ mailbox.display_name }}</strong><br><small class="text-muted">{{ mailbox.user_principal_name }}</small></span>
-        </label>
-        {% else %}<p class="table__empty">No synced user mailboxes are available.</p>{% endfor %}
-      </div>
-    </div>
-  </section>
+{% set oof_states = {} %}
+{% for state in states %}{% set _ = oof_states.update({(state.mailbox | lower): state}) %}{% endfor %}
+{% set oof_audience_labels = {'none': 'Colleagues only', 'contactsOnly': 'Colleagues + external contacts', 'all': 'Colleagues + everyone external'} %}
 
-  <section class="card card--panel">
-    <header class="card__header"><div><h2 class="card__title">Schedule or update automatic replies</h2><p class="card__subtitle">Times are entered in your browser timezone and normalized to UTC for Microsoft 365. The effective UTC range is shown before submission.</p></div></header>
-    <div class="card__body oof-fields">
-      <div class="form-field"><label for="start-local">Starts</label><input class="input" id="start-local" type="datetime-local" required data-initial-utc="{{ submitted.start_time or '' }}" {% if not can_write %}disabled{% endif %}><input type="hidden" name="start_time" id="start-time" value="{{ submitted.start_time or '' }}"></div>
-      <div class="form-field"><label for="end-local">Ends</label><input class="input" id="end-local" type="datetime-local" required data-initial-utc="{{ submitted.end_time or '' }}" {% if not can_write %}disabled{% endif %}><input type="hidden" name="end_time" id="end-time" value="{{ submitted.end_time or '' }}"></div>
-      <p class="form-help oof-wide" id="effective-range" role="status">Enter both times to preview the effective UTC range.</p>
-      <div class="form-field oof-wide"><label for="internal-message">Internal sender message</label><textarea class="input" id="internal-message" name="internal_message" rows="6" maxlength="10000" required {% if not can_write %}disabled{% endif %}>{{ submitted.internal_message or '' }}</textarea></div>
-      <fieldset class="form-field oof-wide"><legend>External audience</legend>
-        <label><input type="radio" name="external_audience" value="none" {% if not submitted.external_audience or submitted.external_audience == 'none' %}checked{% endif %}> No external senders</label><br>
-        <label><input type="radio" name="external_audience" value="contactsOnly" {% if submitted.external_audience == 'contactsOnly' %}checked{% endif %}> External senders in the mailbox's contacts only</label><br>
-        <label><input type="radio" name="external_audience" value="all" {% if submitted.external_audience == 'all' %}checked{% endif %}> All external senders</label>
-        <p class="form-help">This choice is written only when scheduling. Disabling preserves the mailbox's saved audience and messages.</p>
-      </fieldset>
-      <div class="form-field oof-wide"><label><input type="checkbox" name="same_message" id="same-message" {% if submitted.same_message is not defined or submitted.same_message %}checked{% endif %} {% if not can_write %}disabled{% endif %}> Use the internal message for enabled external replies</label></div>
-      <div class="form-field oof-wide" id="external-field" hidden><label for="external-message">External sender message</label><textarea class="input" id="external-message" name="external_message" rows="6" maxlength="10000" {% if not can_write %}disabled{% endif %}>{{ submitted.external_message or '' }}</textarea></div>
-      <div class="form-field oof-wide">
-        {% if can_write %}<div class="oof-actions"><button class="button button--primary" name="intent" value="schedule" type="submit" {% if not mailboxes %}disabled{% endif %}>Save schedule</button><button class="button button--danger" name="intent" value="disable" type="submit" formnovalidate {% if not mailboxes %}disabled{% endif %}>Disable selected</button></div>
-        {% else %}<p class="form-help">Your role has read-only access. Write permission is required to apply automatic replies.</p>{% endif %}
-      </div>
+{% if state_error %}<div class="alert alert--error" role="alert">Current Microsoft 365 state could not be loaded: {{ state_error }}</div>{% endif %}
+
+{% if outcomes %}
+  {% set oof_failed = outcomes | selectattr('success', 'equalto', false) | list %}
+  <section class="card card--panel oof-results{% if oof_failed %} oof-results--failed{% endif %}" aria-labelledby="outcome-heading" role="status">
+    <header class="card__header card__header--stacked">
+      <h2 class="card__title" id="outcome-heading">
+        {% if not oof_failed %}
+          {{ 'Automatic replies turned off' if completed_action == 'disable' else 'Automatic replies saved' }} for {{ outcomes | length }} mailbox{{ 'es' if outcomes | length != 1 }}
+        {% else %}
+          {{ oof_failed | length }} of {{ outcomes | length }} mailbox{{ 'es' if outcomes | length != 1 }} couldn't be updated
+        {% endif %}
+      </h2>
+    </header>
+    <div class="card__body">
+      <ul class="scf-item__chips oof-results__list">
+        {% for result in outcomes %}
+          <li class="scf-chip {{ 'sif-chip--optional' if result.success else 'sif-chip--warning' }}" {% if not result.success %}title="{{ result.error }}"{% endif %}>
+            {{ result.mailbox }} — {% if result.success %}{{ 'off' if completed_action == 'disable' else 'saved' }}{% else %}failed: {{ result.error }}{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+      {% if oof_failed %}<p class="form-help">Your schedule and messages are kept in the editor so you can retry the failed mailboxes.</p>{% endif %}
     </div>
   </section>
-</form>
-<section class="card card--panel" aria-labelledby="current-heading">
- <header class="card__header"><div><h2 class="card__title" id="current-heading">Current Microsoft 365 state</h2><p class="card__subtitle">Read directly from each authorized mailbox. Use Edit to copy an existing schedule into the form; nothing is changed until Save schedule is selected.</p></div></header>
- <div class="card__body table-wrapper"><table class="table"><thead><tr><th>Mailbox</th><th>Status</th><th>Effective range</th><th>External audience</th><th>Read result</th><th></th></tr></thead><tbody>
- {% for state in states %}{% set setting = state.setting or {} %}<tr><td>{{ state.mailbox }}</td><td>{{ setting.status or 'Unknown' }}</td><td>{% if setting.scheduledStartDateTime %}{{ setting.scheduledStartDateTime.dateTime }} {{ setting.scheduledStartDateTime.timeZone }} → {{ setting.scheduledEndDateTime.dateTime }} {{ setting.scheduledEndDateTime.timeZone }}{% else %}—{% endif %}</td><td>{{ setting.externalAudience or '—' }}</td><td>{% if state.success %}Verified{% else %}<span class="text-danger">{{ state.error }}</span>{% endif %}</td><td>{% if state.success and can_write %}<button type="button" class="button button--small button--ghost" data-edit-mailbox="{{ state.mailbox }}" data-setting='{{ setting|tojson }}'>Edit</button>{% endif %}</td></tr>
- {% else %}<tr><td colspan="6" class="table__empty">No authorized user mailboxes are available.</td></tr>{% endfor %}
- </tbody></table></div>
+{% endif %}
+
+<section class="card card--panel oof" aria-labelledby="oof-title" data-oof-root>
+  <header class="card__header card__header--stacked">
+    <div>
+      <h2 class="card__title" id="oof-title">Automatic replies</h2>
+      <p class="card__subtitle">Read live from Microsoft 365 for each user mailbox on this company's email domains. Nothing changes until you save.</p>
+    </div>
+  </header>
+  <div class="card__body card__body--stacked">
+    {% if mailboxes %}
+      <dl class="sif-stats" aria-label="Automatic reply summary" data-oof-stats>
+        <div class="sif-stats__item"><dt>Mailboxes</dt><dd data-oof-stat="total">{{ mailboxes | length }}</dd></div>
+        <div class="sif-stats__item"><dt>Replying now</dt><dd data-oof-stat="on">—</dd></div>
+        <div class="sif-stats__item"><dt>Scheduled</dt><dd data-oof-stat="scheduled">—</dd></div>
+        <div class="sif-stats__item"><dt>Off</dt><dd data-oof-stat="off">—</dd></div>
+      </dl>
+
+      <div class="scf-toolbar oof__toolbar">
+        <input type="search" class="form-input scf-toolbar__search" placeholder="Search people or addresses" aria-label="Search mailboxes" data-oof-search />
+        <label class="visually-hidden" for="oof-filter">Show</label>
+        <select class="form-input oof__filter" id="oof-filter" data-oof-filter>
+          <option value="">Everyone</option>
+          <option value="on">Replying now</option>
+          <option value="scheduled">Scheduled</option>
+          <option value="off">Off</option>
+          <option value="error">Couldn't read</option>
+        </select>
+      </div>
+
+      {% if can_write %}
+        <div class="oof__bulk" data-oof-bulk hidden role="region" aria-label="Selected mailboxes">
+          <span data-oof-bulk-count></span>
+          <button type="button" class="button button--small" data-oof-bulk-set aria-haspopup="dialog" aria-controls="oof-modal">Set reply</button>
+          <button type="button" class="button button--ghost button--small" data-oof-bulk-off>Turn off</button>
+          <button type="button" class="button button--ghost button--small" data-oof-bulk-clear>Clear selection</button>
+        </div>
+      {% endif %}
+
+      <ul class="scf-list oof__list" data-oof-list>
+        {% for mailbox in mailboxes %}
+          {% set upn = mailbox.user_principal_name %}
+          {% set state = oof_states.get(upn | lower) %}
+          {% set setting = (state.setting if state and state.success else none) or {} %}
+          {% set graph_status = setting.status or ('error' if state and not state.success else 'unknown') %}
+          <li
+            class="scf-item oof-item{% if not can_write %} oof-item--readonly{% endif %}"
+            data-oof-item
+            data-mailbox="{{ upn }}"
+            data-name="{{ mailbox.display_name or upn }}"
+            data-search-text="{{ mailbox.display_name }} {{ upn }}"
+          >
+            {% if can_write %}
+              <label class="oof-item__select">
+                <input type="checkbox" data-oof-select value="{{ upn }}" />
+                <span class="visually-hidden">Select {{ mailbox.display_name or upn }}</span>
+              </label>
+            {% endif %}
+            <span class="oof-item__avatar" aria-hidden="true">{{ ((mailbox.display_name or upn)[:1]) | upper }}</span>
+            <div class="scf-item__main">
+              <div class="scf-item__heading">
+                <span class="oof-item__name">{{ mailbox.display_name or upn }}</span>
+                <span class="scf-item__key">{{ upn }}</span>
+              </div>
+              <ul class="scf-item__chips" aria-label="Automatic reply status">
+                {% if state and not state.success %}
+                  <li class="scf-chip sif-chip--warning" data-oof-status title="{{ state.error }}">Couldn't read: {{ state.error | truncate(60) }}</li>
+                {% elif not state %}
+                  <li class="scf-chip scf-chip--muted" data-oof-status>Status unknown</li>
+                {% else %}
+                  <li class="scf-chip oof-status oof-status--{{ graph_status }}" data-oof-status>{{ {'disabled': 'Off', 'alwaysEnabled': 'Replying', 'scheduled': 'Scheduled'}.get(graph_status, graph_status) }}</li>
+                  {% if graph_status != 'disabled' %}<li class="scf-chip">{{ oof_audience_labels.get(setting.externalAudience or 'none', setting.externalAudience) }}</li>{% endif %}
+                {% endif %}
+              </ul>
+              {% if setting.internalReplyMessage and graph_status != 'disabled' %}
+                <p class="scf-item__help oof-item__excerpt" data-oof-excerpt>“{{ setting.internalReplyMessage | striptags | truncate(140) }}”</p>
+              {% endif %}
+            </div>
+            {% if can_write and state and state.success %}
+              <div class="scf-item__actions">
+                <button type="button" class="button button--ghost button--small" data-oof-edit="{{ upn }}" aria-haspopup="dialog" aria-controls="oof-modal">
+                  {{ 'Set reply' if graph_status == 'disabled' else 'Edit reply' }}<span class="visually-hidden"> for {{ mailbox.display_name or upn }}</span>
+                </button>
+              </div>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="scf-empty scf-empty--search" data-oof-no-results hidden>No mailboxes match.</p>
+      {% if not can_write %}
+        <p class="form-help">Your role has read-only access. Write permission is required to apply automatic replies.</p>
+      {% endif %}
+    {% else %}
+      <div class="scf-empty">
+        <p class="scf-empty__title">No user mailboxes yet</p>
+        <p class="text-muted">Mailboxes appear here once Microsoft 365 users on this company's email domains have been synced.</p>
+      </div>
+    {% endif %}
+  </div>
 </section>
+
+{% set oof_data = [] %}
+{% for mailbox in mailboxes %}
+  {% set state = oof_states.get(mailbox.user_principal_name | lower) %}
+  {% set _ = oof_data.append({
+    'mailbox': mailbox.user_principal_name,
+    'name': mailbox.display_name or mailbox.user_principal_name,
+    'success': true if state and state.success else false,
+    'setting': state.setting if state and state.success else none,
+  }) %}
+{% endfor %}
+<script type="application/json" id="oof-data">{{ {
+  'mailboxes': oof_data,
+  'submitted': submitted or {},
+  'failed': (outcomes | selectattr('success', 'equalto', false) | map(attribute='mailbox') | list) if outcomes else [],
+  'canWrite': true if can_write else false,
+} | tojson }}</script>
+
+{% if can_write and mailboxes %}
+<div class="modal scf-modal" id="oof-modal" role="dialog" aria-modal="true" aria-labelledby="oof-modal-title" hidden>
+  <form method="post" action="/m365/out-of-office" id="oof-form" class="modal__panel modal__panel--wide scf-editor oof-editor" novalidate data-oof-form>
+    {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+    <input type="hidden" name="start_time" data-oof-out="start" />
+    <input type="hidden" name="end_time" data-oof-out="end" />
+
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="scf-preview__eyebrow">Automatic reply</p>
+        <h2 class="modal__title" id="oof-modal-title" data-oof-title>Set automatic reply</h2>
+        <p class="scf-editor__subtitle" data-oof-subtitle>Choose who's away, when, and what senders get back.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close automatic reply editor"></button>
+    </header>
+
+    <div class="modal__body scf-editor__body">
+      <div class="scf-editor__main oof-editor__main">
+        <section class="oof-section" aria-labelledby="oof-who-title">
+          <div class="oof-section__head">
+            <h3 class="scf-panel__title" id="oof-who-title">Who's away</h3>
+            <button type="button" class="button button--ghost button--small" data-oof-who-toggle aria-expanded="false" aria-controls="oof-who-list">Change</button>
+          </div>
+          <ul class="scf-item__chips" data-oof-who-chips></ul>
+          <div class="oof-who" id="oof-who-list" data-oof-who hidden>
+            <input type="search" class="form-input" placeholder="Filter mailboxes" aria-label="Filter mailboxes" data-oof-who-search />
+            <div class="oof-who__list">
+              {% for mailbox in mailboxes %}
+                <label class="oof-who__row" data-oof-who-row data-search-text="{{ mailbox.display_name }} {{ mailbox.user_principal_name }}">
+                  <input type="checkbox" name="mailboxes" value="{{ mailbox.user_principal_name }}" data-oof-mailbox />
+                  <span><strong>{{ mailbox.display_name or mailbox.user_principal_name }}</strong><small class="text-muted">{{ mailbox.user_principal_name }}</small></span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+          <p class="scf-error" data-oof-error="who" hidden></p>
+        </section>
+
+        <section class="oof-section" aria-labelledby="oof-when-title">
+          <h3 class="scf-panel__title" id="oof-when-title">When</h3>
+          <div class="oof-presets" role="group" aria-label="Quick dates">
+            <button type="button" class="sig-var oof-preset" data-oof-preset="today">Rest of today</button>
+            <button type="button" class="sig-var oof-preset" data-oof-preset="tomorrow">Tomorrow</button>
+            <button type="button" class="sig-var oof-preset" data-oof-preset="week">Next 7 days</button>
+            <button type="button" class="sig-var oof-preset" data-oof-preset="workweek">Rest of this week</button>
+          </div>
+          <div class="scf-grid">
+            <div class="form-field">
+              <label class="form-label" for="start-local">Starts</label>
+              <input class="form-input" id="start-local" type="datetime-local" data-oof-start />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="end-local">Ends</label>
+              <input class="form-input" id="end-local" type="datetime-local" data-oof-end />
+            </div>
+          </div>
+          <p class="form-help" data-oof-range role="status" aria-live="polite"></p>
+          <p class="scf-error" data-oof-error="when" hidden></p>
+        </section>
+
+        <section class="oof-section" aria-labelledby="oof-message-title">
+          <h3 class="scf-panel__title" id="oof-message-title">Reply to colleagues</h3>
+          <div class="form-field">
+            <label class="visually-hidden" for="internal-message">Internal sender message</label>
+            <textarea class="form-input form-input--textarea" id="internal-message" name="internal_message" rows="5" maxlength="10000" placeholder="e.g. I'm away until Monday 10 November. For urgent help, contact support@…" data-oof-internal></textarea>
+            <p class="form-help oof-counter" data-oof-counter>0 / 10000</p>
+            <p class="scf-error" data-oof-error="internal" hidden></p>
+          </div>
+        </section>
+
+        <section class="oof-section" aria-labelledby="oof-external-title">
+          <h3 class="scf-panel__title" id="oof-external-title">Reply to people outside the organisation</h3>
+          <div class="scf-choice-list oof-audience" role="radiogroup" aria-labelledby="oof-external-title">
+            <label class="scf-choice">
+              <input type="radio" name="external_audience" value="none" data-oof-audience />
+              <span><strong>No one</strong><span class="text-muted">External senders get no reply.</span></span>
+            </label>
+            <label class="scf-choice">
+              <input type="radio" name="external_audience" value="contactsOnly" data-oof-audience />
+              <span><strong>Their contacts</strong><span class="text-muted">Only senders in the mailbox's contacts.</span></span>
+            </label>
+            <label class="scf-choice">
+              <input type="radio" name="external_audience" value="all" data-oof-audience />
+              <span><strong>Everyone</strong><span class="text-muted">Any external sender.</span></span>
+            </label>
+          </div>
+          <div class="oof-external" data-oof-external-wrap>
+            <label class="scf-switch">
+              <input type="checkbox" name="same_message" id="same-message" data-oof-same />
+              <span class="scf-switch__track" aria-hidden="true"></span>
+              <span>Send the same message as colleagues get</span>
+            </label>
+            <div class="form-field" data-oof-external-field>
+              <label class="form-label" for="external-message">External sender message</label>
+              <textarea class="form-input form-input--textarea" id="external-message" name="external_message" rows="5" maxlength="10000" placeholder="A shorter, more formal message for customers and suppliers" data-oof-external></textarea>
+              <p class="scf-error" data-oof-error="external" hidden></p>
+            </div>
+          </div>
+          <p class="form-help">Turning replies off keeps each mailbox's saved messages and audience.</p>
+        </section>
+      </div>
+
+      <aside class="scf-preview oof-preview" aria-label="Live preview">
+        <p class="scf-preview__eyebrow">What senders get</p>
+        <div class="oof-mail" data-oof-preview-internal>
+          <p class="oof-mail__subject">Automatic reply: <span data-oof-preview-subject>Your message</span></p>
+          <p class="oof-mail__to text-muted">To colleagues</p>
+          <div class="oof-mail__body" data-oof-preview-internal-body></div>
+        </div>
+        <div class="oof-mail" data-oof-preview-external>
+          <p class="oof-mail__subject">Automatic reply: <span>Your message</span></p>
+          <p class="oof-mail__to text-muted" data-oof-preview-external-to>To external senders</p>
+          <div class="oof-mail__body" data-oof-preview-external-body></div>
+        </div>
+        <ul class="scf-preview__rules" data-oof-preview-rules></ul>
+      </aside>
+    </div>
+
+    <footer class="modal__footer scf-editor__footer">
+      <button type="submit" class="button button--danger" name="intent" value="disable" data-oof-disable>Turn off replies</button>
+      <span class="scf-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button" name="intent" value="schedule" data-oof-save>Save schedule</button>
+    </footer>
+  </form>
+</div>
+{% endif %}
+<noscript><p class="alert alert--warning">JavaScript is required to schedule automatic replies, because times are converted from your timezone to UTC in the browser.</p></noscript>
 {% endblock %}
 
 {% block scripts %}
@@ -122,13 +340,26 @@
   document.querySelectorAll('[data-edit-mailbox]').forEach(button => button.addEventListener('click', () => {
     const setting = JSON.parse(button.dataset.setting), mailbox = button.dataset.editMailbox;
     document.querySelectorAll('input[name="mailboxes"]').forEach(input => { input.checked = input.value.toLocaleLowerCase() === mailbox.toLocaleLowerCase(); });
-    const graphDate = item => item?.dateTime ? `${item.dateTime}${item.timeZone === 'UTC' && !item.dateTime.endsWith('Z') ? 'Z' : ''}` : '';
+    // Graph returns up to seven fractional-second digits, which not every browser parses.
+    const graphDate = item => {
+      if (!item?.dateTime) return '';
+      const trimmed = item.dateTime.replace(/(\.\d{3})\d+/, '$1');
+      return `${trimmed}${item.timeZone === 'UTC' && !/(Z|[+-]\d{2}:?\d{2})$/.test(trimmed) ? 'Z' : ''}`;
+    };
+    // Exchange stores replies as HTML; show them as editable plain text.
+    const replyText = value => {
+      if (!value) return '';
+      const markup = value.replace(/[\r\n]+/g, '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|h[1-6])>/gi, '$&\n');
+      const doc = new DOMParser().parseFromString(markup, 'text/html');
+      return (doc.body.textContent || '').split('\n').map(line => line.trimEnd()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    };
     document.getElementById('start-local').value = asLocalInput(graphDate(setting.scheduledStartDateTime));
     document.getElementById('end-local').value = asLocalInput(graphDate(setting.scheduledEndDateTime));
-    document.getElementById('internal-message').value = setting.internalReplyMessage || '';
-    document.getElementById('external-message').value = setting.externalReplyMessage || '';
+    const internalText = replyText(setting.internalReplyMessage), externalText = replyText(setting.externalReplyMessage);
+    document.getElementById('internal-message').value = internalText;
+    document.getElementById('external-message').value = externalText;
     const radio = document.querySelector(`input[name="external_audience"][value="${setting.externalAudience || 'none'}"]`); if (radio) radio.checked = true;
-    same.checked = (setting.internalReplyMessage || '') === (setting.externalReplyMessage || ''); syncExternal(); showRange();
+    same.checked = internalText === externalText; syncExternal(); showRange();
     document.getElementById('oof-form').scrollIntoView({behavior:'smooth'});
   }));
 })();

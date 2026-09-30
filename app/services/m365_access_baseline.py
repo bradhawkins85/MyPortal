@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CONTRACT_VERSION = "2026-09-25.3"
+CONTRACT_VERSION = "2026-09-30.1"
 
 
 @dataclass(frozen=True)
@@ -84,6 +84,11 @@ GRAPH_APPLICATION_PERMISSION_IDS = {
     "Group.ReadWrite.All": "62a82d76-70ea-41e2-9197-370581804d09",
     "UserAuthenticationMethod.Read.All": "38d9df27-64da-44fd-b7c5-a6fbac20248f",
     "OrgSettings-Forms.ReadWrite.All": "2cb92fee-97a3-4034-8702-24a6f5d0d1e9",
+    # Best-practice remediations: Conditional Access / Security Defaults,
+    # domain password-expiry policy and the tenant LAPS switch.
+    "Policy.ReadWrite.ConditionalAccess": "01c0a623-fc9b-48e9-b794-0756f8e8f067",
+    "Domain.ReadWrite.All": "7e05723c-0bb0-42da-be95-ae9f08a6e53c",
+    "Policy.ReadWrite.DeviceConfiguration": "230fb2d5-aa21-49c1-bfa7-ae1be179d867",
 }
 
 # Permissions from the legacy provisioning inventory that the named baseline

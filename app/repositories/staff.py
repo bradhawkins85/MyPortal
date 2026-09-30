@@ -597,14 +597,29 @@ async def create_staff(
     onboarding_completed_at: datetime | None = None,
     approval_status: str = "pending",
     requested_by_user_id: int | None = None,
+    requested_by_name: str | None = None,
+    requested_by_email: str | None = None,
     requested_at: datetime | None = None,
     approved_by_user_id: int | None = None,
     approved_at: datetime | None = None,
     request_notes: str | None = None,
     approval_notes: str | None = None,
 ) -> dict[str, Any]:
+    # Requester snapshot columns are only written when supplied so staff can
+    # still be created by imports/syncs that never set them.
+    requested_by = {
+        column: value
+        for column, value in (
+            ("requested_by_name", requested_by_name),
+            ("requested_by_email", requested_by_email),
+        )
+        if value is not None
+    }
+    requested_by_columns = "".join(f",\n            {column}" for column in requested_by)
+    requested_by_placeholders = ", %s" * len(requested_by)
+    requested_by_values = list(requested_by.values())
     staff_id = await db.execute_returning_lastrowid(
-        """
+        f"""
         INSERT INTO staff (
             company_id,
             first_name,
@@ -637,9 +652,9 @@ async def create_staff(
             approved_by_user_id,
             approved_at,
             request_notes,
-            approval_notes
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
+            approval_notes{requested_by_columns}
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s{requested_by_placeholders})
+        """,  # nosec B608 - columns are fixed names
         (
             company_id,
             first_name,
@@ -673,6 +688,7 @@ async def create_staff(
             _coerce_datetime(approved_at),
             request_notes,
             approval_notes,
+            *requested_by_values,
         ),
     )
     if not staff_id:
@@ -711,6 +727,8 @@ async def update_staff(
     onboarding_completed_at: datetime | None = None,
     approval_status: str | None = None,
     requested_by_user_id: int | None = None,
+    requested_by_name: str | None = None,
+    requested_by_email: str | None = None,
     requested_at: datetime | None = None,
     approved_by_user_id: int | None = None,
     approved_at: datetime | None = None,
@@ -721,8 +739,18 @@ async def update_staff(
     offboarding_email_forward_to: str | None = None,
     offboarding_mailbox_grant_emails: str | None = None,
 ) -> dict[str, Any]:
+    # Only reference the requester snapshot columns when a value is supplied so
+    # routine updates (e.g. workflow status changes) never depend on them.
+    requested_by_clause = ""
+    requested_by_params: list[Any] = []
+    if requested_by_name is not None:
+        requested_by_clause += "            requested_by_name = %s,\n"
+        requested_by_params.append(requested_by_name)
+    if requested_by_email is not None:
+        requested_by_clause += "            requested_by_email = %s,\n"
+        requested_by_params.append(requested_by_email)
     await db.execute(
-        """
+        f"""
         UPDATE staff
         SET
             company_id = %s,
@@ -750,7 +778,7 @@ async def update_staff(
             onboarding_completed_at = COALESCE(%s, onboarding_completed_at),
             approval_status = COALESCE(%s, approval_status),
             requested_by_user_id = COALESCE(%s, requested_by_user_id),
-            requested_at = COALESCE(%s, requested_at),
+{requested_by_clause}            requested_at = COALESCE(%s, requested_at),
             approved_by_user_id = COALESCE(%s, approved_by_user_id),
             approved_at = COALESCE(%s, approved_at),
             request_notes = COALESCE(%s, request_notes),
@@ -760,7 +788,7 @@ async def update_staff(
             offboarding_email_forward_to = COALESCE(%s, offboarding_email_forward_to),
             offboarding_mailbox_grant_emails = COALESCE(%s, offboarding_mailbox_grant_emails)
         WHERE id = %s
-        """,
+        """,  # nosec B608 - clause is built from fixed column names
         (
             company_id,
             first_name,
@@ -791,6 +819,7 @@ async def update_staff(
             _coerce_datetime(onboarding_completed_at),
             approval_status,
             requested_by_user_id,
+            *requested_by_params,
             _coerce_datetime(requested_at),
             approved_by_user_id,
             _coerce_datetime(approved_at),

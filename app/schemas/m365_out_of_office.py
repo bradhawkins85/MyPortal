@@ -6,6 +6,18 @@ from typing import Literal
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 
+def _dedupe_mailboxes(mailboxes: list[str]) -> list[str]:
+    """Avoid duplicate Graph writes (addresses are case-insensitive) in submitted order."""
+    seen: set[str] = set()
+    unique: list[str] = []
+    for mailbox in mailboxes:
+        key = str(mailbox).casefold()
+        if key not in seen:
+            seen.add(key)
+            unique.append(mailbox)
+    return unique
+
+
 class OutOfOfficeCreate(BaseModel):
     mailboxes: list[EmailStr] = Field(min_length=1, max_length=100)
     start_time: datetime
@@ -34,9 +46,12 @@ class OutOfOfficeCreate(BaseModel):
         else:
             self.external_message = (self.external_message or "").strip()
             if not self.external_message:
-                raise ValueError("External message is required when messages are different")
-        # Avoid duplicate Graph writes while preserving the submitted order.
-        self.mailboxes = list(dict.fromkeys(self.mailboxes))
+                if self.external_audience != "none":
+                    raise ValueError("External message is required when messages are different")
+                # No external sender receives this reply, so keep the mailbox's
+                # external message meaningful rather than blanking it.
+                self.external_message = self.internal_message
+        self.mailboxes = _dedupe_mailboxes(self.mailboxes)
         return self
 
 
@@ -51,5 +66,5 @@ class OutOfOfficeDisable(BaseModel):
 
     @model_validator(mode="after")
     def remove_duplicates(self):
-        self.mailboxes = list(dict.fromkeys(self.mailboxes))
+        self.mailboxes = _dedupe_mailboxes(self.mailboxes)
         return self

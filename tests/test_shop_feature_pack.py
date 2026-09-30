@@ -19,6 +19,7 @@ EXPECTED = {
     ("GET", "/api/admin/shop/products/{product_id}/restrictions"),
     ("GET", "/api/admin/shop/products/{product_id}"),
     ("GET", "/api/admin/shop/products/{product_id}/price-history"),
+    ("GET", "/api/admin/shop/products/{product_id}/freight-preview"),
     ("GET", "/admin/shop"),
     ("GET", "/admin/shop/packages"),
     ("GET", "/admin/shop/packages/{package_id}"),

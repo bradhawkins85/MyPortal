@@ -29,7 +29,7 @@ def test_payload_requires_aware_ordered_times_and_external_message():
     with pytest.raises(ValidationError, match="after start time"):
         _payload(end_time=datetime(2026, 12, 20, 4, tzinfo=timezone.utc))
     with pytest.raises(ValidationError, match="External message is required"):
-        _payload(same_message=False)
+        _payload(same_message=False, external_audience="contactsOnly")
 
 
 @pytest.mark.anyio
@@ -183,3 +183,27 @@ async def test_rejects_cached_mailbox_outside_company_email_domains(monkeypatch)
 
     with pytest.raises(ValueError, match="Unknown user mailbox"):
         await m365_out_of_office.set_automatic_replies(7, _payload())
+
+
+def test_external_message_optional_when_no_external_audience():
+    payload = _payload(same_message=False, external_audience="none")
+    assert payload.external_message == "We are closed."
+    with pytest.raises(ValidationError, match="External message is required"):
+        _payload(same_message=False, external_audience="all")
+
+
+def test_duplicate_mailboxes_are_removed_case_insensitively():
+    payload = _payload(mailboxes=["One@example.com", "one@example.com", "two@example.com"])
+    assert [str(item).casefold() for item in payload.mailboxes] == [
+        "one@example.com", "two@example.com"
+    ]
+    disable = OutOfOfficeDisable(mailboxes=["A@example.com", "a@example.com"])
+    assert len(disable.mailboxes) == 1
+
+
+def test_plain_text_replies_keep_line_breaks_as_html():
+    assert m365_out_of_office._as_reply_html("Closed <today> & tomorrow\r\nBack Monday") == (
+        "Closed &lt;today&gt; &amp; tomorrow<br>\nBack Monday"
+    )
+    existing = "<html><body><div>Closed</div></body></html>"
+    assert m365_out_of_office._as_reply_html(existing) == existing

@@ -1,0 +1,7 @@
+{
+  "guid": "1673ebca-a22c-49ab-892b-31fbae652ff2",
+  "occurred_at": "2026-09-30T10:00Z",
+  "change_type": "Feature",
+  "summary": "Redesign Out of Office around a searchable list of mailboxes showing who is replying now, scheduled or off, with bulk selection and a modal editor offering quick date presets, audience cards and a live preview of what colleagues and external senders receive",
+  "content_hash": "50885ec72f193cd04687ac226c9452b89650cddc24aa5be8189edcc0b8fc2e04"
+}

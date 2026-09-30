@@ -21,6 +21,7 @@ from app.schemas.staff import (
     StaffExternalCheckpointCallback,
     StaffExternalCheckpointResponse,
     StaffOffboardingRequestCreate,
+    StaffWorkflowPendingWebhookItem,
     StaffWorkflowWebhookCallback,
     StaffWorkflowManualActionRequest,
     StaffWorkflowManualActionResponse,
@@ -386,6 +387,9 @@ async def create_staff_request(
         if current_user is not None and current_user.get("id") is not None
         else None
     )
+    requested_by_name, requested_by_email = (
+        staff_onboarding_workflow_service.requested_by_details(current_user)
+    )
     created = await staff_requests_repo.create_request(
         company_id=company_id,
         first_name=str(payload_data.get("first_name") or "").strip(),
@@ -399,6 +403,8 @@ async def create_staff_request(
         request_notes=str(payload_data.get("request_notes") or "").strip() or None,
         custom_fields=custom_fields or None,
         requested_by_user_id=requester_id,
+        requested_by_name=requested_by_name,
+        requested_by_email=requested_by_email,
         requested_at=datetime.now(tz=timezone.utc),
     )
     approver_user_ids = await staff_onboarding_workflow_service.notify_staff_approval_requested(
@@ -490,6 +496,8 @@ async def approve_staff_request_entry(
             onboarding_completed_at=None,
             approval_status="approved",
             requested_by_user_id=staff_request.get("requested_by_user_id"),
+            requested_by_name=staff_request.get("requested_by_name"),
+            requested_by_email=staff_request.get("requested_by_email"),
             requested_at=staff_request.get("requested_at"),
             approved_by_user_id=approver_id,
             approved_at=now,
@@ -514,6 +522,8 @@ async def approve_staff_request_entry(
             approved_at=now,
             approval_notes=approval_comment,
             requested_by_user_id=staff_request.get("requested_by_user_id"),
+            requested_by_name=staff_request.get("requested_by_name"),
+            requested_by_email=staff_request.get("requested_by_email"),
             requested_at=staff_request.get("requested_at"),
         )
         staff_id = int(created_staff["id"])
@@ -1055,6 +1065,35 @@ async def _confirm_external_checkpoint(
     return StaffExternalCheckpointResponse.model_validate(response_payload)
 
 
+@router.get(
+    "/workflow-webhooks/{webhook_public_id}/pending",
+    response_model=list[StaffWorkflowPendingWebhookItem],
+    summary="List workflows paused on a Pause For Webhook step",
+    description=(
+        "Returns every onboarding/offboarding workflow currently paused on the "
+        "Pause For Webhook step identified by this webhook URL, including the "
+        "staff details and custom fields captured by the request. Authenticate "
+        "with the step's POST key in the X-Webhook-Post-Key header. Resume each "
+        "workflow by POSTing to resumeUrl with the staffId."
+    ),
+)
+async def list_pending_workflow_webhooks(
+    webhook_public_id: str,
+    post_key: str = Header(..., alias="X-Webhook-Post-Key", min_length=24, max_length=255),
+    limit: int = Query(default=100, ge=1, le=500),
+    _: None = Depends(require_database),
+):
+    try:
+        items = await staff_onboarding_workflow_service.list_pending_webhook_checkpoints(
+            webhook_public_id=webhook_public_id.strip(),
+            post_key=post_key,
+            limit=limit,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    return [StaffWorkflowPendingWebhookItem.model_validate(item) for item in items]
+
+
 @router.post(
     "/workflow-webhooks/{webhook_public_id}",
     response_model=StaffExternalCheckpointResponse,
@@ -1063,7 +1102,10 @@ async def _confirm_external_checkpoint(
     description=(
         "Receives POST callbacks for onboarding/offboarding Wait For Webhook steps. "
         "The unique webhook URL identifies the pending workflow checkpoint and "
-        "the request body must include the matching postKey before the workflow resumes."
+        "the request body must include the matching postKey before the workflow resumes. "
+        "Send staffId to choose which paused workflow to resume. Optional values and "
+        "secretValues become workflow variables (${vars.<name>}) for later steps; "
+        "set outcome to 'failed' (with error) to fail the workflow instead."
     ),
 )
 async def confirm_workflow_webhook(
@@ -1079,6 +1121,10 @@ async def confirm_workflow_webhook(
             callback_payload=payload.payload,
             company_id=payload.company_id,
             staff_id=payload.staff_id,
+            values=payload.values,
+            secret_values=payload.secret_values,
+            outcome=payload.outcome,
+            error_message=payload.error,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -1523,6 +1569,8 @@ async def update_staff(
         onboarding_completed_at=data.get("onboarding_completed_at"),
         approval_status=data.get("approval_status"),
         requested_by_user_id=data.get("requested_by_user_id"),
+        requested_by_name=data.get("requested_by_name"),
+        requested_by_email=data.get("requested_by_email"),
         requested_at=data.get("requested_at"),
         approved_by_user_id=data.get("approved_by_user_id"),
         approved_at=data.get("approved_at"),
