@@ -582,6 +582,9 @@
         <p class="stf-error stf-editor__status" data-stf-form-error role="alert" hidden></p>
         <span class="stf-editor__spacer"></span>
         <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        {% if staff_custom_field_definitions %}
+          <button type="button" class="button" data-stf-next>Next</button>
+        {% endif %}
         <button type="submit" class="button">Send request</button>
       </footer>
     </form>

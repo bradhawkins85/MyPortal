@@ -8,6 +8,8 @@
 
   const DIRTY_CONFIRM = 'Discard your unsaved changes to this staff member?';
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  // Guards against a double-click on Next landing on Send request.
+  const SUBMIT_ARM_DELAY_MS = 1000;
 
   function parseJson(id, fallback) {
     const element = document.getElementById(id);
@@ -196,6 +198,68 @@
       });
       panels.forEach((panel) => {
         panel.hidden = panel.dataset.stfPanel !== name;
+      });
+      syncStepButtons(name);
+    }
+
+    // ----- two-step add flow -----------------------------------------------
+    // When the Additional details tab exists, the Person tab shows Next; Send request
+    // appears on the last tab and only becomes clickable a moment after it is shown.
+
+    const nextButton = form.querySelector('[data-stf-next]');
+    const submitButton = form.querySelector('button[type="submit"]');
+    let armTimer = null;
+
+    function isLastStep(name) {
+      const visible = visibleTabs();
+      return !nextButton || !visible.length || visible[visible.length - 1].dataset.stfTab === name;
+    }
+
+    function syncStepButtons(name) {
+      if (!nextButton || !submitButton) {
+        return;
+      }
+      window.clearTimeout(armTimer);
+      const last = isLastStep(name);
+      nextButton.hidden = last;
+      submitButton.hidden = !last;
+      submitButton.disabled = true;
+      if (last) {
+        armTimer = window.setTimeout(() => {
+          submitButton.disabled = false;
+        }, SUBMIT_ARM_DELAY_MS);
+      }
+    }
+
+    function activeTabName() {
+      const active = tabs.find((tab) => tab.classList.contains('is-active'));
+      return active ? active.dataset.stfTab : '';
+    }
+
+    function goNext() {
+      if (!validate()) {
+        return;
+      }
+      const visible = visibleTabs();
+      const index = visible.findIndex((tab) => tab.dataset.stfTab === activeTabName());
+      const next = visible[index + 1];
+      if (next) {
+        showTab(next.dataset.stfTab, true);
+      }
+    }
+
+    if (nextButton) {
+      nextButton.addEventListener('click', goNext);
+      // Enter in a field before the last step moves on instead of submitting.
+      form.addEventListener('keydown', (event) => {
+        if (
+          event.key === 'Enter'
+          && !isLastStep(activeTabName())
+          && event.target.matches('input:not([type="checkbox"]):not([type="radio"]), select')
+        ) {
+          event.preventDefault();
+          goNext();
+        }
       });
     }
 
@@ -486,6 +550,11 @@
 
     // Runs before staff.js's own submit handler (capture phase) so invalid edits never reach the server.
     form.addEventListener('submit', (event) => {
+      if (submitButton && submitButton.disabled) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
       if (!validate()) {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -493,10 +562,9 @@
       }
       if (mode === 'add') {
         snapshot = readState();
-        const submit = form.querySelector('button[type="submit"]');
-        if (submit) {
-          submit.classList.add('button--processing');
-          submit.disabled = true;
+        if (submitButton) {
+          submitButton.classList.add('button--processing');
+          submitButton.disabled = true;
         }
       }
     }, true);
@@ -517,10 +585,9 @@
     form.addEventListener('change', refresh);
 
     modal.addEventListener('modal:opened', () => {
-      const submit = form.querySelector('button[type="submit"]');
-      if (submit) {
-        submit.classList.remove('button--processing');
-        submit.disabled = false;
+      if (submitButton) {
+        submitButton.classList.remove('button--processing');
+        submitButton.disabled = false;
       }
       clearErrors();
       showingErrors = false;
