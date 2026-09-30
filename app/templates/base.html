@@ -1530,12 +1530,11 @@
             row.element.hidden = hidden.has(row.key) && !isCurrentPage;
           });
           if (activeSidebarPreferences.navigation_style === 'top') {
-            let activeDropdownFound = false;
             sidebarMenuRoot.querySelectorAll(':scope > .menu__item--expandable').forEach((item) => {
-              const containsCurrentPage = Boolean(item.querySelector('a[aria-current="page"]'));
-              const keepOpen = containsCurrentPage && !activeDropdownFound;
-              setMenuItemExpanded(item, keepOpen);
-              if (keepOpen) activeDropdownFound = true;
+              // Top-navigation dropdowns are transient. The active link still
+              // identifies the current section without opening its menu on
+              // every page load or preferences refresh.
+              setMenuItemExpanded(item, false);
             });
           }
           document.dispatchEvent(new CustomEvent('myportal:sidebar-updated'));
