@@ -36,7 +36,7 @@
 {%- endmacro %}
 
 {# Password input with a show/hide toggle (enhanced by auth_ui.js). #}
-{% macro password_input(id, name, autocomplete, placeholder='', minlength=none, describedby=none) -%}
+{% macro password_input(id, name, autocomplete, placeholder='', minlength=none, describedby=none, maxlength=none) -%}
 <div class="auth-password" data-password-field>
   <input
     id="{{ id }}"
@@ -46,11 +46,20 @@
     autocomplete="{{ autocomplete }}"
     required
     {% if minlength %}minlength="{{ minlength }}"{% endif %}
+    {% if maxlength %}maxlength="{{ maxlength }}"{% endif %}
     {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}
     {% if describedby %}aria-describedby="{{ describedby }}"{% endif %}
   />
   <button type="button" class="auth-password__toggle" data-password-toggle aria-controls="{{ id }}" aria-pressed="false" hidden>
     <span data-password-toggle-label>Show</span><span class="visually-hidden"> password</span>
   </button>
+</div>
+{%- endmacro %}
+
+{# Compact brand line above single-column cards (password help, 2FA setup). #}
+{% macro auth_brand(app_name) -%}
+<div class="auth-brand">
+  {{ brand_mark('auth-brand__mark') }}
+  <span class="auth-brand__name">{{ app_name }}</span>
 </div>
 {%- endmacro %}
