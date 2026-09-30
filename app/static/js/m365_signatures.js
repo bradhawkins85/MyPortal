@@ -34,7 +34,8 @@
 
   // Wrap {{ tokens }} in text nodes so the live design shows where values go.
   function highlightTokens(html) {
-    const doc = new DOMParser().parseFromString(`<body>${html || ''}</body>`, 'text/html');
+    const doc = new DOMParser().parseFromString('<!doctype html><html><body></body></html>', 'text/html');
+    doc.body.innerHTML = html || '';
     const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
     const nodes = [];
     while (walker.nextNode()) {
