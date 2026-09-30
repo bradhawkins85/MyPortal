@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from functools import lru_cache
+from html import escape
 import re
 import unicodedata
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -22,6 +23,8 @@ from app.repositories import users as users_repo
 from app.repositories import user_companies as user_company_repo
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
+from app.services import email as email_service
+from app.services import message_templates as message_templates_service
 from app.services import tickets as tickets_service
 
 
@@ -31,6 +34,23 @@ _STATUSES_REQUIRING_HELP = {"not_started", "in_progress", "non_compliant"}
 _ESSENTIAL8_TICKET_CATEGORY = "essential8"
 _ESSENTIAL8_TICKET_MODULE = "compliance"
 _SMB1001_TICKET_CATEGORY = "smb1001"
+_ENGAGEMENT_LETTER_TEMPLATE_SLUG = "smb1001-engagement-letter"
+_ENGAGEMENT_LETTER_SUBJECT_SLUG = "smb1001-engagement-letter-subject"
+_DEFAULT_ENGAGEMENT_LETTER_SUBJECT = "Letter of engagement for IT support - {{ company.name }}"
+_DEFAULT_ENGAGEMENT_LETTER = (
+    "<p>Dear {{ recipient.name }},</p>"
+    "<p>This letter confirms that {{ company.name }} engages Hawkins IT Solutions to provide IT support "
+    "on an ad hoc basis, as of {{ letter.date }}.</p>"
+    "<p>Under this engagement, Hawkins IT Solutions will, when requested:</p>"
+    "<ul><li>support, maintain and secure your computers, servers, network and cloud services;</li>"
+    "<li>respond to support requests raised through the portal, by email or by phone;</li>"
+    "<li>advise on security improvements, including the SMB1001 cyber security controls.</li></ul>"
+    "<p>Work is carried out on request and charged at our standard rates unless a separate agreement "
+    "says otherwise. Your staff can reach IT support through the MyPortal customer portal.</p>"
+    "<p>Please keep this letter with your compliance records. If you would like to discuss a managed "
+    "service agreement, reply to this email.</p>"
+    "<p>Kind regards,<br>{{ sender.name }}<br>Hawkins IT Solutions</p>"
+)
 
 
 def _slugify_essential8_element(name: str) -> str:
@@ -245,7 +265,7 @@ async def compliance_page(request: Request):
             link.get("recommendation_name") or "Recommended product or service"
         ) if control["compliance_help_url"] else ""
         controls_by_tier.setdefault(int(control["tier_level"]), []).append(control)
-    legacy_essential8 = await essential8_repo.list_company_compliance(company_id)
+    has_essential8_records = await essential8_repo.company_has_recorded_progress(company_id)
     essential8_import_count = await smb1001_repo.count_importable_essential8_controls(company_id)
 
     extra = {
@@ -257,9 +277,10 @@ async def compliance_page(request: Request):
         "domains": smb1001_repo.DOMAINS,
         "company_members": await users_repo.list_users_for_company(company_id),
         "company": company,
-        "has_essential8_records": bool(legacy_essential8),
+        "has_essential8_records": has_essential8_records,
         "essential8_import_count": essential8_import_count,
         "is_super_admin": bool(user.get("is_super_admin")),
+        "current_user_id": user.get("id"),
         "can_manage": bool(user.get("is_super_admin")) or bool(membership and membership.get("is_admin")),
     }
     return await main_module._render_template("compliance/smb1001.html", request, user, extra=extra)
@@ -391,6 +412,123 @@ async def compliance_submit_smb1001_ticket(request: Request, control_id: int):
     if ticket_id:
         message = f"Ticket #{ticket_id} submitted. A technician will contact you about this SMB1001 control."
     return flash_redirect("/compliance", message, "success")
+
+
+def _person_name(person: dict) -> str:
+    full_name = " ".join(
+        part for part in (str(person.get("first_name") or "").strip(), str(person.get("last_name") or "").strip()) if part
+    )
+    return full_name or str(person.get("display_name") or person.get("email") or "").strip()
+
+
+def _letter_html_to_text(html: str) -> str:
+    text = re.sub(r"<\s*br\s*/?\s*>", "\n", html, flags=re.IGNORECASE)
+    text = re.sub(r"<\s*li[^>]*>", "\n- ", text, flags=re.IGNORECASE)
+    text = re.sub(r"</(p|ul|ol)\s*>", "\n\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.replace("&nbsp;", " ").strip()
+
+
+async def _render_engagement_letter(context: dict) -> tuple[str, str, str]:
+    """Render the editable letter of engagement as (subject, html, text)."""
+
+    subject, _subject_type = await message_templates_service.render_template_content(
+        _ENGAGEMENT_LETTER_SUBJECT_SLUG,
+        context,
+        default_content=_DEFAULT_ENGAGEMENT_LETTER_SUBJECT,
+        default_content_type="text/plain",
+    )
+    subject = " ".join(subject.split())[:255] or "Letter of engagement for IT support"
+    rendered, content_type = await message_templates_service.render_template_content(
+        _ENGAGEMENT_LETTER_TEMPLATE_SLUG,
+        context,
+        default_content=_DEFAULT_ENGAGEMENT_LETTER,
+        default_content_type="text/html",
+    )
+    if content_type == "text/html":
+        return subject, rendered, _letter_html_to_text(rendered)
+    html = "<p>" + escape(rendered).replace("\n\n", "</p><p>").replace("\n", "<br>") + "</p>"
+    return subject, html, rendered
+
+
+@router.post("/compliance/smb1001/engagement-letter", response_class=HTMLResponse)
+async def compliance_send_engagement_letter(request: Request):
+    """Email a letter of engagement to an ad hoc customer to evidence TM-01."""
+    user, membership, company, company_id, redirect = await _load_compliance_context(request)
+    if redirect:
+        return redirect
+    if not (user.get("is_super_admin") or (membership and membership.get("is_admin"))):
+        return flash_redirect("/compliance", "Administrator access is required to send a letter of engagement.", "error")
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    if int(company.get("is_vip") or 0):
+        return flash_redirect(
+            "/compliance",
+            "This company is covered by a managed service agreement, so no letter of engagement is needed.",
+            "info",
+        )
+    control = await smb1001_repo.get_control_by_code(smb1001_repo.ENGAGEMENT_CONTROL_CODE)
+    if not control:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Control not found")
+
+    form = await request.form()
+    try:
+        recipient_id = int(str(form.get("recipient_user_id") or ""))
+    except ValueError:
+        recipient_id = None
+    members = await users_repo.list_users_for_company(company_id)
+    recipient = next((member for member in members if int(member["id"]) == recipient_id), None)
+    recipient_email = str((recipient or {}).get("email") or "").strip()
+    if not recipient_email:
+        return flash_redirect("/compliance", "Choose a company member to receive the letter of engagement.", "error")
+
+    today = date.today()
+    context = {
+        "recipient": {"name": _person_name(recipient), "email": recipient_email},
+        "company": {"name": str(company.get("name") or "").strip()},
+        "sender": {"name": _person_name(user) or "Hawkins IT Solutions", "email": str(user.get("email") or "")},
+        "letter": {"date": today.strftime("%d %B %Y").lstrip("0")},
+    }
+    subject, html_body, text_body = await _render_engagement_letter(context)
+    try:
+        sent, _metadata = await email_service.send_email(
+            subject=subject,
+            recipients=[recipient_email],
+            html_body=html_body,
+            text_body=text_body,
+        )
+    except email_service.EmailDispatchError:
+        sent = False
+    if not sent:
+        return flash_redirect("/compliance", "The letter of engagement could not be sent. Check the email settings and try again.", "error")
+
+    control_id = int(control["id"])
+    existing = await smb1001_repo.get_company_control_compliance(company_id, control_id) or {}
+    evidence_line = f"Letter of engagement emailed to {recipient_email} on {today.isoformat()}."
+    previous_evidence = str(existing.get("evidence") or "").strip()
+    record = await smb1001_repo.save_company_control_compliance(
+        company_id,
+        control_id,
+        user_id=user.get("id"),
+        source="engagement_letter",
+        action="engagement_letter_sent",
+        change_summary=evidence_line,
+        status="compliant",
+        evidence=f"{previous_evidence}\n{evidence_line}" if previous_evidence else evidence_line,
+        last_reviewed_date=today,
+    )
+    await audit_service.record(
+        action="smb1001.engagement_letter.send",
+        request=request,
+        user_id=user.get("id"),
+        entity_type="smb1001_control_compliance",
+        entity_id=record.get("id"),
+        before=existing or None,
+        after=record,
+        metadata={"company_id": company_id, "control_id": control_id, "recipient_user_id": recipient_id},
+    )
+    return flash_redirect("/compliance", f"Letter of engagement sent to {recipient_email}. TM-01 is now marked compliant.", "success")
 
 
 @router.get("/compliance/essential8", response_class=HTMLResponse)

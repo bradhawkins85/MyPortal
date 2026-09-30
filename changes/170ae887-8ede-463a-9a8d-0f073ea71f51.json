@@ -1,0 +1,7 @@
+{
+  "guid": "170ae887-8ede-463a-9a8d-0f073ea71f51",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "Feature",
+  "summary": "SMB1001 compliance now checks TM-03 antivirus and TM-07 Huntress coverage from the asset register, marks TM-08 compliant when the SPF, DKIM and DMARC best practice checks pass, treats VIP customers as meeting TM-01 and lets admins email an editable letter of engagement to ad hoc customers. The Legacy Essential 8 records button is hidden when there are no legacy records.",
+  "content_hash": "a02363363adadd4d670f83a4576a8db3c75180cf5cc93e81eff02afc8953172a"
+}

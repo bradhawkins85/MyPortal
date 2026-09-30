@@ -9,11 +9,14 @@ existing Essential 8 progress can be converted into SMB1001 progress.
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timezone
 from typing import Any, Iterable, Optional
 
 from app.core.database import db
+from app.core.logging import log_warning
 from app.repositories import essential8 as essential8_repo
+from app.services import asset_types
 
 STATUSES: tuple[str, ...] = (
     "not_started",
@@ -27,12 +30,36 @@ DONE_STATUSES = frozenset({"compliant", "not_applicable"})
 HELP_STATUSES = frozenset({"not_started", "in_progress", "non_compliant"})
 MAX_TIER = 5
 
-# Hawkins IT Solutions provides every portal company with the managed IT
-# support required by TM-01.  This is an effective reporting status rather
-# than a stored attestation so historical records and audit data are retained.
-MANAGED_COMPLIANT_CONTROLS: dict[str, str] = {
-    "TM-01": "Compliant through engaged IT support from Hawkins IT Solutions.",
-}
+# Controls whose status is worked out from portal data (company VIP flag, the
+# asset register and Microsoft 365 best practice results).  These are
+# effective reporting statuses rather than stored attestations, so historical
+# records and audit data are retained.
+ENGAGEMENT_CONTROL_CODE = "TM-01"
+ANTIVIRUS_CONTROL_CODE = "TM-03"
+EDR_CONTROL_CODE = "TM-07"
+EMAIL_AUTH_CONTROL_CODE = "TM-08"
+
+# Asset catalogue types that must run endpoint protection.  Network gear,
+# printers, phones and hypervisor appliances cannot run antivirus or Huntress.
+PROTECTED_ASSET_TYPES = frozenset({"workstation", "laptop", "server", "virtual_machine"})
+
+# Asset checkbox custom fields are filled from installed software, so a field
+# whose name mentions one of these products marks a device as protected.
+ANTIVIRUS_PRODUCT_PATTERN = re.compile(
+    r"\b(?:anti[- ]?virus|antimalware|anti[- ]?malware|endpoint (?:protection|security)|"
+    r"bitdefender|gravityzone|defender|sentinel ?one|sophos|eset|webroot|crowdstrike|falcon|"
+    r"trend ?micro|malwarebytes|kaspersky|norton|mcafee|trellix|avast|avg|symantec|"
+    r"cylance|cortex xdr|carbon black|emsisoft|f-secure|withsecure|vipre|panda)\b",
+    re.IGNORECASE,
+)
+HUNTRESS_PRODUCT_PATTERN = re.compile(r"\bhuntress\b", re.IGNORECASE)
+_ARCHIVE_ASSET_FIELD = "archive asset"
+
+EMAIL_AUTH_CHECKS: tuple[tuple[str, str], ...] = (
+    ("bp_spf_records_published", "SPF"),
+    ("bp_dkim_enabled_all_domains", "DKIM"),
+    ("bp_dmarc_records_published", "DMARC"),
+)
 
 DOMAINS: dict[str, str] = {
     "technology": "Technology management",
@@ -179,6 +206,14 @@ async def get_control(control_id: int) -> Optional[dict[str, Any]]:
     item = dict(row)
     item["domain_label"] = DOMAINS.get(item.get("domain") or "", item.get("domain") or "")
     return item
+
+
+async def get_control_by_code(code: str) -> Optional[dict[str, Any]]:
+    row = await db.fetch_one(
+        "SELECT id FROM smb1001_controls WHERE code = %(code)s",
+        {"code": code},
+    )
+    return await get_control(int(row["id"])) if row else None
 
 
 async def get_profile(company_id: int) -> Optional[dict[str, Any]]:
@@ -557,24 +592,212 @@ async def ensure_company_profile(company_id: int, *, user_id: Optional[int] = No
     return await get_profile(company_id) or {"company_id": company_id, "target_tier": 1}
 
 
+async def _load_is_vip(company_id: int) -> Optional[bool]:
+    row = await db.fetch_one(
+        "SELECT is_vip FROM companies WHERE id = %(company_id)s",
+        {"company_id": company_id},
+    )
+    if not row:
+        return None
+    return bool(int(row.get("is_vip") or 0))
+
+
+async def _load_protected_devices(company_id: int) -> list[dict[str, Any]]:
+    """Computers in the asset register with their antivirus and Huntress state."""
+
+    assets = await db.fetch_all(
+        """
+        SELECT id, name, type, asset_type, form_factor, os_name, machine_type
+        FROM assets
+        WHERE company_id = %(company_id)s AND archived_at IS NULL
+        ORDER BY name, id
+        """,
+        {"company_id": company_id},
+    )
+    checked_fields = await db.fetch_all(
+        """
+        SELECT v.asset_id, d.name
+        FROM asset_custom_field_values AS v
+        JOIN asset_custom_field_definitions AS d ON d.id = v.field_definition_id
+        JOIN assets AS a ON a.id = v.asset_id
+        WHERE a.company_id = %(company_id)s AND d.field_type = 'checkbox' AND v.value_boolean = 1
+        """,
+        {"company_id": company_id},
+    )
+    fields_by_asset: dict[int, list[str]] = {}
+    for row in checked_fields:
+        fields_by_asset.setdefault(int(row["asset_id"]), []).append(str(row.get("name") or ""))
+    defender_assets: set[int] = set()
+    try:
+        rows = await db.fetch_all(
+            """
+            SELECT td.asset_id
+            FROM tray_devices AS td
+            JOIN defender_device_status AS ds ON ds.tray_device_id = td.id
+            WHERE td.company_id = %(company_id)s AND td.asset_id IS NOT NULL AND ds.antivirus_enabled = 1
+            """,
+            {"company_id": company_id},
+        )
+        defender_assets = {int(row["asset_id"]) for row in rows}
+    except Exception as exc:  # Defender reporting is an optional feature pack.
+        log_warning("SMB1001 could not read Defender antivirus status", company_id=company_id, error=str(exc))
+
+    devices = []
+    for asset in assets:
+        asset_id = int(asset["id"])
+        fields = fields_by_asset.get(asset_id, [])
+        if any(name.strip().casefold() == _ARCHIVE_ASSET_FIELD for name in fields):
+            continue
+        if asset_types.effective(asset) not in PROTECTED_ASSET_TYPES:
+            continue
+        devices.append(
+            {
+                "id": asset_id,
+                "name": str(asset.get("name") or f"Asset {asset_id}"),
+                "has_antivirus": asset_id in defender_assets
+                or any(ANTIVIRUS_PRODUCT_PATTERN.search(name) for name in fields),
+                "has_huntress": any(HUNTRESS_PRODUCT_PATTERN.search(name) for name in fields),
+            }
+        )
+    return devices
+
+
+async def _load_email_auth_results(company_id: int) -> dict[str, str]:
+    rows = await db.fetch_all(
+        """
+        SELECT check_id, status
+        FROM m365_best_practice_results
+        WHERE company_id = %(company_id)s
+          AND check_id IN ('bp_spf_records_published', 'bp_dkim_enabled_all_domains', 'bp_dmarc_records_published')
+        """,
+        {"company_id": company_id},
+    )
+    return {str(row["check_id"]): str(row.get("status") or "unknown") for row in rows}
+
+
+async def load_automation_signals(company_id: int) -> dict[str, Any]:
+    """Collect the portal data used to evaluate automatically checked controls.
+
+    A source that cannot be read is reported as ``None`` so its controls fall
+    back to their manually recorded status.
+    """
+
+    signals: dict[str, Any] = {"is_vip": None, "devices": None, "email_checks": None}
+    loaders = (
+        ("is_vip", _load_is_vip),
+        ("devices", _load_protected_devices),
+        ("email_checks", _load_email_auth_results),
+    )
+    for key, loader in loaders:
+        try:
+            signals[key] = await loader(company_id)
+        except Exception as exc:
+            log_warning("SMB1001 automatic check data unavailable", company_id=company_id, source=key, error=str(exc))
+    return signals
+
+
+def _name_list(names: list[str], limit: int = 5) -> str:
+    shown = ", ".join(names[:limit])
+    if len(names) > limit:
+        shown += f" and {len(names) - limit} more"
+    return shown
+
+
+def _evaluate_device_coverage(devices: Optional[list[dict[str, Any]]], key: str, product: str) -> dict[str, Any]:
+    if not devices:
+        return {
+            "status": None,
+            "locked": False,
+            "reason": f"No computers were found in the asset register, so {product} coverage cannot be checked automatically.",
+        }
+    missing = [device["name"] for device in devices if not device.get(key)]
+    total = len(devices)
+    if not missing:
+        noun = "computer" if total == 1 else "computers"
+        return {
+            "status": "compliant",
+            "locked": True,
+            "reason": f"Checked automatically: all {total} {noun} in the asset register report {product}.",
+        }
+    return {
+        "status": "in_progress",
+        "locked": True,
+        "reason": (
+            f"Checked automatically: {total - len(missing)} of {total} computers report {product}. "
+            f"Missing on {_name_list(missing)}."
+        ),
+    }
+
+
+def evaluate_automated_controls(signals: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Work out the reported status of controls checked from portal data.
+
+    Each entry has ``status`` (``None`` keeps the manually recorded status),
+    ``locked`` (the status cannot be edited by hand) and ``reason``.
+    """
+
+    results: dict[str, dict[str, Any]] = {}
+
+    is_vip = signals.get("is_vip")
+    if is_vip:
+        results[ENGAGEMENT_CONTROL_CODE] = {
+            "status": "compliant",
+            "locked": True,
+            "reason": "Compliant through the managed service agreement held with VIP customers.",
+        }
+    elif is_vip is not None:
+        results[ENGAGEMENT_CONTROL_CODE] = {
+            "status": None,
+            "locked": False,
+            "reason": (
+                "Ad hoc support customers need a letter of engagement or support agreement. "
+                "Upload a signed agreement, or send a letter of engagement to substantiate this control."
+            ),
+            "engagement_letter": True,
+        }
+
+    devices = signals.get("devices")
+    if devices is not None:
+        results[ANTIVIRUS_CONTROL_CODE] = _evaluate_device_coverage(devices, "has_antivirus", "antivirus")
+        results[EDR_CONTROL_CODE] = _evaluate_device_coverage(devices, "has_huntress", "Huntress")
+
+    email_checks = signals.get("email_checks")
+    if email_checks is not None:
+        outcomes = [(label, email_checks.get(check_id)) for check_id, label in EMAIL_AUTH_CHECKS]
+        if all(result == "pass" for _label, result in outcomes):
+            results[EMAIL_AUTH_CONTROL_CODE] = {
+                "status": "compliant",
+                "locked": True,
+                "reason": "Checked automatically: the SPF, DKIM and DMARC best practice checks pass.",
+            }
+        else:
+            summary = ", ".join(
+                f"{label} {(result or 'not yet checked').replace('_', ' ')}" for label, result in outcomes
+            )
+            results[EMAIL_AUTH_CONTROL_CODE] = {
+                "status": None,
+                "locked": False,
+                "reason": f"Best practice checks: {summary}. All three must pass to be marked compliant automatically.",
+            }
+    return results
+
+
 async def get_company_overview(company_id: int) -> dict[str, Any]:
     tiers = await list_tiers()
     controls = await list_controls()
     compliance_map = await list_company_compliance(company_id)
     profile = await get_profile(company_id) or {"company_id": company_id, "target_tier": 1}
+    automated = evaluate_automated_controls(await load_automation_signals(company_id))
     for control in controls:
         control_id = int(control["id"])
-        managed_reason = MANAGED_COMPLIANT_CONTROLS.get(control["code"])
-        if managed_reason:
-            stored_record = compliance_map.get(control_id)
-            record = {**(stored_record or {}), "status": "compliant"}
+        record = compliance_map.get(control_id)
+        automation = automated.get(control["code"]) or {}
+        if automation.get("status"):
+            record = {**(record or {}), "status": automation["status"]}
             compliance_map[control_id] = record
-            control["status_locked"] = True
-            control["status_reason"] = managed_reason
-        else:
-            record = compliance_map.get(control_id)
-            control["status_locked"] = False
-            control["status_reason"] = ""
+        control["status_locked"] = bool(automation.get("locked"))
+        control["status_reason"] = automation.get("reason") or ""
+        control["engagement_letter"] = bool(automation.get("engagement_letter"))
         control["compliance"] = record
         control["status"] = (record or {}).get("status") or "not_started"
         control["essential8_mapped"] = control["code"] in ESSENTIAL8_MAPPINGS
@@ -880,9 +1103,11 @@ __all__ = [
     "create_profile",
     "derive_status_from_essential8",
     "ensure_company_profile",
+    "evaluate_automated_controls",
     "get_company_control_compliance",
     "get_company_overview",
     "get_control",
+    "get_control_by_code",
     "get_profile",
     "import_essential8_progress",
     "count_importable_essential8_controls",
@@ -890,6 +1115,7 @@ __all__ = [
     "list_control_audit",
     "list_controls",
     "list_tiers",
+    "load_automation_signals",
     "save_company_control_compliance",
     "set_target_tier",
 ]
