@@ -1074,6 +1074,44 @@ def _parse_custom_field_options(options_text: str) -> list[dict[str, str]]:
     return options
 
 
+def _custom_field_options_from_form(form: Any) -> list[dict[str, str]]:
+    """Read custom field options from a submitted form.
+
+    The admin editor posts ``options_json`` (a JSON list of
+    ``{value, label, m365_upn}`` objects) so option text can safely contain
+    commas, colons and pipes. The legacy delimited ``options`` string is still
+    accepted for older clients.
+    """
+    raw_json = str(form.get("options_json") or "").strip()
+    if raw_json:
+        try:
+            parsed = json.loads(raw_json)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, list):
+            options: list[dict[str, str]] = []
+            seen: set[str] = set()
+            for entry in parsed:
+                if not isinstance(entry, dict):
+                    continue
+                value = str(entry.get("value") or "").strip()
+                label = str(entry.get("label") or "").strip()
+                if not value:
+                    value = label
+                if not value or value.lower() in seen:
+                    continue
+                seen.add(value.lower())
+                options.append(
+                    {
+                        "value": value,
+                        "label": label or value,
+                        "m365_upn": str(entry.get("m365_upn") or "").strip().lower(),
+                    }
+                )
+            return options
+    return _parse_custom_field_options(str(form.get("options") or ""))
+
+
 def _parse_staff_custom_field_condition(
     *,
     parent_name_value: str,
@@ -1931,7 +1969,7 @@ async def admin_create_company_staff_custom_field(company_id: int, request: Requ
     visible_to_requester_emails = _normalize_staff_custom_field_visibility(
         form.get("visible_to_requester_emails")
     )
-    options = _parse_custom_field_options(str(form.get("options") or ""))
+    options = _custom_field_options_from_form(form)
     m365_upn = str(form.get("m365_upn") or "").strip().lower() or None
     if not name:
         return _main()._company_edit_redirect(
@@ -1999,7 +2037,7 @@ async def admin_update_company_staff_custom_field(
     visible_to_requester_emails = _normalize_staff_custom_field_visibility(
         form.get("visible_to_requester_emails")
     )
-    options = _parse_custom_field_options(str(form.get("options") or ""))
+    options = _custom_field_options_from_form(form)
     m365_upn = str(form.get("m365_upn") or "").strip().lower() or None
     await staff_custom_fields_repo.update_company_definition(
         definition_id,
