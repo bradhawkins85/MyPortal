@@ -67,7 +67,7 @@
               {% if q.conditions %}
                 {% set first = q.conditions[0] %}
                 <li class="scf-chip scf-chip--logic">
-                  Shown when {{ tq_labels.get(first.parent_question_id, 'another question') }} {{ tq_operator_labels.get(first.operator, first.operator) }} “{{ first.expected_value | truncate(30) }}”{% if q.conditions | length > 1 %} + {{ q.conditions | length - 1 }} more{% endif %}
+                  Shown when {{ tq_labels.get(first.parent_question_id, 'another question') }} {{ tq_operator_labels.get(first.operator, first.operator) }} “{{ first.expected_value | truncate(30) }}”{% if q.conditions | length > 1 %} + {{ (q.conditions | length) - 1 }} more{% endif %}
                 </li>
               {% endif %}
             </ul>
