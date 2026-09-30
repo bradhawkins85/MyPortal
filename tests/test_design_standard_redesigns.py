@@ -392,6 +392,7 @@ def test_issue_tracker_renders_issue_list_stats_and_editor():
     assert 'action="/admin/issues/1/assignments/12/delete"' in html
     assert "stat-strip__stat--total" in html
     assert 'href="/admin/issues?issueId=2" data-iss-edit="2"' in html
+    assert 'data-iss-delete hidden>Delete issue</button>' in html
     # Standard popup modal pattern.
     assert re.search(r'<div class="modal scf-modal" id="iss-modal" role="dialog" aria-modal="true" '
                      r'aria-labelledby="iss-modal-title" aria-hidden="true" hidden>', html)

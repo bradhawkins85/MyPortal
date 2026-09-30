@@ -80,6 +80,7 @@
             </div>
           {% endif %}
           <div class="form-actions">
+            <button type="submit" class="button button--danger" formaction="/admin/issues/{{ editing_issue.issue_id }}/delete" formmethod="post">Delete issue</button>
             <a class="button button--ghost" href="/admin/issues">Cancel</a>
             <button type="submit" class="button">Save changes</button>
           </div>
@@ -342,6 +343,7 @@
       </div>
 
       <footer class="modal__footer scf-editor__footer">
+        <button type="submit" class="button button--danger" data-iss-delete hidden>Delete issue</button>
         <span class="scf-editor__spacer"></span>
         <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
         <button type="submit" class="button" data-iss-submit>Create issue</button>

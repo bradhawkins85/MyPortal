@@ -29,6 +29,12 @@ router.add_api_route(
     response_class=HTMLResponse,
 )
 router.add_api_route(
+    "/admin/issues/{issue_id}/delete",
+    handlers.admin_delete_issue,
+    methods=["POST"],
+    response_class=HTMLResponse,
+)
+router.add_api_route(
     "/admin/issues/{issue_id}/assignments/{assignment_id}/status",
     handlers.admin_update_issue_assignment_status,
     methods=["POST"],
