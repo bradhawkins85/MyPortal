@@ -251,6 +251,9 @@ def test_out_of_office_renders_mailbox_cards_and_editor():
     assert "Couldn't read: Access denied" in html
     assert 'id="oof-modal"' in html
     assert 'name="mailboxes" value="dan@example.com"' in html
+    assert 'data-oof-select-visible' in html
+    assert 'data-oof-new' in html
+    assert '/static/js/m365_out_of_office.js' in html
     data = _json_block(html, "oof-data")
     assert data["mailboxes"][0]["setting"]["externalAudience"] == "contactsOnly"
     assert data["canWrite"] is True
