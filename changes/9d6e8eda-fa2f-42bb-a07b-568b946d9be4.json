@@ -1,0 +1,7 @@
+{
+  "guid": "9d6e8eda-fa2f-42bb-a07b-568b946d9be4",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "Feature",
+  "summary": "Added secure issue deletion to the admin issue tracker, including confirmation and company-scope protection.",
+  "content_hash": "4fe35b8e7254c8435044150dabb4410954560cabcae529d5bdb4f4acab3e747d"
+}

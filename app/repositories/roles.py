@@ -78,6 +78,13 @@ async def update_role(role_id: int, **updates: Any) -> dict[str, Any]:
     return updated
 
 
+async def count_members_by_role() -> dict[int, int]:
+    rows = await db.fetch_all(
+        "SELECT role_id, COUNT(*) AS member_count FROM company_memberships GROUP BY role_id"
+    )
+    return {int(row["role_id"]): int(row["member_count"]) for row in rows if row.get("role_id") is not None}
+
+
 async def delete_role(role_id: int) -> None:
     await db.execute("DELETE FROM roles WHERE id = %s", (role_id,))
 

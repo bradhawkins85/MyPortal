@@ -1,0 +1,7 @@
+{
+  "guid": "2a092ad7-eb31-47d8-8514-a7b2c1c45641",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "Fix",
+  "summary": "Remove duplicated legacy fields and actions from the Microsoft 365 signature editor.",
+  "content_hash": "c2a218354a26847eb88993cc7af36975c56a4988c16278afc9c8d28c8573eff1"
+}

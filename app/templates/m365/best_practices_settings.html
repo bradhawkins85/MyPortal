@@ -73,6 +73,7 @@
                   id="bp-{{ bp.id }}"
                   name="enabled"
                   value="{{ bp.id }}"
+                  {% if bp.alternative_group %}data-policy-group="{{ bp.alternative_group }}"{% endif %}
                   {% if bp.enabled %}checked{% endif %}
                 />
               </td>
@@ -289,4 +290,9 @@
       </div>
     </form>
   </section>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/m365_best_practices_settings.js" defer></script>
 {% endblock %}

@@ -111,6 +111,27 @@ class TrayConfigResponse(BaseModel):
     network_scan_local_cidrs: list[str] = Field(default_factory=list)
 
 
+class TrayOutlookSignaturesRequest(BaseModel):
+    """Email addresses of the Outlook accounts configured for the signed-in user."""
+
+    addresses: list[str] = Field(default_factory=list, max_length=20)
+
+
+class TrayOutlookSignature(BaseModel):
+    address: str
+    name: str
+    html: str
+    text: str
+    hash: str
+
+
+class TrayOutlookSignaturesResponse(BaseModel):
+    enabled: bool
+    template_slug: Optional[str] = None
+    signatures: list[TrayOutlookSignature] = Field(default_factory=list)
+    skipped: dict[str, str] = Field(default_factory=dict)
+
+
 class NetworkScanHost(BaseModel):
     ip_address: str = Field(min_length=1, max_length=45)
     mac_address: Optional[str] = Field(default=None, max_length=17)

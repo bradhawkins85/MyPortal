@@ -9,10 +9,12 @@ TEMPLATE = Path("app/templates/admin/company_edit.html")
 def test_onedrive_export_setting_is_inside_microsoft_365_section():
     template = TEMPLATE.read_text()
     m365_section_start = template.index(
-        '<details class="card card--panel card-collapsible admin-grid__full" '
-        'data-m365-credentials-panel>'
+        '<section class="card card--panel ce-section" id="ce-microsoft-365" '
+        'data-m365-credentials-panel'
     )
-    m365_section_end = template.index("</details>", m365_section_start)
+    m365_section_end = template.index(
+        '<section class="card card--panel ce-section"', m365_section_start + 1
+    )
     onedrive_setting = template.index(
         'for="edit-company-onedrive-export-site"', m365_section_start
     )

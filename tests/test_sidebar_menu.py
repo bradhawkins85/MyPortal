@@ -243,6 +243,22 @@ def test_sidebar_applies_grouped_defaults_and_delegates_toggles():
     assert "document.querySelectorAll('[data-menu-toggle]').forEach" not in base_template
 
 
+def test_top_navigation_dropdowns_are_exclusive_and_aligned():
+    base_template = Path("app/templates/base.html").read_text()
+    stylesheet = Path("app/static/css/app.css").read_text()
+
+    assert "if (item !== menuItem) setMenuItemExpanded(item, false);" in base_template
+    assert "setMenuItemExpanded(item, false);" in base_template
+    assert "let activeDropdownFound = false;" not in base_template
+    assert "const selectedLink = event.target.closest('.menu__submenu a[href]');" in base_template
+    assert "body.navigation--top .menu__item--expandable:hover > .menu__submenu" not in stylesheet
+    top_header_rule = stylesheet.split("body.navigation--top .layout__header {", 1)[1].split("}", 1)[0]
+    assert "position: relative" in top_header_rule
+    assert "top: auto" in top_header_rule
+    assert "position: sticky" not in top_header_rule
+    assert "top: 4.5rem" not in top_header_rule
+
+
 def test_profile_menu_permission_shows_my_profile_for_non_admin(monkeypatch):
     user = {"id": 7, "email": "user@example.com", "is_super_admin": False}
     membership = {
@@ -779,9 +795,8 @@ def test_tickets_menu_permission_uses_no_access_own_all_levels():
 def test_tickets_role_ui_labels_are_no_access_own_all():
     template = Path("app/templates/admin/roles.html").read_text()
 
-    assert "permission.key == 'menu.tickets'" in template
-    assert "{{ 'Own' if is_ticket_permission else 'Read Only' }}" in template
-    assert "{{ 'All' if is_ticket_permission else ('Yes' if is_boolean_permission else 'Read/Write') }}" in template
+    assert "'menu.tickets': {'none': 'No access', 'read': 'Own', 'write': 'All'}" in template
+    assert "'menu.admin.technician': {'none': 'No', 'write': 'Yes'}" in template
     assert "All opens <code>/tickets</code> for company tickets" in template
 
 

@@ -522,6 +522,8 @@
   const sidebarSection = root.querySelector('[data-sidebar-customisation]');
   const sidebarList = root.querySelector('[data-sidebar-items]');
   const sidebarSaveButton = root.querySelector('[data-sidebar-save]');
+  const navigationStyleInputs = root.querySelectorAll('input[name="navigation-style"]');
+  let navigationStyle = 'sidebar';
   const sidebarResetButton = root.querySelector('[data-sidebar-reset]');
   const sidebarAddDividerButton = root.querySelector('[data-sidebar-add-divider]');
   const sidebarAddSpacerButton = root.querySelector('[data-sidebar-add-spacer]');
@@ -1159,6 +1161,7 @@
     });
     SIDEBAR_PROTECTED_KEYS.forEach((key) => hidden.delete(key));
     return {
+      navigation_style: navigationStyle,
       order: sidebarEntries.map((entry) => entry.key),
       hidden: Array.from(hidden),
       groups,
@@ -1166,14 +1169,26 @@
   }
 
   if (sidebarSection && window.MyPortalSidebarMenu) {
-    buildSidebarState(window.MyPortalSidebarMenu.getPreferences());
+    const initialPreferences = window.MyPortalSidebarMenu.getPreferences();
+    navigationStyle = initialPreferences.navigation_style === 'top' ? 'top' : 'sidebar';
+    navigationStyleInputs.forEach((input) => { input.checked = input.value === navigationStyle; });
+    buildSidebarState(initialPreferences);
     renderSidebarItems();
+
+    navigationStyleInputs.forEach((input) => input.addEventListener('change', () => {
+      if (!input.checked) return;
+      navigationStyle = input.value === 'top' ? 'top' : 'sidebar';
+      setSidebarDirty(true);
+    }));
 
     // The sidebar may first render from cache or the defaults; pick up the
     // server copy when it lands, unless the user has already started editing.
     document.addEventListener('myportal:sidebar-updated', () => {
       if (!sidebarDirty) {
-        buildSidebarState(window.MyPortalSidebarMenu.getPreferences());
+        const preferences = window.MyPortalSidebarMenu.getPreferences();
+        navigationStyle = preferences.navigation_style === 'top' ? 'top' : 'sidebar';
+        navigationStyleInputs.forEach((input) => { input.checked = input.value === navigationStyle; });
+        buildSidebarState(preferences);
         renderSidebarItems();
       }
     });
@@ -1194,7 +1209,7 @@
           renderSidebarItems();
           setSidebarDirty(false);
           if (sidebarStatus) sidebarStatus.textContent = 'Saved';
-          showMessage(sidebarSuccess, 'Left menu saved.');
+          showMessage(sidebarSuccess, 'Navigation menu saved.');
         } catch (error) {
           showMessage(sidebarError, error.message || 'Unable to save left menu preferences.');
         } finally {
@@ -1244,7 +1259,7 @@
       sidebarResetButton.addEventListener('click', async () => {
         clearMessages([sidebarSuccess, sidebarError]);
         const confirmed = window.confirm(
-          'Reset the left menu to the default layout? Your groups, order and hidden links will be removed.',
+          'Reset the navigation menu to the default layout? Your position, groups, order and hidden links will be reset.',
         );
         if (!confirmed) {
           return;
@@ -1252,12 +1267,14 @@
         sidebarResetButton.disabled = true;
         try {
           const defaults = await window.MyPortalSidebarMenu.reset();
+          navigationStyle = defaults.navigation_style === 'top' ? 'top' : 'sidebar';
+          navigationStyleInputs.forEach((input) => { input.checked = input.value === navigationStyle; });
           expandedGroupKeys.clear();
           buildSidebarState(defaults);
           renderSidebarItems();
           setSidebarDirty(false);
           if (sidebarStatus) sidebarStatus.textContent = 'Default layout applied';
-          showMessage(sidebarSuccess, 'Left menu reset to the default layout.');
+          showMessage(sidebarSuccess, 'Navigation menu reset to the default layout.');
         } catch (error) {
           showMessage(sidebarError, error.message || 'Unable to reset the left menu.');
         } finally {
