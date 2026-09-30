@@ -20,25 +20,69 @@
       <div>
         <h2 class="card__title" id="sig-list-title">Signature templates</h2>
         <p class="card__subtitle">
-          Design HTML and plain-text signatures filled in from each staff member's details.
-          The published template with the highest priority for today is the one MyPortal uses.
+          Manage tenant-scoped HTML and plain-text signature templates, preview them against staff data,
+          publish them, then deploy published templates to Exchange Online mailboxes. Publishing alone does not change any mailbox; use Deploy to apply a signature.
         </p>
       </div>
     </header>
     <div class="card__body card__body--stacked">
-      {% if templates %}
-        <dl class="sif-stats" aria-label="Signature summary">
-          <div class="sif-stats__item"><dt>Templates</dt><dd>{{ templates | length }}</dd></div>
-          <div class="sif-stats__item"><dt>Published</dt><dd>{{ sig_published | length }}</dd></div>
-          <div class="sif-stats__item"><dt>Drafts</dt><dd>{{ sig_drafts | length }}</dd></div>
-          <div class="sif-stats__item sig-stats__primary">
-            <dt>In use today</dt>
-            <dd>{% if current_primary %}{{ current_primary.name }}{% else %}<span class="text-muted">None</span>{% endif %}</dd>
+      <div class="alert alert--info" role="status">
+        <strong>Lifecycle:</strong> Draft templates are editable but inactive. Published means available for MyPortal use. A published template becomes scheduled or active according to its dates in <strong>{{ schedule_timezone }}</strong>. <strong>Outlook deployment:</strong> choose Deploy on a published template to apply it to selected mailboxes through Exchange Online. Deployment is a one-off push; redeploy after editing a template.
+      </div>
+      {% if current_primary %}
+        <div class="card card--panel">
+          <div class="card__body">
+            <strong>Current primary template:</strong> {{ current_primary.name }} <code>{{ current_primary.slug }}</code>
           </div>
-        </dl>
-
-        <div class="scf-toolbar">
-          <input type="search" class="form-input scf-toolbar__search" placeholder="Search signatures" aria-label="Search signature templates" data-sig-search />
+        </div>
+      {% endif %}
+      {% if templates %}
+        <div class="table-wrapper">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">Slug</th>
+                <th scope="col">MyPortal publication</th>
+                <th scope="col">Priority</th>
+                <th scope="col">Schedule</th>
+                <th scope="col">Updated</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in templates %}
+                <tr>
+                  <td>
+                    {{ item.name }}
+                    {% if current_primary and current_primary.id == item.id %}<span class="badge badge--success">Primary</span>{% endif %}
+                    {% if item.is_default %}<span class="badge badge--info">Default</span>{% endif %}
+                  </td>
+                  <td><code>{{ item.slug }}</code></td>
+                  <td>{{ item.status|replace('_', ' ')|title }}{% if item.status == 'published' %}<br><small class="text-muted">{{ 'Active for MyPortal' if current_primary and current_primary.id == item.id else 'Scheduled/available for MyPortal' }}</small>{% endif %}</td>
+                  <td>{{ item.priority or 0 }}</td>
+                  <td>
+                    {% if item.schedule_start_on or item.schedule_end_on %}
+                      {{ item.schedule_start_on.isoformat() if item.schedule_start_on else 'Immediate' }} → {{ item.schedule_end_on.isoformat() if item.schedule_end_on else 'No end' }}
+                    {% else %}
+                      Always active when published
+                    {% endif %}
+                  </td>
+                  <td>{% if item.updated_at %}<time data-utc="{{ item.updated_at.isoformat() }}">{{ item.updated_at.isoformat() }}</time>{% else %}—{% endif %}</td>
+                  <td>
+                    <div class="button-group">
+                      <a class="button button--small" href="/m365/signatures/{{ item.id }}/edit">Edit</a>
+                      {% if item.status == 'published' %}<a class="button button--small" href="/m365/signatures/{{ item.id }}/deploy">Deploy</a>{% endif %}
+                      <form method="post" action="/m365/signatures/{{ item.id }}/clone" style="display:inline;">
+                        {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                        <button type="submit" class="button button--ghost button--small">Duplicate</button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
 
         <ul class="sig-grid" data-sig-list>
@@ -99,15 +143,24 @@
         </div>
       {% endif %}
 
-      <details class="sig-about">
-        <summary>How publishing works</summary>
-        <ul class="list">
-          <li><strong>Draft</strong> templates can be edited freely and aren't used anywhere.</li>
-          <li><strong>Published</strong> templates are available to MyPortal. Of those active today (in <strong>{{ schedule_timezone }}</strong>), the highest priority wins, then the default, then the earliest start date.</li>
-          <li><strong>Disabled</strong> templates are kept but never used.</li>
-          <li>Publishing doesn't deploy signatures to Outlook or other Microsoft 365 clients — client deployment isn't configured, and personal or third-party signatures stay outside MyPortal.</li>
-        </ul>
-      </details>
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">How deployment works</h2>
+        <p class="card__subtitle">
+          Deploy renders the template for each selected mailbox's staff record and applies it with the Exchange Online
+          <code>Set-MailboxMessageConfiguration</code> cmdlet. This needs the Exchange.ManageAsApp permission and the Exchange Administrator role.
+        </p>
+      </div>
+    </header>
+    <div class="card__body">
+      <ul class="list">
+        <li>HTML and TXT variants are stored separately so administrators can publish rich and plain-text versions independently.</li>
+        <li>Preview uses live staff, company, custom-variable, and automation-token data before publication.</li>
+        <li>Deployed signatures are used by Outlook on the web and the new Outlook. Classic Outlook for Windows and Mac keeps locally stored signatures.</li>
+        <li>If roaming signatures are active in the tenant, Exchange ignores deployed signatures; the Deploy page shows this and can switch the tenant to Exchange-managed signatures.</li>
+        <li>Deploying replaces each selected mailbox's current signature.</li>
+      </ul>
     </div>
   </section>
 {% endblock %}

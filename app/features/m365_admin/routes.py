@@ -14,6 +14,7 @@ from app.schemas.m365_out_of_office import OutOfOfficeCreate, OutOfOfficeDisable
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
 from app.services import m365 as m365_service
+from app.services import m365_signature_deployment as signature_deploy_service
 from app.services import m365_signatures as signatures_service
 from app.services import m365_spam_purge as purge_service
 from app.services import m365_out_of_office as oof_service
@@ -192,6 +193,10 @@ async def set_out_of_office(request: Request):
             action = "schedule"
     except (ValueError, ValidationError) as exc:
         return flash_redirect("/m365/out-of-office", str(exc), "error")
+    except m365_service.M365Error as exc:
+        return flash_redirect(
+            "/m365/out-of-office", f"Microsoft 365 request failed: {exc}", "error"
+        )
     failures = [result for result in results if not result["success"]]
     audit_after = {
         "mailboxes": [str(item) for item in payload.mailboxes],
@@ -412,6 +417,115 @@ async def disable_signature_template(template_id: int, request: Request):
     if not updated:
         return flash_redirect("/m365/signatures", "Signature template not found.", "error")
     return flash_redirect(f"/m365/signatures/{template_id}/edit", "Signature template disabled.", "success")
+
+
+async def _render_signature_deploy(
+    request: Request,
+    user: dict,
+    company_id: int,
+    template_record: dict,
+    *,
+    outcomes: list | None = None,
+    submitted: dict | None = None,
+):
+    return await _main()._render_template(
+        "m365/signatures_deploy.html",
+        request,
+        user,
+        extra={
+            "title": "Deploy signature",
+            "template_record": template_record,
+            "targets": await signature_deploy_service.list_deployment_targets(company_id),
+            "roaming": await signature_deploy_service.get_roaming_signature_status(company_id),
+            "max_mailboxes": signature_deploy_service.MAX_DEPLOY_MAILBOXES,
+            "outcomes": outcomes or [],
+            "submitted": submitted or {},
+        },
+    )
+
+
+@router.get("/m365/signatures/{template_id}/deploy", response_class=HTMLResponse)
+async def signature_deploy_page(template_id: int, request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    template_record = await signatures_service.get_template(company_id, template_id)
+    if not template_record:
+        return flash_redirect("/m365/signatures", "Signature template not found.", "error")
+    return await _render_signature_deploy(request, user, company_id, template_record)
+
+
+@router.post("/m365/signatures/{template_id}/deploy")
+async def deploy_signature_template(template_id: int, request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    deploy_url = f"/m365/signatures/{template_id}/deploy"
+    template_record = await signatures_service.get_template(company_id, template_id)
+    if not template_record:
+        return flash_redirect("/m365/signatures", "Signature template not found.", "error")
+    form = await request.form()
+    submitted = {
+        "mailboxes": [str(item) for item in form.getlist("mailboxes")],
+        "auto_add_new": form.get("auto_add_new") == "on",
+        "auto_add_reply": form.get("auto_add_reply") == "on",
+    }
+    try:
+        results = await signature_deploy_service.deploy_template(
+            company_id,
+            template_id,
+            submitted["mailboxes"],
+            auto_add_new=submitted["auto_add_new"],
+            auto_add_reply=submitted["auto_add_reply"],
+        )
+    except ValueError as exc:
+        return flash_redirect(deploy_url, str(exc), "error")
+    except m365_service.M365Error as exc:
+        return flash_redirect(deploy_url, f"Microsoft 365 request failed: {exc}", "error")
+    failures = [result for result in results if not result["success"]]
+    await audit_service.record(
+        action="m365.signatures.deploy",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="m365_signature_template",
+        entity_id=template_id,
+        after={
+            "slug": template_record.get("slug"),
+            "mailboxes": [result["mailbox"] for result in results],
+            "success_count": len(results) - len(failures),
+            "failure_count": len(failures),
+            "auto_add_new": submitted["auto_add_new"],
+            "auto_add_reply": submitted["auto_add_reply"],
+        },
+    )
+    return await _render_signature_deploy(
+        request, user, company_id, template_record, outcomes=results, submitted=submitted
+    )
+
+
+@router.post("/m365/signatures/{template_id}/deploy/postpone-roaming")
+async def postpone_roaming_signatures(template_id: int, request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    deploy_url = f"/m365/signatures/{template_id}/deploy"
+    try:
+        await signature_deploy_service.postpone_roaming_signatures(company_id)
+    except m365_service.M365Error as exc:
+        return flash_redirect(deploy_url, f"Microsoft 365 request failed: {exc}", "error")
+    await audit_service.record(
+        action="m365.signatures.postpone_roaming",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="m365_organization_config",
+        entity_id=None,
+        after={"PostponeRoamingSignaturesUntilLater": True},
+    )
+    return flash_redirect(
+        deploy_url,
+        "Exchange-managed signatures enabled. Outlook clients can take a few hours to pick up the change.",
+        "success",
+    )
 
 
 @router.post("/m365/signatures/{template_id}/delete")
