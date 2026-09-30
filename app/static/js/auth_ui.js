@@ -89,8 +89,53 @@
     }
   }
 
+  // Forgot password: swap to a "check your email" view once auth.js reports success.
+  function initSentState() {
+    const card = document.querySelector('[data-auth-sent-card]');
+    if (!card) {
+      return;
+    }
+    const form = card.querySelector('[data-auth-sent-form]');
+    const formView = card.querySelector('[data-auth-sent-hide]');
+    const sentView = card.querySelector('[data-auth-sent]');
+    const success = form && form.querySelector('[data-auth-success]');
+    const emailInput = form && form.querySelector('input[name="email"]');
+    const emailOut = card.querySelector('[data-auth-sent-email]');
+    const retry = card.querySelector('[data-auth-sent-retry]');
+    if (!form || !formView || !sentView || !success) {
+      return;
+    }
+    let submittedEmail = '';
+    form.addEventListener('submit', () => {
+      submittedEmail = emailInput ? emailInput.value.trim() : '';
+    });
+    new MutationObserver(() => {
+      if (success.hidden || !success.textContent.trim()) {
+        return;
+      }
+      if (emailOut) {
+        emailOut.textContent = submittedEmail || 'that address';
+      }
+      formView.hidden = true;
+      sentView.hidden = false;
+      sentView.focus();
+    }).observe(success, { attributes: true, attributeFilter: ['hidden'], childList: true, characterData: true, subtree: true });
+    if (retry) {
+      retry.addEventListener('click', () => {
+        success.hidden = true;
+        success.textContent = '';
+        sentView.hidden = true;
+        formView.hidden = false;
+        if (emailInput) {
+          emailInput.focus();
+        }
+      });
+    }
+  }
+
   function init() {
     initPasskeySection();
+    initSentState();
     initPasswordToggles();
     initPasswordRules();
   }

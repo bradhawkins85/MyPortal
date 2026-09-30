@@ -49,10 +49,11 @@ def test_totp_enrolment_has_compact_loading_and_copy_feedback():
 def test_totp_enrolment_layout_stacks_without_horizontal_overflow():
     stylesheet = Path("app/static/css/app.css").read_text()
 
-    assert "width: min(100%, 960px)" in stylesheet
-    assert "grid-template-columns: auto minmax(0, 1fr)" in stylesheet
-    assert "@media (max-width: 720px)" in stylesheet
-    assert "grid-template-columns: minmax(0, 1fr)" in stylesheet
+    assert "grid-template-columns: minmax(0, 44rem)" in stylesheet
+    scan_rule = stylesheet.split(".totp-scan {", 1)[1].split("}", 1)[0]
+    assert "grid-template-columns: auto minmax(0, 1fr)" in scan_rule
+    narrow = stylesheet.split("@media (max-width: 720px) {\n  .totp-scan,", 1)[1].split("}", 1)[0]
+    assert "grid-template-columns: minmax(0, 1fr)" in narrow
     assert "text-overflow: ellipsis" in stylesheet
 
 

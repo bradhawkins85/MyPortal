@@ -307,3 +307,36 @@ def test_register_page_variants():
     assert "First-time setup" in first
     assert '<details class="auth-advanced">' in first and 'name="company_id"' in first
     assert "Already have an account?" not in first
+
+
+def test_password_help_pages_keep_auth_hooks():
+    env = _auth_env()
+    common = {"app_name": "MyPortal", "current_user": None, "csrf_token": "t", "request": None}
+
+    forgot = env.get_template("auth/forgot_password.html").render(**common)
+    assert 'data-endpoint="/auth/password/forgot"' in forgot
+    assert "data-auth-sent-form" in forgot and "data-auth-sent " in forgot
+    assert "auth_ui.js" in forgot
+
+    with_token = env.get_template("auth/reset_password.html").render(reset_token="abc", **common)
+    assert '<input type="hidden" name="token" value="abc" />' in with_token
+    assert 'id="reset-token"' not in with_token
+    assert 'name="confirm_password"' in with_token and 'maxlength="128"' in with_token
+    assert "data-password-rules" in with_token
+
+    without_token = env.get_template("auth/reset_password.html").render(reset_token="", **common)
+    assert 'id="reset-token"' in without_token
+
+
+def test_totp_enrolment_keeps_script_hooks():
+    html = _auth_env().get_template("auth/totp_enrol.html").render(
+        app_name="MyPortal", current_user=None, csrf_token="t", request=None,
+    )
+    for hook in (
+        'id="totp-enrol-root"', "data-totp-qr-container", "data-totp-qr-placeholder", "data-totp-qr",
+        "data-totp-manual-toggle", "data-totp-manual", 'id="totp-enrol-form"', 'id="totp-name"',
+        'id="totp-code"', "data-totp-submit", "data-totp-refresh", "data-logout",
+        'id="totp-secret"', 'id="totp-link"', 'data-copy-target="totp-secret"',
+    ):
+        assert hook in html, hook
+    assert html.count('class="totp-step"') == 3
