@@ -672,6 +672,27 @@ async def _load_ticket_email_attachments(
     return email_attachments
 
 
+async def _embed_ticket_email_images(
+    payload: Mapping[str, Any], html_body: str
+) -> tuple[str, list[dict[str, Any]]]:
+    """Swap ticket image download URLs in ``html_body`` for inline ``cid:`` parts."""
+    ticket_id = _extract_ticket_id_from_email_payload(payload)
+    if not ticket_id:
+        return html_body, []
+
+    from app.services import ticket_attachments as attachments_service
+
+    try:
+        return await attachments_service.embed_ticket_images_for_email(ticket_id, html_body)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning(
+            "Unable to embed inline ticket images in automation email",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
+        return html_body, []
+
+
 def _attachments_for_smtp2go(attachments: list[dict[str, Any]]) -> list[dict[str, str]]:
     formatted: list[dict[str, str]] = []
     for attachment in attachments:
@@ -3426,6 +3447,9 @@ async def _invoke_smtp(
     )
     if attachments is None:
         attachments = await _load_ticket_email_attachments(payload)
+    html_body, inline_images = await _embed_ticket_email_images(payload, html_body)
+    if inline_images:
+        attachments = [*(attachments or []), *inline_images]
 
     # Extract ticket reply ID from context if present, to enable email tracking
     ticket_reply_id = _extract_ticket_reply_id(payload.get("context"))
@@ -3620,6 +3644,7 @@ async def _invoke_smtp2go(
         attachments = _attachments_for_smtp2go(
             await _load_ticket_email_attachments(payload)
         )
+    html_body, inline_images = await _embed_ticket_email_images(payload, html_body)
     template_id = str(payload.get("template_id") or "").strip() or None
     template_data = (
         payload.get("template_data")
@@ -3684,6 +3709,7 @@ async def _invoke_smtp2go(
             bcc=bcc,
             custom_headers=custom_headers_dict,
             attachments=attachments,
+            inlines=inline_images or None,
             template_id=template_id,
             template_data=template_data,
             tracking_id=tracking_id,
