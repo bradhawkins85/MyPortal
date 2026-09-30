@@ -424,7 +424,7 @@
         <section class="card card--panel menu-editor" data-sidebar-customisation>
         <header class="card__header card__header--stacked menu-editor__header">
           <div>
-            <h2 class="card__title">Left menu</h2>
+            <h2 class="card__title">Navigation menu</h2>
             <p class="card__subtitle">
               Drag links to reorder them, move them between groups, and switch off anything you don't use.
               Changes preview here and apply to the sidebar when you save.
@@ -446,6 +446,17 @@
           </div>
         </header>
         <div class="card__body menu-editor__body">
+          <fieldset class="navigation-style" data-navigation-style>
+            <legend class="form-label">Menu position</legend>
+            <label class="navigation-style__option">
+              <input type="radio" name="navigation-style" value="sidebar" />
+              <span><strong>Left menu</strong><small>Show navigation vertically beside the page.</small></span>
+            </label>
+            <label class="navigation-style__option">
+              <input type="radio" name="navigation-style" value="top" />
+              <span><strong>Top menu</strong><small>Keep a horizontal menu at the top, with grouped items in drop-down menus.</small></span>
+            </label>
+          </fieldset>
           <div class="menu-editor__list-header">
             <span class="menu-editor__list-title">Menu layout</span>
             <button type="button" class="menu-editor__text-button" data-sidebar-expand-all aria-pressed="false">Expand all</button>

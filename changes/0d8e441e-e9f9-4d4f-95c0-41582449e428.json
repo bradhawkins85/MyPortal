@@ -1,0 +1,7 @@
+{
+  "guid": "0d8e441e-e9f9-4d4f-95c0-41582449e428",
+  "occurred_at": "2026-09-30T10:40Z",
+  "change_type": "Fix",
+  "summary": "Fix companies chosen when creating an issue not being linked to it, and allow editing issues that are not linked to any company yet",
+  "content_hash": "86aa85db2fb391b1b5e8439ee286cd4fcf9ba44e031e1a4a952611abf7fc0d2f"
+}

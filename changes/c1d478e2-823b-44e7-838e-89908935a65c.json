@@ -1,0 +1,7 @@
+{
+  "guid": "c1d478e2-823b-44e7-838e-89908935a65c",
+  "occurred_at": "2026-09-30T10:30Z",
+  "change_type": "Feature",
+  "summary": "Redesign the Service status admin page as a searchable, filterable service list with a tabbed modal editor, status cards, company picker, automatic check schedule and a live preview of the customer dashboard tile",
+  "content_hash": "e5ddd95f04b388c5942f708bc7506e9242aba9e530d6187a1bb1b58e49448f5d"
+}

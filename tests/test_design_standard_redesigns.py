@@ -251,6 +251,9 @@ def test_out_of_office_renders_mailbox_cards_and_editor():
     assert "Couldn't read: Access denied" in html
     assert 'id="oof-modal"' in html
     assert 'name="mailboxes" value="dan@example.com"' in html
+    assert 'data-oof-select-visible' in html
+    assert 'data-oof-new' in html
+    assert '/static/js/m365_out_of_office.js' in html
     data = _json_block(html, "oof-data")
     assert data["mailboxes"][0]["setting"]["externalAudience"] == "contactsOnly"
     assert data["canWrite"] is True
@@ -369,6 +372,102 @@ def _scheduled_tasks_context(**overrides):
         "company_options": [{"value": "", "label": "All companies"}, {"value": "42", "label": "Acme"}],
         "bulk_company_options": [{"value": "42", "label": "Acme"}],
         "schedule_timezone": "Australia/Brisbane",
+def test_service_status_admin_renders_service_list_and_editor():
+    from datetime import datetime
+
+    definitions = [
+        {"value": "operational", "label": "Operational", "description": "Working", "variant": "status--operational"},
+        {"value": "outage", "label": "Major outage", "description": "Down", "variant": "status--outage"},
+    ]
+    service = {
+        "id": 3, "name": "Email", "description": "Exchange Online", "status": "outage",
+        "status_message": "Some users can't send", "display_order": 2, "is_active": False,
+        "company_ids": [1, 2, 9], "tags": ["mail", "m365"], "updated_at": datetime(2026, 9, 1, 3, 4),
+        "ai_lookup_enabled": True, "ai_lookup_url": "https://status.example.com", "ai_lookup_prompt": "",
+        "ai_lookup_model_override": "", "ai_lookup_frequency_operational": 60,
+        "ai_lookup_frequency_degraded": 15, "ai_lookup_frequency_partial_outage": 10,
+        "ai_lookup_frequency_outage": 5, "ai_lookup_frequency_maintenance": 60,
+        "ai_lookup_last_checked_at": None, "ai_lookup_last_status": None, "ai_lookup_last_message": None,
+    }
+    html = _page_env().get_template("admin/service_status.html").render(
+        service_status_entries=[service],
+        service_status_summary={"total": 1, "by_status": {"operational": 0, "outage": 1}},
+        service_status_definitions=definitions,
+        service_status_lookup={d["value"]: d for d in definitions},
+        company_options=[{"id": 1, "name": "Acme"}, {"id": 2, "name": "Globex"}],
+        service_status_company_lookup={1: "Acme", 2: "Globex"},
+        service_status_public_urls={1: "/service-status/public/1/abc"},
+        service_status_editing=service,
+        service_status_default="operational",
+        csrf_token="t",
+    )
+
+    # Edit links work without JavaScript and open the editor with it.
+    assert 'href="/admin/service-status?serviceId=3" data-ssa-edit="3"' in html
+    assert "Acme, Globex + 1 more" in html
+    assert "Hidden from dashboards" in html
+    assert "AI checks every 5 min" in html
+    assert '<time data-utc="2026-09-01T03:04:00Z">' in html
+    assert 'id="service-modal"' in html and 'data-ssa-tab="visibility"' in html
+    assert 'name="companyIds" value="2"' in html
+    assert 'name="status" value="outage"' in html
+    assert 'id="ssa-delete-form"' in html
+    assert "service_status_admin.js" in html
+    data = _json_block(html, "service-status-editor-data")
+    assert data["services"][0]["tags"] == ["mail", "m365"]
+    assert data["editing"]["id"] == 3
+    assert data["frequencyDefaults"]["outage"] == 5
+    assert "strftime" not in (TEMPLATES / "admin/service_status.html").read_text()
+
+
+def test_service_status_admin_empty_state_offers_first_service():
+    html = _page_env().get_template("admin/service_status.html").render(
+        service_status_entries=[],
+        service_status_summary={"total": 0, "by_status": {}},
+        service_status_definitions=[],
+        service_status_lookup={},
+        company_options=[],
+        service_status_company_lookup={},
+        service_status_public_urls={},
+        service_status_editing=None,
+        service_status_default="operational",
+        csrf_token="t",
+    )
+
+    assert "No services yet" in html
+    assert "+ Add your first service" in html
+    assert 'id="public-pages-modal"' not in html
+def _issue_tracker_context(**overrides):
+    from types import SimpleNamespace
+
+    statuses = [
+        {"value": "new", "label": "New"},
+        {"value": "investigating", "label": "Investigating"},
+        {"value": "monitoring", "label": "Monitoring"},
+        {"value": "resolved", "label": "Resolved"},
+    ]
+    issues = [
+        {"issue_id": 1, "name": "M365 outage", "description": "Sign-in fails", "updated_at_iso": "2026-09-30T01:00:00+00:00",
+         "assignments": [
+             {"assignment_id": 11, "company_id": 5, "company_name": "Acme", "status": "investigating", "updated_at_iso": None},
+             {"assignment_id": 12, "company_id": 6, "company_name": "Globex", "status": "resolved", "updated_at_iso": None},
+         ]},
+        {"issue_id": 2, "name": "Printer driver", "description": None, "updated_at_iso": None,
+         "assignments": [
+             {"assignment_id": 21, "company_id": 5, "company_name": "Acme", "status": "monitoring", "updated_at_iso": None},
+         ]},
+        {"issue_id": 3, "name": "Old VPN", "description": None, "updated_at_iso": None, "assignments": []},
+    ]
+    context = {
+        "request": SimpleNamespace(url=SimpleNamespace(path="/admin/issues", query="")),
+        "issues": issues,
+        "issue_count": len(issues),
+        "issue_status_options": statuses,
+        "selected_status": None,
+        "selected_company_id": None,
+        "search_term": "",
+        "company_options": [{"id": 5, "name": "Acme"}, {"id": 6, "name": "Globex"}],
+        "editing_issue": None,
         "csrf_token": "t",
     }
     context.update(overrides)
@@ -423,3 +522,46 @@ def test_scheduled_tasks_empty_state_offers_first_task():
     assert "No active scheduled tasks" in html
     assert "+ Add your first task" in html
     assert 'href="?show_inactive=1"' in html
+def test_issue_tracker_renders_issue_list_stats_and_editor():
+    html = _page_env().get_template("admin/issues.html").render(**_issue_tracker_context())
+
+    # One row per issue (not per company), with its health and company statuses.
+    assert html.count("data-iss-item") == 3
+    assert "iss-item--active" in html and "iss-item--monitoring" in html and "iss-item--unlinked" in html
+    assert 'action="/admin/issues/1/assignments/11/status"' in html
+    assert 'action="/admin/issues/1/assignments/12/delete"' in html
+    assert "stat-strip__stat--total" in html
+    assert 'href="/admin/issues?issueId=2" data-iss-edit="2"' in html
+    assert 'data-iss-delete hidden>Delete issue</button>' in html
+    # Standard popup modal pattern.
+    assert re.search(r'<div class="modal scf-modal" id="iss-modal" role="dialog" aria-modal="true" '
+                     r'aria-labelledby="iss-modal-title" aria-hidden="true" hidden>', html)
+    assert 'name="companyIds"' in html
+    data = _json_block(html, "iss-editor-data")
+    assert data["openIssueId"] is None
+    assert data["issues"][0]["assignments"][1] == {"company_id": 6, "company_name": "Globex", "status": "resolved"}
+
+
+def test_issue_tracker_empty_and_filtered_states():
+    empty = _page_env().get_template("admin/issues.html").render(
+        **_issue_tracker_context(issues=[], issue_count=0)
+    )
+    assert "No issues yet" in empty
+    assert "+ Create your first issue" in empty
+
+    filtered = _page_env().get_template("admin/issues.html").render(
+        **_issue_tracker_context(issues=[], issue_count=0, selected_status="resolved")
+    )
+    assert "No issues match these filters" in filtered
+    assert "Matching issues" in filtered
+
+
+def test_issue_tracker_opens_editor_for_requested_issue():
+    context = _issue_tracker_context()
+    editing = dict(context["issues"][2], issue_id=9, name="Hidden by filters")
+    html = _page_env().get_template("admin/issues.html").render(
+        **dict(context, editing_issue=editing)
+    )
+    data = _json_block(html, "iss-editor-data")
+    assert data["openIssueId"] == 9
+    assert data["issues"][-1]["name"] == "Hidden by filters"
