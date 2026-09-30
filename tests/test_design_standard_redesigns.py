@@ -345,6 +345,58 @@ def test_totp_enrolment_keeps_script_hooks():
     assert html.count('class="totp-step"') == 3
 
 
+def _render_roles(roles):
+    from app.security.menu_permissions import catalogue_for_api
+
+    env = _env()
+    template = env.get_template("admin/roles.html")
+    context = template.new_context({
+        "roles": roles,
+        "menu_permission_catalogue": catalogue_for_api(),
+        "companies": [],
+        "overview_company_id": None,
+        "overview_role_id": None,
+        "published_content_overview": [],
+        "counter_strip": env.get_template("macros/counters.html").module.counter_strip,
+    })
+    return "".join(template.blocks["content"](context))
+
+
+def test_roles_page_renders_catalogue_and_grouped_access_editor():
+    html = _render_roles([
+        {"id": 1, "name": "Staff", "description": "Everyday staff", "is_system": True,
+         "member_count": 12, "permissions": {"menu.tickets": "read", "menu.dashboard": "read"}},
+        {"id": 7, "name": "Helpdesk", "description": None, "is_system": False,
+         "member_count": 0, "permissions": {"menu.admin.technician": "write", "menu.tickets": "write"}},
+    ])
+
+    assert 'data-role-edit="7"' in html and 'data-role-clone="1"' in html
+    assert "12 members" in html and "Not assigned" in html
+    assert "rol-chip--elevated" in html  # Technician is called out on the list
+    assert 'class="modal scf-modal" id="role-modal" role="dialog"' in html
+    # Every catalogue permission gets one radio group; tickets and technician keep their wording.
+    ticket_row = html[html.index('data-role-perm="menu.tickets"'):]
+    ticket_row = ticket_row[: ticket_row.index("</li>")]
+    assert ">Own<" in ticket_row and ">All<" in ticket_row
+    tech_row = html[html.index('data-role-perm="menu.admin.technician"'):]
+    tech_row = tech_row[: tech_row.index("</li>")]
+    assert ">No<" in tech_row and ">Yes<" in tech_row and 'value="read"' not in tech_row
+    data = _json_block(html, "role-editor-data")
+    assert data["roles"][1] == {
+        "id": 7, "name": "Helpdesk", "description": "",
+        "permissions": {"menu.admin.technician": "write", "menu.tickets": "write"},
+        "isSystem": False, "members": 0,
+    }
+    assert {"key": "menu.tickets", "levels": ["none", "read", "write"]}.items() <= data["catalogue"][
+        [item["key"] for item in data["catalogue"]].index("menu.tickets")
+    ].items()
+
+
+def test_roles_page_empty_state_offers_first_role():
+    html = _render_roles([])
+
+    assert "No roles yet" in html
+    assert "+ Add your first role" in html
 def _scheduled_tasks_context(**overrides):
     tasks = [
         {"id": 1, "name": "Acme — Sync to Xero", "command": "sync_to_xero", "command_label": "Sync to Xero",
