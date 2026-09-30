@@ -1,11 +1,33 @@
 from __future__ import annotations
 
+import html
+import re
 from urllib.parse import quote
 
 from app.repositories import companies as companies_repo
 from app.repositories import m365 as m365_repo
 from app.schemas.m365_out_of_office import OutOfOfficeCreate, OutOfOfficeDisable
 from app.services import m365 as m365_service
+
+
+_HTML_MARKUP = re.compile(
+    r"<\s*/?\s*(html|body|p|div|br|span|table|a|b|strong|i|em|u|ul|ol|li|font|h[1-6])\b",
+    re.IGNORECASE,
+)
+
+
+def _as_reply_html(message: str | None) -> str:
+    """Return a reply body Exchange renders as entered.
+
+    Exchange stores automatic replies as HTML, so plain text submitted with
+    line breaks would otherwise collapse onto a single line in the sent reply.
+    Messages that already contain HTML markup are passed through unchanged.
+    """
+    text = str(message or "")
+    if _HTML_MARKUP.search(text):
+        return text
+    normalised = text.replace("\r\n", "\n").replace("\r", "\n")
+    return html.escape(normalised, quote=False).replace("\n", "<br>\n")
 
 
 def _mailbox_uses_company_domain(mailbox: dict[str, object], domains: set[str]) -> bool:
@@ -49,8 +71,8 @@ async def set_automatic_replies(company_id: int, payload: OutOfOfficeCreate) -> 
                 "dateTime": payload.end_time.replace(tzinfo=None).isoformat(),
                 "timeZone": "UTC",
             },
-            "internalReplyMessage": payload.internal_message,
-            "externalReplyMessage": payload.external_message,
+            "internalReplyMessage": _as_reply_html(payload.internal_message),
+            "externalReplyMessage": _as_reply_html(payload.external_message),
         }
     }
     results: list[dict[str, object]] = []

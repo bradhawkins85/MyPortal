@@ -214,11 +214,11 @@ async def update_template(
 
 async def delete_template(company_id: int, template_id: int) -> bool:
     await _ensure_connection()
-    result = await db.execute(
+    deleted = await db.execute_rowcount(
         "DELETE FROM m365_signature_templates WHERE company_id = %s AND id = %s",
         (company_id, template_id),
     )
-    return bool(result)
+    return deleted > 0
 
 
 async def clear_default_template(company_id: int, *, exclude_template_id: int | None = None) -> None:

@@ -250,3 +250,24 @@ def test_signature_permission_is_available_to_roles():
 
     assert permission["admin_only"] is False
     assert permission["levels"] == ["none", "read", "write"]
+
+
+@pytest.mark.anyio
+async def test_delete_template_reports_affected_rows(monkeypatch):
+    from app.repositories import m365_signatures as signatures_repo
+
+    calls = []
+
+    async def fake_rowcount(sql, params):
+        calls.append(params)
+        return 1 if params == (7, 3) else 0
+
+    async def fake_connection():
+        return None
+
+    monkeypatch.setattr(signatures_repo, "_ensure_connection", fake_connection)
+    monkeypatch.setattr(signatures_repo.db, "execute_rowcount", fake_rowcount)
+
+    assert await signatures_repo.delete_template(7, 3) is True
+    assert await signatures_repo.delete_template(7, 4) is False
+    assert calls == [(7, 3), (7, 4)]

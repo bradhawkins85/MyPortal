@@ -192,6 +192,10 @@ async def set_out_of_office(request: Request):
             action = "schedule"
     except (ValueError, ValidationError) as exc:
         return flash_redirect("/m365/out-of-office", str(exc), "error")
+    except m365_service.M365Error as exc:
+        return flash_redirect(
+            "/m365/out-of-office", f"Microsoft 365 request failed: {exc}", "error"
+        )
     failures = [result for result in results if not result["success"]]
     audit_after = {
         "mailboxes": [str(item) for item in payload.mailboxes],

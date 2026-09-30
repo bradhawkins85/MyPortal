@@ -122,13 +122,26 @@
   document.querySelectorAll('[data-edit-mailbox]').forEach(button => button.addEventListener('click', () => {
     const setting = JSON.parse(button.dataset.setting), mailbox = button.dataset.editMailbox;
     document.querySelectorAll('input[name="mailboxes"]').forEach(input => { input.checked = input.value.toLocaleLowerCase() === mailbox.toLocaleLowerCase(); });
-    const graphDate = item => item?.dateTime ? `${item.dateTime}${item.timeZone === 'UTC' && !item.dateTime.endsWith('Z') ? 'Z' : ''}` : '';
+    // Graph returns up to seven fractional-second digits, which not every browser parses.
+    const graphDate = item => {
+      if (!item?.dateTime) return '';
+      const trimmed = item.dateTime.replace(/(\.\d{3})\d+/, '$1');
+      return `${trimmed}${item.timeZone === 'UTC' && !/(Z|[+-]\d{2}:?\d{2})$/.test(trimmed) ? 'Z' : ''}`;
+    };
+    // Exchange stores replies as HTML; show them as editable plain text.
+    const replyText = value => {
+      if (!value) return '';
+      const markup = value.replace(/[\r\n]+/g, '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|h[1-6])>/gi, '$&\n');
+      const doc = new DOMParser().parseFromString(markup, 'text/html');
+      return (doc.body.textContent || '').split('\n').map(line => line.trimEnd()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    };
     document.getElementById('start-local').value = asLocalInput(graphDate(setting.scheduledStartDateTime));
     document.getElementById('end-local').value = asLocalInput(graphDate(setting.scheduledEndDateTime));
-    document.getElementById('internal-message').value = setting.internalReplyMessage || '';
-    document.getElementById('external-message').value = setting.externalReplyMessage || '';
+    const internalText = replyText(setting.internalReplyMessage), externalText = replyText(setting.externalReplyMessage);
+    document.getElementById('internal-message').value = internalText;
+    document.getElementById('external-message').value = externalText;
     const radio = document.querySelector(`input[name="external_audience"][value="${setting.externalAudience || 'none'}"]`); if (radio) radio.checked = true;
-    same.checked = (setting.internalReplyMessage || '') === (setting.externalReplyMessage || ''); syncExternal(); showRange();
+    same.checked = internalText === externalText; syncExternal(); showRange();
     document.getElementById('oof-form').scrollIntoView({behavior:'smooth'});
   }));
 })();
