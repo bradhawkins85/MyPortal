@@ -340,3 +340,73 @@ def test_totp_enrolment_keeps_script_hooks():
     ):
         assert hook in html, hook
     assert html.count('class="totp-step"') == 3
+
+
+def _render_profile(**context) -> str:
+    from types import SimpleNamespace
+
+    from app import main as main_module
+
+    values = {
+        "request": SimpleNamespace(url=SimpleNamespace(path="/admin/profile", query=""), query_params={}),
+        "app_name": "MyPortal", "csrf_token": "t", "is_super_admin": False,
+        "has_authenticated_user": True, "active_membership": {}, "available_companies": [],
+        "module_enabled": {}, "enabled_module_slugs": [],
+        "current_user": {"id": 7, "email": "tech@example.com", "booking_link_url": "https://cal.example/me"},
+        "profile_totp_devices": [{"id": 1, "name": "Phone"}],
+        "profile_passkeys": [],
+        "profile_m365_contacts": {"connected": True, "account_email": "tech@example.com"},
+        "profile_show_technician_tools": True,
+        "matrix_chat_enabled": True,
+    }
+    values.update(context)
+    return main_module.templates.env.get_template("admin/profile.html").render(**values)
+
+
+def test_profile_page_uses_tabs_stats_and_modals():
+    html = _render_profile()
+
+    # Page-level actions live in the header, and the page title isn't repeated in a card.
+    assert 'data-profile-open="profile-password-modal"' in html
+    assert "management__title" not in html
+    # Security summary counts both second-factor methods.
+    assert re.search(r'data-profile-stat="total"[^>]*>\s*<span[^>]*>Sign-in methods</span>\s*<span[^>]*>1</span>', html)
+    for tab in ("security", "details", "integrations", "menu"):
+        assert f'data-profile-tab="{tab}"' in html and f'data-profile-panel="{tab}"' in html
+    # The tab bar is enhanced by JavaScript; without it every panel stays visible.
+    assert re.search(r'data-profile-tabs\s+hidden', html)
+    assert not re.search(r'data-profile-panel="\w+"[^>]*hidden', html)
+    # Contact, booking and Matrix details save together from one form.
+    contact = html[html.index('id="profile-contact-form"'):html.index("</form>", html.index('id="profile-contact-form"'))]
+    for field in ('id="mobile-number"', 'id="booking-link-url"', 'id="matrix-user-id"'):
+        assert field in contact
+    assert contact.count('type="submit"') == 1
+    # Existing account with an authenticator must confirm their password to add another.
+    assert not re.search(r'data-totp-password-field\s+hidden', html)
+    assert "data-profile-no-second-factor hidden" in html
+
+
+def test_profile_modals_follow_the_gold_standard():
+    html = _render_profile()
+    modal_ids = re.findall(r'<div class="modal scf-modal" id="([\w-]+)" role="dialog" aria-modal="true" aria-labelledby="[\w-]+"[^>]* hidden>', html)
+    assert modal_ids == [
+        "profile-password-modal", "profile-totp-modal", "profile-passkey-modal",
+        "profile-rename-modal", "profile-confirm-modal",
+    ]
+    assert "<dialog" not in html
+    for hook in (
+        'id="password-form"', "data-password-rules", 'name="confirm_password"',
+        "data-totp-qr", "data-totp-manual-toggle", 'id="totp-verify-form"', 'id="totp-code"',
+        'id="passkey-add-form"', 'id="passkey-rename-form"', 'id="profile-confirm-form"',
+        "auth_ui.js", "passkey_utils.js", "profile.js",
+    ):
+        assert hook in html, hook
+
+
+def test_profile_standard_user_sees_security_and_menu_only():
+    html = _render_profile(profile_show_technician_tools=False, profile_totp_devices=[])
+    assert 'data-profile-tab="details"' not in html
+    assert 'data-profile-tab="integrations"' not in html
+    assert "rich_text_editor.js" not in html
+    assert re.search(r'data-totp-password-field\s+hidden', html)
+    assert "data-profile-no-second-factor hidden" not in html
