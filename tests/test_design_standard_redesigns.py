@@ -340,3 +340,84 @@ def test_totp_enrolment_keeps_script_hooks():
     ):
         assert hook in html, hook
     assert html.count('class="totp-step"') == 3
+
+
+def _issue_tracker_context(**overrides):
+    from types import SimpleNamespace
+
+    statuses = [
+        {"value": "new", "label": "New"},
+        {"value": "investigating", "label": "Investigating"},
+        {"value": "monitoring", "label": "Monitoring"},
+        {"value": "resolved", "label": "Resolved"},
+    ]
+    issues = [
+        {"issue_id": 1, "name": "M365 outage", "description": "Sign-in fails", "updated_at_iso": "2026-09-30T01:00:00+00:00",
+         "assignments": [
+             {"assignment_id": 11, "company_id": 5, "company_name": "Acme", "status": "investigating", "updated_at_iso": None},
+             {"assignment_id": 12, "company_id": 6, "company_name": "Globex", "status": "resolved", "updated_at_iso": None},
+         ]},
+        {"issue_id": 2, "name": "Printer driver", "description": None, "updated_at_iso": None,
+         "assignments": [
+             {"assignment_id": 21, "company_id": 5, "company_name": "Acme", "status": "monitoring", "updated_at_iso": None},
+         ]},
+        {"issue_id": 3, "name": "Old VPN", "description": None, "updated_at_iso": None, "assignments": []},
+    ]
+    context = {
+        "request": SimpleNamespace(url=SimpleNamespace(path="/admin/issues", query="")),
+        "issues": issues,
+        "issue_count": len(issues),
+        "issue_status_options": statuses,
+        "selected_status": None,
+        "selected_company_id": None,
+        "search_term": "",
+        "company_options": [{"id": 5, "name": "Acme"}, {"id": 6, "name": "Globex"}],
+        "editing_issue": None,
+        "csrf_token": "t",
+    }
+    context.update(overrides)
+    return context
+
+
+def test_issue_tracker_renders_issue_list_stats_and_editor():
+    html = _page_env().get_template("admin/issues.html").render(**_issue_tracker_context())
+
+    # One row per issue (not per company), with its health and company statuses.
+    assert html.count("data-iss-item") == 3
+    assert "iss-item--active" in html and "iss-item--monitoring" in html and "iss-item--unlinked" in html
+    assert 'action="/admin/issues/1/assignments/11/status"' in html
+    assert 'action="/admin/issues/1/assignments/12/delete"' in html
+    assert "stat-strip__stat--total" in html
+    assert 'href="/admin/issues?issueId=2" data-iss-edit="2"' in html
+    # Standard popup modal pattern.
+    assert re.search(r'<div class="modal scf-modal" id="iss-modal" role="dialog" aria-modal="true" '
+                     r'aria-labelledby="iss-modal-title" aria-hidden="true" hidden>', html)
+    assert 'name="companyIds"' in html
+    data = _json_block(html, "iss-editor-data")
+    assert data["openIssueId"] is None
+    assert data["issues"][0]["assignments"][1] == {"company_id": 6, "company_name": "Globex", "status": "resolved"}
+
+
+def test_issue_tracker_empty_and_filtered_states():
+    empty = _page_env().get_template("admin/issues.html").render(
+        **_issue_tracker_context(issues=[], issue_count=0)
+    )
+    assert "No issues yet" in empty
+    assert "+ Create your first issue" in empty
+
+    filtered = _page_env().get_template("admin/issues.html").render(
+        **_issue_tracker_context(issues=[], issue_count=0, selected_status="resolved")
+    )
+    assert "No issues match these filters" in filtered
+    assert "Matching issues" in filtered
+
+
+def test_issue_tracker_opens_editor_for_requested_issue():
+    context = _issue_tracker_context()
+    editing = dict(context["issues"][2], issue_id=9, name="Hidden by filters")
+    html = _page_env().get_template("admin/issues.html").render(
+        **dict(context, editing_issue=editing)
+    )
+    data = _json_block(html, "iss-editor-data")
+    assert data["openIssueId"] == 9
+    assert data["issues"][-1]["name"] == "Hidden by filters"
