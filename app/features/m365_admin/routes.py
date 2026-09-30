@@ -247,6 +247,7 @@ async def signatures_page(request: Request):
             "title": "Signature management",
             "current_primary": current_primary,
             "schedule_timezone": signatures_service.get_schedule_timezone_name(),
+            "schedule_today": signatures_service.current_schedule_date(),
             "templates": templates,
             "classic_outlook_enabled": bool(company.get("classic_outlook_signatures_enabled")),
             "can_write": can_write,

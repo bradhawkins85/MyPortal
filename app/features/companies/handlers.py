@@ -2669,6 +2669,15 @@ async def admin_company_tray_settings_page(
     company_questions = await tq_repo.list_questions(
         scope="company", company_id=company_id, active_only=False
     )
+    global_questions = await tq_repo.list_questions(scope="global", active_only=False)
+    condition_rows = await tq_repo.list_conditions_for_questions(
+        [int(q["id"]) for q in company_questions]
+    )
+    conditions_by_question: dict[int, list[dict[str, Any]]] = {}
+    for row in condition_rows:
+        conditions_by_question.setdefault(int(row["question_id"]), []).append(dict(row))
+    for question in company_questions:
+        question["conditions"] = conditions_by_question.get(int(question["id"]), [])
     portal_url = (
         str(_main().settings.portal_url).rstrip("/")
         if _main().settings.portal_url
@@ -2682,6 +2691,7 @@ async def admin_company_tray_settings_page(
         "now_iso": datetime.now(timezone.utc).isoformat(),
         "portal_url": portal_url,
         "company_questions": company_questions,
+        "global_questions": global_questions,
     }
     return await _main()._render_template(
         "admin/tray/company_settings.html", request, current_user, extra=extra

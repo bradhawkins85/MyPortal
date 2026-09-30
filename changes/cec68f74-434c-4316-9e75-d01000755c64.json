@@ -1,0 +1,7 @@
+{
+  "guid": "cec68f74-434c-4316-9e75-d01000755c64",
+  "occurred_at": "2026-09-30T07:00Z",
+  "change_type": "Feature",
+  "summary": "Redesign tray ticket intake questions (global and per company) as a grouped card list with a tabbed modal editor, option builder, sentence-style Show when rules and live preview",
+  "content_hash": "151b5e2c8f4323e93bb6fa4b0e3dd8dfe617c34957cbf80b09925ebd8d447f6a"
+}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/scheduled_ticket_payload.html" import scheduled_ticket_payload %}
 {% block header_title %}<span class="header__title-text">{{ title | default('Scheduled Tasks') }}</span>{% endblock %}
 
 {% block header_actions %}
@@ -376,11 +377,7 @@
           <textarea class="form-input form-input--textarea" id="bulk-task-description" name="description" rows="3"></textarea>
           <p class="form-help">Optional description or notes copied to each created task.</p>
         </div>
-        <div class="form-field" id="bulk-task-json-payload-field" hidden>
-          <label class="form-label" for="bulk-task-json-payload">JSON Payload</label>
-          <textarea class="form-input form-input--textarea" id="bulk-task-json-payload" name="jsonPayload" rows="8" placeholder='{"subject": "Example ticket", "description": "Ticket details", "priority": "normal", "status": "open"}'></textarea>
-          <p class="form-help">Required when bulk creating scheduled ticket tasks. The same payload is copied to each company task.</p>
-        </div>
+        {{ scheduled_ticket_payload('bulk-task', 'hidden', 'The same ticket is created for each selected company.') }}
         <div class="form-field form-field--inline">
           <label class="form-label" for="bulk-task-max-retries">Max retries</label>
           <input class="form-input" id="bulk-task-max-retries" name="maxRetries" type="number" min="0" value="12" />
@@ -479,11 +476,7 @@
           <textarea class="form-input form-input--textarea" id="task-description" name="description" rows="3"></textarea>
           <p class="form-help" id="task-description-help">Optional description or notes about this task.</p>
         </div>
-        <div class="form-field" id="task-json-payload-field" style="display: none;">
-          <label class="form-label" for="task-json-payload">JSON Payload</label>
-          <textarea class="form-input form-input--textarea" id="task-json-payload" name="jsonPayload" rows="8" placeholder='{"subject": "Example ticket", "description": "Ticket details", "priority": "normal", "status": "open"}'></textarea>
-          <p class="form-help">JSON configuration for ticket creation. Required fields: subject. Optional: description, priority, status, category, requester_id, assigned_user_id.</p>
-        </div>
+        {{ scheduled_ticket_payload('task', 'style="display: none;"', 'Created each time the task runs.') }}
         <div class="form-field form-field--inline">
           <label class="form-label" for="task-max-retries">Max retries</label>
           <input class="form-input" id="task-max-retries" name="maxRetries" type="number" min="0" value="12" />
@@ -603,5 +596,6 @@
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
   <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/scheduled_ticket_payload.js') }}" defer></script>
   <script src="{{ static_url('/static/js/scheduled_task_columns.js') }}" defer></script>
 {% endblock %}
