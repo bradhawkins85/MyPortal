@@ -351,6 +351,10 @@ class Settings(BaseSettings):
     enable_auto_refresh: bool = Field(
         default=False, validation_alias="ENABLE_AUTO_REFRESH"
     )
+    # How the asset type picker behaves: "auto" offers only the built-in IT
+    # catalogue, "custom" also accepts typed-in types, and "manual" drops the
+    # catalogue entirely for deployments that do not track IT equipment.
+    asset_type_mode: str = Field(default="auto", validation_alias="ASSET_TYPE_MODE")
     force_env_module_settings: bool = Field(
         default=False, validation_alias="FORCE_ENV_MODULE_SETTINGS"
     )
@@ -926,6 +930,16 @@ class Settings(BaseSettings):
             # Split on '#' and take the first part, then strip whitespace
             value = value.split("#")[0].strip()
         return value
+
+    @field_validator("asset_type_mode", mode="before")
+    @classmethod
+    def _normalize_asset_type_mode(cls, value: str | None) -> str:
+        """Validate ASSET_TYPE_MODE, treating an empty value as "auto"."""
+
+        normalized = str(value or "").split("#")[0].strip().lower() or "auto"
+        if normalized not in {"auto", "custom", "manual"}:
+            raise ValueError("ASSET_TYPE_MODE must be one of: auto, custom, manual")
+        return normalized
 
     @field_validator("log_level", mode="before")
     @classmethod

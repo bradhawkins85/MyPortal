@@ -9,7 +9,7 @@ import json
 from urllib.parse import urlparse
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Mapping
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -270,7 +270,7 @@ async def assets_page(request: Request):
         record: dict[str, Any] = {
             "id": row.get("id"),
             "name": name,
-            "type": asset_types.get(asset_types.effective(row)).label,
+            "type": asset_types.display_label(row),
             "asset_type_icon": asset_types.get(asset_types.effective(row)).icon,
             "reported_type": _clean_text(row.get("type")),
             "machine_type": _clean_text(row.get("machine_type")),
@@ -487,12 +487,29 @@ async def new_asset_page(request: Request):
     return await _main()._render_template(
         "assets/form.html", request, user,
         extra={"title": "Create asset", "company": company, "asset": None,
-               "asset_type_groups": asset_types.grouped(),
+               **await _asset_type_picker(_company_id),
                "custom_fields": await asset_custom_fields_repo.list_field_definitions()},
     )
 
 
-def _manual_asset_values(form: Any) -> dict[str, str | None]:
+def _asset_type_mode() -> str:
+    mode = str(getattr(_main().settings, "asset_type_mode", "auto") or "auto").lower()
+    return mode if mode in asset_types.MODES else "auto"
+
+
+async def _asset_type_picker(company_id: int) -> dict[str, Any]:
+    """Template context for the asset type picker under ``ASSET_TYPE_MODE``."""
+    mode = _asset_type_mode()
+    return {
+        "asset_type_mode": mode,
+        "asset_type_groups": [] if mode == "manual" else asset_types.grouped(),
+        "custom_asset_types": [] if mode == "auto" else await asset_repo.list_custom_asset_types(company_id),
+    }
+
+
+async def _manual_asset_values(
+    form: Any, company_id: int, current: Mapping[str, Any] | None = None,
+) -> dict[str, str | None]:
     name = str(form.get("name") or "").strip()
     if not name or len(name) > 255:
         raise HTTPException(status_code=422, detail="Asset name is required and must be 255 characters or fewer")
@@ -502,9 +519,32 @@ def _manual_asset_values(form: Any) -> dict[str, str | None]:
         if len(value) > 255:
             raise HTTPException(status_code=422, detail=f"{key.replace('_', ' ').title()} is too long")
         values[key] = value or None
-    # Manual assets take their type from the fixed catalogue. A bare free-text
-    # ``type`` (older API clients) is mapped onto the closest catalogue entry.
+    mode = _asset_type_mode()
     submitted = str(form.get("asset_type") or "").strip()
+    typed = str(form.get("asset_type_name") or "").strip()
+    if current and not typed and submitted.lower() == asset_types.effective(current):
+        # Keep the asset's current type, even one the active mode no longer
+        # offers (a custom type in auto mode, a catalogue type in manual mode).
+        values["asset_type"] = asset_types.effective(current)
+        values["type"] = asset_types.display_label(current)
+        return values
+    if mode != "auto" and (typed or not submitted):
+        # Custom and manual modes take a typed-in name, reusing the spelling
+        # of a matching type already entered for this company.
+        try:
+            key, label = asset_types.resolve_name(
+                typed or values["type"], mode=mode,
+                existing=await asset_repo.list_custom_asset_types(company_id),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        values["asset_type"] = key
+        values["type"] = label
+        return values
+    if mode == "manual":
+        raise HTTPException(status_code=422, detail="Enter an asset type")
+    # Otherwise the type comes from the fixed catalogue. A bare free-text
+    # ``type`` (older API clients) is mapped onto the closest catalogue entry.
     try:
         key = asset_types.normalise(submitted) if submitted else asset_types.derive(values["type"])
     except ValueError as exc:
@@ -546,7 +586,7 @@ async def create_manual_asset(request: Request):
     if redirect:
         return redirect
     form = await request.form()
-    values = _manual_asset_values(form)
+    values = await _manual_asset_values(form, company_id)
     asset_id = await asset_repo.create_manual_asset(
         company_id=company_id, created_by=int(user["id"]), **values
     )
@@ -1826,10 +1866,12 @@ async def asset_detail_page(
             "linked_websites": [] if customer_safe else await websites_repo.list_for_asset(company_id, asset_id),
             "can_edit": not customer_safe and can_write,
             "asset_type": asset_types.get(asset_types.effective(record)),
+            "asset_type_label": asset_types.display_label(record),
             "derived_asset_type": asset_types.get(asset_types.derive(
                 record.get("type"), form_factor=record.get("form_factor"),
                 os_name=record.get("os_name"), machine_type=record.get("machine_type"))),
-            "asset_type_groups": asset_types.grouped(),
+            **await _asset_type_picker(company_id),
+            "synced_asset_type_groups": asset_types.grouped(),
             "reconciliation_candidates": [] if customer_safe else await asset_repo.list_reconciliation_candidates(company_id, asset_id),
             "asset_sources": [] if customer_safe else await asset_repo.list_asset_sources(company_id, asset_id),
             "customer_safe": customer_safe,
@@ -2135,7 +2177,7 @@ async def update_asset_documentation(request: Request, asset_id: int):
         raise HTTPException(status_code=404, detail="Asset not found")
     form = await request.form()
     if record.get("provenance") == "manual":
-        values = _manual_asset_values(form)
+        values = await _manual_asset_values(form, company_id, record)
         await asset_repo.update_manual_inventory(asset_id, **values)
         await _save_submitted_custom_fields(asset_id, form)
     criticality = _clean_optional(form, "criticality")

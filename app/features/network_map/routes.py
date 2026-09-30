@@ -77,6 +77,11 @@ def _type_filter_groups(all_nodes: dict[str, Any]) -> list[dict[str, Any]]:
         types = [{"key": item.key, "label": item.label, "icon": item.icon, "count": counts.get(item.key, 0)}
                  for item in group["types"]]
         groups.append({"label": group["label"], "types": types})
+    if counts.get(asset_types.CUSTOM_KEY):
+        custom = asset_types.CUSTOM_TYPE
+        groups.append({"label": "Custom", "types": [{
+            "key": custom.key, "label": custom.label, "icon": custom.icon,
+            "count": counts[custom.key]}]})
     return groups
 
 

@@ -45,10 +45,12 @@ class AssetType:
     radio: bool = False
     # Words in a synced type, chassis or OS name that identify this type.
     aliases: tuple[str, ...] = ()
+    # The icon file to draw, when it differs from the key.
+    icon_key: str | None = None
 
     @property
     def icon(self) -> str:
-        return f"/static/images/asset-types/{self.key}.svg"
+        return f"/static/images/asset-types/{self.icon_key or self.key}.svg"
 
     @property
     def colour(self) -> str:
@@ -99,8 +101,15 @@ ASSET_TYPES: tuple[AssetType, ...] = (
     AssetType("other", "Other device", "other"),
 )
 
-BY_KEY: dict[str, AssetType] = {item.key: item for item in ASSET_TYPES}
+# Types typed in by hand (ASSET_TYPE_MODE custom or manual) are stored under
+# this key with their name in ``assets.type``. It is not offered in pickers or
+# matched from synced data, and it is drawn with the generic icon.
+CUSTOM_KEY = "custom"
+CUSTOM_TYPE = AssetType(CUSTOM_KEY, "Custom type", "other", icon_key="other")
+
+BY_KEY: dict[str, AssetType] = {item.key: item for item in (*ASSET_TYPES, CUSTOM_TYPE)}
 DEFAULT_KEY = "other"
+MODES = ("auto", "custom", "manual")
 SOURCES = ("auto", "manual")
 
 def get(key: str | None) -> AssetType:
@@ -108,10 +117,41 @@ def get(key: str | None) -> AssetType:
     return BY_KEY.get(str(key or "").strip().lower(), BY_KEY[DEFAULT_KEY])
 
 
+def display_label(asset: Mapping[str, Any]) -> str:
+    """Return the name to show for an asset's type, using a custom type's own name."""
+    key = effective(asset)
+    if key == CUSTOM_KEY:
+        return str(asset.get("type") or "").strip() or CUSTOM_TYPE.label
+    return get(key).label
+
+
+def resolve_name(name: str | None, *, mode: str, existing: list[str] | tuple[str, ...] = ()) -> tuple[str, str]:
+    """Resolve a typed-in type name to ``(catalogue key, label)``.
+
+    In custom mode a name matching a catalogue key or label uses that entry.
+    Otherwise the name becomes a custom type, reusing the spelling of an
+    ``existing`` custom type that differs only in case or spacing.
+    """
+    clean = " ".join(str(name or "").split())
+    if not clean:
+        raise ValueError("Asset type is required")
+    if len(clean) > 255:
+        raise ValueError("Asset type is too long")
+    folded = clean.casefold()
+    if mode != "manual":
+        for item in ASSET_TYPES:
+            if folded in {item.key.casefold(), item.label.casefold()}:
+                return item.key, item.label
+    for label in existing:
+        if " ".join(str(label).split()).casefold() == folded:
+            return CUSTOM_KEY, str(label)
+    return CUSTOM_KEY, clean
+
+
 def normalise(key: str | None) -> str:
-    """Validate a submitted catalogue key."""
+    """Validate a submitted catalogue key (custom types are named, not keyed)."""
     clean = str(key or "").strip().lower()
-    if clean not in BY_KEY:
+    if clean not in BY_KEY or clean == CUSTOM_KEY:
         raise ValueError("Unknown asset type")
     return clean
 
@@ -197,7 +237,8 @@ def effective(asset: Mapping[str, Any]) -> str:
 @lru_cache(maxsize=None)
 def icon_markup(key: str) -> str:
     """Return the inner markup of a type's icon (a 48x48 viewBox), for embedding."""
-    path = ICON_DIR / f"{get(key).key}.svg"
+    item = get(key)
+    path = ICON_DIR / f"{item.icon_key or item.key}.svg"
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
