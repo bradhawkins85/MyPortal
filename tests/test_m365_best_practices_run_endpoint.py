@@ -210,6 +210,11 @@ def test_best_practices_page_enables_note_editing_for_technician(monkeypatch):
         "get_enabled_check_ids",
         AsyncMock(return_value={"bp_test"}),
     )
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "get_company_exclusions",
+        AsyncMock(return_value={"bp_test"}),
+    )
     monkeypatch.setattr(main_module, "_render_template", render_template)
 
     with TestClient(app) as client:
@@ -217,6 +222,20 @@ def test_best_practices_page_enables_note_editing_for_technician(monkeypatch):
 
     assert response.status_code == 200
     assert render_template.await_args.kwargs["extra"]["can_edit_notes"] is True
+    assert render_template.await_args.kwargs["extra"]["results"] == [
+        {
+            "check_id": "bp_test",
+            "check_name": "Test check",
+            "description": "",
+            "status": "excluded",
+            "details": "Excluded for this company.",
+            "run_at": None,
+            "is_cis_benchmark": False,
+            "cis_group": "",
+            "risk_score": 0,
+            "risk_severity": "medium",
+        }
+    ]
 
 
 def test_best_practices_page_sets_account_exclusion_permission_for_company_admins(monkeypatch):
@@ -240,6 +259,11 @@ def test_best_practices_page_sets_account_exclusion_permission_for_company_admin
     monkeypatch.setattr(
         main_module.m365_best_practices_service,
         "get_enabled_check_ids",
+        AsyncMock(return_value=set()),
+    )
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "get_company_exclusions",
         AsyncMock(return_value=set()),
     )
     monkeypatch.setattr(main_module, "_render_template", render_template)

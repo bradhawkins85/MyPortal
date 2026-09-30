@@ -91,6 +91,7 @@
   {% set fail_count = results | selectattr("status", "equalto", "fail") | list | length %}
   {% set unknown_count = results | selectattr("status", "equalto", "unknown") | list | length %}
   {% set na_count = results | selectattr("status", "equalto", "not_applicable") | list | length %}
+  {% set excluded_count = results | selectattr("status", "equalto", "excluded") | list | length %}
   <div class="stat-strip bp-filter-strip">
     {% if secure_score %}
     <div class="stat-strip__stat stat-strip__stat--info"
@@ -125,6 +126,13 @@
             data-bp-status="not_applicable" aria-pressed="false" title="Click to filter: Not Applicable checks">
       <span class="stat-strip__stat-label">Not Applicable</span>
       <span class="stat-strip__stat-value">{{ na_count }}</span>
+    </button>
+    {% endif %}
+    {% if excluded_count %}
+    <button type="button" class="stat-strip__stat stat-strip__stat--neutral bp-filter-btn"
+            data-bp-status="excluded" aria-pressed="false" title="Click to filter: Excluded checks">
+      <span class="stat-strip__stat-label">Excluded</span>
+      <span class="stat-strip__stat-value">{{ excluded_count }}</span>
     </button>
     {% endif %}
   </div>
@@ -164,6 +172,8 @@
               <span title="Fail" style="color:var(--color-error,#dc2626);font-size:1.25rem">✗</span>
             {% elif check.status == "not_applicable" %}
               <span title="Not applicable" style="color:var(--color-muted,#6b7280);font-size:1.25rem">–</span>
+            {% elif check.status == "excluded" %}
+              <span title="Excluded" style="color:var(--color-muted,#6b7280);font-size:1.25rem">⊘</span>
             {% else %}
               <span title="Unknown" style="color:var(--color-warning,#d97706);font-size:1.25rem">?</span>
             {% endif %}
@@ -302,6 +312,9 @@
                 </form>
                 {% endif %}
                 {% if show_actions %}
+                {% if check.status == "excluded" %}
+                <a href="/m365/best-practices/settings" class="header-menu__item" role="menuitem">Manage exclusion</a>
+                {% else %}
                 <form method="post" action="/m365/best-practices/check/{{ check.check_id }}" class="header-menu__form">
                   {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
                   <button type="submit" class="header-menu__item" role="menuitem" title="Re-evaluate this check now">Check</button>
@@ -316,6 +329,7 @@
                   {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
                   <button type="submit" class="header-menu__item" role="menuitem" title="Skip this check for this company">Exclude</button>
                 </form>
+                {% endif %}
                 {% endif %}
               </div>
             </div>

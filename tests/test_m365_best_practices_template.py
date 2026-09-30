@@ -170,6 +170,7 @@ def test_global_stat_strip_counts_all_benchmarks():
             {"cis_group": "intune_windows", "status": "fail", "check_name": "Windows check"},
             {"cis_group": "intune_ios", "status": "unknown", "check_name": "iOS check"},
             {"cis_group": "intune_macos", "status": "not_applicable", "check_name": "macOS check"},
+            {"cis_group": "", "status": "excluded", "check_name": "Excluded check"},
         ]
     )
 
@@ -178,6 +179,9 @@ def test_global_stat_strip_counts_all_benchmarks():
     assert '<span class="stat-strip__stat-label">Failed</span>' in html
     assert '<span class="stat-strip__stat-label">Unknown</span>' in html
     assert '<span class="stat-strip__stat-label">Not Applicable</span>' in html
+    assert '<span class="stat-strip__stat-label">Excluded</span>' in html
+    assert 'data-bp-status="excluded"' in html
+    assert '<span title="Excluded"' in html
     assert re.search(r'Passed</span>\s*<span class="stat-strip__stat-value">1</span>', html)
     assert re.search(r'Failed</span>\s*<span class="stat-strip__stat-value">1</span>', html)
     assert re.search(r'Unknown</span>\s*<span class="stat-strip__stat-value">1</span>', html)
