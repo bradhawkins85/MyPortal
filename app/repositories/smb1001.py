@@ -461,6 +461,32 @@ def derive_status_from_essential8(level_statuses: Iterable[str]) -> Optional[str
     return None
 
 
+async def count_importable_essential8_controls(company_id: int) -> int:
+    """Return how many SMB1001 controls can currently import E8 progress."""
+
+    e8_controls = await essential8_repo.list_essential8_controls()
+    control_id_by_order = {int(row["control_order"]): int(row["id"]) for row in e8_controls}
+    e8_levels = await essential8_repo.get_per_maturity_statuses_for_company(company_id)
+    controls = await list_controls()
+    compliance_map = await list_company_compliance(company_id)
+
+    importable = 0
+    for control in controls:
+        sources = ESSENTIAL8_MAPPINGS.get(control["code"])
+        if not sources:
+            continue
+        existing = compliance_map.get(int(control["id"]))
+        if existing and (existing.get("status") or "not_started") != "not_started":
+            continue
+        statuses = [
+            (e8_levels.get(control_id_by_order.get(order)) or {}).get(level, "not_started")
+            for order, level in sources
+        ]
+        if derive_status_from_essential8(statuses):
+            importable += 1
+    return importable
+
+
 async def import_essential8_progress(company_id: int, *, user_id: Optional[int] = None) -> dict[str, Any]:
     """Convert a company's Essential 8 progress into SMB1001 control statuses.
 
@@ -859,6 +885,7 @@ __all__ = [
     "get_control",
     "get_profile",
     "import_essential8_progress",
+    "count_importable_essential8_controls",
     "list_company_compliance",
     "list_control_audit",
     "list_controls",

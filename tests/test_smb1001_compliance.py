@@ -215,6 +215,7 @@ async def test_essential8_progress_is_converted_once_without_overwriting(sqlite_
     await smb1001_repo.save_company_control_compliance(
         1, controls["AM-03"]["id"], status="non_compliant", notes="Manual finding"
     )
+    assert await smb1001_repo.count_importable_essential8_controls(1) > 0
 
     profile = await smb1001_repo.ensure_company_profile(1, user_id=7)
     assert profile["target_tier"] == 1
@@ -232,6 +233,7 @@ async def test_essential8_progress_is_converted_once_without_overwriting(sqlite_
     assert records[controls["AM-03"]["id"]]["notes"] == "Manual finding"
     # Unmapped controls are left alone.
     assert controls["TM-01"]["id"] not in records
+    assert await smb1001_repo.count_importable_essential8_controls(1) == 0
 
     # A second visit does not import again.
     import_mock = AsyncMock()
@@ -308,6 +310,7 @@ async def test_compliance_page_renders_smb1001(monkeypatch):
         "get_company_overview",
         AsyncMock(return_value={"profile": {"target_tier": 2}, "tiers": tiers, "controls": controls, "progress": progress}),
     )
+    monkeypatch.setattr(compliance_routes.smb1001_repo, "count_importable_essential8_controls", AsyncMock(return_value=1))
     monkeypatch.setattr(compliance_routes.essential8_repo, "list_company_compliance", AsyncMock(return_value=[{"id": 1}]))
     monkeypatch.setattr(
         compliance_routes.smb1001_repo,
@@ -331,7 +334,7 @@ async def test_compliance_page_renders_smb1001(monkeypatch):
     extra = captured["extra"]
     assert extra["title"] == "SMB1001 Compliance"
     assert extra["can_manage"] is True
-    assert extra["has_essential8_records"] is True
+    assert extra["essential8_import_count"] == 1
     assert extra["progress"]["achieved_tier"]["name"] == "Bronze"
     assert [c["code"] for c in extra["controls_by_tier"][2]] == ["AM-03"]
     assert extra["controls_by_tier"][1][0]["show_help"] is False
@@ -360,7 +363,9 @@ def test_smb1001_ticket_text_names_control_and_tier():
     assert compliance_routes._build_smb1001_ticket_reference(3, 9) == "smb1001:control:9:company:3"
 
 
-def _render_dashboard(monkeypatch, *disabled: str, can_manage: bool = True) -> str:
+def _render_dashboard(
+    monkeypatch, *disabled: str, can_manage: bool = True, essential8_import_count: int = 1
+) -> str:
     import app.main as main_module
     from app.services.component_availability import ComponentAvailability
 
@@ -405,6 +410,7 @@ def _render_dashboard(monkeypatch, *disabled: str, can_manage: bool = True) -> s
         company_members=[{"id": 7, "email": "admin@example.com"}],
         company={"id": 1, "name": "Acme"},
         has_essential8_records=True,
+        essential8_import_count=essential8_import_count,
         can_manage=can_manage,
     )
 
@@ -431,6 +437,11 @@ def test_dashboard_template_hides_legacy_links_and_editing(monkeypatch):
     assert 'id="smb1001-import-e8"' not in body
     assert 'id="smb1001-target-tier"' not in body
     assert 'data-save-control="1"' not in body
+
+
+def test_dashboard_template_hides_import_when_nothing_is_importable(monkeypatch):
+    body = _render_dashboard(monkeypatch, essential8_import_count=0)
+    assert 'id="smb1001-import-e8"' not in body
 
 
 # ---------------------------------------------------------------------------

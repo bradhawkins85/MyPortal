@@ -243,6 +243,7 @@ async def compliance_page(request: Request):
         ) if control["compliance_help_url"] else ""
         controls_by_tier.setdefault(int(control["tier_level"]), []).append(control)
     legacy_essential8 = await essential8_repo.list_company_compliance(company_id)
+    essential8_import_count = await smb1001_repo.count_importable_essential8_controls(company_id)
 
     extra = {
         "title": "SMB1001 Compliance",
@@ -254,6 +255,7 @@ async def compliance_page(request: Request):
         "company_members": await users_repo.list_users_for_company(company_id),
         "company": company,
         "has_essential8_records": bool(legacy_essential8),
+        "essential8_import_count": essential8_import_count,
         "is_super_admin": bool(user.get("is_super_admin")),
         "can_manage": bool(user.get("is_super_admin")) or bool(membership and membership.get("is_admin")),
     }
