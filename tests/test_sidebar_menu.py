@@ -779,9 +779,8 @@ def test_tickets_menu_permission_uses_no_access_own_all_levels():
 def test_tickets_role_ui_labels_are_no_access_own_all():
     template = Path("app/templates/admin/roles.html").read_text()
 
-    assert "permission.key == 'menu.tickets'" in template
-    assert "{{ 'Own' if is_ticket_permission else 'Read Only' }}" in template
-    assert "{{ 'All' if is_ticket_permission else ('Yes' if is_boolean_permission else 'Read/Write') }}" in template
+    assert "'menu.tickets': {'none': 'No access', 'read': 'Own', 'write': 'All'}" in template
+    assert "'menu.admin.technician': {'none': 'No', 'write': 'Yes'}" in template
     assert "All opens <code>/tickets</code> for company tickets" in template
 
 

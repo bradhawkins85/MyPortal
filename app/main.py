@@ -6944,6 +6944,8 @@ async def admin_roles(request: Request, company_id: int | None = Query(None), ro
     if redirect:
         return redirect
     roles_list = await role_repo.list_roles()
+    member_counts = await role_repo.count_members_by_role()
+    roles_list = [{**role, "member_count": member_counts.get(int(role["id"]), 0)} for role in roles_list]
     companies = await company_repo.list_companies()
     overview: list[dict[str, Any]] = []
     overview_role = next((role for role in roles_list if int(role["id"]) == role_id), None) if role_id else None
