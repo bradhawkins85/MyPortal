@@ -317,6 +317,10 @@ _DEFAULT_POLICY_PROFILES: dict[str, str] = {
 }
 
 
+class PolicySelectionError(ValueError):
+    """Raised when enabled best practices request incompatible policy values."""
+
+
 def _validate_policy_selection(check_ids: set[str]) -> None:
     """Reject enabled controls that require different values on one property."""
     selected: dict[tuple[str, str], tuple[str, Any, str]] = {}
@@ -328,7 +332,7 @@ def _validate_policy_selection(check_ids: set[str]) -> None:
             value = desired.get("value")
             previous = selected.get(key)
             if previous and previous[1] != value:
-                raise ValueError(
+                raise PolicySelectionError(
                     "Conflicting policy controls: "
                     f"{previous[0]} requires {key[0]}.{key[1]}={previous[1]!r}, "
                     f"but {check_id} requires {value!r}. Select one policy profile."

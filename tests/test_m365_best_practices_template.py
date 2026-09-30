@@ -435,3 +435,24 @@ def test_settings_table_includes_create_ticket_on_fail_option():
     assert "Create Ticket" in html
     assert 'name="create_ticket_on_fail"' in html
     assert 'id="ticket-bp_test"' in html
+
+
+def test_settings_policy_alternatives_are_grouped_for_mutual_exclusion():
+    html = _render_best_practices_settings(
+        [
+            {
+                "id": "bp_lobby",
+                "name": "Lobby profile",
+                "description": "Description",
+                "enabled": True,
+                "auto_remediate": False,
+                "create_ticket_on_fail": False,
+                "excluded": False,
+                "has_remediation": True,
+                "alternative_group": "teams_global_lobby",
+            }
+        ]
+    )
+
+    assert 'data-policy-group="teams_global_lobby"' in html
+    assert "/static/js/m365_best_practices_settings.js" in html

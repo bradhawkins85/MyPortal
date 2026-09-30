@@ -4462,11 +4462,23 @@ async def save_m365_best_practices_settings(request: Request):
     auto_remediate_ids = {value for value in form.getlist("auto_remediate")}
     create_ticket_on_fail_ids = {value for value in form.getlist("create_ticket_on_fail")}
     excluded_ids = {value for value in form.getlist("excluded")}
-    await m365_best_practices_service.set_enabled_checks(
-        enabled_ids,
-        auto_remediate_ids,
-        create_ticket_on_fail_ids,
-    )
+    try:
+        await m365_best_practices_service.set_enabled_checks(
+            enabled_ids,
+            auto_remediate_ids,
+            create_ticket_on_fail_ids,
+        )
+    except m365_best_practices_service.PolicySelectionError as exc:
+        log_info(
+            "M365 best practice settings rejected",
+            user_id=user.get("id"),
+            reason=str(exc),
+        )
+        return flash_redirect(
+            "/m365/best-practices/settings",
+            str(exc),
+            "error",
+        )
     await m365_best_practices_service.save_company_exclusions(company_id, excluded_ids)
     log_info(
         "M365 best practice settings updated",

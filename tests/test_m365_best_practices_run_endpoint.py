@@ -311,6 +311,41 @@ def test_save_best_practice_settings_includes_create_ticket_on_fail(monkeypatch)
     save_exclusions.assert_awaited_once_with(99, {"bp_other"})
 
 
+def test_save_best_practice_settings_returns_validation_error(monkeypatch):
+    async def fake_context(request, super_admin_only=False):
+        return {"id": 7, "is_super_admin": True}, {}, {"id": 99}, 99, None
+
+    set_enabled = AsyncMock(
+        side_effect=bp_service.PolicySelectionError(
+            "Conflicting policy controls: select one policy profile."
+        )
+    )
+    save_exclusions = AsyncMock()
+    monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service, "set_enabled_checks", set_enabled
+    )
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service, "save_company_exclusions", save_exclusions
+    )
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/m365/best-practices/settings",
+            data={
+                "enabled": [
+                    "bp_only_org_can_bypass_lobby",
+                    "bp_invited_users_auto_admitted",
+                ]
+            },
+        )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/m365/best-practices/settings")
+    assert "flash_type=error" in response.headers["location"]
+    save_exclusions.assert_not_awaited()
+
+
 def test_exclude_check_action_preserves_existing_company_exclusions(monkeypatch):
     async def fake_context(request, super_admin_only=False):
         assert super_admin_only is True
