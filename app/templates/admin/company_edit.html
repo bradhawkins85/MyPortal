@@ -42,7 +42,7 @@
           <ul class="scf-item__chips ce-overview__chips" aria-label="Company summary">
             {% if form_data.is_vip %}<li class="scf-chip scf-chip--logic">VIP pricing</li>{% endif %}
             {% for domain in ce_email_domains[:4] %}<li class="scf-chip">@{{ domain }}</li>{% endfor %}
-            {% if ce_email_domains | length > 4 %}<li class="scf-chip">+{{ ce_email_domains | length - 4 }} more domains</li>{% endif %}
+            {% if ce_email_domains | length > 4 %}<li class="scf-chip">+{{ (ce_email_domains | length) - 4 }} more domains</li>{% endif %}
             {% if not ce_email_domains %}<li class="scf-chip scf-chip--muted">No email domains</li>{% endif %}
             {% if form_data.phone %}<li class="scf-chip">{{ form_data.phone }}</li>{% endif %}
             {% for method in form_data.payment_method or [] %}<li class="scf-chip">{{ ce_payment_labels.get(method, method) }}</li>{% endfor %}
