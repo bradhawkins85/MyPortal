@@ -1,0 +1,7 @@
+{
+  "guid": "4c4fae3c-b459-4215-acaa-568f66be4fd5",
+  "occurred_at": "2026-09-30T03:30Z",
+  "change_type": "Feature",
+  "summary": "Let external scripts list workflows paused on a Pause For Webhook step and resume them with returned values, secrets or a failed outcome",
+  "content_hash": "74791d8599de169fe2bf22ae01e446f5d6349ff853135a80a25965e6ba066a30"
+}

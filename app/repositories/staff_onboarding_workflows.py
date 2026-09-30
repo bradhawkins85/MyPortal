@@ -778,6 +778,39 @@ async def get_pending_external_checkpoint_by_webhook_id(
     return dict(row) if row else None
 
 
+async def list_pending_external_checkpoints_by_webhook_id(
+    webhook_public_id: str,
+    *,
+    waiting_states: Iterable[str],
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Return pending checkpoints for a webhook whose execution is still paused on it."""
+    states = [str(item) for item in waiting_states if item]
+    if not states:
+        return []
+    rows = await db.fetch_all(
+        """
+        SELECT
+            c.*,
+            e.direction AS execution_direction,
+            e.workflow_key AS execution_workflow_key,
+            e.state AS execution_state,
+            e.current_step AS execution_current_step,
+            e.requested_at AS execution_requested_at,
+            e.started_at AS execution_started_at
+        FROM staff_onboarding_external_checkpoints AS c
+        INNER JOIN staff_onboarding_workflow_executions AS e ON e.id = c.execution_id
+        WHERE c.webhook_public_id = %s
+          AND c.status = 'pending'
+          AND FIND_IN_SET(e.state, %s) > 0
+        ORDER BY c.created_at ASC, c.id ASC
+        LIMIT %s
+        """,
+        (webhook_public_id, ",".join(states), int(limit)),
+    )
+    return [dict(row) for row in rows]
+
+
 async def list_external_checkpoints_for_execution_ids(
     execution_ids: Iterable[int],
 ) -> dict[int, list[dict[str, Any]]]:
@@ -811,7 +844,7 @@ async def confirm_external_checkpoint(
     proof_reference_id: str | None,
     payload_hash: str | None,
     callback_payload: dict[str, Any] | None,
-    confirmed_by_api_key_id: int,
+    confirmed_by_api_key_id: int | None,
 ) -> None:
     await db.execute(
         """

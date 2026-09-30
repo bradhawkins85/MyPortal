@@ -33,6 +33,11 @@ def _mock_staff_custom_fields(monkeypatch):
         "get_user_by_id",
         AsyncMock(return_value=None),
     )
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "list_external_checkpoints_for_execution_ids",
+        AsyncMock(return_value={}),
+    )
 
 
 def test_normalise_workflow_steps_uses_step_type_from_config():
