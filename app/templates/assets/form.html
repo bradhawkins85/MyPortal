@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
+{% from "assets/_type_picker.html" import asset_type_picker %}
 
 {% block title %}Create asset{% endblock %}
 {% block header_title %}Create asset{% endblock %}
@@ -15,7 +16,7 @@
       <div class="card__body">
         <div class="form-group"><label class="form-label" for="asset-company">Company</label><input class="input" id="asset-company" value="{{ company.name }}" disabled><small class="form-help">Assets are always created for your active company.</small></div>
         <div class="form-group"><label class="form-label" for="asset-name">Name</label><input class="input" id="asset-name" name="name" maxlength="255" required></div>
-        <div class="form-group"><label class="form-label" for="asset-type">Type</label><select class="input" id="asset-type" name="asset_type" required><option value="">Choose a type</option>{% for group in asset_type_groups %}<optgroup label="{{ group.label }}">{% for item in group.types %}<option value="{{ item.key }}">{{ item.label }}</option>{% endfor %}</optgroup>{% endfor %}</select><small class="form-help">The type sets the asset's icon and where it sits on the network map.</small></div>
+        <div class="form-group"><label class="form-label" for="asset-type">Type</label>{{ asset_type_picker(asset_type_mode, asset_type_groups, custom_asset_types) }}</div>
         <div class="form-group"><label class="form-label" for="asset-status">Status</label><input class="input" id="asset-status" name="status" maxlength="255" value="Active"></div>
         <div class="form-group"><label class="form-label" for="asset-serial">Serial number</label><input class="input" id="asset-serial" name="serial_number" maxlength="255"></div>
         <div class="form-group"><label class="form-label" for="asset-location">Location</label><input class="input" id="asset-location" name="location" maxlength="255"></div>

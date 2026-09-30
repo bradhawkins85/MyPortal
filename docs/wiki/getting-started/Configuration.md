@@ -27,6 +27,25 @@ The deployment helpers (`scripts/install_production.sh`,
 the option existed. Override the value directly in `.env` or through your
 process manager's secret store.
 
+## Asset types
+
+`ASSET_TYPE_MODE` controls the type picker on **Create asset** (`/assets/new`)
+and when editing a manually created asset:
+
+- `auto` (default) – choose from the built-in IT catalogue (routers, switches,
+  laptops, printers and so on). Each type has its own icon and network map row.
+- `custom` – the built-in catalogue plus any type typed into the box. Typing a
+  catalogue name (for example "router") still uses the catalogue type.
+- `manual` – no built-in types. Use this when MyPortal is not tracking IT
+  equipment.
+
+In `custom` and `manual` modes the box suggests the types already entered for
+the company, and a typed type that differs only in case or spacing reuses the
+existing spelling, so duplicates such as "Forklift" and "forklift " are not
+created. Typed-in types are drawn with the generic "Other" icon on the network
+map and appear under **Custom** in its type filter. Assets synchronised from
+integrations always use the built-in catalogue.
+
 ## Component availability
 
 All bundled components are available by default. Operators who need a reduced

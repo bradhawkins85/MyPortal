@@ -163,6 +163,8 @@ class Node:
     ips: list[str] = field(default_factory=list)
     interfaces: list[dict[str, Any]] = field(default_factory=list)
     facts: list[tuple[str, str]] = field(default_factory=list)
+    # A custom asset type's own name; catalogue types use their label.
+    type_name: str | None = None
     # Layout
     x: float = 0.0
     y: float = 0.0
@@ -171,6 +173,10 @@ class Node:
     @property
     def type(self) -> asset_types.AssetType:
         return asset_types.get(self.type_key)
+
+    @property
+    def type_label(self) -> str:
+        return self.type_name or self.type.label
 
     @property
     def radio_count(self) -> int:
@@ -277,7 +283,8 @@ def build_graph(overview: Mapping[str, Any], extra: Mapping[str, Any],
                 facts.append((label, str(asset[key])))
         node = Node(node_id, "asset", str(asset.get("name") or f"Asset {asset_id}"),
                     asset_types.effective(asset), url=f"/assets/{asset_id}",
-                    site=str(asset.get("location") or "").strip() or UNPLACED_SITE, facts=facts)
+                    site=str(asset.get("location") or "").strip() or UNPLACED_SITE, facts=facts,
+                    type_name=asset_types.display_label(asset))
         nodes[node_id] = node
         return node
 
@@ -477,7 +484,7 @@ def _text_lines(node: Node, detail: str) -> list[tuple[str, str]]:
     if detail == "overview":
         return lines
     if node.kind != "internet":
-        lines.append(("nm-meta", node.type.label))
+        lines.append(("nm-meta", node.type_label))
     ips = node.ips if detail == "detailed" else node.ips[:2]
     lines += [("nm-ip", ip) for ip in ips]
     if detail == "standard" and len(node.ips) > 2:
@@ -1035,7 +1042,7 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
         out.append(f"<g {node_attrs}>")
         if node.url and not interactive:
             out.append(f'<a href="{_attr(node.url)}">')
-        out.append(f"<title>{escape(node.label)} — {escape(node.type.label if node.kind != 'network' else 'Subnet')}</title>")
+        out.append(f"<title>{escape(node.label)} — {escape(node.type_label if node.kind != 'network' else 'Subnet')}</title>")
         # In the topology view devices are just an icon and labels; the card
         # stays as an invisible click target that is outlined when selected.
         card_style = ('fill-opacity="0" stroke="none"' if topology
@@ -1085,7 +1092,7 @@ def graph_payload(graph: Graph) -> dict[str, Any]:
     nodes = {}
     for node in graph.nodes.values():
         nodes[node.id] = {
-            "id": node.id, "kind": node.kind, "label": node.label, "type": node.type.label,
+            "id": node.id, "kind": node.kind, "label": node.label, "type": node.type_label,
             "icon": node.type.icon, "site": node.site, "rack": node.rack_name, "url": node.url,
             "ips": node.ips, "interfaces": node.interfaces,
             "facts": [{"label": label, "value": value} for label, value in node.facts],
@@ -1131,7 +1138,7 @@ def inventory(graph: Graph) -> list[dict[str, Any]]:
         if node.kind not in {"asset", "item"}:
             continue
         rows.append({
-            "name": node.label, "type": node.type.label, "site": node.site, "rack": node.rack_name,
+            "name": node.label, "type": node.type_label, "site": node.site, "rack": node.rack_name,
             "ips": node.ips, "interfaces": node.interfaces, "links": payload[node.id]["links"],
             "facts": node.facts,
         })

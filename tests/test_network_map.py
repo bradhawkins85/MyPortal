@@ -120,9 +120,31 @@ def test_every_type_has_a_self_contained_icon():
 
 def test_catalogue_groups_cover_every_type_once():
     keys = [item.key for group in asset_types.grouped() for item in group["types"]]
-    assert sorted(keys) == sorted(asset_types.BY_KEY)
+    assert sorted(keys) == sorted(item.key for item in asset_types.ASSET_TYPES)
+    assert asset_types.CUSTOM_KEY not in keys
     with pytest.raises(ValueError):
         asset_types.normalise("spaceship")
+    # Custom types are named, never picked by key.
+    with pytest.raises(ValueError):
+        asset_types.normalise(asset_types.CUSTOM_KEY)
+
+
+def test_custom_types_resolve_by_name_and_use_the_generic_icon():
+    # Custom mode matches catalogue types by label or key first.
+    assert asset_types.resolve_name("router", mode="custom") == ("router", "Router")
+    assert asset_types.resolve_name("  Network   SWITCH ", mode="custom") == ("switch", "Network switch")
+    assert asset_types.resolve_name("Forklift", mode="custom") == ("custom", "Forklift")
+    # Manual mode never uses the catalogue.
+    assert asset_types.resolve_name("Router", mode="manual") == ("custom", "Router")
+    # An existing custom type's spelling is reused.
+    assert asset_types.resolve_name("  forklift ", mode="manual", existing=["Forklift"]) == ("custom", "Forklift")
+    with pytest.raises(ValueError):
+        asset_types.resolve_name("   ", mode="custom")
+    asset = {"asset_type": "custom", "type": "Forklift"}
+    assert asset_types.effective(asset) == "custom"
+    assert asset_types.display_label(asset) == "Forklift"
+    assert asset_types.get("custom").icon.endswith("/other.svg")
+    assert asset_types.icon_markup("custom") == asset_types.icon_markup("other")
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +276,21 @@ def test_svg_is_well_formed_and_self_contained(detail):
     # Fonts are presentation attributes so WeasyPrint sizes text correctly.
     assert "<style" not in svg
     assert 'font-size="11.5"' in svg
+
+
+def test_custom_asset_types_draw_with_their_name_and_generic_icon():
+    overview, extra = _estate()
+    extra["assets"].append({"id": 99, "name": "Forklift 3", "type": "Forklift",
+                            "asset_type": "custom", "location": "Warehouse"})
+    extra["relationships"] = list(extra.get("relationships") or []) + [
+        {"source_asset_id": 99, "target_id": 6}]
+    graph = nm.build_graph(overview, extra, nm.MapOptions(detail="standard"))
+    node = graph.nodes["asset:99"]
+    assert node.type_key == "custom" and node.type_label == "Forklift"
+    svg = nm.render_svg(graph, title="Map")
+    xml.dom.minidom.parseString(svg)
+    assert 'id="nm-icon-custom"' in svg
+    assert "Forklift" in svg
 
 
 def test_detail_levels_add_information():
