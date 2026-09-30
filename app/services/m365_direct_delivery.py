@@ -63,11 +63,15 @@ def _message(*, recipient: str, subject: str, html_body: str,
         total += len(raw)
         if total > MAX_INLINE_ATTACHMENT_BYTES:
             raise ValueError("M365 inline attachments exceed the 3 MiB module limit")
-        graph_attachments.append({
+        graph_attachment = {
             "@odata.type": "#microsoft.graph.fileAttachment", "name": name,
             "contentType": str(item.get("mime_type") or item.get("content_type") or
                                "application/octet-stream"), "contentBytes": encoded,
-        })
+        }
+        content_id = str(item.get("content_id") or "").strip()
+        if content_id:
+            graph_attachment.update({"isInline": True, "contentId": content_id})
+        graph_attachments.append(graph_attachment)
     if graph_attachments:
         message["attachments"] = graph_attachments
     return message

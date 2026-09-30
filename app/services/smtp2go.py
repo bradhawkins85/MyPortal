@@ -494,6 +494,37 @@ def _extract_tracking_identifier(event_data: dict[str, Any] | None) -> str | Non
     return None
 
 
+def _normalise_inline_payloads(
+    inlines: list[dict[str, Any]] | None,
+) -> list[dict[str, str]] | None:
+    """Return SMTP2Go ``inlines`` payloads for ``cid:`` referenced images."""
+    if not inlines:
+        return None
+
+    normalised: list[dict[str, str]] = []
+    for inline in inlines:
+        if not isinstance(inline, dict):
+            continue
+        filename = str(inline.get("content_id") or inline.get("filename") or "").strip()
+        content = inline.get("content")
+        if isinstance(content, str) and content.strip():
+            encoded = content.strip()
+        elif isinstance(content, (bytes, bytearray)):
+            encoded = base64.b64encode(bytes(content)).decode("ascii")
+        else:
+            continue
+        if not filename:
+            continue
+        normalised.append(
+            {
+                "filename": filename,
+                "fileblob": encoded,
+                "mimetype": str(inline.get("mime_type") or "application/octet-stream"),
+            }
+        )
+    return normalised or None
+
+
 def _normalise_attachment_payloads(
     attachments: list[dict[str, Any]] | None,
 ) -> list[dict[str, str]] | None:
@@ -725,6 +756,7 @@ async def send_email_via_api(
     template_id: str | None = None,
     template_data: dict[str, Any] | None = None,
     tracking_id: str | None = None,
+    inlines: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Send an email using SMTP2Go API.
     
@@ -742,6 +774,9 @@ async def send_email_via_api(
         template_id: SMTP2Go template ID to use (optional)
         template_data: Template variables for SMTP2Go template (optional)
         tracking_id: Internal tracking ID to associate with this email (optional)
+        inlines: Inline images referenced from ``html_body`` as ``cid:<content_id>``.
+            Each dict needs ``content`` (bytes or base64), ``mime_type`` and
+            ``content_id`` (or ``filename``) (optional)
         
     Returns:
         Dict containing the API response with message_id and status
@@ -836,6 +871,11 @@ async def send_email_via_api(
         normalised_attachments = _normalise_attachment_payloads(attachments)
         if normalised_attachments:
             payload["attachments"] = normalised_attachments
+
+        # SMTP2Go references inline images by filename (``cid:<filename>``).
+        normalised_inlines = _normalise_inline_payloads(inlines)
+        if normalised_inlines:
+            payload["inlines"] = normalised_inlines
         
         # Add SMTP2Go template fields
         if template_id:

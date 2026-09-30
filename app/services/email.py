@@ -258,7 +258,14 @@ async def send_email(
                 custom_headers=dict(headers) if headers else None,
                 attachments=[
                     {"filename": name, "content": base64.b64encode(content).decode("ascii")}
-                    for name, content, _mime in (_normalise_attachment(item) for item in (attachments or []))
+                    for name, content, _mime in (
+                        _normalise_attachment(item)
+                        for item in (attachments or [])
+                        if not item.get("content_id")
+                    )
+                ] or None,
+                inlines=[
+                    dict(item) for item in (attachments or []) if item.get("content_id")
                 ] or None,
             )
 
@@ -383,11 +390,30 @@ async def send_email(
     else:
         message.set_content(modified_html_body, subtype="html")
 
-    for attachment in attachments or []:
+    html_part = message.get_body(preferencelist=("html",)) if modified_html_body else None
+    # Inline parts first: once a regular attachment converts the message to
+    # multipart/mixed, ``html_part`` may no longer refer to the HTML body.
+    ordered_attachments = sorted(
+        attachments or [], key=lambda item: not item.get("content_id")
+    )
+    for attachment in ordered_attachments:
         filename, content_bytes, mime_type = _normalise_attachment(attachment)
         maintype, _, subtype = mime_type.partition("/")
         if not maintype or not subtype:
             maintype, subtype = "application", "octet-stream"
+        content_id = str(attachment.get("content_id") or "").strip()
+        if content_id and html_part is not None:
+            # Inline images referenced as ``cid:`` must live alongside the HTML
+            # part in multipart/related so mail clients render them in place.
+            html_part.add_related(
+                content_bytes,
+                maintype=maintype,
+                subtype=subtype,
+                cid=f"<{content_id}>",
+                filename=filename,
+                disposition="inline",
+            )
+            continue
         message.add_attachment(
             content_bytes,
             maintype=maintype,

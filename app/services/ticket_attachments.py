@@ -403,6 +403,81 @@ async def persist_inline_images_for_ticket_body(
     return "".join(rewritten_parts), created_attachments
 
 
+_TICKET_ATTACHMENT_IMAGE_PATTERN = re.compile(
+    r'(<img\b[^>]*?\bsrc\s*=\s*)(["\'])'
+    r'(?:https?://[^"\'/\s]+)?/api/tickets/(\d+)/attachments/(\d+)/download/?(?:\?[^"\']*)?'
+    r'\2',
+    re.IGNORECASE,
+)
+
+
+async def embed_ticket_images_for_email(
+    ticket_id: int | None,
+    html_body: str,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Rewrite ticket attachment ``<img>`` sources to ``cid:`` references.
+
+    Inline images pasted into replies are stored as ticket attachments and the
+    reply body references the authenticated download endpoint. Email
+    recipients cannot load that URL, so outgoing mail must carry the image
+    bytes as inline (``Content-ID``) parts instead. Only images belonging to
+    ``ticket_id`` are embedded; other references are left untouched.
+    """
+
+    if not ticket_id or not html_body or "/attachments/" not in html_body:
+        return html_body, []
+
+    inline_attachments: list[dict[str, Any]] = []
+    content_ids: dict[int, str] = {}
+
+    async def _content_id_for(attachment_id: int) -> str | None:
+        if attachment_id in content_ids:
+            return content_ids[attachment_id]
+        attachment = await attachments_repo.get_attachment(attachment_id)
+        if not attachment or int(attachment.get("ticket_id") or 0) != int(ticket_id):
+            return None
+        mime_type = str(attachment.get("mime_type") or "").lower()
+        extension = _INLINE_IMAGE_EXTENSIONS.get(mime_type)
+        if not extension:
+            return None
+        try:
+            contents = attachment_path(attachment).read_bytes()
+        except OSError as exc:
+            log_error(
+                "Inline ticket image unavailable for email",
+                ticket_id=ticket_id,
+                attachment_id=attachment_id,
+                error=str(exc),
+            )
+            return None
+        content_id = f"ticket-image-{attachment_id}.{extension}"
+        content_ids[attachment_id] = content_id
+        inline_attachments.append(
+            {
+                "filename": content_id,
+                "content": contents,
+                "mime_type": mime_type,
+                "content_id": content_id,
+            }
+        )
+        return content_id
+
+    rewritten_parts: list[str] = []
+    last_index = 0
+    for match in _TICKET_ATTACHMENT_IMAGE_PATTERN.finditer(html_body):
+        prefix, quote, url_ticket_id, attachment_id = match.groups()
+        replacement = match.group(0)
+        if int(url_ticket_id) == int(ticket_id):
+            content_id = await _content_id_for(int(attachment_id))
+            if content_id:
+                replacement = f"{prefix}{quote}cid:{content_id}{quote}"
+        rewritten_parts.append(html_body[last_index:match.start()])
+        rewritten_parts.append(replacement)
+        last_index = match.end()
+    rewritten_parts.append(html_body[last_index:])
+    return "".join(rewritten_parts), inline_attachments
+
+
 async def delete_attachment_file(attachment: dict[str, Any]) -> None:
     """Delete an attachment file and database record."""
     filename = attachment.get("filename")
