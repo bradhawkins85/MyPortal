@@ -1,0 +1,7 @@
+{
+  "guid": "31a18ac9-f141-43a2-97c2-b8b28ed3ce0f",
+  "occurred_at": "2026-09-30T10:45Z",
+  "change_type": "Feature",
+  "summary": "Redesign Roles around a searchable role catalogue showing members, access counts and menu groups, with a modal editor that groups menu access by area with one-click access levels, group and whole-role presets, a live summary of what members get, and delete blocked while members still hold the role",
+  "content_hash": "f03f6be55215ba60deb8f744997d3843173c0103b817385854075ed8f16d5095"
+}
