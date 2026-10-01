@@ -77,9 +77,12 @@ def unpack_attachment(filename: str, payload: bytes, limits: IngestionLimits | N
         return [(filename, _safe_xml(payload, limits))]
     if lower.endswith((".gz", ".gzip")):
         try:
-            data = gzip.decompress(payload)
+            with gzip.GzipFile(fileobj=io.BytesIO(payload)) as archive:
+                data = archive.read(limits.expanded_bytes + 1)
         except (OSError, EOFError) as exc:
             raise DmarcInputError("Invalid gzip attachment") from exc
+        if len(data) > limits.expanded_bytes:
+            raise DmarcInputError("Expanded attachment exceeds limit")
         if data.startswith((b"PK\x03\x04", b"\x1f\x8b")):
             raise DmarcInputError("Nested archives are not accepted")
         return [(filename.rsplit(".", 1)[0], _safe_xml(data, limits))]
