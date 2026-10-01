@@ -524,6 +524,15 @@
   const sidebarSaveButton = root.querySelector('[data-sidebar-save]');
   const navigationStyleInputs = root.querySelectorAll('input[name="navigation-style"]');
   let navigationStyle = 'top';
+  const roleSwitcherDisplayInputs = root.querySelectorAll('input[name="role-switcher-display"]');
+  const ROLE_SWITCHER_DISPLAY_MODES = ['full', 'icon', 'hidden'];
+  let roleSwitcherDisplay = 'full';
+  const syncRoleSwitcherInputs = (preferences) => {
+    roleSwitcherDisplay = ROLE_SWITCHER_DISPLAY_MODES.includes(preferences?.role_switcher_display)
+      ? preferences.role_switcher_display
+      : 'full';
+    roleSwitcherDisplayInputs.forEach((input) => { input.checked = input.value === roleSwitcherDisplay; });
+  };
   const sidebarResetButton = root.querySelector('[data-sidebar-reset]');
   const sidebarAddDividerButton = root.querySelector('[data-sidebar-add-divider]');
   const sidebarAddSpacerButton = root.querySelector('[data-sidebar-add-spacer]');
@@ -1162,6 +1171,7 @@
     SIDEBAR_PROTECTED_KEYS.forEach((key) => hidden.delete(key));
     return {
       navigation_style: navigationStyle,
+      role_switcher_display: roleSwitcherDisplay,
       order: sidebarEntries.map((entry) => entry.key),
       hidden: Array.from(hidden),
       groups,
@@ -1172,12 +1182,19 @@
     const initialPreferences = window.MyPortalSidebarMenu.getPreferences();
     navigationStyle = initialPreferences.navigation_style === 'sidebar' ? 'sidebar' : 'top';
     navigationStyleInputs.forEach((input) => { input.checked = input.value === navigationStyle; });
+    syncRoleSwitcherInputs(initialPreferences);
     buildSidebarState(initialPreferences);
     renderSidebarItems();
 
     navigationStyleInputs.forEach((input) => input.addEventListener('change', () => {
       if (!input.checked) return;
       navigationStyle = input.value === 'sidebar' ? 'sidebar' : 'top';
+      setSidebarDirty(true);
+    }));
+
+    roleSwitcherDisplayInputs.forEach((input) => input.addEventListener('change', () => {
+      if (!input.checked) return;
+      roleSwitcherDisplay = ROLE_SWITCHER_DISPLAY_MODES.includes(input.value) ? input.value : 'full';
       setSidebarDirty(true);
     }));
 
@@ -1188,6 +1205,7 @@
         const preferences = window.MyPortalSidebarMenu.getPreferences();
         navigationStyle = preferences.navigation_style === 'sidebar' ? 'sidebar' : 'top';
         navigationStyleInputs.forEach((input) => { input.checked = input.value === navigationStyle; });
+        syncRoleSwitcherInputs(preferences);
         buildSidebarState(preferences);
         renderSidebarItems();
       }
@@ -1269,6 +1287,7 @@
           const defaults = await window.MyPortalSidebarMenu.reset();
           navigationStyle = defaults.navigation_style === 'sidebar' ? 'sidebar' : 'top';
           navigationStyleInputs.forEach((input) => { input.checked = input.value === navigationStyle; });
+          syncRoleSwitcherInputs(defaults);
           expandedGroupKeys.clear();
           buildSidebarState(defaults);
           renderSidebarItems();

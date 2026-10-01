@@ -307,6 +307,23 @@
             <span><strong>Top menu</strong><small>Keep a horizontal menu at the top, with grouped items in drop-down menus.</small></span>
           </label>
         </fieldset>
+        {% if role_switcher_allowed | default(false) %}
+        <fieldset class="navigation-style navigation-style--modes" data-role-switcher-preference>
+          <legend class="form-label">Role switcher</legend>
+          <label class="navigation-style__option">
+            <input type="radio" name="role-switcher-display" value="full" />
+            <span><strong>Full selector</strong><small>Show the “View as role” drop-down list in the menu.</small></span>
+          </label>
+          <label class="navigation-style__option">
+            <input type="radio" name="role-switcher-display" value="icon" />
+            <span><strong>Icon only</strong><small>Show a compact icon that pops down the role list, saving menu space.</small></span>
+          </label>
+          <label class="navigation-style__option">
+            <input type="radio" name="role-switcher-display" value="hidden" />
+            <span><strong>Hidden</strong><small>Hide the role switcher. While viewing as another role the icon still shows so you can switch back.</small></span>
+          </label>
+        </fieldset>
+        {% endif %}
         <div class="menu-editor__list-header">
           <span class="menu-editor__list-title">Menu layout</span>
           <button type="button" class="menu-editor__text-button" data-sidebar-expand-all aria-pressed="false">Expand all</button>
