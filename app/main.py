@@ -5647,7 +5647,7 @@ async def profile_m365_contact_phones(request: Request, name: str = Query(..., m
 
 @app.post("/api/tickets/{ticket_id}/requester/mobile", response_class=JSONResponse)
 async def attach_ticket_requester_mobile(request: Request, ticket_id: int):
-    _, redirect = await _require_authenticated_user(request)
+    _, redirect = await _require_helpdesk_page(request)
     if redirect:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 

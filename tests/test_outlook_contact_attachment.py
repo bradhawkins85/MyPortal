@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException, status
 from starlette.requests import Request
 
 from app import main
@@ -30,7 +31,7 @@ def test_requester_mobile_attachment_route_is_available():
 
 @pytest.mark.anyio
 async def test_attach_requester_mobile_updates_the_tickets_staff_record(monkeypatch):
-    monkeypatch.setattr(main, "_require_authenticated_user", AsyncMock(return_value=({"id": 7}, None)))
+    monkeypatch.setattr(main, "_require_helpdesk_page", AsyncMock(return_value=({"id": 7}, None)))
     monkeypatch.setattr(main.tickets_repo, "get_ticket", AsyncMock(return_value={"requester_staff_id": 42}))
     monkeypatch.setattr(main.staff_repo, "get_staff_by_id", AsyncMock(return_value={"id": 42}))
     update_mobile = AsyncMock()
@@ -48,6 +49,29 @@ async def test_attach_requester_mobile_updates_the_tickets_staff_record(monkeypa
         "mobile_phone": "+61 400 111 222",
     }
     update_mobile.assert_awaited_once_with(42, "+61 400 111 222")
+
+
+@pytest.mark.anyio
+async def test_attach_requester_mobile_requires_helpdesk_access(monkeypatch):
+    require_helpdesk = AsyncMock(
+        side_effect=HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+    )
+    monkeypatch.setattr(main, "_require_helpdesk_page", require_helpdesk)
+    get_ticket = AsyncMock()
+    monkeypatch.setattr(main.tickets_repo, "get_ticket", get_ticket)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await main.attach_ticket_requester_mobile(
+            _json_request({"phone": "+61 400 111 222"}),
+            123,
+        )
+
+    assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+    require_helpdesk.assert_awaited_once()
+    get_ticket.assert_not_awaited()
 
 
 def test_outlook_results_use_portal_click_to_call_and_offer_attachment():
