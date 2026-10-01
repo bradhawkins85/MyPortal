@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -83,6 +84,8 @@ async def generate_resolution_step_article(
 # Define uploads path at module level
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _PRIVATE_UPLOADS_PATH = _PROJECT_ROOT / "private_uploads"
+_KB_ATTACHMENTS_ROOT = _PRIVATE_UPLOADS_PATH / "knowledge-base" / "attachments"
+_SAFE_PATH_COMPONENT_RE = re.compile(r"^[A-Za-z0-9._-]{1,255}$")
 
 
 # Knowledge base articles can contain very long HTML bodies; capturing only
@@ -337,6 +340,70 @@ async def get_article_version(
 _BLOCKED_ATTACHMENT_SUFFIXES = {".exe", ".bat", ".cmd", ".com", ".js", ".mjs", ".html", ".htm", ".svg", ".xml"}
 
 
+def _validate_attachment_path_component(value: str, *, field_name: str) -> str:
+    component = str(value or "").strip()
+    if not component or component in {".", ".."} or "/" in component or "\\" in component:
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name}")
+    if not _SAFE_PATH_COMPONENT_RE.fullmatch(component):
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name}")
+    return component
+
+
+def _validate_article_id_component(article_id: int) -> str:
+    article_component = _validate_attachment_path_component(str(article_id), field_name="article identifier")
+    if not article_component.isdigit() or int(article_component) <= 0:
+        raise HTTPException(status_code=400, detail="Invalid article identifier")
+    return article_component
+
+
+def _ensure_relative_to(path: Path, root: Path) -> None:
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid attachment path") from exc
+
+
+def _resolve_article_attachment_directory(article_id: int, *, create: bool = False) -> Path:
+    article_component = _validate_article_id_component(article_id)
+    private_root = _PRIVATE_UPLOADS_PATH.resolve()
+    attachments_root = _KB_ATTACHMENTS_ROOT.resolve()
+    _ensure_relative_to(attachments_root, private_root)
+    article_directory = (attachments_root / article_component).resolve()
+    _ensure_relative_to(article_directory, attachments_root)
+    if create:
+        article_directory.mkdir(parents=True, exist_ok=True)
+        article_directory = article_directory.resolve()
+        _ensure_relative_to(article_directory, attachments_root)
+    return article_directory
+
+
+def _resolve_attachment_record_path(article_id: int, storage_path: str | None) -> Path | None:
+    article_component = _validate_article_id_component(article_id)
+    normalized = str(storage_path or "").replace("\\", "/").strip().lstrip("/")
+    if not normalized:
+        return None
+    parts = tuple(part for part in normalized.split("/") if part not in {"", "."})
+    expected_prefix = ("private_uploads", "knowledge-base", "attachments", article_component)
+    if len(parts) != 5 or parts[:4] != expected_prefix:
+        return None
+    filename = parts[-1]
+    if filename in {".", ".."} or not _SAFE_PATH_COMPONENT_RE.fullmatch(filename):
+        return None
+
+    private_root = _PRIVATE_UPLOADS_PATH.resolve()
+    try:
+        article_directory = _resolve_article_attachment_directory(article_id, create=False)
+    except HTTPException:
+        return None
+    candidate = (_PROJECT_ROOT / Path(*parts)).resolve()
+    try:
+        candidate.relative_to(private_root)
+        candidate.relative_to(article_directory)
+    except ValueError:
+        return None
+    return candidate
+
+
 @router.post("/articles/{article_id}/attachments", status_code=status.HTTP_201_CREATED)
 async def upload_article_attachment(
     article_id: int, file: UploadFile = File(...), current_user: dict = Depends(require_super_admin)
@@ -352,9 +419,13 @@ async def upload_article_attachment(
     }:
         await file.close()
         raise HTTPException(status_code=400, detail="Unsupported attachment type")
-    directory = _PRIVATE_UPLOADS_PATH / "knowledge-base" / "attachments" / str(article_id)
-    directory.mkdir(parents=True, exist_ok=True)
-    destination = directory / f"{uuid4().hex}{suffix}"
+    directory = _resolve_article_attachment_directory(article_id, create=True)
+    destination_name = _validate_attachment_path_component(
+        f"{uuid4().hex}{suffix}",
+        field_name="attachment filename",
+    )
+    destination = (directory / destination_name).resolve()
+    _ensure_relative_to(destination, directory)
     size = 0
     try:
         async with aiofiles.open(destination, "wb") as target:
@@ -390,8 +461,8 @@ async def download_article_attachment(
     attachment = await kb_repo.get_attachment(attachment_id)
     if not attachment or int(attachment["article_id"]) != article_id:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    path = (_PROJECT_ROOT / attachment["storage_path"]).resolve()
-    if _PROJECT_ROOT not in path.parents or not path.is_file():
+    path = _resolve_attachment_record_path(article_id, attachment.get("storage_path"))
+    if path is None or not path.is_file():
         raise HTTPException(status_code=404, detail="Attachment file not found")
     return FileResponse(path, filename=attachment["file_name"], media_type="application/octet-stream")
 
@@ -403,6 +474,8 @@ async def delete_article_attachment(
     attachment = await kb_repo.get_attachment(attachment_id)
     if not attachment or int(attachment["article_id"]) != article_id:
         raise HTTPException(status_code=404, detail="Attachment not found")
+    if _resolve_attachment_record_path(article_id, attachment.get("storage_path")) is None:
+        raise HTTPException(status_code=404, detail="Attachment file not found")
     file_storage.delete_stored_file(attachment["storage_path"], _PRIVATE_UPLOADS_PATH)
     await kb_repo.delete_attachment(attachment_id)
 
