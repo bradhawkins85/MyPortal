@@ -438,13 +438,13 @@ async def _add_email_cc_watchers(
     *,
     exclude_addresses: list[str] | None = None,
 ) -> None:
-    """Add original email CC recipients as ticket watchers.
+    """Add original email CC recipients as email-only ticket watchers.
 
     Inbound mail often includes interested customer contacts in Cc.  Persisting
-    them as watchers allows those contacts to reply later and ensures future
-    ticket notifications include the same audience.  Addresses are normalized,
-    de-duplicated, and added idempotently by local user id when possible, or by
-    email address otherwise.
+    them as email-only watchers allows future ticket notifications to include
+    the same audience.  Cc headers are attacker-controlled, so they must not be
+    resolved to portal user ids here: user_id watcher rows are authorization
+    principals and can grant ticket access.
     """
 
     excluded = {
@@ -459,19 +459,8 @@ async def _add_email_cc_watchers(
             continue
         seen.add(address)
 
-        user_id: int | None = None
         try:
-            user = await users_repo.get_user_by_email(address)
-        except Exception:
-            user = None
-        if user:
-            user_id = _extract_record_id(user)
-
-        try:
-            if user_id is not None:
-                await tickets_repo.add_watcher(ticket_id, user_id=user_id)
-            else:
-                await tickets_repo.add_watcher(ticket_id, email=address)
+            await tickets_repo.add_watcher(ticket_id, email=address)
         except Exception as exc:  # pragma: no cover - defensive logging
             log_error(
                 "Failed to add email CC recipient as ticket watcher",
