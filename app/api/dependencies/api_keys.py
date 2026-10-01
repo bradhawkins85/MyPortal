@@ -10,6 +10,17 @@ from app.repositories import api_keys as api_key_repo
 from app.security.client_ip import get_client_ip
 
 
+def require_api_key_company_access(record: dict, company_id: int) -> None:
+    allowed_company_ids = {
+        int(value) for value in record.get("allowed_company_ids") or []
+    }
+    if company_id not in allowed_company_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API key not permitted for this company",
+        )
+
+
 async def _resolve_api_key_record(request: Request, record: dict) -> dict:
     # Forwarded headers are only honoured from TRUSTED_PROXIES; reading them
     # directly would let a caller spoof an allowed address.

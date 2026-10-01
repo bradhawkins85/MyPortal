@@ -35,6 +35,7 @@ def _format_response(row: dict) -> ApiKeyResponse:
         usage=row.get("usage", []),
         permissions=row.get("permissions", []),
         allowed_ips=row.get("ip_restrictions", []),
+        allowed_company_ids=row.get("allowed_company_ids", []),
         is_enabled=bool(row.get("is_enabled", True)),
     )
 
@@ -69,6 +70,7 @@ async def create_api_key(
         expiry_date=payload.expiry_date,
         permissions=[permission.model_dump() for permission in payload.permissions],
         ip_restrictions=[entry.cidr for entry in payload.allowed_ips],
+        allowed_company_ids=payload.allowed_company_ids,
         is_enabled=payload.is_enabled,
     )
     formatted = _format_response(row).model_dump()
@@ -83,6 +85,7 @@ async def create_api_key(
             "expiry_date": payload.expiry_date.isoformat() if payload.expiry_date else None,
             "permissions": formatted.get("permissions", []),
             "allowed_ips": [entry.cidr for entry in payload.allowed_ips],
+            "allowed_company_ids": payload.allowed_company_ids,
             "is_enabled": payload.is_enabled,
         },
     )
@@ -166,11 +169,19 @@ async def update_api_key(
     else:
         is_enabled_argument = None
 
+    allowed_company_ids_argument = (
+        payload.allowed_company_ids
+        if "allowed_company_ids" in fields_set
+        else None
+    )
+
     update_kwargs: dict[str, Any] = {
         "description": new_description,
         "expiry_date": new_expiry,
         "permissions": permissions_argument,
     }
+    if allowed_company_ids_argument is not None:
+        update_kwargs["allowed_company_ids"] = allowed_company_ids_argument
     if is_enabled_argument is not None:
         update_kwargs["is_enabled"] = is_enabled_argument
 
@@ -192,6 +203,7 @@ async def update_api_key(
             else None,
             "permissions": existing.get("permissions", []),
             "is_enabled": bool(existing.get("is_enabled", True)),
+            "allowed_company_ids": existing.get("allowed_company_ids", []),
         },
         after={
             "description": updated.get("description"),
@@ -200,6 +212,7 @@ async def update_api_key(
             else None,
             "permissions": updated.get("permissions", []),
             "is_enabled": bool(updated.get("is_enabled", True)),
+            "allowed_company_ids": updated.get("allowed_company_ids", []),
         },
     )
 
@@ -229,11 +242,17 @@ async def rotate_api_key(
         if payload.allowed_ips is not None
         else [entry.get("cidr") for entry in existing.get("ip_restrictions", [])]
     )
+    allowed_company_ids = (
+        payload.allowed_company_ids
+        if payload.allowed_company_ids is not None
+        else existing.get("allowed_company_ids", [])
+    )
     raw_key, new_row = await api_key_repo.create_api_key(
         description=new_description,
         expiry_date=new_expiry,
         permissions=permissions,
         ip_restrictions=allowed_ips,
+        allowed_company_ids=allowed_company_ids,
     )
     formatted = _format_response(new_row).model_dump()
     metadata = {
@@ -253,6 +272,7 @@ async def rotate_api_key(
             "allowed_ips": [entry.cidr for entry in payload.allowed_ips]
             if payload.allowed_ips is not None
             else [entry.get("cidr") for entry in existing.get("ip_restrictions", [])],
+            "allowed_company_ids": allowed_company_ids,
         },
         metadata=metadata,
     )

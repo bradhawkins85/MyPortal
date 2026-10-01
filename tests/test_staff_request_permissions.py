@@ -277,7 +277,7 @@ async def test_create_staff_request_allows_api_key_for_selected_company(monkeypa
         company_id=9,
         _=None,
         current_user=None,
-        api_key_record={"id": 12},
+        api_key_record={"id": 12, "allowed_company_ids": [9]},
     )
 
     assert result.company_id == 9
@@ -336,7 +336,7 @@ async def test_api_key_can_flag_staff_for_offboarding_approval(monkeypatch):
             notes="Final day",
         ),
         _=None,
-        api_key_record={"id": 12},
+        api_key_record={"id": 12, "allowed_company_ids": [9]},
     )
 
     assert result.approval_status == "pending"
@@ -344,3 +344,49 @@ async def test_api_key_can_flag_staff_for_offboarding_approval(monkeypatch):
     assert kwargs["account_action"] == "Offboard Requested"
     assert kwargs["onboarding_status"] == "offboarding_awaiting_approval"
     assert kwargs["date_offboarded"].isoformat() == "2026-08-10T02:00:00+00:00"
+
+
+@pytest.mark.anyio
+async def test_api_key_cannot_create_staff_request_for_unallowed_company(monkeypatch):
+    from app.api.routes import staff
+    from app.schemas.staff import StaffRequestCreate
+
+    monkeypatch.setattr(staff, "_ensure_company_exists", AsyncMock())
+
+    with pytest.raises(HTTPException) as exc:
+        await staff.create_staff_request(
+            payload=StaffRequestCreate(firstName="API", lastName="User"),
+            company_id=9,
+            _=None,
+            current_user=None,
+            api_key_record={"id": 12, "allowed_company_ids": [8]},
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "API key not permitted for this company"
+
+
+@pytest.mark.anyio
+async def test_api_key_cannot_offboard_staff_for_unallowed_company(monkeypatch):
+    from app.api.routes import staff
+    from app.schemas.staff import StaffOffboardingRequestCreate
+
+    monkeypatch.setattr(
+        staff.staff_repo,
+        "get_staff_by_id",
+        AsyncMock(return_value={"id": 44, "company_id": 9}),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await staff.request_staff_offboarding(
+            staff_id=44,
+            payload=StaffOffboardingRequestCreate(
+                dateOffboarded="2026-08-10T12:00:00+10:00",
+                offboardingType="resignation",
+            ),
+            _=None,
+            api_key_record={"id": 12, "allowed_company_ids": [8]},
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "API key not permitted for this company"
