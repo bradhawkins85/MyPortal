@@ -6650,23 +6650,12 @@ async def profile_m365_contact_phones(request: Request, name: str = Query(..., m
 
 @app.post("/api/tickets/{ticket_id}/requester/mobile", response_class=JSONResponse)
 async def attach_ticket_requester_mobile(request: Request, ticket_id: int):
-    user, redirect = await _require_authenticated_user(request)
+    _, redirect = await _require_helpdesk_page(request)
     if redirect:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
     ticket = await tickets_repo.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester contact not found")
-    # Helpdesk technicians (and super admins) may update any requester's
-    # number; otherwise only the ticket's own requester may change theirs.
-    if not await _is_helpdesk_technician(user, request):
-        try:
-            is_requester = int(ticket.get("requester_id")) == int(user.get("id"))
-        except (TypeError, ValueError):
-            is_requester = False
-        if not is_requester:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester contact not found")
-    if ticket.get("requester_staff_id") is None:
+    if not ticket or ticket.get("requester_staff_id") is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester contact not found")
 
     payload = await request.json()
