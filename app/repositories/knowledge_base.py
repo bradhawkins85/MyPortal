@@ -28,6 +28,10 @@ def _rag_outbox_service():
     return import_module("app.services.rag_outbox")
 
 
+def _tagging_service():
+    return import_module("app.services.tagging")
+
+
 def _normalise_datetime(value: Any) -> datetime | None:
     if not isinstance(value, datetime):
         return None
@@ -582,29 +586,41 @@ async def find_relevant_articles_for_ticket(
     """
     if not ticket_ai_tags or min_matching_tags < 1:
         return []
-    
-    # Normalize ticket tags to lowercase for case-insensitive comparison
-    normalized_ticket_tags = {tag.lower() for tag in ticket_ai_tags if tag}
-    
+
+    # Ticket tags are stored as slugs ("outlook-crash") while article tags are
+    # display text ("outlook crash"), so compare canonical slug forms with the
+    # tag-synonym table applied to both sides.
+    tagging = _tagging_service()
+    synonyms = await tagging.get_tag_synonym_map()
+
+    def _canonical(tags: Iterable[Any]) -> set[str]:
+        canonical: set[str] = set()
+        for tag in tags:
+            slug = tagging.slugify_tag(str(tag)) if tag else None
+            if slug:
+                canonical.add(tagging.canonicalise_slug(slug, synonyms))
+        return canonical
+
+    normalized_ticket_tags = _canonical(ticket_ai_tags)
+
     if not normalized_ticket_tags:
         return []
-    
+
     # Fetch all published articles
     all_articles = await list_articles(include_unpublished=False)
-    
+
     relevant_articles: list[tuple[dict[str, Any], int]] = []
-    
+
     for article in all_articles:
         article_tags = [
             *(article.get("ai_tags") or []),
             *(article.get("manual_ai_tags") or []),
         ]
         excluded_tags = article.get("excluded_ai_tags") or []
-        
-        # Normalize article tags
-        normalized_article_tags = {tag.lower() for tag in article_tags if tag}
-        normalized_excluded_tags = {tag.lower() for tag in excluded_tags if tag}
-        
+
+        normalized_article_tags = _canonical(article_tags)
+        normalized_excluded_tags = _canonical(excluded_tags)
+
         # Check if any ticket tags are in the excluded list
         if normalized_ticket_tags & normalized_excluded_tags:
             continue
