@@ -138,7 +138,9 @@ _INSIGHTS_PROMPT_HEADER = (
     "if there is not enough evidence of resolution, respond with 'Likely In Progress'. "
     "'tags' must contain between five and ten short lowercase kebab-case tags describing the customer-reported issues, affected systems, impacted users, and requested actions. "
     "Derive tags only from the ticket itself and records marked as customer messages: "
-    "do not use technician replies, internal notes, automated assistant replies, or support-side troubleshooting steps as tag evidence."
+    "do not use technician replies, internal notes, automated assistant replies, or support-side troubleshooting steps as tag evidence. "
+    "When a tag-vocabulary record is provided, reuse those exact tags whenever one accurately describes the issue, "
+    "and only create a new tag for a topic none of them cover."
 )
 
 _RESOLUTION_PROMPT_HEADER = (
@@ -1534,7 +1536,8 @@ async def refresh_ticket_ai_insights(ticket_id: int) -> None:
     if not ticket:
         return
 
-    prompt = _render_insights_prompt(ticket, replies, user_lookup)
+    preferred_tags = await get_preferred_tags()
+    prompt = _render_insights_prompt(ticket, replies, user_lookup, preferred_tags)
     now = datetime.now(timezone.utc)
 
     async def _set_terminal_status(status_value: str) -> None:
@@ -1935,6 +1938,7 @@ def _render_insights_prompt(
     ticket: Mapping[str, Any],
     replies: list[Mapping[str, Any]],
     user_lookup: Mapping[int, Mapping[str, Any]],
+    preferred_tags: Sequence[str] = (),
 ) -> str:
     """Render one prompt that yields the summary, resolution state and tags."""
 
@@ -1992,6 +1996,9 @@ def _render_insights_prompt(
                 else "Use only as chronological evidence for the summary and resolution, never as tag evidence"
             ),
         ))
+    if preferred_tags:
+        # Kept last so prompt truncation, which preserves the ending, retains it.
+        records.append(UntrustedRecord("tag-vocabulary", "most-used existing ticket and knowledge base tags", {"preferred_tags": list(preferred_tags)}, "Use only as preferred tag values when they match the ticket"))
     return _limit_ai_prompt(build_prompt(
         _INSIGHTS_PROMPT_HEADER,
         records,

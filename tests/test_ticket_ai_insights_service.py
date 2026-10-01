@@ -63,6 +63,11 @@ def _install_ticket_fakes(monkeypatch, *, response: Any, prompts: list[str], upd
     monkeypatch.setattr(tickets_service.modules_service, "trigger_module", fake_trigger)
     monkeypatch.setattr("app.services.tickets.get_all_excluded_tags", fake_get_excluded_tags)
 
+    async def fake_get_preferred_tags():
+        return ["printer", "vpn"]
+
+    monkeypatch.setattr("app.services.tickets.get_preferred_tags", fake_get_preferred_tags)
+
 
 @pytest.mark.anyio
 async def test_refresh_ticket_ai_insights_stores_summary_and_tags_from_one_call(monkeypatch):
@@ -109,6 +114,18 @@ async def test_insights_prompt_marks_only_customer_messages_as_tag_evidence(monk
     assert "customer message by user7@example.test" in prompt
     assert "helpdesk internal note by user12@example.test" in prompt
     assert "never as tag evidence" in prompt
+
+
+def test_insights_prompt_ends_with_preferred_tag_vocabulary():
+    ticket = {"id": 5, "subject": "VPN drops", "description": "VPN disconnects hourly."}
+
+    prompt = tickets_service._render_insights_prompt(ticket, [], {}, ["vpn", "printer"])
+    without = tickets_service._render_insights_prompt(ticket, [], {})
+
+    assert '"preferred_tags":["vpn","printer"]' in prompt
+    assert prompt.index('"tag-vocabulary"') > prompt.index('"ticket:5"')
+    assert "reuse those exact tags" in prompt
+    assert "preferred_tags" not in without
 
 
 @pytest.mark.anyio
