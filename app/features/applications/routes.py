@@ -281,6 +281,11 @@ async def applications_page(request: Request):
         return redirect
     rows = await repo.list_applications(company_id)
     types = await repo.list_types(company_id)
+    total_count = len(rows)
+    importance_counts = {key: 0 for key in repo.IMPORTANCE_KEYS}
+    for row in rows:
+        if row["importance"] in importance_counts:
+            importance_counts[row["importance"]] += 1
     importance_filter = request.query_params.get("importance", "")
     if importance_filter in repo.IMPORTANCE_KEYS:
         rows = [row for row in rows if row["importance"] == importance_filter]
@@ -292,6 +297,7 @@ async def applications_page(request: Request):
         "title": "Applications", "applications": rows, "can_write": can_write,
         "type_options": [(str(item["id"]), item["name"]) for item in types],
         "importance_levels": list(repo.IMPORTANCE_LEVELS),
+        "total_count": total_count, "importance_counts": importance_counts,
     })
 
 
