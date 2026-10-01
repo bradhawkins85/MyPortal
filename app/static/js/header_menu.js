@@ -41,6 +41,35 @@
       panel.style.top = (rect.bottom + gap) + 'px';
       panel.style.bottom = 'auto';
     }
+
+    correctForContainingBlock(panel);
+  }
+
+  // An ancestor with backdrop-filter, filter, transform, contain or
+  // will-change (e.g. the blurred .layout__header) becomes the containing
+  // block for position:fixed descendants, so viewport coordinates land offset
+  // by that ancestor's position. Measure where the panel actually rendered and
+  // shift it by the difference so it sits directly against its toggle.
+  function correctForContainingBlock(panel) {
+    var placed = panel.getBoundingClientRect();
+    var right = parseFloat(panel.style.right) || 0;
+    var dx = (window.innerWidth - right) - placed.right;
+    if (Math.abs(dx) > 0.5) {
+      panel.style.right = (right - dx) + 'px';
+    }
+    if (panel.style.top !== 'auto') {
+      var top = parseFloat(panel.style.top) || 0;
+      var dy = placed.top - top;
+      if (Math.abs(dy) > 0.5) {
+        panel.style.top = (top - dy) + 'px';
+      }
+    } else {
+      var bottom = parseFloat(panel.style.bottom) || 0;
+      var dyUp = (window.innerHeight - bottom) - placed.bottom;
+      if (Math.abs(dyUp) > 0.5) {
+        panel.style.bottom = (bottom - dyUp) + 'px';
+      }
+    }
   }
 
   function getMenuPanel(menu) {
