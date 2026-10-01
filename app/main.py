@@ -5409,6 +5409,25 @@ async def m365_connect(request: Request):
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.get("/m365/connect/scc")
+async def m365_connect_scc(request: Request):
+    """Start the standalone Security & Compliance consent step.
+
+    Reconnects chain this consent automatically after the main Graph consent
+    (see :func:`_complete_connect_with_scc_consent`).  This endpoint exists so
+    an administrator can capture the consent when a reconnect ended before
+    the second consent screen, or when they denied it the first time.
+    """
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    requested_return = request.query_params.get("return_to", "m365")
+    destination = "/m365/diagnostics" if requested_return == "diagnostics" else "/m365"
+    return await _start_scc_consent_authorize(
+        request, company_id=company_id, destination=destination
+    )
+
+
 @app.get("/m365/provision")
 async def m365_provision(request: Request, tenant_id: str = Query(...)):
     """Start the admin-consent OAuth flow to auto-provision an enterprise app."""
@@ -5649,6 +5668,83 @@ async def _best_effort_sync_m365_email_domains(company_id: int) -> None:
         )
 
 
+async def _start_scc_consent_authorize(
+    request: Request,
+    *,
+    company_id: int,
+    destination: str,
+    chained_message: str | None = None,
+    chained_variant: str = "success",
+) -> RedirectResponse:
+    """Build the Security & Compliance consent authorize redirect.
+
+    AAD does not allow the EOP ``/.default`` scope in the same authorization
+    request as the Graph scopes (AADSTS70011), so it is captured in its own
+    round trip.  The refresh token returned for the combined consent history
+    is cumulative: the administrator's earlier Graph consents stay usable.
+    """
+    credentials = await m365_service.get_credentials(company_id)
+    if not credentials:
+        return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+    context: dict[str, Any] = {
+        "company_id": company_id,
+        "flow": "scc_consent",
+        "tenant_id": credentials["tenant_id"],
+        "client_id": credentials["client_id"],
+        "redirect_uri": _build_m365_redirect_uri(request),
+        "destination": destination,
+    }
+    if chained_message:
+        context["chained_message"] = chained_message
+        context["chained_variant"] = chained_variant
+    state = await _new_m365_oauth_state(request, **context)
+    params = {
+        "client_id": credentials["client_id"],
+        "response_type": "code",
+        "redirect_uri": context["redirect_uri"],
+        "response_mode": "query",
+        "scope": m365_service.SCC_CONNECT_SCOPE,
+        "state": state,
+        "prompt": "consent",
+    }
+    authorize_url = (
+        f"https://login.microsoftonline.com/{credentials['tenant_id']}/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+async def _complete_connect_with_scc_consent(
+    request: Request,
+    *,
+    company_id: int,
+    destination: str,
+    message: str | None = None,
+    variant: str = "success",
+) -> Response:
+    """Finish the connect flow, chaining the Security & Compliance consent.
+
+    The freshly stored refresh token is probed with the delegated SCC token
+    exchange: when it already issues a Security & Compliance token the
+    consent was captured in an earlier connect, so the flow completes
+    normally with no extra consent screen.  Otherwise the administrator is
+    sent through one additional (chained) consent screen.
+    """
+    try:
+        await m365_service._acquire_scc_access_token(company_id)
+    except m365_service.M365Error:
+        return await _start_scc_consent_authorize(
+            request,
+            company_id=company_id,
+            destination=destination,
+            chained_message=message,
+            chained_variant=variant,
+        )
+    if message:
+        return flash_redirect(destination, message, variant)
+    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+
+
 @app.get("/m365/callback", name="m365_callback")
 async def m365_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
     # Consume first, including denied-consent responses: a callback transaction
@@ -5677,6 +5773,15 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
 
     if error:
         message = request.query_params.get("error_description", error)
+        if flow == "scc_consent":
+            # A denied/expired Security & Compliance consent leaves the
+            # company fully connected; only the second consent is missing.
+            message = (
+                "Security & Compliance access was not captured (the consent "
+                "was denied or the sign-in expired). The Microsoft 365 "
+                "connection is unaffected; capture Security & Compliance "
+                "access again or reconnect."
+            )
         if "AADSTS700016" in message:
             # Never mutate shared/global configuration from an error callback.
             # The verified transaction identifies the affected client so the
@@ -6065,6 +6170,75 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             )
         return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
+    if flow == "scc_consent":
+        # ── Security & Compliance consent step (second authorization) ──────
+        # AAD does not allow the EOP /.default scope in the same request as
+        # the Graph scopes (AADSTS70011), so it is captured in its own
+        # round trip.  The refresh token returned here is cumulative: the
+        # user's earlier Graph consents remain usable with it.
+        credentials = await m365_service.get_credentials(company_id)
+        if not credentials:
+            return flash_redirect("/m365", "missing credentials", "error")
+        token_endpoint = f"https://login.microsoftonline.com/{state_data['tenant_id']}/oauth2/v2.0/token"
+        data = {
+            "client_id": str(state_data.get("client_id") or ""),
+            "client_secret": credentials.get("client_secret") or "",
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": str(state_data.get("redirect_uri") or ""),
+            "scope": m365_service.SCC_CONNECT_SCOPE,
+        }
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
+            response = await client.post(token_endpoint, data=data)
+        if response.status_code != 200:
+            log_error(
+                "Microsoft 365 Security & Compliance consent failed",
+                status=response.status_code,
+                body=response.text,
+            )
+            return flash_redirect(
+                "/m365",
+                "Security & Compliance consent could not be completed. Reconnect to retry.",
+                "error",
+            )
+        payload = response.json()
+        refresh_token = payload.get("refresh_token")
+        try:
+            identity = await m365_service.validate_microsoft_id_token(
+                str(payload.get("id_token") or ""), client_id=str(state_data.get("client_id") or "")
+            )
+        except m365_service.M365Error:
+            return flash_redirect("/m365", "Microsoft did not return a verified account identity.", "error")
+        if str(identity.get("tid") or "") != str(state_data.get("tenant_id") or ""):
+            return flash_redirect("/m365", "The signed-in Microsoft tenant did not match this connection.", "error")
+        if refresh_token:
+            # Persist the cumulative refresh token (rotated on this grant);
+            # it now covers both the Graph scopes and the SCC scope.
+            await m365_repo.update_tokens(
+                company_id=company_id,
+                refresh_token=encrypt_secret(refresh_token),
+                access_token=None,
+                token_expires_at=None,
+            )
+        destination = (
+            state_data.get("destination")
+            if state_data.get("destination") in {"/m365", "/m365/diagnostics"}
+            else "/m365"
+        )
+        variant = (
+            state_data.get("chained_variant")
+            if state_data.get("chained_variant") in {"success", "warning"}
+            else "success"
+        )
+        chained = str(state_data.get("chained_message") or "").strip()
+        message = (
+            chained + " Security & Compliance access was captured for spam search and purge."
+            if chained
+            else "Security & Compliance access was captured for spam search and purge."
+        )
+        log_info("Microsoft 365 Security & Compliance consent captured", company_id=company_id)
+        return flash_redirect(destination, message, variant)
+
     # ── Standard connect/token-refresh flow ────────────────────────────────
     credentials = await m365_service.get_credentials(company_id)
     if not credentials:
@@ -6168,12 +6342,15 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             if role_status == "existing"
             else "Compliance Administrator was assigned and verified."
         )
-        return flash_redirect(
-            destination,
-            role_message
-            + " Reconnect is complete; Purview provisioning and search support "
-            "must still be verified separately.",
-            "success",
+        return await _complete_connect_with_scc_consent(
+            request,
+            company_id=company_id,
+            destination=destination,
+            message=(
+                role_message
+                + " Reconnect is complete; Purview provisioning and search support "
+                "must still be verified separately."
+            ),
         )
     if state_data.get("return_to") == "diagnostics":
         # Re-run all diagnostics and complete the Purview-native setup now that
@@ -6187,12 +6364,15 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 company_id=company_id,
                 error=str(exc),
             )
-        return flash_redirect(
-            "/m365/diagnostics",
-            "Permissions and Purview configuration repaired and re-checked",
-            "success",
+        return await _complete_connect_with_scc_consent(
+            request,
+            company_id=company_id,
+            destination="/m365/diagnostics",
+            message="Permissions and Purview configuration repaired and re-checked",
         )
-    return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+    return await _complete_connect_with_scc_consent(
+        request, company_id=company_id, destination="/m365"
+    )
 
 
 @app.get("/search/", response_class=HTMLResponse)

@@ -218,18 +218,30 @@ PROVISION_SCOPE = (
 # those delegated permissions even if they are not statically configured on the
 # enterprise app registration (Microsoft Entra ID dynamic consent).
 #
-# The one exception is the Security & Compliance resource:
-# ``https://ps.compliance.protection.outlook.com/.default`` resolves against the
-# *EOP* app's own default delegated permission (the same one the Microsoft
-# Purview portal uses), not against our enterprise app, so it is safe here.
-# Capturing this consent at connect time is what lets Spam Search & Purge run
-# under the delegated permissions of the signed-in administrator instead of the
-# MyPortal application (see :func:`_acquire_scc_access_token`).
+# The Security & Compliance scope is deliberately NOT part of this string:
+# Microsoft rejects an authorization request that combines one resource's
+# ``/.default`` with another resource's specific scopes (AADSTS70011:
+# ".default scope can't be combined with resource-specific scopes").  It is
+# captured in a second, chained authorization during the connect flow (see
+# :data:`SCC_CONNECT_SCOPE`); the resulting refresh token is cumulative and
+# then covers both this scope set and the Security & Compliance scope.
 CONNECT_SCOPE = (
     "https://graph.microsoft.com/Application.ReadWrite.All "
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
     "https://graph.microsoft.com/Directory.Read.All "
     "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory "
+    "openid profile offline_access"
+)
+
+# Security & Compliance delegated scope, requested in its own authorization
+# request (the connect flow chains it after :data:`CONNECT_SCOPE`).  The
+# ``/.default`` resolves against the *EOP* resource app's own default delegated
+# permission — the same one the Microsoft Purview portal uses — not against
+# our enterprise app.  Capturing this consent at connect time is what lets
+# Spam Search & Purge run under the delegated permissions of the signed-in
+# administrator instead of the MyPortal application (see
+# :func:`_acquire_scc_access_token`).
+SCC_CONNECT_SCOPE = (
     "https://ps.compliance.protection.outlook.com/.default "
     "openid profile offline_access"
 )
@@ -2042,9 +2054,11 @@ async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
     """Acquire a delegated Security & Compliance access token.
 
     The token is always acquired from the refresh token of the Microsoft
-    administrator who last completed the connect flow (which consents to
-    :data:`CONNECT_SCOPE`, including
-    ``https://ps.compliance.protection.outlook.com/.default``).  Purview then
+    administrator who last completed the connect flow.  That flow consents to
+    :data:`CONNECT_SCOPE` and then chains a second authorization for
+    :data:`SCC_CONNECT_SCOPE`
+    (``https://ps.compliance.protection.outlook.com/.default``), so the stored
+    refresh token covers both scope sets.  Purview then
     authorizes the call as that *user*, whose own Compliance Administrator /
     eDiscoveryManager / Search And Purge role membership is what grants
     access.

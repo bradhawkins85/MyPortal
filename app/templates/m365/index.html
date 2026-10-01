@@ -183,6 +183,12 @@
       </section>
 
       <section class="m365-card">
+        <header class="m365-card__header"><span class="m365-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2 3 6v6c0 5 3.8 9.7 9 10 5.2-.3 9-5 9-10V6l-9-4Zm-1 14-4-4 1.4-1.4 2.6 2.6 5.6-5.6L18 9l-7 7Z"/></svg></span><div><h3>Security &amp; Compliance access</h3><p>Required for spam search and purge to run under this administrator's permissions.</p></div></header>
+        <a href="/m365/connect/scc" class="button button--ghost">Capture Security &amp; Compliance access</a>
+        <p class="form-help">Reconnects capture this consent automatically after the Microsoft Graph consent screen. Use this step if a reconnect ended before the Security &amp; Compliance consent screen or if it was denied.</p>
+      </section>
+
+      <section class="m365-card">
         <header class="m365-card__header"><span class="m365-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2 3 6v6c0 5 3.8 9.7 9 10 5.2-.3 9-5 9-10V6l-9-4Zm-1 14-4-4 1.4-1.4 2.6 2.6 5.6-5.6L18 9l-7 7Z"/></svg></span><div><h3>Mailbox report privacy</h3><p>Confirm that usage reports expose the identifiers required for mailbox sync.</p></div></header>
         <form method="post" action="/m365/checks/report-privacy">{% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}<button type="submit" class="button button--ghost">Run privacy check</button></form>
         <p class="form-help">If concealment is detected, update Reports settings in the <a href="https://admin.microsoft.com" target="_blank" rel="noopener noreferrer">Microsoft 365 admin centre</a>.</p>

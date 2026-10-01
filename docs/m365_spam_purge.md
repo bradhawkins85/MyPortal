@@ -20,11 +20,16 @@ mailbox, matching the prior console workflow.
 Spam search and purge run under the **delegated permissions of the Microsoft
 administrator who last reconnected the company** — not under the MyPortal
 application. The connect flow (including the **Configure Compliance
-Administrator** action) consents the Security & Compliance scope
-(`https://ps.compliance.protection.outlook.com/.default`) and stores that
-administrator's refresh token. MyPortal exchanges it for a delegated token on
-every compliance search and purge, so Microsoft Purview authorizes the call as
-that user.
+Administrator** action) consents the Microsoft Graph scopes first and then
+chains a second consent screen for the Security & Compliance scope
+(`https://ps.compliance.protection.outlook.com/.default`) — AAD does not
+allow that `/.default` scope in the same request as other resources' scopes
+(AADSTS70011). The resulting refresh token is cumulative: it covers both
+scope sets, and MyPortal exchanges it for a delegated Security & Compliance
+token on every compliance search and purge, so Microsoft Purview authorizes
+the call as that user. If a reconnect ends before the second consent screen
+(or the consent is denied), the **Capture Security & Compliance access**
+action on the Microsoft 365 settings page runs that step on its own.
 
 Consequences for tenant setup:
 
@@ -224,8 +229,10 @@ that does two things at once:
    and creates a tenant-wide (`/`) assignment only when one does not already
    exist.
 2. Refreshes the company's delegated sign-in, re-consenting
-   `CONNECT_SCOPE` — including the Security & Compliance scope. The signed-in
-   administrator's own refresh token is stored, and all later compliance
+   `CONNECT_SCOPE` and then the chained Security & Compliance consent
+   (skipped when the stored refresh token already covers that scope).
+   The signed-in administrator's cumulative refresh token is stored, and
+   all later compliance
    searches and purges run under **that account's** delegated permissions.
    Choose an account that holds the Compliance Administrator role in the
    customer tenant (eDiscoveryManager membership for search; Search And Purge
