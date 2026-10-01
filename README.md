@@ -166,7 +166,7 @@ licences, subscriptions and compliance, with PDF download and a report designer.
 | Accounting and time | Xero (OAuth2), Solidtime |
 | Email | IMAP mailboxes and filters, SMTP and SMTP relay, SMTP2Go (delivery tracking), Microsoft 365 mail |
 | Monitoring | Uptime Kuma, Windows Defender (via the tray agent), DMARC reports |
-| Messaging and notifications | ntfy, Apprise, Matrix chat, SMS gateway and inbound SMS, Trello |
+| Messaging and notifications | ntfy, Matrix chat, SMS gateway and inbound SMS, Trello |
 | AI | Ollama, ChatGPT and MCP clients |
 | Other | OpnForm, Cal.com, Password Pusher, generic webhooks, and an HTTP integration for external tools |
 

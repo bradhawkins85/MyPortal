@@ -40,7 +40,6 @@ MODULE_CAPABILITIES: dict[str, ModuleCapabilities] = {
     "m365-mail": _c(pack="m365_mail", commands=("sync_m365_mailboxes", "m365_mail_sync:*"), services=("m365_mail.graph",), ui=("mail.m365",)),
     "tacticalrmm": _c(pack="tacticalrmm", commands=("sync_tactical_assets", "push_tactical_companies", "pull_tactical_companies", "refresh_company_ids", "update_tray_icon_installer"), routes=("tacticalrmm.actions",), services=("tacticalrmm.api", "tacticalrmm.company_sync", "tacticalrmm.tray"), ui=("tacticalrmm",)),
     "ntfy": _c(pack="ntfy", services=("ntfy.delivery",), ui=("modules.ntfy",)),
-    "apprise": _c(services=("apprise.delivery",), ui=("modules.apprise",)),
     "uptimekuma": _c(pack="uptimekuma", routes=("webhooks.uptimekuma",), services=("uptimekuma.api",), ui=("uptimekuma",)),
     "chatgpt-mcp": _c(pack="chatgpt_mcp", routes=("mcp.chatgpt",), services=("chatgpt.mcp",), ui=("ai.chatgpt_mcp",)),
     "ollama-mcp": _c(routes=("mcp.ollama",), services=("ollama.mcp",), ui=("ai.ollama_mcp",)),

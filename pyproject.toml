@@ -40,7 +40,6 @@ dependencies = [
     "weasyprint>=68.1",
     "paramiko",
     "defusedxml",
-    "apprise>=1.9.9",
     "tiktoken>=0.6",
     "dnspython>=2.7",
     "publicsuffix2>=2.20191221",

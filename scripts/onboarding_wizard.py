@@ -613,17 +613,6 @@ FEATURES: tuple[Feature, ...] = (
         ),
     ),
     Feature(
-        "apprise",
-        "Apprise",
-        "Send notifications to 80+ services via Apprise URLs.",
-        modules=("apprise",),
-        group=_TELEPHONY,
-        settings=(
-            S("APPRISE_URLS", "Apprise URLs", "secret", required=True, help="Comma-separated notification URLs."),
-            S("APPRISE_TITLE", "Default title"),
-        ),
-    ),
-    Feature(
         "matrix_chat_assign",
         "Matrix Chat Auto-Assign",
         "Assign new Matrix chat rooms to technicians by rule.",
