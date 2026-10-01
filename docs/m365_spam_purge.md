@@ -17,9 +17,39 @@ mailbox, matching the prior console workflow.
 
 ## Permissions
 
-The tenant enterprise app needs **two separate application permission grants**,
-even though both permissions are named `Exchange.ManageAsApp`. Granting one does
-not grant the other.
+Spam search and purge run under the **delegated permissions of the Microsoft
+administrator who last reconnected the company** — not under the MyPortal
+application. The connect flow (including the **Configure Compliance
+Administrator** action) consents the Security & Compliance scope
+(`https://ps.compliance.protection.outlook.com/.default`) and stores that
+administrator's refresh token. MyPortal exchanges it for a delegated token on
+every compliance search and purge, so Microsoft Purview authorizes the call as
+that user.
+
+Consequences for tenant setup:
+
+- The signed-in administrator's **own account** must hold the Compliance
+  Administrator role in the customer tenant — eDiscoveryManager membership for
+  search, and Search And Purge for purge. Directory/Entra roles alone are not
+  sufficient.
+- Reconnecting as a different administrator switches which user's permissions
+  the workflow runs under.
+- If the stored sign-in expires, is revoked, or predates the Security &
+  Compliance consent, the request fails with an actionable 503 error pointing
+  back to the reconnect step — MyPortal never silently falls back to the
+  application identity.
+
+Role changes can take up to an hour to reach Purview. Only authenticated super
+administrators and users with the `helpdesk.technician` permission can access
+the UI or API.
+
+### Application (app-only) permission grants
+
+The Exchange Online PowerShell path used by the Managed Folder Assistant
+follow-up (and the app-registration checks surfaced in diagnostics) still
+relies on **application permission grants** to the tenant enterprise app. Both
+grants are named `Exchange.ManageAsApp`, but granting one does not grant the
+other:
 
 | Resource | Resource application ID | Purpose |
 | --- | --- | --- |
@@ -29,8 +59,7 @@ not grant the other.
 Microsoft documents the separate requirements for `Connect-IPPSSession` and
 `Connect-ExchangeOnline` in its [app-only authentication guidance](https://learn.microsoft.com/en-us/powershell/exchange/app-only-auth-powershell-v2).
 MyPortal provisioning, reconnect repair, and permission diagnostics handle both
-resource assignments independently. Only authenticated super administrators and
-users with the `helpdesk.technician` permission can access the UI or API.
+resource assignments independently.
 
 ### Identify the tenant and application
 
@@ -151,10 +180,13 @@ misreported as failures of every Purview prerequisite.
 
 The preflight also verifies that the enterprise application itself has either
 the **Exchange Administrator** or **Compliance Administrator** Entra directory
-role. The diagnostics repair action assigns Compliance Administrator using the
-delegated administrator session, then verifies the assignment before probing
-Purview. Assigning the role to the interactive user instead of the enterprise
-application does not satisfy app-only authentication.
+role, because those diagnostics probes still run app-only. The diagnostics
+repair action assigns Compliance Administrator to the enterprise application
+using the delegated administrator session, then verifies the assignment before
+probing Purview. (This is separate from the **user-side** Compliance
+Administrator / eDiscoveryManager / Search And Purge roles that the signed-in
+administrator's own account must hold for the delegated search and purge
+calls described above.)
 
 ## API
 
@@ -182,22 +214,34 @@ permission repair, and M365 permission diagnostics.
 
 ## Compliance Administrator remediation
 
-The spam search page can start an interactive Microsoft administrator sign-in to
-assign the built-in **Compliance Administrator** directory role to the configured
-enterprise application. The remediation resolves the enterprise application's
-service principal by its application/client ID, verifies the authenticated tenant,
-and creates a tenant-wide (`/`) assignment only when one does not already exist.
+The spam search page can start an interactive Microsoft administrator sign-in
+that does two things at once:
+
+1. Assigns the built-in **Compliance Administrator** directory role to the
+   configured enterprise application (for the app-only probes surfaced in
+   diagnostics). The remediation resolves the enterprise application's service
+   principal by its application/client ID, verifies the authenticated tenant,
+   and creates a tenant-wide (`/`) assignment only when one does not already
+   exist.
+2. Refreshes the company's delegated sign-in, re-consenting
+   `CONNECT_SCOPE` — including the Security & Compliance scope. The signed-in
+   administrator's own refresh token is stored, and all later compliance
+   searches and purges run under **that account's** delegated permissions.
+   Choose an account that holds the Compliance Administrator role in the
+   customer tenant (eDiscoveryManager membership for search; Search And Purge
+   for purge) so the delegated calls are authorized.
 
 The delegated administrator session must have the Microsoft Graph
-`RoleManagement.ReadWrite.Directory` scope consented and the signed-in account must
-have an active supported role, such as Privileged Role Administrator. After Graph
-verifies a new assignment, MyPortal reconnects and can queue the selected failed
-search again. Role assignment success and the later Purview search result are
-reported separately because the assignment does not establish Purview provisioning
-or app-only command support.
+`RoleManagement.ReadWrite.Directory` scope consented and the signed-in account
+must have an active supported role, such as Privileged Role Administrator.
+After Graph verifies a new assignment, MyPortal reconnects and can queue the
+selected failed search again. Role assignment success and the later Purview
+search result are reported separately because the assignment does not
+establish Purview provisioning.
 
-The Microsoft Exchange Online Protection `Exchange.ManageAsApp` application
-permission and administrator consent remain a separate prerequisite from the
-Entra directory roles. MyPortal does not provision the tenant's Purview
-organization or make Microsoft's best-effort app-only eDiscovery PowerShell
-configuration a supported Microsoft API scenario.
+The Exchange Online `Exchange.ManageAsApp` application permission grants
+(used by the Managed Folder Assistant follow-up and the diagnostics probes)
+remain a separate prerequisite from the delegated sign-in. MyPortal does not
+provision the tenant's Purview organization or make Microsoft's best-effort
+app-only eDiscovery PowerShell configuration a supported Microsoft API
+scenario.

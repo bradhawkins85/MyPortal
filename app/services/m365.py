@@ -214,14 +214,23 @@ PROVISION_SCOPE = (
 # Directory.Read.All to look up service principals (including the Teams SP for
 # Teams.ManageAsApp grants), and RoleManagement.ReadWrite.Directory to assign the
 # Exchange Administrator and Teams Service Administrator directory roles.
-# Using explicit scopes instead of ``/.default`` ensures the admin grants these
-# delegated permissions even if they are not statically configured on the enterprise
-# app registration (Microsoft Entra ID dynamic consent).
+# Using explicit Graph scopes instead of ``/.default`` ensures the admin grants
+# those delegated permissions even if they are not statically configured on the
+# enterprise app registration (Microsoft Entra ID dynamic consent).
+#
+# The one exception is the Security & Compliance resource:
+# ``https://ps.compliance.protection.outlook.com/.default`` resolves against the
+# *EOP* app's own default delegated permission (the same one the Microsoft
+# Purview portal uses), not against our enterprise app, so it is safe here.
+# Capturing this consent at connect time is what lets Spam Search & Purge run
+# under the delegated permissions of the signed-in administrator instead of the
+# MyPortal application (see :func:`_acquire_scc_access_token`).
 CONNECT_SCOPE = (
     "https://graph.microsoft.com/Application.ReadWrite.All "
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
     "https://graph.microsoft.com/Directory.Read.All "
     "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory "
+    "https://ps.compliance.protection.outlook.com/.default "
     "openid profile offline_access"
 )
 
@@ -2006,14 +2015,50 @@ def _exo_error_detail(response: httpx.Response) -> str:
     return ""
 
 
-async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
-    """Acquire an access token for the Security & Compliance PowerShell REST API.
+def _scc_delegated_reconnect_error(reason: str) -> M365Error:
+    """Build the actionable error raised when no delegated SCC token is available.
 
-    Prefers a delegated (user) token via the stored refresh token so that
-    Purview can resolve the user's organizational unit without requiring the
-    app to be registered as an Exchange service principal.  Falls back to
-    app-only ``client_credentials`` when no refresh token is available or the
-    delegated grant fails.
+    Spam Search & Purge deliberately run under the *user's* delegated
+    permissions rather than the MyPortal application, so the operator-facing
+    fix is always the same: a Microsoft administrator who holds the Compliance
+    Administrator role in the customer tenant must reconnect (which also
+    captures the Security & Compliance consent).
+    """
+    return M365Error(
+        "Spam search and purge run under the delegated permissions of the "
+        "Microsoft admin who last reconnected this company, not the MyPortal "
+        "application. " + reason +
+        " Use the Configure Compliance Administrator action (Microsoft 365 "
+        "settings page) or reconnect from Microsoft 365 settings, sign in "
+        "with an account that is a Compliance Administrator in the customer "
+        "tenant (eDiscoveryManager membership for search; Search And Purge "
+        "for purge), consent to the Security & Compliance permission when "
+        "prompted, then retry the request.",
+        http_status=503,
+    )
+
+
+async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
+    """Acquire a delegated Security & Compliance access token.
+
+    The token is always acquired from the refresh token of the Microsoft
+    administrator who last completed the connect flow (which consents to
+    :data:`CONNECT_SCOPE`, including
+    ``https://ps.compliance.protection.outlook.com/.default``).  Purview then
+    authorizes the call as that *user*, whose own Compliance Administrator /
+    eDiscoveryManager / Search And Purge role membership is what grants
+    access.
+
+    There is intentionally **no** app-only ``client_credentials`` fallback:
+    silently switching to the MyPortal application produced confusing 401
+    errors ("Purview rejected the application's credentials") whenever the
+    tenant had not separately granted the app Exchange.ManageAsApp, while the
+    real gap was simply a missing delegated consent.  When the delegated path
+    is unavailable we raise an actionable :class:`M365Error` (503) that tells
+    the operator to reconnect as a Compliance Administrator.
+
+    The rotated refresh token returned by the grant is persisted so the next
+    exchange does not fail with a stale (already-rotated) token.
 
     :returns: A tuple of ``(access_token, tenant_id)``.
     """
@@ -2025,46 +2070,45 @@ async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
     client_id = str(creds.get("client_id") or "").strip()
     client_secret = creds.get("client_secret") or ""
 
-    # Prefer a delegated (user) token so Purview resolves the orgUnit from
-    # the user's identity rather than requiring an Exchange-registered
-    # service principal for the app.
     refresh_token = creds.get("refresh_token")
-    if refresh_token:
-        try:
-            access_token, _, _ = await _exchange_token(
-                tenant_id=tenant_id,
-                client_id=client_id,
-                client_secret=client_secret,
-                refresh_token=refresh_token,
-                scope=_SCC_SCOPE,
-            )
-            log_info(
-                "SCC access token acquired via delegated (refresh_token) grant",
-                company_id=company_id,
-                tenant_id=tenant_id,
-            )
-            return access_token, tenant_id
-        except M365Error as exc:
-            # If the delegated grant fails (expired/revoked refresh token,
-            # missing delegated permission, etc.) fall back to app-only.
-            log_info(
-                "SCC delegated token failed; falling back to client_credentials",
-                company_id=company_id,
-                tenant_id=tenant_id,
-                failure_kind=getattr(exc, "failure_kind", None),
-                error=str(exc),
-            )
+    if not refresh_token:
+        raise _scc_delegated_reconnect_error(
+            "No delegated administrator sign-in is stored for this company. "
+        )
 
-    # Fallback: app-only client_credentials
-    access_token, _, _ = await _exchange_token(
-        tenant_id=tenant_id,
-        client_id=client_id,
-        client_secret=client_secret,
-        refresh_token=None,
-        scope=_SCC_SCOPE,
-    )
+    try:
+        access_token, new_refresh, _ = await _exchange_token(
+            tenant_id=tenant_id,
+            client_id=client_id,
+            client_secret=client_secret,
+            refresh_token=refresh_token,
+            scope=_SCC_SCOPE,
+        )
+    except M365Error as exc:
+        # ``reauthentication_required`` covers expired/revoked refresh tokens
+        # *and* a refresh token that was issued before the Security &
+        # Compliance scope was added to CONNECT_SCOPE (consent_required).
+        # Both cases are fixed by the same reconnect.
+        if getattr(exc, "failure_kind", None) == "reauthentication_required":
+            raise _scc_delegated_reconnect_error(
+                "The stored delegated sign-in can no longer issue a Security "
+                "& Compliance token (it is expired, was revoked, or predates "
+                "the Security & Compliance consent). "
+            ) from exc
+        raise
+
+    if new_refresh:
+        # Microsoft rotates refresh tokens on each grant; persist the new one
+        # or the next delegated exchange fails with the stale token.
+        await m365_repo.update_tokens(
+            company_id=company_id,
+            refresh_token=encrypt_secret(new_refresh),
+            access_token=None,
+            token_expires_at=None,
+        )
+
     log_info(
-        "SCC access token acquired via client_credentials grant",
+        "SCC access token acquired via delegated (refresh_token) grant",
         company_id=company_id,
         tenant_id=tenant_id,
     )

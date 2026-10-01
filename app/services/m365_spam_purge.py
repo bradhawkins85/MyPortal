@@ -46,11 +46,13 @@ def _organization_context_error(organization: str) -> m365_service.M365Error:
 
 
 _AUTH_HINT = (
-    " Purview rejected the application's credentials. In Office 365 Diagnostics, "
-    "run permission repair so Exchange.ManageAsApp is granted on Microsoft Exchange "
-    "Online Protection, confirm the application holds the Compliance Administrator "
-    "role (eDiscoveryManager membership for search; Search And Purge for purge), "
-    "then retry. Role changes can take up to an hour to reach Purview."
+    " Purview rejected the signed-in administrator's permissions. In the "
+    "customer tenant, confirm the Microsoft admin who last reconnected this "
+    "company holds the Compliance Administrator role (eDiscoveryManager "
+    "membership for search; Search And Purge for purge), then retry. Role "
+    "changes can take up to an hour to reach Purview. If that admin is no "
+    "longer available, reconnect the company from the Spam Search & Purge "
+    "page as another Compliance Administrator."
 )
 
 

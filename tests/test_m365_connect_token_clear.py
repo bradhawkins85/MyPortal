@@ -247,5 +247,17 @@ def test_connect_scope_includes_offline_access():
 
 
 def test_connect_scope_does_not_use_default():
-    """CONNECT_SCOPE must NOT use /.default (which only grants pre-configured permissions)."""
-    assert ".default" not in m365_service.CONNECT_SCOPE
+    """CONNECT_SCOPE must NOT use Graph /.default (which only grants pre-configured permissions)."""
+    assert "https://graph.microsoft.com/.default" not in m365_service.CONNECT_SCOPE
+
+
+def test_connect_scope_includes_scc_delegated_scope():
+    """CONNECT_SCOPE must consent the Security & Compliance scope.
+
+    Spam Search & Purge run under the delegated permissions of the
+    reconnected administrator, so the connect flow must capture the EOP
+    delegated scope. ``/.default`` is valid here because it resolves against
+    the *EOP* resource app's own default delegated permission (the same one
+    the Microsoft Purview portal uses), not against the enterprise app.
+    """
+    assert "https://ps.compliance.protection.outlook.com/.default" in m365_service.CONNECT_SCOPE

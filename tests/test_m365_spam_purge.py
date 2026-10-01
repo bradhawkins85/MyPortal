@@ -523,5 +523,104 @@ def test_authorization_failure_message_includes_remediation():
     )
 
     assert message.startswith("Security & Compliance New-ComplianceSearch failed (401)")
-    assert "Microsoft Exchange Online Protection" in message
+    # The 401 hint is about the *user's* roles: searches and purges run under
+    # the delegated permissions of the reconnected administrator.
+    assert "signed-in administrator's permissions" in message
+    assert "eDiscoveryManager" in message and "Search And Purge" in message
+    assert "Compliance Administrator" in message
+    assert "application's credentials" not in message
     assert service._failure_message(ValueError("bad query")) == "bad query"
+
+
+def test_delegated_reconnect_error_is_not_app_hints():
+    """The 503 delegated-reconnect error must surface verbatim, without 401 hints."""
+    message = service._failure_message(
+        m365_service._scc_delegated_reconnect_error(
+            "No delegated administrator sign-in is stored for this company. "
+        )
+    )
+    assert "delegated permissions of the " in message
+    assert "Configure Compliance Administrator" in message
+    assert "eDiscoveryManager" in message and "Search And Purge" in message
+
+
+@pytest.mark.anyio("asyncio")
+async def test_scc_access_token_requires_delegated_sign_in(monkeypatch):
+    """Without a stored refresh token the operator gets an actionable 503,
+    and no app-only client_credentials grant is attempted."""
+    monkeypatch.setattr(
+        m365_service, "get_credentials",
+        AsyncMock(return_value={
+            "tenant_id": "tenant-id", "client_id": "client-id",
+            "client_secret": "secret", "refresh_token": None,
+        }),
+    )
+    exchange = AsyncMock()
+    monkeypatch.setattr(m365_service, "_exchange_token", exchange)
+
+    with pytest.raises(M365Error) as excinfo:
+        await m365_service._acquire_scc_access_token(2)
+
+    assert excinfo.value.http_status == 503
+    assert "delegated permissions" in str(excinfo.value)
+    assert "Configure Compliance Administrator" in str(excinfo.value)
+    exchange.assert_not_called()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_scc_access_token_no_app_only_fallback_on_reauth(monkeypatch):
+    """An expired/revoked/under-consented refresh token must not silently fall
+    back to the MyPortal application; it must report the reconnect step."""
+    monkeypatch.setattr(
+        m365_service, "get_credentials",
+        AsyncMock(return_value={
+            "tenant_id": "tenant-id", "client_id": "client-id",
+            "client_secret": "secret", "refresh_token": "stored-rt",
+        }),
+    )
+    monkeypatch.setattr(
+        m365_service, "_exchange_token",
+        AsyncMock(side_effect=M365Error(
+            "Unable to acquire Microsoft 365 access token",
+            http_status=400, graph_error_code="invalid_grant",
+            failure_kind="reauthentication_required",
+        )),
+    )
+
+    with pytest.raises(M365Error) as excinfo:
+        await m365_service._acquire_scc_access_token(2)
+
+    assert excinfo.value.http_status == 503
+    assert "delegated sign-in" in str(excinfo.value)
+    assert "consent" in str(excinfo.value)
+    # Exactly one grant attempt: the delegated refresh_token exchange, never
+    # a client_credentials fallback.
+    m365_service._exchange_token.assert_awaited_once()
+    assert m365_service._exchange_token.await_args.kwargs["refresh_token"] == "stored-rt"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_scc_access_token_persists_rotated_refresh_token(monkeypatch):
+    """Microsoft rotates refresh tokens on each grant; the new token must be
+    persisted or the next delegated exchange fails with the stale token."""
+    monkeypatch.setattr(
+        m365_service, "get_credentials",
+        AsyncMock(return_value={
+            "tenant_id": "tenant-id", "client_id": "client-id",
+            "client_secret": "secret", "refresh_token": "old-rt",
+        }),
+    )
+    monkeypatch.setattr(
+        m365_service, "_exchange_token",
+        AsyncMock(return_value=("scc-access-token", "rotated-rt", None)),
+    )
+    update_tokens = AsyncMock()
+    monkeypatch.setattr(m365_service.m365_repo, "update_tokens", update_tokens)
+
+    token, tenant_id = await m365_service._acquire_scc_access_token(2)
+
+    assert (token, tenant_id) == ("scc-access-token", "tenant-id")
+    update_tokens.assert_awaited_once()
+    persisted = update_tokens.await_args.kwargs["refresh_token"]
+    assert m365_service.decrypt_secret(persisted) == "rotated-rt"
+    assert persisted != "old-rt"
