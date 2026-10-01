@@ -21,6 +21,8 @@ _ACTIVE_PHASES = {"preparing", "migrating", "draining", "restarting", "verifying
 _MAINTENANCE_PHASES = {"draining", "restarting"}
 _TERMINAL_PHASES = {"succeeded", "failed", "rolled_back", "interrupted"}
 _STALE_SECONDS = 30 * 60
+_STATE_DIR_MODE = 0o750
+_STATE_FILE_MODE = 0o640
 
 
 def _utc_now() -> datetime:
@@ -58,6 +60,11 @@ def _read_state() -> dict[str, Any]:
         return {}
 
 
+def _ensure_state_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True, mode=_STATE_DIR_MODE)
+    os.chmod(path, _STATE_DIR_MODE)
+
+
 def write_upgrade_state(
     *, upgrade_id: str, target_revision: str, phase: str, message: str,
     mode: str, outcome: str | None = None, started_at: str | None = None,
@@ -80,16 +87,17 @@ def write_upgrade_state(
         "maintenance": phase in _MAINTENANCE_PHASES,
         "outcome": outcome if phase in _TERMINAL_PHASES else None,
     }
-    _UPGRADE_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _ensure_state_directory(_UPGRADE_STATE_PATH.parent)
     fd, temporary = tempfile.mkstemp(prefix=".upgrade-state-", dir=_UPGRADE_STATE_PATH.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(state, handle, separators=(",", ":"), sort_keys=True)
             handle.write("\n")
             handle.flush()
+            os.fchmod(handle.fileno(), _STATE_FILE_MODE)
             os.fsync(handle.fileno())
-        os.chmod(temporary, 0o644)  # nginx's unprivileged worker must read it
         os.replace(temporary, _UPGRADE_STATE_PATH)
+        os.chmod(_UPGRADE_STATE_PATH, _STATE_FILE_MODE)
     finally:
         # os.replace() may have already moved the temporary file into place.
         with suppress(FileNotFoundError):
