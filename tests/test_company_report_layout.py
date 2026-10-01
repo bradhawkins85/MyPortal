@@ -1,6 +1,8 @@
 """Unit coverage for the configurable Company Overview layout."""
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from app.services import company_report_layout as layout
@@ -73,3 +75,36 @@ def test_stat_aggregation_filter_and_ordered_threshold_colours():
         {"operator": "gte", "value": 20, "colour": "#14532d"},
         {"operator": "gte", "value": 10, "colour": "#d99b16"},
     ]) == "#d99b16"
+
+
+def test_available_queries_excludes_reports_without_company_context(monkeypatch):
+    async def list_queries():
+        return [
+            {"slug": "tenant", "sql_query": "SELECT * FROM assets WHERE company_id = {{current.company}}"},
+            {"slug": "global", "sql_query": "SELECT * FROM assets"},
+        ]
+
+    monkeypatch.setattr(layout.reporting_repo, "list_queries", list_queries)
+
+    queries = asyncio.run(layout.available_queries())
+
+    assert [query["slug"] for query in queries] == ["tenant"]
+
+
+def test_build_does_not_execute_global_query_from_saved_layout(monkeypatch):
+    async def list_queries():
+        return [{"slug": "global", "name": "Global", "sql_query": "SELECT * FROM assets"}]
+
+    async def get_layout(_company_id):
+        return [{"columns": [{"slug": "global", "display": "table"}]}]
+
+    async def fail_if_executed(*_args, **_kwargs):
+        pytest.fail("global query must not execute in a company report")
+
+    monkeypatch.setattr(layout.reporting_repo, "list_queries", list_queries)
+    monkeypatch.setattr(layout.layout_repo, "get_layout", get_layout)
+    monkeypatch.setattr(layout.reporting_service, "run_query_with_context", fail_if_executed)
+
+    report = asyncio.run(layout.build(1, {"id": 1}))
+
+    assert report.rows[0]["columns"][0]["error"] == "Reporting slug not found."

@@ -157,7 +157,11 @@ class LayoutReport:
 
 
 async def available_queries() -> list[dict[str, Any]]:
-    return await reporting_repo.list_queries()
+    queries = await reporting_repo.list_queries()
+    return [
+        query for query in queries
+        if reporting_service.uses_company_context(str(query.get("sql_query") or ""))
+    ]
 
 
 async def get_layout(company_id: int) -> list[dict[str, Any]]:

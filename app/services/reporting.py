@@ -51,6 +51,11 @@ _CURRENT_COMPANY_PATTERN = re.compile(
 )
 
 
+def uses_company_context(sql: str) -> bool:
+    """Return whether a reporting query is explicitly scoped to a company."""
+    return _CURRENT_COMPANY_PATTERN.search(sql or "") is not None
+
+
 def substitute_query_context(sql: str, *, company_id: int | None = None) -> str:
     """Replace supported report SQL context placeholders with safe literals.
 
