@@ -3,6 +3,43 @@
 
 {% block title %}{{ control.name }} - Requirements{% endblock %}
 
+{% block header_title %}
+  <div class="page-header-bar page-header-bar--record">
+    <span class="header__title-text" title="{{ control.name }}">{{ control.name }}</span>
+    {% if company %}
+      <span class="page-header-bar__meta">
+        <div class="compliance-table__ml-badges">
+          <span class="badge badge--status-{{ ml1_status }}">
+            ML1:
+            {% if ml1_status == 'not_started' %}Not started
+            {% elif ml1_status == 'in_progress' %}In progress
+            {% elif ml1_status == 'compliant' %}Compliant
+            {% elif ml1_status == 'non_compliant' %}Non-compliant
+            {% else %}Not started{% endif %}
+          </span>
+          <span class="badge badge--status-{{ ml2_status }}">
+            ML2:
+            {% if ml2_status == 'not_started' %}Not started
+            {% elif ml2_status == 'in_progress' %}In progress
+            {% elif ml2_status == 'compliant' %}Compliant
+            {% elif ml2_status == 'non_compliant' %}Non-compliant
+            {% else %}Not started{% endif %}
+          </span>
+          <span class="badge badge--status-{{ ml3_status }}">
+            ML3:
+            {% if ml3_status == 'not_started' %}Not started
+            {% elif ml3_status == 'in_progress' %}In progress
+            {% elif ml3_status == 'compliant' %}Compliant
+            {% elif ml3_status == 'non_compliant' %}Non-compliant
+            {% else %}Not started{% endif %}
+          </span>
+        </div>
+        <span>{{ company.name }}</span>
+      </span>
+    {% endif %}
+  </div>
+{% endblock %}
+
 {% block header_actions %}
   {{ page_header_actions([
     {"label": "Back to Essential 8 controls", "type": "link", "href": "/compliance/essential8"}
@@ -117,43 +154,7 @@
 {% block content %}
 <div class="management management--single compliance" data-layout>
   <section class="management__content">
-    <header class="management__header compliance__header">
-      <div>
-        <h1 class="management__title">{{ control.name }}</h1>
-        <p class="management__subtitle">{{ control.description }}</p>
-      </div>
-      {% if company %}
-      <div class="management__header-actions compliance__header-actions">
-        <span class="tag tag--muted">{{ company.name }}</span>
-        <div class="compliance-table__ml-badges">
-          <span class="badge badge--status-{{ ml1_status }}">
-            ML1:
-            {% if ml1_status == 'not_started' %}Not started
-            {% elif ml1_status == 'in_progress' %}In progress
-            {% elif ml1_status == 'compliant' %}Compliant
-            {% elif ml1_status == 'non_compliant' %}Non-compliant
-            {% else %}Not started{% endif %}
-          </span>
-          <span class="badge badge--status-{{ ml2_status }}">
-            ML2:
-            {% if ml2_status == 'not_started' %}Not started
-            {% elif ml2_status == 'in_progress' %}In progress
-            {% elif ml2_status == 'compliant' %}Compliant
-            {% elif ml2_status == 'non_compliant' %}Non-compliant
-            {% else %}Not started{% endif %}
-          </span>
-          <span class="badge badge--status-{{ ml3_status }}">
-            ML3:
-            {% if ml3_status == 'not_started' %}Not started
-            {% elif ml3_status == 'in_progress' %}In progress
-            {% elif ml3_status == 'compliant' %}Compliant
-            {% elif ml3_status == 'non_compliant' %}Non-compliant
-            {% else %}Not started{% endif %}
-          </span>
-        </div>
-      </div>
-      {% endif %}
-    </header>
+    <p class="management__subtitle">{{ control.description }}</p>
 
     <div class="card card--panel compliance-summary-card">
       <div class="compliance-summary__grid">

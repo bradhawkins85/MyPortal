@@ -2,12 +2,45 @@
 {% from "macros/tables.html" import table_column_picker %}
 {% from "macros/header.html" import page_header_overflow %}
 {% block title %}Network Devices{% endblock %}
-{% block header_title %}<span class="header__title-text">Network Devices</span>{% endblock %}
+{% set discovered_device_columns = [
+  {"key": "hostname", "label": "Hostname"},
+  {"key": "state", "label": "State"},
+  {"key": "type", "label": "Type"},
+  {"key": "description", "label": "Description"},
+  {"key": "discovered-by", "label": "Discovered by"},
+  {"key": "wan-ip", "label": "WAN IP"},
+  {"key": "local-ip", "label": "Local IP"},
+  {"key": "mac-address", "label": "MAC address"},
+  {"key": "mac-vendor-os", "label": "MAC vendor / OS"},
+  {"key": "open-ports", "label": "Open ports"},
+  {"key": "first-seen", "label": "First seen"},
+  {"key": "last-seen", "label": "Last seen"},
+  {"key": "myportal-asset", "label": "MyPortal asset"}
+] %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Network Devices</span>
+    {% if devices %}
+      <div class="page-header-toolbar">
+        <label class="visually-hidden" for="network-device-search">Search devices</label>
+        <input id="network-device-search" class="form-input page-header-toolbar__search" type="search" placeholder="Search devices" data-table-filter="network-devices">
+        {{ table_column_picker("network-devices", discovered_device_columns) }}
+        {% if can_configure %}<button class="button button--ghost button--compact" type="button" data-device-bulk-open disabled>Update selected <span data-device-selected-count>(0)</span></button>{% endif %}
+        {% if can_import_ipam %}<button class="button button--ghost button--compact" type="button" data-ipam-bulk-open disabled>Add selected to IPAM <span data-ipam-selected-count>(0)</span></button>{% endif %}
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}
 {% block header_actions %}
+  {% set device_menu_actions = [] %}
   {% if can_manage_device_types %}
-    {{ page_header_overflow("network-device-actions", "Actions", [
-      {"label": "Edit Device Types", "type": "button", "attrs": {"data-device-types-open": true}}
-    ]) }}
+    {% set _ = device_menu_actions.append({"label": "Edit Device Types", "type": "button", "attrs": {"data-device-types-open": true}}) %}
+  {% endif %}
+  {% if devices and can_configure %}
+    {% set _ = device_menu_actions.append({"label": "Purge out of scope", "type": "form", "variant": "danger", "action": "/devices/discovered-purge", "confirm": "Purge every discovered device outside its scanner's configured LAN or WAN CIDRs? This cannot be undone."}) %}
+  {% endif %}
+  {% if device_menu_actions %}
+    {{ page_header_overflow("network-device-actions", "Actions", device_menu_actions) }}
   {% endif %}
 {% endblock %}
 {% block content %}
@@ -26,24 +59,8 @@
   </section>{% endif %}
 
   <section class="card card--panel admin-grid__full">
-    {% set discovered_device_columns = [
-      {"key": "hostname", "label": "Hostname"},
-      {"key": "state", "label": "State"},
-      {"key": "type", "label": "Type"},
-      {"key": "description", "label": "Description"},
-      {"key": "discovered-by", "label": "Discovered by"},
-      {"key": "wan-ip", "label": "WAN IP"},
-      {"key": "local-ip", "label": "Local IP"},
-      {"key": "mac-address", "label": "MAC address"},
-      {"key": "mac-vendor-os", "label": "MAC vendor / OS"},
-      {"key": "open-ports", "label": "Open ports"},
-      {"key": "first-seen", "label": "First seen"},
-      {"key": "last-seen", "label": "Last seen"},
-      {"key": "myportal-asset", "label": "MyPortal asset"}
-    ] %}
     <header class="card__header card__header--stacked">
       <div><h2>Discovered devices</h2><p class="card__lede">Asset matches use normalized MAC addresses. WAN IP identifies the network where each device was most recently seen.</p></div>
-      {% if devices %}<div class="card__controls"><label class="visually-hidden" for="network-device-search">Search devices</label><input id="network-device-search" class="input" type="search" placeholder="Search devices" data-table-filter="network-devices">{{ table_column_picker("network-devices", discovered_device_columns) }}{% if can_configure %}<button class="button button--secondary" type="button" data-device-bulk-open disabled>Update selected <span data-device-selected-count>(0)</span></button><form method="post" action="/devices/discovered-purge" data-confirm="Purge every discovered device outside its scanner's configured LAN or WAN CIDRs? This cannot be undone.">{% include "partials/csrf.html" %}<button class="button button--danger" type="submit">Purge out of scope</button></form>{% endif %}{% if can_import_ipam %}<button class="button button--secondary" type="button" data-ipam-bulk-open disabled>Add selected to IPAM <span data-ipam-selected-count>(0)</span></button>{% endif %}</div>{% endif %}
     </header>
     {% if devices %}
       <div class="table-wrapper"><table class="table" id="network-devices-table" data-table data-table-id="network-devices">

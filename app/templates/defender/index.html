@@ -22,10 +22,7 @@
 {% set item_labels = {
   'blocked_tamper_protection': 'Blocked by tamper protection', 'managed_by_policy': 'Controlled by Group Policy/Intune',
   'unsupported': 'Not supported by Defender', 'failed': 'Failed'} %}
-<section class="page-header">
-  <div><p class="eyebrow">Endpoint security</p><h1>Windows Defender</h1>
-    <p>Monitor protection health, detections and exclusions reported by the MyPortal tray agent.</p></div>
-</section>
+<p class="text-muted">Monitor protection health, detections and exclusions reported by the MyPortal tray agent.</p>
 {% if not defender_enabled %}
   <section class="card"><div class="empty-state"><h2>Defender management is disabled</h2>
     <p>This opt-in service is disabled for this company. A super administrator can enable it here.</p>

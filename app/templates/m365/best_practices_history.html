@@ -2,7 +2,14 @@
 {% from "macros/header.html" import page_header_actions %}
 {% from "macros/tables.html" import table_toolbar %}
 
-{% block header_title %}Microsoft 365 Score History{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Microsoft 365 Score History</span>
+    {% if history %}
+      {{ table_toolbar('bp-history-table', search=true, search_placeholder='Filter history', search_name='q-bp-history', header=true) }}
+    {% endif %}
+  </div>
+{% endblock %}
 {% block title %}Microsoft 365 Score History{% endblock %}
 
 {% block header_actions %}
@@ -28,7 +35,6 @@
       </div>
     </header>
     {% if history %}
-      {{ table_toolbar('bp-history-table', search=true, search_placeholder='Filter history', search_name='q-bp-history') }}
       <div class="panel__body" style="padding:0;overflow:auto">
         <table class="table" id="bp-history-table" data-table data-table-id="m365-best-practices-history">
           <thead><tr>

@@ -1,9 +1,16 @@
 {% extends "base.html" %}
-{% block header_title %}<span class="header__title-text">System update result</span>{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar page-header-bar--record">
+    <span class="header__title-text">{{ 'Docker upgrade' if update.mode == 'docker' else 'Rolling update' }} <code>{{ update.id[:8] }}</code></span>
+    <span class="page-header-bar__meta">
+      <span class="tag {{ 'tag--success' if update.status == 'succeeded' else ('tag--danger' if update.status == 'failed' else 'tag--warning') }}" data-system-update-tag>{{ update.status }}</span>
+      <span>Target <code>{{ update.target_revision }}</code></span>
+    </span>
+  </div>
+{% endblock %}
 {% block header_actions %}<a class="button button--ghost" href="/admin/system-updates">All updates</a>{% endblock %}
 {% block content %}<div class="management management--single"><section class="management__content"
   data-system-update="{{ update.id }}" data-system-update-status="{{ update.status }}" data-system-update-started="{{ update.started_at }}">
-<header class="management__header"><div><h1 class="management__title">{{ 'Docker upgrade' if update.mode == 'docker' else 'Rolling update' }} <code>{{ update.id[:8] }}</code></h1><p class="management__subtitle">Target <code>{{ update.target_revision }}</code></p></div><span class="tag {{ 'tag--success' if update.status == 'succeeded' else ('tag--danger' if update.status == 'failed' else 'tag--warning') }}" data-system-update-tag>{{ update.status }}</span></header>
 <div class="card card--panel"><dl class="definition-list"><dt>Started</dt><dd><span data-utc="{{ update.started_at }}"></span></dd><dt>Completed</dt><dd data-system-update-completed>{% if update.completed_at %}<span data-utc="{{ update.completed_at }}"></span>{% else %}In progress{% endif %}</dd><dt>Mode</dt><dd>{{ update.mode }}</dd><dt>Source</dt><dd>{{ update.source }}</dd></dl>
 {% if update.status == 'pending' %}
   <p class="text-muted" data-system-update-waiting>Waiting for the host to pick up this request; it checks every minute. If it stays queued: {{ host_setup_hint }}</p>

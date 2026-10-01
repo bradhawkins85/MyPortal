@@ -1,9 +1,93 @@
 {% extends "base.html" %}
 
 {% block header_title %}
-  {% if can_edit_staff %}
-    <div class="header-title-menu">
-      <span class="header-title-menu__label">Staff workspace</span>
+  <div class="header-title-menu page-header-bar">
+    <span class="header__title-text">Staff</span>
+    <div class="page-header-toolbar">
+      <form id="staff-filter-form" method="get" action="/staff" class="page-header-toolbar__group">
+        <label class="visually-hidden" for="staff-search">Search staff</label>
+        <input class="form-input page-header-toolbar__search" id="staff-search" type="search" data-table-filter="staff-table" placeholder="Search staff" />
+        <label class="visually-hidden" for="staff-enabled">Status</label>
+        <select class="form-input page-header-toolbar__select" id="staff-enabled" name="enabled" data-submit-on-change>
+          <option value="" {% if enabled_filter == '' %}selected{% endif %}>All statuses</option>
+          <option value="1" {% if enabled_filter == '1' %}selected{% endif %}>Enabled</option>
+          <option value="0" {% if enabled_filter == '0' %}selected{% endif %}>Disabled</option>
+        </select>
+        {% if staff_permission == 3 and departments %}
+          <label class="visually-hidden" for="staff-department-filter">Department</label>
+          <select class="form-input page-header-toolbar__select" id="staff-department-filter" name="department" data-submit-on-change>
+            <option value="" {% if department_filter == '' %}selected{% endif %}>All departments</option>
+            {% for department in departments %}
+              <option value="{{ department }}" {% if department_filter == department %}selected{% endif %}>{{ department }}</option>
+            {% endfor %}
+          </select>
+        {% endif %}
+        <label class="page-header-toolbar__check">
+          <input type="checkbox" name="show_ex_staff" value="1" data-submit-on-change {% if show_ex_staff %}checked{% endif %} />
+          <span>Show ex-staff</span>
+        </label>
+      </form>
+      <div class="ticket-columns ticket-header-toolbar__menu" data-staff-columns>
+        <button type="button" class="button button--ghost button--compact ticket-columns__toggle" data-columns-toggle aria-haspopup="true">
+          <span>Columns</span>
+          <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
+        </button>
+        <div class="ticket-columns__panel" data-columns-panel hidden>
+          <p class="ticket-columns__title">Toggle columns</p>
+          <div class="ticket-columns__options">
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="first-name" checked disabled />
+              First name
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="last-name" checked />
+              Last name
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="email" checked />
+              Email
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="mobile" checked />
+              Mobile
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="code" checked />
+              Code
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="onboarded" checked />
+              Onboarded
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="m365-sign-in" checked />
+              O365 Last Sign In
+            </label>
+            {% if is_super_admin %}
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="portal-last-login" checked />
+                MyPortal Last Login
+              </label>
+            {% endif %}
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="onboarding-workflow" checked />
+              Onboarding Workflow
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="enabled" checked />
+              Enabled
+            </label>
+            {% for field in staff_custom_field_definitions %}
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="custom-{{ field.name }}" checked />
+                {{ field.display_name or field.name }}
+              </label>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% if can_edit_staff %}
       <details class="header-title-menu__dropdown" data-header-menu>
         <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
           Tools
@@ -28,8 +112,8 @@
           {% endif %}
         </ul>
       </details>
-    </div>
-  {% endif %}
+    {% endif %}
+  </div>
 {% endblock %}
 
 {% block content %}
@@ -140,100 +224,6 @@
   </section>
   {% endif %}
   <section class="card card--panel admin-grid__full">
-    <header class="card__header">
-      <div class="card__controls">
-        <form id="staff-filter-form" method="get" action="/staff" class="filters filters--compact">
-          <div class="filters__group">
-            <label class="form-label" for="staff-enabled">Status</label>
-            <select class="form-input" id="staff-enabled" name="enabled" data-submit-on-change>
-              <option value="" {% if enabled_filter == '' %}selected{% endif %}>All</option>
-              <option value="1" {% if enabled_filter == '1' %}selected{% endif %}>Enabled</option>
-              <option value="0" {% if enabled_filter == '0' %}selected{% endif %}>Disabled</option>
-            </select>
-          </div>
-          <div class="filters__group filters__group--checkbox">
-            <label class="checkbox">
-              <input type="checkbox" name="show_ex_staff" value="1" data-submit-on-change {% if show_ex_staff %}checked{% endif %} />
-              <span>Show Ex-Staff</span>
-            </label>
-          </div>
-          {% if staff_permission == 3 and departments %}
-            <div class="filters__group">
-              <label class="form-label" for="staff-department-filter">Department</label>
-              <select class="form-input" id="staff-department-filter" name="department" data-submit-on-change>
-                <option value="" {% if department_filter == '' %}selected{% endif %}>All departments</option>
-                {% for department in departments %}
-                  <option value="{{ department }}" {% if department_filter == department %}selected{% endif %}>{{ department }}</option>
-                {% endfor %}
-              </select>
-            </div>
-          {% endif %}
-          <div class="filters__group">
-            <label class="form-label" for="staff-search">Search</label>
-            <input class="form-input" id="staff-search" type="search" data-table-filter="staff-table" placeholder="Search staff" />
-          </div>
-        </form>
-        <div class="ticket-columns" data-staff-columns>
-          <button type="button" class="button button--ghost ticket-columns__toggle" data-columns-toggle aria-haspopup="true">
-            <span>Columns</span>
-            <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
-          </button>
-          <div class="ticket-columns__panel" data-columns-panel hidden>
-            <p class="ticket-columns__title">Toggle columns</p>
-            <div class="ticket-columns__options">
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="first-name" checked disabled />
-                First name
-              </label>
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="last-name" checked />
-                Last name
-              </label>
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="email" checked />
-                Email
-              </label>
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="mobile" checked />
-                Mobile
-              </label>
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="code" checked />
-                Code
-              </label>
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="onboarded" checked />
-                Onboarded
-              </label>
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="m365-sign-in" checked />
-                O365 Last Sign In
-              </label>
-              {% if is_super_admin %}
-                <label class="ticket-columns__option">
-                  <input type="checkbox" class="staff-column-toggle" data-column="portal-last-login" checked />
-                  MyPortal Last Login
-                </label>
-              {% endif %}
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="onboarding-workflow" checked />
-                Onboarding Workflow
-              </label>
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="enabled" checked />
-                Enabled
-              </label>
-              {% for field in staff_custom_field_definitions %}
-                <label class="ticket-columns__option">
-                  <input type="checkbox" class="staff-column-toggle" data-column="custom-{{ field.name }}" checked />
-                  {{ field.display_name or field.name }}
-                </label>
-              {% endfor %}
-            </div>
-          </div>
-        </div>
-      </div>
-    </header>
     <div class="table-wrapper">
       <table class="table" id="staff-table" data-table data-table-id="staff">
         <thead>

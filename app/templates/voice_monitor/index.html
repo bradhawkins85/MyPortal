@@ -1,6 +1,7 @@
 {% extends "base.html" %}
+{% block header_title %}<span class="header__title-text">Voice Monitor</span>{% endblock %}
 {% block content %}
-<section class="card"><h1>Voice Monitor</h1><p>Subscribed numbers and their latest monitoring status.</p>
+<section class="card"><p>Subscribed numbers and their latest monitoring status.</p>
 <table><thead><tr><th>Number</th><th>Name</th><th>Enabled</th></tr></thead><tbody>
 {% for endpoint in endpoints %}<tr><td>{{ endpoint.destination_e164 }}</td><td>{{ endpoint.display_label }}</td><td>{{ 'Yes' if endpoint.enabled else 'No' }}</td></tr>{% else %}<tr><td colspan="3">No monitored subscriptions.</td></tr>{% endfor %}
 </tbody></table></section>

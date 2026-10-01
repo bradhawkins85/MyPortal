@@ -1,31 +1,43 @@
 {% extends "base.html" %}
 {% block title %}Network map{% endblock %}
 {% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% endblock %}
-{% block header_title %}<span class="header__title-text">Network map</span>{% endblock %}
-{% block header_actions %}<button class="button button--primary" type="button" data-nm-modal-open="export-modal" aria-haspopup="dialog" aria-controls="export-modal">Export</button>{% if feature_pack_available('racks') %}<a class="button button--secondary" href="/racks">Racks</a>{% endif %}{% if feature_pack_available('ipam') %}<a class="button button--secondary" href="/ipam">IPAM</a>{% endif %}{% endblock %}
-{% block content %}
-<div class="network-map-page" data-network-map>
-  <form class="card card--panel nm-filters" method="get" action="/network-map" aria-label="Map options">
-    <div class="nm-filters__row">
-      <label>Layout<select class="input" name="layout">{% for key, item in layouts.items() %}<option value="{{ key }}" {% if key == options.layout %}selected{% endif %} title="{{ item.help }}">{{ item.label }}</option>{% endfor %}</select></label>
-      <label>Detail<select class="input" name="detail">{% for key, level in detail_levels.items() %}<option value="{{ key }}" {% if key == options.detail %}selected{% endif %}>{{ level.label }}</option>{% endfor %}</select></label>
-      <label>Site<select class="input" name="site"><option value="">All sites</option>{% for site in sites %}<option value="{{ site }}" {% if site == options.site %}selected{% endif %}>{{ site }}</option>{% endfor %}</select></label>
-      <label class="checkbox"><input type="checkbox" name="subnets" value="1" {% if options.show_subnets %}checked{% endif %}><span>Show subnets</span></label>
-      <input type="hidden" name="unlinked" value="show"><label class="checkbox" title="Leave off devices with no link to another device"><input type="checkbox" name="unlinked" value="hide" {% if options.hide_unlinked %}checked{% endif %}><span>Hide devices not linked to other devices</span></label>
-<label class="checkbox"><input type="checkbox" name="all_devices" value="1" {% if options.include_unlinked %}checked{% endif %}><span>Include undocumented devices</span></label>
-      <label class="checkbox"><input type="checkbox" name="racks" value="0" {% if not options.show_racks %}checked{% endif %}><span>Ignore rack grouping (sites layout)</span></label>
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Network map</span>
+    <form class="page-header-toolbar" method="get" action="/network-map" aria-label="Map options" data-nm-filters>
+      <label class="visually-hidden" for="nm-layout">Layout</label>
+      <select class="form-input page-header-toolbar__select" id="nm-layout" name="layout" title="Layout">{% for key, item in layouts.items() %}<option value="{{ key }}" {% if key == options.layout %}selected{% endif %} title="{{ item.help }}">{{ item.label }}</option>{% endfor %}</select>
+      <label class="visually-hidden" for="nm-detail">Detail</label>
+      <select class="form-input page-header-toolbar__select" id="nm-detail" name="detail" title="Detail">{% for key, level in detail_levels.items() %}<option value="{{ key }}" {% if key == options.detail %}selected{% endif %}>{{ level.label }}</option>{% endfor %}</select>
+      <label class="visually-hidden" for="nm-site">Site</label>
+      <select class="form-input page-header-toolbar__select" id="nm-site" name="site" title="Site"><option value="">All sites</option>{% for site in sites %}<option value="{{ site }}" {% if site == options.site %}selected{% endif %}>{{ site }}</option>{% endfor %}</select>
       <details class="nm-type-picker">
-        <summary class="button button--ghost">Device types{% if options.types is not none %} ({{ options.types|length }}){% endif %}</summary>
+        <summary class="button button--ghost button--compact">Device types{% if options.types is not none %} ({{ options.types|length }}){% endif %}</summary>
         <div class="nm-type-picker__panel">
           <div class="nm-type-picker__actions"><button class="button button--ghost button--small" type="button" data-nm-types="all">All</button><button class="button button--ghost button--small" type="button" data-nm-types="present">Types in use</button><button class="button button--ghost button--small" type="button" data-nm-types="network">Network only</button><button class="button button--ghost button--small" type="button" data-nm-types="none">None</button></div>
           {% for group in type_groups %}<fieldset><legend>{{ group.label }}</legend>{% for item in group.types %}<label class="checkbox nm-type-option{% if not item.count %} is-empty{% endif %}"><input type="checkbox" name="types" value="{{ item.key }}" data-count="{{ item.count }}" data-category="{{ group.label }}" {% if options.types is none or item.key in options.types %}checked{% endif %}><img src="{{ item.icon }}" alt="" width="18" height="18"><span>{{ item.label }}</span>{% if item.count %}<span class="text-muted">{{ item.count }}</span>{% endif %}</label>{% endfor %}</fieldset>{% endfor %}
         </div>
       </details>
-      <button class="button button--secondary" type="submit">Apply</button>
-    </div>
-    <p class="form-help">{{ detail_levels[options.detail].help }} Showing {{ node_count }} device{{ '' if node_count == 1 else 's' }} and {{ link_count }} link{{ '' if link_count == 1 else 's' }}.</p>
-  </form>
-
+      <div class="header-menu page-header-toolbar__menu" data-header-menu>
+        <button type="button" class="button button--ghost button--compact header-menu__button" data-header-menu-toggle aria-haspopup="true" aria-expanded="false" aria-controls="nm-options-panel">
+          <span>Options</span>
+          <svg class="header-menu__chevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14"><path fill="currentColor" d="M5.5 7.5 10 12l4.5-4.5z" /></svg>
+        </button>
+        <div id="nm-options-panel" class="header-menu__panel header-menu__panel--form header-menu__panel--stack" data-header-menu-panel hidden>
+          <label class="page-header-toolbar__check"><input type="checkbox" name="subnets" value="1" {% if options.show_subnets %}checked{% endif %}><span>Show subnets</span></label>
+          <input type="hidden" name="unlinked" value="show"><label class="page-header-toolbar__check" title="Leave off devices with no link to another device"><input type="checkbox" name="unlinked" value="hide" {% if options.hide_unlinked %}checked{% endif %}><span>Hide devices not linked to other devices</span></label>
+          <label class="page-header-toolbar__check"><input type="checkbox" name="all_devices" value="1" {% if options.include_unlinked %}checked{% endif %}><span>Include undocumented devices</span></label>
+          <label class="page-header-toolbar__check"><input type="checkbox" name="racks" value="0" {% if not options.show_racks %}checked{% endif %}><span>Ignore rack grouping (sites layout)</span></label>
+        </div>
+      </div>
+      <button class="button button--ghost button--compact" type="submit">Apply</button>
+      <span class="page-header-toolbar__info" title="{{ detail_levels[options.detail].help }}">{{ node_count }} device{{ '' if node_count == 1 else 's' }} · {{ link_count }} link{{ '' if link_count == 1 else 's' }}</span>
+    </form>
+  </div>
+{% endblock %}
+{% block header_actions %}{% if feature_pack_available('racks') %}<a class="button button--ghost" href="/racks">Racks</a>{% endif %}{% if feature_pack_available('ipam') %}<a class="button button--ghost" href="/ipam">IPAM</a>{% endif %}<button class="button button--primary" type="button" data-nm-modal-open="export-modal" aria-haspopup="dialog" aria-controls="export-modal">Export</button>{% endblock %}
+{% block content %}
+<div class="network-map-page" data-network-map>
   <div class="nm-workspace">
     <section class="card card--panel nm-canvas" aria-label="Network diagram">
       <div class="nm-toolbar" role="toolbar" aria-label="Diagram view">

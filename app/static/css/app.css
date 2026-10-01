@@ -1763,6 +1763,10 @@ button.header-title-menu__link,
   text-decoration: none;
 }
 
+.header__actions .button {
+  white-space: nowrap;
+}
+
 .header-actions {
   display: flex;
   align-items: center;
@@ -8116,6 +8120,12 @@ body:has(.stf-modal.is-visible) {
   cursor: pointer;
 }
 
+.page-header-toolbar .ticket-columns__panel {
+  max-height: min(420px, 70vh);
+  overflow-y: auto;
+  font-weight: 400;
+}
+
 .page-header-toolbar__info {
   color: var(--hf-muted);
   font-size: 0.8rem;
@@ -8138,6 +8148,11 @@ body:has(.stf-modal.is-visible) {
 
 .page-header-toolbar .header-menu__panel--form[hidden] {
   display: none;
+}
+
+.page-header-toolbar .header-menu__panel--stack {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 16rem;
 }
 
 .header-menu__panel--form > .header-menu__panel-actions {
