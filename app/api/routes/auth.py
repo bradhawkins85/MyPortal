@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 from io import BytesIO
 from typing import Any
+from urllib.parse import quote
 
 import pyotp
 import qrcode
@@ -330,9 +331,12 @@ def _set_passkey_login_cookie(response: Response, request: Request, token: str) 
     # explicit for static analysis.
     if not passkeys_service.is_valid_browser_binding_token(token):
         raise ValueError("Invalid passkey browser binding token")
+    # Encode before writing so cookie structure cannot be influenced even if
+    # upstream validation changes in the future.
+    cookie_value = quote(token, safe="")
     response.set_cookie(
         _passkey_login_cookie_name(),
-        token,
+        cookie_value,
         httponly=True,
         secure=_request_is_secure(request),
         max_age=passkeys_service.PASSKEY_CHALLENGE_TTL_SECONDS,
