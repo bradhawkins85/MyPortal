@@ -137,15 +137,7 @@ async def sync_chat_message_to_ticket(
             ticket_reply_id=int(reply["id"]),
             sync_direction="chat_to_ticket",
         )
-    try:
-        await tickets_service.refresh_ticket_ai_summary(ticket_id)
-    except RuntimeError as exc:
-        log_error(
-            "Chat ticket sync skipped AI summary refresh",
-            ticket_id=ticket_id,
-            error=str(exc),
-        )
-    await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    tickets_service.schedule_ticket_ai_refresh(ticket_id)
     await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
     await tickets_service.emit_ticket_updated_event(ticket_id, actor_type="requester")
 

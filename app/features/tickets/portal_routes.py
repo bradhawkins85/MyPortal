@@ -231,15 +231,7 @@ async def portal_create_ticket(request: Request):
                         log_error(f"Failed to save attachment: {attach_error}")
                         # Continue processing ticket even if attachment fails
 
-        try:
-            await tickets_service.refresh_ticket_ai_summary(ticket["id"])
-        except RuntimeError as exc:
-            log_error(
-                "Portal ticket AI summary refresh skipped after create",
-                ticket_id=ticket["id"],
-                error=str(exc),
-            )
-        await tickets_service.refresh_ticket_ai_tags(ticket["id"])
+        tickets_service.schedule_ticket_ai_refresh(ticket["id"])
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create portal ticket", error=str(exc))
         return await main_module._render_portal_tickets_page(
@@ -431,15 +423,7 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
-    try:
-        await tickets_service.refresh_ticket_ai_summary(ticket_id)
-    except RuntimeError as exc:
-        log_error(
-            "Portal ticket AI summary refresh skipped after reply",
-            ticket_id=ticket_id,
-            error=str(exc),
-        )
-    await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    tickets_service.schedule_ticket_ai_refresh(ticket_id)
     actor_type = "technician" if has_helpdesk_access or is_super_admin else "requester"
     reply_event_payload = dict(created_reply)
     if reply_attachments:

@@ -6328,10 +6328,14 @@ async def _invoke_reprocess_ai(
     attempt_number = 1
     processed = []
     try:
-        if refresh_summary:
+        if refresh_summary and refresh_tags:
+            # One combined model call covers both outputs.
+            await _tickets_service().refresh_ticket_ai_insights(ticket_id_int)
+            processed.extend(["summary", "tags"])
+        elif refresh_summary:
             await _tickets_service().refresh_ticket_ai_summary(ticket_id_int)
             processed.append("summary")
-        if refresh_tags:
+        elif refresh_tags:
             await _tickets_service().refresh_ticket_ai_tags(ticket_id_int)
             processed.append("tags")
         if refresh_resolution:
