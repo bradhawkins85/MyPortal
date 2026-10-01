@@ -229,14 +229,14 @@ async def _build_assets(company_id: int) -> dict[str, Any]:
 def _staff_row_to_account(row: Mapping[str, Any]) -> dict[str, Any]:
     first_name = row.get("first_name") or ""
     last_name = row.get("last_name") or ""
-    name = row.get("name") or f"{first_name} {last_name}".strip()
+    name = f"{first_name} {last_name}".strip()
     return {
         "first_name": first_name,
         "last_name": last_name,
         "name": name,
         "email": row.get("email"),
         "department": row.get("department"),
-        "job_title": row.get("position") or row.get("job_title"),
+        "job_title": row.get("job_title"),
         "mobile_phone": row.get("mobile_phone"),
         "onboarding_status": row.get("onboarding_status"),
         "m365_last_sign_in": _datetime_to_iso(row.get("m365_last_sign_in")),
@@ -246,7 +246,7 @@ def _staff_row_to_account(row: Mapping[str, Any]) -> dict[str, Any]:
 async def _list_active_staff_accounts(company_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """
-        SELECT first_name, last_name, name, email, department, position, job_title,
+        SELECT first_name, last_name, email, department, job_title,
                mobile_phone, onboarding_status, m365_last_sign_in
         FROM staff
         WHERE company_id = %s

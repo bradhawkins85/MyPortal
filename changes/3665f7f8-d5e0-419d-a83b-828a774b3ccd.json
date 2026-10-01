@@ -1,0 +1,7 @@
+{
+  "guid": "3665f7f8-d5e0-419d-a83b-828a774b3ccd",
+  "occurred_at": "2026-10-01T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed ticket, staff, asset, chat and CSP tables showing only the name column for browsers with no saved column choices; fixed the Company Overview report's Active staff, Active user accounts, Licenses and Subscriptions sections failing with unknown-column errors; and fixed removing demo data, which failed on MySQL and when the first super admin belonged to the Demo Company.",
+  "content_hash": "db2c8d84b77df6ebc13c603d6c65f894db1b453a9a186b9ad59ad3f63f02dc25"
+}
