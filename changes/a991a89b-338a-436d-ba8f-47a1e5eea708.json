@@ -1,0 +1,7 @@
+{
+  "guid": "a991a89b-338a-436d-ba8f-47a1e5eea708",
+  "occurred_at": "2026-10-01T06:00Z",
+  "change_type": "Improvement",
+  "summary": "Bring the Backups register and its add/edit pages in line with the portal design standards: search, column picker and count in the header bar, a backup status stat strip, Save and Delete in the page header, and working delete confirmations.",
+  "content_hash": "8f13fd87429995d91f3436e88305de2ca5776b6086620da7399919b9fa682ce2"
+}
