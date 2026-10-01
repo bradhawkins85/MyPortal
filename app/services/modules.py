@@ -8,6 +8,7 @@ import json
 import os
 import string
 import wave
+from importlib import import_module
 from defusedxml import ElementTree as DefusedET
 from defusedxml.common import DefusedXmlException
 from html import unescape
@@ -34,16 +35,11 @@ from app.core.database import db
 from app.repositories import companies as company_repo
 from app.repositories import integration_modules as module_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
-from app.repositories import tickets as tickets_repo
 from app.repositories import webhook_events as webhook_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
-from app.services import call_recordings as call_recordings_service
 from app.services import module_dispatch
 from app.services.module_constants import ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS
-from app.services import email as email_service, webhook_monitor
-from app.services import unifi_talk as unifi_talk_service
 from app.services.realtime import RefreshNotifier, refresh_notifier
-from app.services import tickets as tickets_service
 from app.core.module_capabilities import COMMANDS_BY_MODULE, MODULE_CAPABILITIES
 from app.services.component_availability import (
     AvailabilityConfigurationError,
@@ -51,6 +47,30 @@ from app.services.component_availability import (
 )
 
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+
+
+def _tickets_repo():
+    return import_module("app.repositories.tickets")
+
+
+def _call_recordings_service():
+    return import_module("app.services.call_recordings")
+
+
+def _email_service():
+    return import_module("app.services.email")
+
+
+def _webhook_monitor():
+    return import_module("app.services.webhook_monitor")
+
+
+def _unifi_talk_service():
+    return import_module("app.services.unifi_talk")
+
+
+def _tickets_service():
+    return import_module("app.services.tickets")
 
 _SMART_ATTACHMENT_POLL_ATTEMPTS = 5
 _SMART_ATTACHMENT_POLL_DELAY_SECONDS = 0.5
@@ -2924,7 +2944,7 @@ async def _invoke_suggest_assets(
     # an integration mapping, catching devices whose imported user is stale.
     tactical_client_id = requester.get("tacticalrmm_client_id")
     if tactical_client_id:
-        from app.services import tacticalrmm
+        tacticalrmm = import_module("app.services.tacticalrmm")
 
         agents = await tacticalrmm.fetch_agents(str(tactical_client_id))
         matched_agents: list[tuple[Mapping[str, Any], str]] = []
@@ -2951,7 +2971,7 @@ async def _invoke_suggest_assets(
                 if asset_id not in seen_asset_ids:
                     suggestions.append((asset_id, matched_username))
                     seen_asset_ids.add(asset_id)
-    await tickets_repo.replace_ticket_suggested_assets(ticket_id, suggestions)
+    await _tickets_repo().replace_ticket_suggested_assets(ticket_id, suggestions)
     return {"status": "ok", "ticket_id": ticket_id, "suggested": len(suggestions)}
 
 
@@ -3303,7 +3323,7 @@ async def _invoke_ollama(
         if api_key:
             request_headers["Authorization"] = f"Bearer {api_key}"
 
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name=f"module.ollama.{provider}.generate",
         target_url=endpoint,
         payload={"request_body": body},
@@ -3455,7 +3475,7 @@ async def _invoke_smtp(
     ticket_reply_id = _extract_ticket_reply_id(payload.get("context"))
     enable_tracking = ticket_reply_id is not None
 
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.smtp.send",
         target_url="smtp://send",
         payload={
@@ -3478,7 +3498,7 @@ async def _invoke_smtp(
         event_future.set_result(event_id)
     attempt_number = 1
     try:
-        sent, email_event_metadata = await email_service.send_email(
+        sent, email_event_metadata = await _email_service().send_email(
             subject=subject,
             recipients=recipients,
             html_body=html_body,
@@ -3576,7 +3596,7 @@ async def _invoke_smtp2go(
             "sender": "noreply@example.com"
         }
     """
-    from app.services import smtp2go
+    smtp2go = import_module("app.services.smtp2go")
 
     # Check if using template
     template_type = payload.get("template")
@@ -3671,7 +3691,7 @@ async def _invoke_smtp2go(
     enable_tracking = _ensure_bool(settings.get("enable_tracking"), True)
     ticket_reply_id = _extract_ticket_reply_id(payload.get("context"))
 
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.smtp2go.send",
         target_url="smtp2go://send",
         payload={
@@ -3744,7 +3764,7 @@ async def _invoke_smtp2go(
         # stamped when the 'processed' webhook arrives per recipient.
         if ticket_reply_id:
             try:
-                from app.services import email_recipients as _email_recipients
+                _email_recipients = import_module("app.services.email_recipients")
 
                 await _email_recipients.record_recipients(
                     reply_id=ticket_reply_id,
@@ -3830,7 +3850,7 @@ async def _invoke_tacticalrmm(
             headers[str(key)] = str(value)
     request_body = payload.get("body")
     url = urljoin(f"{base_url}/", endpoint_path)
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.tacticalrmm.invoke",
         target_url=url,
         payload={
@@ -4111,7 +4131,7 @@ async def _invoke_ntfy(
         "title": title,
         "headers": headers,
     }
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.ntfy.publish",
         target_url=url,
         payload=event_payload,
@@ -4267,7 +4287,7 @@ async def _invoke_sms_gateway(
     }
 
     # Create webhook event for monitoring
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.sms-gateway.send",
         target_url=gateway_url,
         payload=request_body,
@@ -4354,7 +4374,7 @@ async def _invoke_apprise(
     title_value = payload.get("title") or settings.get("title") or "MyPortal"
     title = str(title_value).strip() or "MyPortal"
 
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.apprise.notify",
         target_url="apprise://",
         payload={"title": title, "message": message, "url_count": len(urls)},
@@ -4484,7 +4504,7 @@ async def _invoke_create_ticket(
         external_reference = str(external_reference).strip() or None
 
     # Create webhook event for tracking
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.create-ticket.create",
         target_url="internal://tickets",
         payload={
@@ -4521,7 +4541,7 @@ async def _invoke_create_ticket(
         initial_reply_author_id = (
             requester_id if (requester_id and description) else None
         )
-        ticket = await tickets_service.create_ticket(
+        ticket = await _tickets_service().create_ticket(
             subject=subject,
             description=description,
             requester_id=requester_id,
@@ -4697,7 +4717,7 @@ async def _invoke_create_task(
         payload_summary.update(tasks_to_create[0])
 
     # Create webhook event for tracking
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.create-task.create",
         target_url=target_url,
         payload=payload_summary,
@@ -4939,7 +4959,7 @@ async def _validate_call_recordings(
         }
 
     try:
-        sync_result = await call_recordings_service.sync_recordings_from_filesystem(
+        sync_result = await _call_recordings_service().sync_recordings_from_filesystem(
             recordings_path,
             phone_system_type=phone_system_type,
             trusted_base=configured_path or None,
@@ -5020,7 +5040,7 @@ async def _invoke_unifi_talk(
             remote_path=remote_path,
             local_path=local_path,
         )
-        download_result = await unifi_talk_service.download_recordings_from_sftp(
+        download_result = await _unifi_talk_service().download_recordings_from_sftp(
             remote_host=remote_host,
             remote_path=remote_path,
             username=username,
@@ -5035,7 +5055,7 @@ async def _invoke_unifi_talk(
                 f"Downloaded {download_result['downloaded']} recordings, syncing to database",
                 local_path=local_path,
             )
-            sync_result = await call_recordings_service.sync_recordings_from_filesystem(
+            sync_result = await _call_recordings_service().sync_recordings_from_filesystem(
                 local_path,
                 trusted_base=local_path,
             )
@@ -5713,7 +5733,7 @@ async def _invoke_update_ticket(
 
     The ticket_id can be provided directly or via context.ticket.id or context.ticket_id.
     """
-    from app.repositories import tickets as tickets_repo
+    tickets_repo = import_module("app.repositories.tickets")
 
     raw_context = payload.get("context")
     context = raw_context if isinstance(raw_context, Mapping) else {}
@@ -5736,7 +5756,7 @@ async def _invoke_update_ticket(
         raise ValueError("ticket_id must be a valid integer")
 
     # Check ticket exists
-    existing = await tickets_repo.get_ticket(ticket_id_int)
+    existing = await _tickets_repo().get_ticket(ticket_id_int)
     if not existing:
         raise ValueError(f"Ticket {ticket_id_int} not found")
 
@@ -5861,7 +5881,7 @@ async def _invoke_update_ticket(
         }
 
     # Create webhook event for tracking
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.update-ticket.update",
         target_url=f"internal://tickets/{ticket_id_int}",
         payload={"ticket_id": ticket_id_int, **update_fields},
@@ -5878,11 +5898,11 @@ async def _invoke_update_ticket(
     attempt_number = 1
     try:
         if update_fields:
-            await tickets_repo.update_ticket(ticket_id_int, **update_fields)
+            await _tickets_repo().update_ticket(ticket_id_int, **update_fields)
 
         shipment_updated_fields: list[str] = []
         if shipment_requested:
-            from app.services import ticket_shipment_tracking as shipment_tracking
+            shipment_tracking = import_module("app.services.ticket_shipment_tracking")
 
             current_watch = await shipment_tracking.get_watch_for_ticket(ticket_id_int)
             tracking_url = payload.get("shipment_tracking_url")
@@ -5924,7 +5944,7 @@ async def _invoke_update_ticket(
             ]
 
         # Emit ticket updated event
-        await tickets_service.emit_ticket_updated_event(
+        await _tickets_service().emit_ticket_updated_event(
             ticket_id_int,
             actor_type="automation",
             trigger_automations=False,
@@ -6025,16 +6045,16 @@ async def _invoke_update_ticket_description(
     if description is not None:
         description = str(description)
 
-    from app.repositories import tickets as tickets_repo
+    tickets_repo = import_module("app.repositories.tickets")
 
     try:
-        existing = await tickets_repo.get_ticket(ticket_id_int)
+        existing = await _tickets_repo().get_ticket(ticket_id_int)
     except RuntimeError:
         existing = None
     previous_description = existing.get("description") if existing else None
 
     # Create webhook event for tracking
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.update-ticket-description.update",
         target_url=f"internal://tickets/{ticket_id_int}/description",
         payload={
@@ -6059,7 +6079,7 @@ async def _invoke_update_ticket_description(
 
     attempt_number = 1
     try:
-        updated_ticket = await tickets_service.update_ticket_description(
+        updated_ticket = await _tickets_service().update_ticket_description(
             ticket_id_int, description
         )
         if not updated_ticket:
@@ -6154,7 +6174,7 @@ async def _invoke_ai_rename_ticket(
         ticket_id = int(raw_ticket_id)
     except (TypeError, ValueError):
         raise ValueError("ticket_id is required and must be a valid integer")
-    ticket = await tickets_repo.get_ticket(ticket_id)
+    ticket = await _tickets_repo().get_ticket(ticket_id)
     if not ticket:
         raise ValueError(f"Ticket {ticket_id} not found")
 
@@ -6202,8 +6222,8 @@ async def _invoke_ai_rename_ticket(
             "ticket_id": ticket_id,
         }
 
-    await tickets_repo.update_ticket(ticket_id, subject=new_subject)
-    await tickets_service.emit_ticket_updated_event(
+    await _tickets_repo().update_ticket(ticket_id, subject=new_subject)
+    await _tickets_service().emit_ticket_updated_event(
         ticket_id, actor_type="automation", trigger_automations=False
     )
     return {
@@ -6271,7 +6291,7 @@ async def _invoke_reprocess_ai(
         }
 
     # Create webhook event for tracking
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.reprocess-ai.process",
         target_url=f"internal://tickets/{ticket_id_int}/ai",
         payload={
@@ -6294,13 +6314,13 @@ async def _invoke_reprocess_ai(
     processed = []
     try:
         if refresh_summary:
-            await tickets_service.refresh_ticket_ai_summary(ticket_id_int)
+            await _tickets_service().refresh_ticket_ai_summary(ticket_id_int)
             processed.append("summary")
         if refresh_tags:
-            await tickets_service.refresh_ticket_ai_tags(ticket_id_int)
+            await _tickets_service().refresh_ticket_ai_tags(ticket_id_int)
             processed.append("tags")
         if refresh_resolution:
-            await tickets_service.refresh_ticket_resolution_steps(ticket_id_int)
+            await _tickets_service().refresh_ticket_resolution_steps(ticket_id_int)
             processed.append("resolution_steps")
     except Exception as exc:
         logger.error(
@@ -6357,7 +6377,7 @@ async def _invoke_add_ticket_reply(
     - labour_type_id: Optional - Labour type for billing
     - send_notification: Optional (default: false) - Whether to send email notification
     """
-    from app.repositories import tickets as tickets_repo
+    tickets_repo = import_module("app.repositories.tickets")
 
     raw_context = payload.get("context")
     context = raw_context if isinstance(raw_context, Mapping) else {}
@@ -6401,7 +6421,7 @@ async def _invoke_add_ticket_reply(
     send_notification = _ensure_bool(payload.get("send_notification"), False)
 
     # Create webhook event for tracking
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.add-ticket-reply.create",
         target_url=f"internal://tickets/{ticket_id_int}/replies",
         payload={
@@ -6425,12 +6445,12 @@ async def _invoke_add_ticket_reply(
     attempt_number = 1
     try:
         # Check ticket exists
-        existing = await tickets_repo.get_ticket(ticket_id_int)
+        existing = await _tickets_repo().get_ticket(ticket_id_int)
         if not existing:
             raise ValueError(f"Ticket {ticket_id_int} not found")
 
         # Create the reply
-        reply = await tickets_repo.create_reply(
+        reply = await _tickets_repo().create_reply(
             ticket_id=ticket_id_int,
             author_id=author_id,
             body=body_str,
@@ -6441,7 +6461,7 @@ async def _invoke_add_ticket_reply(
         )
 
         # Emit ticket updated event
-        await tickets_service.emit_ticket_updated_event(
+        await _tickets_service().emit_ticket_updated_event(
             ticket_id_int,
             actor_type="automation",
             trigger_automations=False,
@@ -6583,12 +6603,12 @@ async def _invoke_smart_attachment_removal(
 ) -> dict[str, Any]:
     """Remove duplicate ticket attachments by comparing content hashes."""
 
-    from app.repositories import tickets as tickets_repo
+    tickets_repo = import_module("app.repositories.tickets")
     from app.repositories import ticket_attachments as attachments_repo
     from app.services import ticket_attachments as attachments_service
 
     ticket_id = _resolve_ticket_id_from_payload(payload)
-    existing = await tickets_repo.get_ticket(ticket_id)
+    existing = await _tickets_repo().get_ticket(ticket_id)
     if not existing:
         raise ValueError(f"Ticket {ticket_id} not found")
 
@@ -6949,7 +6969,7 @@ async def _invoke_whisperx(
     WhisperX ``/asr`` endpoint, and (when *add_note* is true) posts the
     resulting transcription as an internal note on the ticket.
     """
-    from app.repositories import tickets as tickets_repo
+    tickets_repo = import_module("app.repositories.tickets")
     from app.repositories import ticket_attachments as attachments_repo
     from app.services import ticket_attachments as attachments_service
 
@@ -6985,7 +7005,7 @@ async def _invoke_whisperx(
     target_url = f"{base_url}/asr"
 
     # -- create webhook event for tracking --------------------------------
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.whisperx.transcribe",
         target_url=target_url,
         payload={
@@ -7006,7 +7026,7 @@ async def _invoke_whisperx(
     attempt_number = 1
     try:
         # -- verify ticket exists -----------------------------------------
-        existing = await tickets_repo.get_ticket(ticket_id_int)
+        existing = await _tickets_repo().get_ticket(ticket_id_int)
         if not existing:
             raise ValueError(f"Ticket {ticket_id_int} not found")
 
@@ -7154,7 +7174,7 @@ async def _invoke_whisperx(
                     f"**Transcription of {t['filename']}:**\n\n{t['transcription']}"
                 )
             note_body = "\n\n---\n\n".join(parts)
-            reply = await tickets_repo.create_reply(
+            reply = await _tickets_repo().create_reply(
                 ticket_id=ticket_id_int,
                 author_id=None,
                 body=note_body,
@@ -7162,7 +7182,7 @@ async def _invoke_whisperx(
             )
             reply_id = reply.get("id") if reply else None
 
-            await tickets_service.emit_ticket_updated_event(
+            await _tickets_service().emit_ticket_updated_event(
                 ticket_id_int,
                 actor_type="automation",
                 trigger_automations=False,
@@ -7305,7 +7325,7 @@ async def _invoke_password_pusher(
     elif api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.password-pusher.push",
         target_url=target_url,
         payload={
@@ -7529,7 +7549,7 @@ async def _resolve_trello_company_for_action(
     # covers payloads that render only ``{{ticket.external_reference}}`` into
     # ``card_id`` without carrying the full ticket context.
     try:
-        from app.services import trello as trello_service
+        trello_service = import_module("app.services.trello")
 
         ticket = await trello_service.find_ticket_for_card(card_id)
     except Exception as exc:  # pragma: no cover - defensive lookup fallback
@@ -7551,9 +7571,9 @@ async def _resolve_company_from_ticket_id(
     if ticket_id <= 0:
         return None
     try:
-        from app.repositories import tickets as tickets_repo
+        tickets_repo = import_module("app.repositories.tickets")
 
-        ticket = await tickets_repo.get_ticket(ticket_id)
+        ticket = await _tickets_repo().get_ticket(ticket_id)
     except Exception as exc:  # pragma: no cover - defensive lookup fallback
         logger.debug("Trello company lookup by ticket {} failed: {}", ticket_id, exc)
         return None
@@ -7592,7 +7612,7 @@ async def _invoke_solidtime_reconcile(
     if event_future and not event_future.done():
         event_future.set_result(None)
 
-    from app.services.solidtime import reconcile_once
+    reconcile_once = import_module("app.services.solidtime").reconcile_once
 
     return await reconcile_once()
 

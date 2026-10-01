@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
+from importlib import import_module
 from typing import Any
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request, status
@@ -75,7 +76,7 @@ async def _visible_bcp_assets(
     request: Request, user: dict[str, Any], company_id: int, *, write: bool = False
 ) -> list[dict[str, Any]]:
     """Return only assets the BCP user may also see in the Assets module."""
-    from app import main as main_module
+    main_module = import_module("app.main")
 
     membership = await main_module._get_effective_company_membership(
         request, int(user["id"]), company_id

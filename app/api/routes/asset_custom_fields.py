@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -57,7 +58,7 @@ async def _require_asset_custom_field_access(asset_id: int, current_user: dict) 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found") from None
     membership = await user_company_repo.get_user_company(user_id, company_id)
     if membership:
-        from app import main as main_module
+        main_module = import_module("app.main")
 
         if main_module._membership_menu_can(current_user, membership, "menu.assets", write=True):
             return asset

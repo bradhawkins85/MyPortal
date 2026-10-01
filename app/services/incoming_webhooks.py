@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+from importlib import import_module
 import json
 import re
 from typing import Any, Awaitable, Callable
@@ -155,7 +156,7 @@ class IncomingWebhookMonitorMiddleware:
                       request_body: bytes, response_body: bytes,
                       response_status: int | None, raised: BaseException | None) -> None:
         try:
-            from app.services import webhook_monitor
+            webhook_monitor = import_module("app.services.webhook_monitor")
 
             headers = {
                 key.decode("latin-1"): value.decode("latin-1")

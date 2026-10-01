@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 from io import BytesIO
 from datetime import datetime, timezone
+from importlib import import_module
 from pathlib import Path, PurePosixPath
 from typing import BinaryIO, Optional
 from uuid import uuid4
@@ -91,7 +92,7 @@ async def _validate_requirement_owner(company_id: int, owner_user_id: int | None
 
 
 def _requirement_upload_dir() -> Path:
-    from app import main as main_module
+    main_module = import_module("app.main")
 
     return main_module._private_uploads_path / "compliance" / "essential8"
 
@@ -643,7 +644,7 @@ async def list_requirement_evidence(
 def _resolve_requirement_evidence_file(relative_path: str) -> Path | None:
     """Resolve a stored evidence path, refusing anything outside the E8 evidence folder."""
 
-    from app import main as main_module
+    main_module = import_module("app.main")
 
     root = _requirement_upload_dir().resolve()
     candidate = main_module._private_uploads_path.joinpath(*PurePosixPath(relative_path).parts).resolve()

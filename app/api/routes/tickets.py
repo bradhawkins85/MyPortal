@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from importlib import import_module
 from typing import Any
 
 from fastapi import (
@@ -2148,7 +2149,7 @@ async def _can_view_ticket_attachments(
     )
     if not membership:
         return False
-    from app import main as main_module
+    main_module = import_module("app.main")
 
     return main_module._membership_menu_can(
         current_user, membership, "menu.tickets", write=True

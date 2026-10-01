@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import suppress
+from importlib import import_module
 import ipaddress
 import json
 from datetime import datetime, timedelta, timezone
@@ -82,7 +83,7 @@ def _sanitise_text_body(payload: str | None) -> str | None:
 
 async def _apply_event_deletion_rules(event: dict[str, Any]) -> None:
     """Evaluate event-triggered policies after a result has been persisted."""
-    from app.services import webhook_deletion_rules
+    webhook_deletion_rules = import_module("app.services.webhook_deletion_rules")
     try:
         await webhook_deletion_rules.apply_event_rules(event)
     except Exception as exc:  # pragma: no cover - monitoring must not break delivery
@@ -343,7 +344,7 @@ async def log_incoming_webhook(
     """
     # Endpoint-specific legacy logging enriches the central middleware context
     # instead of creating a second event for the same request.
-    from app.services.incoming_webhooks import current_context
+    current_context = import_module("app.services.incoming_webhooks").current_context
 
     monitor_context = current_context()
     if monitor_context is not None:
@@ -635,7 +636,7 @@ async def _resume_staff_workflow_after_delivery(*, event_id: int, event: dict[st
     if metadata.get("resume_source") != _STAFF_WORKFLOW_RESUME_SOURCE:
         return
     try:
-        from app.services import staff_onboarding_workflows as workflow_service
+        workflow_service = import_module("app.services.staff_onboarding_workflows")
 
         await workflow_service.resume_paused_workflow_execution(
             execution_id=int(metadata["execution_id"]),

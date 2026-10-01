@@ -9,6 +9,7 @@ import re
 import secrets
 from contextlib import suppress
 from datetime import datetime, timezone
+from importlib import import_module
 from urllib.parse import unquote
 from email.header import decode_header, make_header
 from email.utils import getaddresses, parsedate_to_datetime
@@ -880,7 +881,7 @@ async def get_account(account_id: int, *, redact: bool = True) -> dict[str, Any]
 
 
 async def _refresh_scheduler() -> None:
-    from app.services.scheduler import scheduler_service
+    scheduler_service = import_module("app.services.scheduler").scheduler_service
 
     await scheduler_service.refresh()
 

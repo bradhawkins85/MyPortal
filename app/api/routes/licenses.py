@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from importlib import import_module
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -58,7 +59,7 @@ async def _require_license_access(license_id: int, user: dict[str, Any]) -> dict
         return record
     membership = await user_company_repo.get_user_company(user_id, company_id)
     if membership:
-        from app import main as main_module
+        main_module = import_module("app.main")
 
         if membership.get("can_manage_licenses") or main_module._membership_menu_can(
             user, membership, "menu.m365.licenses"

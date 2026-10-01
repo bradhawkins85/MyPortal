@@ -4,6 +4,7 @@ import asyncio
 import json
 from collections.abc import Awaitable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone
+from importlib import import_module
 import re
 from functools import lru_cache
 from time import monotonic
@@ -1710,7 +1711,7 @@ async def process_deferred_runs(limit: int = 50) -> int:
 
 
 async def process_due_automations(limit: int = 20) -> None:
-    from app.services import slas as sla_service
+    sla_service = import_module("app.services.slas")
     await sla_service.emit_due_events()
     await process_deferred_runs()
     due = await automation_repo.list_due_automations(limit=limit)

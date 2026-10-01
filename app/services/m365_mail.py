@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from datetime import datetime, timedelta, timezone
+from importlib import import_module
 from typing import Any, Mapping
 from urllib.parse import quote, unquote, urlencode, urlsplit
 
@@ -302,7 +303,7 @@ async def get_account(account_id: int) -> dict[str, Any] | None:
 
 
 async def _ensure_scheduled_task(account: Mapping[str, Any]) -> Mapping[str, Any]:
-    from app.services.scheduler import scheduler_service
+    scheduler_service = import_module("app.services.scheduler").scheduler_service
 
     account_id = account.get("id")
     if account_id is None:
@@ -662,7 +663,7 @@ async def force_reimport_message(account_id: int, message_uid: str) -> dict[str,
 
 
 async def delete_account(account_id: int) -> None:
-    from app.services.scheduler import scheduler_service
+    scheduler_service = import_module("app.services.scheduler").scheduler_service
 
     existing = await mail_repo.get_account(account_id)
     if not existing:
