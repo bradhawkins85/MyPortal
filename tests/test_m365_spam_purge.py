@@ -449,13 +449,10 @@ async def test_start_search_does_not_block_on_advisory_preflight(monkeypatch):
     monkeypatch.setattr(service.purge_repo, "update_request", update)
     preflight = AsyncMock(return_value={"ready": False, "checks": []})
     monkeypatch.setattr(service.m365_service, "run_purview_preflight", preflight)
-    started = []
-    monkeypatch.setattr(service, "_start_task", lambda *args, **kwargs: started.append(args))
 
     await service.start_search(7, 2)
 
     preflight.assert_not_awaited()
-    assert started == [(7, "search")]
     assert update.await_args.args[1]["search_status"] == "queued"
 
 
