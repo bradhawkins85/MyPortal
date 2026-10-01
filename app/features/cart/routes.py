@@ -14,6 +14,8 @@ from fastapi.datastructures import FormData
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.datastructures import URL
 
+from app.services import invoice_generator as invoice_generator_service
+
 
 router = APIRouter(tags=["Cart"])
 
@@ -1283,13 +1285,34 @@ async def place_order(request: Request) -> RedirectResponse:
             is None
         ]
 
-        await main_module.invoice_generator_service.generate_order_invoice(
+        invoice_result = await invoice_generator_service.generate_order_invoice(
             order_number=order_number,
             company_id=company_id,
             user_name=user_name,
             order_items=physical_items,
             freight_amount=freight_amount,
         )
+        invoice_status = str((invoice_result or {}).get("status") or "")
+        if invoice_status == "succeeded":
+            xero_result = invoice_result.get("xero_result") or {}
+            if str(xero_result.get("status") or "") != "succeeded":
+                main_module.log_error(
+                    "Cart order invoice created locally but not synced to Xero",
+                    order_number=order_number,
+                    company_id=company_id,
+                    invoice_id=invoice_result.get("invoice_id"),
+                    xero_status=xero_result.get("status"),
+                    reason=xero_result.get("reason") or xero_result.get("error"),
+                )
+        elif invoice_status != "skipped" or physical_items:
+            main_module.log_error(
+                "Cart order invoice was not generated",
+                order_number=order_number,
+                company_id=company_id,
+                status=invoice_status,
+                reason=(invoice_result or {}).get("reason"),
+                error=(invoice_result or {}).get("error"),
+            )
     except Exception as exc:  # pragma: no cover - defensive logging
         main_module.log_error(
             "Failed to generate local invoice for cart order",
