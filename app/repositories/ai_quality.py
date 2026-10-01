@@ -2,18 +2,104 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from typing import Any
 
 from app.core.database import db
 
 PIPELINE_VERSION = "agent-rag-v1"
 REASONS = {"incorrect", "uncited", "irrelevant", "incomplete", "unsafe", "other"}
+_MAX_REDACTION_INPUT_CHARS = 5000
+_LOCAL_EMAIL_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-")
+_DOMAIN_EMAIL_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-")
+_EMAIL_TOKEN_CHARS = _LOCAL_EMAIL_CHARS | {"@"}
+
+
+def _is_word_char(char: str) -> bool:
+    return char.isalnum() or char == "_"
+
+
+def _is_email_token(token: str) -> bool:
+    if token.count("@") != 1:
+        return False
+    local, domain = token.split("@", 1)
+    if not local or not domain:
+        return False
+    if any(char not in _LOCAL_EMAIL_CHARS for char in local):
+        return False
+    if any(char not in _DOMAIN_EMAIL_CHARS for char in domain):
+        return False
+    label, separator, tld = domain.rpartition(".")
+    if not separator or not label:
+        return False
+    return len(tld) >= 2 and tld.isalpha()
+
+
+def _redact_emails(value: str) -> str:
+    parts: list[str] = []
+    i = 0
+    length = len(value)
+    while i < length:
+        char = value[i]
+        if char not in _EMAIL_TOKEN_CHARS:
+            parts.append(char)
+            i += 1
+            continue
+        start = i
+        while i < length and value[i] in _EMAIL_TOKEN_CHARS:
+            i += 1
+        token = value[start:i]
+        core = token.rstrip(".")
+        trailing = token[len(core):]
+        if core and _is_email_token(core):
+            parts.append("[email]")
+            parts.append(trailing)
+        else:
+            parts.append(token)
+    return "".join(parts)
+
+
+def _redact_number_sequences(value: str) -> str:
+    parts: list[str] = []
+    i = 0
+    length = len(value)
+    while i < length:
+        char = value[i]
+        prev = value[i - 1] if i > 0 else ""
+        if not char.isdigit() or (prev and _is_word_char(prev)):
+            parts.append(char)
+            i += 1
+            continue
+        j = i
+        digit_count = 0
+        last_was_separator = False
+        while j < length:
+            current = value[j]
+            if current.isdigit():
+                digit_count += 1
+                last_was_separator = False
+                j += 1
+                continue
+            if current in " -" and not last_was_separator:
+                last_was_separator = True
+                j += 1
+                continue
+            break
+        if last_was_separator:
+            j -= 1
+        next_char = value[j] if j < length else ""
+        if digit_count >= 8 and (not next_char or not _is_word_char(next_char)):
+            parts.append("[number]")
+            i = j
+            continue
+        parts.append(char)
+        i += 1
+    return "".join(parts)
 
 
 def redact_query(value: str) -> str:
-    value = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[email]", value)
-    value = re.sub(r"\b(?:\d[ -]?){7,}\d\b", "[number]", value)
+    value = value[:_MAX_REDACTION_INPUT_CHARS]
+    value = _redact_emails(value)
+    value = _redact_number_sequences(value)
     return value[:500]
 
 

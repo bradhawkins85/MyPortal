@@ -207,3 +207,15 @@ def test_plain_text_replies_keep_line_breaks_as_html():
     )
     existing = "<html><body><div>Closed</div></body></html>"
     assert m365_out_of_office._as_reply_html(existing) == existing
+
+
+def test_known_html_heading_tag_is_preserved():
+    existing = "<h2>Closed for holidays</h2>"
+    assert m365_out_of_office._as_reply_html(existing) == existing
+
+
+def test_large_angle_bracket_input_without_markup_is_escaped():
+    message = "<" + (" " * 4000) + ("a" * 4000)
+    rendered = m365_out_of_office._as_reply_html(message)
+    assert rendered.startswith("&lt;")
+    assert "<br>" not in rendered

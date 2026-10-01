@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import html
-import re
 from urllib.parse import quote
 
 from app.repositories import companies as companies_repo
@@ -10,10 +9,61 @@ from app.schemas.m365_out_of_office import OutOfOfficeCreate, OutOfOfficeDisable
 from app.services import m365 as m365_service
 
 
-_HTML_MARKUP = re.compile(
-    r"<\s*/?\s*(html|body|p|div|br|span|table|a|b|strong|i|em|u|ul|ol|li|font|h[1-6])\b",
-    re.IGNORECASE,
-)
+_HTML_TAGS = {
+    "html",
+    "body",
+    "p",
+    "div",
+    "br",
+    "span",
+    "table",
+    "a",
+    "b",
+    "strong",
+    "i",
+    "em",
+    "u",
+    "ul",
+    "ol",
+    "li",
+    "font",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+}
+
+
+def _contains_known_html_markup(text: str) -> bool:
+    """Return True when text contains one of the supported HTML tags."""
+    length = len(text)
+    i = 0
+    while i < length:
+        if text[i] != "<":
+            i += 1
+            continue
+        j = i + 1
+        while j < length and text[j].isspace():
+            j += 1
+        if j < length and text[j] == "/":
+            j += 1
+            while j < length and text[j].isspace():
+                j += 1
+        start = j
+        while j < length and text[j].isalnum():
+            j += 1
+        if start == j:
+            i += 1
+            continue
+        tag = text[start:j].casefold()
+        next_char = text[j] if j < length else ""
+        is_word_char = bool(next_char) and (next_char.isalnum() or next_char == "_")
+        if tag in _HTML_TAGS and not is_word_char:
+            return True
+        i += 1
+    return False
 
 
 def _as_reply_html(message: str | None) -> str:
@@ -24,7 +74,7 @@ def _as_reply_html(message: str | None) -> str:
     Messages that already contain HTML markup are passed through unchanged.
     """
     text = str(message or "")
-    if _HTML_MARKUP.search(text):
+    if _contains_known_html_markup(text):
         return text
     normalised = text.replace("\r\n", "\n").replace("\r", "\n")
     return html.escape(normalised, quote=False).replace("\n", "<br>\n")

@@ -18,6 +18,28 @@ def test_diagnostics_redact_sensitive_query_values():
     assert "0412" not in redacted
 
 
+def test_redact_query_handles_trailing_email_punctuation():
+    redacted = redact_query("Contact person@example.com.")
+    assert redacted == "Contact [email]."
+
+
+def test_redact_query_ignores_invalid_email_like_tokens():
+    redacted = redact_query("Not an email: person@example.")
+    assert redacted == "Not an email: person@example."
+
+
+def test_redact_query_redacts_long_number_sequences():
+    redacted = redact_query("Call +61 412 345 678 or 1234 5678")
+    assert "[number]" in redacted
+    assert "1234 5678" not in redacted
+
+
+def test_redact_query_bounds_processing_for_large_adversarial_input():
+    payload = ("a" * 3000) + ("@" * 3000) + ("-" * 3000) + ("9 " * 3000)
+    redacted = redact_query(payload)
+    assert len(redacted) == 500
+
+
 def test_evidence_telemetry_contains_identifiers_not_content():
     identifiers, types = evidence_ids({"tickets": [{"source_id": 7, "summary": "secret"}]})
     assert identifiers == ["tickets:7"]
