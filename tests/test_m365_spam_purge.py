@@ -109,24 +109,6 @@ async def test_api_start_search_returns_service_unavailable_for_preflight_error(
     assert exc_info.value.detail == "Purview preflight did not pass"
 
 
-@pytest.mark.anyio("asyncio")
-async def test_preflight_failure_is_marked_service_unavailable(monkeypatch):
-    monkeypatch.setattr(
-        service.m365_service,
-        "run_purview_preflight",
-        AsyncMock(return_value={
-            "ready": False,
-            "checks": [{"label": "Tenant-wide admin consent", "status": "Requires Admin Action"}],
-        }),
-    )
-
-    with pytest.raises(M365Error) as exc_info:
-        await service._require_purview_preflight(2)
-
-    assert exc_info.value.http_status == 503
-    assert "Tenant-wide admin consent" in str(exc_info.value)
-
-
 def test_scc_organization_uses_initial_onmicrosoft_domain(monkeypatch):
     async def fake_token(_company_id):
         return "graph-token"
@@ -460,41 +442,28 @@ def test_spam_purge_discloses_limits_retention_and_unknown_counts():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_preflight_ready_allows_search_to_start(monkeypatch):
+async def test_start_search_does_not_block_on_advisory_preflight(monkeypatch):
     request = {"id": 7, "company_id": 2, "search_status": "draft"}
     monkeypatch.setattr(service.purge_repo, "get_request", AsyncMock(return_value=request))
     update = AsyncMock()
     monkeypatch.setattr(service.purge_repo, "update_request", update)
-    monkeypatch.setattr(
-        service.m365_service, "run_purview_preflight",
-        AsyncMock(return_value={"ready": True, "checks": [
-            {"label": "Microsoft-supported execution route", "status": "Warning"},
-        ]}),
-    )
+    preflight = AsyncMock(return_value={"ready": False, "checks": []})
+    monkeypatch.setattr(service.m365_service, "run_purview_preflight", preflight)
     started = []
     monkeypatch.setattr(service, "_start_task", lambda *args, **kwargs: started.append(args))
 
     await service.start_search(7, 2)
 
+    preflight.assert_not_awaited()
     assert started == [(7, "search")]
     assert update.await_args.args[1]["search_status"] == "queued"
 
 
-@pytest.mark.anyio("asyncio")
-async def test_preflight_error_lists_only_blocking_checks(monkeypatch):
-    monkeypatch.setattr(
-        service.m365_service, "run_purview_preflight",
-        AsyncMock(return_value={"ready": False, "checks": [
-            {"label": "Microsoft-supported execution route", "status": "Warning"},
-            {"label": "Purview compliance organization availability", "status": "Failed"},
-            {"label": "Purview search authorization", "status": "Not Verified"},
-        ]}),
+def test_authorization_failure_message_includes_remediation():
+    message = service._failure_message(
+        M365Error("Security & Compliance New-ComplianceSearch failed (401)", http_status=401)
     )
 
-    with pytest.raises(M365Error) as exc_info:
-        await service._require_purview_preflight(2)
-
-    message = str(exc_info.value)
-    assert "Purview compliance organization availability" in message
-    assert "execution route" not in message
-    assert "search authorization" not in message
+    assert message.startswith("Security & Compliance New-ComplianceSearch failed (401)")
+    assert "Microsoft Exchange Online Protection" in message
+    assert service._failure_message(ValueError("bad query")) == "bad query"

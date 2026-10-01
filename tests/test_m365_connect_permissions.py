@@ -1002,3 +1002,40 @@ async def test_try_grant_missing_permissions_skips_teams_when_role_absent_from_s
     assert result is False, "Should return False when no new grants were made"
     teams_grants = [p for p in posted if p.get("resourceId") == "teams-sp-id"]
     assert teams_grants == [], "No Teams.ManageAsApp POST expected when role is absent from SP"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_try_grant_missing_permissions_grants_eop_manage_as_app_by_role_value():
+    """Purview tokens need Exchange.ManageAsApp on EOP under EOP's own role ID."""
+    eop_role = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    graph_assignments = [{"appRoleId": r, "resourceId": "graph-sp-id"} for r in _PROVISION_APP_ROLES]
+    exo_assignment = {"appRoleId": _EXO_MANAGE_AS_APP_ROLE, "resourceId": "exo-sp-id"}
+    posts: list[tuple[str, dict]] = []
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "appRoleAssignments" in url:
+            return {"value": graph_assignments + [exo_assignment]}
+        if m365_service._SCC_APP_ID in url:
+            return {"value": [{"id": "eop-sp-id", "appId": m365_service._SCC_APP_ID, "appRoles": [
+                {"id": eop_role, "value": "Exchange.ManageAsApp", "allowedMemberTypes": ["Application"]},
+            ]}]}
+        if _EXO_APP_ID in url:
+            return {"value": [{"id": "exo-sp-id"}]}
+        if "roleManagement/directory/roleAssignments" in url:
+            return {"value": [{"id": "existing-assignment"}]}
+        return _sp_response()
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        posts.append((url, payload))
+        return {}
+
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=_fake_creds())),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+    ):
+        result = await m365_service.try_grant_missing_permissions(company_id=1, access_token="t")
+
+    assert result is True
+    eop_posts = [payload for url, payload in posts if payload.get("resourceId") == "eop-sp-id"]
+    assert eop_posts == [{"principalId": _SP_OBJECT_ID, "resourceId": "eop-sp-id", "appRoleId": eop_role}]

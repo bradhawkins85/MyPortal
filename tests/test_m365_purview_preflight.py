@@ -396,3 +396,68 @@ async def test_preflight_reports_missing_enterprise_application_admin_role():
     assert "enterprise application" in check["detail"]
     assert "Compliance Administrator" in check["remediation"]
     assert result["ready"] is False
+
+
+@pytest.mark.anyio("asyncio")
+async def test_resolve_eop_role_uses_published_value_not_exchange_online_id():
+    eop_role = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+
+    async def graph_get(_token: str, url: str):
+        assert m365._SCC_APP_ID in url
+        return {"value": [{
+            "id": "eop-sp", "appId": m365._SCC_APP_ID,
+            "appRoles": [
+                {"id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "value": "Other.Role"},
+                {"id": eop_role, "value": "Exchange.ManageAsApp",
+                 "allowedMemberTypes": ["Application"]},
+            ],
+        }]}
+
+    with patch.object(m365, "_graph_get", side_effect=graph_get):
+        assert await m365._resolve_eop_manage_as_app_role("token") == ("eop-sp", eop_role)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_preflight_accepts_eop_assignment_under_tenant_role_id():
+    client_id = "22222222-2222-2222-2222-222222222222"
+    object_id = "33333333-3333-3333-3333-333333333333"
+    eop_role = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+
+    async def graph_get(_token: str, url: str):
+        if "/domains?" in url:
+            return {"value": [{"id": "contoso.onmicrosoft.com", "isInitial": True}]}
+        if f"appId eq '{m365._SCC_APP_ID}'" in url:
+            return {"value": [{"id": "eop-sp", "appId": m365._SCC_APP_ID, "appRoles": [
+                {"id": eop_role, "value": "Exchange.ManageAsApp"},
+            ]}]}
+        if "/applications/" in url:
+            return {"requiredResourceAccess": [{
+                "resourceAppId": m365._SCC_APP_ID,
+                "resourceAccess": [{"id": eop_role, "type": "Role"}],
+            }]}
+        if "/appRoleAssignments" in url:
+            return {"value": [{"appRoleId": eop_role, "resourceId": "eop-sp"}]}
+        if "/transitiveMemberOf/" in url:
+            return {"value": []}
+        if "/servicePrincipals?" in url:
+            return {"value": [{"id": object_id, "appId": client_id}]}
+        raise AssertionError(url)
+
+    with (
+        patch.object(m365, "get_credentials", AsyncMock(return_value={
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "client_id": client_id,
+            "app_object_id": "55555555-5555-5555-5555-555555555555",
+        })),
+        patch.object(m365, "acquire_access_token", AsyncMock(return_value="graph-token")),
+        patch.object(m365, "_graph_get", side_effect=graph_get),
+        patch.object(
+            m365, "_acquire_scc_access_token",
+            AsyncMock(side_effect=m365.M365Error("unauthorized", http_status=401)),
+        ),
+    ):
+        result = await m365.run_purview_preflight(7)
+
+    checks = {item["key"]: item for item in result["checks"]}
+    assert checks["eop_permission"]["status"] == "Passed"
+    assert checks["admin_consent"]["status"] == "Passed"
