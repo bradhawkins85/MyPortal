@@ -127,6 +127,18 @@ class Settings(BaseSettings):
     website_check_lease_seconds: int = Field(default=120, ge=30, le=3600)
     website_check_batch_size: int = Field(default=20, ge=1, le=100)
     website_check_company_concurrency: int = Field(default=2, ge=1, le=20)
+    m365_spam_purge_poll_seconds: int = Field(
+        default=10,
+        ge=0,
+        le=3600,
+        validation_alias="M365_SPAM_PURGE_POLL_SECONDS",
+        description=(
+            "How often the in-app scheduler polls for queued M365 spam "
+            "search/purge requests. Set to 0 to disable the in-app worker "
+            "(fall back to an external cron). "
+            "Default: 10 seconds."
+        ),
+    )
     m365_it_external_email_address: str = Field(
         default="", validation_alias="M365_IT_EXTERNAL_EMAIL_ADDRESS"
     )
