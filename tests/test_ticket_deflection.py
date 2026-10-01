@@ -47,6 +47,11 @@ def test_build_query_strips_markup():
     assert query == "Printer Jams & smudges"
 
 
+def test_build_query_handles_unclosed_angle_brackets_quickly():
+    query = ticket_deflection.build_query("Printer", "<" * 100000)
+    assert query.startswith("Printer")
+
+
 @pytest.mark.anyio
 async def test_short_drafts_do_not_retrieve(monkeypatch):
     retrieve = _patch(monkeypatch, candidates=[])

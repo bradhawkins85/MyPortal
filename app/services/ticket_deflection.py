@@ -23,14 +23,19 @@ MAX_QUERY_LENGTH = 1500
 DEFAULT_LIMIT = 3
 _CANDIDATE_LIMIT = 10
 _RESOLVED_STATUSES = {"resolved", "closed"}
-_TAG_RE = re.compile(r"<[^>]+>")
+# Excluding "<" from the body keeps matching linear on runs of unclosed "<".
+_TAG_RE = re.compile(r"<[^<>]*>")
+# Drafts are cut before any regex runs so typed input bounds the work done.
+_MAX_INPUT_LENGTH = 20000
 _SPACE_RE = re.compile(r"\s+")
 
 
 def build_query(subject: str | None, description: str | None) -> str:
     """Combine the form fields into plain retrieval text."""
 
-    text = f"{subject or ''}\n{_TAG_RE.sub(' ', description or '')}"
+    subject = (subject or "")[:_MAX_INPUT_LENGTH]
+    description = (description or "")[:_MAX_INPUT_LENGTH]
+    text = f"{subject}\n{_TAG_RE.sub(' ', description)}"
     return _SPACE_RE.sub(" ", html.unescape(text)).strip()[:MAX_QUERY_LENGTH]
 
 
