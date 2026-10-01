@@ -551,7 +551,7 @@ def test_service_status_admin_renders_service_list_and_editor():
     service = {
         "id": 3, "name": "Email", "description": "Exchange Online", "status": "outage",
         "status_message": "Some users can't send", "display_order": 2, "is_active": False,
-        "company_ids": [1, 2, 9], "tags": ["mail", "m365"], "updated_at": datetime(2026, 9, 1, 3, 4),
+        "company_ids": [1, 2, 9], "tags": ["mail", "m365", "critical", "external", "smtp"], "updated_at": datetime(2026, 9, 1, 3, 4),
         "ai_lookup_enabled": True, "ai_lookup_url": "https://status.example.com", "ai_lookup_prompt": "",
         "ai_lookup_model_override": "", "ai_lookup_frequency_operational": 60,
         "ai_lookup_frequency_degraded": 15, "ai_lookup_frequency_partial_outage": 10,
@@ -575,6 +575,7 @@ def test_service_status_admin_renders_service_list_and_editor():
     assert 'href="/admin/service-status?serviceId=3" data-ssa-edit="3"' in html
     assert "Acme, Globex + 1 more" in html
     assert "Hidden from dashboards" in html
+    assert "+ 1 tags" in html
     assert "AI checks every 5 min" in html
     assert '<time data-utc="2026-09-01T03:04:00Z">' in html
     assert 'id="service-modal"' in html and 'data-ssa-tab="visibility"' in html
@@ -583,7 +584,7 @@ def test_service_status_admin_renders_service_list_and_editor():
     assert 'id="ssa-delete-form"' in html
     assert "service_status_admin.js" in html
     data = _json_block(html, "service-status-editor-data")
-    assert data["services"][0]["tags"] == ["mail", "m365"]
+    assert data["services"][0]["tags"] == ["mail", "m365", "critical", "external", "smtp"]
     assert data["editing"]["id"] == 3
     assert data["frequencyDefaults"]["outage"] == 5
     assert "strftime" not in (TEMPLATES / "admin/service_status.html").read_text()
@@ -653,6 +654,34 @@ def test_roles_page_renders_catalogue_and_grouped_access_editor():
     assert {"key": "menu.tickets", "levels": ["none", "read", "write"]}.items() <= data["catalogue"][
         [item["key"] for item in data["catalogue"]].index("menu.tickets")
     ].items()
+
+
+def test_roles_page_shows_group_overflow_chip_count():
+    from app.security.menu_permissions import catalogue_for_api
+
+    permissions = {}
+    groups_seen = set()
+    for permission in catalogue_for_api():
+        group = permission["group"]
+        if group in groups_seen:
+            continue
+        groups_seen.add(group)
+        permissions[permission["key"]] = "read"
+        if len(groups_seen) == 5:
+            break
+
+    html = _render_roles([
+        {
+            "id": 9,
+            "name": "Overflow",
+            "description": None,
+            "is_system": False,
+            "member_count": 1,
+            "permissions": permissions,
+        }
+    ])
+
+    assert "+1 more" in html
 
 
 def test_roles_page_empty_state_offers_first_role():

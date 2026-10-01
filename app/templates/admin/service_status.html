@@ -31,6 +31,7 @@
 {% block content %}
 {% set ssa_defaults = {"operational": 60, "degraded": 15, "partial_outage": 10, "outage": 5, "maintenance": 60} %}
 {% set ssa_inactive_count = service_status_entries | rejectattr("is_active") | list | length %}
+{% set service_count = service_status_entries | length %}
 
 {% set strip_items = [] %}
 {% for definition in service_status_definitions %}
@@ -62,7 +63,7 @@
           {% endfor %}
           {% if ssa_inactive_count %}<option value="inactive">Hidden from dashboards</option>{% endif %}
         </select>
-        <span class="text-muted ssa__count" data-ssa-count role="status" aria-live="polite">{{ service_status_entries | length }} service{{ 's' if service_status_entries | length != 1 }}</span>
+        <span class="text-muted ssa__count" data-ssa-count role="status" aria-live="polite">{{ service_count }} service{{ 's' if service_count != 1 }}</span>
       </div>
 
       <ul class="scf-list ssa__list" data-ssa-list>
@@ -74,6 +75,8 @@
           {% for company_id in service.company_ids %}
             {% set _ = company_names.append(service_status_company_lookup.get(company_id, 'Company #' ~ company_id)) %}
           {% endfor %}
+          {% set company_count = company_names | length %}
+          {% set service_tag_count = service.tags | length %}
           <li
             class="scf-item ssa-item{% if not service.is_active %} scf-item--inactive ssa-item--inactive{% endif %}"
             data-ssa-item
@@ -100,7 +103,7 @@
                 {% endif %}
                 {% if company_names %}
                   <li class="scf-chip scf-chip--visibility" title="{{ company_names | join(', ') }}">
-                    {% if company_names | length <= 2 %}{{ company_names | join(', ') }}{% else %}{{ company_names[:2] | join(', ') }} + {{ company_names | length - 2 }} more{% endif %}
+                    {% if company_count <= 2 %}{{ company_names | join(', ') }}{% else %}{{ company_names[:2] | join(', ') }} + {{ company_count - 2 }} more{% endif %}
                   </li>
                 {% else %}
                   <li class="scf-chip">All companies</li>
@@ -114,8 +117,8 @@
                 {% for tag in service.tags[:4] %}
                   <li class="scf-chip ssa-chip--tag">{{ tag }}</li>
                 {% endfor %}
-                {% if service.tags | length > 4 %}
-                  <li class="scf-chip ssa-chip--tag" title="{{ service.tags[4:] | join(', ') }}">+ {{ service.tags | length - 4 }} tags</li>
+                {% if service_tag_count > 4 %}
+                  <li class="scf-chip ssa-chip--tag" title="{{ service.tags[4:] | join(', ') }}">+ {{ service_tag_count - 4 }} tags</li>
                 {% endif %}
               </ul>
             </div>

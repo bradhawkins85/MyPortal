@@ -41,10 +41,13 @@ from app.services.ai_prompt_security import (
     validate_references,
 )
 
+tiktoken = None
 try:
-    import tiktoken
+    import tiktoken as _tiktoken
 except ImportError:  # pragma: no cover - optional runtime dependency fallback
-    tiktoken = None
+    pass
+else:
+    tiktoken = _tiktoken
 
 _KB_RESULT_LIMIT = 1000
 _TICKET_RESULT_LIMIT = 1000
