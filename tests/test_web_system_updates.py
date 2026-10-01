@@ -116,6 +116,17 @@ def test_pending_request_can_be_cancelled(monkeypatch, history):
         system_updates.cancel_request(record["id"])
 
 
+def test_pending_request_cancel_succeeds_when_flag_already_missing(monkeypatch, history):
+    _docker(monkeypatch)
+    record = asyncio.run(system_updates.request_update())["record"]
+    system_updates._FLAG_PATH.unlink()
+
+    cancelled = system_updates.cancel_request(record["id"])
+
+    assert cancelled["status"] == "failed"
+    assert not system_updates._FLAG_PATH.exists()
+
+
 def test_unclaimed_request_expires_with_setup_hint(monkeypatch, history):
     _docker(monkeypatch)
     record = asyncio.run(system_updates.request_update())["record"]
@@ -130,6 +141,23 @@ def test_unclaimed_request_expires_with_setup_hint(monkeypatch, history):
     assert expired["status"] == "failed"
     assert "web-upgrades on" in expired["error"]
     assert not system_updates._FLAG_PATH.exists()
+
+
+def test_unclaimed_request_expires_even_when_flag_already_missing(monkeypatch, history):
+    _docker(monkeypatch)
+    record = asyncio.run(system_updates.request_update())["record"]
+    stale = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    path = history / f"{record['id']}.json"
+    data = json.loads(path.read_text())
+    data["started_at"] = stale
+    path.write_text(json.dumps(data))
+    system_updates._FLAG_PATH.unlink()
+
+    system_updates.expire_unclaimed_requests()
+
+    expired = system_update_history.get(record["id"])
+    assert expired["status"] == "failed"
+    assert "host did not pick up" in expired["error"]
 
 
 def test_baremetal_request_uses_tracked_rolling_workflow(monkeypatch, history):
