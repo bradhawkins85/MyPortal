@@ -175,11 +175,11 @@
                   <div class="scf-item__actions sch-item__actions">
                     <button type="button" class="button button--ghost button--small" data-task-run>Run now<span class="visually-hidden"> {{ task.name }}</span></button>
                     <button type="button" class="button button--ghost button--small" data-task-edit aria-haspopup="dialog" aria-controls="task-editor-modal">Edit<span class="visually-hidden"> {{ task.name }}</span></button>
-                    <details class="sch-more" data-sch-more>
+                    <details class="sch-more" data-sch-more data-floating-menu>
                       <summary class="button button--ghost button--small sch-more__toggle" aria-label="More actions for {{ task.name }}">
                         <svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16"><circle cx="4" cy="10" r="1.6" fill="currentColor"/><circle cx="10" cy="10" r="1.6" fill="currentColor"/><circle cx="16" cy="10" r="1.6" fill="currentColor"/></svg>
                       </summary>
-                      <div class="sch-more__menu" role="menu">
+                      <div class="sch-more__menu" data-floating-menu-panel role="menu">
                         <button type="button" class="sch-more__item" role="menuitem" data-task-logs aria-haspopup="dialog" aria-controls="task-logs-modal">Run history</button>
                         {% if task.command in rich_preview_commands %}
                           <button type="button" class="sch-more__item" role="menuitem" data-task-preview aria-haspopup="dialog" aria-controls="task-preview-modal">Preview what it will do</button>
