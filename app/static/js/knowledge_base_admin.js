@@ -102,6 +102,141 @@
     return div.innerHTML;
   }
 
+  const RICH_HTML_ALLOWED_TAGS = new Set([
+    'a', 'b', 'blockquote', 'br', 'code', 'div', 'em', 'h1', 'h2', 'h3', 'h4',
+    'h5', 'h6', 'hr', 'i', 'img', 'kb-if', 'li', 'ol', 'p', 'pre', 's', 'section',
+    'span', 'strong', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'u', 'ul',
+  ]);
+  const RICH_HTML_BLOCKED_TAGS = new Set(['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form']);
+  const RICH_HTML_GLOBAL_ATTRS = new Set(['class', 'title', 'role', 'aria-label', 'aria-hidden', 'colspan', 'rowspan']);
+  const RICH_HTML_ATTRS_BY_TAG = {
+    a: new Set(['href', 'target', 'rel']),
+    img: new Set(['src', 'alt', 'width', 'height', 'style']),
+    'kb-if': new Set(['company']),
+  };
+  const SAFE_STYLE_PROPS = new Set(['width', 'height', 'max-width', 'max-height', 'float', 'text-align']);
+
+  function sanitizeInlineStyle(value) {
+    return String(value || '')
+      .split(';')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const split = part.indexOf(':');
+        if (split <= 0) {
+          return null;
+        }
+        const key = part.slice(0, split).trim().toLowerCase();
+        const raw = part.slice(split + 1).trim();
+        if (!SAFE_STYLE_PROPS.has(key)) {
+          return null;
+        }
+        if (/expression\s*\(/i.test(raw) || /url\s*\(\s*['"]?\s*javascript:/i.test(raw)) {
+          return null;
+        }
+        return `${key}: ${raw}`;
+      })
+      .filter(Boolean)
+      .join('; ');
+  }
+
+  function sanitizeUrlValue(raw, options) {
+    const forImage = Boolean(options && options.forImage);
+    const value = String(raw || '').trim();
+    if (!value) {
+      return '';
+    }
+    if (value.startsWith('#') || value.startsWith('/')) {
+      return value;
+    }
+    if (/^https?:/i.test(value) || /^mailto:/i.test(value)) {
+      return value;
+    }
+    if (forImage && /^data:image\/(png|gif|jpe?g|webp|bmp|svg\+xml);/i.test(value)) {
+      return value;
+    }
+    return '';
+  }
+
+  function sanitizeRichHtml(html) {
+    const template = document.createElement('template');
+    template.innerHTML = String(html || '');
+
+    function sanitizeNode(node) {
+      let child = node.firstChild;
+      while (child) {
+        const next = child.nextSibling;
+        if (child.nodeType === Node.ELEMENT_NODE) {
+          const tag = child.tagName.toLowerCase();
+          if (RICH_HTML_BLOCKED_TAGS.has(tag)) {
+            node.removeChild(child);
+            child = next;
+            continue;
+          }
+          if (!RICH_HTML_ALLOWED_TAGS.has(tag)) {
+            while (child.firstChild) {
+              node.insertBefore(child.firstChild, child);
+            }
+            node.removeChild(child);
+            child = next;
+            continue;
+          }
+          Array.from(child.attributes).forEach((attribute) => {
+            const name = attribute.name.toLowerCase();
+            if (name.startsWith('on')) {
+              child.removeAttribute(attribute.name);
+              return;
+            }
+            const allowed = RICH_HTML_GLOBAL_ATTRS.has(name)
+              || Boolean(RICH_HTML_ATTRS_BY_TAG[tag] && RICH_HTML_ATTRS_BY_TAG[tag].has(name));
+            if (!allowed) {
+              child.removeAttribute(attribute.name);
+              return;
+            }
+            if ((name === 'href' || name === 'src')) {
+              const safe = sanitizeUrlValue(attribute.value, { forImage: tag === 'img' && name === 'src' });
+              if (safe) {
+                child.setAttribute(attribute.name, safe);
+              } else {
+                child.removeAttribute(attribute.name);
+              }
+              return;
+            }
+            if (name === 'style') {
+              const cleanStyle = sanitizeInlineStyle(attribute.value);
+              if (cleanStyle) {
+                child.setAttribute('style', cleanStyle);
+              } else {
+                child.removeAttribute('style');
+              }
+              return;
+            }
+            if (tag === 'a' && name === 'target' && attribute.value !== '_blank' && attribute.value !== '_self') {
+              child.setAttribute('target', '_self');
+            }
+            if (tag === 'a' && name === 'rel') {
+              child.setAttribute('rel', 'noopener noreferrer');
+            }
+          });
+          if (tag === 'a' && child.getAttribute('target') === '_blank') {
+            child.setAttribute('rel', 'noopener noreferrer');
+          }
+          sanitizeNode(child);
+        } else if (child.nodeType === Node.COMMENT_NODE) {
+          node.removeChild(child);
+        }
+        child = next;
+      }
+    }
+
+    sanitizeNode(template.content);
+    return template.innerHTML;
+  }
+
+  function setSanitizedHtml(element, html) {
+    element.innerHTML = sanitizeRichHtml(html);
+  }
+
   function getCsrfToken() {
     const meta = document.querySelector('meta[name="csrf-token"]');
     return meta ? meta.getAttribute('content') || '' : '';
@@ -259,11 +394,26 @@
     function render() {
       const options = Array.from(select.options);
       const selected = options.filter((option) => option.selected);
-      list.innerHTML = options.length
-        ? options
-            .map((option) => `<label class="kbe-pick__option"><input type="checkbox" value="${escapeHtml(option.value)}"${option.selected ? ' checked' : ''} /><span>${escapeHtml(option.textContent)}</span></label>`)
-            .join('')
-        : '<p class="kbe-pick__empty">No options available.</p>';
+      list.textContent = '';
+      if (options.length) {
+        options.forEach((option) => {
+          const labelNode = document.createElement('label');
+          labelNode.className = 'kbe-pick__option';
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.value = option.value;
+          checkbox.checked = option.selected;
+          const text = document.createElement('span');
+          text.textContent = option.textContent || '';
+          labelNode.append(checkbox, text);
+          list.appendChild(labelNode);
+        });
+      } else {
+        const empty = document.createElement('p');
+        empty.className = 'kbe-pick__empty';
+        empty.textContent = 'No options available.';
+        list.appendChild(empty);
+      }
       count.textContent = selected.length ? `${selected.length} selected` : emptyLabel;
       clear.hidden = selected.length === 0;
       wrapper.classList.toggle('kbe-pick--compact', options.length <= 6);
@@ -373,7 +523,7 @@
       return false;
     }
     const temp = document.createElement('div');
-    temp.innerHTML = html;
+    setSanitizedHtml(temp, html);
     const text = (temp.textContent || '').replace(/ /g, ' ').trim();
     if (text) {
       return true;
@@ -384,7 +534,7 @@
   function sectionSnippet(editor) {
     // Pad block boundaries so "Step one.Step two" reads as separate sentences.
     const temp = document.createElement('div');
-    temp.innerHTML = editor.innerHTML.replace(/<\/(p|li|h\d|div|pre|blockquote|kb-if|td)>|<br\s*\/?>/gi, '$& ');
+    setSanitizedHtml(temp, editor.innerHTML.replace(/<\/(p|li|h\d|div|pre|blockquote|kb-if|td)>|<br\s*\/?>/gi, '$& '));
     const text = (temp.textContent || '').replace(/\s+/g, ' ').trim();
     if (text) {
       return text.length > 160 ? `${text.slice(0, 160)}…` : text;
@@ -487,7 +637,7 @@
     const heading = $('[data-kb-section-heading]', wrapper);
     heading.value = section && section.heading ? section.heading : '';
     const editor = $('[data-kb-section-editor]', wrapper);
-    editor.innerHTML = section && section.content ? section.content : '<p><br></p>';
+    setSanitizedHtml(editor, section && section.content ? section.content : '<p><br></p>');
     initialiseSectionEditor(editor);
     updateAccessChip(wrapper);
     return wrapper;
@@ -579,7 +729,7 @@
       image.removeAttribute('data-kb-image-decorated');
       image.removeAttribute('draggable');
     });
-    return clone.innerHTML.trim();
+    return sanitizeRichHtml(clone.innerHTML.trim());
   }
 
   function collectSectionsFromDom() {
@@ -1082,11 +1232,26 @@
     const list = $('[data-kb-access-list]', accessDialog);
     const filter = $('[data-kb-access-filter]', accessDialog);
     filter.value = '';
-    list.innerHTML = companyOptions.length
-      ? companyOptions
-          .map((company) => `<label class="kbe-pick__option"><input type="checkbox" value="${company.id}"${selected.has(Number(company.id)) ? ' checked' : ''} /><span>${escapeHtml(company.name || `Company ${company.id}`)}</span></label>`)
-          .join('')
-      : '<p class="kbe-pick__empty">No companies available.</p>';
+    list.textContent = '';
+    if (companyOptions.length) {
+      companyOptions.forEach((company) => {
+        const labelNode = document.createElement('label');
+        labelNode.className = 'kbe-pick__option';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = String(company.id);
+        checkbox.checked = selected.has(Number(company.id));
+        const text = document.createElement('span');
+        text.textContent = company.name || `Company ${company.id}`;
+        labelNode.append(checkbox, text);
+        list.appendChild(labelNode);
+      });
+    } else {
+      const empty = document.createElement('p');
+      empty.className = 'kbe-pick__empty';
+      empty.textContent = 'No companies available.';
+      list.appendChild(empty);
+    }
     accessDialog.showModal();
     filter.focus();
   }
@@ -1139,17 +1304,68 @@
       const total = generatedTags.length + addedTags.length;
       aiTagsCount.textContent = total ? String(total) : '';
     }
-    const emptyHtml = generatedTags.length === 0 && addedTags.length === 0
-      ? '<span class="kbe__muted">No tags yet — they are generated after saving.</span>'
-      : '';
-    const generatedHtml = generatedTags
-      .map((tag) => `<span class="tag tag--removable" data-tag-value="${escapeHtml(tag)}">${escapeHtml(tag)}<button type="button" class="tag__remove" data-tag-action="remove" aria-label="Remove tag ${escapeHtml(tag)}" title="Remove from this article">×</button><button type="button" class="tag__exclude" data-tag-action="exclude" aria-label="Exclude tag ${escapeHtml(tag)} everywhere" title="Remove and exclude from future use">⊘</button></span>`)
-      .join('');
-    const manualHtml = addedTags
-      .map((tag) => `<span class="tag tag--manual" data-manual-tag-value="${escapeHtml(tag)}" title="Manually added tag">${escapeHtml(tag)}<button type="button" class="tag__remove" data-tag-action="remove-manual" aria-label="Remove manual tag ${escapeHtml(tag)}" title="Remove manual tag">×</button></span>`)
-      .join('');
-    const addHtml = '<div class="kb-admin__manual-tag-form" data-kb-manual-tag-form><input class="form-input form-input--sm" type="text" name="manual_tag" maxlength="48" placeholder="Add keyword" aria-label="Add manual AI tag"><button type="button" class="kbe-btn" data-kb-manual-tag-add>Add</button></div>';
-    aiTagsContainer.innerHTML = emptyHtml + generatedHtml + manualHtml + addHtml;
+    aiTagsContainer.textContent = '';
+    if (generatedTags.length === 0 && addedTags.length === 0) {
+      const empty = document.createElement('span');
+      empty.className = 'kbe__muted';
+      empty.textContent = 'No tags yet — they are generated after saving.';
+      aiTagsContainer.appendChild(empty);
+    }
+    generatedTags.forEach((tag) => {
+      const chip = document.createElement('span');
+      chip.className = 'tag tag--removable';
+      chip.dataset.tagValue = tag;
+      chip.append(document.createTextNode(tag));
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'tag__remove';
+      remove.dataset.tagAction = 'remove';
+      remove.setAttribute('aria-label', `Remove tag ${tag}`);
+      remove.title = 'Remove from this article';
+      remove.textContent = '×';
+      const exclude = document.createElement('button');
+      exclude.type = 'button';
+      exclude.className = 'tag__exclude';
+      exclude.dataset.tagAction = 'exclude';
+      exclude.setAttribute('aria-label', `Exclude tag ${tag} everywhere`);
+      exclude.title = 'Remove and exclude from future use';
+      exclude.textContent = '⊘';
+      chip.append(remove, exclude);
+      aiTagsContainer.appendChild(chip);
+    });
+    addedTags.forEach((tag) => {
+      const chip = document.createElement('span');
+      chip.className = 'tag tag--manual';
+      chip.dataset.manualTagValue = tag;
+      chip.title = 'Manually added tag';
+      chip.append(document.createTextNode(tag));
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'tag__remove';
+      remove.dataset.tagAction = 'remove-manual';
+      remove.setAttribute('aria-label', `Remove manual tag ${tag}`);
+      remove.title = 'Remove manual tag';
+      remove.textContent = '×';
+      chip.appendChild(remove);
+      aiTagsContainer.appendChild(chip);
+    });
+    const addWrap = document.createElement('div');
+    addWrap.className = 'kb-admin__manual-tag-form';
+    addWrap.dataset.kbManualTagForm = '';
+    const addInput = document.createElement('input');
+    addInput.className = 'form-input form-input--sm';
+    addInput.type = 'text';
+    addInput.name = 'manual_tag';
+    addInput.maxLength = 48;
+    addInput.placeholder = 'Add keyword';
+    addInput.setAttribute('aria-label', 'Add manual AI tag');
+    const addButton = document.createElement('button');
+    addButton.type = 'button';
+    addButton.className = 'kbe-btn';
+    addButton.dataset.kbManualTagAdd = '';
+    addButton.textContent = 'Add';
+    addWrap.append(addInput, addButton);
+    aiTagsContainer.appendChild(addWrap);
 
     const manualTagWrapper = aiTagsContainer.querySelector('[data-kb-manual-tag-form]');
     const manualTagInput = manualTagWrapper.querySelector('input[name="manual_tag"]');
@@ -1283,16 +1499,36 @@
       attachmentCount.textContent = attachments.length ? String(attachments.length) : '';
     }
     if (!attachments.length) {
-      attachmentsElement.innerHTML = '<p class="kbe__muted">No attachments.</p>';
+      attachmentsElement.textContent = '';
+      const empty = document.createElement('p');
+      empty.className = 'kbe__muted';
+      empty.textContent = 'No attachments.';
+      attachmentsElement.appendChild(empty);
       return;
     }
-    attachmentsElement.innerHTML = attachments
-      .map((item) => {
-        const size = Number(item.file_size || 0);
-        const sizeLabel = size >= 1048576 ? `${(size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.ceil(size / 1024))} KB`;
-        return `<div class="kbe__attachment"><a href="/api/knowledge-base/articles/${state.activeId}/attachments/${item.id}" title="${escapeHtml(item.file_name)}">${escapeHtml(item.file_name)}</a><span class="kbe__muted">${sizeLabel}</span><button class="kbe-icon kbe-icon--danger" type="button" data-kb-delete-attachment="${item.id}" aria-label="Remove ${escapeHtml(item.file_name)}" title="Remove">${ICONS.trash}</button></div>`;
-      })
-      .join('');
+    attachmentsElement.textContent = '';
+    attachments.forEach((item) => {
+      const size = Number(item.file_size || 0);
+      const sizeLabel = size >= 1048576 ? `${(size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.ceil(size / 1024))} KB`;
+      const row = document.createElement('div');
+      row.className = 'kbe__attachment';
+      const link = document.createElement('a');
+      link.href = `/api/knowledge-base/articles/${state.activeId}/attachments/${item.id}`;
+      link.title = item.file_name || '';
+      link.textContent = item.file_name || '';
+      const sizeNode = document.createElement('span');
+      sizeNode.className = 'kbe__muted';
+      sizeNode.textContent = sizeLabel;
+      const remove = document.createElement('button');
+      remove.className = 'kbe-icon kbe-icon--danger';
+      remove.type = 'button';
+      remove.dataset.kbDeleteAttachment = String(item.id);
+      remove.setAttribute('aria-label', `Remove ${item.file_name || 'attachment'}`);
+      remove.title = 'Remove';
+      remove.innerHTML = ICONS.trash;
+      row.append(link, sizeNode, remove);
+      attachmentsElement.appendChild(row);
+    });
   }
 
   async function reloadAttachments() {
@@ -1319,8 +1555,12 @@
   function openReview(title) {
     reviewTitle.textContent = title;
     versionList.hidden = true;
-    versionList.innerHTML = '';
-    reviewContent.innerHTML = '<p class="kbe__muted">Loading…</p>';
+    versionList.textContent = '';
+    reviewContent.textContent = '';
+    const loading = document.createElement('p');
+    loading.className = 'kbe__muted';
+    loading.textContent = 'Loading…';
+    reviewContent.appendChild(loading);
     if (!reviewDialog.open) {
       reviewDialog.showModal();
     }
@@ -1330,19 +1570,50 @@
     const companyQuery = previewCompany.value ? `?company_id=${encodeURIComponent(previewCompany.value)}` : '';
     const companyLabel = previewCompany.value ? previewCompany.selectedOptions[0].textContent : 'an anonymous customer';
     openReview(`Preview as ${companyLabel}`);
+    reviewContent.textContent = '';
     if (state.dirty) {
-      reviewContent.innerHTML = '<div class="alert alert--warning">Showing the last saved version — save to preview your latest changes.</div>';
-    } else {
-      reviewContent.innerHTML = '';
+      const warn = document.createElement('div');
+      warn.className = 'alert alert--warning';
+      warn.textContent = 'Showing the last saved version — save to preview your latest changes.';
+      reviewContent.appendChild(warn);
     }
     try {
       const article = await api(`/api/knowledge-base/articles/${encodeURIComponent(state.activeSlug)}/customer-preview${companyQuery}`);
-      const sections = (article.sections || [])
-        .map((section) => `<section class="knowledge-base__section">${section.heading ? `<h2 class="knowledge-base__section-heading">${escapeHtml(section.heading)}</h2>` : ''}<div class="knowledge-base__section-content">${section.content || ''}</div></section>`)
-        .join('');
-      reviewContent.insertAdjacentHTML('beforeend', `<h1>${escapeHtml(article.title)}</h1>${article.summary ? `<p class="kbe__muted">${escapeHtml(article.summary)}</p>` : ''}${sections || article.content || ''}`);
+      const title = document.createElement('h1');
+      title.textContent = article.title || '';
+      reviewContent.appendChild(title);
+      if (article.summary) {
+        const summary = document.createElement('p');
+        summary.className = 'kbe__muted';
+        summary.textContent = article.summary;
+        reviewContent.appendChild(summary);
+      }
+      if (Array.isArray(article.sections) && article.sections.length) {
+        article.sections.forEach((section) => {
+          const sectionNode = document.createElement('section');
+          sectionNode.className = 'knowledge-base__section';
+          if (section.heading) {
+            const heading = document.createElement('h2');
+            heading.className = 'knowledge-base__section-heading';
+            heading.textContent = section.heading;
+            sectionNode.appendChild(heading);
+          }
+          const contentNode = document.createElement('div');
+          contentNode.className = 'knowledge-base__section-content';
+          setSanitizedHtml(contentNode, section.content || '');
+          sectionNode.appendChild(contentNode);
+          reviewContent.appendChild(sectionNode);
+        });
+      } else {
+        const contentNode = document.createElement('div');
+        setSanitizedHtml(contentNode, article.content || '');
+        reviewContent.appendChild(contentNode);
+      }
     } catch (error) {
-      reviewContent.insertAdjacentHTML('beforeend', '<div class="alert alert--warning">This article is not visible to that customer. It may be unpublished or restricted.</div>');
+      const warning = document.createElement('div');
+      warning.className = 'alert alert--warning';
+      warning.textContent = 'This article is not visible to that customer. It may be unpublished or restricted.';
+      reviewContent.appendChild(warning);
     }
   }
 
@@ -1350,17 +1621,29 @@
     openReview('Version history');
     const versions = await api(`/api/knowledge-base/articles/${state.activeId}/versions`);
     if (!versions || !versions.length) {
-      reviewContent.innerHTML = '<p class="kbe__muted">No earlier versions yet. A version is recorded every time the article is saved.</p>';
+      reviewContent.textContent = '';
+      const empty = document.createElement('p');
+      empty.className = 'kbe__muted';
+      empty.textContent = 'No earlier versions yet. A version is recorded every time the article is saved.';
+      reviewContent.appendChild(empty);
       return;
     }
     versionList.hidden = false;
-    versionList.innerHTML = versions
-      .map((item) => {
-        const when = item.created_at ? new Date(item.created_at) : null;
-        const label = when && !Number.isNaN(when.getTime()) ? when.toLocaleString() : (item.created_at || '');
-        return `<button type="button" class="kbe-review__version" data-kb-version="${item.version_number}"><strong>v${item.version_number}</strong><span>${escapeHtml(label)}</span></button>`;
-      })
-      .join('');
+    versionList.textContent = '';
+    versions.forEach((item) => {
+      const when = item.created_at ? new Date(item.created_at) : null;
+      const label = when && !Number.isNaN(when.getTime()) ? when.toLocaleString() : (item.created_at || '');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'kbe-review__version';
+      button.dataset.kbVersion = String(item.version_number);
+      const strong = document.createElement('strong');
+      strong.textContent = `v${item.version_number}`;
+      const span = document.createElement('span');
+      span.textContent = label;
+      button.append(strong, span);
+      versionList.appendChild(button);
+    });
     await showVersion(versions[0].version_number);
   }
 
@@ -1368,9 +1651,25 @@
     versionList.querySelectorAll('[data-kb-version]').forEach((button) => {
       button.classList.toggle('is-active', button.dataset.kbVersion === String(versionNumber));
     });
-    reviewContent.innerHTML = '<p class="kbe__muted">Loading…</p>';
+    reviewContent.textContent = '';
+    const loading = document.createElement('p');
+    loading.className = 'kbe__muted';
+    loading.textContent = 'Loading…';
+    reviewContent.appendChild(loading);
     const version = await api(`/api/knowledge-base/articles/${state.activeId}/versions/${versionNumber}`);
-    reviewContent.innerHTML = `<h1>${escapeHtml(version.title || '')}</h1>${version.summary ? `<p class="kbe__muted">${escapeHtml(version.summary)}</p>` : ''}${version.content || ''}`;
+    reviewContent.textContent = '';
+    const title = document.createElement('h1');
+    title.textContent = version.title || '';
+    reviewContent.appendChild(title);
+    if (version.summary) {
+      const summary = document.createElement('p');
+      summary.className = 'kbe__muted';
+      summary.textContent = version.summary;
+      reviewContent.appendChild(summary);
+    }
+    const contentNode = document.createElement('div');
+    setSanitizedHtml(contentNode, version.content || '');
+    reviewContent.appendChild(contentNode);
   }
 
   // ---------------------------------------------------------------------------
@@ -1738,14 +2037,22 @@
   }
   $('[data-kb-preview]', form).addEventListener('click', () => showCustomerPreview());
   $('[data-kb-versions]', form).addEventListener('click', () => showVersions().catch((error) => {
-    reviewContent.innerHTML = `<div class="alert alert--warning">${escapeHtml(error.message)}</div>`;
+    reviewContent.textContent = '';
+    const warning = document.createElement('div');
+    warning.className = 'alert alert--warning';
+    warning.textContent = error.message;
+    reviewContent.appendChild(warning);
   }));
   if (versionList) {
     versionList.addEventListener('click', (event) => {
       const button = event.target.closest('[data-kb-version]');
       if (button) {
         showVersion(button.dataset.kbVersion).catch((error) => {
-          reviewContent.innerHTML = `<div class="alert alert--warning">${escapeHtml(error.message)}</div>`;
+          reviewContent.textContent = '';
+          const warning = document.createElement('div');
+          warning.className = 'alert alert--warning';
+          warning.textContent = error.message;
+          reviewContent.appendChild(warning);
         });
       }
     });

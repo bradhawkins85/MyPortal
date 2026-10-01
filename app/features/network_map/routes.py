@@ -10,6 +10,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
+import xml.etree.ElementTree as ET
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -29,6 +30,13 @@ PAPER_SIZES = {"a4": "A4", "a3": "A3", "a2": "A2", "letter": "Letter", "tabloid"
 # Portrait page sizes in millimetres, for scaling the map to fit one page.
 PAPER_MM = {"a4": (210, 297), "a3": (297, 420), "a2": (420, 594), "letter": (216, 279), "tabloid": (279, 432)}
 PDF_MARGIN_MM = 10
+SVG_NS = "http://www.w3.org/2000/svg"
+XLINK_NS = "http://www.w3.org/1999/xlink"
+UNSAFE_SVG_TAGS = {"script", "foreignObject", "iframe", "object", "embed"}
+UNSAFE_URL_SCHEMES = ("javascript:", "vbscript:")
+
+ET.register_namespace("", SVG_NS)
+ET.register_namespace("xlink", XLINK_NS)
 
 
 def _routes():
@@ -121,7 +129,7 @@ async def network_map_page(request: Request):
     return await _routes()._main()._render_template(
         "network_map/index.html", request, user, extra={
             "title": title, "company": company, "can_edit": can_edit,
-            "map_svg": Markup(svg), "map_payload": network_map.graph_payload(graph),
+            "map_svg": Markup(_sanitize_svg(svg)), "map_payload": network_map.graph_payload(graph),
             "options": options, "options_query": query,
             "detail_levels": network_map.DETAIL_LEVELS,
             "layouts": network_map.LAYOUTS,
@@ -174,7 +182,7 @@ async def export_pdf(request: Request):
     avail_w, avail_h = page_w - 2 * PDF_MARGIN_MM, page_h - 2 * PDF_MARGIN_MM - 6
     map_width_mm = min(avail_w, avail_h * width / height)
     html = _routes()._main().templates.env.get_template("network_map/pdf.html").render(
-        svg=Markup(_fit_svg(svg)), company=company, subtitle=subtitle, options=options,
+        svg=Markup(_sanitize_svg(_fit_svg(svg))), company=company, subtitle=subtitle, options=options,
         page_size=f"{page_w}mm {page_h}mm", map_width_mm=round(map_width_mm, 1),
         inventory=network_map.inventory(graph) if options.detail != "overview" else [],
         detail=options.detail,
@@ -203,6 +211,61 @@ def _svg_size(svg: str) -> tuple[float, float]:
 def _fit_svg(svg: str) -> str:
     """Let the SVG scale to the PDF page instead of using its pixel size."""
     return re.sub(r'^<svg([^>]*?) width="[\d.]+" height="[\d.]+"', r'<svg\1 class="pdf-map"', svg, count=1)
+
+
+def _tag_name(value: str) -> str:
+    return value.rsplit("}", 1)[-1] if "}" in value else value
+
+
+def _safe_svg_url(value: str) -> bool:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return True
+    if raw.startswith("#") or raw.startswith("/"):
+        return True
+    if raw.startswith(("http://", "https://", "data:image/")):
+        return True
+    return not raw.startswith(UNSAFE_URL_SCHEMES)
+
+
+def _sanitize_svg(svg: str) -> str:
+    """Remove active content from SVG before bypassing template auto-escaping."""
+    try:
+        root = ET.fromstring(svg)
+    except ET.ParseError:
+        return f'<svg xmlns="{SVG_NS}" viewBox="0 0 1 1"></svg>'
+    if _tag_name(root.tag) != "svg":
+        return f'<svg xmlns="{SVG_NS}" viewBox="0 0 1 1"></svg>'
+
+    for parent in root.iter():
+        for child in list(parent):
+            if _tag_name(child.tag) in UNSAFE_SVG_TAGS:
+                parent.remove(child)
+                continue
+            for attribute in list(child.attrib):
+                name = _tag_name(attribute).lower()
+                value = child.attrib.get(attribute)
+                if name.startswith("on"):
+                    del child.attrib[attribute]
+                    continue
+                if name in {"href"} and not _safe_svg_url(str(value)):
+                    del child.attrib[attribute]
+                    continue
+                if name == "style" and re.search(r"(expression\s*\(|javascript:)", str(value), re.IGNORECASE):
+                    del child.attrib[attribute]
+        for attribute in list(parent.attrib):
+            name = _tag_name(attribute).lower()
+            value = parent.attrib.get(attribute)
+            if name.startswith("on"):
+                del parent.attrib[attribute]
+                continue
+            if name in {"href"} and not _safe_svg_url(str(value)):
+                del parent.attrib[attribute]
+                continue
+            if name == "style" and re.search(r"(expression\s*\(|javascript:)", str(value), re.IGNORECASE):
+                del parent.attrib[attribute]
+
+    return ET.tostring(root, encoding="unicode", method="xml")
 
 
 def _next_url(form: Any, fallback: str) -> str:

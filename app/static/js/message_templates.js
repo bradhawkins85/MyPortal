@@ -78,6 +78,99 @@
       .replace(/"/g, '&quot;');
   }
 
+  const HTML_ALLOWED_TAGS = new Set([
+    'a', 'b', 'blockquote', 'br', 'code', 'div', 'em', 'h1', 'h2', 'h3', 'h4', 'h5',
+    'h6', 'hr', 'i', 'img', 'li', 'ol', 'p', 'pre', 's', 'span', 'strong', 'table',
+    'tbody', 'td', 'th', 'thead', 'tr', 'u', 'ul',
+  ]);
+  const HTML_BLOCKED_TAGS = new Set(['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form']);
+  const HTML_GLOBAL_ATTRS = new Set(['class', 'title', 'colspan', 'rowspan']);
+  const HTML_ATTRS_BY_TAG = {
+    a: new Set(['href', 'target', 'rel']),
+    img: new Set(['src', 'alt', 'width', 'height']),
+  };
+
+  function sanitizeUrl(value, forImage) {
+    const url = String(value || '').trim();
+    if (!url) {
+      return '';
+    }
+    if (url.startsWith('#') || url.startsWith('/')) {
+      return url;
+    }
+    if (/^https?:/i.test(url) || /^mailto:/i.test(url)) {
+      return url;
+    }
+    if (forImage && /^data:image\/(png|gif|jpe?g|webp|bmp|svg\+xml);/i.test(url)) {
+      return url;
+    }
+    return '';
+  }
+
+  function sanitizeHtml(html) {
+    const template = document.createElement('template');
+    template.innerHTML = String(html || '');
+    const sanitizeNode = (node) => {
+      let child = node.firstChild;
+      while (child) {
+        const next = child.nextSibling;
+        if (child.nodeType === Node.ELEMENT_NODE) {
+          const tag = child.tagName.toLowerCase();
+          if (HTML_BLOCKED_TAGS.has(tag)) {
+            node.removeChild(child);
+            child = next;
+            continue;
+          }
+          if (!HTML_ALLOWED_TAGS.has(tag)) {
+            while (child.firstChild) {
+              node.insertBefore(child.firstChild, child);
+            }
+            node.removeChild(child);
+            child = next;
+            continue;
+          }
+          Array.from(child.attributes).forEach((attribute) => {
+            const name = attribute.name.toLowerCase();
+            if (name.startsWith('on')) {
+              child.removeAttribute(attribute.name);
+              return;
+            }
+            const allowed = HTML_GLOBAL_ATTRS.has(name)
+              || Boolean(HTML_ATTRS_BY_TAG[tag] && HTML_ATTRS_BY_TAG[tag].has(name));
+            if (!allowed) {
+              child.removeAttribute(attribute.name);
+              return;
+            }
+            if (name === 'href' || name === 'src') {
+              const safe = sanitizeUrl(attribute.value, tag === 'img' && name === 'src');
+              if (safe) {
+                child.setAttribute(attribute.name, safe);
+              } else {
+                child.removeAttribute(attribute.name);
+              }
+              return;
+            }
+            if (tag === 'a' && name === 'target' && attribute.value !== '_blank' && attribute.value !== '_self') {
+              child.setAttribute('target', '_self');
+            }
+            if (tag === 'a' && name === 'rel') {
+              child.setAttribute('rel', 'noopener noreferrer');
+            }
+          });
+          if (tag === 'a' && child.getAttribute('target') === '_blank') {
+            child.setAttribute('rel', 'noopener noreferrer');
+          }
+          sanitizeNode(child);
+        } else if (child.nodeType === Node.COMMENT_NODE) {
+          node.removeChild(child);
+        }
+        child = next;
+      }
+    };
+    sanitizeNode(template.content);
+    return template.innerHTML;
+  }
+
   function tokensIn(content) {
     const found = [];
     String(content || '').replace(TOKEN_PATTERN, (match, path) => {
@@ -278,7 +371,7 @@
   }
 
   function htmlToText(html) {
-    const doc = new DOMParser().parseFromString(`<body>${html || ''}</body>`, 'text/html');
+    const doc = new DOMParser().parseFromString(`<body>${sanitizeHtml(html)}</body>`, 'text/html');
     doc.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
     doc.querySelectorAll('a[href]').forEach((link) => {
       const href = link.getAttribute('href');
@@ -298,8 +391,7 @@
 
   // Wrap {{ tokens }} in text nodes so the preview shows where values go.
   function highlightHtml(html) {
-    const doc = new DOMParser().parseFromString('<!doctype html><html><body></body></html>', 'text/html');
-    doc.body.innerHTML = html || '';
+    const doc = new DOMParser().parseFromString(`<body>${sanitizeHtml(html)}</body>`, 'text/html');
     const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
     const nodes = [];
     while (walker.nextNode()) {
