@@ -68,6 +68,23 @@ ALLOWED_MIME_TYPES = {
     "application/json",
 }
 
+# Only formats that cannot execute active content may be rendered in the portal's
+# origin. Keep this separate from ALLOWED_MIME_TYPES because many valid downloads
+# (for example, office documents and text files) are not safe inline previews.
+INLINE_PREVIEW_MIME_TYPES = {
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+}
+
+
+def can_preview_inline(mime_type: str | None) -> bool:
+    """Return whether an attachment MIME type is safe to render inline."""
+    return mime_type in INLINE_PREVIEW_MIME_TYPES
+
+
 # Number of bytes to read from the start of a file for MIME sniffing.
 _MAGIC_HEADER_BYTES = 2048
 _INLINE_IMAGE_DATA_URI_PATTERN = re.compile(

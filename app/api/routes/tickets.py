@@ -1999,11 +1999,16 @@ async def download_ticket_attachment(
             )
 
     original_filename = attachment.get("original_filename") or "download"
-    disposition = "inline" if preview else "attachment"
+    mime_type = attachment.get("mime_type") or "application/octet-stream"
+    disposition = (
+        "inline"
+        if preview and attachments_service.can_preview_inline(mime_type)
+        else "attachment"
+    )
     return FileResponse(
         path=file_path,
         filename=original_filename,
-        media_type=attachment.get("mime_type") or "application/octet-stream",
+        media_type=mime_type,
         content_disposition_type=disposition,
     )
 
