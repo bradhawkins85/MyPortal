@@ -64,7 +64,7 @@ def classify(rel: str, text: str) -> dict:
 
     # ---- Actions menu ---------------------------------------------------
     has_header_actions_block = "{% block header_actions" in text
-    uses_macro = "page_header_actions" in text
+    uses_macro = "page_header_actions" in text or "page_header_overflow" in text
     uses_legacy = "header-title-menu" in text
     if uses_macro or uses_legacy:
         findings["actions"] = "PASS"

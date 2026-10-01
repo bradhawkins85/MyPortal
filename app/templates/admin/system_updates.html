@@ -1,22 +1,76 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/tables.html" import table_column_picker %}
+
+{% set check = update_check | default({}, true) %}
+{% set changes = pending_changes | default({}, true) %}
+{% set is_docker = check.deployment == 'docker' %}
+{% set counts = status_counts | default({}, true) %}
+{% set system_update_columns = [
+  {"key": "started", "label": "Started"},
+  {"key": "status", "label": "Status"},
+  {"key": "source", "label": "Source"},
+  {"key": "mode", "label": "Mode"},
+  {"key": "target", "label": "Target revision"},
+  {"key": "completed", "label": "Completed"},
+] %}
+{% macro version_label(value) %}{% if value %}<code>{{ value[:12] if not is_docker else value }}</code>{% else %}<span class="text-muted">Unknown</span>{% endif %}{% endmacro %}
+
 {% block header_title %}
   <div class="page-header-bar">
-    <span class="header__title-text">System update history</span>
+    <span class="header__title-text" title="Rolling blue/green deployments and sanitized coordinator results. Times display in your local timezone.">System updates</span>
     <div class="page-header-toolbar">
       <label class="visually-hidden" for="system-updates-filter">Filter updates</label>
       <input id="system-updates-filter" type="search" class="form-input page-header-toolbar__search" placeholder="Filter updates" title="Status, revision, source…" data-table-filter="system-updates-table" />
+      {{ table_column_picker("system-updates", system_update_columns) }}
+      <span class="page-header-toolbar__info" data-table-info data-system-updates-info aria-live="polite">{{ updates | length }} update{{ '' if updates | length == 1 else 's' }}</span>
     </div>
   </div>
 {% endblock %}
-{% block header_actions %}{% endblock %}
+
+{% block header_actions %}
+  {% set system_update_actions = [] %}
+  {% if active_update %}
+    {% set _ = system_update_actions.append({"label": "View progress", "type": "link", "variant": "primary",
+       "href": "/admin/system-updates/" ~ active_update.id}) %}
+  {% else %}
+    {% set _ = system_update_actions.append({"label": "Update now", "type": "form", "variant": "primary",
+       "action": "/admin/system-updates/request",
+       "confirm": "Upgrade MyPortal to the latest " ~ ('release' if is_docker else 'revision') ~ " now?",
+       "attrs": {"disabled": not check.available, "title": none if check.available else "MyPortal is already up to date"}}) %}
+  {% endif %}
+  {% set _ = system_update_actions.append({"label": "Check for updates", "type": "link", "href": "/admin/system-updates?refresh=1"}) %}
+  {% if changes.compare_url %}
+    {% set _ = system_update_actions.append({"label": "Compare on GitHub", "type": "link", "href": changes.compare_url, "target": "_blank"}) %}
+  {% endif %}
+  {{ page_header_actions(system_update_actions, menu_id="system-update-actions-menu") }}
+{% endblock %}
+
 {% block content %}
-<div class="management management--single"><section class="management__content">
-  <p class="management__subtitle">Rolling blue/green deployments and sanitized coordinator results. Times display in your local timezone.</p>
-  {% set check = update_check | default({}, true) %}
-  {% set is_docker = check.deployment == 'docker' %}
-  {% macro version_label(value) %}{% if value %}<code>{{ value[:12] if not is_docker else value }}</code>{% else %}<span class="text-muted">Unknown</span>{% endif %}{% endmacro %}
-  <div class="card card--panel" data-system-update-panel>
-    <h2 class="card__title">Upgrade MyPortal</h2>
+{% macro filter_tile(key, label, count, variant, hint) -%}
+  <button type="button" class="stat-strip__stat stat-strip__stat--{{ variant }} system-updates__filter-tile" data-system-updates-filter="{{ key }}" aria-pressed="false" title="Show only {{ hint }}">
+    <span class="stat-strip__stat-label">{{ label }}</span>
+    <span class="stat-strip__stat-value">{{ count }}</span>
+  </button>
+{%- endmacro %}
+<div class="stat-strip" role="group" aria-label="Filter updates by status" data-system-updates-filter-strip>
+  <button type="button" class="stat-strip__stat stat-strip__stat--total system-updates__filter-tile" data-system-updates-filter-clear aria-pressed="true" title="Show every update">
+    <span class="stat-strip__stat-label">Updates</span>
+    <span class="stat-strip__stat-value">{{ updates | length }}</span>
+  </button>
+  {{ filter_tile('succeeded', 'Succeeded', counts.succeeded or 0, 'success', 'updates that succeeded') }}
+  {{ filter_tile('failed', 'Failed', counts.failed or 0, 'danger', 'updates that failed or were cancelled') }}
+  {{ filter_tile('active', 'In progress', counts.active or 0, 'warning', 'updates that are queued or running') }}
+</div>
+
+<section class="card card--panel" data-system-update-panel>
+  <header class="card__header">
+    <div>
+      <h2 class="card__title">Installed version</h2>
+      <p class="card__subtitle">{% if is_docker %}Upgrades back up the database, move to the latest published release and roll back automatically if it does not become healthy. The Docker host picks up requests within a minute.{% else %}Upgrades use the rolling blue/green coordinator, so the portal stays online. The server picks up requests within a minute.{% endif %}</p>
+    </div>
+  </header>
+  <div class="card__body">
     <dl class="definition-list">
       <dt>Installation</dt><dd>{{ 'Docker' if is_docker else 'Bare metal' }}</dd>
       <dt>Installed {{ 'release' if is_docker else 'revision' }}</dt><dd>{{ version_label(check.installed) }}</dd>
@@ -29,30 +83,91 @@
         {% if check.checked_at %}<span class="text-muted">Checked <span data-utc="{{ check.checked_at }}"></span></span>{% endif %}
       </dd>
     </dl>
-    <p class="text-muted">{% if is_docker %}Upgrades back up the database, move to the latest published release and roll back automatically if it does not become healthy. The Docker host picks up requests within a minute.{% else %}Upgrades use the rolling blue/green coordinator, so the portal stays online. The server picks up requests within a minute.{% endif %}</p>
-    <div class="form-actions">
-      {% if active_update %}
-        <a class="button button--primary" href="/admin/system-updates/{{ active_update.id }}">View progress</a>
-      {% else %}
-        <form method="post" action="/admin/system-updates/request">
-          {% include "partials/csrf.html" %}
-          <button type="submit" class="button button--primary" data-confirm="Upgrade MyPortal to the latest {{ 'release' if is_docker else 'revision' }} now?" {% if not check.available %}disabled{% endif %}>Update now</button>
-        </form>
-      {% endif %}
-      <a class="button button--ghost" href="/admin/system-updates?refresh=1">Check again</a>
-    </div>
   </div>
-  <div class="card card--panel"><div class="table-wrapper"><table class="table" id="system-updates-table" data-table data-table-id="system-updates">
-    <thead><tr><th data-sort="date">Started</th><th data-sort="string">Status</th><th data-sort="string">Source</th><th data-sort="string">Mode</th><th data-sort="string">Target revision</th><th data-sort="date">Completed</th><th>Result</th></tr></thead>
-    <tbody>{% for update in updates %}<tr>
-      <td data-label="Started" data-value="{{ update.started_at }}"><span data-utc="{{ update.started_at }}"></span></td>
-      <td data-label="Status"><span class="tag {{ 'tag--success' if update.status == 'succeeded' else ('tag--danger' if update.status == 'failed' else 'tag--warning') }}">{{ update.status }}</span></td>
-      <td data-label="Source">{{ update.source }}</td><td data-label="Mode">{{ update.mode }}</td>
-      <td data-label="Target revision"><code>{{ update.target_revision[:12] }}</code></td>
-      <td data-label="Completed" data-value="{{ update.completed_at or '' }}">{% if update.completed_at %}<span data-utc="{{ update.completed_at }}"></span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
-      <td data-label="Result"><a class="button button--ghost" href="/admin/system-updates/{{ update.id }}">Inspect</a></td>
+</section>
+
+<section class="card card--panel" data-system-update-changes>
+  <header class="card__header">
+    <div>
+      <h2 class="card__title">What's new since your version</h2>
+      <p class="card__subtitle">
+        {% if check.error %}Changes can't be listed until the update check succeeds.
+        {% elif not check.available %}You're on the latest {{ 'release' if is_docker else 'revision' }}, so there's nothing new to install.
+        {% elif changes.error %}{{ changes.error }}
+        {% elif is_docker %}{{ changes.total }} release{{ '' if changes.total == 1 else 's' }} and {{ changes.change_count }} change{{ '' if changes.change_count == 1 else 's' }} between {{ check.installed or 'your version' }} and {{ check.latest }}.
+        {% else %}{{ changes.total }} commit{{ '' if changes.total == 1 else 's' }} on main between <code>{{ check.installed[:12] }}</code> and <code>{{ check.latest[:12] }}</code>.{% endif %}
+      </p>
+    </div>
+  </header>
+  {% if check.available and not check.error and not changes.error %}
+  <div class="card__body">
+    {% if is_docker %}
+      {% for release in changes.releases %}
+        <details class="system-updates__release"{% if loop.first %} open{% endif %}>
+          <summary>
+            <strong>{{ release.name }}</strong>
+            {% if release.published_at %}<span class="text-muted">Published <span data-utc="{{ release.published_at }}"></span></span>{% endif %}
+            <span class="tag">{{ release.changes | length }} change{{ '' if release.changes | length == 1 else 's' }}</span>
+          </summary>
+          {% if release.changes %}
+            <ul class="system-updates__changes">
+              {% for item in release.changes %}
+                <li>
+                  {{ item.title }}
+                  {% if item.number and item.url %}<a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">#{{ item.number }}</a>{% elif item.url %}<a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">details</a>{% endif %}
+                  {% if item.author %}<span class="text-muted">by {{ item.author }}</span>{% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+          {% if release.notes %}<p class="system-updates__notes">{{ release.notes }}</p>{% endif %}
+          {% if release.url %}<p><a href="{{ release.url }}" target="_blank" rel="noopener noreferrer">View {{ release.tag }} on GitHub</a></p>{% endif %}
+        </details>
+      {% else %}
+        <p class="text-muted">GitHub did not list any published releases in this range.</p>
+      {% endfor %}
+      {% if changes.truncated %}<p class="text-muted">Showing the newest {{ changes.releases | length }} of {{ changes.total }} releases.</p>{% endif %}
+    {% else %}
+      <ul class="system-updates__changes">
+        {% for commit in changes.commits %}
+          <li>
+            {{ commit.title }}
+            {% if commit.number %}<span class="text-muted">#{{ commit.number }}</span>{% endif %}
+            {% if commit.url %}<a href="{{ commit.url }}" target="_blank" rel="noopener noreferrer"><code>{{ commit.sha[:7] }}</code></a>{% else %}<code>{{ commit.sha[:7] }}</code>{% endif %}
+            {% if commit.author %}<span class="text-muted">by {{ commit.author }}</span>{% endif %}
+            {% if commit.date %}<span class="text-muted">· <span data-utc="{{ commit.date }}"></span></span>{% endif %}
+          </li>
+        {% else %}
+          <li class="text-muted">GitHub did not list any commits in this range.</li>
+        {% endfor %}
+      </ul>
+      {% if changes.truncated %}<p class="text-muted">GitHub lists the first 250 commits of {{ changes.total }}; use Compare on GitHub in Actions to see them all.</p>{% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
+
+<section class="card card--panel">
+  <div class="table-wrapper"><table class="table" id="system-updates-table" data-table data-table-id="system-updates">
+    <thead><tr>
+      <th data-sort="date" data-column-key="started">Started</th>
+      <th data-sort="string" data-column-key="status">Status</th>
+      <th data-sort="string" data-column-key="source">Source</th>
+      <th data-sort="string" data-column-key="mode">Mode</th>
+      <th data-sort="string" data-column-key="target">Target revision</th>
+      <th data-sort="date" data-column-key="completed">Completed</th>
+      <th class="table__actions">Result</th>
+    </tr></thead>
+    <tbody>{% for update in updates %}<tr data-system-update-group="{{ 'active' if update.status in ('pending', 'running') else update.status }}">
+      <td data-label="Started" data-column-key="started" data-value="{{ update.started_at }}"><span data-utc="{{ update.started_at }}"></span></td>
+      <td data-label="Status" data-column-key="status"><span class="tag {{ 'tag--success' if update.status == 'succeeded' else ('tag--danger' if update.status == 'failed' else 'tag--warning') }}">{{ update.status }}</span></td>
+      <td data-label="Source" data-column-key="source">{{ update.source }}</td>
+      <td data-label="Mode" data-column-key="mode">{{ update.mode }}</td>
+      <td data-label="Target revision" data-column-key="target"><code>{{ update.target_revision[:12] }}</code></td>
+      <td data-label="Completed" data-column-key="completed" data-value="{{ update.completed_at or '' }}">{% if update.completed_at %}<span data-utc="{{ update.completed_at }}"></span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+      <td data-label="Result" class="table__actions"><a class="button button--ghost button--small" href="/admin/system-updates/{{ update.id }}">Inspect</a></td>
     </tr>{% else %}<tr><td colspan="7" class="table__empty">No system updates have been recorded yet.</td></tr>{% endfor %}</tbody>
-  </table></div></div>
-</section></div>
+  </table></div>
+</section>
 <script src="{{ static_url('/static/js/system_updates.js') }}" defer></script>
 {% endblock %}

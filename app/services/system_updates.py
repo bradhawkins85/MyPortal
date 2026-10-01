@@ -42,7 +42,24 @@ _UNCLAIMED_REQUEST_SECONDS = 15 * 60
 _REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
 _TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
+_MAX_RELEASES = 30
+_RELEASE_PAGES = 3
+# GitHub's generated release notes: "* Title by @author in https://…/pull/123".
+_RELEASE_ITEM_RE = re.compile(
+    r"^\s*[*-]\s+(?P<title>.+?)(?:\s+by\s+@(?P<author>\S+))?(?:\s+in\s+(?P<url>https://\S+))?\s*$"
+)
+_PULL_URL_RE = re.compile(r"/pull/(?P<number>\d+)/?$")
+_MERGE_PR_RE = re.compile(r"^Merge pull request #(?P<number>\d+)\b")
+
 _check_cache: dict[str, Any] = {"at": 0.0, "value": None}
+_changes_cache: dict[str, Any] = {"key": None, "at": 0.0, "value": None}
+
+
+def _github_repo() -> tuple[str, str]:
+    # .env.example ships these blank; blank means "use the default".
+    repo = os.getenv("MYPORTAL_REPO", "").strip() or "bradhawkins85/MyPortal"
+    api = (os.getenv("MYPORTAL_GITHUB_API", "").strip() or "https://api.github.com").rstrip("/")
+    return repo, api
 
 
 def deployment_type() -> str:
@@ -72,9 +89,7 @@ def _version_newer(candidate: str, current: str) -> bool:
 
 
 async def _latest_release_tag() -> str:
-    # .env.example ships these blank; blank means "use the default".
-    repo = os.getenv("MYPORTAL_REPO", "").strip() or "bradhawkins85/MyPortal"
-    api = (os.getenv("MYPORTAL_GITHUB_API", "").strip() or "https://api.github.com").rstrip("/")
+    repo, api = _github_repo()
     async with httpx.AsyncClient(timeout=_CHECK_TIMEOUT_SECONDS) as client:
         response = await client.get(
             f"{api}/repos/{repo}/releases/latest",
@@ -137,6 +152,175 @@ async def check_for_update(*, refresh: bool = False) -> dict[str, Any]:
     return result
 
 
+def revision_url(target: str) -> str:
+    """Return the GitHub page for an update target (a commit or a release tag)."""
+    repo, _ = _github_repo()
+    if _REVISION_RE.fullmatch(target or ""):
+        return f"https://github.com/{repo}/commit/{target}"
+    if _TAG_RE.fullmatch(target or ""):
+        return f"https://github.com/{repo}/releases/tag/{target}"
+    return ""
+
+
+def _parse_release_notes(body: str) -> tuple[list[dict[str, Any]], str]:
+    """Split GitHub release notes into pull request items and any other text."""
+    items: list[dict[str, Any]] = []
+    other: list[str] = []
+    for line in (body or "").splitlines():
+        stripped = line.strip()
+        match = _RELEASE_ITEM_RE.match(stripped) if stripped[:1] in {"*", "-"} else None
+        if match:
+            url = match.group("url") or ""
+            pull = _PULL_URL_RE.search(url)
+            items.append({
+                "title": match.group("title").strip(),
+                "author": match.group("author") or "",
+                "url": url if url.startswith("https://") else "",
+                "number": int(pull.group("number")) if pull else None,
+            })
+        elif stripped and not stripped.startswith(("## What's Changed", "**Full Changelog**")):
+            other.append(stripped)
+    return items, "\n".join(other)
+
+
+async def _release_changes(client: httpx.AsyncClient, installed: str, latest: str) -> dict[str, Any]:
+    repo, api = _github_repo()
+    releases: list[dict[str, Any]] = []
+    for page in range(1, _RELEASE_PAGES + 1):
+        response = await client.get(
+            f"{api}/repos/{repo}/releases",
+            params={"per_page": 100, "page": page},
+            headers={"Accept": "application/vnd.github+json"},
+        )
+        response.raise_for_status()
+        batch = response.json()
+        if not isinstance(batch, list):
+            raise RuntimeError("GitHub returned an unexpected release list.")
+        releases.extend(batch)
+        # Releases are listed newest first: stop once a page reaches the installed one.
+        reached_installed = any(
+            installed and not _version_newer(str(item.get("tag_name") or ""), installed)
+            for item in batch
+        )
+        if len(batch) < 100 or reached_installed:
+            break
+    pending = []
+    for release in releases:
+        tag = str(release.get("tag_name") or "")
+        if release.get("draft") or release.get("prerelease") or not _TAG_RE.fullmatch(tag):
+            continue
+        if not _version_newer(tag, installed) or _version_newer(tag, latest):
+            continue
+        items, notes = _parse_release_notes(str(release.get("body") or ""))
+        html_url = str(release.get("html_url") or "")
+        pending.append({
+            "tag": tag,
+            "name": str(release.get("name") or tag),
+            "published_at": str(release.get("published_at") or ""),
+            "url": html_url if html_url.startswith("https://") else "",
+            "changes": items,
+            "notes": notes,
+        })
+    pending.sort(key=lambda release: _version_key(release["tag"].lstrip("vV")), reverse=True)
+    return {
+        "kind": "releases",
+        "releases": pending[:_MAX_RELEASES],
+        "total": len(pending),
+        "truncated": len(pending) > _MAX_RELEASES,
+        "change_count": sum(len(release["changes"]) for release in pending),
+        "compare_url": f"https://github.com/{repo}/compare/{installed}...{latest}" if installed else "",
+    }
+
+
+async def _commit_changes(client: httpx.AsyncClient, installed: str, latest: str) -> dict[str, Any]:
+    repo, api = _github_repo()
+    response = await client.get(
+        f"{api}/repos/{repo}/compare/{installed}...{latest}",
+        headers={"Accept": "application/vnd.github+json"},
+    )
+    response.raise_for_status()
+    data = response.json()
+    raw_commits = data.get("commits") or []
+    commits = []
+    for entry in reversed(raw_commits):  # GitHub lists them oldest first
+        sha = str(entry.get("sha") or "")
+        if not _REVISION_RE.fullmatch(sha):
+            continue
+        commit = entry.get("commit") or {}
+        lines = [line.strip() for line in str(commit.get("message") or "").splitlines() if line.strip()]
+        title = lines[0] if lines else sha[:12]
+        pull = _MERGE_PR_RE.match(title)
+        if title.startswith("Merge branch ") or title.startswith("Merge remote-tracking branch "):
+            continue
+        if pull and len(lines) > 1:
+            title = lines[1]
+        html_url = str(entry.get("html_url") or "")
+        commits.append({
+            "sha": sha,
+            "title": title,
+            "author": str((entry.get("author") or {}).get("login") or (commit.get("author") or {}).get("name") or ""),
+            "date": str((commit.get("author") or {}).get("date") or ""),
+            "url": html_url if html_url.startswith("https://") else "",
+            "number": int(pull.group("number")) if pull else None,
+        })
+    total = int(data.get("total_commits") or len(raw_commits))
+    compare_url = str(data.get("html_url") or "")
+    return {
+        "kind": "commits",
+        "commits": commits,
+        "total": total,
+        "truncated": total > len(raw_commits),
+        "change_count": len(commits),
+        "compare_url": compare_url if compare_url.startswith("https://") else "",
+    }
+
+
+async def list_changes(check: dict[str, Any], *, refresh: bool = False) -> dict[str, Any]:
+    """List what changed between the installed and the latest version.
+
+    Docker installs list the published releases (with their notes) newer than
+    the installed release; bare-metal installs list the commits on main since
+    the installed revision.  Failures are reported in ``error``, never raised.
+    """
+    deployment = str(check.get("deployment") or deployment_type())
+    installed = str(check.get("installed") or "")
+    latest = str(check.get("latest") or "")
+    empty: dict[str, Any] = {
+        "kind": "releases" if deployment == "docker" else "commits",
+        "releases": [], "commits": [], "total": 0, "truncated": False,
+        "change_count": 0, "compare_url": "", "error": None,
+    }
+    if check.get("error") or not check.get("available") or not latest:
+        return empty
+    if deployment != "docker" and not (
+        _REVISION_RE.fullmatch(installed) and _REVISION_RE.fullmatch(latest)
+    ):
+        return {**empty, "error": "The installed revision is not a Git commit, so the changes cannot be listed."}
+
+    key = (deployment, installed, latest)
+    now = time.monotonic()
+    if (
+        not refresh and _changes_cache.get("key") == key
+        and now - float(_changes_cache["at"]) < _CHECK_CACHE_SECONDS
+    ):
+        return _changes_cache["value"]
+    try:
+        async with httpx.AsyncClient(timeout=_CHECK_TIMEOUT_SECONDS) as client:
+            fetch = (
+                _release_changes(client, installed, latest) if deployment == "docker"
+                else _commit_changes(client, installed, latest)
+            )
+            result = {**empty, **await asyncio.wait_for(fetch, timeout=_CHECK_TIMEOUT_SECONDS)}
+    except Exception as exc:  # network or GitHub failures are reported, not raised
+        log_error("Listing system update changes failed", error=str(exc))
+        reason = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
+        if isinstance(exc, asyncio.TimeoutError):
+            reason = "timed out"
+        return {**empty, "error": f"Could not list the changes: {reason}."}
+    _changes_cache.update(key=key, at=now, value=result)
+    return result
+
+
 def _write_docker_request(update_id: str, target: str, requested_at: str) -> None:
     _FLAG_PATH.parent.mkdir(parents=True, exist_ok=True)
     payload = (
@@ -192,8 +376,7 @@ async def _installed_revision() -> str:
 
 
 async def _github_revision_is_older(target: str, installed: str) -> bool:
-    repo = os.getenv("MYPORTAL_REPO", "").strip() or "bradhawkins85/MyPortal"
-    api = (os.getenv("MYPORTAL_GITHUB_API", "").strip() or "https://api.github.com").rstrip("/")
+    repo, api = _github_repo()
     try:
         async with httpx.AsyncClient(timeout=_CHECK_TIMEOUT_SECONDS) as client:
             response = await client.get(

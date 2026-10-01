@@ -5,14 +5,54 @@
   const ACTIVE_STATUSES = new Set(['pending', 'running']);
   const TAG_CLASSES = ['tag--success', 'tag--danger', 'tag--warning'];
 
-  function bindConfirmations() {
-    document.querySelectorAll('[data-confirm]').forEach((element) => {
-      element.addEventListener('click', (event) => {
-        if (!window.confirm(element.getAttribute('data-confirm') || 'Are you sure?')) {
-          event.preventDefault();
+  function bindHistoryFilters() {
+    const table = document.getElementById('system-updates-table');
+    const strip = document.querySelector('[data-system-updates-filter-strip]');
+    if (!table || !strip) return;
+    const tiles = Array.from(strip.querySelectorAll('[data-system-updates-filter]'));
+    const clearTile = strip.querySelector('[data-system-updates-filter-clear]');
+    const info = document.querySelector('[data-system-updates-info]');
+    const rows = Array.from(table.querySelectorAll('tbody tr[data-system-update-group]'));
+    const selected = new Set();
+
+    function apply() {
+      tiles.forEach((tile) => {
+        tile.setAttribute('aria-pressed', selected.has(tile.dataset.systemUpdatesFilter) ? 'true' : 'false');
+      });
+      if (clearTile) clearTile.setAttribute('aria-pressed', selected.size ? 'false' : 'true');
+      rows.forEach((row) => {
+        if (selected.size && !selected.has(row.dataset.systemUpdateGroup)) {
+          row.dataset.statFilterHidden = 'true';
+        } else {
+          delete row.dataset.statFilterHidden;
         }
       });
+      table.dispatchEvent(new CustomEvent('table:rows-updated'));
+    }
+
+    // Tiles toggle independently, so several statuses can be shown at once.
+    tiles.forEach((tile) => {
+      tile.addEventListener('click', () => {
+        const key = tile.dataset.systemUpdatesFilter;
+        if (selected.has(key)) selected.delete(key); else selected.add(key);
+        apply();
+      });
     });
+    if (clearTile) {
+      clearTile.addEventListener('click', () => {
+        selected.clear();
+        apply();
+      });
+    }
+
+    if (info) {
+      table.addEventListener('table:render', (event) => {
+        const shown = event.detail ? event.detail.filteredCount : rows.length;
+        info.textContent = shown === rows.length
+          ? `${rows.length} update${rows.length === 1 ? '' : 's'}`
+          : `Showing ${shown} of ${rows.length}`;
+      });
+    }
   }
 
   function tagClass(status) {
@@ -57,7 +97,8 @@
       element.hidden = !active;
     });
     if (update.status !== 'pending') {
-      root.querySelectorAll('[data-system-update-waiting], [data-system-update-cancel]').forEach((element) => {
+      // The cancel action renders in the page header, outside root.
+      document.querySelectorAll('[data-system-update-waiting], [data-system-update-cancel]').forEach((element) => {
         element.hidden = true;
       });
     }
@@ -92,7 +133,7 @@
   }
 
   function init() {
-    bindConfirmations();
+    bindHistoryFilters();
     pollProgress();
   }
 
