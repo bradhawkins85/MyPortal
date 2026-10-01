@@ -6,6 +6,20 @@ Templates accept the same variable syntax as automation payloads so bodies can
 reference ticket fields, system metadata, or user profiles without duplicating
 large strings across automations.
 
+## Admin page
+
+Super admins manage templates under **Admin → Message templates**
+(`/admin/message-templates`). The list can be searched and filtered by format,
+shows which templates MyPortal's own emails rely on, and copies each template's
+`{{ template.<key> }}` token. The editor offers Plain text and HTML formats,
+click-to-insert variables, a live preview that highlights variables, and saves
+in place (Ctrl+S). MyPortal looks up these keys for its built-in emails:
+`signup_verification`, `staff_invitation`, `subscription-renewal-reminder`,
+`monthly-subscription-renewal-reminder`,
+`third-party-annual-subscription-renewal-reminder` and
+`third-party-monthly-subscription-renewal-reminder`. Renaming or deleting one of
+them makes MyPortal fall back to its default wording.
+
 ## REST endpoints
 
 The `/api/message-templates` endpoints require super-admin privileges and are

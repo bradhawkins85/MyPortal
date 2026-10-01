@@ -2,7 +2,33 @@
 {% from "macros/header.html" import page_header_actions %}
 {% from "macros/tables.html" import table_column_picker %}
 
-{% block header_title %}<span class="header__title-text">Companies</span>{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Companies</span>
+    {% if is_super_admin %}
+      <div class="page-header-toolbar">
+        <label class="visually-hidden" for="companies-filter">Filter companies</label>
+        <input
+          id="companies-filter"
+          type="search"
+          class="form-input page-header-toolbar__search"
+          placeholder="Filter companies"
+          data-table-filter="companies-table"
+        />
+        <label class="page-header-toolbar__check" for="show-archived">
+          <input
+            id="show-archived"
+            type="checkbox"
+            {% if show_archived %}checked{% endif %}
+            onchange="window.location.href = this.checked ? '/admin/companies?show_archived=true' : '/admin/companies';"
+          />
+          <span>Show archived</span>
+        </label>
+        {{ table_column_picker("companies", companies_columns) }}
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}
 
 {% block header_actions %}
   {{ page_header_actions([
@@ -15,6 +41,8 @@
   {"key": "syncro_id", "module": "syncro",     "label": "Syncro ID",     "default_visible": false},
   {"key": "xero_id", "module": "xero",       "label": "Xero ID",       "default_visible": false},
   {"key": "email_domains", "label": "Email domains", "default_visible": false},
+  {"key": "automations", "label": "Company automations", "default_visible": false},
+  {"key": "recurring_invoice_items", "label": "Recurring invoice items", "default_visible": false},
   {"key": "tacticalrmm_client_id", "module": "tacticalrmm",     "label": "Tactical RMM client ID",      "default_visible": false},
   {"key": "hudu_id", "module": "hudu",                   "label": "Hudu ID",                      "default_visible": false},
   {"key": "huntress_organization_id", "module": "huntress",  "label": "Huntress organisation ID",     "default_visible": false},
@@ -34,31 +62,6 @@
   <div class="admin-grid admin-grid--columns">
     {% if is_super_admin %}
       <section class="card card--panel admin-grid__full">
-        <header class="card__header">
-          <div class="card__controls">
-            <div class="form-field form-field--checkbox" style="margin-right: 1rem;">
-              <label class="checkbox" for="show-archived">
-                <input 
-                  id="show-archived" 
-                  type="checkbox" 
-                  {% if show_archived %}checked{% endif %}
-                  onchange="window.location.href = this.checked ? '/admin/companies?show_archived=true' : '/admin/companies';"
-                />
-                <span>Show archived</span>
-              </label>
-            </div>
-            <input
-              type="search"
-              class="form-input card__control"
-              placeholder="Filter companies"
-              aria-label="Filter companies"
-              data-table-filter="companies-table"
-            />
-          </div>
-          <div class="card__controls card__controls--right">
-            {{ table_column_picker("companies", companies_columns) }}
-          </div>
-        </header>
         <div class="table-wrapper">
           <table class="table" id="companies-table" data-table data-table-id="companies" data-page-size-max="25">
             <thead>
@@ -67,6 +70,8 @@
                 {% if module_enabled.get('syncro', false) %}<th scope="col" data-sort="string" data-column-key="syncro_id">Syncro ID</th>{% endif %}
                 {% if module_enabled.get('xero', false) %}<th scope="col" data-sort="string" data-column-key="xero_id">Xero ID</th>{% endif %}
                 <th scope="col" data-sort="string" data-column-key="email_domains">Email domains</th>
+                <th scope="col" data-sort="number" data-column-key="automations">Company automations</th>
+                <th scope="col" data-sort="number" data-column-key="recurring_invoice_items">Recurring invoice items</th>
                 {% if module_enabled.get('tacticalrmm', false) %}<th scope="col" data-sort="string" data-column-key="tacticalrmm_client_id">Tactical RMM client ID</th>{% endif %}
                 {% if module_enabled.get('hudu', false) %}<th scope="col" data-sort="string" data-column-key="hudu_id">Hudu ID</th>{% endif %}
                 {% if module_enabled.get('huntress', false) %}<th scope="col" data-sort="string" data-column-key="huntress_organization_id">Huntress organisation ID</th>{% endif %}
@@ -85,7 +90,7 @@
               {% if managed_companies %}
                 {% for company in managed_companies %}
                   <tr>
-                    <td data-label="Name" data-column-key="name">{{ company.name }}</td>
+                    <td data-label="Name" data-column-key="name"><a href="/admin/companies/{{ company.id }}/edit">{{ company.name }}</a></td>
                     {% if module_enabled.get('syncro', false) %}<td data-label="Syncro ID" data-value="{{ company.syncro_company_id or '' }}" data-column-key="syncro_id">
                       {% if company.syncro_company_id %}
                         {{ company.syncro_company_id }}
@@ -107,6 +112,8 @@
                         <span class="text-muted">—</span>
                       {% endif %}
                     </td>
+                    <td data-label="Company automations" data-value="{{ company.automation_count }}" data-column-key="automations">{{ company.automation_count }}</td>
+                    <td data-label="Recurring invoice items" data-value="{{ company.recurring_invoice_item_count }}" data-column-key="recurring_invoice_items">{{ company.recurring_invoice_item_count }}</td>
                     {% if module_enabled.get('tacticalrmm', false) %}<td data-label="Tactical RMM client ID" data-value="{{ company.tacticalrmm_client_id or '' }}" data-column-key="tacticalrmm_client_id">
                       {% if company.tacticalrmm_client_id %}
                         {{ company.tacticalrmm_client_id }}

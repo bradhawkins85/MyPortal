@@ -1,7 +1,23 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}{{ 'Automation simulation' if is_simulation else 'Automation preview' }}{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <div class="page-header-bar page-header-bar--record">
+      <span class="header__title-text" title="{{ automation.name }}">{{ automation.name }}</span>
+      <span class="page-header-bar__meta">{{ 'Event automation simulation' if is_simulation else 'Scheduled ticket automation preview' }}</span>
+    </div>
+    <div class="page-header-toolbar">
+      <form method="get" class="page-header-toolbar__group">
+        <label class="page-header-toolbar__check" for="preview-limit">Scan limit</label>
+        <input id="preview-limit" name="limit" type="number" min="1" max="5000" class="form-input page-header-toolbar__number" value="{{ limit }}" />
+        <button type="submit" class="button button--ghost button--compact">{{ 'Refresh simulation' if is_simulation else 'Refresh preview' }}</button>
+      </form>
+      <label class="visually-hidden" for="automation-preview-filter">Filter preview tickets</label>
+      <input id="automation-preview-filter" type="search" class="form-input page-header-toolbar__search" placeholder="Filter tickets" data-table-filter="automation-preview-table" />
+    </div>
+  </div>
+{% endblock %}
 
 {% block header_actions %}
   {{ page_header_actions([
@@ -13,22 +29,11 @@
 {% block content %}
   <div class="management management--single" data-layout>
     <section class="management__content">
-      <header class="management__header">
-        <div>
-          <p class="eyebrow">{{ 'Event automation simulation' if is_simulation else 'Scheduled ticket automation' }}</p>
-          <h1 class="page-title">{{ automation.name }}</h1>
-          {% if is_simulation %}
-            <p class="page-subtitle">Simulate this event automation against recent tickets using its filters. Review the matches, then process the automation against the selected tickets only.</p>
-          {% else %}
-            <p class="page-subtitle">Preview the tickets that will be actioned the next time this automation runs. No actions are executed from this page.</p>
-          {% endif %}
-        </div>
-        <form method="get" class="management__filters">
-          <label class="form-label" for="preview-limit">Scan limit</label>
-          <input id="preview-limit" name="limit" type="number" min="1" max="5000" class="form-input" value="{{ limit }}" />
-          <button type="submit" class="button">{{ 'Refresh simulation' if is_simulation else 'Refresh preview' }}</button>
-        </form>
-      </header>
+      {% if is_simulation %}
+        <p class="page-subtitle">Simulate this event automation against recent tickets using its filters. Review the matches, then process the automation against the selected tickets only.</p>
+      {% else %}
+        <p class="page-subtitle">Preview the tickets that will be actioned the next time this automation runs. No actions are executed from this page.</p>
+      {% endif %}
 
       <div class="management__body">
         <div class="management__stats">
@@ -48,12 +53,6 @@
             <h3 class="stat-card__title">Checked</h3>
             <p class="stat-card__value stat-card__value--small">{{ preview.checked_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</p>
           </article>
-        </div>
-
-        <div class="management__toolbar">
-          <div class="management__toolbar-search">
-            <input type="search" class="form-input" placeholder="Filter preview tickets" aria-label="Filter preview tickets" data-table-filter="automation-preview-table" />
-          </div>
         </div>
 
         {% if is_simulation and preview.tickets %}

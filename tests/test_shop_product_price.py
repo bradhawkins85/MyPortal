@@ -1,7 +1,7 @@
 """Tests for the get_product_price helper in app/services/shop.py."""
 from decimal import Decimal
 
-from app.services.shop import get_product_price
+from app.services.shop import get_product_price, get_subscription_billing_plan
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +122,20 @@ def test_annual_annual_payment_returns_correct_price():
         "price_annual_annual_payment": Decimal("1100.00"),
     }
     assert get_product_price(product) == Decimal("1100.00")
+
+
+def test_single_annual_price_without_legacy_selectors_is_not_monthly_amortised():
+    product = {
+        "subscription_category_id": 3,
+        "commitment_type": None,
+        "payment_frequency": None,
+        "price_monthly_commitment": None,
+        "price_annual_monthly_payment": None,
+        "price_annual_annual_payment": Decimal("275.00"),
+    }
+
+    assert get_subscription_billing_plan(product) == ("annual", "annual")
+    assert get_product_price(product) == Decimal("275.00")
 
 
 def test_annual_annual_payment_no_price_falls_back_to_standard():

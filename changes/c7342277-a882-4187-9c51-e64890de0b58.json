@@ -1,0 +1,7 @@
+{
+  "guid": "c7342277-a882-4187-9c51-e64890de0b58",
+  "occurred_at": "2026-09-28T00:00Z",
+  "change_type": "Feature",
+  "summary": "Document uplinks between racks: pick switches and routers by rack when linking ports, and see inter-rack links on each rack and the infrastructure overview.",
+  "content_hash": "4cb6c13342db9bb32a98e2c4dd5991233e2bf88e48863895c861a3c1128d492e"
+}

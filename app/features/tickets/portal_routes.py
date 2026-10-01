@@ -24,6 +24,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.core.logging import log_error
 from app.features.tickets.form_helpers import get_last_form_value
+from app.security.csrf import parse_csrf_form
 from app.security.flash import flash_redirect
 from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import staff as staff_repo
@@ -115,22 +116,23 @@ async def portal_tickets_page(request: Request):
 
     # If no explicit filters are provided, try to load the default view
     if not status_filter and not search_term:
+        filters: dict[str, Any] = {}
         try:
             user_id = int(user.get("id"))
             default_view = await ticket_views_repo.get_default_view(user_id)
             if default_view:
-                filters = default_view.get("filters") or {}
-                # Apply status filter from default view
-                if filters.get("status"):
-                    status_list = filters["status"]
-                    if isinstance(status_list, list) and status_list:
-                        status_filter = ",".join(str(s) for s in status_list)
-                # Apply search filter from default view
-                if filters.get("search"):
-                    search_term = str(filters["search"])
+                loaded_filters = default_view.get("filters")
+                if isinstance(loaded_filters, dict):
+                    filters = loaded_filters
         except (TypeError, ValueError, RuntimeError):
             # If we can't load the default view, just continue without it
             pass
+        status_list = filters.get("status")
+        if isinstance(status_list, list) and status_list:
+            status_filter = ",".join(str(s) for s in status_list)
+        search_value = filters.get("search")
+        if search_value:
+            search_term = str(search_value)
 
     return await _main()._render_portal_tickets_page(
         request,
@@ -231,8 +233,12 @@ async def portal_create_ticket(request: Request):
 
         try:
             await tickets_service.refresh_ticket_ai_summary(ticket["id"])
-        except RuntimeError:
-            pass
+        except RuntimeError as exc:
+            log_error(
+                "Portal ticket AI summary refresh skipped after create",
+                ticket_id=ticket["id"],
+                error=str(exc),
+            )
         await tickets_service.refresh_ticket_ai_tags(ticket["id"])
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create portal ticket", error=str(exc))
@@ -302,11 +308,9 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
             available_companies = await main_module.company_access.list_accessible_companies(user)
             active_company_id = getattr(request.state, "active_company_id", None)
             allowed_company_ids: set[int] = set()
-            if active_company_id is not None:
-                try:
-                    allowed_company_ids.add(int(active_company_id))
-                except (TypeError, ValueError):
-                    pass
+            parsed_active_company_id = tickets_service.parse_company_id(active_company_id)
+            if parsed_active_company_id is not None:
+                allowed_company_ids.add(parsed_active_company_id)
             if not allowed_company_ids:
                 for entry in available_companies:
                     try:
@@ -324,7 +328,7 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
             status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
         )
 
-    form = await request.form()
+    form = await parse_csrf_form(request)
     body = str(form.get("body") or "").strip()
     try:
         body, _inline_attachments = await attachments_service.persist_inline_images_for_ticket_body(
@@ -429,8 +433,12 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
 
     try:
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
-    except RuntimeError:
-        pass
+    except RuntimeError as exc:
+        log_error(
+            "Portal ticket AI summary refresh skipped after reply",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
     actor_type = "technician" if has_helpdesk_access or is_super_admin else "requester"
     reply_event_payload = dict(created_reply)

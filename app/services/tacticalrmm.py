@@ -52,9 +52,13 @@ async def _load_settings() -> dict[str, Any]:
         base_url = _clean_text(settings.get("base_url"))
         api_key = _clean_text(settings.get("api_key"))
         if not base_url:
-            raise TacticalRMMConfigurationError("Tactical RMM base URL is not configured")
+            raise TacticalRMMConfigurationError(
+                "Tactical RMM base URL is not configured"
+            )
         if not api_key:
-            raise TacticalRMMConfigurationError("Tactical RMM API key is not configured")
+            raise TacticalRMMConfigurationError(
+                "Tactical RMM API key is not configured"
+            )
         verify_ssl = bool(settings.get("verify_ssl", True))
         cached = {
             "base_url": base_url.rstrip("/"),
@@ -73,7 +77,9 @@ async def _call_endpoint(
     if body is not None:
         payload["body"] = body
     try:
-        result = await modules_service.trigger_module("tacticalrmm", payload, background=False)
+        result = await modules_service.trigger_module(
+            "tacticalrmm", payload, background=False
+        )
     except ValueError as exc:
         raise TacticalRMMConfigurationError(str(exc)) from exc
     status = str(result.get("status") or "").lower()
@@ -100,7 +106,9 @@ def _normalise_next_url(next_value: Any, base_url: str) -> str | None:
             if candidate:
                 next_value = candidate
                 break
-    if isinstance(next_value, Sequence) and not isinstance(next_value, (str, bytes, bytearray)):
+    if isinstance(next_value, Sequence) and not isinstance(
+        next_value, (str, bytes, bytearray)
+    ):
         for candidate in next_value:
             resolved = _normalise_next_url(candidate, base_url)
             if resolved:
@@ -118,20 +126,28 @@ def _normalise_next_url(next_value: Any, base_url: str) -> str | None:
     return next_value.lstrip("/")
 
 
-def _extract_agent_page(response: Any, base_url: str) -> tuple[list[Mapping[str, Any]], str | None]:
+def _extract_agent_page(
+    response: Any, base_url: str
+) -> tuple[list[Mapping[str, Any]], str | None]:
     if isinstance(response, list):
         return [item for item in response if isinstance(item, Mapping)], None
     if isinstance(response, Mapping):
         for key in ("results", "agents", "items", "data"):
             value = response.get(key)
             if isinstance(value, list):
-                next_link = response.get("next") or response.get("next_url") or response.get("nextLink")
+                next_link = (
+                    response.get("next")
+                    or response.get("next_url")
+                    or response.get("nextLink")
+                )
                 if not next_link:
                     pagination = response.get("links") or response.get("pagination")
                     if isinstance(pagination, Mapping):
                         next_link = pagination.get("next") or pagination.get("next_url")
                 next_endpoint = _normalise_next_url(next_link, base_url)
-                return [item for item in value if isinstance(item, Mapping)], next_endpoint
+                return [
+                    item for item in value if isinstance(item, Mapping)
+                ], next_endpoint
         # Some endpoints may return a single agent
         if all(key in response for key in ("id", "hostname", "client")):
             return [response], None
@@ -188,7 +204,7 @@ def _ram_gb_from_wmi_memory(memory: Any) -> float | None:
                 continue
     if total_bytes <= 0:
         return None
-    return round(total_bytes / (1024 ** 3), 2)
+    return round(total_bytes / (1024**3), 2)
 
 
 def _coerce_float(value: Any) -> float | None:
@@ -212,11 +228,134 @@ def _join_list(value: Any, separator: str = ", ") -> str | None:
     if value is None:
         return None
     if isinstance(value, list):
-        parts = [str(item).strip() for item in value if item is not None and str(item).strip()]
+        parts = [
+            str(item).strip()
+            for item in value
+            if item is not None and str(item).strip()
+        ]
         return separator.join(parts) if parts else None
     if isinstance(value, str):
         return value.strip() or None
     return str(value).strip() or None
+
+
+def _extract_motherboard_serial(hardware: Mapping[str, Any]) -> str | None:
+    """Extract the baseboard serial from Tactical RMM's WMI hardware details."""
+    for key, value in hardware.items():
+        normalised_key = re.sub(r"[^a-z]", "", str(key).lower())
+        if normalised_key in {"motherboardserialnumber", "baseboardserialnumber"}:
+            serial = _clean_text(value)
+            if serial:
+                return serial
+
+        board_keys = {"motherboard", "motherboards", "baseboard", "baseboards"}
+        if normalised_key not in board_keys:
+            continue
+
+        boards = value if isinstance(value, (list, tuple)) else (value,)
+        for board in boards:
+            # Some WMI values are wrapped in an additional list.
+            entries = board if isinstance(board, (list, tuple)) else (board,)
+            for entry in entries:
+                if not isinstance(entry, Mapping):
+                    continue
+                for entry_key, entry_value in entry.items():
+                    normalised_entry_key = re.sub(
+                        r"[^a-z]", "", str(entry_key).lower()
+                    )
+                    if normalised_entry_key in {"serial", "serialnumber"}:
+                        serial = _clean_text(entry_value)
+                        if serial:
+                            return serial
+    return None
+
+
+def _extract_physicaldrive0_serial(hardware: Mapping[str, Any]) -> str | None:
+    """Extract the disk serial associated with Windows PHYSICALDRIVE0."""
+    disk_keys = {"disk", "disks", "drive", "drives", "physicaldisk", "physicaldisks"}
+
+    def properties(value: Any) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        entries = value if isinstance(value, (list, tuple)) else (value,)
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                continue
+            for entry_key, entry_value in entry.items():
+                result[re.sub(r"[^a-z]", "", str(entry_key).lower())] = entry_value
+        return result
+
+    for key, value in hardware.items():
+        if re.sub(r"[^a-z]", "", str(key).lower()) not in disk_keys:
+            continue
+        disks = value if isinstance(value, (list, tuple)) else (value,)
+        for disk in disks:
+            disk_properties = properties(disk)
+            device_id = _clean_text(
+                disk_properties.get("deviceid")
+                or disk_properties.get("device")
+                or disk_properties.get("name")
+            )
+            if not device_id or "physicaldrive0" not in re.sub(
+                r"[^a-z0-9]", "", device_id.lower()
+            ):
+                continue
+            serial = _clean_text(
+                disk_properties.get("serialnumber") or disk_properties.get("serial")
+            )
+            if serial:
+                return serial
+    return None
+
+
+def _device_serial(primary_serial: Any, hardware: Mapping[str, Any]) -> str | None:
+    serial = _clean_text(primary_serial)
+    if serial is None or serial.casefold() == "to be filled by o.e.m.":
+        return (
+            _extract_motherboard_serial(hardware)
+            or _extract_physicaldrive0_serial(hardware)
+        )
+    return serial
+
+
+def _extract_mac_addresses(*sources: Any) -> str | None:
+    """Return every unique hardware MAC address in TRMM's agent payload."""
+    addresses: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: Any) -> None:
+        if isinstance(value, Mapping):
+            for key, nested in value.items():
+                normalised_key = re.sub(r"[^a-z]", "", str(key).lower())
+                if normalised_key in {
+                    "mac",
+                    "macaddress",
+                    "macaddresses",
+                    "physicaladdress",
+                }:
+                    add(nested)
+                elif isinstance(nested, (Mapping, list, tuple)):
+                    add(nested)
+            return
+        if isinstance(value, (list, tuple)):
+            for nested in value:
+                add(nested)
+            return
+        if value is None:
+            return
+        for candidate in re.findall(
+            r"(?i)(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}|[0-9a-f]{12}", str(value)
+        ):
+            compact = re.sub(r"[^0-9A-Fa-f]", "", candidate).upper()
+            if len(compact) != 12 or compact == "000000000000":
+                continue
+            mac = ":".join(compact[index : index + 2] for index in range(0, 12, 2))
+            if mac not in seen:
+                seen.add(mac)
+                addresses.append(mac)
+
+    for source in sources:
+        add(source)
+    return ",".join(addresses) or None
 
 
 def _normalise_machine_type(value: Any) -> str | None:
@@ -299,7 +438,9 @@ def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
             "computername",
         )
     )
-    client_info = agent.get("client") if isinstance(agent.get("client"), Mapping) else {}
+    client_info = (
+        agent.get("client") if isinstance(agent.get("client"), Mapping) else {}
+    )
     site_info = agent.get("site") if isinstance(agent.get("site"), Mapping) else {}
 
     # ``logged_username`` is the computed field name in AgentTableSerializer;
@@ -320,19 +461,32 @@ def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
         "name": name or "Agent",
         "type": _clean_text(_lookup(agent, "monitoring_type", "agent_type", "type")),
         "machine_type": _machine_type_from_sources(
-            _lookup(agent, "machine_type", "device_machine_type", "virtualization_type"),
-            _lookup(agent, "is_virtual", "is_vm", "virtual_machine", "hypervisor_present"),
+            _lookup(
+                agent, "machine_type", "device_machine_type", "virtualization_type"
+            ),
+            _lookup(
+                agent, "is_virtual", "is_vm", "virtual_machine", "hypervisor_present"
+            ),
             _lookup(hardware, "machine_type", "virtualization_type"),
-            _lookup(hardware, "is_virtual", "is_vm", "virtual_machine", "hypervisor_present"),
+            _lookup(
+                hardware, "is_virtual", "is_vm", "virtual_machine", "hypervisor_present"
+            ),
             _lookup(agent, "make_model", "model", "manufacturer"),
-            _lookup(hardware, "model", "manufacturer", "system_model", "system_manufacturer"),
+            _lookup(
+                hardware, "model", "manufacturer", "system_model", "system_manufacturer"
+            ),
         ),
-        "serial_number": _clean_text(
+        "serial_number": _device_serial(
             _lookup(agent, "serial_number", "serial", "bios_serial")
-            or _lookup(hardware, "serial", "serial_number")
+            or _lookup(hardware, "serial", "serial_number"),
+            hardware,
         ),
-        "status": _clean_text(_lookup(agent, "status", "agent_status", "monitoring_status")),
-        "os_name": _clean_text(_lookup(agent, "os", "operating_system", "os_name", "os_version")),
+        "status": _clean_text(
+            _lookup(agent, "status", "agent_status", "monitoring_status")
+        ),
+        "os_name": _clean_text(
+            _lookup(agent, "os", "operating_system", "os_name", "os_version")
+        ),
         # cpu_model is a list in the real TacticalRMM API – join multiple CPUs
         "cpu_name": _clean_text(
             _join_list(_lookup(agent, "cpu_model", "processor"))
@@ -359,6 +513,12 @@ def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
             "last_sync",
             "last_agent_checkin",
         ),
+        "boot_time": _lookup(
+            agent,
+            "boot_time",
+            "last_boot_time",
+            "booted_at",
+        ),
         "motherboard_manufacturer": _clean_text(
             _lookup(hardware, "motherboard_manufacturer", "board_manufacturer")
         ),
@@ -376,10 +536,33 @@ def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
             or _lookup(hardware, "performance_score")
         ),
         "warranty_status": _clean_text(_lookup(agent, "warranty_status")),
-        "warranty_end_date": _lookup(agent, "warranty_expires", "warranty_end", "warranty_expiration"),
-        "tactical_asset_id": _clean_text(
-            _lookup(agent, "agent_id", "id", "pk")
+        "warranty_end_date": _lookup(
+            agent, "warranty_expires", "warranty_end", "warranty_expiration"
         ),
+        "mac_address": _extract_mac_addresses(
+            _lookup(
+                agent,
+                "mac_address",
+                "mac_addresses",
+                "network_interfaces",
+                "network_adapters",
+            ),
+            _lookup(
+                wmi_detail,
+                "network_config",
+                "network_adapters",
+                "network_interfaces",
+                "nics",
+            ),
+            _lookup(
+                generic_hw,
+                "network_config",
+                "network_adapters",
+                "network_interfaces",
+                "nics",
+            ),
+        ),
+        "tactical_asset_id": _clean_text(_lookup(agent, "agent_id", "id", "pk")),
         "client_id": _clean_text(
             _lookup(client_info, "id", "pk", "client_id")
             or _lookup(agent, "client_id", "client")
@@ -389,11 +572,14 @@ def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
             or _lookup(agent, "client_name", "client")
         ),
         "site_name": _clean_text(
-            _lookup(site_info, "name", "site")
-            or _lookup(agent, "site", "site_name")
+            _lookup(site_info, "name", "site") or _lookup(agent, "site", "site_name")
         ),
     }
-    if not details["tactical_asset_id"] and details.get("client_id") and details.get("name"):
+    if (
+        not details["tactical_asset_id"]
+        and details.get("client_id")
+        and details.get("name")
+    ):
         details["tactical_asset_id"] = f"{details['client_id']}::{details['name']}"
     return details
 
@@ -419,6 +605,22 @@ async def _fetch_agent_detail(agent_id: str) -> Mapping[str, Any] | None:
     return None
 
 
+async def fetch_agent(agent_id: str) -> Mapping[str, Any]:
+    """Fetch one agent for an on-demand integration sync."""
+
+    clean_agent_id = str(agent_id).strip()
+    if not clean_agent_id:
+        raise ValueError("Tactical RMM agent ID is required")
+    result = await _call_endpoint(f"agents/{clean_agent_id}/")
+    if not isinstance(result, Mapping):
+        raise TacticalRMMAPIError("Tactical RMM returned an invalid agent response")
+    # AgentSerializer can omit its database ID, so retain the authoritative ID
+    # supplied by the script for asset matching.
+    agent = dict(result)
+    agent["agent_id"] = clean_agent_id
+    return agent
+
+
 async def fetch_agents(client_id: str | None = None) -> list[Mapping[str, Any]]:
     settings = await _load_settings()
     base_url = settings["base_url"]
@@ -436,7 +638,9 @@ async def fetch_agents(client_id: str | None = None) -> list[Mapping[str, Any]]:
         try:
             response = await _call_endpoint(endpoint)
         except TacticalRMMAPIError as exc:
-            log_error("Failed to fetch Tactical RMM agents", endpoint=endpoint, error=str(exc))
+            log_error(
+                "Failed to fetch Tactical RMM agents", endpoint=endpoint, error=str(exc)
+            )
             continue
         page_items, next_endpoint = _extract_agent_page(response, base_url)
         if page_items:
@@ -447,7 +651,11 @@ async def fetch_agents(client_id: str | None = None) -> list[Mapping[str, Any]]:
             try:
                 response = await _call_endpoint(next_endpoint)
             except TacticalRMMAPIError as exc:
-                log_error("Failed to fetch Tactical RMM agents page", endpoint=next_endpoint, error=str(exc))
+                log_error(
+                    "Failed to fetch Tactical RMM agents page",
+                    endpoint=next_endpoint,
+                    error=str(exc),
+                )
                 break
             page_items, next_endpoint = _extract_agent_page(response, base_url)
             if page_items:
@@ -460,8 +668,7 @@ async def fetch_agents(client_id: str | None = None) -> list[Mapping[str, Any]]:
     # RAM data is available for extract_agent_details().
     if collected:
         agent_ids = [
-            str(a.get("agent_id") or a.get("id") or "").strip()
-            for a in collected
+            str(a.get("agent_id") or a.get("id") or "").strip() for a in collected
         ]
         details: list[Mapping[str, Any] | None] = list(
             await asyncio.gather(
@@ -574,18 +781,20 @@ async def fetch_scripts() -> list[dict[str, Any]]:
         sid = _script_id(item)
         if sid is None:
             continue
-        scripts.append({
-            "id": sid,
-            "name": _script_label(item),
-            "description": _clean_text(item.get("description")),
-            "category": _clean_text(item.get("category")),
-            "script_type": (
-                _clean_text(item.get("shell"))
-                or _clean_text(item.get("script_type"))
-                or _clean_text(item.get("type"))
-            ),
-            "raw": dict(item),
-        })
+        scripts.append(
+            {
+                "id": sid,
+                "name": _script_label(item),
+                "description": _clean_text(item.get("description")),
+                "category": _clean_text(item.get("category")),
+                "script_type": (
+                    _clean_text(item.get("shell"))
+                    or _clean_text(item.get("script_type"))
+                    or _clean_text(item.get("type"))
+                ),
+                "raw": dict(item),
+            }
+        )
     scripts.sort(
         key=lambda s: (str(s.get("name") or "").lower(), int(s.get("id") or 0))
     )
@@ -604,13 +813,17 @@ def _script_default_body(
     timeout = max(1, min(timeout, 86400))
     return {
         "output": script.get("output") or "forget",
-        "emails": script.get("emails") if isinstance(script.get("emails"), list) else [],
+        "emails": script.get("emails")
+        if isinstance(script.get("emails"), list)
+        else [],
         "emailMode": script.get("emailMode") or script.get("email_mode") or "default",
         "custom_field": script.get("custom_field"),
         "save_all_output": bool(script.get("save_all_output", False)),
         "script": script_id,
         "args": script.get("args") if isinstance(script.get("args"), list) else [],
-        "env_vars": script.get("env_vars") if isinstance(script.get("env_vars"), list) else [],
+        "env_vars": script.get("env_vars")
+        if isinstance(script.get("env_vars"), list)
+        else [],
         "run_as_user": bool(script.get("run_as_user", False)),
         "timeout": timeout,
     }
@@ -680,22 +893,24 @@ async def fetch_agent_installed_software(agent_id: str) -> list[str]:
 async def fetch_clients() -> list[Mapping[str, Any]]:
     """
     Fetch all Tactical RMM clients from the /beta/v1/client/ endpoint.
-    
+
     Returns:
         List of client dictionaries with 'id' and 'name' fields
     """
     await _load_settings()
     endpoint = "beta/v1/client/"
-    
+
     collected: list[Mapping[str, Any]] = []
     log_info("Fetching Tactical RMM clients")
-    
+
     try:
         response = await _call_endpoint(endpoint)
     except TacticalRMMAPIError as exc:
-        log_error("Failed to fetch Tactical RMM clients", endpoint=endpoint, error=str(exc))
+        log_error(
+            "Failed to fetch Tactical RMM clients", endpoint=endpoint, error=str(exc)
+        )
         return collected
-    
+
     # The endpoint returns a list of client objects
     if isinstance(response, list):
         for item in response:
@@ -711,5 +926,5 @@ async def fetch_clients() -> list[Mapping[str, Any]]:
         # Handle case where response is a single client
         elif "id" in response and "name" in response:
             collected.append(response)
-    
+
     return collected

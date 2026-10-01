@@ -1,0 +1,7 @@
+{
+  "guid": "084588be-f3cf-4e7d-a930-15d88b80c3c0",
+  "occurred_at": "2026-08-29T00:00Z",
+  "change_type": "Feature",
+  "summary": "Microsoft 365 Mail now allows multiple DMARC reporting mailboxes per company and exposes every active address for multi-domain DNS configuration.",
+  "content_hash": "1aeb1e61fc571fc7020e78669e098647af2e7617266d1652fb62b9b996a8e958"
+}

@@ -114,3 +114,38 @@ def test_hsts_effective_respects_explicit_disable_in_production():
     with patch.dict(os.environ, env, clear=False):
         settings = Settings()
         assert settings.hsts_effective() is False
+
+
+@pytest.mark.parametrize("environment", [None, "staging", "prod", ""])
+def test_weak_secret_rejected_unless_explicitly_development(environment):
+    """An unset/other ENVIRONMENT must not bypass the weak-secret refusal."""
+    from app.core.config import Settings
+
+    env = _base_env(SESSION_SECRET="change-me")
+    with patch.dict(os.environ, env, clear=False):
+        os.environ.pop("ENVIRONMENT", None)
+        if environment is not None:
+            os.environ["ENVIRONMENT"] = environment
+        with pytest.raises(ValidationError) as excinfo:
+            Settings(_env_file=None)
+    assert "SESSION_SECRET" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("environment", ["development", "test", "TEST"])
+def test_weak_secret_allowed_when_explicitly_dev_or_test(environment):
+    from app.core.config import Settings
+
+    env = _base_env(SESSION_SECRET="change-me", ENVIRONMENT=environment)
+    with patch.dict(os.environ, env, clear=False):
+        assert Settings(_env_file=None).secret_key == "change-me"
+
+
+def test_env_example_ships_no_placeholder_secrets():
+    from pathlib import Path
+
+    from dotenv import dotenv_values
+
+    values = dotenv_values(Path(__file__).resolve().parents[1] / ".env.example", interpolate=False)
+    assert values["SESSION_SECRET"] in ("", None)
+    assert values["TOTP_ENCRYPTION_KEY"] in ("", None)
+    assert "ENABLE_HSTS" not in values or values["ENABLE_HSTS"] != "false"

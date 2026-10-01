@@ -1221,7 +1221,7 @@ async def test_xero_token_keepalive_refreshes_configured_module(monkeypatch):
         "client_secret": "xero-secret",
         "refresh_token": "refresh-token",
     }
-    acquire = AsyncMock(return_value="fresh-access-token")
+    renew = AsyncMock(return_value="fresh-access-token")
 
     async def fake_get_module(slug: str, *, redact: bool = True):
         assert slug == modules_service.XERO_MODULE_SLUG
@@ -1233,15 +1233,15 @@ async def test_xero_token_keepalive_refreshes_configured_module(monkeypatch):
 
     monkeypatch.setattr(modules_service, "get_module", fake_get_module)
     monkeypatch.setattr(modules_service, "get_xero_credentials", fake_get_xero_credentials)
-    monkeypatch.setattr(modules_service, "acquire_xero_access_token", acquire)
+    monkeypatch.setattr(modules_service, "renew_xero_access_token", renew)
 
     assert await modules_service._xero_token_keepalive_once() is True
-    acquire.assert_awaited_once()
+    renew.assert_awaited_once()
 
 
 @pytest.mark.anyio("asyncio")
 async def test_xero_token_keepalive_skips_incomplete_credentials(monkeypatch):
-    acquire = AsyncMock(return_value="fresh-access-token")
+    renew = AsyncMock(return_value="fresh-access-token")
 
     async def fake_get_module(slug: str, *, redact: bool = True):
         return {"enabled": True, "settings": {}}
@@ -1255,10 +1255,19 @@ async def test_xero_token_keepalive_skips_incomplete_credentials(monkeypatch):
 
     monkeypatch.setattr(modules_service, "get_module", fake_get_module)
     monkeypatch.setattr(modules_service, "get_xero_credentials", fake_get_xero_credentials)
-    monkeypatch.setattr(modules_service, "acquire_xero_access_token", acquire)
+    monkeypatch.setattr(modules_service, "renew_xero_access_token", renew)
 
     assert await modules_service._xero_token_keepalive_once() is False
-    acquire.assert_not_awaited()
+    renew.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_renew_xero_access_token_forces_rotation_under_lock(monkeypatch):
+    refresh = AsyncMock(return_value="rotated-access-token")
+    monkeypatch.setattr(modules_service, "refresh_xero_access_token", refresh)
+
+    assert await modules_service.renew_xero_access_token() == "rotated-access-token"
+    refresh.assert_awaited_once_with()
 
 
 def test_xero_token_keepalive_interval_uses_safe_minimum(monkeypatch):

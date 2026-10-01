@@ -42,13 +42,13 @@
         <h2 class="card-title">{{ role.title }}</h2>
         {% if can_edit %}
         <div class="card-actions">
-          <button class="btn btn-sm btn-secondary" onclick="showEditRoleModal({{ role.id }}, '{{ role.title|replace("'", "\\'") }}', {{ role.responsibilities|tojson if role.responsibilities else 'null' }})">
+          <button type="button" class="btn btn-sm btn-secondary" data-bcp-action="edit-role" data-bcp-payload='{{ {"id": role.id, "title": role.title, "responsibilities": role.responsibilities} | tojson | e }}'>
             <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
               <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
             </svg>
             Edit Role
           </button>
-          <button class="btn btn-sm btn-primary" onclick="showAssignUserModal({{ role.id }}, '{{ role.title|replace("'", "\\'") }}')">
+          <button type="button" class="btn btn-sm btn-primary" data-bcp-action="assign-role-user" data-bcp-payload='{{ {"id": role.id, "title": role.title} | tojson | e }}'>
             <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
               <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
             </svg>
@@ -82,7 +82,8 @@
               <tr>
                 <th>Name</th>
                 <th>Email</th>
-                <th>Role Type</th>
+                <th>Coverage</th>
+                <th>Collaborator Role</th>
                 <th>Contact Info</th>
                 {% if can_edit %}
                 <th>Actions</th>
@@ -107,10 +108,11 @@
                     <span class="badge badge-primary">Primary</span>
                   {% endif %}
                 </td>
+                <td>{{ assignment.collaborator_role or 'Executor' }}</td>
                 <td>{{ assignment.contact_info or '-' }}</td>
                 {% if can_edit %}
                 <td>
-                  <button class="btn-icon" onclick="showEditAssignmentModal({{ assignment.id }}, {{ assignment.user_id }}, {{ assignment.is_alternate|tojson }}, {{ assignment.contact_info|tojson if assignment.contact_info else 'null' }})" title="Edit">
+                  <button type="button" class="btn-icon" data-bcp-action="edit-assignment" data-bcp-payload='{{ {"id": assignment.id, "user_id": assignment.user_id, "collaborator_role": assignment.collaborator_role or "Executor", "is_alternate": assignment.is_alternate, "contact_info": assignment.contact_info} | tojson | e }}' title="Edit">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                       <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
                     </svg>
@@ -142,6 +144,38 @@
       </div>
     </section>
   {% endif %}
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Collaboration Audit Trail</h2>
+      <p class="text-muted text-sm">Recent collaborator assignment changes are captured for auditability.</p>
+    </div>
+    <div class="card-body">
+      {% if collaboration_audit %}
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Action</th>
+              <th>User</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in collaboration_audit %}
+            <tr>
+              <td>{{ entry.created_at.strftime('%Y-%m-%d %H:%M') if entry.created_at else '-' }}</td>
+              <td>{{ entry.action }}</td>
+              <td>{{ entry.user_email or ('User ' ~ entry.user_id) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted">No collaborator changes have been logged yet.</p>
+      {% endif %}
+    </div>
+  </section>
 </div>
 
 <!-- Add Role Modal -->
@@ -230,6 +264,15 @@
             This is an alternate/backup assignment
           </label>
         </div>
+        <div class="form-group">
+          <label for="assign_collaborator_role" class="form-label">Collaborator Role</label>
+          <select id="assign_collaborator_role" name="collaborator_role" class="form-control">
+            <option value="Executor">Executor</option>
+            <option value="CoAuthor">Co-author</option>
+            <option value="Reviewer">Reviewer</option>
+            <option value="Approver">Approver</option>
+          </select>
+        </div>
         
         <div class="form-group">
           <label for="assign_contact_info">Emergency Contact Info</label>
@@ -275,6 +318,15 @@
             This is an alternate/backup assignment
           </label>
         </div>
+        <div class="form-group">
+          <label for="edit_assign_collaborator_role" class="form-label">Collaborator Role</label>
+          <select id="edit_assign_collaborator_role" name="collaborator_role" class="form-control">
+            <option value="Executor">Executor</option>
+            <option value="CoAuthor">Co-author</option>
+            <option value="Reviewer">Reviewer</option>
+            <option value="Approver">Approver</option>
+          </select>
+        </div>
         
         <div class="form-group">
           <label for="edit_assign_contact_info">Emergency Contact Info</label>
@@ -302,7 +354,7 @@ function closeAddRoleModal() {
 function showEditRoleModal(roleId, title, responsibilities) {
   const modal = document.getElementById('editRoleModal');
   const form = document.getElementById('editRoleForm');
-  form.action = '/bcp/roles/' + roleId + '/update';
+  form.action = '/bcp/roles/' + encodeURIComponent(String(roleId)) + '/update';
   document.getElementById('edit_role_title').value = title;
   document.getElementById('edit_role_responsibilities').value = responsibilities || '';
   modal.style.display = 'flex';
@@ -315,10 +367,11 @@ function closeEditRoleModal() {
 function showAssignUserModal(roleId, roleTitle) {
   const modal = document.getElementById('assignUserModal');
   const form = document.getElementById('assignUserForm');
-  form.action = '/bcp/roles/' + roleId + '/assign';
+  form.action = '/bcp/roles/' + encodeURIComponent(String(roleId)) + '/assign';
   document.getElementById('assignUserModalTitle').textContent = 'Assign User to ' + roleTitle;
   document.getElementById('assign_user_id').value = '';
   document.querySelector('#assignUserForm input[name="is_alternate"]').checked = false;
+  document.getElementById('assign_collaborator_role').value = 'Executor';
   document.getElementById('assign_contact_info').value = '';
   modal.style.display = 'flex';
 }
@@ -327,11 +380,12 @@ function closeAssignUserModal() {
   document.getElementById('assignUserModal').style.display = 'none';
 }
 
-function showEditAssignmentModal(assignmentId, userId, isAlternate, contactInfo) {
+function showEditAssignmentModal(assignmentId, userId, collaboratorRole, isAlternate, contactInfo) {
   const modal = document.getElementById('editAssignmentModal');
   const form = document.getElementById('editAssignmentForm');
-  form.action = '/bcp/roles/assignments/' + assignmentId + '/update';
+  form.action = '/bcp/roles/assignments/' + encodeURIComponent(String(assignmentId)) + '/update';
   document.getElementById('edit_assign_user_id').value = userId;
+  document.getElementById('edit_assign_collaborator_role').value = collaboratorRole || 'Executor';
   document.getElementById('edit_is_alternate').checked = isAlternate;
   document.getElementById('edit_assign_contact_info').value = contactInfo || '';
   modal.style.display = 'flex';

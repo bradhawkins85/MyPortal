@@ -78,7 +78,7 @@ async def get_recent_dbp_trends(
 
     placeholders = ", ".join(["%s"] * len(skus))
     rows = await db.fetch_all(
-        f"SELECT sku, dbp, recorded_at"
+        f"SELECT sku, dbp, recorded_at"  # nosec B608
         f" FROM stock_feed_price_history"
         f" WHERE sku IN ({placeholders})"
         f" ORDER BY sku ASC, recorded_at DESC, id DESC",

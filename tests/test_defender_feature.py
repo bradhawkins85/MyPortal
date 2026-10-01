@@ -1,0 +1,605 @@
+"""Regression coverage for the Windows Defender management surface."""
+import asyncio
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+from starlette.requests import Request
+from starlette.responses import RedirectResponse
+
+from app.api.routes import defender
+from app.api.routes.defender import router
+from app.repositories import defender as defender_repo
+from app.schemas.defender import (DefenderExclusionCreate, DefenderExclusionListCreate,
+    DefenderSettingsUpdate, DefenderStatusReport)
+from app.security.menu_permissions import MENU_PERMISSION_MAP
+
+
+def test_defender_permission_supports_role_access_levels():
+    permission = MENU_PERMISSION_MAP["menu.defender"]
+    assert permission.label == "Windows Defender"
+    assert permission.admin_only is False
+
+
+def test_defender_portal_context_uses_application_session_auth(monkeypatch):
+    request = Request({"type": "http", "method": "GET", "path": "/defender", "headers": []})
+    expected_user = {"company_id": 42, "is_company_admin": True}
+
+    async def require_authenticated_user(received_request):
+        assert received_request is request
+        return expected_user, None
+
+    monkeypatch.setattr(
+        defender,
+        "_main",
+        lambda: SimpleNamespace(_require_authenticated_user=require_authenticated_user),
+    )
+
+    user, membership, company_id, redirect = asyncio.run(defender._portal_context(request))
+
+    assert user is expected_user
+    assert membership is None
+    assert company_id == 42
+    assert redirect is None
+
+
+def test_defender_portal_context_preserves_auth_redirect(monkeypatch):
+    request = Request({"type": "http", "method": "GET", "path": "/defender", "headers": []})
+    auth_redirect = RedirectResponse("/login", status_code=303)
+
+    async def require_authenticated_user(_request):
+        return None, auth_redirect
+
+    monkeypatch.setattr(
+        defender,
+        "_main",
+        lambda: SimpleNamespace(_require_authenticated_user=require_authenticated_user),
+    )
+
+    user, membership, company_id, redirect = asyncio.run(defender._portal_context(request))
+
+    assert (user, membership, company_id) == (None, None, None)
+    assert redirect is auth_redirect
+
+
+def test_defender_write_access_allows_technicians_with_write_permission(monkeypatch):
+    request = Request({"type": "http", "method": "POST", "path": "/api/defender", "headers": []})
+    technician = {"company_id": 42, "menu_access": {"menu.defender": "write"}}
+
+    async def require_authenticated_user(_request):
+        return technician, None
+
+    monkeypatch.setattr(defender, "_main", lambda: SimpleNamespace(
+        _require_authenticated_user=require_authenticated_user,
+        _menu_can=lambda permissions, key, write=False: permissions.get(key) == "write",
+    ))
+
+    user, _, company_id, redirect = asyncio.run(defender._portal_context(request, write=True))
+
+    assert user is technician
+    assert company_id == 42
+    assert redirect is None
+
+
+def test_defender_page_renders_html_template(monkeypatch):
+    request = Request({"type": "http", "method": "GET", "path": "/defender", "headers": []})
+    expected_user = {"company_id": 42, "is_company_admin": True}
+    rendered_response = object()
+
+    async def portal_context(_request):
+        return expected_user, None, 42, None
+
+    async def render_template(template_name, received_request, user, *, extra):
+        assert template_name == "defender/index.html"
+        assert received_request is request
+        assert user is expected_user
+        assert extra == {
+            "defender_enabled": False,
+            "defender_devices": [],
+            "defender_exclusions": [],
+            "defender_detections": [],
+            "defender_can_write": True,
+            "defender_settings": {},
+            "defender_commands": [],
+            "defender_tamper_locked_devices": [],
+        }
+        return rendered_response
+
+    monkeypatch.setattr(defender, "_portal_context", portal_context)
+    monkeypatch.setattr(
+        defender.repo,
+        "company_enabled",
+        lambda _company_id: asyncio.sleep(0, result=False),
+    )
+    monkeypatch.setattr(defender, "_main", lambda: SimpleNamespace(_render_template=render_template))
+
+    response = asyncio.run(defender.defender_page(request))
+
+    assert response is rendered_response
+
+
+def test_defender_routes_cover_portal_tray_and_ticket_workflows():
+    paths = {route.path for route in router.routes}
+    assert {
+        "/defender",
+        "/api/defender/enabled",
+        "/api/defender/exclusions",
+        "/api/defender/settings",
+        "/api/defender/devices/{device_id}/commands/{command_type}",
+        "/api/defender/devices/{device_id}/management",
+        "/api/defender/detections/{detection_id}/actions",
+        "/api/defender/devices/{device_id}/ticket",
+        "/api/defender/detections/{detection_id}/ticket",
+        "/api/tray/defender/policy",
+        "/api/tray/defender/status",
+        "/api/tray/defender/detections",
+        "/api/tray/defender/commands",
+        "/api/tray/defender/commands/{command_id}/result",
+    } <= paths
+
+
+def test_device_exclusion_payload_requires_supported_type():
+    payload = DefenderExclusionCreate(
+        scope="device", exclusion_type="path", value=r"C:\Trusted", tray_device_id=42
+    )
+    assert payload.tray_device_id == 42
+
+
+def test_defender_exclusion_payload_supports_registry_paths():
+    payload = DefenderExclusionCreate(
+        scope="company", exclusion_type="registry", value=r"HKLM\Software\Contoso"
+    )
+
+    assert payload.exclusion_type == "registry"
+    assert payload.value == r"HKLM\Software\Contoso"
+
+
+def test_all_defender_tables_use_shared_filtering_and_sorting():
+    template = Path("app/templates/defender/index.html").read_text()
+    for table_name in ("devices", "exclusions", "detections"):
+        table_id = f"defender-{table_name}-table"
+        assert f'id="{table_id}" data-table' in template
+        assert f'data-table-filter="{table_id}"' in template
+    assert template.count('data-sort="') >= 10
+    assert "/static/js/tables.js" in template
+
+
+def test_defender_endpoint_table_displays_last_scan_details():
+    template = Path("app/templates/defender/index.html").read_text()
+    assert 'data-sort="date">Last scan</th>' in template
+    assert "d.last_scan.scan_type|title" in template
+    assert "d.last_scan.status|title" in template
+    assert "d.last_scan.duration_seconds" in template
+
+
+def test_defender_endpoint_table_displays_antivirus_product_names():
+    template = Path("app/templates/defender/index.html").read_text()
+    assert "d.antivirus_product_names" in template
+    assert "join(', ')" in template
+
+
+def test_status_report_accepts_recent_scan_history():
+    report = DefenderStatusReport(
+        scan_history=[{
+            "scan_type": "quick",
+            "started_at": "2026-08-20T01:00:00Z",
+            "completed_at": "2026-08-20T01:02:30Z",
+            "duration_seconds": 150,
+            "status": "completed",
+        }]
+    )
+    assert report.scan_history[0].scan_type == "quick"
+    assert report.scan_history[0].duration_seconds == 150
+
+
+def test_status_report_accepts_each_firewall_profile():
+    report = DefenderStatusReport(
+        firewall_domain_enabled=True,
+        firewall_private_enabled=False,
+        firewall_public_enabled=True,
+    )
+    assert report.firewall_domain_enabled is True
+    assert report.firewall_private_enabled is False
+    assert report.firewall_public_enabled is True
+
+
+def test_status_report_accepts_defender_protection_history():
+    report = DefenderStatusReport(detections=[{
+        "detection_uid": "det-123",
+        "threat_name": "Trojan:Win32/Example",
+        "severity": "high",
+        "status": "remediated",
+        "detected_at": "2026-08-20T01:02:03Z",
+        "infected_files": [r"C:\Users\Example\payload.exe"],
+        "details": {"action_success": True},
+    }])
+    assert report.detections[0].threat_name == "Trojan:Win32/Example"
+    assert report.detections[0].status == "remediated"
+    assert report.detections[0].infected_files == [r"C:\Users\Example\payload.exe"]
+
+
+def test_status_report_persists_embedded_protection_history(monkeypatch):
+    request = Request({"type": "http", "method": "POST", "path": "/api/tray/defender/status", "headers": []})
+    reported = []
+
+    async def tray(_request):
+        return {"id": 7, "company_id": 42, "hostname": "PC-07"}
+
+    async def report_detection(device_id, company_id, detection):
+        reported.append((device_id, company_id, detection.detection_uid))
+
+    monkeypatch.setattr(defender, "_tray", tray)
+    monkeypatch.setattr(defender.repo, "report_status", lambda *_args: asyncio.sleep(0))
+    monkeypatch.setattr(defender.repo, "report_detection", report_detection)
+    monkeypatch.setattr(defender.repo, "settings", lambda _company_id: asyncio.sleep(0, result={}))
+    monkeypatch.setattr(defender.repo, "clear_alert_ticket", lambda *_args: asyncio.sleep(0))
+
+    response = asyncio.run(defender.tray_status(DefenderStatusReport(detections=[{
+        "detection_uid": "det-123",
+        "threat_name": "Trojan:Win32/Example",
+        "severity": "high",
+        "status": "remediated",
+        "detected_at": "2026-08-20T01:02:03Z",
+    }]), request))
+
+    assert response == {"status": "accepted"}
+    assert reported == [(7, 42, "det-123")]
+
+
+def test_excluded_device_policy_disables_agent_processing(monkeypatch):
+    monkeypatch.setattr(
+        defender_repo, "device_is_managed",
+        lambda _device_id, _company_id: asyncio.sleep(0, result=False),
+    )
+
+    result = asyncio.run(defender_repo.policy(7, 42))
+
+    assert result == {"enabled": False, "exclusions": []}
+
+
+def test_tray_policy_returns_early_for_excluded_device(monkeypatch):
+    request = Request({"type": "http", "method": "GET", "path": "/api/tray/defender/policy", "headers": []})
+
+    async def tray(_request, *, require_managed=True):
+        assert require_managed is False
+        return {"id": 7, "company_id": 42}
+
+    monkeypatch.setattr(defender, "_tray", tray)
+    monkeypatch.setattr(
+        defender.repo, "policy",
+        lambda _device_id, _company_id: asyncio.sleep(0, result={"enabled": False, "exclusions": []}),
+    )
+
+    result = asyncio.run(defender.tray_policy(request))
+
+    assert result == {"enabled": False, "exclusions": []}
+
+
+def test_defender_ui_exposes_management_workflows():
+    template = Path("app/templates/defender/index.html").read_text()
+    assert "Tamper protection" in template
+    assert "Stale agents" in template
+    assert 'data-defender-command="quick_scan"' in template
+    assert 'data-defender-command="full_scan"' in template
+    assert 'data-defender-command="signature_update"' in template
+    assert 'data-defender-command="enable_firewall"' in template
+    assert "Exclude from management" in template
+    assert "Include in management" in template
+    assert "data-defender-management" in template
+    assert "Domain:" in template
+    assert "Private:" in template
+    assert "Public:" in template
+    assert 'data-defender-modal-open": "protection-policy-modal"' in template
+    assert 'data-defender-modal-open": "ticket-actions-modal"' in template
+    assert 'data-defender-modal-open": "exclusions-modal"' in template
+    assert 'data-defender-modal-open": "exclusion-lists-modal"' in template
+    assert 'id="exclusion-lists-modal"' in template
+    assert "Apply to companies" in template
+    assert 'class="card defender-detections-section"' in template
+    assert 'data-label="Infected files"' in template
+    assert 'data-detection-exclude-value="{{ file }}"' in template
+    assert 'data-detection-device-id="{{ d.tray_device_id }}"' in template
+    assert 'data-detection-action="quarantine"' in template
+    assert "Automatic ticket creation" in template
+    assert "Anti Virus is off" in template
+    assert "Real-time protection is off" in template
+    assert "Tamper protection is off" in template
+    assert "A threat is detected" in template
+    assert "data-ticket-device" not in template
+    assert "stat-strip" not in template  # rendered through the shared counter macro
+    assert 'counter_strip([' in template
+
+
+def test_firewall_action_is_available_even_before_profiles_are_reported():
+    template = Path("app/templates/defender/index.html").read_text()
+    action = 'data-defender-command="enable_firewall"'
+    assert action in template
+    assert "d.firewall_domain_enabled is sameas false" not in template
+
+
+def test_exclusion_changes_update_the_open_modal_without_reloading():
+    script = Path("app/static/js/defender.js").read_text()
+    assert "tbody.append(row)" in script
+    assert "button.closest('tr')?.remove()" in script
+    add_section = script[script.index("#defender-exclusion-form"):script.index("[data-defender-settings-form]")]
+    delete_section = script[script.index("[data-delete-exclusion]"):script.index("const itemMarkup")]
+    assert "location.reload()" not in add_section
+    assert "location.reload()" not in delete_section
+
+
+def test_defender_exclusion_list_payload_supports_reusable_types_and_companies():
+    payload = DefenderExclusionListCreate(name="  Standard apps  ", exclusions=[
+        {"exclusion_type": "path", "value": r"C:\Trusted"},
+        {"exclusion_type": "process", "value": "agent.exe"},
+        {"exclusion_type": "extension", "value": ".cache"},
+        {"exclusion_type": "registry", "value": r"HKLM\Software\Contoso"},
+    ], company_ids=[42, 84, 42])
+    assert payload.name == "Standard apps"
+    assert [item.exclusion_type for item in payload.exclusions] == ["path", "process", "extension", "registry"]
+    assert payload.company_ids == [42, 84]
+
+
+def test_defender_exclusion_list_routes_cover_management_workflow():
+    routes = {(route.path, tuple(route.methods or [])) for route in router.routes}
+    assert any(path == "/api/defender/exclusion-lists" and "POST" in methods for path, methods in routes)
+    assert any(path == "/api/defender/exclusion-lists/{list_id}" and "PUT" in methods for path, methods in routes)
+    assert any(path == "/api/defender/exclusion-lists/{list_id}" and "DELETE" in methods for path, methods in routes)
+
+
+def test_defender_navigation_shows_active_detection_count():
+    template = Path("app/templates/base.html").read_text()
+    assert "defender_detection_count" in template
+    assert 'class="menu__badge"' in template
+
+
+def test_defender_ticket_options_default_to_disabled():
+    settings = DefenderSettingsUpdate()
+    assert settings.auto_ticket_antivirus_off is False
+    assert settings.auto_ticket_realtime_off is False
+    assert settings.auto_ticket_tamper_off is False
+    assert settings.auto_ticket_threat_detected is False
+
+
+def test_status_report_automatically_creates_configured_alert_ticket(monkeypatch):
+    request = Request({"type": "http", "method": "POST", "path": "/api/tray/defender/status", "headers": []})
+    created = []
+
+    async def tray(_request):
+        return {"id": 7, "company_id": 42, "hostname": "PC-07", "asset_id": 99}
+
+    async def create_ticket(**kwargs):
+        created.append(kwargs)
+        return {"id": 123}
+
+    monkeypatch.setattr(defender, "_tray", tray)
+    monkeypatch.setattr(defender.repo, "report_status", lambda *_args: asyncio.sleep(0))
+    monkeypatch.setattr(defender.repo, "settings", lambda _company_id: asyncio.sleep(0, result={"defender_auto_ticket_antivirus_off": True}))
+    monkeypatch.setattr(defender.repo, "alert_ticket", lambda *_args: asyncio.sleep(0, result=None))
+    monkeypatch.setattr(defender.repo, "link_alert_ticket", lambda *_args: asyncio.sleep(0))
+    monkeypatch.setattr(defender.repo, "clear_alert_ticket", lambda *_args: asyncio.sleep(0))
+    monkeypatch.setattr(defender.tickets_service, "create_ticket", create_ticket)
+    monkeypatch.setattr(defender.tickets_repo, "replace_ticket_assets", lambda *_args: asyncio.sleep(0))
+
+    response = asyncio.run(defender.tray_status(DefenderStatusReport(
+        antivirus_enabled=False,
+        realtime_protection_enabled=True,
+        tamper_protection_enabled=True,
+    ), request))
+
+    assert response == {"status": "accepted"}
+    assert len(created) == 1
+    assert created[0]["subject"] == "Defender alert: Anti Virus is off on PC-07"
+    assert created[0]["external_reference"] == "defender-alert:7:antivirus_off"
+
+
+def test_defender_reporting_catalog_supports_reports_and_dashboard_panels():
+    sql = Path("migrations/331_windows_defender_reporting_queries.sql").read_text()
+
+    assert "'defender-device-status'" in sql
+    assert "'defender-detections'" in sql
+    assert "'dashboard-defender-devices'" in sql
+    assert "'dashboard-defender-unhealthy-devices'" in sql
+    assert "'dashboard-defender-health-by-status'" in sql
+    assert "'dashboard-defender-active-detections-by-severity'" in sql
+    assert sql.count("{{current.company}}") == 6
+    assert sql.count(" AS X") == 2
+    assert sql.count(" AS Y") == 2
+
+
+def test_defender_infected_files_are_available_in_reporting():
+    sql = Path("migrations/345_defender_infected_files.sql").read_text()
+
+    assert "infected_files_json AS infected_files" in sql
+    assert "WHERE slug = 'defender-detections'" in sql
+
+
+def test_defender_device_queries_only_include_windows_agents(monkeypatch):
+    queries = []
+
+    async def fetch_all(sql, _params):
+        queries.append(sql)
+        return []
+
+    monkeypatch.setattr(defender_repo.db, "fetch_all", fetch_all)
+
+    devices, exclusions, detections = asyncio.run(defender_repo.dashboard(42))
+
+    assert (devices, exclusions, detections) == ([], [], [])
+    assert "LOWER(td.os)='windows'" in queries[0]
+
+
+def test_defender_dashboard_parses_multiple_antivirus_product_names(monkeypatch):
+    async def fetch_all(sql, _params):
+        if "FROM tray_devices td LEFT JOIN defender_device_status ds" in sql:
+            return [{
+                "id": 7,
+                "asset_id": None,
+                "hostname": "PC-07",
+                "last_seen_utc": None,
+                "health_status": "critical",
+                "antivirus_enabled": False,
+                "realtime_protection_enabled": True,
+                "tamper_protection_enabled": True,
+                "firewall_domain_enabled": True,
+                "firewall_private_enabled": True,
+                "firewall_public_enabled": True,
+                "signatures_updated_at": None,
+                "last_scan_at": None,
+                "threat_count": 0,
+                "details_json": "{\"antivirus_product_names\": [\"Bitdefender\", \"Microsoft Defender Antivirus\"]}",
+                "updated_at": None,
+                "is_stale": 0,
+            }]
+        return []
+
+    monkeypatch.setattr(defender_repo.db, "fetch_all", fetch_all)
+
+    devices, exclusions, detections = asyncio.run(defender_repo.dashboard(42))
+
+    assert exclusions == []
+    assert detections == []
+    assert devices[0]["antivirus_product_names"] == ["Bitdefender", "Microsoft Defender Antivirus"]
+
+
+def test_defender_reporting_migration_excludes_non_windows_agents():
+    sql = Path("migrations/333_defender_windows_devices_only.sql").read_text()
+
+    assert sql.count("LOWER(td.os) = ''windows''") == 4
+    assert "WHERE slug = 'defender-device-status'" in sql
+    assert "WHERE slug = 'dashboard-defender-devices'" in sql
+    assert "WHERE slug = 'dashboard-defender-unhealthy-devices'" in sql
+    assert "WHERE slug = 'dashboard-defender-health-by-status'" in sql
+
+
+def _policy_result(**overrides):
+    result = {
+        "status": "blocked",
+        "evaluated_at": "2026-09-28T01:00:00Z",
+        "tamper_protection": {"enabled": True, "source": "Intune", "protects_exclusions": None},
+        "items": [
+            {"setting": "exclusion_path", "value": r"C:\Trusted", "action": "add",
+             "status": "blocked_tamper_protection", "message": "Tamper Protection is on"},
+            {"setting": "scheduled_scan", "value": "Quick scan Monday at 02:00", "action": "set", "status": "applied"},
+        ],
+    }
+    result.update(overrides)
+    return result
+
+
+def test_status_report_persists_policy_result(monkeypatch):
+    executed = []
+
+    async def execute(sql, params):
+        executed.append((sql, params))
+
+    monkeypatch.setattr(defender_repo.db, "execute", execute)
+    report = DefenderStatusReport(policy_result=_policy_result())
+
+    asyncio.run(defender_repo.report_status(7, 42, report))
+
+    sql, params = executed[0]
+    assert "policy_status=VALUES(policy_status)" in sql
+    assert params[-3] == "blocked"
+    assert params[-2] is not None
+    stored = json.loads(params[-1])
+    assert stored["items"][0]["status"] == "blocked_tamper_protection"
+    assert stored["tamper_protection"]["source"] == "Intune"
+
+
+def test_status_report_from_older_agent_stores_no_policy_result(monkeypatch):
+    executed = []
+    monkeypatch.setattr(defender_repo.db, "execute", lambda sql, params: asyncio.sleep(0, result=executed.append(params)))
+
+    asyncio.run(defender_repo.report_status(7, 42, DefenderStatusReport()))
+
+    assert executed[0][-3:] == (None, None, None)
+
+
+def test_policy_summary_flags_tamper_protection_that_may_lock_exclusions():
+    locked = defender_repo._policy_summary(_policy_result())
+    assert locked["tamper_locks_exclusions"] is True
+    assert [item["status"] for item in locked["policy_issues"]] == ["blocked_tamper_protection"]
+
+    unlocked = defender_repo._policy_summary(_policy_result(tamper_protection={"enabled": True, "protects_exclusions": False}))
+    assert unlocked["tamper_locks_exclusions"] is False
+
+    assert defender_repo._policy_summary(None) == {"policy": None, "policy_issues": [], "tamper_locks_exclusions": False}
+
+
+def test_defender_dashboard_exposes_policy_outcome(monkeypatch):
+    async def fetch_all(sql, _params):
+        if "FROM tray_devices td LEFT JOIN defender_device_status ds" in sql:
+            assert "ds.policy_result_json" in sql
+            return [{"id": 7, "hostname": "PC-07", "defender_managed": 1, "antivirus_enabled": True,
+                     "details_json": json.dumps({"running_mode": "Passive"}), "policy_status": "blocked",
+                     "policy_result_json": json.dumps(_policy_result())}]
+        return []
+
+    monkeypatch.setattr(defender_repo.db, "fetch_all", fetch_all)
+
+    devices, _, _ = asyncio.run(defender_repo.dashboard(42))
+
+    assert devices[0]["tamper_locks_exclusions"] is True
+    assert devices[0]["running_mode"] == "Passive"
+    assert devices[0]["policy_issues"][0]["value"] == r"C:\Trusted"
+    assert "policy_result_json" not in devices[0]
+
+
+def test_command_poll_fails_commands_the_agent_never_finished(monkeypatch):
+    executed = []
+
+    async def execute(sql, params):
+        executed.append(sql)
+
+    monkeypatch.setattr(defender_repo.db, "execute", execute)
+    monkeypatch.setattr(defender_repo.db, "fetch_all", lambda *_args: asyncio.sleep(0, result=[]))
+
+    asyncio.run(defender_repo.poll_commands(7, 42))
+
+    assert "status='claimed'" in executed[0] and "INTERVAL 24 HOUR" in executed[0]
+
+
+def test_recent_commands_include_the_agent_result_message(monkeypatch):
+    monkeypatch.setattr(defender_repo.db, "fetch_all", lambda *_args: asyncio.sleep(0, result=[
+        {"id": 1, "command_type": "enable_firewall", "status": "failed",
+         "result_json": json.dumps({"message": "Group Policy turns the firewall off"})},
+    ]))
+
+    commands = asyncio.run(defender_repo.recent_commands(42))
+
+    assert commands[0]["message"] == "Group Policy turns the firewall off"
+    assert "result_json" not in commands[0]
+
+
+def test_long_agent_policy_messages_are_truncated_not_rejected():
+    report = DefenderStatusReport(policy_result=_policy_result(items=[
+        {"setting": "exclusion_path", "value": "C:\\" + "a" * 1200, "action": "add", "status": "failed", "message": "x" * 5000},
+    ]))
+    item = report.policy_result.items[0]
+    assert len(item.value) == 1000 and len(item.message) == 2000
+
+
+def test_exclusion_values_reject_control_characters():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        DefenderExclusionCreate(scope="company", exclusion_type="path", value="C:\\Trusted\nC:\\Other")
+    assert DefenderExclusionCreate(scope="company", exclusion_type="path", value="  C:\\Trusted  ").value == "C:\\Trusted"
+
+
+def test_defender_ui_flags_tamper_protection_and_policy_outcome():
+    template = Path("app/templates/defender/index.html").read_text()
+    assert "data-defender-tamper-warning" in template
+    assert "Exclusions locked" in template
+    assert '<th data-sort="string">Policy</th>' in template
+    assert "Blocked by tamper protection" in template
+    assert "Update tray agent" in template
+    assert 'id="defender-commands-table" data-table' in template
+    assert "Registry path (not supported by Defender)" in template
+
+
+def test_defender_template_compiles():
+    from jinja2 import Environment, FileSystemLoader
+
+    Environment(loader=FileSystemLoader("app/templates")).get_template("defender/index.html")

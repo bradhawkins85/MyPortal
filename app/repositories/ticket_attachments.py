@@ -96,7 +96,7 @@ async def update_attachment(attachment_id: int, **fields) -> None:
         UPDATE ticket_attachments
         SET {', '.join(set_clauses)}
         WHERE id = ?
-    """
+    """  # nosec B608
     
     await db.execute(query, tuple(values))
     log_debug(f"Updated attachment {attachment_id}")

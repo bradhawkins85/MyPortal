@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block header_title %}<span class="header__title-text">Benchmarking</span>{% endblock %}
+
+{% block content %}
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Cross-company M365 benchmark rollup</h2>
+        <p class="card__subtitle">Latest benchmark snapshot per company for super-admin comparison and governance reporting.</p>
+      </div>
+    </header>
+    <div class="table-wrapper">
+      <table class="table table--stack-mobile" data-table data-table-id="benchmarking-rollup">
+        <thead>
+          <tr>
+            <th scope="col">Company</th>
+            <th scope="col">Snapshot</th>
+            <th scope="col">Pass %</th>
+            <th scope="col">Pass</th>
+            <th scope="col">Fail</th>
+            <th scope="col">Secure Score %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in benchmark_rows %}
+            <tr>
+              <td data-label="Company">{{ row.company_name }}</td>
+              <td data-label="Snapshot">{% if row.snapshot_date_iso %}<span data-utc="{{ row.snapshot_date_iso }}"></span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+              <td data-label="Pass %">{{ row.pass_percentage }}%</td>
+              <td data-label="Pass">{{ row.pass_count }}</td>
+              <td data-label="Fail">{{ row.fail_count }}</td>
+              <td data-label="Secure Score %">{% if row.secure_score_percentage is not none %}{{ row.secure_score_percentage }}%{% else %}<span class="text-muted">—</span>{% endif %}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="table__empty">No benchmark snapshots are available yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

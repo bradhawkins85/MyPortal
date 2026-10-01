@@ -1,1120 +1,1231 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# Atomic blue/green release deployment.  The checkout containing this script is
+# a control repository only: serving processes never execute from it.
+set -Eeuo pipefail
+umask 027
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
-VENV_DIR="${PROJECT_ROOT}/.venv"
-FLAG_DIR="${PROJECT_ROOT}/var/state"
-SYSTEM_UPDATE_FLAG_FILE="${FLAG_DIR}/system_update.flag"
-SYSTEM_UPDATE_STATUS_FILE="${FLAG_DIR}/system_update.status"
+SERVICE_USER="myportal"
 
-normalise_upgrade_mode() {
-  local raw="${1:-}"
-  case "${raw,,}" in
-    graceful|rolling|restart)
-      printf '%s' "${raw,,}"
-      ;;
-    *)
-      printf '%s' "graceful"
-      ;;
-  esac
-}
+# The coordinator runs as root, while the control checkout is frequently owned
+# by the administrator who cloned it. Git refuses to operate on repositories
+# owned by another user unless they are listed in safe.directory; the
+# GIT_CONFIG_* variables add that setting for this process only.
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PROJECT_ROOT"
 
-read_flag_var() {
-  local key="$1"
-  if [[ ! -f "$SYSTEM_UPDATE_FLAG_FILE" ]]; then
-    return
+# The application writes update requests below its release's var/state, which
+# every immutable release links to the shared state directory. Checkouts that
+# predate the immutable-release layout keep the flag inside the checkout.
+if [[ -d "${MYPORTAL_SHARED_ROOT:-/opt/myportal/shared}/state" ]]; then
+  SYSTEM_UPDATE_FLAG_FILE="${MYPORTAL_SHARED_ROOT:-/opt/myportal/shared}/state/system_update.flag"
+else
+  SYSTEM_UPDATE_FLAG_FILE="${PROJECT_ROOT}/var/state/system_update.flag"
+fi
+
+# The flag pauses mail import while an update is waiting to be applied.  A
+# failed coordinator run is terminal for that request, so never leave the flag
+# behind and indefinitely block IMAP or Microsoft 365 imports.  The cron
+# wrapper also clears consumed flags, but this trap covers direct invocations
+# and failures that abort before control returns to the wrapper.
+clear_update_flag_on_failure() {
+  local status=$?
+  trap - EXIT
+  if ((status != 0)) && [[ -e "$SYSTEM_UPDATE_FLAG_FILE" || -L "$SYSTEM_UPDATE_FLAG_FILE" ]]; then
+    rm -f -- "$SYSTEM_UPDATE_FLAG_FILE"
+    echo "Upgrade aborted with status ${status}; cleared pending update flag ${SYSTEM_UPDATE_FLAG_FILE}." >&2
   fi
-  awk -F'=' -v lookup="$key" '
-    $0 !~ /^[[:space:]]*#/ && index($0, "=") > 0 {
-      current=$1
-      sub(/^[[:space:]]+/, "", current)
-      sub(/[[:space:]]+$/, "", current)
-      if (current == lookup) {
-        value=substr($0, index($0, "=") + 1)
-        sub(/^[[:space:]]+/, "", value)
-        sub(/[[:space:]]+$/, "", value)
-        print value
-        exit
-      }
-    }
-  ' "$SYSTEM_UPDATE_FLAG_FILE"
+  exit "$status"
 }
 
-purge_spurious_dist_info() {
-  if [[ ! -d "$VENV_DIR" ]]; then
-    return
-  fi
+trap clear_update_flag_on_failure EXIT
 
-  local pattern="~?portal-*.dist-info"
-
-  while IFS= read -r -d '' site_packages; do
-    while IFS= read -r -d '' artifact; do
-      echo "Removing unexpected dist-info artifact: $artifact"
-      rm -rf "$artifact"
-    done < <(find "$site_packages" -maxdepth 1 -mindepth 1 -name "$pattern" -print0 2>/dev/null)
-  done < <(find "$VENV_DIR" -type d -name "site-packages" -print0 2>/dev/null)
-}
-
-prepare_git_environment() {
-  local current_home="${HOME:-}"
-  if [[ -n "$current_home" ]]; then
-    if mkdir -p "$current_home/.config/git" >/dev/null 2>&1; then
-      return
-    fi
+resolve_environment_file() {
+  local system_env="${1:-/etc/myportal.env}" selected
+  if [[ -n "${MYPORTAL_ENV_FILE:-}" ]]; then
+    selected="$MYPORTAL_ENV_FILE"
+  elif [[ -f "$system_env" ]]; then
+    # This is the EnvironmentFile used by deploy/systemd/myportal@.service.
+    # Migrations must use the same credentials as the serving application.
+    selected="$system_env"
+  else
+    # Backward compatibility for installations created by the legacy installer.
+    selected="${PROJECT_ROOT}/.env"
   fi
 
-  local fallback_home="${PROJECT_ROOT}/.cache/git-home"
-  mkdir -p "$fallback_home/.config/git"
-  export HOME="$fallback_home"
-  export XDG_CONFIG_HOME="$fallback_home/.config"
-  export GIT_CONFIG_GLOBAL="$fallback_home/.gitconfig"
-  echo "Redirected Git configuration to ${fallback_home} because the default HOME directory is not writable." >&2
+  # Resolve symlink chains as well as relative paths. Otherwise invoking this
+  # script through /opt/myportal/current can chain one release's .env to the
+  # previous release instead of the persistent deployment configuration.
+  python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$selected"
 }
 
-# Clean up local modifications to __pycache__ files before pulling from remote.
-# These files are incorrectly tracked in the repository and can cause merge conflicts
-# when they are modified locally during normal Python execution.
-# This function resets all tracked __pycache__ files to their HEAD version.
-clean_pycache_files() {
-  git restore .
-  echo "Cleaning __pycache__ files to prevent merge conflicts..."
-  
-  # Reset any local changes to __pycache__ files to prevent merge conflicts
-  # git checkout works for both existing and deleted files
-  git ls-files '*__pycache__*' 2>/dev/null | while IFS= read -r file; do
-    git checkout HEAD -- "$file" 2>/dev/null || true
-  done
-  
-  echo "__pycache__ cleanup complete."
+VENV_DIR="${PROJECT_ROOT}/.venv" # retained only to find the coordinator Python
+ENV_FILE=$(resolve_environment_file)
+RELEASE_ROOT="${MYPORTAL_RELEASE_ROOT:-/opt/myportal/releases}"
+SHARED_ROOT="${MYPORTAL_SHARED_ROOT:-/opt/myportal/shared}"
+INSTANCE_ROOT="${MYPORTAL_INSTANCE_ROOT:-/opt/myportal/instances}"
+CURRENT_LINK="${MYPORTAL_CURRENT_LINK:-/opt/myportal/current}"
+UPSTREAM_FILE="${MYPORTAL_NGINX_UPSTREAM_FILE:-/etc/nginx/conf.d/myportal-active.inc}"
+READY_TIMEOUT="${MYPORTAL_READY_TIMEOUT:-60}"
+READY_REQUEST_TIMEOUT="${MYPORTAL_READY_REQUEST_TIMEOUT:-10}"
+DRAIN_SECONDS="${MYPORTAL_DRAIN_SECONDS:-15}"
+SMOKE_PATH="${MYPORTAL_SMOKE_PATH:-/healthz}"
+SYSTEM_UPDATE_STATUS_FILE="${SHARED_ROOT}/state/system_update.status"
+# shared/state is writable by the service account (root:myportal 0770), which
+# can create, rename or symlink any entry in it. Root-only artifacts (the
+# deployment plan, the lock, staged status files) therefore live in this
+# root-owned 0700 directory, and files the application must read are
+# published into shared/state with install(1), which replaces a planted
+# symlink instead of writing through it.
+UPDATER_STATE_DIR="${MYPORTAL_UPDATER_STATE_DIR:-/var/lib/myportal-updater}"
+UPDATE_CRON_FILE="${MYPORTAL_UPDATE_CRON_FILE:-/etc/cron.d/myportal-update}"
+REQUESTED_UPGRADE_MODE="rolling"
+RESTART_MODE="rolling"
+UPGRADE_READY_WAIT_SECONDS=0
+DEPLOYMENT_PLAN='{}'
+DEPLOYMENT_PLAN_FILE=""
+DEPLOYMENT_ACTION="staged-cutover"
+DEPLOYMENT_REASON="planner_not_run"
+STEP_REPORT=""
+TRAY_ARTIFACT_ROOT="${MYPORTAL_TRAY_ARTIFACT_ROOT:-${SHARED_ROOT}/artifacts/tray}"
+TRAY_ARTIFACTS_AVAILABLE=false
+FEATURE_PACK_RELOAD_TIMEOUT="${MYPORTAL_FEATURE_PACK_RELOAD_TIMEOUT:-60}"
+
+usage() {
+  cat <<'EOF'
+Usage: upgrade.sh [--rolling] [--graceful | --restart] [--auto-fallback]
+
+All update modes use the safe immutable blue/green release procedure. Legacy
+mode flags remain accepted for callers, but never update a live checkout.
+EOF
 }
 
-AUTO_FALLBACK=0
-EXPLICIT_RESTART_MODE=""
-
-while [[ $# -gt 0 ]]; do
+while (($#)); do
   case "$1" in
-    --auto-fallback)
-      AUTO_FALLBACK=1
-      shift
-      ;;
-    --graceful)
-      # Zero-downtime single-server reload: ``systemctl reload`` sends
-      # SIGHUP, which uvicorn workers handle by cycling without
-      # dropping accepted connections.  See docs/zero_downtime_upgrades.md.
-      EXPLICIT_RESTART_MODE="graceful"
-      shift
-      ;;
-    --rolling)
-      # Two-instance rolling deploy across systemd templated services
-      # (myportal@blue, myportal@green) sharing a single database.  See
-      # docs/zero_downtime_upgrades.md (Track B2).
-      EXPLICIT_RESTART_MODE="rolling"
-      shift
-      ;;
-    --restart)
-      # Force the classic full service restart path.
-      EXPLICIT_RESTART_MODE="restart"
-      shift
-      ;;
-    --help|-h)
-      cat <<'USAGE'
-Usage: upgrade.sh [--auto-fallback] [--graceful | --rolling | --restart]
-
-Fetch and apply the latest application code from the configured Git remote.
-
-Options:
-  --auto-fallback  Indicates the script is running as part of an automated
-                   recovery path. The script will avoid signalling the
-                   external restart helpers so the caller can manage restarts.
-  --graceful       After updating, ask systemd to reload (SIGHUP) the
-                   single MyPortal service so workers cycle without
-                   dropping connections.  Requires uvicorn workers
-                   and the systemd unit shipped in
-                   docs/systemd-service.md (ExecReload= line).
-  --rolling        Roll the upgrade across the two-instance blue/green
-                   deployment described in deploy/nginx/myportal-bluegreen.conf
-                   + deploy/systemd/myportal@.service.  One instance is
-                   drained, upgraded, healthchecked, and brought back
-                   before the other is touched.
-  --restart        Force a classic full service restart after updating.
-USAGE
-      exit 0
-      ;;
-    *)
-      echo "Error: Unknown option '$1'" >&2
-      exit 1
-      ;;
+    --rolling|--graceful|--restart) REQUESTED_UPGRADE_MODE="${1#--}" ;;
+    --auto-fallback) : ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
+  shift
 done
 
-prepare_git_environment
+resolve_requested_upgrade_mode() { printf '%s' "${APP_UPGRADE_MODE:-$REQUESTED_UPGRADE_MODE}"; }
+resolve_effective_upgrade_mode() { printf '%s' rolling; }
 
-detect_python_interpreter() {
-  local interpreter=""
-  if [[ -x "${VENV_DIR}/bin/python" ]]; then
-    interpreter="${VENV_DIR}/bin/python"
-  elif [[ -x "${VENV_DIR}/Scripts/python.exe" ]]; then
-    interpreter="${VENV_DIR}/Scripts/python.exe"
-  elif command -v python3 >/dev/null 2>&1; then
-    interpreter=$(command -v python3)
-  elif command -v python >/dev/null 2>&1; then
-    interpreter=$(command -v python)
+ensure_updater_state_dir() {
+  if [[ -L "$UPDATER_STATE_DIR" ]]; then
+    echo "Refusing to use symlinked updater state directory ${UPDATER_STATE_DIR}." >&2
+    return 1
   fi
-  printf '%s' "$interpreter"
+  [[ -d "$UPDATER_STATE_DIR" ]] || install -d -m 0700 "$UPDATER_STATE_DIR"
+  if [[ $EUID -eq 0 ]]; then
+    chown root:root "$UPDATER_STATE_DIR"
+  fi
+  chmod 0700 "$UPDATER_STATE_DIR"
 }
 
-read_env_var() {
-  local key="$1"
-  local default_value="${2:-}"
-
-  if [[ -n "${!key:-}" ]]; then
-    printf '%s' "${!key}"
-    return
+# Copy a root-staged file into the service-writable state directory. install
+# unlinks an existing destination (including a planted symlink) and creates
+# the file exclusively; the final rename replaces the directory entry and
+# never follows a symlink either.
+publish_state_file() {
+  local source="$1" destination="$2" staging owner=()
+  staging="$(dirname "$destination")/.$(basename "$destination").$$.tmp"
+  if [[ $EUID -eq 0 ]] && getent group "$SERVICE_USER" >/dev/null 2>&1; then
+    owner=(-o root -g "$SERVICE_USER")
   fi
-
-  if [[ -z "$PYTHON_INTERPRETER" || ! -f "${PROJECT_ROOT}/.env" ]]; then
-    printf '%s' "$default_value"
-    return
-  fi
-
-  local value
-  value=$(ENV_LOOKUP_KEY="$key" ENV_LOOKUP_DEFAULT="$default_value" PROJECT_ROOT="$PROJECT_ROOT" "$PYTHON_INTERPRETER" - <<'PY'
-from __future__ import annotations
-
-import os
-from pathlib import Path
-
-key = os.environ["ENV_LOOKUP_KEY"]
-default = os.environ.get("ENV_LOOKUP_DEFAULT", "")
-env_path = Path(Path(os.environ["PROJECT_ROOT"]) / ".env")
-
-if not env_path.exists():
-    print(default)
-    raise SystemExit
-
-for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-    line = raw_line.strip()
-    if not line or line.startswith("#") or "=" not in line:
-        continue
-    name, value = line.split("=", 1)
-    if name.strip() != key:
-        continue
-    value = value.strip()
-    if value and len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-        value = value[1:-1]
-    print(value)
-    break
-else:
-    print(default)
-PY
-  )
-
-  printf '%s' "$value"
+  install -m 0640 ${owner[@]+"${owner[@]}"} "$source" "$staging" && mv -Tf "$staging" "$destination"
 }
 
-ensure_env_default() {
-  local interpreter="$1"
-  local key="$2"
-  local default_value="$3"
-  local env_file="${PROJECT_ROOT}/.env"
-
-  if [[ -z "$interpreter" || ! -f "$env_file" ]]; then
-    return
-  fi
-
-  ENV_DEFAULT_KEY="$key" \
-    ENV_DEFAULT_VALUE="$default_value" \
-    ENV_DEFAULT_FILE="$env_file" \
-    "$interpreter" - <<'PY'
-from __future__ import annotations
-
-import os
-from pathlib import Path
-
-env_path = Path(os.environ["ENV_DEFAULT_FILE"])
-key = os.environ["ENV_DEFAULT_KEY"]
-default = os.environ["ENV_DEFAULT_VALUE"]
-
-existing = env_path.read_text(encoding="utf-8")
-for raw_line in existing.splitlines():
-    stripped = raw_line.strip()
-    if not stripped or stripped.startswith("#") or "=" not in raw_line:
-        continue
-    name, _ = raw_line.split("=", 1)
-    if name.strip() == key:
-        break
-else:
-    suffix = "" if not existing or existing.endswith("\n") else "\n"
-    env_path.write_text(existing + f"{suffix}{key}={default}\n", encoding="utf-8")
-PY
-}
+# Values interpolated into the key=value status file must stay on one line.
+single_line() { printf '%s' "${1//[$'\r\n']/ }"; }
 
 write_upgrade_status() {
-  local status="$1"
-  local message="$2"
-  local reason="${3:-}"
-  local started_at="${4:-${UPGRADE_STARTED_AT:-}}"
-  local finished_at="${5:-$(date --iso-8601=seconds)}"
-  local ready_wait="${6:-${UPGRADE_READY_WAIT_SECONDS:-0}}"
-  mkdir -p "$FLAG_DIR"
-  cat >"$SYSTEM_UPDATE_STATUS_FILE" <<EOF
-started_at=${started_at}
-finished_at=${finished_at}
+  local status="$1" message reason
+  message=$(single_line "$2")
+  reason=$(single_line "${3:-immutable_release}")
+  mkdir -p "$(dirname "$SYSTEM_UPDATE_STATUS_FILE")"
+  ensure_updater_state_dir
+  local tmp="${UPDATER_STATE_DIR}/system_update.status.$$"
+  cat >"$tmp" <<EOF
+started_at=${UPGRADE_STARTED_AT}
+finished_at=$(date --iso-8601=seconds)
 status=${status}
 mode=${RESTART_MODE}
 requested_mode=${REQUESTED_UPGRADE_MODE}
 reason=${reason}
+deployment_plan=$(single_line "$DEPLOYMENT_PLAN")
+steps=${STEP_REPORT}
 message=${message}
-ready_wait_seconds=${ready_wait}
+ready_wait_seconds=${UPGRADE_READY_WAIT_SECONDS}
 EOF
-  chmod 640 "$SYSTEM_UPDATE_STATUS_FILE" >/dev/null 2>&1 || true
+  chmod 600 "$tmp"
+  # Reporting is best-effort: a status file the application tampered with
+  # must not abort (or roll back) an otherwise healthy deployment.
+  if ! publish_state_file "$tmp" "$SYSTEM_UPDATE_STATUS_FILE"; then
+    echo "WARNING: could not publish upgrade status to ${SYSTEM_UPDATE_STATUS_FILE}." >&2
+  fi
+  rm -f -- "$tmp"
 }
 
-detect_destructive_migration_change() {
-  local changed="$1"
-  while IFS= read -r path; do
-    [[ -z "$path" || "$path" != migrations/* ]] && continue
-    if [[ "$path" == *CONTRACT.md || "$path" == *contract* ]]; then
-      return 0
-    fi
-    if [[ -f "$PROJECT_ROOT/$path" ]] && grep -Eiq 'drop[[:space:]]+(column|table|index)|rename[[:space:]]+(column|table)|alter[[:space:]]+table' "$PROJECT_ROOT/$path"; then
-      return 0
-    fi
-  done <<<"$changed"
-  return 1
+record_step() {
+  local name="$1" outcome="$2" reason="$3" duration="${4:-0}"
+  local entry="${name}:${outcome}:${reason}:${duration}s"
+  [[ -z "$STEP_REPORT" ]] && STEP_REPORT="$entry" || STEP_REPORT="${STEP_REPORT};${entry}"
+  echo "Upgrade step ${name}: ${outcome} (${reason}, ${duration}s)." >&2
 }
 
-classify_upgrade_reason() {
-  local changed="$1"
-  if [[ -z "$changed" ]]; then
-    printf '%s' "application_reload_required"
-    return
+cleanup_old_releases() {
+  # Cleanup is deliberately best-effort: an inability to reclaim disk space
+  # must not turn an otherwise verified deployment into a reported failure.
+  if ! python3 "${PROJECT_ROOT}/scripts/cleanup_releases.py" "$RELEASE_ROOT" "$CURRENT_LINK" --retain 3; then
+    echo "WARNING: post-deployment release cleanup failed; deployment remains successful." >&2
   fi
-  if grep -Eq '(^|[[:space:]])pyproject\.toml($|[[:space:]])' <<<"$changed"; then
-    printf '%s' "dependency_manifest_changed"
-    return
-  fi
-  if detect_destructive_migration_change "$changed"; then
-    printf '%s' "destructive_migration_phase"
-    return
-  fi
-  if grep -Eq '^migrations/' <<<"$changed"; then
-    printf '%s' "migrations_changed"
-    return
-  fi
-  if grep -Eq '^deploy/' <<<"$changed"; then
-    printf '%s' "deployment_topology_changed"
-    return
-  fi
-  if grep -Eq '^scripts/' <<<"$changed"; then
-    printf '%s' "upgrade_runtime_changed"
-    return
-  fi
-  if grep -Eq '^app/' <<<"$changed"; then
-    printf '%s' "shared_app_code_changed"
-    return
-  fi
-  printf '%s' "application_reload_required"
 }
 
-resolve_requested_upgrade_mode() {
-  if [[ -n "${EXPLICIT_RESTART_MODE:-}" ]]; then
-    printf '%s' "$EXPLICIT_RESTART_MODE"
-    return
-  fi
-  local from_flag
-  from_flag=$(read_flag_var "requested_mode")
-  if [[ -n "$from_flag" ]]; then
-    normalise_upgrade_mode "$from_flag"
-    return
-  fi
-  normalise_upgrade_mode "${APP_UPGRADE_MODE:-graceful}"
+# The plan lists every changed path. A first deployment diffs from the empty
+# tree, which makes the JSON far larger than the kernel's 128 KiB limit for a
+# single argument, so helpers read it from a file rather than from argv.
+plan_field() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]])' \
+    "$DEPLOYMENT_PLAN_FILE" "$1"
 }
 
-resolve_effective_upgrade_mode() {
-  local requested_mode="$1"
-  local changed="$2"
-  local reason
-
-  if [[ "${FORCE_RESTART:-0}" == "1" ]]; then
-    UPGRADE_REASON="force_restart_requested"
-    printf '%s' "restart"
-    return
+generate_deployment_plan() {
+  local base="$1" target="$2"
+  # Root re-reads the plan (including changed_paths used to publish files), so
+  # it must never live where the service account could replace it.
+  ensure_updater_state_dir
+  DEPLOYMENT_PLAN_FILE="${UPDATER_STATE_DIR}/deployment_plan.json"
+  rm -f -- "${SHARED_ROOT}/state/deployment_plan.json"  # legacy location
+  PYTHONPATH="$PROJECT_ROOT" python3 -m app.services.deployment_plan "$base" "$target" >"$DEPLOYMENT_PLAN_FILE"
+  DEPLOYMENT_PLAN=$(<"$DEPLOYMENT_PLAN_FILE")
+  DEPLOYMENT_ACTION=$(plan_field action)
+  DEPLOYMENT_REASON=$(plan_field reason)
+  case "$DEPLOYMENT_ACTION" in
+    no-op|static-publish|template-reload|feature-pack-reload|tray-publish|migration-only|staged-cutover) ;;
+    *) echo "Deployment planner returned an unknown action: ${DEPLOYMENT_ACTION}" >&2; return 1 ;;
+  esac
+  if [[ ! "$DEPLOYMENT_REASON" =~ ^[A-Za-z0-9_.-]{1,128}$ ]]; then
+    echo "Deployment planner returned an invalid reason." >&2
+    return 1
   fi
+}
 
-  reason=$(classify_upgrade_reason "$changed")
-  UPGRADE_REASON="$reason"
-  case "$reason" in
-    dependency_manifest_changed|destructive_migration_phase)
-      printf '%s' "restart"
-      ;;
-    *)
-      printf '%s' "$requested_mode"
-      ;;
+# changed_paths come from git, but they become filesystem paths below root-
+# owned trees, so refuse anything that could leave the destination.
+validate_relative_path() {
+  local path="$1"
+  case "$path" in
+    ""|/*|*$'\n'*|*$'\r'*) return 1 ;;
+  esac
+  case "/${path}/" in
+    */../*|*/./*|*//*) return 1 ;;
   esac
 }
 
-PYTHON_INTERPRETER=$(detect_python_interpreter)
+resolve_plan_base() {
+  local release="$1" revision="${1##*/}"
 
-cd "$PROJECT_ROOT"
+  # The control checkout is not evidence of what is serving. In particular,
+  # package upgrades can advance that checkout before the immutable-release
+  # layout has created /opt/myportal/current. Comparing origin/main with HEAD
+  # in that state incorrectly produces a no-op and leaves the old service in
+  # place. Use a deployed release only when its directory name is a real commit;
+  # otherwise diff from Git's empty tree so the first immutable deployment is
+  # deliberately planned as a full, fail-closed cutover.
+  if [[ -n "$release" && "$revision" =~ ^[0-9a-f]{40}$ ]] && \
+     git cat-file -e "${revision}^{commit}" 2>/dev/null; then
+    printf '%s' "$revision"
+    return
+  fi
 
-purge_spurious_dist_info
+  git hash-object -t tree /dev/null
+}
 
-ensure_env_default "$PYTHON_INTERPRETER" "ENABLE_AUTO_REFRESH" "false"
-REQUESTED_UPGRADE_MODE=$(resolve_requested_upgrade_mode)
-RESTART_MODE="$REQUESTED_UPGRADE_MODE"
-UPGRADE_REASON=$(read_flag_var "requested_reason")
-UPGRADE_STARTED_AT=$(date --iso-8601=seconds)
-UPGRADE_READY_WAIT_SECONDS=0
-UPGRADE_STATUS_WRITTEN=0
-
-on_exit() {
-  local exit_code=$?
-  purge_spurious_dist_info
-  if [[ "$UPGRADE_STATUS_WRITTEN" == "0" ]]; then
-    if [[ "$exit_code" -eq 0 ]]; then
-      write_upgrade_status "succeeded" "Upgrade completed." "$UPGRADE_REASON"
-    else
-      write_upgrade_status "failed" "Upgrade failed with exit code ${exit_code}." "$UPGRADE_REASON"
+publish_paths_without_worker_reload() {
+  local revision="$1" category="$2" destination release path
+  destination="${SHARED_ROOT}/published/${category}/${revision}"
+  rm -rf "$destination"
+  mkdir -p "$destination"
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    if ! validate_relative_path "$path"; then
+      echo "Refusing to publish unsafe path from the deployment plan: ${path}" >&2
+      return 1
     fi
-  fi
-  trap - EXIT
-  exit "$exit_code"
+    mkdir -p "$destination/$(dirname "$path")"
+    git show "${revision}:${path}" >"$destination/$path"
+    for release in "$(readlink -f "$INSTANCE_ROOT/blue" 2>/dev/null || true)" \
+                   "$(readlink -f "$INSTANCE_ROOT/green" 2>/dev/null || true)"; do
+      [[ -n "$release" && -d "$release" ]] || continue
+      mkdir -p "$release/$(dirname "$path")"
+      chmod u+w "$release" "$release/$(dirname "$path")" 2>/dev/null || true
+      install -m 0644 "$destination/$path" "$release/$path"
+    done
+  done < <(python3 -c 'import json,sys; p=json.load(open(sys.argv[1], encoding="utf-8")); c=sys.argv[2]; prefixes={"static":"app/static/","template":"app/templates/","feature_pack":"app/features/","tray":"tray/"}; print("\n".join(x for x in p["changed_paths"] if x.startswith(prefixes[c])))' "$DEPLOYMENT_PLAN_FILE" "$category")
+  ln -sfn "$destination" "${SHARED_ROOT}/published/${category}/current"
 }
 
-trap on_exit EXIT
-
-detect_service_name() {
-  local explicit
-  explicit=$(read_env_var "SYSTEMD_SERVICE_NAME" "")
-  if [[ -n "$explicit" ]]; then
-    printf '%s' "$explicit"
-    return
-  fi
-  printf '%s' "myportal"
-}
-
-resolve_service_user() {
-  local service_name="$1"
-
-  if [[ -n "${MYPORTAL_SERVICE_USER:-}" ]]; then
-    printf '%s' "$MYPORTAL_SERVICE_USER"
-    return
-  fi
-
-  if [[ -n "${SERVICE_USER:-}" ]]; then
-    printf '%s' "$SERVICE_USER"
-    return
-  fi
-
-  local env_override
-  env_override=$(read_env_var "SERVICE_USER" "")
-  if [[ -n "$env_override" ]]; then
-    printf '%s' "$env_override"
-    return
-  fi
-
-  local systemctl_bin
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl_bin=$(command -v systemctl)
-  else
-    systemctl_bin=""
-  fi
-
-  if [[ -n "$systemctl_bin" ]]; then
-    local reported_user
-    reported_user=$($systemctl_bin show "$service_name" --property=User --value 2>/dev/null | tr -d '\r') || reported_user=""
-    if [[ -n "$reported_user" ]]; then
-      printf '%s' "$reported_user"
-      return
-    fi
-
-    local fragment_path
-    fragment_path=$($systemctl_bin show "$service_name" --property=FragmentPath --value 2>/dev/null | tr -d '\r') || fragment_path=""
-    if [[ -n "$fragment_path" && -f "$fragment_path" ]]; then
-      local parsed_user
-      parsed_user=$(awk -F'=' '/^User=/{print $2; exit}' "$fragment_path")
-      if [[ -n "$parsed_user" ]]; then
-        printf '%s' "$parsed_user"
-        return
-      fi
-    fi
-  fi
-
-  printf '%s' "$service_name"
-}
-
-reset_project_permissions() {
-  local service_user="$1"
-  if [[ -z "$service_user" ]]; then
-    echo "Warning: Unable to determine service user; skipping ownership reset." >&2
-    return
-  fi
-
-  if ! id "$service_user" >/dev/null 2>&1; then
-    echo "Warning: Service user '$service_user' was not found on this system; skipping ownership reset." >&2
-    return
-  fi
-
-  local service_group
-  service_group=$(id -gn "$service_user" 2>/dev/null || true)
-  if [[ -z "$service_group" ]]; then
-    service_group="$service_user"
-  fi
-
-  if chown -R "$service_user:$service_group" "$PROJECT_ROOT"; then
-    echo "Reset ownership of ${PROJECT_ROOT} to ${service_user}:${service_group}."
-  else
-    echo "Warning: Failed to reset ownership of ${PROJECT_ROOT}; please update permissions manually if required." >&2
+validate_origin_remote() {
+  local url="$1"
+  case "$url" in
+    https://github.com/*|git@github.com:*|ssh://git@github.com/*) ;;
+    *) echo "Refusing automatic update from untrusted origin: $url" >&2; return 1 ;;
+  esac
+  if [[ "$url" =~ ^https://[^/@]+:[^/@]+@ ]]; then
+    echo "Refusing credential-bearing HTTPS remotes" >&2; return 1
   fi
 }
 
-SERVICE_NAME=$(detect_service_name)
-SERVICE_USER=$(resolve_service_user "$SERVICE_NAME")
-
-# Load GitHub credentials from .env in a safe manner
-if [[ -f .env ]]; then
-  if [[ -z "$PYTHON_INTERPRETER" ]]; then
-    echo "Warning: Unable to locate a python interpreter to parse .env credentials. Skipping GitHub authentication." >&2
-  else
-    while IFS=':' read -r key encoded || [[ -n "${key:-}" ]]; do
-      if [[ -z "${key:-}" ]]; then
-        continue
-      fi
-      value=$(printf '%s' "$encoded" | base64 --decode)
-      case "$key" in
-        GITHUB_USERNAME) GITHUB_USERNAME="$value" ;;
-        GITHUB_PASSWORD) GITHUB_PASSWORD="$value" ;;
-      esac
-    done < <(
-      "$PYTHON_INTERPRETER" - <<'PY'
-import base64
+validate_required_configuration() {
+  local missing
+  missing=$(ENV_CONFIG_FILE="$ENV_FILE" python3 - <<'PY'
+import os
 from pathlib import Path
 
-env_path = Path('.env')
-if env_path.exists():
-    for raw_line in env_path.read_text().splitlines():
+required = ("SESSION_SECRET", "TOTP_ENCRYPTION_KEY")
+values = dict(os.environ)
+env_file = Path(os.environ["ENV_CONFIG_FILE"])
+
+if env_file.is_file():
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
-        if not line or line.startswith('#') or '=' not in line:
+        if not line or line.startswith("#") or "=" not in line:
             continue
-        key, value = line.split('=', 1)
-        key = key.strip()
-        if key not in {'GITHUB_USERNAME', 'GITHUB_PASSWORD'}:
-            continue
-        value = value.strip()
-        if value and len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-            value = value[1:-1]
-        encoded = base64.b64encode(value.encode()).decode()
-        print(f"{key}:{encoded}")
+        name, value = line.removeprefix("export ").split("=", 1)
+        name, value = name.strip(), value.strip()
+        if name not in values:
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            values[name] = value
+
+print(" ".join(name for name in required if not values.get(name)))
 PY
-    )
+  )
+  if [[ -n "$missing" ]]; then
+    echo "Missing required application configuration: ${missing}." >&2
+    echo "Set the values in ${ENV_FILE} (or export them) before running the upgrade." >&2
+    return 1
   fi
-fi
-
-REMOTE_URL=$(git config --get remote.origin.url || true)
-PRE_PULL_HEAD=$(git rev-parse HEAD)
-
-# Clean up __pycache__ files before pulling to prevent merge conflicts
-clean_pycache_files
-
-perform_git_update() {
-  local remote_ref="$1"
-  local branch="$2"
-
-  if git pull --ff-only "$remote_ref" "$branch"; then
-    return 0
-  fi
-
-  echo "Fast-forward pull failed; attempting rebase to integrate remote changes..." >&2
-  if git pull --rebase "$remote_ref" "$branch"; then
-    return 0
-  fi
-
-  echo "Error: Unable to update repository automatically from ${remote_ref} ${branch}." >&2
-  echo "Please resolve the divergence manually and re-run the upgrade." >&2
-  exit 1
 }
 
-if [[ -n "${GITHUB_USERNAME:-}" && -n "${GITHUB_PASSWORD:-}" && "$REMOTE_URL" == https://* ]]; then
-  AUTH_REMOTE_URL="https://${GITHUB_USERNAME}:${GITHUB_PASSWORD}@${REMOTE_URL#https://}"
-  perform_git_update "$AUTH_REMOTE_URL" main
-else
-  perform_git_update origin main
-fi
+atomic_link() {
+  local target="$1" link="$2" tmp
+  tmp="${link}.new.$$"
+  mkdir -p "$(dirname "$link")"
+  ln -s "$target" "$tmp"
+  mv -Tf "$tmp" "$link"
+}
 
-POST_PULL_HEAD=$(git rev-parse HEAD)
-FORCE_RESTART="$(read_env_var "FORCE_RESTART" "0")"
+instance_port() { [[ "$1" == blue ]] && printf 8001 || printf 8002; }
 
-reset_project_permissions "$SERVICE_USER"
+write_upstream_file() {
+  local active="$1" inactive="$2" tmp="${UPSTREAM_FILE}.new.$$"
+  mkdir -p "$(dirname "$UPSTREAM_FILE")"
+  printf 'server 127.0.0.1:%s max_fails=1 fail_timeout=5s;\nserver 127.0.0.1:%s down;\n' \
+    "$(instance_port "$active")" "$(instance_port "$inactive")" >"$tmp"
+  chmod 644 "$tmp"
+  mv -f "$tmp" "$UPSTREAM_FILE"
+}
 
-update_version_file() {
-  local version
-  version=$(git log -1 --format="%cd" --date=format:"%Y%m%d%H%M%S" HEAD)
-  printf '%s\n' "$version" >"${PROJECT_ROOT}/version.txt"
-  echo "Updated version.txt to ${version}."
+write_upstream() {
+  write_upstream_file "$1" "$2"
+  nginx -t
+  nginx -s reload
+}
+
+read_active() {
+  if [[ -f "$UPSTREAM_FILE" ]] && grep -q "127.0.0.1:8002 max_fails" "$UPSTREAM_FILE"; then
+    printf green
+  else
+    printf blue
+  fi
+}
+
+wait_for_version() {
+  local port="$1" expected="$2" elapsed=0 body="" reported="<unavailable>" last_body="no response" failure="no_response"
+  local endpoint="http://127.0.0.1:${port}/readyz"
+  while ((elapsed < READY_TIMEOUT)); do
+    # Startup can make the readiness handler slower than its steady-state
+    # response time (notably while database pools and feature packs settle).
+    # Allow an individual request enough time to finish while retaining the
+    # outer retry window for connection-refused and not-ready responses.
+    body=$(curl -fsS --max-time "$READY_REQUEST_TIMEOUT" "$endpoint" 2>/dev/null || true)
+    if [[ -n "$body" ]]; then
+      last_body="$body"
+      failure="bad_release_metadata"
+    fi
+    reported=$(python3 -c 'import json,sys
+try:
+    payload=json.loads(sys.argv[1])
+except (json.JSONDecodeError, TypeError):
+    print("<invalid-or-empty-response>")
+else:
+    print(payload.get("version", "<missing>") if isinstance(payload, dict) else "<invalid-response>")
+' "$body")
+    if [[ "$reported" != "<invalid-or-empty-response>" && "$reported" != "<invalid-response>" && "$reported" != "<missing>" ]]; then
+      failure="stale_version"
+    fi
+    if python3 -c 'import json,sys
+try:
+    payload=json.loads(sys.argv[1])
+except (json.JSONDecodeError, TypeError):
+    raise SystemExit(1)
+if not isinstance(payload, dict):
+    raise SystemExit(1)
+raise SystemExit(not (payload.get("status") == "ok" and payload.get("version") == sys.argv[2]))
+' "$body" "$expected"; then
+      return 0
+    fi
+    sleep 1; ((elapsed+=1))
+  done
+  echo "Instance version verification failed: cause=${failure} endpoint=${endpoint} expected=${expected} reported=${reported}" >&2
+  echo "last readiness response: ${last_body}" >&2
+  echo "Verification command: curl -fsS --max-time ${READY_REQUEST_TIMEOUT} ${endpoint}" >&2
+  return 1
+}
+
+restart_instance_on_release() {
+  local instance="$1" release="$2" port assigned pid process_release attempts=0
+  port=$(instance_port "$instance")
+  assigned=$(readlink -f "$INSTANCE_ROOT/$instance" 2>/dev/null || true)
+  if [[ "$assigned" != "$release" ]]; then
+    echo "Instance restart failed: cause=wrong_instance_target instance=${instance} expected=${release} assigned=${assigned:-<missing>}" >&2
+    return 1
+  fi
+
+  # A plain restart can overlap with orphaned or asynchronously stopping
+  # workers. Stop first and prove that the slot's port is no longer served;
+  # otherwise an old worker can satisfy readiness with a stale revision.
+  if ! systemctl stop "myportal@${instance}.service"; then
+    echo "Instance restart failed: cause=failed_restart phase=stop instance=${instance}" >&2
+    return 1
+  fi
+  if curl -fsS --max-time 2 "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
+    echo "Instance restart failed: cause=stale_listener instance=${instance} port=${port}; an unmanaged process is still serving the slot" >&2
+    return 1
+  fi
+  if ! systemctl start "myportal@${instance}.service"; then
+    echo "Instance restart failed: cause=failed_restart phase=start instance=${instance}" >&2
+    systemctl status --no-pager "myportal@${instance}.service" >&2 || true
+    return 1
+  fi
+  if ! systemctl is-active --quiet "myportal@${instance}.service"; then
+    echo "Instance restart failed: cause=failed_restart phase=inactive_after_start instance=${instance}" >&2
+    systemctl status --no-pager "myportal@${instance}.service" >&2 || true
+    return 1
+  fi
+
+  while ((attempts < 5)); do
+    pid=$(systemctl show --property MainPID --value "myportal@${instance}.service")
+    process_release=$(readlink -f "/proc/${pid}/cwd" 2>/dev/null || true)
+    [[ -n "$pid" && "$pid" != 0 && "$process_release" == "$release" ]] && break
+    sleep 1
+    ((attempts+=1))
+  done
+  if [[ -z "$pid" || "$pid" == 0 || "$process_release" != "$release" ]]; then
+    echo "Instance restart failed: cause=wrong_instance_target instance=${instance} expected=${release} pid=${pid:-<missing>} process_release=${process_release:-<unavailable>}" >&2
+    return 1
+  fi
+  echo "Started ${instance} from ${process_release} (pid=${pid}, port=${port})." >&2
+}
+
+smoke_test() {
+  local port="$1" expected="$2" headers body
+  headers=$(mktemp); body=$(mktemp)
+  curl -fsS --max-time 10 -D "$headers" -o "$body" "http://127.0.0.1:${port}${SMOKE_PATH}"
+  rm -f "$headers" "$body"
+  wait_for_version "$port" "$expected"
+}
+
+make_dependency_layer_service_readable() {
+  local layer="$1"
+  [[ -d "$layer" ]] || return 1
+  # The upgrade runs as root under umask 027, while systemd runs the release as
+  # myportal. The release's .venv is a symlink into this shared layer, so
+  # hardening only the release tree does not make its interpreter executable.
+  chmod a+rx "${SHARED_ROOT}/dependency-layers" "$layer"
+  find "$layer" -type d -exec chmod a+rx,a-w {} +
+  find "$layer" -type f -exec chmod a+rX,a-w {} +
 }
 
 install_dependencies() {
-  if [[ -z "$PYTHON_INTERPRETER" ]]; then
-    echo "Warning: Unable to locate a Python interpreter; skipping dependency installation." >&2
-    return 1
+  local release="$1" key layer staging start=$SECONDS
+  local lock="${release}/requirements.lock"
+  [[ -s "$lock" ]] || { echo "Required dependency lock is missing: ${lock}" >&2; return 1; }
+  key=$(cat "${release}/pyproject.toml" "$lock"; python3 -c 'import sys; print(sys.implementation.name, *sys.version_info[:2])')
+  key=$(printf '%s' "$key" | sha256sum | awk '{print $1}')
+  layer="${SHARED_ROOT}/dependency-layers/${key}"
+  mkdir -p "${SHARED_ROOT}/dependency-layers"
+  # Repair cached layers created by older upgrades before testing or reusing
+  # them. Root being able to execute Python did not prove the service user
+  # could traverse and execute the symlink target.
+  [[ ! -d "$layer" ]] || make_dependency_layer_service_readable "$layer"
+  if [[ -x "${layer}/bin/python" && -f "${layer}/.verified" ]] && \
+     (cd "$release" && "${layer}/bin/python" -m pip check >/dev/null && "${layer}/bin/python" -c 'import uvicorn'); then
+    ln -s "$layer" "${release}/.venv"
+    record_step dependency_layer hit "verified_${key}" "$((SECONDS-start))"
+    return 0
   fi
-
-  echo "Installing updated dependencies…"
-  if ! "$PYTHON_INTERPRETER" -m pip install --upgrade pip setuptools wheel; then
-    echo "Warning: Failed to upgrade pip/setuptools/wheel; continuing anyway." >&2
-  fi
-  if ! "$PYTHON_INTERPRETER" -m pip install --upgrade "$PROJECT_ROOT"; then
-    echo "Error: Dependency installation failed." >&2
-    return 1
-  fi
+  rm -rf "$layer"
+  staging="${layer}.staging.$$"
+  rm -rf "$staging"
+  python3 -m venv "$staging"
+  # Use the venv's bundled pip. Packaging tools are never upgraded as part of
+  # deployment, and every runtime dependency comes from the committed lock.
+  "$staging/bin/python" -m pip install --disable-pip-version-check --requirement "$lock"
+  (cd "$release" && "$staging/bin/python" -m pip check && "$staging/bin/python" -c 'import uvicorn')
+  printf '%s\n' "$key" >"$staging/.verified"
+  mv "$staging" "$layer"
+  make_dependency_layer_service_readable "$layer"
+  ln -s "$layer" "${release}/.venv"
+  record_step dependency_layer miss "lock_or_interpreter_${key}" "$((SECONDS-start))"
 }
 
-run_restart_helper() {
-  case "$RESTART_MODE" in
-    graceful)
-      run_graceful_reload
-      ;;
-    rolling)
-      run_rolling_restart
-      ;;
-    restart)
-      local status=0
-      "${SCRIPT_DIR}/restart.sh" || status=$?
-      if [[ "$status" -eq 0 ]]; then
-        echo "Restart helper completed successfully."
-      else
-        echo "Error: restart helper exited with status ${status}." >&2
-        exit "$status"
-      fi
-      ;;
-    *)
-      echo "Error: Unsupported restart mode '${RESTART_MODE}'." >&2
-      exit 1
-      ;;
-  esac
-}
-
-# ---------------------------------------------------------------------------
-# Zero-downtime restart helpers (see docs/zero_downtime_upgrades.md).
-# ---------------------------------------------------------------------------
-
-# Resolve the systemd unit name from the environment.  Matches the
-# convention documented in docs/systemd-service.md.
-service_unit_name() {
-  local name="${SYSTEMD_SERVICE_NAME:-myportal}"
-  if [[ "$name" != *.service ]]; then
-    name="${name}.service"
-  fi
-  printf '%s' "$name"
-}
-
-# Wait up to ``timeout`` seconds for ``url`` to return HTTP 200.
-wait_for_ready() {
-  local url="$1"
-  local timeout="${2:-60}"
-  local elapsed=0
-  while (( elapsed < timeout )); do
-    if curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 1
-    ((elapsed++))
+validate_tray_artifacts() {
+  local revision="$1" source start=$SECONDS artifact
+  source="${TRAY_ARTIFACT_ROOT}/${revision}"
+  [[ -f "${source}/SHA256SUMS" ]] || { echo "Tray checksum manifest missing for ${revision}" >&2; return 1; }
+  [[ -f "${source}/REVISION" && "$(tr -d '\r\n' <"${source}/REVISION")" == "$revision" ]] || {
+    echo "Tray artifacts are stale or do not identify revision ${revision}" >&2; return 1;
+  }
+  for artifact in myportal-tray.msi myportal-tray.pkg; do
+    [[ -s "${source}/${artifact}" ]] || { echo "Required tray artifact missing: ${artifact}" >&2; return 1; }
+    grep -Eq "(^|[[:space:]])${artifact}$" "${source}/SHA256SUMS" || {
+      echo "Tray checksum manifest does not contain ${artifact}" >&2; return 1;
+    }
   done
-  echo "Error: ${url} did not become ready within ${timeout}s." >&2
-  return 1
+  grep -Eq '(^|[[:space:]])REVISION$' "${source}/SHA256SUMS" || {
+    echo "Tray checksum manifest does not contain REVISION" >&2; return 1;
+  }
+  (cd "$source" && sha256sum --check --strict SHA256SUMS)
+  record_step tray_artifacts verified "tray_inputs_changed_${revision}" "$((SECONDS-start))"
 }
 
-run_graceful_reload() {
-  if ! command -v systemctl >/dev/null 2>&1; then
-    echo "Error: --graceful requires systemctl on PATH." >&2
-    exit 1
+prepare_tray_artifacts() {
+  local revision="$1" source
+  source="${TRAY_ARTIFACT_ROOT}/${revision}"
+
+  # The supported release workflows publish installers directly to GitHub
+  # Releases. A deployment host therefore normally has no revision-specific CI
+  # bundle to validate. Preserve validation for installations that explicitly
+  # stage such a bundle, but do not make an absent optional bundle block the
+  # application upgrade.
+  if [[ ! -e "$source" ]]; then
+    TRAY_ARTIFACTS_AVAILABLE=false
+    record_step tray_artifacts skipped "github_release_delivery_${revision}" 0
+    return 0
   fi
-  local unit
-  unit=$(service_unit_name)
-  echo "Graceful reload: signalling ${unit} (SIGHUP via systemctl reload)..."
-  if ! systemctl reload "$unit"; then
-    echo "Error: systemctl reload ${unit} failed." >&2
-    exit 1
+
+  validate_tray_artifacts "$revision"
+  TRAY_ARTIFACTS_AVAILABLE=true
+}
+
+publish_tray_artifacts() {
+  local revision="$1" destination
+  destination="${SHARED_ROOT}/published/tray/${revision}"
+  rm -rf "$destination"
+  mkdir -p "$destination"
+  cp -a "${TRAY_ARTIFACT_ROOT}/${revision}/." "$destination/"
+  ln -sfn "$destination" "${SHARED_ROOT}/published/tray/current"
+}
+
+install_blue_green_service_unit() {
+  local release="$1"
+  local source_unit="${release}/deploy/systemd/myportal@.service"
+  local installed_unit="/etc/systemd/system/myportal@.service"
+
+  if [[ ! -r "$source_unit" ]]; then
+    echo "Blue/green systemd unit is missing from release: ${source_unit}" >&2
+    return 1
   fi
-  local probe="${MYPORTAL_READYZ_URL:-http://127.0.0.1:8000/readyz}"
-  local ready_started=$SECONDS
-  echo "Graceful reload: waiting for ${probe} to return 200..."
-  if ! wait_for_ready "$probe" "${MYPORTAL_READY_TIMEOUT:-60}"; then
-    UPGRADE_READY_WAIT_SECONDS=$((SECONDS - ready_started))
-    exit 1
+  if [[ "${EUID:-$(id -u)}" != 0 ]]; then
+    echo "Blue/green service setup requires root. Re-run the upgrade with sudo." >&2
+    return 1
   fi
-  UPGRADE_READY_WAIT_SECONDS=$((SECONDS - ready_started))
-  echo "Graceful reload: readiness confirmed after ${UPGRADE_READY_WAIT_SECONDS}s."
-  echo "Graceful reload complete."
+
+  # Older installations have only myportal.service. Install (or update) the
+  # instance template before attempting to start either deployment slot.
+  install -m 0644 "$source_unit" "$installed_unit"
+  systemctl daemon-reload
+  # A duplicated unit suffix creates the template instance "blue.service" or
+  # "green.service". The unit intentionally rejects that invalid instance with
+  # EX_USAGE (64), so remove any stale malformed units before enabling the
+  # canonical blue/green names.
+  systemctl disable --now myportal@blue.service.service myportal@green.service.service >/dev/null 2>&1 || true
+  systemctl reset-failed myportal@blue.service.service myportal@green.service.service >/dev/null 2>&1 || true
+  systemctl enable myportal@blue.service myportal@green.service >/dev/null
+  if ! systemctl cat myportal@.service >/dev/null; then
+    echo "Unable to register myportal@.service; check systemd and ${installed_unit}." >&2
+    return 1
+  fi
+}
+
+install_nginx_site() {
+  local source_config="$1" installed_config="$2"
+  if [[ -e /proc/net/if_inet6 ]]; then
+    install -m 0644 "$source_config" "$installed_config"
+  else
+    # nginx refuses to start when asked to listen on [::] and the kernel has
+    # IPv6 disabled, which is common for LXC containers and hardened VMs.
+    sed '/listen[[:space:]]*\[::\]/d' "$source_config" >"${installed_config}.new.$$"
+    chmod 0644 "${installed_config}.new.$$"
+    mv -f "${installed_config}.new.$$" "$installed_config"
+    echo "IPv6 is unavailable; installed ${installed_config} with IPv4 listeners only." >&2
+  fi
+}
+
+install_blue_green_nginx_config() {
+  local release="$1" active="$2" inactive="$3"
+  local source_config="${release}/deploy/nginx/myportal-bluegreen.conf"
+  local available_dir="/etc/nginx/sites-available"
+  local enabled_dir="/etc/nginx/sites-enabled"
+  local installed_config
+
+  if [[ ! -r "$source_config" ]]; then
+    echo "Blue/green nginx configuration is missing from release: ${source_config}" >&2
+    return 1
+  fi
+  if [[ "${EUID:-$(id -u)}" != 0 ]]; then
+    echo "Blue/green nginx setup requires root. Re-run the upgrade with sudo." >&2
+    return 1
+  fi
+
+  # Debian-family packages use sites-available/sites-enabled, while other
+  # nginx packages load conf.d directly. Install into the layout nginx already
+  # provides instead of requiring a manual proxy setup after the workers start.
+  if [[ -d "$available_dir" && -d "$enabled_dir" ]]; then
+    installed_config="${available_dir}/myportal.conf"
+    install_nginx_site "$source_config" "$installed_config"
+    ln -sfn "$installed_config" "${enabled_dir}/myportal.conf"
+    # The packaged "Welcome to nginx" site is the default_server for port 80
+    # and would answer every request instead of MyPortal. Disable only the
+    # unmodified package link; a customised default site is left alone.
+    if [[ -L "${enabled_dir}/default" && "$(readlink -f "${enabled_dir}/default")" == "${available_dir}/default" ]]; then
+      rm -f "${enabled_dir}/default"
+      echo "Disabled the packaged nginx default site so MyPortal serves port 80." >&2
+    fi
+  else
+    installed_config="/etc/nginx/conf.d/myportal.conf"
+    install -d -m 0755 "$(dirname "$installed_config")"
+    install_nginx_site "$source_config" "$installed_config"
+  fi
+
+  # The include is mandatory for nginx -t. Point it at the already validated
+  # candidate so a first-time nginx start cannot expose a dead legacy backend.
+  write_upstream_file "$active" "$inactive"
+  nginx -t
+  systemctl enable --now nginx
+}
+
+make_release_service_readable() {
+  local release="$1"
+  # Releases are commonly prepared by root with umask 027. The service runs as
+  # the unprivileged myportal user, so every directory must be traversable and
+  # regular files must be readable. Do not follow symlinks: in particular, the
+  # protected environment file must retain its existing permissions.
+  find "$release" -type d -exec chmod a+rx,a-w {} +
+  find "$release" -type f -exec chmod a+rX,a-w {} +
+}
+
+prepare_shared_uploads() {
+  local shared legacy name
+  for name in private_uploads uploads; do
+    shared="${SHARED_ROOT}/${name}"
+    if [[ "$name" == private_uploads ]]; then
+      legacy="${PROJECT_ROOT}/private_uploads"
+    else
+      legacy="${PROJECT_ROOT}/app/static/uploads"
+    fi
+    if [[ ! -d "$shared" ]]; then
+      install -d -m 0750 -o myportal -g myportal "$shared"
+      # Seed persistent storage for installations upgrading from the original
+      # single-checkout layout. Never remove or replace the legacy data.
+      if [[ -d "$legacy" ]]; then
+        cp -a "$legacy"/. "$shared"/
+      fi
+    fi
+    # Repair both ownership and owner permissions left by immutable-release
+    # preparation or interrupted legacy deployments. chown alone does not make
+    # a root-created 0555 directory writable by its new owner.
+    chown -R myportal:myportal "$shared"
+    find "$shared" -type d -exec chmod u+rwx {} +
+  done
+}
+
+link_shared_uploads() {
+  local release="$1"
+  mkdir -p "${release}/app/static"
+  rm -rf "${release}/private_uploads" "${release}/app/static/uploads"
+  ln -s "${SHARED_ROOT}/private_uploads" "${release}/private_uploads"
+  ln -s "${SHARED_ROOT}/uploads" "${release}/app/static/uploads"
+  # The target is the writable data store, but keep the link metadata owned by
+  # the service account as well so ownership checks do not report these paths
+  # as root-owned. -h prevents chown from dereferencing the links.
+  chown -h myportal:myportal "${release}/private_uploads" "${release}/app/static/uploads"
+}
+
+validate_release_uploads() {
+  local release="$1" path expected
+  while IFS='|' read -r path expected; do
+    if [[ ! -L "$path" || "$(readlink -f "$path" 2>/dev/null || true)" != "$expected" ]]; then
+      echo "Release upload path is not linked to persistent storage: ${path}" >&2
+      return 1
+    fi
+    if ! runuser --user myportal -- test -w "$path"; then
+      echo "Release upload path is not writable by the myportal service account: ${path}" >&2
+      return 1
+    fi
+  done <<EOF
+${release}/private_uploads|${SHARED_ROOT}/private_uploads
+${release}/app/static/uploads|${SHARED_ROOT}/uploads
+EOF
+}
+
+repair_assigned_release_uploads() {
+  local instance release path expected
+  for instance in blue green; do
+    release=$(readlink -f "${INSTANCE_ROOT}/${instance}" 2>/dev/null || true)
+    [[ -n "$release" && -d "$release" && "$release" != "$RELEASE_DIR" ]] || continue
+
+    chmod u+w "$release" "${release}/app" "${release}/app/static"
+    while IFS='|' read -r path expected; do
+      if [[ -d "$path" && ! -L "$path" ]]; then
+        # Releases made by the older updater stored uploads locally. Preserve
+        # files that are not already in shared storage before replacing the
+        # directory; -n prevents an old slot overwriting newer shared files.
+        cp -a -n "$path"/. "$expected"/
+      fi
+      rm -rf "$path"
+      ln -s "$expected" "$path"
+      chown -h myportal:myportal "$path"
+    done <<EOF
+${release}/private_uploads|${SHARED_ROOT}/private_uploads
+${release}/app/static/uploads|${SHARED_ROOT}/uploads
+EOF
+    chown -R myportal:myportal "${SHARED_ROOT}/private_uploads" "${SHARED_ROOT}/uploads"
+    find "${SHARED_ROOT}/private_uploads" "${SHARED_ROOT}/uploads" -type d -exec chmod u+rwx {} +
+    make_release_service_readable "$release"
+    validate_release_uploads "$release"
+  done
+}
+
+release_runtime_ready() {
+  local release="$1"
+  [[ -x "${release}/.venv/bin/python" ]] || return 1
+  # Validate as the same unprivileged account used by systemd. A root-only
+  # dependency layer passes an ordinary -x/import check but fails ExecStart
+  # with status 126 (permission denied).
+  runuser --user myportal -- "${release}/.venv/bin/python" -c 'import uvicorn' >/dev/null 2>&1
+}
+
+validate_release_metadata() {
+  local revision="$1" release="$2" recorded
+  recorded=$(tr -d '\r\n' <"$release/version.txt" 2>/dev/null || true)
+  if [[ ! "$revision" =~ ^[0-9a-f]{40}$ || "${release##*/}" != "$revision" || "$recorded" != "$revision" ]]; then
+    echo "Release preparation failed: cause=bad_release_metadata release=${release} expected=${revision} recorded=${recorded:-<missing>}" >&2
+    return 1
+  fi
+}
+
+prepare_release() {
+  local revision="$1" release="$2" staging
+  staging="${release}.staging.$$"
+  mkdir -p "$RELEASE_ROOT" "$INSTANCE_ROOT" "$SHARED_ROOT/state" "$SHARED_ROOT/data"
+  # The service needs to traverse deployment-owned parents to reach both the
+  # instance symlink and its immutable release target.
+  chmod a+rx "$RELEASE_ROOT" "$INSTANCE_ROOT" "$SHARED_ROOT"
+  # Releases link var/ to the shared tree. The application records update
+  # requests and feature-pack reload results in var/state and keeps runtime
+  # data in var/data, so the service account must be able to write both.
+  chgrp "$SERVICE_USER" "$SHARED_ROOT/state" "$SHARED_ROOT/data"
+  chmod 0770 "$SHARED_ROOT/state" "$SHARED_ROOT/data"
+  prepare_shared_uploads
+  if [[ -e "$release" ]]; then
+    # A previous attempt may have prepared this revision with missing or stale
+    # configuration. Refresh only the symlink; never copy or regenerate secrets.
+    if [[ -f "$ENV_FILE" && "$(readlink "$release/.env" 2>/dev/null || true)" != "$ENV_FILE" ]]; then
+      ln -sfn "$ENV_FILE" "$release/.env"
+    fi
+    # A release may already exist after an interrupted attempt, and older
+    # preparations retained the repository's timestamp-style version.txt.
+    # Readiness verification compares against the Git revision, so repair the
+    # generated release metadata before restarting either instance.
+    chmod u+w "$release" "$release/version.txt" 2>/dev/null || true
+    printf '%s\n' "$revision" >"$release/version.txt"
+    chmod u+w "$release" "${release}/app" "${release}/app/static"
+    link_shared_uploads "$release"
+    # Older scripts moved a completed virtualenv from a temporary directory,
+    # leaving console-script shebangs pointed at a path that no longer exists.
+    # Rebuild only an unusable runtime; never mutate a healthy active release.
+    if ! release_runtime_ready "$release"; then
+      chmod -R u+w "$release"
+      rm -rf "${release}/.venv"
+      if ! install_dependencies "$release"; then
+        make_release_service_readable "$release"
+        return 1
+      fi
+    fi
+    # Repair releases prepared with root-only traversal permissions before
+    # retrying their service startup.
+    make_release_service_readable "$release"
+    validate_release_uploads "$release"
+    validate_release_metadata "$revision" "$release"
+    if ! release_runtime_ready "$release"; then
+      echo "Release preparation failed: cause=runtime_not_executable_by_service_user release=${release} interpreter=${release}/.venv/bin/python" >&2
+      return 1
+    fi
+    return 0
+  fi
+  rm -rf "$staging"; mkdir -p "$staging"
+  git archive "$revision" | tar -x -C "$staging"
+  printf '%s\n' "$revision" >"$staging/version.txt"
+  # Settings resolves .env relative to the immutable release. Reuse the
+  # installation's protected configuration rather than copying its secrets.
+  if [[ -f "$ENV_FILE" ]]; then
+    ln -s "$ENV_FILE" "$staging/.env"
+  fi
+  # Mutable state is shared, while code, templates, assets, and dependencies are
+  # private to this revision.
+  rm -rf "$staging/var"
+  ln -s "$SHARED_ROOT" "$staging/var"
+  link_shared_uploads "$staging"
+  # Publish the code path before creating its virtualenv. Entry-point scripts
+  # embed an absolute interpreter path and break if the venv is subsequently
+  # renamed from the staging path to the release path.
+  mv "$staging" "$release"
+  if ! install_dependencies "$release"; then
+    rm -rf "$release"
+    return 1
+  fi
+  make_release_service_readable "$release"
+  validate_release_uploads "$release"
+  validate_release_metadata "$revision" "$release"
+  if ! release_runtime_ready "$release"; then
+    echo "Release preparation failed: cause=runtime_not_executable_by_service_user release=${release} interpreter=${release}/.venv/bin/python" >&2
+    return 1
+  fi
+}
+
+run_release_manage() {
+  local release="$1"
+  shift
+  # Do not source .env in a shell: characters such as $, #, !, spaces, and
+  # quotes must reach the application without expansion.  Disable dotenv
+  # interpolation and make the protected file authoritative over any stale
+  # DB_* values inherited by the upgrade process.
+  ENV_CONFIG_FILE="$ENV_FILE" "${release}/.venv/bin/python" - \
+    "${release}/manage.py" "$@" <<'PY'
+import os
+import sys
+
+from dotenv import dotenv_values
+
+env_file = os.environ["ENV_CONFIG_FILE"]
+try:
+    configured = dotenv_values(env_file, interpolate=False)
+except (OSError, UnicodeError, ValueError) as exc:
+    raise SystemExit(f"Unable to read application environment file {env_file}: {exc}") from None
+
+for name, value in configured.items():
+    if value is not None:
+        os.environ[name] = value
+
+os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+PY
+}
+
+rollback() {
+  local old_active="$1" new_instance="$2" old_instance_release="$3" upstream_switched="$4"
+  echo "Deployment failed; restoring ${old_active}." >&2
+  if [[ -n "$old_instance_release" && -d "$old_instance_release" ]]; then
+    atomic_link "$old_instance_release" "$INSTANCE_ROOT/$new_instance"
+    systemctl restart "myportal@${new_instance}.service" >/dev/null 2>&1 || true
+  fi
+  # A startup failure happens before nginx is changed. Do not replace a legacy
+  # installation's working upstream with a blue slot that has never existed.
+  [[ "$upstream_switched" == true ]] && write_upstream "$old_active" "$new_instance" || true
+  [[ -n "$PREVIOUS_RELEASE" && -d "$PREVIOUS_RELEASE" ]] && atomic_link "$PREVIOUS_RELEASE" "$CURRENT_LINK"
+  write_upgrade_status failed "Cutover failed; previous release and upstream restored."
 }
 
 run_rolling_restart() {
-  if ! command -v systemctl >/dev/null 2>&1; then
-    echo "Error: --rolling requires systemctl on PATH." >&2
+  local revision="$1" release="$2" active inactive old_inactive upstream_switched=false start=$SECONDS
+  active=$(read_active); [[ "$active" == blue ]] && inactive=green || inactive=blue
+  old_inactive=$(readlink -f "$INSTANCE_ROOT/$inactive" 2>/dev/null || true)
+  # Bind the slot names now. The trap body runs in the scope of whichever
+  # function failed, and helpers such as write_upstream_file declare their own
+  # "active"/"inactive" locals that would otherwise swap the rollback target.
+  # shellcheck disable=SC2064 # expanding the slot names now is the point
+  trap "rollback $(printf '%q ' "$active" "$inactive" "$old_inactive")\"\$upstream_switched\"" ERR
+
+  # Only the non-serving slot changes during preparation and validation.
+  atomic_link "$release" "$INSTANCE_ROOT/$inactive"
+  restart_instance_on_release "$inactive" "$release"
+  wait_for_version "$(instance_port "$inactive")" "$revision"
+  smoke_test "$(instance_port "$inactive")" "$revision"
+
+  # Install and start the public listener only after its first backend has
+  # passed readiness and smoke checks. This also promotes legacy deployments
+  # whose workers existed but whose blue/green nginx site was never enabled.
+  install_blue_green_nginx_config "$release" "$inactive" "$active"
+
+  # nginx accepts no new work on the old slot after this validated reload.
+  write_upstream "$inactive" "$active"
+  upstream_switched=true
+  sleep "$DRAIN_SECONDS"
+  atomic_link "$release" "$CURRENT_LINK"
+  UPGRADE_READY_WAIT_SECONDS=$((SECONDS-start))
+  trap - ERR
+}
+
+run_migration_phase() {
+  local release="$1" serving="$2" target="$3" args=()
+  [[ "${UPG01_MAINTENANCE_MODE:-false}" == "true" ]] && args+=(--maintenance)
+  write_upgrade_status migrating "Applying and validating schema changes before cutover."
+  if ! run_release_manage "$release" migrate \
+    --serving-release "${serving:-none}" --target-release "$target" "${args[@]}"; then
+    write_upgrade_status failed "Database migration failed; release was not activated. Review the migration error above; if it is a connection error, verify DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME in ${ENV_FILE}."
+    echo "Database migration failed; release was not activated. Review the migration error above; if it is a connection error, verify DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME in ${ENV_FILE}." >&2
+    return 1
+  fi
+}
+
+is_additive_migration_only_release() {
+  local old_revision="$1" target_revision="$2" status path extra metadata
+  [[ -n "$old_revision" ]] || return 1
+  git cat-file -e "${old_revision}^{commit}" 2>/dev/null || return 1
+  git cat-file -e "${target_revision}^{commit}" 2>/dev/null || return 1
+  git diff --quiet "$old_revision" "$target_revision" && return 1
+
+  while IFS=$'\t' read -r status path extra; do
+    # Deletions, renames, copies, and type changes are never additive. Checking
+    # the status also prevents git-show attempts for paths absent from target.
+    [[ "$status" == A || "$status" == M ]] || return 1
+    [[ -z "$extra" ]] || return 1
+    [[ "$path" == migrations/*.sql || "$path" == changes/*.json ]] || return 1
+    if [[ "$path" == migrations/*.sql ]]; then
+      metadata=$(git show "${target_revision}:${path}" 2>/dev/null) || return 1
+      grep -Eiq '^--[[:space:]]*phase:[[:space:]]*expand[[:space:]]*$' <<<"$metadata" || return 1
+      grep -Eiq '^--[[:space:]]*compatible-from:[[:space:]]*\*[[:space:]]*$' <<<"$metadata" || return 1
+      grep -Eiq '^--[[:space:]]*compatible-to:[[:space:]]*\*[[:space:]]*$' <<<"$metadata" || return 1
+    fi
+  done < <(git diff --name-status "$old_revision" "$target_revision")
+  return 0
+}
+
+require_host_prerequisites() {
+  local tool missing=()
+  for tool in git curl nginx systemctl flock runuser python3; do
+    command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+  done
+  if ((${#missing[@]})); then
+    echo "Missing required commands: ${missing[*]}. Run scripts/install_production.sh to prepare this host." >&2
+    return 1
+  fi
+  if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
+    echo "Service account '${SERVICE_USER}' does not exist. Run scripts/install_production.sh to prepare this host." >&2
+    return 1
+  fi
+  if [[ ! -f "$ENV_FILE" ]]; then
+    echo "Environment file ${ENV_FILE} does not exist. Run scripts/install_production.sh to create it." >&2
+    return 1
+  fi
+}
+
+record_control_checkout() {
+  # Installations made before MYPORTAL_CONTROL_CHECKOUT existed lack it (or
+  # carry a stale path), which stops the portal's System updates page from
+  # finding the checkout. Record this checkout; the file is rewritten in place
+  # so its root:myportal ownership and 0640 mode are kept.
+  [[ -f "$ENV_FILE" ]] || return 0
+  CONTROL_ENV_FILE="$ENV_FILE" CONTROL_CHECKOUT="$PROJECT_ROOT" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["CONTROL_ENV_FILE"])
+checkout = os.environ["CONTROL_CHECKOUT"]
+key = "MYPORTAL_CONTROL_CHECKOUT"
+lines = path.read_text(encoding="utf-8").splitlines()
+for index, line in enumerate(lines):
+    if line.strip().startswith("#") or "=" not in line or line.split("=", 1)[0].strip() != key:
+        continue
+    current = line.split("=", 1)[1].strip().strip("'\"")
+    if current and (Path(current) / ".git").exists():
+        raise SystemExit(0)
+    lines[index] = f"{key}={checkout}"
+    break
+else:
+    lines.append(f"{key}={checkout}")
+with path.open("r+", encoding="utf-8") as handle:
+    handle.write("\n".join(lines) + "\n")
+    handle.truncate()
+print(f"Recorded {key}={checkout} in {path}.")
+PY
+}
+
+verify_release_sources() {
+  # Refuse a release whose Python does not even parse (for example a stray
+  # "continue" outside a loop) before migrations run or any slot restarts.
+  # Compiles in memory only: the release directory is read-only.
+  local release="$1" interpreter="${1}/.venv/bin/python"
+  [[ -x "$interpreter" ]] || interpreter=python3
+  if ! "$interpreter" - "$release" <<'PY'
+import sys
+from pathlib import Path
+
+release = Path(sys.argv[1])
+errors = []
+for top in ("app", "migrations", "scripts", "manage.py"):
+    root = release / top
+    paths = [root] if root.is_file() else sorted(root.rglob("*.py")) if root.is_dir() else []
+    for path in paths:
+        try:
+            compile(path.read_bytes(), str(path.relative_to(release)), "exec", dont_inherit=True)
+        except SyntaxError as exc:
+            errors.append(f"{exc.filename}:{exc.lineno}: {exc.msg}")
+if errors:
+    print("Python syntax errors in this release:", *errors, sep="\n  ", file=sys.stderr)
+    sys.exit(1)
+PY
+  then
+    echo "Release ${release##*/} does not compile; the serving release was left unchanged." >&2
+    return 1
+  fi
+}
+
+install_upgrade_command() {
+  # Give administrators a stable command, because the control checkout can
+  # live anywhere (/opt/myportal/control is only the documented default).
+  # Refreshed on every run so it follows the checkout if it moves.
+  local command_path="${MYPORTAL_UPGRADE_COMMAND:-/usr/local/sbin/myportal-upgrade}" staging
+  install -d -m 0755 "$(dirname "$command_path")" 2>/dev/null || return 0
+  staging=$(mktemp "${command_path}.XXXXXX") || return 0
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf '# Installed by scripts/upgrade.sh: deploy the latest origin/main from the\n'
+    printf '# MyPortal control checkout at %s.\n' "$PROJECT_ROOT"
+    printf 'exec %q "$@"\n' "${SCRIPT_DIR}/upgrade.sh"
+  } >"$staging"
+  chmod 0755 "$staging"
+  mv -f "$staging" "$command_path"
+}
+
+migrate_update_cron_log() {
+  # Older installers appended this root job's output to a file inside
+  # /var/log/myportal, which the service account owns and could replace with
+  # a symlink. Point existing cron entries at a root-owned log instead.
+  local legacy="/var/log/myportal/process_update_flag.log" staging
+  [[ -f "$UPDATE_CRON_FILE" && ! -L "$UPDATE_CRON_FILE" ]] || return 0
+  grep -qF "$legacy" "$UPDATE_CRON_FILE" || return 0
+  staging="${UPDATE_CRON_FILE}.new.$$"
+  sed "s|${legacy}|/var/log/myportal-updater.log|g" "$UPDATE_CRON_FILE" >"$staging"
+  chmod 0644 "$staging"
+  mv -f "$staging" "$UPDATE_CRON_FILE"
+  echo "Moved the update cron log to /var/log/myportal-updater.log." >&2
+}
+
+retire_legacy_service() {
+  # Installations made by the original installer ran a single-checkout
+  # myportal.service on port 8000. Once a blue/green slot is serving, that
+  # unit would run every scheduled job a second time against the same
+  # database, so stop and remove it.
+  local unit="/etc/systemd/system/myportal.service"
+  [[ -f "$unit" ]] || return 0
+  systemctl disable --now myportal.service >/dev/null 2>&1 || true
+  rm -f "$unit"
+  systemctl daemon-reload
+  echo "Retired the legacy single-checkout myportal.service unit." >&2
+}
+
+require_host_prerequisites
+cd "$PROJECT_ROOT"
+# Create missing deployment parents explicitly: under umask 027, mkdir -p
+# would make /opt/myportal untraversable for the unprivileged service account.
+for deployment_dir in "$RELEASE_ROOT" "$SHARED_ROOT" "$INSTANCE_ROOT" "$(dirname "$CURRENT_LINK")"; do
+  deployment_parent=$(dirname "$deployment_dir")
+  [[ -d "$deployment_parent" ]] || install -d -m 0755 "$deployment_parent"
+done
+if [[ ! "$FEATURE_PACK_RELOAD_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+  echo "MYPORTAL_FEATURE_PACK_RELOAD_TIMEOUT must be a positive integer." >&2
+  exit 2
+fi
+mkdir -p "$SHARED_ROOT/state"
+ensure_updater_state_dir
+# The lock lives in the root-only directory: opening it in shared/state would
+# truncate whatever file a planted symlink pointed at.
+exec 9>"$UPDATER_STATE_DIR/upgrade.lock"
+flock 9
+migrate_update_cron_log || echo "Warning: could not move the update cron log out of /var/log/myportal." >&2
+install_upgrade_command || echo "Warning: could not install the myportal-upgrade command." >&2
+record_control_checkout || echo "Warning: could not record MYPORTAL_CONTROL_CHECKOUT in ${ENV_FILE}." >&2
+validate_origin_remote "$(git config --get remote.origin.url)"
+validate_required_configuration
+UPGRADE_STARTED_AT=$(date --iso-8601=seconds)
+PREVIOUS_RELEASE=$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)
+git fetch --quiet origin main
+TARGET_REVISION=$(git rev-parse 'origin/main^{commit}')
+RELEASE_DIR="${RELEASE_ROOT}/${TARGET_REVISION}"
+PLAN_BASE=$(resolve_plan_base "$PREVIOUS_RELEASE")
+generate_deployment_plan "$PLAN_BASE" "$TARGET_REVISION"
+
+# The plan and every subsequent decision are recorded before preparation or
+# live-release changes begin.
+write_upgrade_status preparing "Deployment plan ${DEPLOYMENT_ACTION} for ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
+
+# Artifact validation is preparation, not cutover. A staged bundle must be
+# complete and valid before any release, instance, or active link moves. The
+# normal GitHub Release delivery path does not stage a server-side bundle.
+if [[ "$(plan_field validate_tray_artifacts)" == True ]]; then
+  if ! prepare_tray_artifacts "$TARGET_REVISION"; then
+    record_step tray_artifacts failed "missing_stale_or_invalid_${TARGET_REVISION}" 0
+    write_upgrade_status failed "Required tray artifacts failed validation; the active release was not touched." "$DEPLOYMENT_REASON"
     exit 1
   fi
-  local instances=(${MYPORTAL_ROLLING_INSTANCES:-blue green})
-  local state_file="${MYPORTAL_NGINX_STATE_FILE:-/etc/nginx/myportal-bluegreen.state}"
-  declare -A port_for
-  port_for[blue]="${MYPORTAL_BLUE_PORT:-8001}"
-  port_for[green]="${MYPORTAL_GREEN_PORT:-8002}"
-  local total_ready_wait=0
-
-  restore_all_instances() {
-    if [[ ! -w "$state_file" && ! -w "$(dirname "$state_file")" ]]; then
-      return
-    fi
-    {
-      for other in "${instances[@]}"; do
-        echo "server 127.0.0.1:${port_for[$other]} max_fails=3 fail_timeout=10s;"
-      done
-    } > "$state_file"
-    if command -v nginx >/dev/null 2>&1; then
-      nginx -s reload || true
-    fi
-  }
-
-  for instance in "${instances[@]}"; do
-    local unit="myportal@${instance}.service"
-    local port="${port_for[$instance]:-8000}"
-    echo "Rolling deploy: draining ${instance} (port ${port})..."
-    # Mark the instance as drained in the nginx state file (the
-    # blue/green nginx config includes this file inside its upstream
-    # block) and reload nginx so traffic stops going to it.
-    if [[ -w "$state_file" || -w "$(dirname "$state_file")" ]]; then
-      {
-        for other in "${instances[@]}"; do
-          if [[ "$other" == "$instance" ]]; then
-            echo "server 127.0.0.1:${port_for[$other]} down;"
-          else
-            echo "server 127.0.0.1:${port_for[$other]} max_fails=3 fail_timeout=10s;"
-          fi
-        done
-      } > "$state_file"
-      if command -v nginx >/dev/null 2>&1; then
-        nginx -s reload || true
-      fi
-    else
-      echo "Warning: ${state_file} not writable; relying on systemd stop+start to drain." >&2
-    fi
-
-    # Give in-flight requests a brief window to finish before we
-    # restart the worker pool.
-    sleep "${MYPORTAL_DRAIN_SECONDS:-5}"
-
-    echo "Rolling deploy: restarting ${unit}..."
-    if ! systemctl restart "$unit"; then
-      restore_all_instances
-      echo "Error: systemctl restart ${unit} failed; aborting rolling deploy with ${instance} drained." >&2
-      exit 1
-    fi
-    local ready_started=$SECONDS
-    if ! wait_for_ready "http://127.0.0.1:${port}/readyz" "${MYPORTAL_READY_TIMEOUT:-60}"; then
-      total_ready_wait=$((total_ready_wait + SECONDS - ready_started))
-      restore_all_instances
-      echo "Error: ${instance} failed readiness check; aborting rolling deploy with ${instance} drained." >&2
-      exit 1
-    fi
-    total_ready_wait=$((total_ready_wait + SECONDS - ready_started))
-
-    # Re-enable the instance in the upstream and reload nginx.
-    if [[ -w "$state_file" || -w "$(dirname "$state_file")" ]]; then
-      {
-        for other in "${instances[@]}"; do
-          echo "server 127.0.0.1:${port_for[$other]} max_fails=3 fail_timeout=10s;"
-        done
-      } > "$state_file"
-      if command -v nginx >/dev/null 2>&1; then
-        nginx -s reload || true
-      fi
-    fi
-    echo "Rolling deploy: ${instance} back in service."
-  done
-  UPGRADE_READY_WAIT_SECONDS="$total_ready_wait"
-  echo "Rolling deploy: readiness confirmed after ${UPGRADE_READY_WAIT_SECONDS}s total."
-  echo "Rolling deploy complete."
-}
-
-# ---------------------------------------------------------------------------
-# Tray app build helpers
-# ---------------------------------------------------------------------------
-
-GO_MIN_MAJOR=1
-GO_MIN_MINOR=22
-GO_BIN=""
-DOTNET_BIN=""
-
-go_satisfies_version() {
-  local go_bin="$1"
-  local version_output
-  version_output=$("$go_bin" version 2>/dev/null) || return 1
-  local major minor
-  if [[ "$version_output" =~ go([0-9]+)\.([0-9]+) ]]; then
-    major="${BASH_REMATCH[1]}"
-    minor="${BASH_REMATCH[2]}"
-    if [[ "$major" -gt "$GO_MIN_MAJOR" ]] || \
-       [[ "$major" -eq "$GO_MIN_MAJOR" && "$minor" -ge "$GO_MIN_MINOR" ]]; then
-      return 0
-    fi
-  fi
-  return 1
-}
-
-detect_go() {
-  local -a candidates=("${GOROOT:-/usr/local/go}/bin/go" "go")
-  local candidate resolved
-  for candidate in "${candidates[@]}"; do
-    if [[ "$candidate" == /* ]]; then
-      [[ -x "$candidate" ]] && resolved="$candidate" || continue
-    else
-      command -v "$candidate" >/dev/null 2>&1 && resolved=$(command -v "$candidate") || continue
-    fi
-    if go_satisfies_version "$resolved"; then
-      printf '%s' "$resolved"
-      return 0
-    fi
-  done
-  return 1
-}
-
-ensure_go_toolchain() {
-  local go_bin
-  if go_bin=$(detect_go); then
-    echo "Go toolchain found: $("$go_bin" version)."
-    GO_BIN="$go_bin"
-    return 0
-  fi
-
-  if ! command -v apt-get >/dev/null 2>&1; then
-    echo "Warning: apt-get not found; cannot install Go automatically." >&2
-    echo "Install Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ manually to enable tray app builds: https://go.dev/doc/install" >&2
-    return 1
-  fi
-
-  echo "Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ not found; installing via apt-get…"
-  if ! apt-get update -qq; then
-    echo "Warning: apt-get update failed; skipping Go installation." >&2
-    return 1
-  fi
-  if ! apt-get install -y -qq golang-go; then
-    echo "Warning: Failed to install golang-go package." >&2
-    return 1
-  fi
-
-  if go_bin=$(detect_go); then
-    echo "Go toolchain installed: $("$go_bin" version)."
-    GO_BIN="$go_bin"
-    return 0
-  fi
-
-  echo "Warning: golang-go installed but Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ was not detected." >&2
-  echo "Install Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ manually: https://go.dev/doc/install" >&2
-  return 1
-}
-
-ensure_make() {
-  if command -v make >/dev/null 2>&1; then
-    return 0
-  fi
-
-  if ! command -v apt-get >/dev/null 2>&1; then
-    echo "Warning: apt-get not found; cannot install make automatically." >&2
-    return 1
-  fi
-
-  echo "make not found; installing via apt-get…"
-  if ! apt-get install -y -qq make; then
-    echo "Warning: Failed to install make." >&2
-    return 1
-  fi
-}
-
-detect_dotnet() {
-  local -a candidates=("${HOME}/.dotnet/dotnet" "dotnet")
-  local candidate resolved
-  for candidate in "${candidates[@]}"; do
-    if [[ "$candidate" == /* ]]; then
-      [[ -x "$candidate" ]] && resolved="$candidate" || continue
-    else
-      command -v "$candidate" >/dev/null 2>&1 && resolved=$(command -v "$candidate") || continue
-    fi
-    if "$resolved" --version >/dev/null 2>&1; then
-      printf '%s' "$resolved"
-      return 0
-    fi
-  done
-  return 1
-}
-
-ensure_dotnet() {
-  local dotnet_bin
-  if dotnet_bin=$(detect_dotnet); then
-    echo ".NET SDK found: $("$dotnet_bin" --version)."
-    DOTNET_BIN="$dotnet_bin"
-    return 0
-  fi
-
-  if ! command -v apt-get >/dev/null 2>&1; then
-    echo "Warning: apt-get not found; cannot install .NET SDK automatically." >&2
-    echo "Install .NET SDK 8+ manually to enable MSI builds: https://dotnet.microsoft.com/download" >&2
-    return 1
-  fi
-
-  echo ".NET SDK not found; installing via apt-get…"
-  if ! apt-get update -qq; then
-    echo "Warning: apt-get update failed; skipping .NET SDK installation." >&2
-    return 1
-  fi
-  if ! apt-get install -y -qq dotnet-sdk-8.0 2>/dev/null && \
-     ! apt-get install -y -qq dotnet-sdk-9.0 2>/dev/null; then
-    echo "Warning: Failed to install .NET SDK via apt-get." >&2
-    echo "Install .NET SDK 8+ manually: https://dotnet.microsoft.com/download" >&2
-    return 1
-  fi
-
-  if dotnet_bin=$(detect_dotnet); then
-    echo ".NET SDK installed: $("$dotnet_bin" --version)."
-    DOTNET_BIN="$dotnet_bin"
-    return 0
-  fi
-
-  echo "Warning: .NET SDK installed but dotnet binary not found on PATH." >&2
-  return 1
-}
-
-ensure_wix() {
-  # Add dotnet global tools directory to PATH so installed tools are found.
-  # WiX v7 requires accepting the FireGiant Open Source Maintenance Fee
-  # (OSMF) EULA. We pass `-acceptEula wix7` on the `wix build` command line
-  # per https://docs.firegiant.com/wix/osmf/ so unattended builds do not
-  # fail with WIX7015.
-  export PATH="${HOME}/.dotnet/tools:${PATH}"
-
-  if command -v wix >/dev/null 2>&1; then
-    local current_version
-    current_version=$(wix --version 2>/dev/null | head -n1 | awk '{print $1}')
-    if [[ "$current_version" == 7.* ]]; then
-      return 0
-    fi
-    echo "Found WiX version ${current_version:-unknown}; replacing with v7…"
-    if [[ -n "$DOTNET_BIN" ]] || ensure_dotnet; then
-      "$DOTNET_BIN" tool uninstall --global wix >/dev/null 2>&1 || true
-    fi
-  fi
-
-  # Ensure .NET SDK is available first.
-  if [[ -z "$DOTNET_BIN" ]]; then
-    if ! ensure_dotnet; then
-      return 1
-    fi
-  fi
-
-  echo "WiX v7 not found; installing via dotnet tool install…"
-  if ! "$DOTNET_BIN" tool install --global wix --version "7.*" 2>/dev/null; then
-    # If the tool is already installed but outdated, update it.
-    if ! "$DOTNET_BIN" tool update --global wix --version "7.*" 2>/dev/null; then
-      echo "Warning: Failed to install WiX v7 via dotnet tool install." >&2
-      return 1
-    fi
-  fi
-
-  # Re-source PATH so the newly installed wix binary is found.
-  export PATH="${HOME}/.dotnet/tools:${PATH}"
-
-  if command -v wix >/dev/null 2>&1; then
-    echo "WiX v7 installed successfully."
-    return 0
-  fi
-
-  echo "Warning: WiX v7 installed but wix binary not found on PATH." >&2
-  return 1
-}
-
-build_tray_app() {
-  local tray_dir="${PROJECT_ROOT}/tray"
-  local static_tray_dir="${PROJECT_ROOT}/app/static/tray"
-
-  if [[ ! -f "${tray_dir}/Makefile" ]]; then
-    echo "Tray app Makefile not found at ${tray_dir}/Makefile; skipping tray build."
-    return
-  fi
-
-  if ! ensure_go_toolchain; then
-    echo "Skipping tray app build: Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ toolchain not available." >&2
-    return
-  fi
-
-  if ! ensure_make; then
-    echo "Skipping tray app build: make not available." >&2
-    return
-  fi
-
-  if [[ -z "$GO_BIN" ]]; then
-    echo "Warning: GO_BIN is unset after toolchain detection; skipping tray app build." >&2
-    return
-  fi
-
-  local go_dir
-  go_dir=$(dirname "$GO_BIN")
-
-  # Build Windows MSI installer directly via build-msi (which depends on
-  # build-windows).  We do not run build-all first because that includes
-  # macOS targets which require lipo/pkgbuild and therefore fail on Linux
-  # hosts, causing an early return that skips the MSI entirely.
-  #
-  # WiX is Windows-only (see wixtoolset/issues#7154): the Directory/@Name
-  # validator depends on Windows path semantics and always fails on
-  # Linux/macOS with WIX0389.  So on non-Windows hosts we don't even try —
-  # the Makefile target itself also short-circuits, but skipping here keeps
-  # the upgrade output free of the misleading "WiX not available" warning.
-  local host_os
-  host_os=$(uname -s 2>/dev/null || echo Unknown)
-  case "$host_os" in
-    MINGW*|MSYS*|CYGWIN*|Windows_NT)
-      if ensure_wix; then
-        echo "Building Windows MSI installer…"
-        if (cd "$tray_dir" && PATH="${go_dir}:${HOME}/.dotnet/tools:${PATH}" make build-msi); then
-          echo "MSI installer built: ${tray_dir}/dist/windows/myportal-tray.msi"
-        else
-          echo "Warning: MSI build failed." >&2
-        fi
-      else
-        echo "Warning: WiX v7 not available; skipping MSI build." >&2
-        echo "Install WiX v7 manually with: dotnet tool install --global wix --version \"7.*\"" >&2
-      fi
-      ;;
-    Darwin)
-      echo "Skipping MSI build: WiX only supports Windows hosts (host: ${host_os})."
-      echo "Building macOS PKG and DMG installers…"
-      if (cd "$tray_dir" && PATH="${go_dir}:${PATH}" make build-dmg); then
-        echo "macOS installers built: ${tray_dir}/dist/darwin/myportal-tray.pkg and .dmg"
-      else
-        echo "Warning: macOS installer build failed." >&2
-      fi
-      ;;
-    *)
-      echo "Skipping MSI build: WiX only supports Windows hosts (host: ${host_os})."
-      echo "Build the MSI on a Windows machine and copy it to ${static_tray_dir}/myportal-tray.msi."
-      echo "Build the macOS PKG/DMG on a macOS machine and copy them to ${static_tray_dir}/."
-      ;;
-  esac
-
-  # Copy any built installers to app/static/tray/ so they are served via HTTP.
-  mkdir -p "$static_tray_dir"
-  local copied=0
-  if [[ -f "${tray_dir}/dist/windows/myportal-tray.msi" ]]; then
-    cp "${tray_dir}/dist/windows/myportal-tray.msi" "${static_tray_dir}/myportal-tray.msi"
-    echo "Copied myportal-tray.msi → app/static/tray/"
-    copied=1
-  fi
-  if [[ -f "${tray_dir}/dist/darwin/myportal-tray.pkg" ]]; then
-    cp "${tray_dir}/dist/darwin/myportal-tray.pkg" "${static_tray_dir}/myportal-tray.pkg"
-    echo "Copied myportal-tray.pkg → app/static/tray/"
-    copied=1
-  fi
-  if [[ -f "${tray_dir}/dist/darwin/myportal-tray.dmg" ]]; then
-    cp "${tray_dir}/dist/darwin/myportal-tray.dmg" "${static_tray_dir}/myportal-tray.dmg"
-    echo "Copied myportal-tray.dmg → app/static/tray/"
-    copied=1
-  fi
-  if [[ "$copied" -eq 0 ]]; then
-    echo "No installer packages found to copy to app/static/tray/." >&2
-  fi
-}
-
-changed_files=""
-if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
-  echo "Repository updated to $POST_PULL_HEAD."
-  update_version_file
-
-  # Detect whether the pulled diff is fully scoped to one or more
-  # feature packs at ``app/features/<slug>/``.  Pack-only updates can
-  # be hot-reloaded in-process by the running scheduler (see
-  # ``app/services/scheduler.py::_consume_feature_pack_reload_flag``)
-  # so we must not bounce the service for them.  Non-pack changes
-  # (and ``FORCE_RESTART=1``) still go through the normal restart
-  # path because they may touch dependencies, middleware, migrations,
-  # or the FastAPI app object itself.
-  FEATURE_PACK_DIFF_SLUGS=""
-  if [[ "$FORCE_RESTART" != "1" ]]; then
-    changed_files=$(git diff --name-only "$PRE_PULL_HEAD" "$POST_PULL_HEAD" || true)
-    if [[ -n "$changed_files" ]]; then
-      pack_only=1
-      slugs=""
-      while IFS= read -r changed; do
-        [[ -z "$changed" ]] && continue
-        if [[ "$changed" != app/features/* ]]; then
-          pack_only=0
-          break
-        fi
-        rest="${changed#app/features/}"
-        slug="${rest%%/*}"
-        if [[ -z "$slug" || "$rest" == "$slug" ]]; then
-          # File sits directly under app/features/ (e.g. __init__.py
-          # of the package itself) — not pack-scoped.
-          pack_only=0
-          break
-        fi
-        case " $slugs " in
-          *" $slug "*) : ;;
-          *) slugs="${slugs:+$slugs }$slug" ;;
-        esac
-      done <<<"$changed_files"
-      if [[ "$pack_only" -eq 1 && -n "$slugs" ]]; then
-        FEATURE_PACK_DIFF_SLUGS="$slugs"
-      fi
-    fi
-  fi
-
-  if [[ -n "$FEATURE_PACK_DIFF_SLUGS" ]]; then
-    UPGRADE_REASON="feature_pack_hot_reload"
-    echo "Pulled diff is scoped to feature pack(s): ${FEATURE_PACK_DIFF_SLUGS}."
-    echo "Skipping dependency install and service restart; the running scheduler will hot-reload these packs."
-    mkdir -p "${PROJECT_ROOT}/var/state"
-    {
-      for slug in $FEATURE_PACK_DIFF_SLUGS; do
-        printf '%s\n' "$slug"
-      done
-    } > "${PROJECT_ROOT}/var/state/feature_pack_reload.flag"
-    chmod 640 "${PROJECT_ROOT}/var/state/feature_pack_reload.flag" >/dev/null 2>&1 || true
-    write_upgrade_status "succeeded" "Feature pack hot-reload scheduled for ${FEATURE_PACK_DIFF_SLUGS}." "$UPGRADE_REASON"
-    UPGRADE_STATUS_WRITTEN=1
-  else
-    RESTART_MODE=$(resolve_effective_upgrade_mode "$REQUESTED_UPGRADE_MODE" "$changed_files")
-    echo "Applying upgrade using ${RESTART_MODE} mode (requested: ${REQUESTED_UPGRADE_MODE}; reason: ${UPGRADE_REASON})."
-    install_dependencies
-    build_tray_app
-    if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
-      run_restart_helper
-      write_upgrade_status "succeeded" "Upgrade applied using ${RESTART_MODE} mode." "$UPGRADE_REASON"
-      UPGRADE_STATUS_WRITTEN=1
-    else
-      echo "Auto-fallback mode detected; caller will relaunch the service." >&2
-      write_upgrade_status "succeeded" "Dependencies updated; caller will relaunch the service." "$UPGRADE_REASON"
-      UPGRADE_STATUS_WRITTEN=1
-    fi
-  fi
-elif [[ "$FORCE_RESTART" == "1" ]]; then
-  RESTART_MODE="restart"
-  UPGRADE_REASON="force_restart_requested"
-  echo "No repository changes detected but FORCE_RESTART=1; reinstalling dependencies and restarting service."
-  update_version_file
-  install_dependencies
-  build_tray_app
-  if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
-    run_restart_helper
-    write_upgrade_status "succeeded" "Force restart completed." "$UPGRADE_REASON"
-    UPGRADE_STATUS_WRITTEN=1
-  else
-    echo "Auto-fallback mode detected; caller responsible for restart handling." >&2
-    write_upgrade_status "succeeded" "Dependencies refreshed; caller responsible for restart handling." "$UPGRADE_REASON"
-    UPGRADE_STATUS_WRITTEN=1
-  fi
 else
-  echo "No changes detected from remote."
-  UPGRADE_REASON="already_up_to_date"
-  write_upgrade_status "skipped" "No changes detected from remote." "$UPGRADE_REASON"
-  UPGRADE_STATUS_WRITTEN=1
+  record_step tray_artifacts skipped "tray_inputs_unchanged" 0
 fi
+case "$DEPLOYMENT_ACTION" in
+  migration-only|staged-cutover) ;;
+  *) record_step dependency_layer skipped "no_python_release_required" 0 ;;
+esac
+
+case "$DEPLOYMENT_ACTION" in
+  no-op)
+    write_upgrade_status succeeded "No production changes were required for ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
+    cleanup_old_releases
+    exit 0
+    ;;
+  static-publish)
+    publish_paths_without_worker_reload "$TARGET_REVISION" static
+    write_upgrade_status succeeded "Versioned static assets ${TARGET_REVISION} published without reloading workers." "$DEPLOYMENT_REASON"
+    cleanup_old_releases
+    exit 0
+    ;;
+  template-reload)
+    publish_paths_without_worker_reload "$TARGET_REVISION" static
+    publish_paths_without_worker_reload "$TARGET_REVISION" template
+    write_upgrade_status succeeded "Templates published and caches invalidated without reloading workers." "$DEPLOYMENT_REASON"
+    cleanup_old_releases
+    exit 0
+    ;;
+  feature-pack-reload)
+    # Candidate code is imported from the same immutable release used by a
+    # normal cutover.  The active link and control checkout remain untouched.
+    prepare_release "$TARGET_REVISION" "$RELEASE_DIR"
+    if ! verify_release_sources "$RELEASE_DIR"; then
+      write_upgrade_status failed "Release ${TARGET_REVISION} has Python syntax errors; it was not deployed." "$DEPLOYMENT_REASON"
+      exit 1
+    fi
+    request_id="${TARGET_REVISION}-$$-$(date +%s)"
+    reload_flag="${SHARED_ROOT}/state/feature_pack_reload.flag"
+    reload_result="${SHARED_ROOT}/state/feature_pack_reload.${request_id}.result"
+    rm -f "$reload_result"
+    reload_staging="${UPDATER_STATE_DIR}/feature_pack_reload.flag.$$"
+    python3 - "$DEPLOYMENT_PLAN_FILE" "$request_id" "$TARGET_REVISION" "$RELEASE_DIR" "$reload_staging" <<'PY'
+import json, os, sys
+plan_file, request_id, revision, release_path, output = sys.argv[1:]
+with open(plan_file, encoding="utf-8") as handle:
+    plan = handle.read()
+payload = {
+    "request_id": request_id,
+    "revision": revision,
+    "release_path": release_path,
+    "packs": json.loads(plan)["feature_packs"],
+}
+with open(output, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, sort_keys=True)
+    handle.flush()
+    os.fsync(handle.fileno())
+PY
+    publish_state_file "$reload_staging" "$reload_flag"
+    rm -f -- "$reload_staging"
+    write_upgrade_status reloading "Waiting for feature-pack activation acknowledgement for ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
+    reload_deadline=$((SECONDS + FEATURE_PACK_RELOAD_TIMEOUT))
+    reload_acknowledged=false
+    while ((SECONDS < reload_deadline)); do
+      if [[ -f "$reload_result" ]] && python3 - "$reload_result" "$request_id" "$TARGET_REVISION" "$DEPLOYMENT_PLAN_FILE" <<'PY'
+import json, os, stat, sys
+# Written by the service account: never follow a symlink or block on a FIFO.
+fd = os.open(sys.argv[1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+with os.fdopen(fd, encoding="utf-8") as handle:
+    if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+        raise SystemExit(1)
+    result = json.loads(handle.read(1 << 20))
+expected = sorted(json.load(open(sys.argv[4], encoding="utf-8"))["feature_packs"])
+ok = result.get("request_id") == sys.argv[2] and result.get("revision") == sys.argv[3]
+ok = ok and result.get("status") == "succeeded"
+ok = ok and sorted(result.get("loaded", {})) == expected
+ok = ok and all(result["loaded"].get(pack) == sys.argv[3] for pack in expected)
+raise SystemExit(0 if ok else 1)
+PY
+      then
+        reload_acknowledged=true
+        break
+      fi
+      sleep 1
+    done
+    rm -f "$reload_result"
+    if [[ "$reload_acknowledged" == true ]]; then
+      # Only now may deployment metadata advance.  Point the serving slot and
+      # canonical release link at the acknowledged immutable candidate so a
+      # later service restart cannot silently roll the packs back.
+      active_instance=$(read_active)
+      atomic_link "$RELEASE_DIR" "$INSTANCE_ROOT/$active_instance"
+      atomic_link "$RELEASE_DIR" "$CURRENT_LINK"
+      write_upgrade_status succeeded "Feature packs loaded and acknowledged at ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
+      cleanup_old_releases
+      exit 0
+    fi
+    # Do not infer success from Git metadata.  A negative result or timeout
+    # always continues into the verified immutable-release cutover below.
+    rm -f "$reload_flag"
+    DEPLOYMENT_ACTION="staged-cutover"
+    DEPLOYMENT_REASON="feature_pack_reload_unacknowledged"
+    record_step feature_pack_reload failed "acknowledgement_timeout_or_activation_failure" "$FEATURE_PACK_RELOAD_TIMEOUT"
+    ;;
+  tray-publish)
+    if [[ "$TRAY_ARTIFACTS_AVAILABLE" == true ]]; then
+      publish_tray_artifacts "$TARGET_REVISION"
+      tray_message="Verified CI tray artifacts ${TARGET_REVISION} published without reloading workers."
+    else
+      tray_message="Tray source ${TARGET_REVISION} is delivered through GitHub Releases; no server-side CI bundle was staged."
+    fi
+    write_upgrade_status succeeded "$tray_message" "$DEPLOYMENT_REASON"
+    cleanup_old_releases
+    exit 0
+    ;;
+  migration-only|staged-cutover) ;;
+  *) echo "Unknown deployment action: ${DEPLOYMENT_ACTION}" >&2; exit 1 ;;
+esac
+
+write_upgrade_status preparing "Preparing immutable release ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
+prepare_release "$TARGET_REVISION" "$RELEASE_DIR"
+if ! verify_release_sources "$RELEASE_DIR"; then
+  write_upgrade_status failed "Release ${TARGET_REVISION} has Python syntax errors; it was not deployed." "$DEPLOYMENT_REASON"
+  exit 1
+fi
+# The inactive slot may still point at a release produced before persistent
+# upload links were introduced. Repair both assigned releases before systemd
+# can start or roll back either one; otherwise an old worker loops while trying
+# to create private_uploads inside its read-only release directory.
+repair_assigned_release_uploads
+run_migration_phase "$RELEASE_DIR" "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"
+if is_additive_migration_only_release "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"; then
+  # Schema-only expands need no worker signal: the serving revision was
+  # explicitly declared compatible and the database lock applied them once.
+  atomic_link "$RELEASE_DIR" "$CURRENT_LINK"
+  RESTART_MODE="migration-only"
+  write_upgrade_status succeeded "Additive migration release ${TARGET_REVISION} applied; application workers were not reloaded." "$DEPLOYMENT_REASON"
+  echo "Successfully applied migration-only release ${TARGET_REVISION}."
+  cleanup_old_releases
+  exit 0
+fi
+install_blue_green_service_unit "$RELEASE_DIR"
+run_rolling_restart "$TARGET_REVISION" "$RELEASE_DIR"
+retire_legacy_service
+write_upgrade_status succeeded "Release ${TARGET_REVISION} is serving; previous release retained."
+echo "Successfully deployed ${TARGET_REVISION} from ${RELEASE_DIR}."
+cleanup_old_releases

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, IPvAnyAddress
 
 
 class TrayDeviceFacts(BaseModel):
@@ -32,6 +32,21 @@ class TrayEnrolResponse(BaseModel):
     poll_interval_seconds: int = 30
 
 
+class TrayTRMMSyncRequest(BaseModel):
+    """Identifiers posted by a Tactical RMM agent-side sync script."""
+
+    agent_id: str = Field(min_length=1, max_length=255)
+    tray_agent_id: str = Field(min_length=1, max_length=255)
+    create_asset_if_missing: bool = True
+
+
+class TrayTRMMSyncResponse(BaseModel):
+    status: str
+    device_id: int
+    asset_id: int
+    agent_id: str
+
+
 class TrayHeartbeatRequest(BaseModel):
     console_user: Optional[str] = Field(default=None, max_length=255)
     agent_version: Optional[str] = Field(default=None, max_length=32)
@@ -46,6 +61,8 @@ class TrayMenuNode(BaseModel):
     * ``label`` — non-interactive caption.
     * ``app_version`` — non-interactive caption showing the tray app version.
     * ``link`` — opens ``url`` in the default browser.
+      The ``{{service_status_url}}`` URL variable is resolved by the server to
+      the absolute published status-page URL for the device's company.
     * ``submenu`` — has ``children``.
     * ``display_text`` — opens a popup with ``text`` (sanitised HTML).
     * ``env_var`` — reads an env var named ``name`` and shows / copies it.
@@ -53,6 +70,7 @@ class TrayMenuNode(BaseModel):
     * ``submit_ticket`` — opens the submit-a-ticket dialog.
     * ``submit_syncro_ticket`` — opens the same dialog and creates the ticket in Syncro.
     * ``TRMM_Script`` — asks MyPortal to run a selected Tactical RMM script on the linked asset.
+    * ``scan_network`` — asks an enabled network-scanner device to scan now.
     * ``refresh_config`` — asks the tray service to pull the latest menu config.
     * ``separator`` — visual divider.
     * ``quit`` — exits the tray application.
@@ -87,6 +105,46 @@ class TrayConfigResponse(BaseModel):
     # "browser" = always open in the default system browser.
     # "shell"   = require the dedicated chat shell; no browser fallback.
     chat_client_mode: Optional[str] = None
+    network_scanner_enabled: bool = False
+    network_scan_interval_minutes: int = 360
+    network_scan_wan_cidrs: list[str] = Field(default_factory=list)
+    network_scan_local_cidrs: list[str] = Field(default_factory=list)
+
+
+class TrayOutlookSignaturesRequest(BaseModel):
+    """Email addresses of the Outlook accounts configured for the signed-in user."""
+
+    addresses: list[str] = Field(default_factory=list, max_length=20)
+
+
+class TrayOutlookSignature(BaseModel):
+    address: str
+    name: str
+    html: str
+    text: str
+    hash: str
+
+
+class TrayOutlookSignaturesResponse(BaseModel):
+    enabled: bool
+    template_slug: Optional[str] = None
+    signatures: list[TrayOutlookSignature] = Field(default_factory=list)
+    skipped: dict[str, str] = Field(default_factory=dict)
+
+
+class NetworkScanHost(BaseModel):
+    ip_address: str = Field(min_length=1, max_length=45)
+    mac_address: Optional[str] = Field(default=None, max_length=17)
+    hostname: Optional[str] = Field(default=None, max_length=255)
+    vendor: Optional[str] = Field(default=None, max_length=255)
+    os_details: Optional[str] = Field(default=None, max_length=500)
+    open_ports: Optional[str] = None
+
+
+class NetworkScanRequest(BaseModel):
+    wan_ip: IPvAnyAddress
+    subnets: list[str] = Field(default_factory=list, max_length=128)
+    hosts: list[NetworkScanHost] = Field(max_length=4096)
 
 
 class TrayMenuConfigCreate(BaseModel):

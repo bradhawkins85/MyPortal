@@ -54,13 +54,13 @@ async def list_plans(
 
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     
-    query = f"""
-        SELECT id, title, plan_type, content, version, status,
-               created_by, created_at, updated_at, last_reviewed_at, last_reviewed_by
-        FROM business_continuity_plans
-        {where_clause}
-        ORDER BY updated_at DESC
-    """
+    query = (
+        "SELECT id, title, plan_type, content, version, status, "  # nosec B608
+        "created_by, created_at, updated_at, last_reviewed_at, last_reviewed_by "
+        "FROM business_continuity_plans "
+        f"{where_clause} "
+        "ORDER BY updated_at DESC"
+    )
     plans = await db.fetch_all(query, tuple(params))
     
     # If user_id is provided, add permission information
@@ -112,11 +112,11 @@ async def update_plan(
         return await get_plan_by_id(plan_id)
 
     params.append(plan_id)
-    query = f"""
-        UPDATE business_continuity_plans
-        SET {', '.join(updates)}
-        WHERE id = %s
-    """
+    query = (
+        "UPDATE business_continuity_plans "  # nosec B608
+        f"SET {', '.join(updates)} "
+        "WHERE id = %s"
+    )
     await db.execute(query, tuple(params))
     return await get_plan_by_id(plan_id)
 

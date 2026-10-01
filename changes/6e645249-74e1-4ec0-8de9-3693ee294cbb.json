@@ -1,0 +1,7 @@
+{
+  "guid": "6e645249-74e1-4ec0-8de9-3693ee294cbb",
+  "occurred_at": "2026-09-23T00:00Z",
+  "change_type": "Feature",
+  "summary": "Added configurable Webhook Monitor deletion and retention rules.",
+  "content_hash": "563e167527bf762e772728074aca8a77b797f77274deab460a07e7d308013e7a"
+}

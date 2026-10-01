@@ -1,6 +1,8 @@
 """Redis client utilities."""
 from __future__ import annotations
 
+from contextlib import suppress
+
 from redis.asyncio import Redis
 from redis.asyncio.connection import ConnectionPool
 
@@ -49,13 +51,9 @@ async def close_redis_client() -> None:
     _redis_pool = None
 
     if client is not None:
-        try:
+        with suppress(Exception):
             await client.aclose()
-        except Exception:  # pragma: no cover - defensive cleanup
-            pass
 
     if pool is not None:
-        try:
+        with suppress(Exception):
             await pool.disconnect()
-        except Exception:  # pragma: no cover - defensive cleanup
-            pass

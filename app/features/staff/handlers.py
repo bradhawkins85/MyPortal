@@ -14,6 +14,13 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import ValidationError
 
 from app import main as main_module
+from app.repositories import staff_custom_fields as staff_custom_fields_repo
+from app.repositories import staff_onboarding_workflows as staff_workflow_repo
+from app.repositories import staff_requests as staff_requests_repo
+from app.schemas.staff_onboarding_workflows import (
+    CompanyWorkflowPolicyUpsertSchema,
+    WorkflowConfigSchema,
+)
 from app.services import notifications as notifications_service
 
 from .helpers import (
@@ -24,8 +31,6 @@ from .helpers import (
     _staff_member_matches_company_email_domains,
 )
 
-CompanyWorkflowPolicyUpsertSchema = main_module.CompanyWorkflowPolicyUpsertSchema
-WorkflowConfigSchema = main_module.WorkflowConfigSchema
 _parse_input_datetime = main_module._parse_input_datetime
 _parse_local_datetime_to_utc = main_module._parse_local_datetime_to_utc
 _raw_value_includes_time = main_module._raw_value_includes_time
@@ -44,12 +49,9 @@ message_templates_service = main_module.message_templates_service
 modules_service = main_module.modules_service
 settings = main_module.settings
 staff_access_service = main_module.staff_access_service
-staff_custom_fields_repo = main_module.staff_custom_fields_repo
 staff_field_config_service = main_module.staff_field_config_service
 staff_onboarding_workflow_service = main_module.staff_onboarding_workflow_service
 staff_repo = main_module.staff_repo
-staff_requests_repo = main_module.staff_requests_repo
-staff_workflow_repo = main_module.staff_workflow_repo
 tickets_service = main_module.tickets_service
 user_company_repo = main_module.user_company_repo
 user_repo = main_module.user_repo
@@ -388,6 +390,7 @@ async def staff_page(
     is_super_admin = bool(user.get("is_super_admin"))
     is_admin = is_super_admin or bool(membership and membership.get("is_admin"))
     is_helpdesk_technician = await main_module._is_helpdesk_technician(user, request)
+    has_admin_technician_access = await main_module._has_admin_technician_access(user, request)
     membership_data = membership or {}
     raw_staff_menu_access = main_module.normalize_menu_permissions(
         membership_data.get("menu_permissions")
@@ -712,6 +715,7 @@ async def staff_page(
         "is_super_admin": is_super_admin,
         "is_admin": is_admin,
         "is_helpdesk_technician": is_helpdesk_technician,
+        "has_admin_technician_access": has_admin_technician_access,
         "staff_permission": staff_permission,
         "can_edit_staff": can_edit_staff,
         "can_request_staff_offboarding": can_request_staff_offboarding,
@@ -740,8 +744,77 @@ async def staff_page(
         "manual_onedrive_export_enabled": bool(
             str((company_record or {}).get("onedrive_export_drive_id") or "").strip()
         ),
+        "open_add_staff_modal": bool(
+            can_edit_staff
+            and getattr(getattr(request, "state", None), "open_add_staff_modal", False)
+        ),
     }
     return await _render_template("staff/index.html", request, user, extra=extra)
+
+
+async def staff_add_page(
+    request: Request,
+    enabled: str = "",
+    department: str = "",
+    show_ex_staff: str = "",
+):
+    """Render the staff page with the add staff member modal opened on load."""
+
+    request.state.open_add_staff_modal = True
+    return await staff_page(
+        request,
+        enabled=enabled,
+        department=department,
+        show_ex_staff=show_ex_staff,
+    )
+
+
+async def staff_member_tickets(staff_id: int, request: Request) -> JSONResponse:
+    """Return tickets requested by one staff member for the technician modal."""
+    user, redirect = await main_module._require_authenticated_user(request)
+    if redirect or not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not await main_module._has_admin_technician_access(user, request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Technician access required")
+
+    company_id = user.get("company_id")
+    staff_member = await staff_repo.get_staff_by_id(staff_id)
+    if not staff_member or company_id is None or int(staff_member.get("company_id") or 0) != int(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff member not found")
+
+    dashboard = await tickets_service.load_dashboard_state(
+        company_id=int(company_id),
+        requester_staff_id=staff_id,
+        limit=None,
+        include_reference_data=False,
+    )
+    status_labels = {
+        definition.tech_status: definition.tech_label
+        for definition in dashboard.status_definitions
+    }
+    rows = []
+    for ticket in dashboard.tickets:
+        assigned = dashboard.user_lookup.get(int(ticket.get("assigned_user_id") or 0), {})
+        assigned_name = " ".join(
+            str(assigned.get(key) or "").strip() for key in ("first_name", "last_name")
+        ).strip()
+        company = dashboard.company_lookup.get(int(ticket.get("company_id") or 0), {})
+        ticket_status = str(ticket.get("status") or "open")
+        rows.append(
+            {
+                "id": ticket.get("id"),
+                "subject": ticket.get("subject") or "Untitled ticket",
+                "status": status_labels.get(ticket_status, ticket_status.replace("_", " ").title()),
+                "priority": ticket.get("priority") or "normal",
+                "company": company.get("name") or ticket.get("company_id") or "—",
+                "assigned": assigned_name or assigned.get("email") or "—",
+                "updatedAt": ticket.get("updated_at"),
+            }
+        )
+    staff_name = " ".join(
+        str(staff_member.get(key) or "").strip() for key in ("first_name", "last_name")
+    ).strip()
+    return JSONResponse({"staffName": staff_name or staff_member.get("email") or f"Staff {staff_id}", "tickets": _serialise_for_json(rows)})
 
 
 _WORKFLOW_POLICY_FORM_SCHEMA: dict[str, Any] = {
@@ -909,6 +982,16 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "description": "Creates an asset password entry in Hudu under the company linked to this workflow for secure credential storage.",
     },
     {
+        "type": "create_myportal_credential",
+        "name": "Create MyPortal credential",
+        "description": "Stores an approved prior-step secret in this company's vault and exposes only its credential ID/version.",
+    },
+    {
+        "type": "share_myportal_credential",
+        "name": "Share MyPortal credential",
+        "description": "Grants verified, least-privilege vault access and exposes a link (never plaintext) to later steps.",
+    },
+    {
         "type": "delete_staff_record",
         "name": "Delete staff record",
         "description": (
@@ -1035,6 +1118,16 @@ _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "type": "hudu_push_password",
         "name": "Push password to Hudu",
         "description": "Creates an asset password entry in Hudu under the company linked to this workflow for secure credential storage.",
+    },
+    {
+        "type": "create_myportal_credential",
+        "name": "Create MyPortal credential",
+        "description": "Stores a newly rotated, organisation-controlled prior-step secret in this company's vault; never collect an employee's private password.",
+    },
+    {
+        "type": "share_myportal_credential",
+        "name": "Share MyPortal credential",
+        "description": "Grants verified, least-privilege vault access and exposes a link (never plaintext) to later steps.",
     },
     {
         "type": "delete_staff_record",
@@ -1650,11 +1743,25 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 ),
             },
             {
-                "name": "mark_source_read_only",
-                "label": "Mark source OneDrive read-only",
+                "name": "source_protection_operation",
+                "label": "Source protection operation",
+                "type": "select",
+                "default": "none",
+                "description": (
+                    "Explicitly disable the Entra account to prevent owner writes, or report that source protection was not requested. "
+                    "A read sharing invitation does not remove an owner's write access."
+                ),
+                "options": [
+                    {"value": "none", "label": "None (report not applied)"},
+                    {"value": "disable_account", "label": "Disable Entra account"},
+                ],
+            },
+            {
+                "name": "require_source_protection",
+                "label": "Require source protection",
                 "type": "checkbox",
-                "default": True,
-                "description": "Attempts to remove inherited permissions and grant the user read access after export.",
+                "default": False,
+                "description": "Pause the workflow unless the selected protection operation succeeds.",
             },
             {
                 "name": "wait_for_completion",
@@ -1678,7 +1785,6 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "options": [
                     {"value": "fail", "label": "Fail (safest)"},
                     {"value": "rename", "label": "Rename new export"},
-                    {"value": "replace", "label": "Replace existing"},
                 ],
             },
         ],
@@ -1989,6 +2095,34 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "default": "",
                 "description": "Optional description for this credential entry.",
             },
+        ],
+    },
+    "create_myportal_credential": {
+        "fields": [
+            {"name": "credential_name", "label": "Credential name", "type": "text", "default": "${vars.staff.full_name} - Account", "required": True, "description": "Supports workflow variable templates."},
+            {"name": "username", "label": "Username", "type": "text", "default": "${vars.staff.email}"},
+            {"name": "credential_class", "label": "Class", "type": "select", "default": "user", "options": ["user", "shared", "service", "device", "other"]},
+            {"name": "secret_source", "label": "Secret source", "type": "text", "default": "${vars.generated_password}", "required": True, "description": "Must be a protected output from an earlier step. Literal passwords cannot be saved."},
+            {"name": "owner", "label": "Owner", "type": "text", "default": "${vars.staff.full_name}"},
+            {"name": "asset_id", "label": "Linked asset ID (optional)", "type": "number", "required": False},
+            {"name": "ticket_id", "label": "Linked ticket ID (optional)", "type": "number", "required": False},
+            {"name": "expires_on", "label": "Expiry date (optional)", "type": "date", "required": False},
+            {"name": "review_on", "label": "Review date (optional)", "type": "date", "required": False},
+            {"name": "credential_output_var", "label": "Store credential ID as variable", "type": "text", "default": "credential_id", "description": "Only the non-secret credential ID is made available to later steps."},
+        ],
+    },
+    "share_myportal_credential": {
+        "fields": [
+            {"name": "credential_id", "label": "Credential ID", "type": "text", "default": "${vars.credential_id}", "required": True, "description": "ID from Create MyPortal credential or a same-company credential."},
+            {"name": "selector_type", "label": "Recipient selector", "type": "select", "options": ["staff", "job_title", "external"], "required": True},
+            {"name": "staff_id", "label": "Staff ID", "type": "text", "required": False},
+            {"name": "job_title", "label": "Job title", "type": "text", "required": False},
+            {"name": "recipient_email", "label": "External recipient email", "type": "text", "required": False},
+            {"name": "permissions", "label": "Permissions", "type": "text", "default": "reveal", "required": True, "description": "Comma-separated: enumerate, reveal, share, administer."},
+            {"name": "reason", "label": "Reason", "type": "textarea", "required": True},
+            {"name": "expires_at", "label": "Expiry (UTC, required for external)", "type": "text", "required": False},
+            {"name": "verification_code", "label": "Independent verification code", "type": "text", "required": False, "description": "Required for external one-time shares; deliver separately."},
+            {"name": "output_var", "label": "Output object variable", "type": "text", "default": "credential_share", "required": True},
         ],
     },
 }
@@ -3010,6 +3144,9 @@ async def create_staff_member(request: Request):
             custom_values[key] = str(raw_value or "").strip() or None
 
     requester_id = int(user["id"]) if user.get("id") is not None else None
+    requested_by_name, requested_by_email = (
+        staff_onboarding_workflow_service.requested_by_details(user)
+    )
 
     created = await staff_requests_repo.create_request(
         company_id=company_id,
@@ -3023,6 +3160,8 @@ async def create_staff_member(request: Request):
         request_notes=None,
         custom_fields=custom_values or None,
         requested_by_user_id=requester_id,
+        requested_by_name=requested_by_name,
+        requested_by_email=requested_by_email,
         requested_at=datetime.now(tz=timezone.utc),
     )
 
@@ -3148,62 +3287,44 @@ async def update_staff_member(staff_id: int, request: Request):
             }
         )
 
-    if is_super_admin:
-        first_name = (
-            get_value("firstName", "first_name") or existing.get("first_name") or ""
-        ).strip()
-        last_name = (
-            get_value("lastName", "last_name") or existing.get("last_name") or ""
-        ).strip()
-        email = (get_value("email") or existing.get("email") or "").strip()
-        mobile_phone = (
-            get_value("mobilePhone", "mobile_phone")
-            or existing.get("mobile_phone")
-            or ""
-        ).strip() or None
-        date_onboarded = _parse_input_datetime(
-            get_value("dateOnboarded", "date_onboarded"), assume_midnight=True
-        ) or _parse_input_datetime(existing.get("date_onboarded"))
-        if existing.get("date_onboarded") and not get_value(
-            "dateOnboarded", "date_onboarded"
-        ):
-            date_onboarded = _parse_input_datetime(existing.get("date_onboarded"))
-        enabled = bool(
-            get_value("enabled")
-            if get_value("enabled") is not None
-            else existing.get("enabled", True)
-        )
-        street = get_value("street") or existing.get("street")
-        city = get_value("city") or existing.get("city")
-        state_val = get_value("state") or existing.get("state")
-        postcode = get_value("postcode") or existing.get("postcode")
-        country = get_value("country") or existing.get("country")
-        department = get_value("department") or existing.get("department")
-        job_title = get_value("jobTitle", "job_title") or existing.get("job_title")
-        org_company = get_value("company", "org_company") or existing.get("org_company")
-        manager_name = get_value("managerName", "manager_name") or existing.get(
-            "manager_name"
-        )
-        account_action = get_value("accountAction", "account_action") or existing.get(
-            "account_action"
-        )
-    else:
-        first_name = existing.get("first_name") or ""
-        last_name = existing.get("last_name") or ""
-        email = existing.get("email") or ""
-        mobile_phone = existing.get("mobile_phone")
+    first_name = (
+        get_value("firstName", "first_name") or existing.get("first_name") or ""
+    ).strip()
+    last_name = (
+        get_value("lastName", "last_name") or existing.get("last_name") or ""
+    ).strip()
+    email = (get_value("email") or existing.get("email") or "").strip()
+    mobile_phone = (
+        get_value("mobilePhone", "mobile_phone")
+        or existing.get("mobile_phone")
+        or ""
+    ).strip() or None
+    date_onboarded = _parse_input_datetime(
+        get_value("dateOnboarded", "date_onboarded"), assume_midnight=True
+    ) or _parse_input_datetime(existing.get("date_onboarded"))
+    if existing.get("date_onboarded") and not get_value(
+        "dateOnboarded", "date_onboarded"
+    ):
         date_onboarded = _parse_input_datetime(existing.get("date_onboarded"))
-        enabled = bool(existing.get("enabled", True))
-        street = existing.get("street")
-        city = existing.get("city")
-        state_val = existing.get("state")
-        postcode = existing.get("postcode")
-        country = existing.get("country")
-        department = existing.get("department")
-        job_title = existing.get("job_title")
-        org_company = existing.get("org_company")
-        manager_name = existing.get("manager_name")
-        account_action = existing.get("account_action")
+    enabled = bool(
+        get_value("enabled")
+        if get_value("enabled") is not None
+        else existing.get("enabled", True)
+    )
+    street = get_value("street") or existing.get("street")
+    city = get_value("city") or existing.get("city")
+    state_val = get_value("state") or existing.get("state")
+    postcode = get_value("postcode") or existing.get("postcode")
+    country = get_value("country") or existing.get("country")
+    department = get_value("department") or existing.get("department")
+    job_title = get_value("jobTitle", "job_title") or existing.get("job_title")
+    org_company = get_value("company", "org_company") or existing.get("org_company")
+    manager_name = get_value("managerName", "manager_name") or existing.get(
+        "manager_name"
+    )
+    account_action = get_value("accountAction", "account_action") or existing.get(
+        "account_action"
+    )
 
     date_offboarded = _parse_input_datetime(
         get_value("dateOffboarded", "date_offboarded")
@@ -3474,6 +3595,9 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         if not notes
         else f"Type: {offboarding_type}\n\nNotes: {notes}"
     )
+    requested_by_name, requested_by_email = (
+        staff_onboarding_workflow_service.requested_by_details(user)
+    )
 
     updated = await staff_repo.update_staff(
         staff_id,
@@ -3502,6 +3626,8 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         onboarding_completed_at=existing.get("onboarding_completed_at"),
         approval_status="pending",
         requested_by_user_id=int(user["id"]) if user.get("id") is not None else None,
+        requested_by_name=requested_by_name,
+        requested_by_email=requested_by_email,
         requested_at=datetime.now(tz=timezone.utc),
         approved_by_user_id=None,
         approved_at=None,

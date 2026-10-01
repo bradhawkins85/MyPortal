@@ -21,8 +21,13 @@ def normalize_email(address: str) -> str:
 
 
 async def list_entries(*, search: str | None = None, limit: int = 100, offset: int = 0, sort: str = "created_at", direction: str = "desc") -> list[dict[str, Any]]:
-    sort_column = sort if sort in _ALLOWED_SORTS else "created_at"
-    sort_direction = "ASC" if str(direction).lower() == "asc" else "DESC"
+    if sort not in _ALLOWED_SORTS:
+        raise ValueError("Unsupported sort column")
+    direction_key = str(direction).lower()
+    if direction_key not in {"asc", "desc"}:
+        raise ValueError("Unsupported sort direction")
+    sort_column = sort
+    sort_direction = direction_key.upper()
     params: dict[str, Any] = {"limit": max(1, min(int(limit), 500)), "offset": max(0, int(offset))}
     where = ""
     if search:
@@ -36,7 +41,7 @@ async def list_entries(*, search: str | None = None, limit: int = 100, offset: i
         {where}
         ORDER BY {sort_column} {sort_direction}, id {sort_direction}
         LIMIT :limit OFFSET :offset
-        """,
+        """,  # nosec B608
         params,
     )
 
@@ -47,7 +52,7 @@ async def count_entries(*, search: str | None = None) -> int:
     if search:
         where = "WHERE email LIKE :search OR COALESCE(reason, '') LIKE :search OR COALESCE(last_event_type, '') LIKE :search"
         params["search"] = f"%{search.strip().lower()}%"
-    row = await db.fetch_one(f"SELECT COUNT(*) AS count FROM email_blocklist {where}", params)
+    row = await db.fetch_one(f"SELECT COUNT(*) AS count FROM email_blocklist {where}", params)  # nosec B608
     return int((row or {}).get("count") or 0)
 
 
@@ -79,7 +84,7 @@ async def filter_allowed(addresses: list[str]) -> tuple[list[str], list[str]]:
     keys = [a.lower() for a in unique]
     placeholders = ", ".join(f":email{i}" for i in range(len(keys)))
     params = {f"email{i}": email for i, email in enumerate(keys)}
-    rows = await db.fetch_all(f"SELECT email FROM email_blocklist WHERE email IN ({placeholders})", params)
+    rows = await db.fetch_all(f"SELECT email FROM email_blocklist WHERE email IN ({placeholders})", params)  # nosec B608
     blocked = {str(row.get("email") or "").lower() for row in rows}
     return [a for a in unique if a.lower() not in blocked], [a for a in unique if a.lower() in blocked]
 

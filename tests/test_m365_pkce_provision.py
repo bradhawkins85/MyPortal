@@ -130,6 +130,18 @@ async def test_m365_provision_uses_pkce(async_client: HttpxAsyncClient):
     assert "code_challenge" in qs, "Should include code_challenge for PKCE"
     assert qs.get("code_challenge_method", [None])[0] == "S256"
 
+    # The callback verifies the tenant using the signed ID token, so the
+    # authorization request must opt in to OpenID Connect.
+    requested_scopes = set(qs.get("scope", [""])[0].split())
+    assert {"openid", "profile", "offline_access"} <= requested_scopes
+
+
+def test_identity_validating_m365_flows_request_openid_scopes():
+    """Token exchanges that validate an ID token must request one."""
+    for scope in (m365_service.PROVISION_SCOPE, m365_service.CONNECT_SCOPE):
+        requested_scopes = set(scope.split())
+        assert {"openid", "profile"} <= requested_scopes
+
 
 @pytest.mark.anyio("asyncio")
 async def test_m365_provision_uses_pkce_even_when_admin_credentials_present(

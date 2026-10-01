@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -73,6 +72,16 @@ class LoginResponse(BaseModel):
     redirect: Optional[str] = None
 
 
+class RegistrationPendingResponse(BaseModel):
+    detail: str
+    verification_required: bool = True
+
+
+class RegistrationConflictResponse(BaseModel):
+    detail: str
+    account_setup_reset_available: bool | None = None
+
+
 class SessionResponse(LoginResponse):
     pass
 
@@ -113,11 +122,19 @@ class PasswordChangeRequest(BaseModel):
 class TOTPSetupResponse(BaseModel):
     secret: str
     otpauth_url: str
+    qr_code_data_uri: str
 
 
 class TOTPVerifyRequest(BaseModel):
     code: str
     name: Optional[str] = None
+    # Required when the account already has an authenticator, so a stolen
+    # session cannot silently add a second factor the attacker controls.
+    current_password: Optional[str] = Field(default=None, max_length=128)
+
+
+class TOTPDeleteRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
 
 
 class TOTPAuthenticator(BaseModel):
@@ -127,3 +144,44 @@ class TOTPAuthenticator(BaseModel):
 
 class TOTPListResponse(BaseModel):
     items: list[TOTPAuthenticator]
+
+
+class PasskeyBeginRegistrationRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+
+
+class PasskeyCredentialRequest(BaseModel):
+    challenge_id: str = Field(min_length=1, max_length=64)
+    credential: dict[str, Any]
+
+
+class PasskeyFinishRegistrationRequest(PasskeyCredentialRequest):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class PasskeyItem(BaseModel):
+    id: int
+    name: str
+    created_at: datetime
+    last_used_at: Optional[datetime] = None
+    transports: list[str] = []
+    credential_device_type: Optional[str] = None
+    credential_backed_up: bool = False
+
+
+class PasskeyListResponse(BaseModel):
+    items: list[PasskeyItem]
+
+
+class PasskeyChallengeResponse(BaseModel):
+    challenge_id: str
+    public_key: dict[str, Any]
+    expires_at: datetime
+
+
+class PasskeyRenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class PasskeyDeleteRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)

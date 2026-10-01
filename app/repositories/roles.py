@@ -7,6 +7,8 @@ from typing import Any, Optional
 from app.core.database import db
 from app.security.menu_permissions import compact_menu_permissions, menu_permissions_to_legacy
 
+_ALLOWED_ROLE_UPDATE_COLUMNS = frozenset({"name", "description", "permissions", "is_system"})
+
 
 async def list_roles() -> list[dict[str, Any]]:
     rows = await db.fetch_all("SELECT * FROM roles ORDER BY name")
@@ -50,6 +52,9 @@ async def create_role(*, name: str, description: str | None = None, permissions:
 
 
 async def update_role(role_id: int, **updates: Any) -> dict[str, Any]:
+    unknown = set(updates) - _ALLOWED_ROLE_UPDATE_COLUMNS
+    if unknown:
+        raise ValueError(f"Unsupported role fields: {', '.join(sorted(unknown))}")
     if not updates:
         role = await get_role_by_id(role_id)
         if not role:
@@ -65,12 +70,19 @@ async def update_role(role_id: int, **updates: Any) -> dict[str, Any]:
     columns.append("updated_at = %s")
     params.append(datetime.utcnow())
     params.append(role_id)
-    sql = f"UPDATE roles SET {', '.join(columns)} WHERE id = %s"
+    sql = f"UPDATE roles SET {', '.join(columns)} WHERE id = %s"  # nosec B608
     await db.execute(sql, tuple(params))
     updated = await get_role_by_id(role_id)
     if not updated:
         raise ValueError("Role not found after update")
     return updated
+
+
+async def count_members_by_role() -> dict[int, int]:
+    rows = await db.fetch_all(
+        "SELECT role_id, COUNT(*) AS member_count FROM company_memberships GROUP BY role_id"
+    )
+    return {int(row["role_id"]): int(row["member_count"]) for row in rows if row.get("role_id") is not None}
 
 
 async def delete_role(role_id: int) -> None:

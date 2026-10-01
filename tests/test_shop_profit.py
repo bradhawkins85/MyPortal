@@ -1,7 +1,23 @@
 """Tests for the calculate_profit helper in app/services/shop.py."""
 from decimal import Decimal
 
-from app.services.shop import calculate_profit
+from app.services.shop import calculate_profit, get_subscription_price_options
+
+
+def test_subscription_price_options_ignore_product_price_and_zero_options():
+    options = get_subscription_price_options({
+        "price": 0,
+        "subscription_category_id": 3,
+        "price_monthly_commitment": "19.95",
+        "price_annual_monthly_payment": None,
+        "price_annual_annual_payment": "0",
+    })
+
+    assert options == [{
+        "label": "Monthly commitment · monthly payment",
+        "price": Decimal("19.95"),
+        "suffix": "/month",
+    }]
 
 
 # ---------------------------------------------------------------------------

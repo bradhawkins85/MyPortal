@@ -12,11 +12,11 @@ def test_offboarding_email_forwarding_is_inside_microsoft_365_section():
     forwarding_setting = template.index(
         'id="edit-company-offboarding-email-forwarding"'
     )
-    credentials_form = template.index(
-        'action="/admin/companies/{{ company.id }}/m365-credentials"'
+    m365_section_end = template.index(
+        '<section class="card card--panel ce-section"', m365_section_start
     )
 
-    assert m365_section_start < forwarding_setting < credentials_form
+    assert m365_section_start < forwarding_setting < m365_section_end
     assert template.count('id="edit-company-offboarding-email-forwarding"') == 1
     assert 'name="offboardingEmailForwardingEnabled"\n                form="company-settings-form"' in template
 

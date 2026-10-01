@@ -12,6 +12,7 @@ from app.schemas.m365_mail import (
     M365MailAccountCreate,
     M365MailAccountResponse,
     M365MailAccountUpdate,
+    M365MailRecoveryImportRequest,
     M365MailSyncResponse,
 )
 from app.services import m365_mail as m365_mail_service
@@ -107,6 +108,23 @@ async def sync_account(
     __: dict = Depends(require_super_admin),
 ) -> M365MailSyncResponse:
     result = await m365_mail_service.sync_account(account_id)
+    return M365MailSyncResponse.model_validate(result)
+
+
+@router.post(
+    "/accounts/{account_id}/recovery-import",
+    response_model=M365MailSyncResponse,
+    summary="Manually import a mailbox or folder without notifications",
+)
+async def recovery_import_account(
+    account_id: int,
+    payload: M365MailRecoveryImportRequest,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+) -> M365MailSyncResponse:
+    result = await m365_mail_service.sync_account(
+        account_id, recovery=True, folder_override=payload.folder
+    )
     return M365MailSyncResponse.model_validate(result)
 
 

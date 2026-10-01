@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from ipaddress import ip_network
-from typing import Optional
+from typing import Annotated, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
 ALLOWED_API_KEY_HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
+CompanyId = Annotated[int, Field(gt=0)]
 
 
 class ApiKeyUsageEntry(BaseModel):
@@ -64,6 +65,7 @@ class ApiKeyCreateRequest(BaseModel):
     expiry_date: Optional[date]
     permissions: list[ApiKeyEndpointPermission] = Field(default_factory=list)
     allowed_ips: list[ApiKeyIpRestriction] = Field(default_factory=list)
+    allowed_company_ids: list[CompanyId] = Field(default_factory=list)
     is_enabled: bool = True
 
 
@@ -73,6 +75,7 @@ class ApiKeyRotateRequest(BaseModel):
     retire_previous: bool = True
     permissions: Optional[list[ApiKeyEndpointPermission]] = None
     allowed_ips: Optional[list[ApiKeyIpRestriction]] = None
+    allowed_company_ids: Optional[list[CompanyId]] = None
 
 
 class ApiKeyUpdateRequest(BaseModel):
@@ -80,6 +83,7 @@ class ApiKeyUpdateRequest(BaseModel):
     expiry_date: Optional[date] = None
     permissions: Optional[list[ApiKeyEndpointPermission]] = None
     is_enabled: Optional[bool] = None
+    allowed_company_ids: Optional[list[CompanyId]] = None
 
 
 class ApiKeyResponse(BaseModel):
@@ -94,6 +98,7 @@ class ApiKeyResponse(BaseModel):
     usage: list[ApiKeyUsageEntry] = Field(default_factory=list)
     permissions: list[ApiKeyEndpointPermission] = Field(default_factory=list)
     allowed_ips: list[ApiKeyIpRestriction] = Field(default_factory=list)
+    allowed_company_ids: list[CompanyId] = Field(default_factory=list)
     is_enabled: bool = True
 
 

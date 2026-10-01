@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 
 from app.core.database import db
 from app.core.logging import log_info
 from app.security.encryption import decrypt_secret, encrypt_secret
+from app.services import passkeys as passkeys_service
 
 
 def _hash_session_token(token: str) -> str:
@@ -81,12 +85,23 @@ async def create_session(
 
 
 async def get_session_by_token(token: str) -> Optional[dict[str, Any]]:
+    # Only the digest is looked up. Matching the raw value as well would let
+    # anyone who can read ``user_sessions`` replay the stored digest as a
+    # cookie, which defeats hashing the token in the first place.
     token_hash = _hash_session_token(token)
     row = await db.fetch_one(
-        "SELECT * FROM user_sessions WHERE session_token = %s OR session_token = %s",
-        (token_hash, token),
+        "SELECT * FROM user_sessions WHERE session_token = %s",
+        (token_hash,),
     )
     return row
+
+
+async def rotate_session_token(session_id: int, token: str) -> None:
+    """Store the digest of a freshly issued raw *token* for a session."""
+    await db.execute(
+        "UPDATE user_sessions SET session_token = %s WHERE id = %s",
+        (_hash_session_token(token), session_id),
+    )
 
 
 async def get_session_by_id(session_id: int) -> Optional[dict[str, Any]]:
@@ -112,6 +127,7 @@ async def update_session(
     impersonator_user_id: Any = _SENTINEL,
     impersonator_session_id: Any = _SENTINEL,
     impersonation_started_at: Any = _SENTINEL,
+    selected_role_id: Any = _SENTINEL,
 ) -> None:
     updates: list[str] = []
     params: list[Any] = []
@@ -142,15 +158,34 @@ async def update_session(
     if impersonation_started_at is not _SENTINEL:
         updates.append("impersonation_started_at = %s")
         params.append(impersonation_started_at)
+    if selected_role_id is not _SENTINEL:
+        updates.append("selected_role_id = %s")
+        params.append(selected_role_id)
     if not updates:
         return
     params.append(session_id)
-    sql = f"UPDATE user_sessions SET {', '.join(updates)} WHERE id = %s"
+    sql = f"UPDATE user_sessions SET {', '.join(updates)} WHERE id = %s"  # nosec B608
     await db.execute(sql, tuple(params))
 
 
 async def deactivate_session(session_id: int) -> None:
     await update_session(session_id, is_active=False)
+
+
+async def deactivate_sessions_for_user(
+    user_id: int, *, except_session_id: int | None = None
+) -> None:
+    """Revoke every active session a user holds, optionally keeping one."""
+    if except_session_id is None:
+        await db.execute(
+            "UPDATE user_sessions SET is_active = 0 WHERE user_id = %s AND is_active = 1",
+            (user_id,),
+        )
+        return
+    await db.execute(
+        "UPDATE user_sessions SET is_active = 0 WHERE user_id = %s AND is_active = 1 AND id <> %s",
+        (user_id, except_session_id),
+    )
 
 
 async def list_active_sessions_for_user(user_id: int) -> list[dict[str, Any]]:
@@ -163,6 +198,68 @@ async def list_active_sessions_for_user(user_id: int) -> list[dict[str, Any]]:
         (user_id,),
     )
     return list(rows)
+
+
+_FIRST_USER_LOCK_NAME = "myportal_first_user_registration"
+_FIRST_USER_LOCK_TIMEOUT_SECONDS = 10
+_local_first_user_lock = asyncio.Lock()
+
+
+@asynccontextmanager
+async def first_user_registration_lock() -> AsyncIterator[None]:
+    """Serialise creation of the initial super administrator.
+
+    MySQL uses a named ``GET_LOCK`` held on one pooled connection, so the
+    bootstrap is exclusive across workers and hosts. SQLite development mode
+    runs in a single process, where an in-process lock is sufficient.
+    """
+    if db.is_sqlite() or not db.is_connected():
+        async with _local_first_user_lock:
+            yield
+        return
+
+    async with db.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT GET_LOCK(%s, %s)",
+                (_FIRST_USER_LOCK_NAME, _FIRST_USER_LOCK_TIMEOUT_SECONDS),
+            )
+            row = await cursor.fetchone()
+        if not row or row[0] != 1:
+            raise RuntimeError("Could not obtain the first-user registration lock")
+        try:
+            yield
+        finally:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT RELEASE_LOCK(%s)", (_FIRST_USER_LOCK_NAME,))
+                await cursor.fetchone()
+
+
+def _parse_window_start(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    text = str(value)
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+
+
+async def get_login_attempt_count(identifier: str, *, window_seconds: int) -> int:
+    """Return attempts recorded for *identifier* in its current window.
+
+    Unlike :func:`register_login_attempt` this does not record an attempt,
+    so callers can check a failure counter before deciding to add to it.
+    """
+    row = await db.fetch_one(
+        "SELECT * FROM login_rate_limits WHERE identifier = %s",
+        (identifier,),
+    )
+    if not row:
+        return 0
+    if datetime.utcnow() - _parse_window_start(row["window_start"]) > timedelta(seconds=window_seconds):
+        return 0
+    return int(row["attempts"] or 0)
 
 
 async def register_login_attempt(
@@ -180,12 +277,8 @@ async def register_login_attempt(
         )
         return True
 
-    window_start = row["window_start"]
+    window_start_dt = _parse_window_start(row["window_start"])
     attempts = int(row["attempts"])
-    if isinstance(window_start, datetime):
-        window_start_dt = window_start
-    else:
-        window_start_dt = datetime.strptime(str(window_start), "%Y-%m-%d %H:%M:%S")
 
     if now - window_start_dt > timedelta(seconds=window_seconds):
         await db.execute(
@@ -209,30 +302,50 @@ async def clear_login_attempts(identifier: str) -> None:
     )
 
 
+# Password reset and account verification tokens are single-use bearer
+# secrets, so only their SHA-256 digest is stored (as for session tokens).
+# Rows written before digests were introduced have ``token_hashed = 0`` and
+# are matched by their raw value until they expire; a hashed row is matched
+# only by the digest of the presented token, so a digest read from the
+# database cannot itself be replayed as a token.
+_TOKEN_MATCH_SQL = "((token = %s AND token_hashed = 1) OR (token = %s AND token_hashed = 0))"
+
+
+def _token_match_params(token: str) -> tuple[str, str]:
+    return (_hash_session_token(token), token)
+
+
 async def create_password_reset_token(
     *, user_id: int, token: str, expires_at: datetime
 ) -> None:
     await db.execute(
         """
-        INSERT INTO password_tokens (token, user_id, expires_at, used)
-        VALUES (%s, %s, %s, 0)
+        INSERT INTO password_tokens (token, user_id, expires_at, used, token_hashed)
+        VALUES (%s, %s, %s, 0, 1)
         """,
-        (token, user_id, expires_at),
+        (_hash_session_token(token), user_id, expires_at),
     )
 
 
 async def get_password_reset_token(token: str) -> Optional[dict[str, Any]]:
     row = await db.fetch_one(
-        "SELECT * FROM password_tokens WHERE token = %s",
-        (token,),
+        f"SELECT * FROM password_tokens WHERE {_TOKEN_MATCH_SQL}",  # nosec B608
+        _token_match_params(token),
     )
     return row
 
 
 async def mark_password_reset_token_used(token: str) -> None:
     await db.execute(
-        "UPDATE password_tokens SET used = 1 WHERE token = %s",
-        (token,),
+        f"UPDATE password_tokens SET used = 1 WHERE {_TOKEN_MATCH_SQL}",  # nosec B608
+        _token_match_params(token),
+    )
+
+
+async def invalidate_password_reset_tokens_for_user(user_id: int) -> None:
+    await db.execute(
+        "UPDATE password_tokens SET used = 1 WHERE user_id = %s AND used = 0",
+        (user_id,),
     )
 
 
@@ -241,38 +354,71 @@ async def create_account_verification_token(
 ) -> None:
     await db.execute(
         """
-        INSERT INTO account_verification_tokens (token, user_id, expires_at, used)
-        VALUES (%s, %s, %s, 0)
+        INSERT INTO account_verification_tokens (token, user_id, expires_at, used, token_hashed)
+        VALUES (%s, %s, %s, 0, 1)
         """,
-        (token, user_id, expires_at),
+        (_hash_session_token(token), user_id, expires_at),
     )
 
 
 async def get_account_verification_token(token: str) -> Optional[dict[str, Any]]:
     row = await db.fetch_one(
-        "SELECT * FROM account_verification_tokens WHERE token = %s",
-        (token,),
+        f"SELECT * FROM account_verification_tokens WHERE {_TOKEN_MATCH_SQL}",  # nosec B608
+        _token_match_params(token),
     )
     return row
 
 
 async def mark_account_verification_token_used(token: str) -> None:
     await db.execute(
-        "UPDATE account_verification_tokens SET used = 1 WHERE token = %s",
-        (token,),
+        f"UPDATE account_verification_tokens SET used = 1 WHERE {_TOKEN_MATCH_SQL}",  # nosec B608
+        _token_match_params(token),
+    )
+
+
+async def invalidate_account_verification_tokens_for_user(user_id: int) -> None:
+    """Retire every outstanding signup verification link for a user."""
+    await db.execute(
+        "UPDATE account_verification_tokens SET used = 1 WHERE user_id = %s AND used = 0",
+        (user_id,),
     )
 
 
 async def get_totp_authenticators(user_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
-        "SELECT id, name, secret FROM user_totp_authenticators WHERE user_id = %s",
+        "SELECT id, name, secret, last_used_step FROM user_totp_authenticators WHERE user_id = %s",
         (user_id,),
     )
     decoded: list[dict[str, Any]] = []
     for row in rows:
         secret = decrypt_secret(row["secret"])
-        decoded.append({"id": row["id"], "name": row["name"], "secret": secret})
+        decoded.append(
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "secret": secret,
+                "last_used_step": row.get("last_used_step"),
+            }
+        )
     return decoded
+
+
+async def claim_totp_step(authenticator_id: int, step: int) -> bool:
+    """Record *step* as used for an authenticator, refusing replays.
+
+    The update only succeeds when *step* is newer than the last accepted
+    step, so a code (or an earlier one) cannot be used twice, even by two
+    concurrent requests.
+    """
+    updated = await db.execute_rowcount(
+        """
+        UPDATE user_totp_authenticators
+        SET last_used_step = %s
+        WHERE id = %s AND (last_used_step IS NULL OR last_used_step < %s)
+        """,
+        (step, authenticator_id, step),
+    )
+    return updated > 0
 
 
 async def count_totp_authenticators(user_id: int) -> int:
@@ -290,15 +436,15 @@ async def user_has_totp_authenticator(user_id: int) -> bool:
 
 
 async def create_totp_authenticator(
-    *, user_id: int, name: str, secret: str
+    *, user_id: int, name: str, secret: str, last_used_step: int | None = None
 ) -> dict[str, Any]:
     encrypted = encrypt_secret(secret)
     await db.execute(
         """
-        INSERT INTO user_totp_authenticators (user_id, name, secret)
-        VALUES (%s, %s, %s)
+        INSERT INTO user_totp_authenticators (user_id, name, secret, last_used_step)
+        VALUES (%s, %s, %s, %s)
         """,
-        (user_id, name, encrypted),
+        (user_id, name, encrypted, last_used_step),
     )
     rows = await db.fetch_all(
         "SELECT id, name, secret FROM user_totp_authenticators WHERE user_id = %s ORDER BY id DESC LIMIT 1",
@@ -315,3 +461,229 @@ async def delete_totp_authenticator(user_id: int, authenticator_id: int) -> None
         "DELETE FROM user_totp_authenticators WHERE user_id = %s AND id = %s",
         (user_id, authenticator_id),
     )
+
+
+async def list_passkeys_for_user(user_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT id, user_id, credential_id, public_key, sign_count, transports, aaguid,
+               credential_device_type, credential_backed_up, display_name,
+               created_at, updated_at, last_used_at
+        FROM user_passkeys
+        WHERE user_id = %s
+        ORDER BY created_at ASC, id ASC
+        """,
+        (user_id,),
+    )
+    return list(rows)
+
+
+async def count_passkeys(user_id: int) -> int:
+    row = await db.fetch_one(
+        "SELECT COUNT(*) AS count FROM user_passkeys WHERE user_id = %s",
+        (user_id,),
+    )
+    return int((row or {}).get("count") or 0)
+
+
+async def get_passkey_by_id(user_id: int, passkey_id: int) -> Optional[dict[str, Any]]:
+    return await db.fetch_one(
+        """
+        SELECT id, user_id, credential_id, public_key, sign_count, transports, aaguid,
+               credential_device_type, credential_backed_up, display_name,
+               created_at, updated_at, last_used_at
+        FROM user_passkeys
+        WHERE id = %s AND user_id = %s
+        """,
+        (passkey_id, user_id),
+    )
+
+
+async def get_passkey_by_credential_id(credential_id: str) -> Optional[dict[str, Any]]:
+    return await db.fetch_one(
+        """
+        SELECT id, user_id, credential_id, public_key, sign_count, transports, aaguid,
+               credential_device_type, credential_backed_up, display_name,
+               created_at, updated_at, last_used_at
+        FROM user_passkeys
+        WHERE credential_id = %s
+        """,
+        (credential_id,),
+    )
+
+
+async def create_passkey(
+    *,
+    user_id: int,
+    credential_id: str,
+    public_key: bytes,
+    sign_count: int,
+    transports: list[str] | None,
+    aaguid: str | None,
+    credential_device_type: str | None,
+    credential_backed_up: bool,
+    display_name: str,
+) -> dict[str, Any]:
+    new_id = await db.execute_returning_lastrowid(
+        """
+        INSERT INTO user_passkeys (
+            user_id,
+            credential_id,
+            public_key,
+            sign_count,
+            transports,
+            aaguid,
+            credential_device_type,
+            credential_backed_up,
+            display_name,
+            created_at,
+            updated_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            user_id,
+            credential_id,
+            passkeys_service.bytes_to_base64url(public_key),
+            sign_count,
+            json.dumps(transports or []),
+            aaguid,
+            credential_device_type,
+            1 if credential_backed_up else 0,
+            display_name,
+            datetime.utcnow(),
+            datetime.utcnow(),
+        ),
+    )
+    return await get_passkey_by_id(user_id, int(new_id))
+
+
+async def update_passkey_name(user_id: int, passkey_id: int, display_name: str) -> Optional[dict[str, Any]]:
+    await db.execute(
+        """
+        UPDATE user_passkeys
+        SET display_name = %s, updated_at = %s
+        WHERE id = %s AND user_id = %s
+        """,
+        (display_name, datetime.utcnow(), passkey_id, user_id),
+    )
+    return await get_passkey_by_id(user_id, passkey_id)
+
+
+async def update_passkey_after_authentication(
+    *,
+    passkey_id: int,
+    sign_count: int,
+    credential_device_type: str | None,
+    credential_backed_up: bool,
+    last_used_at: datetime,
+) -> None:
+    await db.execute(
+        """
+        UPDATE user_passkeys
+        SET sign_count = %s,
+            credential_device_type = %s,
+            credential_backed_up = %s,
+            last_used_at = %s,
+            updated_at = %s
+        WHERE id = %s
+        """,
+        (
+            sign_count,
+            credential_device_type,
+            1 if credential_backed_up else 0,
+            last_used_at,
+            last_used_at,
+            passkey_id,
+        ),
+    )
+
+
+async def delete_passkey(user_id: int, passkey_id: int) -> None:
+    await db.execute(
+        "DELETE FROM user_passkeys WHERE user_id = %s AND id = %s",
+        (user_id, passkey_id),
+    )
+
+
+async def create_passkey_challenge(
+    *,
+    challenge_id: str,
+    ceremony: str,
+    challenge: str,
+    expires_at: datetime,
+    browser_binding_hash: str | None = None,
+    user_id: int | None = None,
+    session_id: int | None = None,
+) -> None:
+    await db.execute(
+        """
+        INSERT INTO passkey_challenges (
+            challenge_id,
+            ceremony,
+            challenge,
+            browser_binding_hash,
+            user_id,
+            session_id,
+            expires_at,
+            created_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            challenge_id,
+            ceremony,
+            challenge,
+            browser_binding_hash,
+            user_id,
+            session_id,
+            expires_at,
+            datetime.utcnow(),
+        ),
+    )
+
+
+async def get_passkey_challenge(challenge_id: str) -> Optional[dict[str, Any]]:
+    return await db.fetch_one(
+        """
+        SELECT challenge_id, ceremony, challenge, browser_binding_hash, user_id,
+               session_id, expires_at, consumed_at, created_at
+        FROM passkey_challenges
+        WHERE challenge_id = %s
+        """,
+        (challenge_id,),
+    )
+
+
+async def consume_passkey_challenge(
+    *,
+    challenge_id: str,
+    ceremony: str,
+    browser_binding_hash: str | None = None,
+    user_id: int | None = None,
+    session_id: int | None = None,
+) -> bool:
+    params: list[Any] = [datetime.utcnow(), challenge_id, ceremony, datetime.utcnow()]
+    sql = """
+        UPDATE passkey_challenges
+        SET consumed_at = %s
+        WHERE challenge_id = %s
+          AND ceremony = %s
+          AND consumed_at IS NULL
+          AND expires_at >= %s
+    """
+    if browser_binding_hash is None:
+        sql += " AND browser_binding_hash IS NULL"
+    else:
+        sql += " AND browser_binding_hash = %s"
+        params.append(browser_binding_hash)
+    if user_id is None:
+        sql += " AND user_id IS NULL"
+    else:
+        sql += " AND user_id = %s"
+        params.append(user_id)
+    if session_id is None:
+        sql += " AND session_id IS NULL"
+    else:
+        sql += " AND session_id = %s"
+        params.append(session_id)
+    rowcount = await db.execute_rowcount(sql, tuple(params))
+    return rowcount == 1

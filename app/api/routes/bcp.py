@@ -3,22 +3,216 @@ BCP (Business Continuity Planning) routes and page handlers.
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta, timezone
+from importlib import import_module
 from typing import Any
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.api.dependencies.auth import get_current_session
+from app.api.dependencies.bc_rbac import user_has_company_permission
 from app.core.config import get_settings
 from app.repositories import bcp as bcp_repo
-from app.repositories import company_memberships as membership_repo
+from app.repositories import assets as asset_repo
 from app.security.flash import flash_redirect
 from app.security.session import SessionData
+from app.services import audit
 from app.services.sanitization import sanitize_rich_text
 
 router = APIRouter(prefix="/bcp", tags=["Business Continuity Planning"])
 
 settings = get_settings()
+
+_page_rendering: tuple[Callable[..., Awaitable[dict[str, Any]]], Any] | None = None
+
+
+def configure_page_rendering(
+    *,
+    build_base_context: Callable[..., Awaitable[dict[str, Any]]],
+    templates: Any,
+) -> None:
+    """Bind shared page-rendering dependencies during application assembly.
+
+    Reconfiguration is allowed so tests and reload flows can swap in a fresh
+    rendering pair without leaving the route module partially configured.
+    """
+
+    global _page_rendering
+    _page_rendering = (build_base_context, templates)
+
+
+def _get_page_rendering() -> tuple[Callable[..., Awaitable[dict[str, Any]]], Any]:
+    if _page_rendering is None:
+        raise RuntimeError("BCP page rendering has not been configured")
+    return _page_rendering
+
+
+def _display_user_name(user: dict[str, Any] | None) -> str:
+    """Return a stable display name for user-facing BCP tables."""
+    if not user:
+        return "Unassigned"
+    return (
+        user.get("name")
+        or " ".join(
+            part for part in [user.get("first_name"), user.get("last_name")] if part
+        ).strip()
+        or user.get("email")
+        or f"User {user.get('id')}"
+    )
+
+
+def _as_utc_naive(value: datetime | None) -> datetime | None:
+    """Normalise datetimes so KPI comparisons work with MySQL DATETIME values."""
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+async def _visible_bcp_assets(
+    request: Request, user: dict[str, Any], company_id: int, *, write: bool = False
+) -> list[dict[str, Any]]:
+    """Return only assets the BCP user may also see in the Assets module."""
+    main_module = import_module("app.main")
+
+    membership = await main_module._get_effective_company_membership(
+        request, int(user["id"]), company_id
+    )
+    if not (user.get("is_super_admin") or (
+        main_module._membership_menu_can(user, membership, "menu.assets")
+        and main_module._membership_menu_can(
+            user, membership, "menu.bcp_asset_links", write=write
+        )
+    )):
+        return []
+    can_write_assets = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )
+    assets = await asset_repo.list_company_assets(company_id)
+    if not can_write_assets:
+        assets = [asset for asset in assets if bool(asset.get("customer_visible"))]
+    return assets
+
+
+def _group_component_asset_links(links: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for link in links:
+        grouped.setdefault(int(link["component_id"]), []).append(link)
+    return grouped
+
+
+def _build_bcp_kpi_items(
+    *,
+    activities: list[dict[str, Any]],
+    backup_items: list[dict[str, Any]],
+    training_items: list[dict[str, Any]],
+    review_items: list[dict[str, Any]],
+    roles: list[dict[str, Any]],
+    incidents: list[dict[str, Any]],
+    dependencies: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build lightweight KPI tiles for BCP readiness."""
+    total_activities = len(activities)
+    rto_covered = sum(
+        1
+        for activity in activities
+        if (activity.get("impact") or {}).get("rto_hours") is not None
+    )
+    rto_pct = int((rto_covered / total_activities) * 100) if total_activities else 0
+
+    recent_window = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=365)
+    completed_exercises = sum(
+        1
+        for item in training_items
+        if item.get("status") == "Completed"
+        and item.get("training_date")
+        and (_as_utc_naive(item["training_date"]) or recent_window) >= recent_window
+    )
+    approved_reviews = sum(
+        1 for item in review_items if item.get("approval_status") == "Approved"
+    )
+    assigned_collaborators = sum(len(role.get("assignments") or []) for role in roles)
+    reviewed_incidents = sum(
+        1 for incident in incidents if incident.get("after_action_reviewed_at")
+    )
+
+    return [
+        {
+            "label": "RTO coverage",
+            "value": f"{rto_pct}%",
+            "variant": "success" if total_activities and rto_pct >= 80 else "warning",
+            "title": f"{rto_covered} of {total_activities} critical activities have an RTO."
+            if total_activities
+            else "No critical activities defined yet.",
+        },
+        {
+            "label": "RPO readiness",
+            "value": "Ready" if backup_items else "Gap",
+            "variant": "success" if backup_items else "danger",
+            "title": "Backup coverage is used as the current RPO readiness indicator.",
+        },
+        {
+            "label": "Exercise cadence",
+            "value": completed_exercises,
+            "variant": "success" if completed_exercises else "warning",
+            "title": "Completed drills/exercises in the last 12 months.",
+        },
+        {
+            "label": "Approval snapshots",
+            "value": approved_reviews,
+            "variant": "success" if approved_reviews else "warning",
+            "title": "Review records marked approved and ready for export.",
+        },
+        {
+            "label": "Collaborators",
+            "value": assigned_collaborators,
+            "variant": "info" if assigned_collaborators else "warning",
+            "title": "Assigned executors, co-authors, reviewers, and approvers.",
+        },
+        {
+            "label": "Dependencies",
+            "value": len(dependencies),
+            "variant": "info" if dependencies else "warning",
+            "title": "Mapped vendor/resource dependencies linked to the plan.",
+        },
+        {
+            "label": "After-action reviews",
+            "value": reviewed_incidents,
+            "variant": "success" if reviewed_incidents else "neutral",
+            "title": "Incidents with a completed after-action review.",
+        },
+    ]
+
+
+async def _list_plan_change_summaries(plan_id: int, limit: int = 5) -> list[dict[str, Any]]:
+    """Return recent plan change summaries from the audit log."""
+    from app.repositories import audit_logs as audit_log_repo
+
+    audit_entries = await audit_log_repo.list_audit_logs(
+        entity_type="bcp_plan",
+        entity_id=plan_id,
+        action="bcp.plan.update",
+        limit=limit,
+    )
+    summaries: list[dict[str, Any]] = []
+    for entry in audit_entries:
+        before = entry.get("previous_value") or {}
+        after = entry.get("new_value") or {}
+        changed_fields = sorted(set(before.keys()) | set(after.keys()))
+        summaries.append(
+            {
+                "id": entry.get("id"),
+                "changed_at": entry.get("created_at"),
+                "changed_by": entry.get("user_email") or f"User {entry.get('user_id')}",
+                "changed_fields": changed_fields,
+                "before": before,
+                "after": after,
+            }
+        )
+    return summaries
 
 
 def _check_bcp_enabled():
@@ -40,6 +234,14 @@ async def _resolve_session(request: Request, session: SessionData | None) -> Ses
         return cached
 
     return await get_current_session(request)
+
+
+def _active_company_id(request: Request, session: SessionData) -> int | None:
+    """Return the active company for this request (request state, then session)."""
+    active_company_id = getattr(request.state, "active_company_id", None)
+    if active_company_id is None:
+        active_company_id = getattr(session, "active_company_id", None)
+    return active_company_id
 
 
 async def _require_bcp_view(
@@ -64,13 +266,15 @@ async def _require_bcp_view(
     
     # Check BCP view permission. The membership repository expands tri-state
     # menu permissions and the continuity.access alias for backward compatibility.
-    has_permission = await membership_repo.user_has_permission(session.user_id, "bcp:view")
-    if not has_permission:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP view permission required")
-    
-    active_company_id = getattr(request.state, "active_company_id", None)
+    active_company_id = _active_company_id(request, session)
     if active_company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected")
+
+    # Evaluate the permission on the membership for the active company only;
+    # a grant in another company must not unlock this company's BCP.
+    has_permission = await user_has_company_permission(session.user_id, active_company_id, "bcp:view")
+    if not has_permission:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP view permission required")
     
     return user, active_company_id
 
@@ -98,13 +302,15 @@ async def _require_bcp_edit(
         return user, active_company_id
     
     # Check BCP edit permission
-    has_permission = await membership_repo.user_has_permission(session.user_id, "bcp:edit")
-    if not has_permission:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP edit permission required")
-    
-    active_company_id = getattr(request.state, "active_company_id", None)
+    active_company_id = _active_company_id(request, session)
     if active_company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected")
+
+    # Evaluate the permission on the membership for the active company only;
+    # a grant in another company must not unlock this company's BCP.
+    has_permission = await user_has_company_permission(session.user_id, active_company_id, "bcp:edit")
+    if not has_permission:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP edit permission required")
     
     return user, active_company_id
 
@@ -132,13 +338,15 @@ async def _require_bcp_incident_run(
         return user, active_company_id
     
     # Check BCP incident:run permission
-    has_permission = await membership_repo.user_has_permission(session.user_id, "bcp:incident:run")
-    if not has_permission:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP incident:run permission required")
-    
-    active_company_id = getattr(request.state, "active_company_id", None)
+    active_company_id = _active_company_id(request, session)
     if active_company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected")
+
+    # Evaluate the permission on the membership for the active company only;
+    # a grant in another company must not unlock this company's BCP.
+    has_permission = await user_has_company_permission(session.user_id, active_company_id, "bcp:incident:run")
+    if not has_permission:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP incident:run permission required")
     
     return user, active_company_id
 
@@ -164,15 +372,91 @@ async def _require_bcp_export(
         return user, active_company_id
     
     # Check BCP export permission
-    has_permission = await membership_repo.user_has_permission(session.user_id, "bcp:export")
-    if not has_permission:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP export permission required")
-    
-    active_company_id = getattr(request.state, "active_company_id", None)
+    active_company_id = _active_company_id(request, session)
     if active_company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected")
-    
+
+    # Evaluate the permission on the membership for the active company only;
+    # a grant in another company must not unlock this company's BCP.
+    has_permission = await user_has_company_permission(session.user_id, active_company_id, "bcp:export")
+    if not has_permission:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP export permission required")
+
     return user, active_company_id
+
+
+async def _require_plan_object(
+    company_id: int,
+    getter: Callable[[int], Awaitable[dict[str, Any] | None]],
+    object_id: int,
+    label: str,
+) -> dict[str, Any]:
+    """Load a plan child object and ensure it belongs to the company's plan.
+
+    Returns 404 when the plan is missing, the object does not exist, or the
+    object belongs to another company's plan (IDOR protection).
+    """
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    obj = await getter(object_id)
+    if not obj or obj.get("plan_id") != plan["id"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{label} not found")
+    return obj
+
+
+async def _list_company_users(company_id: int) -> list[dict[str, Any]]:
+    """Users that may be picked on this company's plan: members and super admins."""
+    from app.repositories import user_companies as user_company_repo
+    from app.repositories import users as user_repo
+
+    member_ids = {
+        int(assignment["user_id"])
+        for assignment in await user_company_repo.list_assignments(company_id)
+        if assignment.get("user_id") is not None
+    }
+    return [
+        member
+        for member in await user_repo.list_users()
+        if member.get("is_super_admin") or int(member["id"]) in member_ids
+    ]
+
+
+async def _require_company_user(company_id: int, user_id: int | None, label: str = "User") -> None:
+    """Reject user ids that are not super admins or members of ``company_id``.
+
+    Stops a plan editor from attaching arbitrary accounts from other
+    companies to their plan's roles and reviews (which would also expose
+    those users' names and emails on the plan pages).
+    """
+    if user_id is None:
+        return
+    from app.repositories import user_companies as user_company_repo
+    from app.repositories import users as user_repo
+
+    target = await user_repo.get_user_by_id(user_id)
+    if target and target.get("is_super_admin"):
+        return
+    if target and await user_company_repo.get_user_company(user_id, company_id):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"{label} must be a member of this company",
+    )
+
+
+async def _require_role_assignment(company_id: int, assignment_id: int) -> dict[str, Any]:
+    """Load a role assignment and ensure its role belongs to the company's plan."""
+    assignment = await bcp_repo.get_role_assignment_by_id(assignment_id)
+    if not assignment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+    try:
+        await _require_plan_object(company_id, bcp_repo.get_role_by_id, assignment["role_id"], "Role")
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found") from exc
+        raise
+    return assignment
 
 
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -191,17 +475,33 @@ async def bcp_overview(request: Request):
     # Get objectives and distribution list
     objectives = await bcp_repo.list_objectives(plan["id"])
     distribution_list = await bcp_repo.list_distribution_list(plan["id"])
+    activities = await bcp_repo.list_critical_activities(plan["id"], sort_by="importance")
+    backup_items = await bcp_repo.list_backup_items(plan["id"])
+    training_items = await bcp_repo.list_training_items(plan["id"])
+    review_items = await bcp_repo.list_review_items(plan["id"])
+    roles = await bcp_repo.list_roles_with_assignments(plan["id"])
+    incidents = await bcp_repo.list_incidents(plan["id"])
+    dependencies = await bcp_repo.list_dependency_mappings(plan["id"])
+    kpi_items = _build_bcp_kpi_items(
+        activities=activities,
+        backup_items=backup_items,
+        training_items=training_items,
+        review_items=review_items,
+        roles=roles,
+        incidents=incidents,
+        dependencies=dependencies,
+    )
+    recent_plan_changes = await _list_plan_change_summaries(plan["id"])
     has_bcp_planning_gaps = (
         plan.get("last_reviewed") is None
         or len(objectives) == 0
         or len(distribution_list) == 0
     )
     
-    # Import template rendering from main
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -209,13 +509,18 @@ async def bcp_overview(request: Request):
             "plan": plan,
             "objectives": objectives,
             "distribution_list": distribution_list,
+            "kpi_items": kpi_items,
+            "recent_reviews": review_items[:5],
+            "recent_plan_changes": recent_plan_changes,
+            "dependency_count": len(dependencies),
+            "approved_review_count": sum(1 for item in review_items if item.get("approval_status") == "Approved"),
             "has_bcp_planning_gaps": has_bcp_planning_gaps,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
             "bcp_compliance_help_url": settings.bcp_compliance_marketing_url,
         },
     )
     
-    return templates.TemplateResponse("bcp/overview.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/overview.html", context=context)
 
 
 @router.get("/glossary", response_class=HTMLResponse, include_in_schema=False)
@@ -223,7 +528,7 @@ async def bcp_glossary(request: Request):
     """BCP Glossary page."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
 
     
     # Define glossary terms
@@ -270,7 +575,7 @@ async def bcp_glossary(request: Request):
         },
     ]
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -279,7 +584,7 @@ async def bcp_glossary(request: Request):
         },
     )
     
-    return templates.TemplateResponse("bcp/glossary.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/glossary.html", context=context)
 
 
 # Risk Assessment pages and endpoints
@@ -288,7 +593,7 @@ async def bcp_risks(request: Request, severity: str = Query(None), heatmap_filte
     """BCP Risks page with list, heatmap, and legend."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     from app.services.risk_calculator import (
         get_severity_band_info,
         get_likelihood_scale,
@@ -314,13 +619,13 @@ async def bcp_risks(request: Request, severity: str = Query(None), heatmap_filte
             likelihood, impact = map(int, heatmap_filter.split(","))
             risks = [r for r in risks if r.get("likelihood") == likelihood and r.get("impact") == impact]
         except (ValueError, AttributeError):
-            pass
+            heatmap_filter = ""
     
     # Get heatmap data
     heatmap_data = await bcp_repo.get_risk_heatmap_data(plan["id"])
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -333,11 +638,12 @@ async def bcp_risks(request: Request, severity: str = Query(None), heatmap_filte
             "impact_scale": get_impact_scale(),
             "active_severity_filter": severity,
             "active_heatmap_filter": heatmap_filter,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
+            "available_global_risks": [item for item in await bcp_repo.list_global_risks(company_id) if not item["assigned"]],
         },
     )
     
-    return templates.TemplateResponse("bcp/risks.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/risks.html", context=context)
 
 
 @router.get("/risks/heatmap", response_class=HTMLResponse, include_in_schema=False)
@@ -345,7 +651,7 @@ async def bcp_risks_heatmap_partial(request: Request):
     """Return just the heatmap HTML for HTMX updates."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import templates
+    _, templates = _get_page_rendering()
     from app.services.risk_calculator import get_severity_band_info
     
     # Get or create plan for this company
@@ -364,7 +670,7 @@ async def bcp_risks_heatmap_partial(request: Request):
         "severity_bands": get_severity_band_info(),
     }
     
-    return templates.TemplateResponse("bcp/heatmap_partial.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/heatmap_partial.html", context=context)
 
 
 @router.get("/bia", response_class=HTMLResponse, include_in_schema=False)
@@ -372,7 +678,7 @@ async def bcp_bia(request: Request, sort_by: str = Query("importance")):
     """BCP Business Impact Analysis page with critical activities list."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     from app.services.time_utils import humanize_hours
     
     # Get or create plan for this company
@@ -395,21 +701,32 @@ async def bcp_bia(request: Request, sort_by: str = Query("importance")):
             activity["impact"]["rto_humanized"] = humanize_hours(activity["impact"]["rto_hours"])
         else:
             activity["impact_rto_humanized"] = "-" if not activity.get("impact") else None
+    dependencies = await bcp_repo.list_dependency_mappings(plan["id"])
+    dependency_counts: dict[int, int] = {}
+    for dependency in dependencies:
+        if dependency.get("critical_activity_id"):
+            dependency_counts[dependency["critical_activity_id"]] = dependency_counts.get(
+                dependency["critical_activity_id"], 0
+            ) + 1
+    for activity in activities:
+        activity["dependency_count"] = dependency_counts.get(activity["id"], 0)
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
             "title": "Business Impact Analysis",
             "plan": plan,
             "activities": activities,
+            "dependencies": dependencies,
             "sort_by": sort_by,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
+            "available_global_bias": [item for item in await bcp_repo.list_global_bia_assessments(company_id) if not item["assigned"]],
         },
     )
     
-    return templates.TemplateResponse("bcp/bia.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/bia.html", context=context)
 
 
 @router.get("/incident", response_class=HTMLResponse, include_in_schema=False)
@@ -417,7 +734,7 @@ async def bcp_incident(request: Request, tab: str = Query("checklist")):
     """BCP Incident Console with tabs for Checklist, Contacts, and Event Log."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -434,6 +751,7 @@ async def bcp_incident(request: Request, tab: str = Query("checklist")):
     
     # Get active incident if any
     active_incident = await bcp_repo.get_active_incident(plan["id"])
+    incidents = await bcp_repo.list_incidents(plan["id"])
     
     # Get checklist ticks if there's an active incident
     checklist_with_ticks = []
@@ -472,24 +790,25 @@ async def bcp_incident(request: Request, tab: str = Query("checklist")):
         event_log = await bcp_repo.list_event_log_entries(plan["id"], incident_id=active_incident["id"])
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
             "title": "Incident Console",
             "plan": plan,
             "active_incident": active_incident,
+            "incidents": incidents,
             "checklist_items": checklist_with_ticks,
             "internal_contacts": internal_contacts,
             "external_contacts": external_contacts,
             "roles": roles,
             "event_log": event_log,
-            "active_tab": tab,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "active_tab": tab if tab in {"checklist", "contacts", "event-log", "after-action"} else "checklist",
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/incident.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/incident.html", context=context)
 
 
 @router.get("/recovery", response_class=HTMLResponse, include_in_schema=False)
@@ -502,7 +821,7 @@ async def bcp_recovery(
     """BCP Recovery Actions page with filters."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     from app.repositories import users as user_repo
     from app.services.time_utils import humanize_hours
     from datetime import datetime
@@ -540,13 +859,25 @@ async def bcp_recovery(
             action["rto_humanized"] = "-"
     
     # Get all users for owner filter dropdown
-    all_users = await user_repo.list_users()
+    all_users = await _list_company_users(company_id)
     
     # Get all critical activities for activity filter
     activities = await bcp_repo.list_critical_activities(plan["id"], sort_by="name")
 
+    visible_assets = await _visible_bcp_assets(request, user, company_id)
+    visible_asset_ids = {int(asset["id"]) for asset in visible_assets}
+    asset_links = await bcp_repo.list_component_asset_links(
+        plan["id"], "recovery_action"
+    )
+    # Do not reveal even the existence of an asset the viewer cannot access.
+    asset_links = [link for link in asset_links if int(link["asset_id"]) in visible_asset_ids]
+    for action in actions:
+        action["asset_links"] = _group_component_asset_links(asset_links).get(
+            int(action["id"]), []
+        )
+
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -555,15 +886,16 @@ async def bcp_recovery(
             "actions": actions,
             "all_users": all_users,
             "activities": activities,
+            "available_assets": visible_assets,
             "owner_filter": owner_filter,
             "status_filter": status_filter,
             "activity_filter": activity_filter,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
-            "now": datetime.utcnow(),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
+            "now": datetime.now(timezone.utc),
         },
     )
     
-    return templates.TemplateResponse("bcp/recovery.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/recovery.html", context=context)
 
 
 @router.get("/contacts", response_class=HTMLResponse, include_in_schema=False)
@@ -571,7 +903,7 @@ async def bcp_contacts(request: Request):
     """BCP Contacts & Claims page."""
     user, company_id = await _require_bcp_view(request)
 
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
 
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -590,7 +922,7 @@ async def bcp_contacts(request: Request):
     insurance_claims = await bcp_repo.list_insurance_claims(plan["id"])
 
 
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -605,11 +937,11 @@ async def bcp_contacts(request: Request):
             "recovery_contacts_preview": recovery_contacts[:6],
             "recovery_contacts_count": len(recovery_contacts),
             "can_edit": user.get("is_super_admin")
-            or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
 
-    return templates.TemplateResponse("bcp/contacts.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/contacts.html", context=context)
 
 
 @router.post("/contacts", include_in_schema=False)
@@ -651,7 +983,8 @@ async def update_contact_page(
     responsibility_or_agency: str = Form(None),
 ):
     """Update a contact from the Contacts & Claims page."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_contact_by_id, contact_id, "Contact")
 
     updated = await bcp_repo.update_contact(
         contact_id,
@@ -671,7 +1004,8 @@ async def update_contact_page(
 @router.post("/contacts/{contact_id}/delete", include_in_schema=False)
 async def delete_contact_page(request: Request, contact_id: int):
     """Delete a contact from the Contacts & Claims page."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_contact_by_id, contact_id, "Contact")
 
     deleted = await bcp_repo.delete_contact(contact_id)
     if not deleted:
@@ -685,7 +1019,7 @@ async def bcp_schedules(request: Request):
     """BCP Training & Review Schedules page."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -696,9 +1030,14 @@ async def bcp_schedules(request: Request):
     # Get training and review items
     training_items = await bcp_repo.list_training_items(plan["id"])
     review_items = await bcp_repo.list_review_items(plan["id"])
+    all_users = await _list_company_users(company_id)
+    users_by_id = {member["id"]: member for member in all_users}
+    for item in review_items:
+        item["reviewer"] = users_by_id.get(item.get("reviewed_by_user_id"))
+        item["approver"] = users_by_id.get(item.get("approved_by_user_id"))
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -706,11 +1045,12 @@ async def bcp_schedules(request: Request):
             "plan": plan,
             "training_items": training_items,
             "review_items": review_items,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "all_users": all_users,
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/schedules.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/schedules.html", context=context)
 
 
 @router.post("/training", include_in_schema=False)
@@ -718,7 +1058,12 @@ async def create_training_item_endpoint(
     request: Request,
     training_date: str = Form(...),
     training_type: str = Form(None),
+    training_status: str = Form("Scheduled", alias="status"),
+    participants_count: int = Form(None),
+    score_percent: int = Form(None),
     comments: str = Form(None),
+    lessons_learned: str = Form(None),
+    follow_up_actions: str = Form(None),
 ):
     """Create a new training item."""
     user, company_id = await _require_bcp_edit(request)
@@ -736,12 +1081,30 @@ async def create_training_item_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid training date format"
         )
+    if participants_count is not None and participants_count < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Participants must be non-negative")
+    if score_percent is not None and not (0 <= score_percent <= 100):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Score must be between 0 and 100")
     
-    await bcp_repo.create_training_item(
+    training_item = await bcp_repo.create_training_item(
         plan["id"],
         training_date_obj,
         training_type if training_type else None,
-        comments if comments else None,
+        status=training_status if training_status else "Scheduled",
+        participants_count=participants_count,
+        score_percent=score_percent,
+        comments=comments if comments else None,
+        lessons_learned=lessons_learned if lessons_learned else None,
+        follow_up_actions=follow_up_actions if follow_up_actions else None,
+    )
+    await audit.record_create(
+        action="bcp.training_item.create",
+        user_id=user["id"],
+        entity_type="bcp_training_item",
+        entity_id=training_item["id"],
+        after=training_item,
+        metadata={"company_id": company_id, "plan_id": plan["id"]},
+        request=request,
     )
     
     return flash_redirect("/bcp/schedules", "Training scheduled successfully", "success")
@@ -753,7 +1116,12 @@ async def update_training_item_endpoint(
     training_id: int,
     training_date: str = Form(...),
     training_type: str = Form(None),
+    training_status: str = Form("Scheduled", alias="status"),
+    participants_count: int = Form(None),
+    score_percent: int = Form(None),
     comments: str = Form(None),
+    lessons_learned: str = Form(None),
+    follow_up_actions: str = Form(None),
 ):
     """Update a training item."""
     user, company_id = await _require_bcp_edit(request)
@@ -767,16 +1135,38 @@ async def update_training_item_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid training date format"
         )
+    if participants_count is not None and participants_count < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Participants must be non-negative")
+    if score_percent is not None and not (0 <= score_percent <= 100):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Score must be between 0 and 100")
+    before = await _require_plan_object(
+        company_id, bcp_repo.get_training_item_by_id, training_id, "Training item"
+    )
     
     updated = await bcp_repo.update_training_item(
         training_id,
         training_date=training_date_obj,
         training_type=training_type if training_type else None,
+        status=training_status if training_status else "Scheduled",
+        participants_count=participants_count,
+        score_percent=score_percent,
         comments=comments if comments else None,
+        lessons_learned=lessons_learned if lessons_learned else None,
+        follow_up_actions=follow_up_actions if follow_up_actions else None,
     )
     
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training item not found")
+    await audit.record(
+        action="bcp.training_item.update",
+        user_id=user["id"],
+        entity_type="bcp_training_item",
+        entity_id=training_id,
+        before=before,
+        after=updated,
+        metadata={"company_id": company_id},
+        request=request,
+    )
     
     return flash_redirect("/bcp/schedules", "Training updated successfully", "success")
 
@@ -788,10 +1178,22 @@ async def delete_training_item_endpoint(
 ):
     """Delete a training item."""
     user, company_id = await _require_bcp_edit(request)
+    before = await _require_plan_object(
+        company_id, bcp_repo.get_training_item_by_id, training_id, "Training item"
+    )
     
     deleted = await bcp_repo.delete_training_item(training_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training item not found")
+    await audit.record_delete(
+        action="bcp.training_item.delete",
+        user_id=user["id"],
+        entity_type="bcp_training_item",
+        entity_id=training_id,
+        before=before,
+        metadata={"company_id": company_id},
+        request=request,
+    )
     
     return flash_redirect("/bcp/schedules", "Training deleted successfully", "success")
 
@@ -800,8 +1202,13 @@ async def delete_training_item_endpoint(
 async def create_review_item_endpoint(
     request: Request,
     review_date: str = Form(...),
+    version_label: str = Form(None),
+    review_approval_status: str = Form("Draft", alias="approval_status"),
+    reviewed_by_user_id: int = Form(None),
+    approved_by_user_id: int = Form(None),
     reason: str = Form(None),
     changes_made: str = Form(None),
+    approval_snapshot: str = Form(None),
 ):
     """Create a new review item."""
     user, company_id = await _require_bcp_edit(request)
@@ -810,6 +1217,9 @@ async def create_review_item_endpoint(
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
     
+    await _require_company_user(company_id, reviewed_by_user_id, "Reviewer")
+    await _require_company_user(company_id, approved_by_user_id, "Approver")
+
     # Parse review date
     try:
         from datetime import datetime
@@ -820,11 +1230,25 @@ async def create_review_item_endpoint(
             detail="Invalid review date format"
         )
     
-    await bcp_repo.create_review_item(
+    review_item = await bcp_repo.create_review_item(
         plan["id"],
         review_date_obj,
+        version_label if version_label else None,
+        review_approval_status if review_approval_status else "Draft",
+        reviewed_by_user_id,
+        approved_by_user_id,
         reason if reason else None,
         changes_made if changes_made else None,
+        approval_snapshot if approval_snapshot else None,
+    )
+    await audit.record_create(
+        action="bcp.review_item.create",
+        user_id=user["id"],
+        entity_type="bcp_review_item",
+        entity_id=review_item["id"],
+        after=review_item,
+        metadata={"company_id": company_id, "plan_id": plan["id"]},
+        request=request,
     )
     
     return flash_redirect("/bcp/schedules", "Review scheduled successfully", "success")
@@ -835,8 +1259,13 @@ async def update_review_item_endpoint(
     request: Request,
     review_id: int,
     review_date: str = Form(...),
+    version_label: str = Form(None),
+    review_approval_status: str = Form("Draft", alias="approval_status"),
+    reviewed_by_user_id: int = Form(None),
+    approved_by_user_id: int = Form(None),
     reason: str = Form(None),
     changes_made: str = Form(None),
+    approval_snapshot: str = Form(None),
 ):
     """Update a review item."""
     user, company_id = await _require_bcp_edit(request)
@@ -851,15 +1280,35 @@ async def update_review_item_endpoint(
             detail="Invalid review date format"
         )
     
+    before = await _require_plan_object(
+        company_id, bcp_repo.get_review_item_by_id, review_id, "Review item"
+    )
+    await _require_company_user(company_id, reviewed_by_user_id, "Reviewer")
+    await _require_company_user(company_id, approved_by_user_id, "Approver")
     updated = await bcp_repo.update_review_item(
         review_id,
         review_date=review_date_obj,
+        version_label=version_label if version_label else None,
+        approval_status=review_approval_status if review_approval_status else "Draft",
+        reviewed_by_user_id=reviewed_by_user_id,
+        approved_by_user_id=approved_by_user_id,
         reason=reason if reason else None,
         changes_made=changes_made if changes_made else None,
+        approval_snapshot=approval_snapshot if approval_snapshot else None,
     )
     
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review item not found")
+    await audit.record(
+        action="bcp.review_item.update",
+        user_id=user["id"],
+        entity_type="bcp_review_item",
+        entity_id=review_id,
+        before=before,
+        after=updated,
+        metadata={"company_id": company_id},
+        request=request,
+    )
     
     return flash_redirect("/bcp/schedules", "Review updated successfully", "success")
 
@@ -871,10 +1320,22 @@ async def delete_review_item_endpoint(
 ):
     """Delete a review item."""
     user, company_id = await _require_bcp_edit(request)
+    before = await _require_plan_object(
+        company_id, bcp_repo.get_review_item_by_id, review_id, "Review item"
+    )
     
     deleted = await bcp_repo.delete_review_item(review_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review item not found")
+    await audit.record_delete(
+        action="bcp.review_item.delete",
+        user_id=user["id"],
+        entity_type="bcp_review_item",
+        entity_id=review_id,
+        before=before,
+        metadata={"company_id": company_id},
+        request=request,
+    )
     
     return flash_redirect("/bcp/schedules", "Review deleted successfully", "success")
 
@@ -884,7 +1345,8 @@ async def bcp_roles(request: Request):
     """BCP Roles & Responsibilities page."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
+    from app.repositories import audit_logs as audit_log_repo
     from app.repositories import users as user_repo
     
     # Get or create plan for this company
@@ -903,10 +1365,15 @@ async def bcp_roles(request: Request):
             assignment["user"] = user_data
     
     # Get all users for assignment dropdown
-    all_users = await user_repo.list_users()
+    all_users = await _list_company_users(company_id)
+    collaboration_audit = await audit_log_repo.list_audit_logs(
+        entity_type="bcp_role_assignment",
+        metadata_filters={"company_id": company_id},
+        limit=10,
+    )
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -914,11 +1381,12 @@ async def bcp_roles(request: Request):
             "plan": plan,
             "roles": roles,
             "all_users": all_users,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "collaboration_audit": collaboration_audit,
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/roles.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/roles.html", context=context)
 
 
 @router.post("/roles", include_in_schema=False)
@@ -994,13 +1462,31 @@ async def assign_user_to_role(
     request: Request,
     role_id: int,
     user_id: int = Form(...),
+    collaborator_role: str = Form("Executor"),
     is_alternate: bool = Form(False),
     contact_info: str = Form(None),
 ):
     """Assign a user to a BCP role."""
     user, company_id = await _require_bcp_edit(request)
-    
-    await bcp_repo.create_role_assignment(role_id, user_id, is_alternate, contact_info)
+    await _require_plan_object(company_id, bcp_repo.get_role_by_id, role_id, "Role")
+    await _require_company_user(company_id, user_id)
+
+    assignment = await bcp_repo.create_role_assignment(
+        role_id,
+        user_id,
+        collaborator_role=collaborator_role if collaborator_role else "Executor",
+        is_alternate=is_alternate,
+        contact_info=contact_info,
+    )
+    await audit.record_create(
+        action="bcp.role_assignment.create",
+        user_id=user["id"],
+        entity_type="bcp_role_assignment",
+        entity_id=assignment["id"],
+        after=assignment,
+        metadata={"company_id": company_id},
+        request=request,
+    )
     
     return flash_redirect("/bcp/roles", "User assigned to role successfully", "success")
 
@@ -1010,15 +1496,34 @@ async def update_role_assignment_endpoint(
     request: Request,
     assignment_id: int,
     user_id: int = Form(...),
+    collaborator_role: str = Form("Executor"),
     is_alternate: bool = Form(False),
     contact_info: str = Form(None),
 ):
     """Update a role assignment."""
     user, company_id = await _require_bcp_edit(request)
-    
-    updated = await bcp_repo.update_role_assignment(assignment_id, user_id=user_id, is_alternate=is_alternate, contact_info=contact_info)
+    before = await _require_role_assignment(company_id, assignment_id)
+    await _require_company_user(company_id, user_id)
+
+    updated = await bcp_repo.update_role_assignment(
+        assignment_id,
+        user_id=user_id,
+        collaborator_role=collaborator_role if collaborator_role else "Executor",
+        is_alternate=is_alternate,
+        contact_info=contact_info,
+    )
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+    await audit.record(
+        action="bcp.role_assignment.update",
+        user_id=user["id"],
+        entity_type="bcp_role_assignment",
+        entity_id=assignment_id,
+        before=before,
+        after=updated,
+        metadata={"company_id": company_id},
+        request=request,
+    )
     
     return flash_redirect("/bcp/roles", "Assignment updated successfully", "success")
 
@@ -1030,10 +1535,20 @@ async def delete_role_assignment_endpoint(
 ):
     """Delete a role assignment."""
     user, company_id = await _require_bcp_edit(request)
+    before = await _require_role_assignment(company_id, assignment_id)
     
     deleted = await bcp_repo.delete_role_assignment(assignment_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+    await audit.record_delete(
+        action="bcp.role_assignment.delete",
+        user_id=user["id"],
+        entity_type="bcp_role_assignment",
+        entity_id=assignment_id,
+        before=before,
+        metadata={"company_id": company_id},
+        request=request,
+    )
     
     return flash_redirect("/bcp/roles", "Assignment removed successfully", "success")
 
@@ -1057,7 +1572,7 @@ async def bcp_export(request: Request):
     """BCP Export landing page with download options."""
     user, company_id = await _require_bcp_export(request)
 
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
 
 
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -1113,7 +1628,7 @@ async def bcp_export(request: Request):
         },
     ]
 
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -1126,7 +1641,7 @@ async def bcp_export(request: Request):
         },
     )
 
-    return templates.TemplateResponse("bcp/export.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/export.html", context=context)
 
 
 @router.get("/export/pdf", include_in_schema=True)
@@ -1178,7 +1693,14 @@ async def export_bcp_pdf(
     
     try:
         # Generate PDF
-        pdf_buffer, content_hash = await export_bcp_to_pdf(plan["id"], event_log_limit=event_log_limit)
+        visible_asset_ids = {
+            int(asset["id"])
+            for asset in await _visible_bcp_assets(request, user, company_id)
+        }
+        pdf_buffer, content_hash = await export_bcp_to_pdf(
+            plan["id"], event_log_limit=event_log_limit,
+            visible_asset_ids=visible_asset_ids,
+        )
         
         # Create filename
         timestamp = dt.now().strftime("%Y%m%d_%H%M%S")
@@ -1228,7 +1750,7 @@ async def update_plan(
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
     
-    await bcp_repo.update_plan(
+    updated_plan = await bcp_repo.update_plan(
         plan["id"],
         title=title,
         executive_summary=executive_summary if executive_summary else None,
@@ -1237,11 +1759,14 @@ async def update_plan(
     
     
     # Audit log
-    await audit.log_action(
+    await audit.record(
         action="bcp.plan.update",
         user_id=user["id"],
-        entity_type="plan",
-        metadata={"company_id": company_id},
+        entity_type="bcp_plan",
+        entity_id=plan["id"],
+        before=plan,
+        after=updated_plan,
+        metadata={"company_id": company_id, "plan_id": plan["id"]},
         request=request,
     )
     
@@ -1282,6 +1807,7 @@ async def delete_objective(
 ):
     """Delete an objective."""
     user, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_objective_by_id, objective_id, "Objective")
     
     deleted = await bcp_repo.delete_objective(objective_id)
     if not deleted:
@@ -1364,6 +1890,7 @@ async def update_risk(
 ):
     """Update a risk."""
     user, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_risk_by_id, risk_id, "Risk")
     
     from app.services.risk_calculator import calculate_risk
     
@@ -1410,6 +1937,7 @@ async def delete_risk(
 ):
     """Delete a risk."""
     user, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_risk_by_id, risk_id, "Risk")
     
     deleted = await bcp_repo.delete_risk(risk_id)
     if not deleted:
@@ -1538,7 +2066,10 @@ async def delete_distribution_entry(
     entry_id: int,
 ):
     """Delete a distribution list entry."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(
+        company_id, bcp_repo.get_distribution_entry_by_id, entry_id, "Entry"
+    )
     
     deleted = await bcp_repo.delete_distribution_entry(entry_id)
     if not deleted:
@@ -1557,7 +2088,7 @@ async def bcp_insurance(request: Request):
     """BCP Insurance page with policies table."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -1569,18 +2100,18 @@ async def bcp_insurance(request: Request):
     policies = await bcp_repo.list_insurance_policies(plan["id"])
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
             "title": "Insurance Policies",
             "plan": plan,
             "policies": policies,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/insurance.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/insurance.html", context=context)
 
 
 @router.post("/insurance", include_in_schema=False)
@@ -1608,7 +2139,7 @@ async def create_insurance_policy(
             from datetime import datetime
             review_date = datetime.fromisoformat(last_review_date)
         except ValueError:
-            pass
+            review_date = None
     
     await bcp_repo.create_insurance_policy(
         plan["id"],
@@ -1637,7 +2168,8 @@ async def update_insurance_policy(
     payment_terms: str = Form(None),
 ):
     """Update an insurance policy."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_insurance_policy_by_id, policy_id, "Policy")
     
     # Parse date if provided
     review_date = None
@@ -1646,7 +2178,7 @@ async def update_insurance_policy(
             from datetime import datetime
             review_date = datetime.fromisoformat(last_review_date)
         except ValueError:
-            pass
+            review_date = None
     
     updated = await bcp_repo.update_insurance_policy(
         policy_id,
@@ -1671,7 +2203,8 @@ async def delete_insurance_policy(
     policy_id: int,
 ):
     """Delete an insurance policy."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_insurance_policy_by_id, policy_id, "Policy")
     
     deleted = await bcp_repo.delete_insurance_policy(policy_id)
     if not deleted:
@@ -1748,7 +2281,7 @@ async def bcp_backups(request: Request):
     """BCP Backups page with backup items table."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -1762,18 +2295,18 @@ async def bcp_backups(request: Request):
     # Get all backup items (manual + auto-created from backup jobs)
     backups = await bcp_repo.list_backup_items(plan["id"])
 
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
             "title": "Data Backup Strategy",
             "plan": plan,
             "backups": backups,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/backups.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/backups.html", context=context)
 
 
 @router.post("/backups", include_in_schema=False)
@@ -1815,7 +2348,8 @@ async def update_backup_item(
     steps: str = Form(None),
 ):
     """Update a backup item."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_backup_item_by_id, backup_id, "Backup item")
     
     updated = await bcp_repo.update_backup_item(
         backup_id,
@@ -1838,7 +2372,8 @@ async def delete_backup_item(
     backup_id: int,
 ):
     """Delete a backup item."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_backup_item_by_id, backup_id, "Backup item")
     
     deleted = await bcp_repo.delete_backup_item(backup_id)
     if not deleted:
@@ -1913,14 +2448,14 @@ async def bcp_bia_new(request: Request):
     """New critical activity page."""
     user, company_id = await _require_bcp_edit(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -1931,7 +2466,7 @@ async def bcp_bia_new(request: Request):
         },
     )
     
-    return templates.TemplateResponse("bcp/bia_edit.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/bia_edit.html", context=context)
 
 
 @router.get("/bia/{activity_id}/edit", response_class=HTMLResponse, include_in_schema=False)
@@ -1939,9 +2474,8 @@ async def bcp_bia_edit(request: Request, activity_id: int):
     """Edit page for a critical activity."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
-    from app.services.time_utils import humanize_hours
-    
+    build_base_context, templates = _get_page_rendering()
+
     # Get the activity
     activity = await bcp_repo.get_critical_activity_by_id(activity_id)
     if not activity:
@@ -1953,18 +2487,18 @@ async def bcp_bia_edit(request: Request, activity_id: int):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
             "title": f"Edit Critical Activity: {activity['name']}",
             "plan": plan,
             "activity": activity,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/bia_edit.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/bia_edit.html", context=context)
 
 
 @router.post("/bia", include_in_schema=False)
@@ -2065,7 +2599,8 @@ async def update_critical_activity_endpoint(
     losses_comments: str = Form(None),
 ):
     """Update a critical activity with impact data."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_critical_activity_by_id, activity_id, "Activity")
     
     # Validate importance if provided
     if importance is not None and not (1 <= importance <= 5):
@@ -2118,7 +2653,8 @@ async def delete_critical_activity_endpoint(
     activity_id: int,
 ):
     """Delete a critical activity."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_critical_activity_by_id, activity_id, "Activity")
     
     deleted = await bcp_repo.delete_critical_activity(activity_id)
     if not deleted:
@@ -2199,6 +2735,74 @@ async def export_bia_csv(request: Request):
     )
 
 
+@router.post("/dependencies", include_in_schema=False)
+async def create_dependency_mapping_endpoint(
+    request: Request,
+    critical_activity_id: int = Form(None),
+    dependency_type: str = Form(...),
+    dependency_name: str = Form(...),
+    owner_name: str = Form(None),
+    rto_hours: int = Form(None),
+    notes: str = Form(None),
+):
+    """Create a vendor/resource dependency mapping."""
+    user, company_id = await _require_bcp_edit(request)
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    if rto_hours is not None and rto_hours < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="RTO hours must be non-negative")
+    if critical_activity_id is not None:
+        await _require_plan_object(
+            company_id, bcp_repo.get_critical_activity_by_id, critical_activity_id, "Activity"
+        )
+
+    dependency = await bcp_repo.create_dependency_mapping(
+        plan["id"],
+        critical_activity_id,
+        dependency_type,
+        dependency_name,
+        owner_name if owner_name else None,
+        rto_hours,
+        notes if notes else None,
+    )
+    await audit.record_create(
+        action="bcp.dependency.create",
+        user_id=user["id"],
+        entity_type="bcp_dependency_map",
+        entity_id=dependency["id"] if dependency else None,
+        after=dependency,
+        metadata={"company_id": company_id, "plan_id": plan["id"]},
+        request=request,
+    )
+    return flash_redirect("/bcp/bia", "Dependency mapped successfully", "success")
+
+
+@router.post("/dependencies/{dependency_id}/delete", include_in_schema=False)
+async def delete_dependency_mapping_endpoint(
+    request: Request,
+    dependency_id: int,
+):
+    """Delete a dependency mapping."""
+    user, company_id = await _require_bcp_edit(request)
+    before = await _require_plan_object(
+        company_id, bcp_repo.get_dependency_mapping_by_id, dependency_id, "Dependency mapping"
+    )
+    deleted = await bcp_repo.delete_dependency_mapping(dependency_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dependency mapping not found")
+    await audit.record_delete(
+        action="bcp.dependency.delete",
+        user_id=user["id"],
+        entity_type="bcp_dependency_map",
+        entity_id=dependency_id,
+        before=before,
+        metadata={"company_id": company_id},
+        request=request,
+    )
+    return flash_redirect("/bcp/bia", "Dependency removed successfully", "success")
+
+
 # ============================================================================
 # Incident Console Endpoints
 # ============================================================================
@@ -2222,7 +2826,7 @@ async def start_incident(request: Request):
         return flash_redirect("/bcp/incident", "An incident is already active", "error")
     
     # Create new incident
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     incident = await bcp_repo.create_incident(plan["id"], now, source="Manual")
     
     # Initialize checklist ticks
@@ -2249,7 +2853,7 @@ async def start_incident(request: Request):
         entity_type="bcp_incident",
         entity_id=incident["id"],
         new_value={"plan_id": plan["id"], "source": "Manual"},
-        metadata={"company_id": company_id},
+        metadata={"company_id": company_id, "plan_id": plan["id"]},
         request=request,
     )
     
@@ -2280,7 +2884,7 @@ async def close_incident_endpoint(request: Request):
     await bcp_repo.close_incident(active_incident["id"])
     
     # Add event log entry
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     user_name = user.get("name", "")
     initials = "".join([part[0].upper() for part in user_name.split()[:2]]) if user_name else "SYS"
     
@@ -2299,11 +2903,54 @@ async def close_incident_endpoint(request: Request):
         user_id=user["id"],
         entity_type="bcp_incident",
         entity_id=active_incident["id"],
+        new_value={"status": "Closed"},
         metadata={"plan_id": plan["id"], "company_id": company_id},
         request=request,
     )
     
     return flash_redirect("/bcp/incident", "Incident closed successfully", "success")
+
+
+@router.post("/incident/{incident_id}/after-action", include_in_schema=False)
+async def update_incident_after_action_endpoint(
+    request: Request,
+    incident_id: int,
+    after_action_summary: str = Form(None),
+    after_action_improvements: str = Form(None),
+):
+    """Capture after-action review details for an incident."""
+    user, company_id = await _require_bcp_edit(request)
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+
+    before = await bcp_repo.get_incident_by_id(incident_id)
+    if not before or before["plan_id"] != plan["id"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+
+    reviewed_at = (
+        datetime.now(timezone.utc)
+        if (after_action_summary and after_action_summary.strip())
+        or (after_action_improvements and after_action_improvements.strip())
+        else None
+    )
+    updated = await bcp_repo.update_incident_after_action(
+        incident_id,
+        after_action_summary=after_action_summary if after_action_summary else None,
+        after_action_improvements=after_action_improvements if after_action_improvements else None,
+        after_action_reviewed_at=reviewed_at,
+    )
+    await audit.record(
+        action="bcp.incident.after_action.update",
+        user_id=user["id"],
+        entity_type="bcp_incident",
+        entity_id=incident_id,
+        before=before,
+        after=updated,
+        metadata={"company_id": company_id, "plan_id": plan["id"]},
+        request=request,
+    )
+    return flash_redirect("/bcp/incident?tab=after-action", "After-action review saved", "success")
 
 
 @router.post("/incident/checklist/{tick_id}/toggle", include_in_schema=False)
@@ -2317,14 +2964,14 @@ async def toggle_checklist_item(
     from datetime import datetime
     from app.services import audit
     
-    # Get the tick
-    tick = await bcp_repo.get_checklist_tick_by_id(tick_id)
-    if not tick:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist item not found")
+    # Get the tick (must belong to this company's plan)
+    tick = await _require_plan_object(
+        company_id, bcp_repo.get_checklist_tick_by_id, tick_id, "Checklist item"
+    )
     
     # Toggle the tick
     new_state = not tick["is_done"]
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     
     await bcp_repo.toggle_checklist_tick(tick_id, new_state, user["id"], now)
     
@@ -2385,7 +3032,8 @@ async def update_contact_endpoint(
     responsibility_or_agency: str = Form(None),
 ):
     """Update a contact."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_contact_by_id, contact_id, "Contact")
     
     updated = await bcp_repo.update_contact(
         contact_id,
@@ -2408,7 +3056,8 @@ async def delete_contact_endpoint(
     contact_id: int,
 ):
     """Delete a contact."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_contact_by_id, contact_id, "Contact")
     
     deleted = await bcp_repo.delete_contact(contact_id)
     if not deleted:
@@ -2443,9 +3092,9 @@ async def create_event_log_entry_endpoint(
         try:
             event_time = datetime.fromisoformat(happened_at.replace('Z', '+00:00'))
         except ValueError:
-            event_time = datetime.utcnow()
+            event_time = datetime.now(timezone.utc)
     else:
-        event_time = datetime.utcnow()
+        event_time = datetime.now(timezone.utc)
     
     # Get user initials
     user_name = user.get("name", "")
@@ -2557,6 +3206,8 @@ async def webhook_start_incident(request: Request):
     try:
         body = await request.body()
         payload = json.loads(body.decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise json.JSONDecodeError("Expected a JSON object", body.decode("utf-8", errors="replace"), 0)
     except json.JSONDecodeError as exc:
         await webhook_monitor.log_incoming_webhook(
             name="BCP Incident Webhook - Invalid JSON",
@@ -2577,12 +3228,14 @@ async def webhook_start_incident(request: Request):
     source = payload.get("source", "Other")
     message = payload.get("message", "External alert triggered incident")
     api_key = payload.get("api_key")
+    # Never persist the shared secret in the webhook monitor log.
+    log_payload = {key: value for key, value in payload.items() if key != "api_key"}
     
     if not company_id:
         await webhook_monitor.log_incoming_webhook(
             name="BCP Incident Webhook - Missing company_id",
             source_url=source_url,
-            payload=payload,
+            payload=log_payload,
             headers=request_headers,
             response_status=400,
             response_body="company_id is required",
@@ -2593,13 +3246,15 @@ async def webhook_start_incident(request: Request):
             detail="company_id is required"
         )
     
-    # TODO: Validate API key against stored keys
-    # For now, we'll just check if it's provided
+    # Accept the key from the payload (legacy integrations) or the standard
+    # X-API-Key header, and validate it against the stored API keys.
     if not api_key:
+        api_key = request.headers.get("x-api-key")
+    if not api_key or not isinstance(api_key, str):
         await webhook_monitor.log_incoming_webhook(
             name="BCP Incident Webhook - Missing API key",
             source_url=source_url,
-            payload=payload,
+            payload=log_payload,
             headers=request_headers,
             response_status=401,
             response_body="api_key is required",
@@ -2609,6 +3264,22 @@ async def webhook_start_incident(request: Request):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="api_key is required"
         )
+
+    from app.api.dependencies.api_keys import _lookup_api_key
+
+    try:
+        await _lookup_api_key(request, api_key)
+    except HTTPException as exc:
+        await webhook_monitor.log_incoming_webhook(
+            name="BCP Incident Webhook - Invalid API key",
+            source_url=source_url,
+            payload=log_payload,
+            headers=request_headers,
+            response_status=exc.status_code,
+            response_body=str(exc.detail),
+            error_message="API key rejected",
+        )
+        raise
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -2616,7 +3287,7 @@ async def webhook_start_incident(request: Request):
         await webhook_monitor.log_incoming_webhook(
             name="BCP Incident Webhook - Plan not found",
             source_url=source_url,
-            payload=payload,
+            payload=log_payload,
             headers=request_headers,
             response_status=404,
             response_body=f"No BCP plan found for company_id {company_id}",
@@ -2638,7 +3309,7 @@ async def webhook_start_incident(request: Request):
         await webhook_monitor.log_incoming_webhook(
             name=f"BCP Incident Webhook - {source}",
             source_url=source_url,
-            payload=payload,
+            payload=log_payload,
             headers=request_headers,
             response_status=200,
             response_body=json.dumps(response_data),
@@ -2646,7 +3317,7 @@ async def webhook_start_incident(request: Request):
         return response_data
     
     # Create new incident
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     incident = await bcp_repo.create_incident(plan["id"], now, source=source)
     
     # Initialize checklist ticks
@@ -2676,7 +3347,7 @@ async def webhook_start_incident(request: Request):
     await webhook_monitor.log_incoming_webhook(
         name=f"BCP Incident Started - {source}",
         source_url=source_url,
-        payload=payload,
+        payload=log_payload,
         headers=request_headers,
         response_status=200,
         response_body=json.dumps(response_data),
@@ -2695,7 +3366,7 @@ async def bcp_evacuation(request: Request):
     """BCP Evacuation Procedures page."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -2709,18 +3380,18 @@ async def bcp_evacuation(request: Request):
         evacuation = await bcp_repo.create_evacuation_plan(plan["id"])
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
             "title": "Evacuation Procedures",
             "plan": plan,
             "evacuation": evacuation,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/evacuation.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/evacuation.html", context=context)
 
 
 @router.post("/evacuation", include_in_schema=False)
@@ -2761,7 +3432,7 @@ async def bcp_emergency_kit(request: Request, tab: str = Query("documents")):
     """BCP Emergency Kit page with Documents and Equipment tabs."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -2780,7 +3451,7 @@ async def bcp_emergency_kit(request: Request, tab: str = Query("documents")):
     equipment_items = [item for item in all_items if item["category"] == "Equipment"]
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -2789,11 +3460,11 @@ async def bcp_emergency_kit(request: Request, tab: str = Query("documents")):
             "document_items": document_items,
             "equipment_items": equipment_items,
             "active_tab": tab,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/emergency_kit.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/emergency_kit.html", context=context)
 
 
 @router.post("/emergency-kit", include_in_schema=False)
@@ -2831,7 +3502,8 @@ async def update_emergency_kit_item_endpoint(
     notes: str = Form(None),
 ):
     """Update an emergency kit item."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_emergency_kit_item_by_id, item_id, "Item")
     
     updated = await bcp_repo.update_emergency_kit_item(
         item_id,
@@ -2854,17 +3526,17 @@ async def mark_emergency_kit_item_checked_endpoint(
     item_id: int,
 ):
     """Mark an emergency kit item as checked today."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
     
     from datetime import datetime
     
     # Get the item to determine its category for redirect
-    item = await bcp_repo.get_emergency_kit_item_by_id(item_id)
-    if not item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    item = await _require_plan_object(
+        company_id, bcp_repo.get_emergency_kit_item_by_id, item_id, "Item"
+    )
     
     # Mark as checked
-    await bcp_repo.mark_emergency_kit_item_checked(item_id, datetime.utcnow())
+    await bcp_repo.mark_emergency_kit_item_checked(item_id, datetime.now(timezone.utc))
     
     # Redirect to the appropriate tab
     tab = "documents" if item["category"] == "Document" else "equipment"
@@ -2877,12 +3549,12 @@ async def delete_emergency_kit_item_endpoint(
     item_id: int,
 ):
     """Delete an emergency kit item."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
     
     # Get the item to determine its category for redirect
-    item = await bcp_repo.get_emergency_kit_item_by_id(item_id)
-    if not item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    item = await _require_plan_object(
+        company_id, bcp_repo.get_emergency_kit_item_by_id, item_id, "Item"
+    )
     
     tab = "documents" if item["category"] == "Document" else "equipment"
     
@@ -2907,6 +3579,7 @@ async def create_recovery_action_endpoint(
     rto_hours: int = Form(None),
     due_date: str = Form(None),
     critical_activity_id: int = Form(None),
+    asset_ids: list[int] = Form(default=[]),
 ):
     """Create a new recovery action."""
     user, company_id = await _require_bcp_edit(request)
@@ -2922,7 +3595,7 @@ async def create_recovery_action_endpoint(
             from datetime import datetime
             due_date_obj = datetime.fromisoformat(due_date)
         except ValueError:
-            pass
+            due_date_obj = None
     
     # Validate RTO if provided
     if rto_hours is not None and rto_hours < 0:
@@ -2930,8 +3603,20 @@ async def create_recovery_action_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="RTO hours must be non-negative"
         )
-    
-    await bcp_repo.create_recovery_action(
+    await _require_company_user(company_id, owner_id or None, "Owner")
+    if critical_activity_id:
+        await _require_plan_object(
+            company_id, bcp_repo.get_critical_activity_by_id, critical_activity_id, "Activity"
+        )
+    allowed_assets = {
+        int(asset["id"])
+        for asset in await _visible_bcp_assets(request, user, company_id, write=True)
+    }
+    requested_assets = set(asset_ids)
+    if not requested_assets.issubset(allowed_assets):
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    created = await bcp_repo.create_recovery_action(
         plan["id"],
         action,
         resources if resources else None,
@@ -2940,6 +3625,12 @@ async def create_recovery_action_endpoint(
         due_date_obj,
         critical_activity_id if critical_activity_id else None,
     )
+    for asset_id in requested_assets:
+        await bcp_repo.link_asset_to_component(
+            plan_id=plan["id"], company_id=company_id,
+            component_type="recovery_action", component_id=int(created["id"]),
+            asset_id=asset_id, linked_by_user_id=int(user["id"]),
+        )
     
     
     # Audit logging
@@ -2947,8 +3638,9 @@ async def create_recovery_action_endpoint(
         action="bcp.recovery_action.create",
         user_id=user["id"],
         entity_type="recovery_action",
-        entity_id=None,
-        metadata={"company_id": company_id},
+        entity_id=created["id"],
+        new_value={"asset_ids": sorted(requested_assets)},
+        metadata={"company_id": company_id, "plan_id": plan["id"]},
         request=request,
     )
     
@@ -2965,10 +3657,16 @@ async def update_recovery_action_endpoint(
     rto_hours: int = Form(None),
     due_date: str = Form(None),
     critical_activity_id: int = Form(None),
+    asset_ids: list[int] = Form(default=[]),
 ):
     """Update a recovery action."""
     user, company_id = await _require_bcp_edit(request)
     
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    before = await bcp_repo.get_recovery_action_by_id(action_id)
+    if not plan or not before or int(before["plan_id"]) != int(plan["id"]):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recovery action not found")
+
     # Parse due date if provided
     due_date_obj = None
     if due_date:
@@ -2976,7 +3674,7 @@ async def update_recovery_action_endpoint(
             from datetime import datetime
             due_date_obj = datetime.fromisoformat(due_date)
         except ValueError:
-            pass
+            due_date_obj = None
     
     # Validate RTO if provided
     if rto_hours is not None and rto_hours < 0:
@@ -2984,7 +3682,19 @@ async def update_recovery_action_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="RTO hours must be non-negative"
         )
-    
+    await _require_company_user(company_id, owner_id or None, "Owner")
+    if critical_activity_id:
+        await _require_plan_object(
+            company_id, bcp_repo.get_critical_activity_by_id, critical_activity_id, "Activity"
+        )
+    allowed_assets = {
+        int(asset["id"])
+        for asset in await _visible_bcp_assets(request, user, company_id, write=True)
+    }
+    requested_assets = set(asset_ids)
+    if not requested_assets.issubset(allowed_assets):
+        raise HTTPException(status_code=404, detail="Asset not found")
+
     updated = await bcp_repo.update_recovery_action(
         action_id,
         action=action,
@@ -2999,13 +3709,33 @@ async def update_recovery_action_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recovery action not found")
     
     
-    # Audit logging
+    current_links = await bcp_repo.list_component_asset_links(
+        plan["id"], "recovery_action", action_id
+    )
+    current_by_asset = {int(link["asset_id"]): link for link in current_links}
+    visible_current_ids = set(current_by_asset) & allowed_assets
+    for asset_id in requested_assets - visible_current_ids:
+        await bcp_repo.link_asset_to_component(
+            plan_id=plan["id"], company_id=company_id,
+            component_type="recovery_action", component_id=action_id,
+            asset_id=asset_id, linked_by_user_id=int(user["id"]),
+        )
+    # Hidden assets are outside this editor's authority and remain linked.
+    for asset_id in visible_current_ids - requested_assets:
+        await bcp_repo.unlink_asset_from_component(
+            link_id=int(current_by_asset[asset_id]["id"]), plan_id=plan["id"],
+            company_id=company_id, unlinked_by_user_id=int(user["id"]),
+        )
+
+    # The existing audit/version history records the full link delta.
     await audit.log_action(
         action="bcp.recovery_action.update",
         user_id=user["id"],
         entity_type="recovery_action",
         entity_id=action_id,
-        metadata={"company_id": company_id},
+        previous_value={"asset_ids": sorted(current_by_asset)},
+        new_value={"asset_ids": sorted(requested_assets)},
+        metadata={"company_id": company_id, "plan_id": plan["id"]},
         request=request,
     )
     
@@ -3019,10 +3749,13 @@ async def mark_recovery_action_complete_endpoint(
 ):
     """Mark a recovery action as completed."""
     user, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(
+        company_id, bcp_repo.get_recovery_action_by_id, action_id, "Recovery action"
+    )
     
     from datetime import datetime
     
-    updated = await bcp_repo.mark_recovery_action_complete(action_id, datetime.utcnow())
+    updated = await bcp_repo.mark_recovery_action_complete(action_id, datetime.now(timezone.utc))
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recovery action not found")
     
@@ -3047,6 +3780,9 @@ async def delete_recovery_action_endpoint(
 ):
     """Delete a recovery action."""
     user, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(
+        company_id, bcp_repo.get_recovery_action_by_id, action_id, "Recovery action"
+    )
     
     deleted = await bcp_repo.delete_recovery_action(action_id)
     if not deleted:
@@ -3082,6 +3818,14 @@ async def export_recovery_actions_csv(request: Request):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
     
     actions = await bcp_repo.list_recovery_actions(plan["id"])
+    exportable_assets = {
+        int(asset["id"]): asset
+        for asset in await _visible_bcp_assets(request, user, company_id)
+    }
+    links = await bcp_repo.list_component_asset_links(plan["id"], "recovery_action")
+    links_by_action = _group_component_asset_links([
+        link for link in links if int(link["asset_id"]) in exportable_assets
+    ])
     
     # Create CSV
     output = StringIO()
@@ -3098,6 +3842,7 @@ async def export_recovery_actions_csv(request: Request):
             "Completed At",
             "Created At",
             "Updated At",
+            "Assets",
         ],
     )
     writer.writeheader()
@@ -3124,6 +3869,14 @@ async def export_recovery_actions_csv(request: Request):
             "Completed At": action.get("completed_at", ""),
             "Created At": action.get("created_at", ""),
             "Updated At": action.get("updated_at", ""),
+            "Assets": "; ".join(
+                "{} (ID {}{})".format(
+                    link.get("name") or link["asset_name_snapshot"],
+                    link["asset_id"],
+                    ", archived" if link.get("archived_at") else "",
+                )
+                for link in links_by_action.get(int(action["id"]), [])
+            ),
         })
     
     output.seek(0)
@@ -3148,7 +3901,7 @@ async def bcp_recovery_checklist(request: Request):
     """BCP Recovery Checklist page for Crisis & Recovery phase."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -3202,7 +3955,7 @@ async def bcp_recovery_checklist(request: Request):
         checklist_with_ticks = [{**item, "tick": None} for item in checklist_items]
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -3210,11 +3963,11 @@ async def bcp_recovery_checklist(request: Request):
             "plan": plan,
             "active_incident": active_incident,
             "checklist_items": checklist_with_ticks,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/recovery_checklist.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/recovery_checklist.html", context=context)
 
 
 # ============================================================================
@@ -3227,7 +3980,7 @@ async def bcp_recovery_contacts(request: Request):
     """BCP Recovery Contacts page with contact type, organisation, contact, title, phone/mobile."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -3239,18 +3992,18 @@ async def bcp_recovery_contacts(request: Request):
     contacts = await bcp_repo.list_recovery_contacts(plan["id"])
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
             "title": "Recovery Contacts",
             "plan": plan,
             "contacts": contacts,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/recovery_contacts.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/recovery_contacts.html", context=context)
 
 
 @router.post("/recovery-contacts", include_in_schema=False)
@@ -3289,7 +4042,8 @@ async def update_recovery_contact_endpoint(
     phone: str = Form(None),
 ):
     """Update a recovery contact."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_recovery_contact_by_id, contact_id, "Contact")
     
     updated = await bcp_repo.update_recovery_contact(
         contact_id,
@@ -3311,7 +4065,8 @@ async def delete_recovery_contact_endpoint(
     contact_id: int,
 ):
     """Delete a recovery contact."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_recovery_contact_by_id, contact_id, "Contact")
     
     deleted = await bcp_repo.delete_recovery_contact(contact_id)
     if not deleted:
@@ -3384,7 +4139,7 @@ async def bcp_insurance_claims(request: Request):
     """BCP Insurance Claims page with insurer, date, claim details, follow-up actions."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -3396,18 +4151,18 @@ async def bcp_insurance_claims(request: Request):
     claims = await bcp_repo.list_insurance_claims(plan["id"])
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
             "title": "Insurance Claims",
             "plan": plan,
             "claims": claims,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/insurance_claims.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/insurance_claims.html", context=context)
 
 
 @router.post("/insurance-claims", include_in_schema=False)
@@ -3432,7 +4187,7 @@ async def create_insurance_claim_endpoint(
             from datetime import datetime
             claim_date_obj = datetime.fromisoformat(claim_date)
         except ValueError:
-            pass
+            claim_date_obj = None
     
     await bcp_repo.create_insurance_claim(
         plan["id"],
@@ -3455,7 +4210,8 @@ async def update_insurance_claim_endpoint(
     follow_up_actions: str = Form(None),
 ):
     """Update an insurance claim."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_insurance_claim_by_id, claim_id, "Claim")
     
     # Parse date if provided
     claim_date_obj = None
@@ -3464,7 +4220,7 @@ async def update_insurance_claim_endpoint(
             from datetime import datetime
             claim_date_obj = datetime.fromisoformat(claim_date)
         except ValueError:
-            pass
+            claim_date_obj = None
     
     updated = await bcp_repo.update_insurance_claim(
         claim_id,
@@ -3486,7 +4242,8 @@ async def delete_insurance_claim_endpoint(
     claim_id: int,
 ):
     """Delete an insurance claim."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_insurance_claim_by_id, claim_id, "Claim")
     
     deleted = await bcp_repo.delete_insurance_claim(claim_id)
     if not deleted:
@@ -3559,7 +4316,7 @@ async def bcp_market_changes(request: Request):
     """BCP Market Changes page with market change, impact to business, business options."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -3571,18 +4328,18 @@ async def bcp_market_changes(request: Request):
     changes = await bcp_repo.list_market_changes(plan["id"])
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
             "title": "Market Assessment",
             "plan": plan,
             "changes": changes,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/market_changes.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/market_changes.html", context=context)
 
 
 @router.post("/market-changes", include_in_schema=False)
@@ -3618,7 +4375,8 @@ async def update_market_change_endpoint(
     options: str = Form(None),
 ):
     """Update a market change record."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_market_change_by_id, change_id, "Market change")
     
     updated = await bcp_repo.update_market_change(
         change_id,
@@ -3639,7 +4397,8 @@ async def delete_market_change_endpoint(
     change_id: int,
 ):
     """Delete a market change record."""
-    user, company_id = await _require_bcp_edit(request)
+    _, company_id = await _require_bcp_edit(request)
+    await _require_plan_object(company_id, bcp_repo.get_market_change_by_id, change_id, "Market change")
     
     deleted = await bcp_repo.delete_market_change(change_id)
     if not deleted:
@@ -3710,7 +4469,7 @@ async def bcp_wellbeing(request: Request):
     """BCP Staff Wellbeing informational page with admin-editable links/phone numbers."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -3759,18 +4518,18 @@ async def bcp_wellbeing(request: Request):
         },
     ]
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
             "title": "Staff Wellbeing Support",
             "plan": plan,
             "wellbeing_resources": wellbeing_resources,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/wellbeing.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/wellbeing.html", context=context)
 
 
 # ============================================================================
@@ -3783,7 +4542,7 @@ async def bcp_seed_info(request: Request):
     """BCP Seeding Info page - shows what defaults are seeded and how to manage them."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     from app.services.bcp_seeding import get_seeding_documentation
     
     # Get or create plan for this company
@@ -3797,18 +4556,18 @@ async def bcp_seed_info(request: Request):
     seed_docs = get_seeding_documentation()
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
             "title": "BCP Seed Data Information",
             "plan": plan,
             "seed_docs": seed_docs,
-            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "can_edit": user.get("is_super_admin") or await user_has_company_permission(user["id"], company_id, "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/seed_info.html", context)
+    return templates.TemplateResponse(request=request, name="bcp/seed_info.html", context=context)
 
 
 @router.post("/admin/reseed", include_in_schema=False)
@@ -3872,3 +4631,101 @@ async def reseed_bcp_defaults(
         message = f"Successfully added: {', '.join(parts)}"
     
     return flash_redirect("/bcp/admin/seed-info", message, "success")
+
+# Global risk and BIA assessment library
+async def _require_bcp_library_admin(request: Request) -> dict[str, Any]:
+    user, _ = await _require_bcp_view(request)
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super administrator required")
+    return user
+
+
+@router.get("/library", response_class=HTMLResponse, include_in_schema=False)
+async def bcp_global_library(request: Request):
+    """Manage reusable risk and BIA assessments and customer assignments."""
+    user = await _require_bcp_library_admin(request)
+    build_base_context, templates = _get_page_rendering()
+    from app.repositories import companies as company_repo
+    context = await build_base_context(request, user, extra={
+        "title": "Global BCP Assessment Library",
+        "global_risks": await bcp_repo.list_global_risks(),
+        "global_bias": await bcp_repo.list_global_bia_assessments(),
+        "companies": await company_repo.list_companies(),
+    })
+    return templates.TemplateResponse(request=request, name="bcp/library.html", context=context)
+
+
+@router.post("/library/risks", include_in_schema=False)
+async def create_global_risk_endpoint(
+    request: Request, description: str = Form(...), likelihood: int = Form(...),
+    impact: int = Form(...), preventative_actions: str = Form(None),
+    contingency_plans: str = Form(None), company_ids: list[int] = Form(default=[]),
+):
+    await _require_bcp_library_admin(request)
+    if not 1 <= likelihood <= 4 or not 1 <= impact <= 4:
+        raise HTTPException(status_code=400, detail="Likelihood and impact must be between 1 and 4")
+    assessment_id = await bcp_repo.create_global_risk(
+        description.strip(), likelihood, impact, preventative_actions or None, contingency_plans or None)
+    for company_id in set(company_ids):
+        await bcp_repo.assign_global_risk(assessment_id, company_id)
+    return flash_redirect("/bcp/library", "Global risk created and assignments applied", "success")
+
+
+@router.post("/library/bia", include_in_schema=False)
+async def create_global_bia_endpoint(
+    request: Request, name: str = Form(...), description: str = Form(None),
+    priority: str = Form(None), supplier_dependency: str = Form(None),
+    importance: int = Form(None), notes: str = Form(None), losses_financial: str = Form(None),
+    losses_staffing: str = Form(None), losses_reputation: str = Form(None),
+    rto_hours: int = Form(None), company_ids: list[int] = Form(default=[]),
+):
+    await _require_bcp_library_admin(request)
+    if importance is not None and not 1 <= importance <= 5:
+        raise HTTPException(status_code=400, detail="Importance must be between 1 and 5")
+    if rto_hours is not None and rto_hours < 0:
+        raise HTTPException(status_code=400, detail="RTO hours must be non-negative")
+    assessment_id = await bcp_repo.create_global_bia(
+        name=name.strip(), description=description or None, priority=priority or None,
+        supplier_dependency=supplier_dependency or None, importance=importance, notes=notes or None,
+        losses_financial=losses_financial or None, losses_staffing=losses_staffing or None,
+        losses_reputation=losses_reputation or None, rto_hours=rto_hours)
+    for company_id in set(company_ids):
+        await bcp_repo.assign_global_bia(assessment_id, company_id)
+    return flash_redirect("/bcp/library", "Global BIA assessment created and assignments applied", "success")
+
+
+@router.post("/library/{kind}/{assessment_id}/assign", include_in_schema=False)
+async def bulk_assign_global_assessment(
+    request: Request, kind: str, assessment_id: int, company_ids: list[int] = Form(default=[]),
+):
+    await _require_bcp_library_admin(request)
+    if kind not in {"risk", "bia"}:
+        raise HTTPException(status_code=404, detail="Assessment type not found")
+    assign = bcp_repo.assign_global_risk if kind == "risk" else bcp_repo.assign_global_bia
+    assigned = sum([await assign(assessment_id, company_id) for company_id in set(company_ids)])
+    return flash_redirect("/bcp/library", f"Assigned to {assigned} customer(s)", "success")
+
+
+@router.post("/library/{kind}/{assessment_id}/delete", include_in_schema=False)
+async def delete_global_assessment_endpoint(request: Request, kind: str, assessment_id: int):
+    await _require_bcp_library_admin(request)
+    if kind not in {"risk", "bia"}:
+        raise HTTPException(status_code=404, detail="Assessment type not found")
+    await bcp_repo.delete_global_assessment(kind, assessment_id)
+    return flash_redirect("/bcp/library", "Global assessment deleted", "success")
+
+
+@router.post("/available/{kind}/{assessment_id}/add", include_in_schema=False)
+async def add_available_global_assessment(request: Request, kind: str, assessment_id: int):
+    """Add a selected global assessment from within the active customer's BCP."""
+    _, company_id = await _require_bcp_edit(request)
+    if kind == "risk":
+        created = await bcp_repo.assign_global_risk(assessment_id, company_id)
+        destination = "/bcp/risks"
+    elif kind == "bia":
+        created = await bcp_repo.assign_global_bia(assessment_id, company_id)
+        destination = "/bcp/bia"
+    else:
+        raise HTTPException(status_code=404, detail="Assessment type not found")
+    message = "Assessment added" if created else "Assessment was already added or is unavailable"
+    return flash_redirect(destination, message, "success" if created else "warning")

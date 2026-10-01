@@ -15,6 +15,7 @@ def _base_env() -> dict[str, str]:
     return {
         "SESSION_SECRET": "test-secret",
         "TOTP_ENCRYPTION_KEY": "test-totp-key",
+        "ENVIRONMENT": "test",
     }
 
 

@@ -1,0 +1,7 @@
+{
+  "guid": "3aa3c5ed-ac7b-4175-8001-1d5b63979995",
+  "occurred_at": "2026-09-27T12:39Z",
+  "change_type": "Fix",
+  "summary": "Prevent BCP pages from failing on object-shaped role permission records",
+  "content_hash": "bad7ae721292c245a8846a837b9464afeb935e5e09d6894f889aaf30eb25c108"
+}

@@ -1,0 +1,7 @@
+{
+  "guid": "5807b919-846d-41c3-94c9-f40fa368c28f",
+  "occurred_at": "2026-08-25T00:00Z",
+  "change_type": "Fix",
+  "summary": "Corrected Microsoft 365 mailbox import matching so case-sensitive Graph message IDs cannot resolve to unrelated tickets.",
+  "content_hash": "93dc882f143359131d128d605d12f6e65f789cc6da489f4da3f027a3c9021190"
+}

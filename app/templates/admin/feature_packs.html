@@ -26,10 +26,9 @@
       <section class="card card--panel">
         {% if not packs %}
           <p class="empty-state">
-            No feature packs are currently loaded. Configure the
-            <code>FEATURE_PACKS</code> environment variable (see
-            <code>docs/feature_packs.md</code>) and restart the
-            application to register packs.
+            No built-in feature packs are currently loaded. Check the
+            application startup logs for import or mount failures before
+            retrying.
           </p>
         {% else %}
           <div class="table-wrapper">
@@ -104,6 +103,52 @@
           </div>
         {% endif %}
       </section>
+
+      {% if core_components %}
+      <section class="card card--panel">
+        <h2>Core components</h2>
+        <p class="muted">
+          Sections served by the core application or shared with another pack.
+          Disable any of them by adding the slug to
+          <code>DISABLED_FEATURE_PACKS</code> in the <code>.env</code> file and
+          restarting. Disabled components are hidden from navigation and their
+          routes return 404.
+        </p>
+        <div class="table-wrapper">
+          <table class="table" id="core-components-table" data-table data-table-id="core_components">
+            <thead>
+              <tr>
+                <th scope="col" data-sort="string" data-column-key="label">Component</th>
+                <th scope="col" data-sort="string" data-column-key="slug">Slug</th>
+                <th scope="col" data-column-key="description" data-mobile-hidden="true">Description</th>
+                <th scope="col" data-sort="string" data-column-key="status">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for component in core_components %}
+                <tr data-component-slug="{{ component.slug }}">
+                  <td data-label="Component" data-column-key="label"><strong>{{ component.label }}</strong></td>
+                  <td data-label="Slug" data-column-key="slug"><code>{{ component.slug }}</code></td>
+                  <td data-label="Description" data-column-key="description" data-mobile-hidden="true">
+                    {{ component.description }}
+                    {% if component.parent_pack %}
+                      <div class="muted">Requires feature pack <code>{{ component.parent_pack }}</code>.</div>
+                    {% endif %}
+                  </td>
+                  <td data-label="Status" data-column-key="status">
+                    {% if component.available %}
+                      <span class="status status--success">Enabled</span>
+                    {% else %}
+                      <span class="status">Disabled by deployment</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      {% endif %}
 
       <section class="card card--panel">
         <h2>Plugins</h2>

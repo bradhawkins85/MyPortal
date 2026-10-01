@@ -14,15 +14,17 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
 from app.core.logging import log_error, log_info
 from app.core.features import module_name_for_slug
 
+if TYPE_CHECKING:
+    from app.core.features import FeatureRegistry
+
 try:  # pragma: no cover - import-time guard for environments without watchfiles
-    from watchfiles import Change, awatch
+    from watchfiles import awatch
 except ImportError:  # pragma: no cover
-    Change = None  # type: ignore[assignment]
     awatch = None  # type: ignore[assignment]
 
 
@@ -82,7 +84,7 @@ class FeaturePackWatcher:
             try:
                 await task
             except (asyncio.CancelledError, Exception):  # pragma: no cover - best effort cleanup
-                pass
+                continue
         self._tasks.clear()
 
     @staticmethod
@@ -135,6 +137,10 @@ class FeaturePackWatcher:
         return False
 
     async def _reload_with_logging(self, slug: str) -> None:
+        from app.services.component_availability import get_component_availability
+
+        if not get_component_availability().feature_pack_available(slug):
+            return
         log_info("Auto-reloading feature pack", feature=slug)
         try:
             await self._registry.reload(slug)

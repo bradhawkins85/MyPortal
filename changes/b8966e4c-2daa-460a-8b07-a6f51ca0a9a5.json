@@ -1,0 +1,7 @@
+{
+  "guid": "b8966e4c-2daa-460a-8b07-a6f51ca0a9a5",
+  "occurred_at": "2026-09-30T12:00Z",
+  "change_type": "Feature",
+  "summary": "Redesign the forgot password, reset password and two-factor setup pages with a focused card, a check-your-email confirmation, a hidden reset token when opened from the email link, a live password checklist, and numbered authenticator setup steps",
+  "content_hash": "e4292afd0742f35748a0e99e37579101797eea0ed92ff427c0b3db29100c42cd"
+}

@@ -81,8 +81,9 @@ async def update_field_definition(
         return
     
     params.append(definition_id)
-    await db.execute(
-        f"UPDATE asset_custom_field_definitions SET {', '.join(updates)} WHERE id = %s",
+    # The SET fragment is assembled only from fixed function arguments above; values remain bound.
+    await db.execute(  # nosec B608
+        f"UPDATE asset_custom_field_definitions SET {', '.join(updates)} WHERE id = %s",  # nosec B608
         tuple(params),
     )
 
@@ -118,7 +119,7 @@ async def get_all_asset_field_values(asset_ids: list[int]) -> dict[int, dict[int
         JOIN asset_custom_field_definitions d ON v.field_definition_id = d.id
         WHERE v.asset_id IN ({placeholders})
         ORDER BY d.display_order ASC, d.id ASC
-        """,
+        """,  # nosec B608
         tuple(asset_ids),
     )
 

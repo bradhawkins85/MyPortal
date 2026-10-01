@@ -41,7 +41,7 @@ async def test_startrack_fetch_sends_only_selected_filter_results(monkeypatch):
     <section>Large confusing page content Delivered signed by Wrong Person</section>
     """
 
-    async def fake_fetch(url):
+    async def fake_fetch(url, **kwargs):
         return html
 
     monkeypatch.setattr(svc, "_fetch_with_retries", fake_fetch)
@@ -593,3 +593,56 @@ def test_positive_poll_interval_uses_defined_interval():
     }
 
     assert svc._is_watch_due(watch, now_utc=now) is True
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://startrack.evil.com/track/ABC123",
+        "https://evilstartrack.com.au/track/ABC123",
+        "https://startrack.com.au.evil.com/track/ABC123",
+        "https://example.com/startrack/ABC123",
+    ],
+)
+def test_detect_provider_rejects_lookalike_hosts(url):
+    assert svc.detect_provider(url) is None
+
+
+def test_detect_provider_accepts_carrier_subdomain():
+    assert svc.detect_provider("https://msto.startrack.com.au/track-trace/?id=X") is not None
+    assert svc.detect_provider("https://startrack.com.au/track/X") is not None
+
+
+@pytest.mark.anyio
+async def test_fetch_rejects_stored_non_carrier_url_at_fetch_time():
+    with pytest.raises(ValueError):
+        await svc._fetch_with_retries("https://startrack.evil.com/track/X", retries=1)
+
+
+@pytest.mark.anyio
+async def test_fetch_blocks_redirect_off_carrier_domain(monkeypatch):
+    import socket
+
+    import httpx
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(302, headers={"Location": "http://attacker.example/metadata"})
+
+    real_client = httpx.AsyncClient
+
+    def client_factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(svc.httpx, "AsyncClient", client_factory)
+
+    with pytest.raises(ValueError):
+        await svc._fetch_with_retries("https://www.startrack.com.au/track/X", retries=1)
+    assert calls == ["https://www.startrack.com.au/track/X"]

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import Mapping
-
 import nh3
 
 _ALLOWED_TAGS: frozenset[str] = frozenset(
@@ -26,7 +24,6 @@ _ALLOWED_TAGS: frozenset[str] = frozenset(
         "h6",
         "hr",
         "i",
-        "iframe",
         "li",
         "ol",
         "p",
@@ -46,9 +43,19 @@ _ALLOWED_TAGS: frozenset[str] = frozenset(
     )
 )
 
+# Embeds are only permitted in staff-curated content (e.g. shop product
+# descriptions).  Customer-supplied content such as ticket bodies, replies and
+# inbound email must never be able to frame arbitrary origins.
+_EMBED_TAGS: frozenset[str] = frozenset(("iframe",))
+
 _ALLOWED_ATTRIBUTES: dict[str, set[str]] = {
     "a": {"href", "title", "target"},
     "img": {"src", "alt", "title", "width", "height", "loading", "decoding"},
+    "span": {"data-mention"},
+    "table": {"role"},
+}
+
+_EMBED_ATTRIBUTES: dict[str, set[str]] = {
     "iframe": {
         "src",
         "title",
@@ -59,13 +66,27 @@ _ALLOWED_ATTRIBUTES: dict[str, set[str]] = {
         "allowfullscreen",
         "referrerpolicy",
     },
-    "span": {"data-mention"},
-    "table": {"role"},
 }
 
 _ALLOWED_PROTOCOLS: frozenset[str] = frozenset(
     ("http", "https", "mailto", "tel", "data")
 )
+
+# ``data:`` URLs are only kept for inline raster images (pasted screenshots
+# in ticket replies); everywhere else they are dropped.
+_DATA_IMAGE_URL_PATTERN = re.compile(
+    r"^\s*data:image/(?:png|jpeg|jpg|gif|webp)[;,]", re.IGNORECASE
+)
+_URL_ATTRIBUTES: frozenset[str] = frozenset(("href", "src"))
+
+
+def _filter_attribute(element: str, attribute: str, value: str) -> str | None:
+    if attribute in _URL_ATTRIBUTES and value.strip().lower().startswith("data:"):
+        if element == "img" and attribute == "src" and _DATA_IMAGE_URL_PATTERN.match(value):
+            return value
+        return None
+    return value
+
 
 _INLINE_CSS_PATTERN = re.compile(r"(?is)^\s*(?:[a-z0-9._#-]+\s*\{[^}]*\}\s*)+")
 _EMAIL_HEADER_PATTERN = re.compile(r"^(from|sent|to|subject|cc):", re.IGNORECASE)
@@ -177,13 +198,16 @@ def _strip_style_blocks(value: str) -> str:
     return "".join(cleaned_parts)
 
 
-def sanitize_rich_text(value: str | None) -> SanitizedRichText:
+def sanitize_rich_text(value: str | None, *, allow_embeds: bool = False) -> SanitizedRichText:
     """Clean potentially unsafe HTML and normalise newlines.
 
     The function keeps a small subset of semantic formatting tags so replies can
     retain emphasis, lists, and links while stripping scripts and unsafe
     attributes. Plain text newlines are converted to ``<br />`` markers so legacy
     replies that were stored without HTML continue to display as expected.
+
+    ``allow_embeds`` additionally permits ``<iframe>`` embeds and must only be
+    used for staff-curated content such as shop product descriptions.
     """
 
     raw_text = (value or "").strip()
@@ -191,11 +215,16 @@ def sanitize_rich_text(value: str | None) -> SanitizedRichText:
         raw_text = _strip_style_blocks(raw_text)
         raw_text = _INLINE_CSS_PATTERN.sub("", raw_text)
         raw_text = _strip_quoted_email_headers(raw_text)
+    tags = _ALLOWED_TAGS | _EMBED_TAGS if allow_embeds else _ALLOWED_TAGS
+    attributes = (
+        {**_ALLOWED_ATTRIBUTES, **_EMBED_ATTRIBUTES} if allow_embeds else _ALLOWED_ATTRIBUTES
+    )
     cleaned = nh3.clean(
         raw_text,
-        tags=_ALLOWED_TAGS,
-        attributes=_ALLOWED_ATTRIBUTES,
+        tags=tags,
+        attributes=attributes,
         url_schemes=_ALLOWED_PROTOCOLS,
+        attribute_filter=_filter_attribute,
     )
     normalised = cleaned.replace("\r\n", "\n").replace("\r", "\n").replace("\u200b", "")
     if normalised:

@@ -1,0 +1,7 @@
+{
+  "guid": "55937cb6-36c6-4997-a2ef-d4c2a910ee72",
+  "occurred_at": "2026-08-20T00:00Z",
+  "change_type": "Fix",
+  "summary": "Import the Windows signing PFX non-interactively with CertUtil to prevent the MSI workflow from timing out.",
+  "content_hash": "e35c8c9d4094ac8974e1b232b9b292dffc39c7ba073d9fffb7167a30fb3c075a"
+}

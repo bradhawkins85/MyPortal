@@ -17,7 +17,7 @@ from app.api.routes import tickets as tickets_routes
 from app.core.database import db
 from app import main as main_module
 from app.main import app, scheduler_service
-from app.services.tickets import HELPDESK_PERMISSION_KEY, TicketStatusDefinition
+from app.services.tickets import TICKET_ASSIGNEE_PERMISSION_KEY, TicketStatusDefinition
 from app.security.session import SessionData, session_manager
 
 
@@ -1048,7 +1048,7 @@ def test_admin_ticket_assign_options_only_include_helpdesk_users(monkeypatch):
     response = asyncio.run(main_module._render_tickets_dashboard(request, user))
 
     assert response.status_code == status.HTTP_200_OK
-    assert captured["permission"] == HELPDESK_PERMISSION_KEY
+    assert captured["permission"] == TICKET_ASSIGNEE_PERMISSION_KEY
     options = captured["extra"].get("ticket_user_options")
     assert options == [{"id": 1, "email": "tech@example.com"}]
     lookup = captured["extra"].get("ticket_user_lookup")
@@ -1059,8 +1059,8 @@ def test_admin_ticket_assign_options_only_include_helpdesk_users(monkeypatch):
 
 
 def test_admin_reprocess_ticket_ai_triggers_services(monkeypatch, active_session):
-    async def fake_require_helpdesk(request):
-        return {"id": 99, "email": "agent@example.com", "is_super_admin": False}, None
+    async def fake_require_super_admin(request):
+        return {"id": 99, "email": "admin@example.com", "is_super_admin": True}, None
 
     async def fake_get_ticket(ticket_id: int):
         assert ticket_id == 42
@@ -1069,7 +1069,7 @@ def test_admin_reprocess_ticket_ai_triggers_services(monkeypatch, active_session
     summary_mock = AsyncMock(return_value=None)
     tags_mock = AsyncMock(return_value=None)
 
-    monkeypatch.setattr(main_module, "_require_helpdesk_page", fake_require_helpdesk)
+    monkeypatch.setattr(main_module, "_require_super_admin_page", fake_require_super_admin)
     monkeypatch.setattr(main_module.tickets_repo, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_summary", summary_mock)
     monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_tags", tags_mock)
@@ -1095,9 +1095,48 @@ def test_admin_reprocess_ticket_ai_triggers_services(monkeypatch, active_session
     tags_mock.assert_awaited_once_with(42)
 
 
+def test_admin_reprocess_closed_ticket_ai_only_triggers_tags(monkeypatch, active_session):
+    async def fake_require_super_admin(request):
+        return {"id": 99, "email": "admin@example.com", "is_super_admin": True}, None
+
+    async def fake_get_ticket(ticket_id: int):
+        assert ticket_id == 42
+        return {"id": ticket_id, "status": "closed"}
+
+    summary_mock = AsyncMock(return_value=None)
+    tags_mock = AsyncMock(return_value=None)
+
+    monkeypatch.setattr(main_module, "_require_super_admin_page", fake_require_super_admin)
+    monkeypatch.setattr(main_module.tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_summary", summary_mock)
+    monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_tags", tags_mock)
+    monkeypatch.setattr(session_manager, "load_session", AsyncMock(return_value=active_session))
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+
+    try:
+        with TestClient(app) as client:
+            client.cookies.set("myportal_session_csrf", active_session.csrf_token)
+            response = client.post(
+                "/admin/tickets/42/ai/reprocess",
+                json={},
+                headers={"X-CSRF-Token": "csrf-token"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json() == {
+        "status": "queued",
+        "message": "AI tags will be regenerated shortly.",
+    }
+    summary_mock.assert_not_awaited()
+    tags_mock.assert_awaited_once_with(42)
+
+
 def test_admin_reprocess_ticket_ai_missing_ticket(monkeypatch, active_session):
-    async def fake_require_helpdesk(request):
-        return {"id": 77, "email": "agent@example.com", "is_super_admin": False}, None
+    async def fake_require_super_admin(request):
+        return {"id": 77, "email": "admin@example.com", "is_super_admin": True}, None
 
     async def fake_get_ticket(ticket_id: int):
         return None
@@ -1105,7 +1144,7 @@ def test_admin_reprocess_ticket_ai_missing_ticket(monkeypatch, active_session):
     summary_mock = AsyncMock(return_value=None)
     tags_mock = AsyncMock(return_value=None)
 
-    monkeypatch.setattr(main_module, "_require_helpdesk_page", fake_require_helpdesk)
+    monkeypatch.setattr(main_module, "_require_super_admin_page", fake_require_super_admin)
     monkeypatch.setattr(main_module.tickets_repo, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_summary", summary_mock)
     monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_tags", tags_mock)

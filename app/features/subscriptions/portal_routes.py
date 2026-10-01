@@ -4,6 +4,8 @@ Owns the portal subscription pages:
 
 * ``GET  /subscriptions``                              — portal subscription list.
 * ``POST /subscriptions/{subscription_id}/request-change`` — request a change.
+* ``PATCH /subscriptions/{subscription_id}/quantity`` — directly adjust an
+  externally billed, reminder-only subscription.
 
 Handler code migrated from ``app/main.py``.
 """
@@ -15,12 +17,23 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from pydantic import ValidationError
 
+from app.api.routes.subscriptions import (
+    CreateExistingSubscriptionRequest,
+    create_existing_subscription_record,
+)
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
+from app.repositories import shop as shop_repo
+from app.repositories import subscription_change_requests as change_requests_repo
 from app.repositories import subscriptions as subscriptions_repo
-from app.repositories import user_companies as user_company_repo
-
+from app.services import subscription_renewals
+from app.services.voice_monitor_billing import (
+    contract_display,
+    is_voice_monitor_subscription,
+)
+from app.security.csrf import parse_csrf_form
 
 router = APIRouter(tags=["Subscriptions"])
 
@@ -30,6 +43,20 @@ def _main():
     from app import main as main_module
 
     return main_module
+
+
+def _coerce_date(value: Any) -> date | None:
+    """Return *value* as a date when possible."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError:
+            return None
+    return None
 
 
 async def _load_subscription_context(request: Request):
@@ -57,10 +84,14 @@ async def _load_subscription_context(request: Request):
             detail="Invalid company identifier",
         )
 
-    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    membership = await _main()._get_effective_company_membership(
+        request, user["id"], company_id
+    )
     has_license = bool(membership and membership.get("can_manage_licenses"))
     has_cart = bool(membership and membership.get("can_access_cart"))
-    can_view_subscriptions = _main()._membership_menu_can(user, membership, "menu.subscriptions")
+    can_view_subscriptions = _main()._membership_menu_can(
+        user, membership, "menu.subscriptions"
+    )
 
     if not (is_super_admin or (has_license and has_cart) or can_view_subscriptions):
         return (
@@ -78,7 +109,9 @@ async def _load_subscription_context(request: Request):
 @router.get("/subscriptions", response_class=HTMLResponse)
 async def subscriptions_page(request: Request):
     """Display active subscriptions for the current company."""
-    user, membership, company, company_id, redirect = await _load_subscription_context(request)
+    user, membership, company, company_id, redirect = await _load_subscription_context(
+        request
+    )
     if redirect:
         return redirect
 
@@ -88,25 +121,84 @@ async def subscriptions_page(request: Request):
     )
 
     formatted: list[dict[str, Any]] = []
+    lifecycle_subscriptions: list[dict[str, Any]] = []
     for sub in subs:
         formatted_sub = dict(sub)
-        if isinstance(sub.get("start_date"), datetime):
-            formatted_sub["start_date"] = sub["start_date"].strftime("%Y-%m-%d")
-        elif isinstance(sub.get("start_date"), date):
-            formatted_sub["start_date"] = sub["start_date"].strftime("%Y-%m-%d")
-
-        if isinstance(sub.get("end_date"), datetime):
-            formatted_sub["end_date"] = sub["end_date"].strftime("%Y-%m-%d")
-        elif isinstance(sub.get("end_date"), date):
-            formatted_sub["end_date"] = sub["end_date"].strftime("%Y-%m-%d")
+        start_date_value = _coerce_date(sub.get("start_date"))
+        end_date_value = _coerce_date(sub.get("end_date"))
+        if start_date_value is not None:
+            formatted_sub["start_date"] = start_date_value.strftime("%Y-%m-%d")
+        if end_date_value is not None:
+            formatted_sub["end_date"] = end_date_value.strftime("%Y-%m-%d")
 
         formatted_sub["contract_term"] = ""
+        if is_voice_monitor_subscription(formatted_sub):
+            formatted_sub["voice_monitor_contract"] = contract_display(formatted_sub)
+        formatted_sub["days_until_renewal"] = (
+            (end_date_value - date.today()).days if end_date_value is not None else None
+        )
         formatted.append(formatted_sub)
+        lifecycle_subscriptions.append(
+            {
+                **dict(sub),
+                "start_date": start_date_value,
+                "end_date": end_date_value,
+            }
+        )
+
+    pending_changes_by_subscription = (
+        await change_requests_repo.list_pending_changes_for_subscriptions(
+            [sub["id"] for sub in lifecycle_subscriptions]
+        )
+        if lifecycle_subscriptions
+        else {}
+    )
+    renewal_forecast = subscription_renewals.build_renewal_forecast(
+        lifecycle_subscriptions,
+        today=date.today(),
+    )
+    churn_report = subscription_renewals.build_churn_risk_report(
+        lifecycle_subscriptions,
+        today=date.today(),
+        pending_changes_by_subscription=pending_changes_by_subscription,
+    )
+    churn_lookup = {item["subscription_id"]: item for item in churn_report["items"]}
+    reminder_days_lookup = {
+        subscription_id: campaign["days_before"]
+        for campaign in renewal_forecast["reminder_campaigns"]
+        for subscription_id in campaign["subscription_ids"]
+    }
+    for formatted_sub in formatted:
+        churn_item = churn_lookup.get(formatted_sub["id"])
+        formatted_sub["churn_risk"] = churn_item or {
+            "level": "none",
+            "reasons": [],
+            "score": 0,
+            "days_until_renewal": formatted_sub.get("days_until_renewal"),
+        }
+        formatted_sub["pending_changes_count"] = len(
+            pending_changes_by_subscription.get(formatted_sub["id"], [])
+        )
+        formatted_sub["reminder_due_days"] = reminder_days_lookup.get(
+            formatted_sub["id"]
+        )
 
     is_super_admin = bool(user.get("is_super_admin"))
+    creation_products: list[dict[str, Any]] = []
+    if is_super_admin:
+        products = await shop_repo.list_products_summary(
+            shop_repo.ProductFilters(include_archived=False, sort="name_asc")
+        )
+        creation_products = [
+            product
+            for product in products
+            if product.get("subscription_category_id") is not None
+        ]
     can_request_changes = bool(
         is_super_admin
-        or _main()._membership_menu_can(user, membership, "menu.subscriptions", write=True)
+        or _main()._membership_menu_can(
+            user, membership, "menu.subscriptions", write=True
+        )
         or (
             membership
             and membership.get("can_manage_licenses")
@@ -120,21 +212,186 @@ async def subscriptions_page(request: Request):
         "company": company,
         "can_request_changes": can_request_changes,
         "is_super_admin": is_super_admin,
+        "creation_products": creation_products,
+        "creation_default_start_date": date.today().isoformat(),
+        "renewal_forecast": renewal_forecast,
+        "churn_report": churn_report,
     }
-    return await _main()._render_template("subscriptions/index.html", request, user, extra=extra)
+    return await _main()._render_template(
+        "subscriptions/index.html", request, user, extra=extra
+    )
 
 
-@router.post("/subscriptions/{subscription_id}/request-change", response_class=JSONResponse)
+def _can_manage_subscriptions(
+    user: dict[str, Any], membership: dict[str, Any] | None
+) -> bool:
+    """Return whether the user may make company subscription changes."""
+    return bool(
+        user.get("is_super_admin")
+        or _main()._membership_menu_can(
+            user, membership, "menu.subscriptions", write=True
+        )
+        or (
+            membership
+            and membership.get("can_manage_licenses")
+            and membership.get("can_access_cart")
+        )
+    )
+
+
+async def _render_external_creation_form(
+    request: Request,
+    user: dict[str, Any],
+    company: dict[str, Any] | None,
+    *,
+    values: dict[str, Any] | None = None,
+    errors: dict[str, str] | None = None,
+    failure_message: str | None = None,
+    response_status: int = status.HTTP_200_OK,
+):
+    response = await _main()._render_template(
+        "subscriptions/create_external.html",
+        request,
+        user,
+        extra={
+            "title": "Add externally billed subscription",
+            "company": company,
+            "form_values": values
+            or {
+                "start_date": date.today().isoformat(),
+                "quantity": "1",
+                "auto_renew": True,
+                "billing_frequency": "annual",
+            },
+            "form_errors": errors or {},
+            "failure_message": failure_message,
+        },
+    )
+    response.status_code = response_status
+    return response
+
+
+@router.get("/subscriptions/create", response_class=HTMLResponse)
+async def create_external_subscription_page(request: Request):
+    """Show the company-scoped externally billed subscription form."""
+    user, membership, company, _company_id, redirect = (
+        await _load_subscription_context(request)
+    )
+    if redirect:
+        return redirect
+    if not _can_manage_subscriptions(user, membership):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Subscription read/write permission required",
+        )
+    return await _render_external_creation_form(request, user, company)
+
+
+@router.post("/subscriptions/create", response_class=HTMLResponse)
+async def create_external_subscription(request: Request):
+    """Create a reminder-only third-party subscription for the active company."""
+    user, membership, company, company_id, redirect = (
+        await _load_subscription_context(request)
+    )
+    if redirect:
+        return redirect
+    if not _can_manage_subscriptions(user, membership):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Subscription read/write permission required",
+        )
+
+    form = await parse_csrf_form(request)
+    values = {
+        "start_date": str(form.get("start_date", "")).strip(),
+        "quantity": str(form.get("quantity", "")).strip(),
+        "auto_renew": form.get("auto_renew") == "on",
+        "end_date": str(form.get("end_date", "")).strip() or None,
+        "vendor": str(form.get("vendor", "")).strip(),
+        "external_name": str(form.get("external_name", "")).strip(),
+        "external_sku": str(form.get("external_sku", "")).strip() or None,
+        "billing_frequency": str(form.get("billing_frequency", "")).strip(),
+    }
+    try:
+        payload = CreateExistingSubscriptionRequest.model_validate(
+            {
+                **values,
+                "customer_id": company_id,
+                "product_id": None,
+                "reminder_only": True,
+            }
+        )
+    except ValidationError as exc:
+        labels = {
+            "start_date": "Start date",
+            "quantity": "Quantity",
+            "end_date": "Renewal or expiry date",
+            "vendor": "Vendor name",
+            "external_name": "Subscription name",
+            "billing_frequency": "Billing frequency",
+        }
+        errors: dict[str, str] = {}
+        for issue in exc.errors():
+            field = str(issue["loc"][0])
+            errors[field] = f"{labels.get(field, field.title())}: {issue['msg']}."
+        return await _render_external_creation_form(
+            request,
+            user,
+            company,
+            values=values,
+            errors=errors,
+            response_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+
+    try:
+        await create_existing_subscription_record(payload, user)
+    except HTTPException as exc:
+        return await _render_external_creation_form(
+            request,
+            user,
+            company,
+            values=values,
+            failure_message=str(exc.detail),
+            response_status=exc.status_code,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to create external subscription reminder", error=str(exc))
+        return await _render_external_creation_form(
+            request,
+            user,
+            company,
+            values=values,
+            failure_message="The subscription reminder could not be created. Please try again.",
+            response_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    return RedirectResponse(
+        url="/subscriptions?created=1", status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+@router.post(
+    "/subscriptions/{subscription_id}/request-change", response_class=JSONResponse
+)
 async def request_subscription_change(request: Request, subscription_id: str):
     """Request a quantity change for a subscription."""
-    user, membership, _, company_id, redirect = await _load_subscription_context(request)
+    user, membership, _, company_id, redirect = await _load_subscription_context(
+        request
+    )
     if redirect:
         return redirect
     if not (
         _main()._membership_menu_can(user, membership, "menu.subscriptions", write=True)
-        or bool(membership and membership.get("can_manage_licenses") and membership.get("can_access_cart"))
+        or bool(
+            membership
+            and membership.get("can_manage_licenses")
+            and membership.get("can_access_cart")
+        )
     ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Subscription read/write permission required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Subscription read/write permission required",
+        )
 
     subscription = await subscriptions_repo.get_subscription(subscription_id)
     if not subscription or int(subscription.get("customer_id", 0)) != company_id:
@@ -218,7 +475,9 @@ async def request_subscription_change(request: Request, subscription_id: str):
     description = "\n".join(description_parts)
 
     user_id = user.get("id")
-    from app.services import tickets as tickets_service  # noqa: PLC0415 – avoid circular import
+    from app.services import (
+        tickets as tickets_service,
+    )  # noqa: PLC0415 – avoid circular import
 
     try:
         ticket = await tickets_service.create_ticket(
@@ -265,6 +524,71 @@ async def request_subscription_change(request: Request, subscription_id: str):
                 "message": "Change request submitted but ticket creation failed",
             }
         )
+
+
+@router.patch("/subscriptions/{subscription_id}/quantity", response_class=JSONResponse)
+async def update_reminder_only_quantity(request: Request, subscription_id: str):
+    """Directly update quantity for an externally managed subscription."""
+    user, membership, _, company_id, redirect = await _load_subscription_context(
+        request
+    )
+    if redirect:
+        return redirect
+    can_write = bool(
+        user.get("is_super_admin")
+        or _main()._membership_menu_can(
+            user, membership, "menu.subscriptions", write=True
+        )
+        or (
+            membership
+            and membership.get("can_manage_licenses")
+            and membership.get("can_access_cart")
+        )
+    )
+    if not can_write:
+        raise HTTPException(
+            status_code=403, detail="Subscription read/write permission required"
+        )
+
+    subscription = await subscriptions_repo.get_subscription(subscription_id)
+    if not subscription or int(subscription.get("customer_id", 0)) != company_id:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    if not subscription.get("reminder_only"):
+        raise HTTPException(
+            status_code=409,
+            detail="Only reminder-only subscriptions can be adjusted directly. Use the standard subscription change workflow instead.",
+        )
+    try:
+        payload = await request.json()
+        quantity = int(payload.get("quantity"))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400, detail="Quantity must be a valid integer"
+        ) from exc
+    if not 1 <= quantity <= 9999:
+        raise HTTPException(
+            status_code=400, detail="Quantity must be between 1 and 9999"
+        )
+
+    previous_quantity = int(subscription.get("quantity") or 0)
+    if quantity != previous_quantity:
+        await subscriptions_repo.update_subscription(subscription_id, quantity=quantity)
+        log_info(
+            "Reminder-only subscription quantity adjusted",
+            subscription_id=subscription_id,
+            company_id=company_id,
+            previous_quantity=previous_quantity,
+            quantity=quantity,
+            user_id=user.get("id"),
+        )
+    return JSONResponse(
+        {
+            "success": True,
+            "subscription_id": subscription_id,
+            "previous_quantity": previous_quantity,
+            "quantity": quantity,
+        }
+    )
 
 
 __all__ = ["router"]

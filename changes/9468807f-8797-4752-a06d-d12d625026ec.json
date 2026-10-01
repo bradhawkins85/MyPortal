@@ -1,0 +1,7 @@
+{
+  "guid": "9468807f-8797-4752-a06d-d12d625026ec",
+  "occurred_at": "2026-09-29T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fix Docker upgrades waiting forever for the new release when an HTTP proxy is configured, and failing to start the proxy on first switch.",
+  "content_hash": "88f891be671f4472d2f836085b0d527d6932016cfb0aba6ad7a16215e2540dc1"
+}

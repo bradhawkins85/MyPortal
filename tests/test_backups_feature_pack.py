@@ -20,6 +20,14 @@ EXPECTED = {
     ("POST", "/admin/backup-jobs/{job_id}"),
     ("POST", "/admin/backup-jobs/{job_id}/delete"),
     ("POST", "/admin/backup-jobs/{job_id}/regenerate-token"),
+    ("GET", "/backups"),
+    ("GET", "/backups/new"),
+    ("POST", "/backups"),
+    ("GET", "/backups/{entry_id}/edit"),
+    ("POST", "/backups/{entry_id}"),
+    ("POST", "/backups/{entry_id}/delete"),
+    ("GET", "/backups/tracked/{job_id}/edit"),
+    ("POST", "/backups/tracked/{job_id}"),
 }
 
 

@@ -157,7 +157,8 @@ async def test_reset_user_password_raises_actionable_403_on_authorization_reques
             await m365_service.reset_user_password(1, "user@example.com")
 
     message = str(exc_info.value)
-    assert "User.ReadWrite.All" in message
+    assert "User-PasswordProfile.ReadWrite.All" in message
+    assert "federated or synchronized" in message
     assert exc_info.value.http_status == 403
     assert exc_info.value.graph_error_code == "Authorization_RequestDenied"
 

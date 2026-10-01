@@ -1,0 +1,34 @@
+{% from "macros/counters.html" import counter_strip %}
+<section class="card card--panel" data-report-section="smb1001">
+  <header class="card__header report-section__header">
+    <h2>SMB1001 compliance</h2>
+    <span class="report-section__meta">
+      Tier achieved: <strong>{{ section.data.achieved_tier or 'None yet' }}</strong>
+      {% if section.data.target_tier %} · Target: {{ section.data.target_tier }} ({{ section.data.target_percentage }}% — {{ section.data.target_done }} of {{ section.data.target_total }} controls){% endif %}
+    </span>
+  </header>
+  <div class="card__body">
+    {% set tiers = section.data.tiers or [] %}
+    {% if tiers %}
+      {% if section.data.next_tier %}
+        <p class="report-section__meta">{{ section.data.next_tier_remaining }} control{{ '' if section.data.next_tier_remaining == 1 else 's' }} remaining to reach {{ section.data.next_tier }}.</p>
+      {% endif %}
+      {% for tier in tiers %}
+        <div style="margin-bottom: var(--space-3);">
+          <div class="report-section__header" style="margin-bottom: var(--space-2);">
+            <h3 style="margin: 0; font-size: 1rem;">Tier {{ tier.tier_level }} · {{ tier.name }}{% if tier.achieved %} ✓{% endif %}</h3>
+            <span class="report-section__meta">{{ tier.percentage }}% complete ({{ tier.done }} of {{ tier.total }}) · {{ 'Independent audit' if tier.attestation == 'independent' else 'Self-attested' }}</span>
+          </div>
+          {{ counter_strip(items=[
+            {'label': 'Complete', 'value': tier.done, 'variant': 'success'},
+            {'label': 'In progress', 'value': tier.in_progress, 'variant': 'warning'},
+            {'label': 'Non-compliant', 'value': tier.non_compliant, 'variant': 'danger'},
+            {'label': 'Not started', 'value': tier.not_started, 'variant': 'neutral'},
+          ]) }}
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="report-empty">No SMB1001 data is available for this company.</p>
+    {% endif %}
+  </div>
+</section>

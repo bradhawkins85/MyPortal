@@ -1,0 +1,7 @@
+{
+  "guid": "087a7855-7a95-461d-9a0d-e9c7e0059671",
+  "occurred_at": "2026-09-22T00:00Z",
+  "change_type": "Feature",
+  "summary": "Add deployment-level environment controls for disabling feature packs and modules.",
+  "content_hash": "5fcf7951f0456281ac31975c4256c30b29126aae6804e7ac0e9af4fcb4ea8094"
+}

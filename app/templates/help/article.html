@@ -28,7 +28,7 @@
         <ul class="help__nav-list">
           {% for article in section.articles %}
           <li class="help__nav-item {% if article.slug == help_article.slug and section.slug == help_article.section_slug %}help__nav-item--active{% endif %}">
-            <a href="/help/{{ section.slug }}/{{ article.slug }}" class="help__nav-link">{{ article.name }}</a>
+            <a href="/help/{{ section.slug }}/{{ article.slug }}" class="help__nav-link">{{ article.name }}{% if article.inactive %} <span class="badge badge--muted help__inactive-badge" title="The feature this article documents is not active">Inactive</span>{% endif %}</a>
           </li>
           {% endfor %}
         </ul>
@@ -37,6 +37,11 @@
     </nav>
 
     <article class="help__content card card--panel">
+      {% if help_article.inactive %}
+      <div class="alert alert--warning" role="status">
+        The feature this article documents is not active on this portal. Only super administrators can see it.
+      </div>
+      {% endif %}
       <div class="help__article-body rich-text-viewer">
         {{ help_article_html | safe }}
       </div>

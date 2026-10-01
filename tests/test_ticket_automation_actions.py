@@ -157,6 +157,83 @@ async def test_invoke_update_ticket_no_fields_skips(monkeypatch, mock_webhook_mo
 
 
 @pytest.mark.asyncio
+async def test_invoke_update_ticket_supports_extended_ticket_fields(
+    monkeypatch, mock_webhook_monitor, mock_record_success
+):
+    """User-facing ticket fields are parsed and passed to the repository."""
+    from app.repositories import tickets as tickets_repo
+    from app.services import tickets as tickets_service
+
+    monkeypatch.setattr(
+        tickets_repo,
+        "get_ticket",
+        AsyncMock(return_value={"id": 12, "external_reference": "OLD"}),
+    )
+    update_mock = AsyncMock(return_value={"id": 12})
+    monkeypatch.setattr(tickets_repo, "update_ticket", update_mock)
+    monkeypatch.setattr(tickets_service, "emit_ticket_updated_event", AsyncMock())
+
+    result = await modules._invoke_update_ticket(
+        {},
+        {
+            "ticket_id": 12,
+            "external_reference": " PO-456 ",
+            "review_date": "2026-09-15",
+            "category": "Shipping",
+        },
+        event_future=None,
+    )
+
+    assert result["status"] == "succeeded"
+    update_mock.assert_awaited_once_with(
+        12,
+        category="Shipping",
+        external_reference="PO-456",
+        review_date=modules.date(2026, 9, 15),
+    )
+
+
+@pytest.mark.asyncio
+async def test_invoke_update_ticket_supports_shipment_fields(
+    monkeypatch, mock_webhook_monitor, mock_record_success
+):
+    """Shipment URL and polling controls update the related shipment watch."""
+    from app.repositories import tickets as tickets_repo
+    from app.services import ticket_shipment_tracking, tickets as tickets_service
+
+    monkeypatch.setattr(tickets_repo, "get_ticket", AsyncMock(return_value={"id": 31}))
+    update_mock = AsyncMock()
+    monkeypatch.setattr(tickets_repo, "update_ticket", update_mock)
+    monkeypatch.setattr(tickets_service, "emit_ticket_updated_event", AsyncMock())
+    monkeypatch.setattr(ticket_shipment_tracking, "get_watch_for_ticket", AsyncMock(return_value=None))
+    upsert_mock = AsyncMock(return_value={"ticket_id": 31})
+    monkeypatch.setattr(ticket_shipment_tracking, "upsert_watch", upsert_mock)
+
+    result = await modules._invoke_update_ticket(
+        {},
+        {
+            "ticket_id": 31,
+            "shipment_tracking_url": "https://auspost.com.au/track/ABC",
+            "shipment_poll_interval_seconds": "1200",
+            "shipment_monitoring_enabled": "true",
+            "shipment_public_comments_enabled": False,
+        },
+        event_future=None,
+    )
+
+    assert result["status"] == "succeeded"
+    update_mock.assert_not_awaited()
+    upsert_mock.assert_awaited_once_with(
+        ticket_id=31,
+        tracking_url="https://auspost.com.au/track/ABC",
+        poll_interval_seconds=1200,
+        active=True,
+        public_comments_enabled=False,
+    )
+    assert "shipment_poll_interval_seconds" in result["updated_fields"]
+
+
+@pytest.mark.asyncio
 async def test_invoke_update_ticket_missing_ticket_id():
     """Test that update-ticket raises error when ticket_id is missing."""
     with pytest.raises(ValueError, match="ticket_id is required"):
@@ -356,20 +433,57 @@ async def test_invoke_reprocess_ai_summary_and_tags(monkeypatch, mock_webhook_mo
     
     mock_summary = AsyncMock()
     mock_tags = AsyncMock()
+    mock_resolution = AsyncMock()
     monkeypatch.setattr(tickets_service, "refresh_ticket_ai_summary", mock_summary)
     monkeypatch.setattr(tickets_service, "refresh_ticket_ai_tags", mock_tags)
+    monkeypatch.setattr(tickets_service, "refresh_ticket_resolution_steps", mock_resolution)
     
     result = await modules._invoke_reprocess_ai(
         {},
-        {"ticket_id": 1, "refresh_summary": True, "refresh_tags": True},
+        {"ticket_id": 1, "refresh_summary": True, "refresh_tags": True, "refresh_resolution": True},
         event_future=None,
     )
     
     assert result["status"] == "succeeded"
     assert "summary" in result["processed"]
     assert "tags" in result["processed"]
+    assert "resolution_steps" in result["processed"]
     mock_summary.assert_called_once_with(1)
     mock_tags.assert_called_once_with(1)
+    mock_resolution.assert_called_once_with(1)
+
+
+@pytest.mark.asyncio
+async def test_invoke_reprocess_ai_tags_do_not_implicitly_refresh_resolution(
+    monkeypatch, mock_webhook_monitor, mock_record_success
+):
+    """Resolution steps are rebuilt only when their dedicated flag is set."""
+    from app.services import tickets as tickets_service
+
+    mock_tags = AsyncMock()
+    mock_resolution = AsyncMock()
+    monkeypatch.setattr(tickets_service, "refresh_ticket_ai_tags", mock_tags)
+    monkeypatch.setattr(tickets_service, "refresh_ticket_resolution_steps", mock_resolution)
+
+    result = await modules._invoke_reprocess_ai(
+        {},
+        {"ticket_id": 1, "refresh_summary": False, "refresh_tags": True},
+        event_future=None,
+    )
+
+    assert result["processed"] == ["tags"]
+    mock_tags.assert_awaited_once_with(1)
+    mock_resolution.assert_not_awaited()
+    assert mock_webhook_monitor.await_args.kwargs["payload"]["refresh_resolution"] is False
+
+
+def test_reprocess_ai_schema_exposes_resolution_flag():
+    schema = modules.get_action_payload_schema("reprocess-ai")
+
+    assert schema is not None
+    field_names = {field["name"] for field in schema["fields"]}
+    assert "refresh_resolution" in field_names
+    assert "refresh_resolution_steps" not in field_names
 
 
 @pytest.mark.asyncio
@@ -384,7 +498,7 @@ async def test_invoke_reprocess_ai_summary_only(monkeypatch, mock_webhook_monito
     
     result = await modules._invoke_reprocess_ai(
         {},
-        {"ticket_id": 1, "refresh_summary": True, "refresh_tags": False},
+        {"ticket_id": 1, "refresh_summary": True, "refresh_tags": False, "refresh_resolution": False},
         event_future=None,
     )
     
@@ -399,7 +513,7 @@ async def test_invoke_reprocess_ai_no_processing_skips(monkeypatch, mock_webhook
     """Test that reprocess-ai returns skipped when both options are false."""
     result = await modules._invoke_reprocess_ai(
         {},
-        {"ticket_id": 1, "refresh_summary": False, "refresh_tags": False},
+        {"ticket_id": 1, "refresh_summary": False, "refresh_tags": False, "refresh_resolution": False},
         event_future=None,
     )
     

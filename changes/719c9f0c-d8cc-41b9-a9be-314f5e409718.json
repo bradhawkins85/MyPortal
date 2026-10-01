@@ -1,0 +1,7 @@
+{
+  "guid": "719c9f0c-d8cc-41b9-a9be-314f5e409718",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed Microsoft 365 best-practice checks failing to save precise assessment outcomes such as missing permissions or unsupported capabilities.",
+  "content_hash": "274764e4b080a979e331798898ff87df03f5157a2c79b97809493478ed2ddd09"
+}

@@ -1,0 +1,7 @@
+{
+  "guid": "9b71a35c-1068-47e3-b937-dc83572820f0",
+  "occurred_at": "2026-09-25T00:00Z",
+  "change_type": "Feature",
+  "summary": "Add reusable versioned process templates and immutable company-scoped execution runs.",
+  "content_hash": "00f1787c6ff6ca34f5ec4e8f411e79696379b18183450f92f03a5be29c2ddce0"
+}

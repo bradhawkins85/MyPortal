@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import ipaddress
 import json
 import re
 import socket
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+from app.services.outbound_url_guard import redirect_guard_hooks
+
+from app.core.config import get_settings
 from app.core.logging import log_error, log_warning
 from app.repositories import service_status as service_status_repo
 from app.services import modules as modules_service
@@ -90,6 +96,45 @@ def normalise_company_ids(company_ids: Sequence[int | str] | None) -> list[int]:
         seen.add(value)
         normalised.append(value)
     return normalised
+
+
+def _public_status_token_component(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    return str(value).strip()
+
+
+def public_status_token_seed(company: Mapping[str, Any] | None) -> str:
+    if not company:
+        return ""
+    parts = [
+        _public_status_token_component(company.get("updated_at")),
+        _public_status_token_component(company.get("created_at")),
+        _public_status_token_component(company.get("name")),
+        _public_status_token_component(company.get("id")),
+    ]
+    return "|".join(part for part in parts if part)
+
+
+def build_public_status_token(company_id: int, *, seed: Any = None) -> str:
+    payload = (
+        f"service-status-public:{int(company_id)}:"
+        f"{_public_status_token_component(seed)}"
+    ).encode("utf-8")
+    return hmac.new(
+        get_settings().secret_key.encode("utf-8"),
+        payload,
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def is_valid_public_status_token(company_id: int, token: str | None, *, seed: Any = None) -> bool:
+    candidate = str(token or "").strip().lower()
+    if not candidate:
+        return False
+    return hmac.compare_digest(build_public_status_token(company_id, seed=seed), candidate)
 
 
 def _clean_text(value: Any) -> str | None:
@@ -468,7 +513,8 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
         if isinstance(data, dict):
             return data
     except (json.JSONDecodeError, ValueError):
-        pass
+        # A miss is expected here: fenced and embedded JSON are tried below.
+        data = None
 
     # 2. Strip markdown fenced code blocks
     md_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", stripped, re.DOTALL)
@@ -478,7 +524,8 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
             if isinstance(data, dict):
                 return data
         except (json.JSONDecodeError, ValueError):
-            pass
+            # A malformed fence may still contain an embedded JSON object.
+            data = None
 
     # 3. Find the first { … last } substring
     start = stripped.find("{")
@@ -489,7 +536,8 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
             if isinstance(data, dict):
                 return data
         except (json.JSONDecodeError, ValueError):
-            pass
+            # Invalid/non-object model output intentionally falls back to None.
+            data = None
 
     return None
 
@@ -595,10 +643,14 @@ async def run_ai_lookup_for_service(service_id: int) -> dict[str, Any]:
 
     # Fetch the URL content
     try:
-        async with httpx.AsyncClient(
+        async with monitored_client(httpx.AsyncClient,
             timeout=30.0,
             follow_redirects=True,
             headers=_AI_LOOKUP_HTTP_HEADERS,
+            # Re-validate every hop (including redirects) at fetch time.  The
+            # lookup URL policy already excludes private ranges, so redirects
+            # are held to the same standard.
+            event_hooks=redirect_guard_hooks(allow_private=False),
         ) as client:
             response = await client.get(lookup_url)
         response.raise_for_status()
@@ -631,10 +683,10 @@ async def run_ai_lookup_for_service(service_id: int) -> dict[str, Any]:
         # trigger_module raises ValueError when the module is not configured at all
         return {"service_id": service_id, "error": "Ollama module not configured", "changed": False}
 
-    module_status = str(module_result.get("status") or "")
+    module_status = modules_service.module_result_status(module_result)
     if module_status == "skipped":
         return {"service_id": service_id, "error": "Ollama module not enabled", "changed": False}
-    if module_status != "succeeded":
+    if not modules_service.module_result_succeeded(module_result):
         last_error = module_result.get("last_error") or module_result.get("error") or module_status
         await service_status_repo.update_service(
             service_id,

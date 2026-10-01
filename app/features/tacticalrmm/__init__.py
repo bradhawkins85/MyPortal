@@ -14,7 +14,7 @@ from .routes import router as tacticalrmm_router
 
 PACK = FeaturePack(
     slug="tacticalrmm",
-    version="1.0.0",
+    version="1.1.0",
     routers=(tacticalrmm_router,),
 )
 

@@ -1,54 +1,52 @@
 {% extends "base.html" %}
 {% from "macros/tables.html" import pagination %}
 
-{% block header_title %}Change log{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Change log</span>
+    <div class="page-header-toolbar">
+      <form method="get" class="page-header-toolbar__group">
+        <label class="visually-hidden" for="filter-change-type">Change type</label>
+        <select class="form-input page-header-toolbar__select" id="filter-change-type" name="change_type" onchange="this.form.submit()">
+          <option value="" {% if not filters.selected_change_type %}selected{% endif %}>All changes</option>
+          {% for change_type in change_types %}
+            <option
+              value="{{ change_type }}"
+              {% if change_type.lower() == filters.selected_change_type %}selected{% endif %}
+            >
+              {{ change_type }}
+            </option>
+          {% endfor %}
+        </select>
+        <label class="visually-hidden" for="filter-limit">Limit</label>
+        <input
+          class="form-input page-header-toolbar__number"
+          id="filter-limit"
+          type="number"
+          min="1"
+          max="500"
+          name="limit"
+          value="{{ filters.limit }}"
+          title="Limit"
+        />
+        <button type="submit" class="button button--ghost button--compact">Apply</button>
+        <a class="button button--ghost button--compact" href="/admin/change-log">Reset</a>
+      </form>
+      <label class="visually-hidden" for="change-log-filter">Search change log</label>
+      <input
+        id="change-log-filter"
+        type="search"
+        class="form-input page-header-toolbar__search"
+        placeholder="Search change log"
+        data-table-filter="change-log-table"
+      />
+    </div>
+  </div>
+{% endblock %}
 
 {% block content %}
 <div class="admin-grid">
   <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <form method="get" class="filter-grid">
-        <div class="form-field">
-          <label class="form-label" for="filter-change-type">Change type</label>
-          <select class="form-input" id="filter-change-type" name="change_type">
-            <option value="" {% if not filters.selected_change_type %}selected{% endif %}>All changes</option>
-            {% for change_type in change_types %}
-              <option
-                value="{{ change_type }}"
-                {% if change_type.lower() == filters.selected_change_type %}selected{% endif %}
-              >
-                {{ change_type }}
-              </option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="filter-limit">Limit</label>
-          <input
-            class="form-input"
-            id="filter-limit"
-            type="number"
-            min="1"
-            max="500"
-            name="limit"
-            value="{{ filters.limit }}"
-          />
-        </div>
-        <div class="form-actions form-actions--inline">
-          <button type="submit" class="button">Apply filters</button>
-          <a class="button button--ghost" href="/admin/change-log">Reset</a>
-        </div>
-      </form>
-    </header>
-    <div class="card__controls card__controls--bordered">
-      <input
-        type="search"
-        class="form-input"
-        placeholder="Search change log"
-        aria-label="Search change log"
-        data-table-filter="change-log-table"
-      />
-    </div>
     <div class="table-wrapper">
       <table class="table" id="change-log-table" data-table data-table-id="change-log">
         <thead>

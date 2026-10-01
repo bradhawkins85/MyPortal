@@ -65,6 +65,10 @@ def substitute_query_context(sql: str, *, company_id: int | None = None) -> str:
 class ReportingQueryError(ValueError):
     """Raised when an author-supplied SQL query fails validation."""
 
+    def __init__(self, message: str, *, client_code: str = "invalid_query") -> None:
+        super().__init__(message)
+        self.client_code = client_code
+
 
 # Statement-level keywords that indicate a write or otherwise unsafe action.
 _FORBIDDEN_KEYWORDS = (
@@ -215,18 +219,19 @@ def validate_select_query(sql: str) -> str:
     contains a trailing semicolon so it is safe to wrap inside a subquery.
     """
     if not sql or not sql.strip():
-        raise ReportingQueryError("SQL query is required.")
+        raise ReportingQueryError("SQL query is required.", client_code="required")
 
     cleaned = _strip_sql_comments(sql).strip()
     if not cleaned:
-        raise ReportingQueryError("SQL query is required.")
+        raise ReportingQueryError("SQL query is required.", client_code="required")
 
     statements = _split_top_level_statements(cleaned)
     if not statements:
-        raise ReportingQueryError("SQL query is required.")
+        raise ReportingQueryError("SQL query is required.", client_code="required")
     if len(statements) > 1:
         raise ReportingQueryError(
-            "Only a single SELECT statement is allowed (found multiple statements)."
+            "Only a single SELECT statement is allowed (found multiple statements).",
+            client_code="multiple_statements",
         )
 
     statement = statements[0]
@@ -238,19 +243,23 @@ def validate_select_query(sql: str) -> str:
     # Must begin with SELECT or WITH
     first_token_match = re.match(r"\s*([A-Z]+)", upper_no_strings)
     if not first_token_match or first_token_match.group(1) not in {"SELECT", "WITH"}:
-        raise ReportingQueryError("Only SELECT statements are allowed.")
+        raise ReportingQueryError(
+            "Only SELECT statements are allowed.", client_code="select_only"
+        )
 
     # Reject dangerous keywords as standalone tokens
     tokens = set(re.findall(r"\b[A-Z]+\b", upper_no_strings))
     for keyword in _FORBIDDEN_KEYWORDS:
         if keyword in tokens:
             raise ReportingQueryError(
-                f"Statement contains the forbidden keyword '{keyword}'."
+                f"Statement contains the forbidden keyword '{keyword}'.",
+                client_code="forbidden_keyword",
             )
     for phrase in _FORBIDDEN_PHRASES:
         if phrase in upper_no_strings:
             raise ReportingQueryError(
-                f"Statement contains the forbidden phrase '{phrase}'."
+                f"Statement contains the forbidden phrase '{phrase}'.",
+                client_code="forbidden_phrase",
             )
 
     return statement

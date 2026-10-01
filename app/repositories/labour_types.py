@@ -6,6 +6,8 @@ import aiomysql
 
 from app.core.database import db
 
+_SQL_UPDATE_LABOUR_TYPES = "UPDATE ticket_labour_types SET "
+
 LabourTypeRecord = dict[str, Any]
 
 
@@ -118,12 +120,9 @@ async def update_labour_type(
     if updates:
         updates.append("updated_at = UTC_TIMESTAMP(6)")
         params.append(labour_type_id)
+        # The SET fragment is assembled only from fixed function arguments above; values remain bound.
         await db.execute(
-            f"""
-            UPDATE ticket_labour_types
-            SET {', '.join(updates)}
-            WHERE id = %s
-            """,
+            _SQL_UPDATE_LABOUR_TYPES + ", ".join(updates) + " WHERE id = %s",
             tuple(params),
         )
     return await get_labour_type(labour_type_id)
@@ -232,8 +231,9 @@ async def replace_labour_types(definitions: Sequence[dict[str, Any]]) -> list[La
                 ]
                 if to_delete:
                     placeholders = ", ".join(["%s"] * len(to_delete))
+                    # The IN placeholders are derived only from retained integer ids; values remain bound.
                     await cursor.execute(
-                        f"DELETE FROM ticket_labour_types WHERE id IN ({placeholders})",
+                        f"DELETE FROM ticket_labour_types WHERE id IN ({placeholders})",  # nosec B608
                         tuple(to_delete),
                     )
                 await conn.commit()

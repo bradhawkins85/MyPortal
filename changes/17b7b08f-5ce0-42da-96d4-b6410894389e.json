@@ -1,0 +1,7 @@
+{
+  "guid": "17b7b08f-5ce0-42da-96d4-b6410894389e",
+  "occurred_at": "2026-08-20T00:00Z",
+  "change_type": "Fix",
+  "summary": "Report Windows Defender protection history detections from tray devices to MyPortal.",
+  "content_hash": "626819fb24e4167776fd2efb8641c6d548826b30ccc097f69cab76edffc4d43a"
+}

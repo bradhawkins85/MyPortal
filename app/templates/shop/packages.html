@@ -9,9 +9,13 @@
 
 {% set is_shop_super_admin = is_super_admin | default(current_user and current_user.get('is_super_admin')) %}
 
-{% block header_title_content %}
-  <div class="header__title-content">
-    <span class="header__title-text">{{ super() }}</span>
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">{{ title | default('Packages') }}</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="shop-packages-filter">Filter packages</label>
+      <input id="shop-packages-filter" type="search" class="form-input page-header-toolbar__search" placeholder="Filter packages" data-table-filter="shop-packages-table" />
+    </div>
   </div>
 {% endblock %}
 
@@ -40,15 +44,6 @@
       <div>
         <h2 class="card__title">Available packages</h2>
         <p class="card__subtitle">Choose a package to automatically add multiple products to your order.</p>
-      </div>
-      <div class="card__controls shop-toolbar">
-        <input
-          type="search"
-          class="form-input card__control"
-          placeholder="Filter packages"
-          aria-label="Filter packages"
-          data-table-filter="shop-packages-table"
-        />
       </div>
     </header>
     <div class="table-wrapper">
@@ -139,6 +134,26 @@
       <p class="table-pagination__status" data-page-info aria-live="polite"></p>
     </div>
   </section>
+</div>
+
+<div
+  class="modal"
+  id="package-details-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="package-details-title"
+  hidden
+>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close package details</span>
+      &times;
+    </button>
+    <div class="modal__body">
+      <h2 class="modal__title" id="package-details-title">Package details</h2>
+      <div id="package-details-body" class="modal__details"></div>
+    </div>
+  </div>
 </div>
 
 <div

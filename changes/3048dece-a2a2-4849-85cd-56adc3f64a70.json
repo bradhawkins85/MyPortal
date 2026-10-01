@@ -1,0 +1,7 @@
+{
+  "guid": "3048dece-a2a2-4849-85cd-56adc3f64a70",
+  "occurred_at": "2026-09-23T00:00Z",
+  "change_type": "Fix",
+  "summary": "Prevented unsupported agent answers, enforced evidence citation authorization, and hid uncalibrated confidence percentages.",
+  "content_hash": "13790229d448b7b74713346d01d9fddf9aa7fba331e247facda500198fe4a3a2"
+}

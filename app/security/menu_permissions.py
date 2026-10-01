@@ -9,6 +9,26 @@ AccessLevel = Literal["none", "read", "write"]
 ACCESS_LEVELS: tuple[AccessLevel, ...] = ("none", "read", "write")
 BOOLEAN_MENU_PERMISSIONS: frozenset[str] = frozenset({"menu.admin.technician"})
 
+# Sparse role payloads written before the feature-specific catalogue existed
+# inherit only access they already had through the old owning permission.  The
+# Roles editor submits every key, so an explicit ``none`` always wins and new
+# or reviewed roles never gain access implicitly.
+COMPATIBILITY_PERMISSION_MAP: dict[str, str] = {
+    "menu.documentation_search": "menu.assets",
+    "menu.asset_photos": "menu.assets",
+    "menu.asset_relationships": "menu.assets",
+    "menu.processes": "menu.assets",
+    "menu.expirations": "menu.assets",
+    "menu.websites": "menu.assets",
+    "menu.applications": "menu.assets",
+    "menu.ipam": "menu.network_devices",
+    "menu.racks": "menu.network_devices",
+    "menu.network_map": "menu.network_devices",
+    "menu.bcp_asset_links": "menu.continuity",
+    "menu.credentials": "menu.admin.company",
+    "menu.credential_sharing": "menu.admin.company",
+}
+
 
 @dataclass(frozen=True)
 class MenuPermission:
@@ -22,10 +42,12 @@ class MenuPermission:
 
 
 MENU_PERMISSIONS: tuple[MenuPermission, ...] = (
-    MenuPermission("menu.dashboard", "Dashboard", "General", "View the company dashboard and overview."),
+    MenuPermission("menu.dashboard", "Dashboard", "General", "View the company dashboard and overview; write access allows layout customisation."),
     MenuPermission("menu.service_status", "Service status", "General", "View service status dashboards."),
     MenuPermission("menu.notifications", "Notifications", "General", "View and manage notification settings.", admin_only=True),
     MenuPermission("menu.knowledge_base", "Knowledge base", "General", "View knowledge base articles."),
+    MenuPermission("content.knowledge_base", "Published articles & runbooks", "Customer Portal content", "Open published knowledge-base articles, runbooks, their search results, attachments, and exports."),
+    MenuPermission("content.assets", "Published assets", "Customer Portal content", "Open customer-published assets, linked records, downloads, and exports."),
     MenuPermission("menu.help", "Help", "General", "View help and support documentation."),
     MenuPermission("menu.chat", "Chat", "General", "Access the chat interface.", ("chat.access",), "can_access_chat"),
     MenuPermission("menu.tickets", "Tickets", "Company", "No Access blocks tickets, Own opens /tickets for the user, All opens /tickets for company tickets, and technicians can use /admin/tickets across customers.", ("helpdesk.technician",), None),
@@ -35,30 +57,66 @@ MENU_PERMISSIONS: tuple[MenuPermission, ...] = (
     MenuPermission("menu.quotes", "Quotes", "Commerce", "View quotes; write access allows quote actions.", (), "can_access_quotes"),
     MenuPermission("menu.orders", "Orders", "Commerce", "View orders; write access allows order actions.", ("orders.access",), "can_access_orders"),
     MenuPermission("menu.forms", "Forms", "Company", "View forms; write access allows submissions.", ("forms.access",), "can_access_forms"),
+    MenuPermission("menu.documentation_search", "Documentation search", "Documentation", "Search only documentation sources the role can already open. This permission never grants access to a search result by itself."),
     MenuPermission("menu.assets", "Assets", "Company", "View assets; write access allows asset changes.", ("assets.manage",), "can_manage_assets"),
+    MenuPermission("menu.asset_photos", "Asset photos", "Asset actions", "View and download photos for accessible assets; write access allows uploads, captions, visibility changes, ordering, and deletion."),
+    MenuPermission("menu.asset_relationships", "Asset relationships", "Asset actions", "View links between accessible records; write access allows relationship creation and removal."),
+    MenuPermission("menu.processes", "Processes", "Documentation", "View process templates and runs; write access allows templates, runs, and workflow steps to be changed."),
+    MenuPermission("menu.expirations", "Expirations", "Documentation", "View accessible expiry and review dates; write access allows reminder settings and workflow actions."),
+    MenuPermission("menu.websites", "Website monitoring", "Documentation", "View documented websites and monitoring results; write access allows website changes and on-demand checks."),
+    MenuPermission("menu.applications", "Applications", "Documentation", "View the company's application register; write access allows applications and application types to be changed. Revealing a product key is audited."),
+    MenuPermission("menu.network_devices", "Network Devices", "Company", "View discovered network devices; write access allows device actions and subnet scanner management."),
+    MenuPermission("menu.ipam", "IP address management", "Infrastructure", "View networks and addresses; write access allows network and address changes."),
+    MenuPermission("menu.racks", "Rack management", "Infrastructure", "View racks and placements; write access allows rack and equipment changes."),
+    MenuPermission("menu.network_map", "Network map", "Infrastructure", "View and export the network map built from racks, IPAM and assets; write access allows asset interfaces and network links to be documented."),
+    MenuPermission("menu.backups", "Backups", "Infrastructure", "View the backup register of tracked and manual backup jobs; write access allows backup entries and their details to be changed. Linked vault credentials are only listed for roles with Credential vault access."),
+    MenuPermission("menu.defender", "Windows Defender", "Company", "View endpoint protection status; write access allows Defender configuration, exclusions, and ticket creation."),
     MenuPermission("menu.m365.configuration", "Office 365 Configuration", "Office 365", "View or manage Microsoft 365 tenant configuration.", ("licenses.manage",), "can_manage_licenses"),
     MenuPermission("menu.m365.best_practices", "Office 365 Best Practices", "Office 365", "View or run Microsoft 365 best-practice checks.", ("m365_best_practices.access",), "can_view_m365_best_practices"),
     MenuPermission("menu.m365.user_mailboxes", "User Mailboxes", "Office 365", "View user mailboxes; write access allows mailbox actions.", ("m365_user_mailboxes.access",), "can_view_m365_user_mailboxes"),
     MenuPermission("menu.m365.shared_mailboxes", "Shared Mailboxes", "Office 365", "View shared mailboxes; write access allows mailbox actions.", ("m365_shared_mailboxes.access",), "can_view_m365_shared_mailboxes"),
+    MenuPermission("menu.m365.signatures", "Signature Management", "Office 365", "View or manage tenant-scoped Microsoft 365 signature templates, previews, and publication state."),
+    MenuPermission("menu.m365.out_of_office", "Out of Office", "Office 365", "View user mailboxes and manage their automatic reply messages and schedules."),
+    MenuPermission("menu.m365.spam_purge", "Spam Search & Purge", "Office 365", "Search for and permanently remove malicious email from Microsoft 365 mailboxes.", admin_only=True),
     MenuPermission("menu.m365.licenses", "Licenses", "Office 365", "View licenses; write access allows license changes.", ("licenses.manage", "licenses.order"), "can_manage_licenses"),
     MenuPermission("menu.m365.diagnostics", "Office 365 Diagnostics", "Office 365", "View or repair Microsoft 365 diagnostics.", admin_only=True),
     MenuPermission("menu.subscriptions", "Subscriptions", "Commerce", "View subscriptions; write access allows subscription change/order actions.", ("billing.manage", "licenses.manage", "cart.access"), None),
+    MenuPermission("menu.voice_monitor", "Voice monitor", "Company", "View subscribed monitoring numbers; write access allows monitoring preferences and test calls."),
     MenuPermission("menu.invoices", "Invoices", "Commerce", "View invoices; write access allows invoice management.", ("billing.manage", "invoices.manage"), "can_manage_invoices"),
     MenuPermission("menu.staff", "Staff", "Company", "View staff; write access allows staff management.", ("staff.manage",), "can_manage_staff"),
-    MenuPermission("menu.compliance", "Compliance", "Compliance", "View or manage Essential 8 compliance.", ("compliance.access",), "can_view_compliance"),
+    MenuPermission("menu.compliance", "SMB1001", "Compliance", "View or manage SMB1001 compliance (and legacy Essential 8 records).", ("compliance.access",), "can_view_compliance"),
     MenuPermission("menu.reports", "Reports", "Reporting", "View generated company reports."),
     MenuPermission("menu.reporting", "Reporting", "Reporting", "View or build reporting dashboards.", ("helpdesk.technician",), None),
+    MenuPermission(
+        "menu.dmarc",
+        "DMARC reports",
+        "Reporting",
+        "View DMARC aggregate reports; write access allows reporting-address management.",
+        ("dmarc.view", "dmarc.manage"),
+    ),
     MenuPermission("menu.compliance_checks", "Compliance Checks", "Compliance", "View assigned compliance checks.", ("compliance_checks.access",), "can_view_compliance_checks"),
     MenuPermission("menu.compliance_checks.library", "Compliance Checks Library", "Compliance", "Manage compliance check library items.", ("compliance_checks.manage",), "can_manage_compliance_checks", admin_only=True),
     MenuPermission("menu.continuity", "Continuity", "Compliance", "View or manage business continuity plans.", ("continuity.access", "bcp:view", "bcp:edit"), "can_view_bcp"),
+    MenuPermission("menu.bcp_asset_links", "BCP asset links", "Compliance", "View asset links only when the role can also view both BCP and Assets; write access allows links to be changed subject to BCP plan permissions."),
+    MenuPermission("menu.credentials", "Credential vault", "Credentials", "View company credential metadata; write access allows credential creation, rotation, and lifecycle management. Secret reveal still requires its existing strong-authentication and grant checks."),
+    MenuPermission("menu.credential_sharing", "Credential sharing", "Credentials", "View grant metadata; write access allows credentials to be shared or grants revoked. Recipient, grant, strong-authentication, and company checks always remain in force."),
     MenuPermission("menu.admin.profile", "My Profile", "Administration", "View and update the user's administration profile."),
     MenuPermission("menu.admin.impersonation", "Impersonation", "Administration", "Access impersonation administration.", admin_only=True),
+    MenuPermission("menu.admin.users", "Users", "Administration", "View and manage portal user accounts.", admin_only=True),
+    MenuPermission("menu.admin.sessions", "Sessions", "Administration", "View and revoke authenticated user sessions.", admin_only=True),
+    MenuPermission("menu.admin.benchmarking", "Benchmarking", "Administration", "View cross-company benchmark data.", admin_only=True),
+    MenuPermission("menu.admin.rag", "RAG index", "Administration", "View retrieval index diagnostics and relationship metrics.", admin_only=True),
     MenuPermission("menu.admin.call_recordings", "Call Recordings", "Administration", "Access call recordings administration.", admin_only=True),
     MenuPermission("menu.admin.calls", "Calls", "Administration", "Access phone call webhook logs.", admin_only=True),
+    MenuPermission("menu.admin.voice_monitor", "Voice monitor", "Administration", "Provision and diagnose voice monitoring.", admin_only=True),
     MenuPermission("menu.admin.scheduled_tasks", "Scheduled Tasks", "Administration", "Access scheduled task administration.", admin_only=True),
+    MenuPermission("menu.admin.cron_calendar", "Cron Calendar", "Administration", "View the scheduled task calendar.", admin_only=True),
     MenuPermission("menu.admin.backup_history", "Backup History", "Administration", "Access backup history.", admin_only=True),
     MenuPermission("menu.admin.backup_summary", "Backup Summary", "Administration", "Access backup summary.", admin_only=True),
     MenuPermission("menu.admin.message_templates", "Message Templates", "Administration", "Manage message templates.", admin_only=True),
+    MenuPermission("menu.admin.forms", "Forms administration", "Administration", "Manage forms and their company and user assignments.", admin_only=True),
+    MenuPermission("menu.admin.tag_exclusions", "AI tag exclusions", "Administration", "Manage ticket and knowledge-base AI tag exclusions.", admin_only=True),
+    MenuPermission("menu.admin.tray", "Tray administration", "Administration", "View and manage tray devices, installers, branding, diagnostics, and ticket questions.", admin_only=True),
     MenuPermission("menu.admin.webhooks", "Webhooks", "Administration", "Monitor and manage webhooks.", admin_only=True),
     MenuPermission("menu.admin.api_keys", "API Keys", "Administration", "Manage API keys.", admin_only=True),
     MenuPermission("menu.admin.modules", "Modules", "Administration", "Manage integration modules.", admin_only=True),
@@ -141,6 +199,9 @@ def normalize_menu_permissions(raw: Any) -> dict[str, AccessLevel]:
         for key, value in source.items():
             if key in MENU_PERMISSION_MAP:
                 normalized[key] = normalize_menu_permission_level(key, value)
+        for target_key, former_key in COMPATIBILITY_PERMISSION_MAP.items():
+            if target_key not in source and former_key in source:
+                normalized[target_key] = normalized[former_key]
         # Also accept a legacy list nested under permissions for compatibility.
         legacy = raw.get("legacy") or raw.get("permissions")
         if isinstance(legacy, list):

@@ -1,0 +1,16 @@
+{% from "macros/counters.html" import counter_strip %}
+<section class="card card--panel" data-report-section="voice_monitor">
+  <header class="card__header report-section__header"><h2>Voice Monitor</h2><span class="report-section__meta">Last 30 days</span></header>
+  <div class="card__body">
+    {{ counter_strip(total=section.data.attempts, total_label='Attempts', items=[
+      {'label':'Availability','value':section.data.availability_percentage ~ '%','variant':'success'},
+      {'label':'Successful connections','value':section.data.successful_connections,'variant':'success'},
+      {'label':'Failures','value':section.data.failures,'variant':'danger'},
+      {'label':'Average answer time','value':(section.data.avg_answer_seconds ~ ' s') if section.data.avg_answer_seconds is not none else '—','variant':'info'},
+      {'label':'Average duration','value':(section.data.avg_duration_seconds ~ ' s') if section.data.avg_duration_seconds is not none else '—','variant':'info'}
+    ]) }}
+    {% if section.data.failure_categories %}<p><strong>Failure categories:</strong>
+      {% for category in section.data.failure_categories %}{{ category.category }} ({{ category.count }}){% if not loop.last %}, {% endif %}{% endfor %}
+    </p>{% endif %}
+  </div>
+</section>

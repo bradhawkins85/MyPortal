@@ -72,7 +72,9 @@
       return;
     }
     modal.hidden = false;
+    modal.setAttribute('aria-hidden', 'false');
     modal.classList.add('is-visible');
+    modal.dispatchEvent(new CustomEvent('modal:opened'));
     const focusTarget = modal.querySelector('[autofocus], input, select, textarea, button');
     if (focusTarget && typeof focusTarget.focus === 'function') {
       focusTarget.focus();
@@ -84,7 +86,16 @@
       return;
     }
     modal.classList.remove('is-visible');
+    modal.setAttribute('aria-hidden', 'true');
     modal.hidden = true;
+  }
+
+  // User-initiated dismissals can be vetoed (e.g. unsaved changes) by cancelling 'modal:beforeclose'.
+  function dismissModal(modal) {
+    const beforeClose = new CustomEvent('modal:beforeclose', { cancelable: true });
+    if (modal.dispatchEvent(beforeClose)) {
+      closeModal(modal);
+    }
   }
 
   function bindModalDismissal(modal) {
@@ -92,15 +103,21 @@
       return;
     }
     modal.addEventListener('click', (event) => {
-      if (event.target === modal || event.target.hasAttribute('data-modal-close')) {
-        closeModal(modal);
+      if (event.target === modal || event.target.closest('[data-modal-close]')) {
+        dismissModal(modal);
       }
     });
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && !modal.hidden) {
-        closeModal(modal);
+        dismissModal(modal);
       }
     });
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[char]);
   }
 
   function getField(id) {
@@ -436,6 +453,7 @@
     const editIdField = getField('edit-staff-id');
     const editCustomFieldsGrid = getField('edit-custom-fields-grid');
     const offboardingModal = document.getElementById('staff-offboarding-modal');
+    const ticketsModal = document.getElementById('staff-tickets-modal');
     const offboardingForm = document.getElementById('staff-offboarding-form');
     const offboardingStaffIdField = getField('offboarding-staff-id');
     const offboardingDateField = getField('offboarding-date');
@@ -448,14 +466,13 @@
     const offboardingMailboxGrantField = getField('offboarding-mailbox-grant');
     const offboardingImmediateButton = getField('offboarding-immediate');
     const offboardingFormError = getField('offboarding-form-error');
-    const addForm = container.querySelector('form.staff-form');
+    const addForm = container.querySelector('[data-staff-add-form]');
+    const editModalTitle = editModal ? editModal.querySelector('[data-stf-title]') : null;
     const editModalStaffName = getField('edit-modal-staff-name');
     const editActionNoteField = getField('edit-action-note');
     const editActionStepField = getField('edit-action-step');
     const editActionError = getField('edit-action-error');
     const editFormError = getField('edit-form-error');
-    const editDeleteConfirm = getField('edit-delete-confirm');
-    const editDangerZone = getField('edit-danger-zone');
 
     const editFields = {
       first_name: getField('edit-first-name'),
@@ -481,6 +498,75 @@
     bindModalDismissal(editModal);
     bindModalDismissal(addModal);
     bindModalDismissal(offboardingModal);
+    bindModalDismissal(ticketsModal);
+
+    const ticketsBody = ticketsModal?.querySelector('[data-staff-tickets-body]');
+    const ticketsSubtitle = ticketsModal?.querySelector('[data-staff-tickets-subtitle]');
+    const ticketsLoading = ticketsModal?.querySelector('[data-staff-tickets-loading]');
+    const ticketsError = ticketsModal?.querySelector('[data-staff-tickets-error]');
+
+    function ticketCell(row, label, value) {
+      const cell = document.createElement('td');
+      cell.dataset.label = label;
+      cell.textContent = value == null || value === '' ? '—' : String(value);
+      row.appendChild(cell);
+      return cell;
+    }
+
+    container.querySelectorAll('[data-staff-tickets]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const staffId = button.getAttribute('data-staff-tickets');
+        if (!staffId || !ticketsModal || !ticketsBody) return;
+        ticketsBody.replaceChildren();
+        if (ticketsSubtitle) ticketsSubtitle.textContent = '';
+        if (ticketsError) ticketsError.hidden = true;
+        if (ticketsLoading) ticketsLoading.hidden = false;
+        openModal(ticketsModal);
+        try {
+          const payload = await requestJson(`/api/staff/${encodeURIComponent(staffId)}/tickets`, {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+          });
+          if (ticketsSubtitle) ticketsSubtitle.textContent = `Tickets under ${payload.staffName}`;
+          const tickets = Array.isArray(payload.tickets) ? payload.tickets : [];
+          if (!tickets.length) {
+            const row = document.createElement('tr');
+            const cell = ticketCell(row, '', 'No tickets found for this staff member.');
+            cell.colSpan = 7;
+            cell.className = 'table__empty';
+            ticketsBody.appendChild(row);
+          }
+          tickets.forEach((ticket) => {
+            const row = document.createElement('tr');
+            ticketCell(row, 'ID', ticket.id);
+            const subjectCell = document.createElement('td');
+            subjectCell.dataset.label = 'Subject';
+            const link = document.createElement('a');
+            link.href = `/admin/tickets/${encodeURIComponent(ticket.id)}`;
+            link.textContent = ticket.subject || 'Untitled ticket';
+            subjectCell.appendChild(link);
+            row.appendChild(subjectCell);
+            ticketCell(row, 'Status', ticket.status);
+            ticketCell(row, 'Priority', ticket.priority);
+            ticketCell(row, 'Company', ticket.company);
+            ticketCell(row, 'Assigned', ticket.assigned);
+            const updatedCell = ticketCell(row, 'Updated', '—');
+            if (ticket.updatedAt) {
+              updatedCell.textContent = new Date(ticket.updatedAt).toLocaleString();
+              updatedCell.dataset.value = ticket.updatedAt;
+            }
+            ticketsBody.appendChild(row);
+          });
+        } catch (error) {
+          if (ticketsError) {
+            ticketsError.textContent = `Unable to load tickets: ${error.message}`;
+            ticketsError.hidden = false;
+          }
+        } finally {
+          if (ticketsLoading) ticketsLoading.hidden = true;
+        }
+      });
+    });
 
     function resetAddStaffForm() {
       if (!addForm) {
@@ -502,6 +588,11 @@
         openModal(addModal);
       });
     });
+
+    if (flags.openAddStaffModal && addModal) {
+      resetAddStaffForm();
+      openModal(addModal);
+    }
 
     const editCustomFieldInputs = new Map();
     const editCustomFieldGroups = new Map();
@@ -540,9 +631,10 @@
           return editCustomFieldGroups.get(normalized);
         }
         const section = document.createElement('fieldset');
-        section.className = 'fieldset staff-modal__subsection';
+        section.className = 'stf-section';
         section.dataset.customFieldGroup = normalized;
         const legend = document.createElement('legend');
+        legend.className = 'stf-section__title';
         legend.textContent = normalized;
         section.appendChild(legend);
         editCustomFieldsGrid.appendChild(section);
@@ -579,41 +671,48 @@
         wrapper.dataset.conditionOperator = field.condition_operator || '';
         wrapper.dataset.conditionValue = field.condition_value || '';
         const inputId = `edit-custom-${field.name}`;
+        const label = escapeHtml(field.display_name || field.name);
+        const help = field.help_text ? `<p class="form-help">${escapeHtml(field.help_text)}</p>` : '';
         if (field.field_type === 'checkbox') {
           wrapper.innerHTML = `
-            <label class="checkbox" for="${inputId}">
+            <label class="stf-switch" for="${inputId}">
               <input type="checkbox" id="${inputId}" />
-              <span>${field.display_name || field.name}</span>
+              <span class="stf-switch__track" aria-hidden="true"></span>
+              <span>${label}</span>
             </label>
+            ${help}
           `;
         } else if (field.field_type === 'select') {
           const options = (field.options || [])
-            .map((option) => `<option value="${option.value}">${option.label || option.value}</option>`)
+            .map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label || option.value)}</option>`)
             .join('');
           wrapper.innerHTML = `
-            <label class="form-label" for="${inputId}">${field.display_name || field.name}</label>
+            <label class="form-label" for="${inputId}">${label}</label>
             <select class="form-input" id="${inputId}">
-              <option value="">Select ${(field.display_name || field.name).toLowerCase()}</option>
+              <option value="">Select ${label.toLowerCase()}</option>
               ${options}
             </select>
+            ${help}
           `;
         } else if (field.field_type === 'multiselect') {
           const checkboxes = (field.options || [])
             .map((option, idx) => {
               const cbId = `${inputId}-opt-${idx}`;
-              return `<label class="checkbox" for="${cbId}"><input type="checkbox" id="${cbId}" value="${option.value}" /><span>${option.label || option.value}</span></label>`;
+              return `<label class="stf-chip-option" for="${cbId}"><input type="checkbox" id="${cbId}" value="${escapeHtml(option.value)}" /><span>${escapeHtml(option.label || option.value)}</span></label>`;
             })
             .join('');
           wrapper.innerHTML = `
-            <label class="form-label">${field.display_name || field.name}</label>
-            <div class="multiselect-checkboxes" id="${inputId}" data-multiselect-group>
+            <span class="form-label" id="${inputId}-label">${label}</span>
+            <div class="stf-chip-options" id="${inputId}" role="group" aria-labelledby="${inputId}-label" data-multiselect-group>
               ${checkboxes}
             </div>
+            ${help}
           `;
         } else {
           wrapper.innerHTML = `
-            <label class="form-label" for="${inputId}">${field.display_name || field.name}</label>
+            <label class="form-label" for="${inputId}">${label}</label>
             <input class="form-input" id="${inputId}" type="${field.field_type === 'date' ? 'date' : 'text'}" />
+            ${help}
           `;
         }
         ensureRowContainer(groupLabel, displayOrder).appendChild(wrapper);
@@ -658,8 +757,8 @@
           return directField;
         }
 
-        const modalField = staffModal
-          ? staffModal.querySelector(`[name="${normalizedName}"], #edit-${normalizedName}`)
+        const modalField = editModal
+          ? editModal.querySelector(`[name="${normalizedName}"], #edit-${normalizedName}`)
           : null;
         return modalField || null;
       };
@@ -819,10 +918,6 @@
       setActionVisibility(editActionButtons.m365ResetPassword, { visible: canM365Actions, disabled: false });
       setActionVisibility(editActionButtons.m365EnableSignIn, { visible: canM365Actions, disabled: false });
       setActionVisibility(editActionButtons.m365DisableSignIn, { visible: canM365Actions, disabled: false });
-      const canSeeDangerZone = Boolean(flags && flags.isSuperAdmin);
-      if (editDangerZone) {
-        editDangerZone.hidden = !canSeeDangerZone;
-      }
       setActionVisibility(editActionButtons.delete, { visible: Boolean(flags && flags.isSuperAdmin), disabled: false });
 
       if (editActionButtons.workflowForceComplete) {
@@ -840,8 +935,12 @@
       editIdField.value = String(id);
       setValue(editFields.first_name, member.first_name);
       setValue(editFields.last_name, member.last_name);
+      const memberName = `${member.first_name || ''} ${member.last_name || ''}`.trim();
+      if (editModalTitle) {
+        editModalTitle.textContent = memberName || member.email || 'Staff member';
+      }
       if (editModalStaffName) {
-        editModalStaffName.textContent = `${member.first_name || ''} ${member.last_name || ''}`.trim() || member.email || '';
+        editModalStaffName.textContent = memberName && member.email ? member.email : 'No email address on file';
       }
       setValue(editFields.email, member.email);
       setValue(editFields.mobile_phone, member.mobile_phone);
@@ -888,9 +987,6 @@
       if (editActionStepField) {
         editActionStepField.value = '';
       }
-      if (editDeleteConfirm) {
-        editDeleteConfirm.checked = false;
-      }
       setInlineError(editActionError, '');
       setInlineError(editFormError, '');
       updateEditActionButtons(member);
@@ -904,7 +1000,7 @@
 
     async function deleteStaff(staffId, isConfirmed) {
       if (!isConfirmed) {
-        throw new Error('Confirm deletion in the danger zone before deleting.');
+        throw new Error('Deletion was not confirmed.');
       }
       await requestJson(`/staff/${staffId}`, { method: 'DELETE' });
       window.location.reload();
@@ -1345,7 +1441,7 @@
         }
         try {
           setInlineError(editActionError, '');
-          await sendInvite(currentEditStaffId, getActionNote());
+          await sendInvite(currentEditStaffId);
         } catch (error) {
           setInlineError(editActionError, `Failed to send invitation: ${error.message}`);
         }
@@ -1504,11 +1600,18 @@
         if (!currentEditStaffId) {
           return;
         }
+        const member = staffById.get(currentEditStaffId);
+        const name = member
+          ? `${member.first_name || ''} ${member.last_name || ''}`.trim() || member.email || 'this staff member'
+          : 'this staff member';
+        if (!window.confirm(`Permanently delete ${name}? Their staff record is removed and this cannot be undone.`)) {
+          return;
+        }
         try {
-          setInlineError(editActionError, '');
-          await deleteStaff(currentEditStaffId, Boolean(editDeleteConfirm && editDeleteConfirm.checked));
+          setInlineError(editFormError, '');
+          await deleteStaff(currentEditStaffId, true);
         } catch (error) {
-          setInlineError(editActionError, `Failed to delete staff record: ${error.message}`);
+          setInlineError(editFormError, `Failed to delete staff record: ${error.message}`);
         }
       });
     }

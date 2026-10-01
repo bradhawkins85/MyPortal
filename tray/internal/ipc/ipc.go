@@ -234,7 +234,16 @@ func listenSocket(path string) (net.Listener, error) {
 	}
 	// Remove stale socket file.
 	removeSocket(path)
-	return net.Listen("unix", path)
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	if err := configureSocket(path); err != nil {
+		ln.Close()
+		removeSocket(path)
+		return nil, err
+	}
+	return ln, nil
 }
 
 func dialSocket(path string) (net.Conn, error) {

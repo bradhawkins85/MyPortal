@@ -25,8 +25,10 @@ from app.repositories import licenses as licenses_repo
 from app.repositories import m365_best_practices as m365_bp_repo
 from app.repositories import report_sections as report_sections_repo
 from app.repositories import shop as shop_repo
-from app.repositories import staff as staff_repo
+from app.repositories import smb1001 as smb1001_repo
 from app.repositories import subscriptions as subscriptions_repo
+from app.repositories import voice_monitor as voice_monitor_repo
+from app.services import m365_best_practices as m365_bp_service
 
 
 # ---------------------------------------------------------------------------
@@ -86,9 +88,27 @@ REPORT_SECTIONS: tuple[ReportSection, ...] = (
         description="Active subscriptions linked to the company.",
     ),
     ReportSection(
+        key="smb1001",
+        label="SMB1001 compliance",
+        description="Tier achieved, target tier and progress for each SMB1001 tier (Bronze to Diamond).",
+    ),
+    ReportSection(
+        key="smb1001_recommendations",
+        label="SMB1001 compliance recommendations",
+        description="Outstanding SMB1001 controls up to the target tier and recommended products or services.",
+    ),
+    ReportSection(
         key="essential8",
-        label="Essential 8 compliance progress",
-        description="Per-maturity-level progress for each Essential 8 control.",
+        label="Essential 8 compliance (legacy) — all maturity levels",
+        description="Compliance percentages for maturity levels 1, 2, and 3.",
+    ),
+    ReportSection(key="essential8_ml1", label="Essential 8 (legacy) — maturity level 1", description="Maturity level 1 compliance percentage."),
+    ReportSection(key="essential8_ml2", label="Essential 8 (legacy) — maturity level 2", description="Maturity level 2 compliance percentage."),
+    ReportSection(key="essential8_ml3", label="Essential 8 (legacy) — maturity level 3", description="Maturity level 3 compliance percentage."),
+    ReportSection(
+        key="essential8_recommendations",
+        label="Essential 8 compliance recommendations (legacy)",
+        description="Non-compliant requirements at the current maturity level and recommended products or services.",
     ),
     ReportSection(
         key="compliance_checks",
@@ -117,6 +137,11 @@ REPORT_SECTIONS: tuple[ReportSection, ...] = (
             "Per-day backup status for every job configured for the company. "
             "The detailed report renders a colour-coded grid for the last 30 days."
         ),
+    ),
+    ReportSection(
+        key="voice_monitor",
+        label="Voice Monitor",
+        description="Call availability, quality, failures, and incidents during the report period.",
     ),
     ReportSection(
         key="huntress_edr",
@@ -204,14 +229,14 @@ async def _build_assets(company_id: int) -> dict[str, Any]:
 def _staff_row_to_account(row: Mapping[str, Any]) -> dict[str, Any]:
     first_name = row.get("first_name") or ""
     last_name = row.get("last_name") or ""
-    name = row.get("name") or f"{first_name} {last_name}".strip()
+    name = f"{first_name} {last_name}".strip()
     return {
         "first_name": first_name,
         "last_name": last_name,
         "name": name,
         "email": row.get("email"),
         "department": row.get("department"),
-        "job_title": row.get("position") or row.get("job_title"),
+        "job_title": row.get("job_title"),
         "mobile_phone": row.get("mobile_phone"),
         "onboarding_status": row.get("onboarding_status"),
         "m365_last_sign_in": _datetime_to_iso(row.get("m365_last_sign_in")),
@@ -221,7 +246,7 @@ def _staff_row_to_account(row: Mapping[str, Any]) -> dict[str, Any]:
 async def _list_active_staff_accounts(company_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """
-        SELECT first_name, last_name, name, email, department, position, job_title,
+        SELECT first_name, last_name, email, department, job_title,
                mobile_phone, onboarding_status, m365_last_sign_in
         FROM staff
         WHERE company_id = %s
@@ -246,6 +271,8 @@ async def _build_active_user_accounts(company_id: int) -> dict[str, Any]:
 
 async def _build_m365_best_practices(company_id: int) -> dict[str, Any]:
     results = await m365_bp_repo.list_results(company_id)
+    history = await m365_bp_repo.list_daily_history(company_id, limit=30)
+    catalog = m365_bp_service._catalog_map()
     counts: dict[str, int] = {
         "pass": 0,
         "fail": 0,
@@ -261,14 +288,47 @@ async def _build_m365_best_practices(company_id: int) -> dict[str, Any]:
             counts[status] += 1
         else:
             counts["other"] += 1
+    exposure = {"critical": 0, "high": 0, "medium": 0, "low": 0, "risk_points": 0}
+    for row in results:
+        if str(row.get("status") or "").lower() != "fail":
+            continue
+        bp = catalog.get(
+            str(row.get("check_id") or ""),
+            {"id": str(row.get("check_id") or "")},
+        )
+        posture = m365_bp_service._posture_metadata_for_bp(bp)
+        severity = str(posture.get("risk_severity") or "medium")
+        if severity in exposure:
+            exposure[severity] += 1
+        exposure["risk_points"] += int(posture.get("risk_score") or 0)
     total = len(results)
     # Exclude N/A and unknown from the pass-rate denominator
     rated_total = total - counts["not_applicable"] - counts["unknown"] - counts["other"]
     passed = counts["pass"]
     pass_percentage = round((passed / rated_total * 100.0), 1) if rated_total else 0.0
+    latest_snapshot = history[0] if history else None
+    oldest_snapshot = history[-1] if history else None
+    secure_score_delta = None
+    fail_delta = None
+    if latest_snapshot and oldest_snapshot and latest_snapshot is not oldest_snapshot:
+        latest_secure = latest_snapshot.get("secure_score_percentage")
+        oldest_secure = oldest_snapshot.get("secure_score_percentage")
+        if latest_secure is not None and oldest_secure is not None:
+            secure_score_delta = round(float(latest_secure) - float(oldest_secure), 1)
+        fail_delta = int(latest_snapshot.get("fail_count") or 0) - int(
+            oldest_snapshot.get("fail_count") or 0
+        )
     return {
         "total": total,
         "counts": counts,
+        "exposure": exposure,
+        "history_window_days": len(history),
+        "trend": {
+            "fail_delta": fail_delta,
+            "secure_score_delta": secure_score_delta,
+            "latest_snapshot_date": _date_to_iso(latest_snapshot.get("snapshot_date")) if latest_snapshot else None,
+            "baseline_snapshot_date": _date_to_iso(oldest_snapshot.get("snapshot_date")) if oldest_snapshot else None,
+        },
         "pass_percentage": pass_percentage,
         "last_run_at": _max_datetime(row.get("run_at") for row in results),
     }
@@ -297,7 +357,7 @@ _EXCLUDE_PACKAGE_MAILBOX_SQL = (
 )
 
 _MAILBOX_BASE_QUERY = (
-    "SELECT user_principal_name, display_name, mailbox_type,"
+    "SELECT user_principal_name, display_name, mailbox_type,"  # nosec B608
     " storage_used_bytes, archive_storage_used_bytes"
     " FROM m365_mailboxes"
     " WHERE company_id = %s AND mailbox_type = %s"
@@ -410,21 +470,99 @@ async def _build_essential8(company_id: int) -> dict[str, Any]:
                 in_progress += 1
         not_started = total - compliant - in_progress
         percentage = round((compliant / total * 100.0), 1) if total else 0.0
-        # ML2 and ML3 are only included when at least one control has progress.
-        has_progress = compliant > 0 or in_progress > 0
-        if level_key == "ml1" or has_progress:
-            level_rows.append(
-                {
-                    "level": level_key,
-                    "label": level_label,
-                    "total": total,
-                    "compliant": compliant,
-                    "in_progress": in_progress,
-                    "not_started": not_started,
-                    "percentage": percentage,
-                }
-            )
+        level_rows.append({"level": level_key, "label": level_label, "total": total,
+                           "compliant": compliant, "in_progress": in_progress,
+                           "not_started": not_started, "percentage": percentage})
     return {"levels": level_rows}
+
+
+async def _build_essential8_level(company_id: int, level: str) -> dict[str, Any]:
+    data = await _build_essential8(company_id)
+    return {"levels": [row for row in data["levels"] if row["level"] == level]}
+
+
+async def _build_essential8_ml1(company_id: int) -> dict[str, Any]:
+    return await _build_essential8_level(company_id, "ml1")
+
+
+async def _build_essential8_ml2(company_id: int) -> dict[str, Any]:
+    return await _build_essential8_level(company_id, "ml2")
+
+
+async def _build_essential8_ml3(company_id: int) -> dict[str, Any]:
+    return await _build_essential8_level(company_id, "ml3")
+
+
+async def _build_essential8_recommendations(company_id: int) -> dict[str, Any]:
+    controls = await essential8_repo.list_company_compliance(company_id)
+    requirements = await essential8_repo.list_essential8_requirements()
+    compliance = await essential8_repo.list_company_requirement_compliance(company_id)
+    links = await essential8_repo.list_requirement_marketing_page_links()
+    control_map = {row["control_id"]: row for row in controls}
+    status_map = {row["requirement_id"]: row.get("status", "not_started") for row in compliance}
+    link_map = {row["requirement_id"]: row for row in links}
+    rows: list[dict[str, Any]] = []
+    for requirement in requirements:
+        control = control_map.get(requirement["control_id"])
+        if not control:
+            continue
+        current_level = str(control.get("maturity_level") or "ml0")
+        current_level = current_level if current_level in {"ml1", "ml2", "ml3"} else "ml1"
+        status = status_map.get(requirement["id"], "not_started")
+        if requirement["maturity_level"] != current_level or status in {"compliant", "not_applicable"}:
+            continue
+        recommendation = link_map.get(requirement["id"], {})
+        url = recommendation.get("external_url") or (
+            f"/marketing/{recommendation['marketing_page_slug']}"
+            if recommendation.get("marketing_page_slug") and recommendation.get("marketing_page_is_published") else ""
+        )
+        rows.append({
+            "control": (control.get("control") or {}).get("name") or control.get("control_name") or "Essential 8 control",
+            "maturity_level": current_level.upper(), "requirement": requirement.get("description"),
+            "status": status, "recommendation": recommendation.get("recommendation_name") or "Contact us for assistance",
+            "url": url,
+        })
+    return {"recommendations": rows, "total": len(rows)}
+
+
+async def _build_smb1001(company_id: int) -> dict[str, Any]:
+    # First use converts Essential 8 progress, matching the SMB1001 page.
+    await smb1001_repo.ensure_company_profile(company_id)
+    overview = await smb1001_repo.get_company_overview(company_id)
+    progress = overview["progress"]
+    tiers = [
+        {
+            "tier_level": tier["tier_level"],
+            "name": tier["name"],
+            "attestation": tier.get("attestation"),
+            "total": tier["total"],
+            "done": tier["done"],
+            "in_progress": tier["counts"]["in_progress"],
+            "non_compliant": tier["counts"]["non_compliant"],
+            "not_started": tier["counts"]["not_started"],
+            "percentage": tier["percentage"],
+            "achieved": tier["achieved"],
+        }
+        for tier in progress["tiers"]
+    ]
+    target = next((tier for tier in tiers if tier["tier_level"] == progress["target_tier"]), None)
+    return {
+        "achieved_tier": (progress.get("achieved_tier") or {}).get("name"),
+        "next_tier": (progress.get("next_tier") or {}).get("name"),
+        "next_tier_remaining": (progress.get("next_tier") or {}).get("remaining"),
+        "target_tier": target["name"] if target else None,
+        "target_done": progress["target_done"],
+        "target_total": progress["target_total"],
+        "target_percentage": progress["target_percentage"],
+        "overall_percentage": progress["overall_percentage"],
+        "total": progress["overall_total"],
+        "tiers": tiers,
+    }
+
+
+async def _build_smb1001_recommendations(company_id: int) -> dict[str, Any]:
+    await smb1001_repo.ensure_company_profile(company_id)
+    return await smb1001_repo.list_recommendations(company_id)
 
 
 async def _build_compliance_checks(company_id: int) -> dict[str, Any]:
@@ -630,6 +768,21 @@ async def _build_backup_jobs(company_id: int) -> dict[str, Any]:
     }
 
 
+def _report_period() -> tuple[datetime, datetime]:
+    end = datetime.now(timezone.utc)
+    return end - timedelta(days=30), end
+
+
+async def _build_voice_monitor(company_id: int) -> dict[str, Any]:
+    start, end = _report_period()
+    return await voice_monitor_repo.get_report_summary(company_id, start=start, end=end)
+
+
+async def _build_voice_monitor_detail(company_id: int) -> dict[str, Any]:
+    start, end = _report_period()
+    return await voice_monitor_repo.get_report_detail(company_id, start=start, end=end)
+
+
 # Maps section keys to their builder coroutine.
 _SECTION_BUILDERS = {
     "assets": _build_assets,
@@ -640,12 +793,19 @@ _SECTION_BUILDERS = {
     "orders_current_month": _build_orders_current_month,
     "licenses": _build_licenses,
     "subscriptions": _build_subscriptions,
+    "smb1001": _build_smb1001,
+    "smb1001_recommendations": _build_smb1001_recommendations,
     "essential8": _build_essential8,
+    "essential8_ml1": _build_essential8_ml1,
+    "essential8_ml2": _build_essential8_ml2,
+    "essential8_ml3": _build_essential8_ml3,
+    "essential8_recommendations": _build_essential8_recommendations,
     "compliance_checks": _build_compliance_checks,
     "tickets_last_month": _build_tickets_last_month,
     "asset_custom_fields": _build_asset_custom_fields,
     "issues": _build_issues,
     "backup_jobs": _build_backup_jobs,
+    "voice_monitor": _build_voice_monitor,
 }
 
 
@@ -696,21 +856,38 @@ async def _build_active_user_accounts_detail(company_id: int) -> dict[str, Any]:
 async def _build_m365_best_practices_detail(company_id: int) -> dict[str, Any]:
     """Per-check breakdown for the detail page."""
     results = await m365_bp_repo.list_results(company_id)
+    catalog = m365_bp_service._catalog_map()
     checks: list[dict[str, Any]] = []
     for row in results:
+        bp = catalog.get(
+            str(row.get("check_id") or ""),
+            {"id": str(row.get("check_id") or "")},
+        )
+        posture = m365_bp_service._posture_metadata_for_bp(bp)
         checks.append(
             {
                 "check_id": row.get("check_id"),
                 "check_name": row.get("check_name"),
                 "status": str(row.get("status") or "").lower(),
                 "details": row.get("details"),
+                "notes": row.get("notes"),
                 "remediation_status": row.get("remediation_status"),
+                "risk_severity": posture.get("risk_severity"),
+                "risk_score": posture.get("risk_score"),
+                "business_impact": posture.get("business_impact"),
+                "benchmark_category": posture.get("benchmark_category"),
                 "run_at": _datetime_to_iso(row.get("run_at")),
             }
         )
     # Sort: fails first, then warns, then pass, then others.
     _order = {"fail": 0, "warn": 1, "error": 2, "pass": 3, "not_applicable": 4}
-    checks.sort(key=lambda c: (_order.get(c.get("status") or "", 5), c.get("check_name") or ""))
+    checks.sort(
+        key=lambda c: (
+            _order.get(c.get("status") or "", 5),
+            -int(c.get("risk_score") or 0),
+            c.get("check_name") or "",
+        )
+    )
     return {"checks": checks, "total": len(checks)}
 
 
@@ -823,10 +1000,18 @@ async def _build_essential8_detail(company_id: int) -> dict[str, Any]:
     """Per-control breakdown with maturity-level statuses for the detail page."""
     controls = await essential8_repo.list_essential8_controls()
     per_control = await essential8_repo.get_per_maturity_statuses_for_company(company_id)
+    bundle = await essential8_repo.build_requirement_export_bundle(company_id)
+    requirements_by_control: dict[int, list[dict[str, Any]]] = {}
+    for requirement in bundle.get("requirements", []):
+        control_id = requirement.get("control_id")
+        if control_id is None:
+            continue
+        requirements_by_control.setdefault(int(control_id), []).append(requirement)
     rows: list[dict[str, Any]] = []
     for control in controls:
         control_id = control.get("id")
         statuses = per_control.get(control_id, {}) if control_id is not None else {}
+        requirement_rows = requirements_by_control.get(int(control_id), []) if control_id is not None else []
         rows.append(
             {
                 "id": control_id,
@@ -835,6 +1020,42 @@ async def _build_essential8_detail(company_id: int) -> dict[str, Any]:
                 "ml1": statuses.get("ml1", "not_started"),
                 "ml2": statuses.get("ml2", "not_started"),
                 "ml3": statuses.get("ml3", "not_started"),
+                "requirement_count": len(requirement_rows),
+                "evidence_reference_count": sum(
+                    int(requirement.get("evidence_reference_count") or 0)
+                    for requirement in requirement_rows
+                ),
+                "pending_approval_count": sum(
+                    1 for requirement in requirement_rows
+                    if requirement.get("approval_status") == "pending_approval"
+                ),
+            }
+        )
+    return {
+        "controls": rows,
+        "total": len(rows),
+        "generated_at": bundle.get("generated_at"),
+    }
+
+
+async def _build_smb1001_detail(company_id: int) -> dict[str, Any]:
+    """Per-control SMB1001 status with review dates and evidence counts."""
+    overview = await smb1001_repo.get_company_overview(company_id)
+    evidence_map = await smb1001_repo.list_evidence_map(company_id)
+    tier_names = {int(tier["tier_level"]): tier["name"] for tier in overview["tiers"]}
+    rows: list[dict[str, Any]] = []
+    for control in overview["controls"]:
+        record = control.get("compliance") or {}
+        rows.append(
+            {
+                "code": control["code"],
+                "name": control["name"],
+                "tier": tier_names.get(int(control["tier_level"]), f"Tier {control['tier_level']}"),
+                "domain": control.get("domain_label"),
+                "status": control["status"],
+                "last_reviewed_date": record.get("last_reviewed_date"),
+                "target_compliance_date": record.get("target_compliance_date"),
+                "evidence_file_count": len(evidence_map.get(int(control["id"]), [])),
             }
         )
     return {"controls": rows, "total": len(rows)}
@@ -1001,8 +1222,6 @@ async def _huntress_company_linked(company_id: int) -> bool:
     """True when Huntress is enabled and the company has an organisation ID."""
     # Local import to avoid a circular dependency between reports/modules/huntress.
     from app.services import huntress as huntress_service
-    from app.services import modules as modules_service
-
     try:
         if not await huntress_service.is_module_enabled():
             return False
@@ -1141,12 +1360,14 @@ _DETAIL_BUILDERS: dict[str, Any] = {
     "orders_current_month": _build_orders_detail,
     "licenses": _build_licenses_detail,
     "subscriptions": _build_subscriptions_detail,
+    "smb1001": _build_smb1001_detail,
     "essential8": _build_essential8_detail,
     "compliance_checks": _build_compliance_checks_detail,
     "tickets_last_month": _build_tickets_detail,
     "asset_custom_fields": _build_asset_custom_fields_detail,
     "issues": _build_issues_detail,
     "backup_jobs": _build_backup_jobs_detail,
+    "voice_monitor": _build_voice_monitor_detail,
     "huntress_edr": _build_huntress_edr_detail,
     "huntress_itdr": _build_huntress_itdr_detail,
     "huntress_sat": _build_huntress_sat_detail,
@@ -1265,7 +1486,7 @@ async def build_company_report(company_id: int) -> ReportData:
 
     sections: list[SectionResult] = []
     for section_def in ordered_defs:
-        enabled = visibility.get(section_def.key, True)
+        enabled = visibility.get(section_def.key, True) and _section_component_available(section_def.key)
         data: dict[str, Any] = {}
         if enabled:
             builder = _SECTION_BUILDERS.get(section_def.key)
@@ -1312,6 +1533,16 @@ async def build_company_report(company_id: int) -> ReportData:
 # ---------------------------------------------------------------------------
 
 
+def _section_component_available(key: str) -> bool:
+    """Hide sections owned by a deployment-disabled component."""
+    for prefix in ("smb1001", "essential8"):
+        if key == prefix or key.startswith(f"{prefix}_"):
+            from app.services.component_availability import get_component_availability
+
+            return get_component_availability().feature_pack_available(prefix)
+    return True
+
+
 def _section_is_empty(key: str, data: dict[str, Any]) -> bool:
     """Return True when a section has no meaningful content to display."""
     if not data or "error" in data:
@@ -1332,9 +1563,13 @@ def _section_is_empty(key: str, data: dict[str, Any]) -> bool:
         return int(data.get("total") or 0) == 0
     if key == "subscriptions":
         return int(data.get("total") or 0) == 0
-    if key == "essential8":
+    if key in {"smb1001", "smb1001_recommendations"}:
+        return int(data.get("total") or 0) == 0
+    if key in {"essential8", "essential8_ml1", "essential8_ml2", "essential8_ml3"}:
         levels = data.get("levels") or []
         return len(levels) == 0 or all(int(lvl.get("total") or 0) == 0 for lvl in levels)
+    if key == "essential8_recommendations":
+        return int(data.get("total") or 0) == 0
     if key == "compliance_checks":
         return int(data.get("total") or 0) == 0
     if key == "tickets_last_month":
@@ -1346,6 +1581,8 @@ def _section_is_empty(key: str, data: dict[str, Any]) -> bool:
         return int(data.get("total") or 0) == 0
     if key == "backup_jobs":
         return int(data.get("total_jobs") or 0) == 0
+    if key == "voice_monitor":
+        return int(data.get("attempts") or 0) == 0
     if key == "huntress_edr":
         return not (
             int(data.get("active_incidents") or 0)

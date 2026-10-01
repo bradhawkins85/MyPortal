@@ -41,3 +41,10 @@ func TestResolveEnvVarMenuLabelFallsBackToVarNameWhenUnset(t *testing.T) {
 		t.Fatalf("expected variable name fallback, got %q", label)
 	}
 }
+
+func TestResolveEnvVarValueUsesConfiguredEnvironment(t *testing.T) {
+	t.Setenv("COMPUTERNAME", "MAC-01")
+	if got := resolveEnvVarValue("COMPUTERNAME"); got != "MAC-01" {
+		t.Fatalf("expected configured value, got %q", got)
+	}
+}

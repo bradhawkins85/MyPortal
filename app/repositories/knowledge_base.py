@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+from importlib import import_module
 import json
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -14,6 +15,17 @@ _PERMISSION_SCOPES = {
     "company_admin",
     "super_admin",
 }
+_ALLOWED_ARTICLE_UPDATE_COLUMNS = frozenset({
+    "slug", "title", "summary", "content", "permission_scope", "is_published",
+    "published_at", "created_by", "ai_tags", "excluded_ai_tags", "manual_ai_tags",
+    "owner_id", "lifecycle_status", "review_due_at",
+})
+
+_LIFECYCLE_STATUSES = {"draft", "in_review", "published", "retired"}
+
+
+def _rag_outbox_service():
+    return import_module("app.services.rag_outbox")
 
 
 def _normalise_datetime(value: Any) -> datetime | None:
@@ -33,7 +45,12 @@ def _normalise_article(row: dict[str, Any]) -> dict[str, Any]:
     if created_by is not None:
         article["created_by"] = int(created_by)
     article["is_published"] = bool(int(article.get("is_published", 0)))
-    for key in ("created_at", "updated_at", "published_at"):
+    owner_id = article.get("owner_id")
+    if owner_id is not None:
+        article["owner_id"] = int(owner_id)
+    status = str(article.get("lifecycle_status") or ("published" if article["is_published"] else "draft"))
+    article["lifecycle_status"] = status if status in _LIFECYCLE_STATUSES else "draft"
+    for key in ("created_at", "updated_at", "published_at", "review_due_at"):
         article[f"{key}_utc"] = _normalise_datetime(article.get(key))
     permission = article.get("permission_scope") or "anonymous"
     if permission not in _PERMISSION_SCOPES:
@@ -99,10 +116,12 @@ async def _attach_relations(rows: Sequence[dict[str, Any]]) -> list[dict[str, An
     admin_company_map: dict[int, list[int]] = defaultdict(list)
     section_map: dict[int, list[dict[str, Any]]] = defaultdict(list)
     section_company_map: dict[int, list[int]] = defaultdict(list)
+    asset_map: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    attachment_map: dict[int, list[dict[str, Any]]] = defaultdict(list)
 
     if placeholders:
         user_rows = await db.fetch_all(
-            f"SELECT article_id, user_id FROM knowledge_base_article_users WHERE article_id IN ({placeholders})",
+            f"SELECT article_id, user_id FROM knowledge_base_article_users WHERE article_id IN ({placeholders})",  # nosec B608
             params,
         )
         for relation in user_rows:
@@ -114,7 +133,7 @@ async def _attach_relations(rows: Sequence[dict[str, Any]]) -> list[dict[str, An
             user_map[article_id].append(user_id)
 
         company_rows = await db.fetch_all(
-            f"SELECT article_id, company_id, require_admin FROM knowledge_base_article_companies WHERE article_id IN ({placeholders})",
+            f"SELECT article_id, company_id, require_admin FROM knowledge_base_article_companies WHERE article_id IN ({placeholders})",  # nosec B608
             params,
         )
         for relation in company_rows:
@@ -129,13 +148,39 @@ async def _attach_relations(rows: Sequence[dict[str, Any]]) -> list[dict[str, An
             else:
                 member_company_map[article_id].append(company_id)
 
+        asset_rows = await db.fetch_all(
+            f"""SELECT kaa.article_id, a.id, a.name, a.company_id, a.type, a.serial_number
+                FROM knowledge_base_article_assets kaa
+                JOIN assets a ON a.id = kaa.asset_id
+                WHERE kaa.article_id IN ({placeholders}) ORDER BY a.name, a.id""",  # nosec B608
+            params,
+        )
+        for asset in asset_rows:
+            asset_map[int(asset["article_id"])].append({
+                "id": int(asset["id"]), "name": asset.get("name") or "",
+                "company_id": int(asset["company_id"]), "type": asset.get("type"),
+                "serial_number": asset.get("serial_number"),
+            })
+        attachment_rows = await db.fetch_all(
+            f"""SELECT id, article_id, file_name, content_type, file_size, uploaded_by, created_at
+                FROM knowledge_base_article_attachments WHERE article_id IN ({placeholders})
+                ORDER BY created_at DESC, id DESC""",  # nosec B608
+            params,
+        )
+        for attachment in attachment_rows:
+            item = dict(attachment)
+            item["id"] = int(item["id"])
+            item["article_id"] = int(item["article_id"])
+            item["file_size"] = int(item["file_size"])
+            attachment_map[item["article_id"]].append(item)
+
         section_rows = await db.fetch_all(
             f"""
             SELECT id, article_id, position, heading, content
             FROM knowledge_base_sections
             WHERE article_id IN ({placeholders})
             ORDER BY position ASC, id ASC
-            """,
+            """,  # nosec B608
             params,
         )
         
@@ -147,7 +192,7 @@ async def _attach_relations(rows: Sequence[dict[str, Any]]) -> list[dict[str, An
             section_placeholders, section_params = _prepare_in_clause(section_ids)
             if section_placeholders:
                 section_company_rows = await db.fetch_all(
-                    f"SELECT section_id, company_id FROM knowledge_base_section_companies WHERE section_id IN ({section_placeholders})",
+                    f"SELECT section_id, company_id FROM knowledge_base_section_companies WHERE section_id IN ({section_placeholders})",  # nosec B608
                     section_params,
                 )
                 for relation in section_company_rows:
@@ -185,11 +230,17 @@ async def _attach_relations(rows: Sequence[dict[str, Any]]) -> list[dict[str, An
             article["company_admin_ids"] = sorted(set(admin_company_map.get(article_id, [])))
             ordered_sections = section_map.get(article_id, [])
             article["sections"] = ordered_sections
+            article["assets"] = asset_map.get(article_id, [])
+            article["asset_ids"] = [asset["id"] for asset in article["assets"]]
+            article["attachments"] = attachment_map.get(article_id, [])
         else:
             article["allowed_user_ids"] = []
             article["company_ids"] = []
             article["company_admin_ids"] = []
             article["sections"] = []
+            article["assets"] = []
+            article["asset_ids"] = []
+            article["attachments"] = []
         enriched.append(article)
     return enriched
 
@@ -237,14 +288,18 @@ async def create_article(
     published_at: datetime | None,
     created_by: int | None,
     ai_tags: Sequence[str] | None,
+    owner_id: int | None = None,
+    lifecycle_status: str = "draft",
+    review_due_at: datetime | None = None,
 ) -> dict[str, Any]:
     if permission_scope not in _PERMISSION_SCOPES:
         permission_scope = "anonymous"
     article_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO knowledge_base_articles (
-            slug, title, summary, ai_tags, content, permission_scope, is_published, published_at, created_by
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            slug, title, summary, ai_tags, content, permission_scope, is_published, published_at, created_by,
+            owner_id, lifecycle_status, review_due_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             slug,
@@ -256,15 +311,22 @@ async def create_article(
             1 if is_published else 0,
             published_at,
             created_by,
+            owner_id,
+            lifecycle_status if lifecycle_status in _LIFECYCLE_STATUSES else "draft",
+            review_due_at,
         ),
     )
     created = await get_article_by_id(article_id)
     if not created:
         raise RuntimeError("Failed to create knowledge base article")
+    await _rag_outbox_service().enqueue("knowledge_base", article_id, source_updated_at=created.get("updated_at"))
     return created
 
 
 async def update_article(article_id: int, **updates: Any) -> dict[str, Any]:
+    unknown = set(updates) - _ALLOWED_ARTICLE_UPDATE_COLUMNS
+    if unknown:
+        raise ValueError(f"Unsupported article fields: {', '.join(sorted(unknown))}")
     if not updates:
         article = await get_article_by_id(article_id)
         if not article:
@@ -276,6 +338,8 @@ async def update_article(article_id: int, **updates: Any) -> dict[str, Any]:
     for column, value in updates.items():
         if column == "permission_scope" and value not in _PERMISSION_SCOPES:
             continue
+        if column == "lifecycle_status" and value not in _LIFECYCLE_STATUSES:
+            raise ValueError("Unsupported lifecycle status")
         if column == "is_published":
             columns.append("is_published = %s")
             params.append(1 if value else 0)
@@ -300,16 +364,97 @@ async def update_article(article_id: int, **updates: Any) -> dict[str, Any]:
             raise ValueError("Article not found")
         return article
     params.append(article_id)
-    sql = f"UPDATE knowledge_base_articles SET {', '.join(columns)} WHERE id = %s"
+    sql = f"UPDATE knowledge_base_articles SET {', '.join(columns)} WHERE id = %s"  # nosec B608
     await db.execute(sql, tuple(params))
     updated = await get_article_by_id(article_id)
     if not updated:
         raise ValueError("Article not found after update")
+    await _rag_outbox_service().enqueue("knowledge_base", article_id, source_updated_at=updated.get("updated_at"))
     return updated
+
+
+async def replace_article_assets(article_id: int, asset_ids: Iterable[int]) -> None:
+    await db.execute("DELETE FROM knowledge_base_article_assets WHERE article_id = %s", (article_id,))
+    for asset_id in sorted(set(_safe_ints(asset_ids))):
+        await db.execute(
+            "INSERT INTO knowledge_base_article_assets (article_id, asset_id) VALUES (%s, %s)",
+            (article_id, asset_id),
+        )
+
+
+def _safe_ints(values: Iterable[Any]) -> list[int]:
+    result = []
+    for value in values:
+        try:
+            result.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+async def create_article_version(article: Mapping[str, Any], *, created_by: int | None) -> int:
+    article_id = int(article["id"])
+    row = await db.fetch_one(
+        "SELECT COALESCE(MAX(version_number), 0) + 1 AS next_version FROM knowledge_base_article_versions WHERE article_id = %s",
+        (article_id,),
+    )
+    version = int((row or {}).get("next_version") or 1)
+    snapshot = {key: value for key, value in article.items() if not key.endswith("_utc")}
+    await db.execute(
+        "INSERT INTO knowledge_base_article_versions (article_id, version_number, snapshot_json, created_by) VALUES (%s, %s, %s, %s)",
+        (article_id, version, json.dumps(snapshot, default=str), created_by),
+    )
+    return version
+
+
+async def list_article_versions(article_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        "SELECT id, article_id, version_number, created_by, created_at FROM knowledge_base_article_versions WHERE article_id = %s ORDER BY version_number DESC",
+        (article_id,),
+    )
+    return [dict(row) for row in rows]
+
+
+async def get_article_version(article_id: int, version_number: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT version_number, snapshot_json, created_by, created_at FROM knowledge_base_article_versions WHERE article_id = %s AND version_number = %s",
+        (article_id, version_number),
+    )
+    if not row:
+        return None
+    snapshot = json.loads(row["snapshot_json"])
+    snapshot["version_number"] = int(row["version_number"])
+    snapshot["version_created_by"] = row.get("created_by")
+    snapshot["version_created_at"] = row.get("created_at")
+    return snapshot
+
+
+async def create_attachment(
+    article_id: int, *, file_name: str, content_type: str | None, storage_path: str,
+    file_size: int, uploaded_by: int | None,
+) -> dict[str, Any]:
+    attachment_id = await db.execute_returning_lastrowid(
+        """INSERT INTO knowledge_base_article_attachments
+           (article_id, file_name, content_type, storage_path, file_size, uploaded_by)
+           VALUES (%s, %s, %s, %s, %s, %s)""",
+        (article_id, file_name, content_type, storage_path, file_size, uploaded_by),
+    )
+    row = await db.fetch_one("SELECT * FROM knowledge_base_article_attachments WHERE id = %s", (attachment_id,))
+    return dict(row or {})
+
+
+async def get_attachment(attachment_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one("SELECT * FROM knowledge_base_article_attachments WHERE id = %s", (attachment_id,))
+    return dict(row) if row else None
+
+
+async def delete_attachment(attachment_id: int) -> None:
+    await db.execute("DELETE FROM knowledge_base_article_attachments WHERE id = %s", (attachment_id,))
 
 
 async def delete_article(article_id: int) -> None:
     await db.execute("DELETE FROM knowledge_base_articles WHERE id = %s", (article_id,))
+    await _rag_outbox_service().enqueue("knowledge_base", article_id, action="delete")
 
 
 async def replace_article_users(article_id: int, user_ids: Iterable[int]) -> None:

@@ -1,0 +1,7 @@
+{
+  "guid": "6184d3d1-57fb-4807-b5ff-6357b9a1b1b0",
+  "occurred_at": "2026-09-30T11:00Z",
+  "change_type": "Feature",
+  "summary": "Redesign the sign in and sign up pages with a brand panel, passkey-first sign in, show/hide password, an authenticator code that appears only when needed, a live password checklist with confirmation, and a guided first-time administrator setup",
+  "content_hash": "cce1d9a279813a3cb569d2a2f8b4c4ef36798073ba27e21ab0191222ed95769d"
+}

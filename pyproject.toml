@@ -20,11 +20,14 @@ dependencies = [
     "jinja2>=3.1.6",
     "itsdangerous",
     "pyotp",
+    "qrcode>=8.0",
     "apscheduler",
     "croniter>=6.2.2",
     "httpx",
     "loguru",
     "cryptography>=46.0.7",
+    "PyJWT[crypto]>=2.10.1",
+    "webauthn==3.0.0",
     "email-validator",
     "python-multipart",
     "nh3",
@@ -39,6 +42,8 @@ dependencies = [
     "defusedxml",
     "apprise>=1.9.9",
     "tiktoken>=0.6",
+    "dnspython>=2.7",
+    "publicsuffix2>=2.20191221",
 ]
 
 [project.optional-dependencies]
@@ -47,6 +52,7 @@ dev = [
     "pytest-asyncio",
     "httpx",
     "respx",
+    "pytest-playwright>=0.7.0",
 ]
 
 [build-system]

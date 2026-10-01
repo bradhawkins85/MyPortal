@@ -69,6 +69,7 @@ async def send_email(
     enable_tracking: bool = False,
     ticket_reply_id: int | None = None,
     attachments: Sequence[Mapping[str, Any]] | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Send an email using the configured SMTP server.
 
@@ -83,6 +84,8 @@ async def send_email(
         enable_tracking: Enable email tracking (opens and clicks)
         ticket_reply_id: ID of the ticket reply being sent (required for tracking)
         attachments: Optional file attachments. Content may be bytes or base64 text.
+        headers: Optional extra message headers (for example Message-ID or
+            List-Unsubscribe). Applied on the SMTP2Go and SMTP relay paths.
 
     Returns a tuple where the first element indicates if delivery was attempted and
     succeeded, and the second element contains the webhook monitor event metadata
@@ -103,6 +106,111 @@ async def send_email(
         logger.warning("Email delivery skipped because no recipients were provided", subject=subject)
         return False, None
 
+    # M365 notification handling is evaluated before SMTP. Its result describes
+    # the actual Graph operation (created Inbox draft or submitted mail), not a
+    # delivery confirmation.
+    try:
+        from app.services import modules as module_service
+        direct_module = await module_service.get_module(
+            "m365-direct-delivery", redact=False
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        direct_module = None
+        logger.debug("M365 direct-delivery module check failed", error=str(exc))
+    if direct_module and direct_module.get("enabled"):
+        direct_settings = dict(direct_module.get("settings") or {})
+        try:
+            direct_company_id = int(direct_settings.get("company_id") or 0)
+        except (TypeError, ValueError):
+            direct_company_id = 0
+        configured_domains = {
+            str(domain).strip().lower().lstrip("@")
+            for domain in direct_settings.get("recipient_domains") or []
+            if str(domain).strip()
+        }
+        direct_recipients = [
+            address for address in to_addresses
+            if not configured_domains or address.rsplit("@", 1)[-1].lower() in configured_domains
+        ]
+        delivered: list[str] = []
+        outcomes: list[dict[str, Any]] = []
+        direct_errors: list[tuple[str, Exception]] = []
+        if direct_company_id:
+            from app.services import m365_direct_delivery
+
+            for address in direct_recipients:
+                try:
+                    mode = str(direct_settings.get("delivery_mode") or "inbox_item")
+                    configured_sender = str(direct_settings.get("sender_address") or "").strip()
+                    from app.services import email_recipients
+                    if ticket_reply_id:
+                        prior = await email_recipients.get_m365_terminal_operation(
+                            reply_id=ticket_reply_id, recipient_email=address,
+                        )
+                        if prior:
+                            delivered.append(address)
+                            outcomes.append(prior)
+                            continue
+                    result = await m365_direct_delivery.deliver_message(
+                        company_id=direct_company_id,
+                        recipient=address,
+                        subject=subject,
+                        html_body=html_body,
+                        text_body=text_body,
+                        sender=configured_sender or (sender if mode == "inbox_item" else None),
+                        reply_to=reply_to,
+                        attachments=attachments,
+                        mode=mode,
+                    )
+                    if ticket_reply_id:
+                        await email_recipients.record_m365_operation(
+                            reply_id=ticket_reply_id,
+                            recipient_email=address,
+                            company_id=direct_company_id,
+                            message_id=result.get("message_id"),
+                            operation=result["operation"], state=result["state"],
+                        )
+                    delivered.append(address)
+                    outcomes.append(result)
+                except Exception as exc:
+                    direct_errors.append((address, exc))
+                    if ticket_reply_id:
+                        try:
+                            from app.services import email_recipients
+                            await email_recipients.record_m365_operation(
+                                reply_id=ticket_reply_id, recipient_email=address,
+                                company_id=direct_company_id, message_id=None,
+                                operation=str(direct_settings.get("delivery_mode") or "inbox_item"),
+                                state=("unknown" if isinstance(
+                                    exc, m365_direct_delivery.AmbiguousDeliveryError
+                                ) else "failed"),
+                            )
+                        except Exception as history_exc:  # pragma: no cover - defensive
+                            logger.warning("Unable to record M365 failure", error=str(history_exc))
+                    logger.warning(
+                        "M365 direct delivery failed",
+                        recipient=address, subject=subject, error=str(exc),
+                    )
+        elif direct_recipients:
+            logger.error("M365 direct delivery is enabled without a company_id")
+        to_addresses = [address for address in to_addresses if address not in delivered]
+        # sendMail may have reached Exchange before a timeout. Falling back to
+        # SMTP could duplicate it and would silently change transport.
+        if direct_errors and (direct_settings.get("delivery_mode") == "send_mail" or
+                              not direct_settings.get("fallback_to_smtp", True)):
+            failed = ", ".join(address for address, _ in direct_errors)
+            raise EmailDispatchError(f"M365 direct delivery failed for: {failed}")
+        if not to_addresses:
+            logger.info(
+                "M365 notification operation completed",
+                subject=subject, recipients=delivered, tracking=bool(ticket_reply_id),
+            )
+            return True, {
+                "status": outcomes[0]["state"] if len(outcomes) == 1 else "completed",
+                "operation": outcomes[0]["operation"] if len(outcomes) == 1 else "mixed",
+                "provider": "m365-direct-delivery", "recipients": delivered,
+            }
+
     if not settings.smtp_host:
         logger.warning("SMTP host not configured; email delivery skipped", subject=subject)
         return False, None
@@ -113,9 +221,10 @@ async def send_email(
     modified_html_body = html_body
     
     try:
-        from app.services import modules as modules_service
-        
-        smtp2go_module = await modules_service.get_module("smtp2go", redact=False)
+        from app.services import modules as module_service
+        smtp2go_module = await module_service.get_module(
+            "smtp2go", redact=False
+        )
         if smtp2go_module and smtp2go_module.get("enabled"):
             smtp2go_enabled = True
     except Exception as exc:  # pragma: no cover - defensive logging
@@ -140,10 +249,23 @@ async def send_email(
                 text_body=text_body,
                 sender=sender,
                 reply_to=reply_to,
+                bcc=(
+                    [str(settings.outbound_audit_bcc)]
+                    if settings.outbound_audit_bcc
+                    else None
+                ),
                 tracking_id=tracking_id,
+                custom_headers=dict(headers) if headers else None,
                 attachments=[
                     {"filename": name, "content": base64.b64encode(content).decode("ascii")}
-                    for name, content, _mime in (_normalise_attachment(item) for item in (attachments or []))
+                    for name, content, _mime in (
+                        _normalise_attachment(item)
+                        for item in (attachments or [])
+                        if not item.get("content_id")
+                    )
+                ] or None,
+                inlines=[
+                    dict(item) for item in (attachments or []) if item.get("content_id")
                 ] or None,
             )
 
@@ -213,33 +335,8 @@ async def send_email(
             )
             # Fall through to SMTP relay
     
-    # Apply email tracking if enabled (legacy Plausible tracking)
+    # Apply email tracking when requested by the caller.
     tracking_requested = enable_tracking
-    module_settings: dict[str, Any] | None = None
-    try:
-        from app.services import modules as modules_service
-
-        plausible_module = await modules_service.get_module("plausible", redact=False)
-        if plausible_module and plausible_module.get("enabled"):
-            tracking_requested = True
-
-        # Load module settings when tracking is requested or the module is enabled
-        if tracking_requested or (plausible_module and plausible_module.get("enabled")):
-            try:
-                module_settings = await modules_service.get_module_settings("plausible")
-            except Exception as settings_exc:  # pragma: no cover - defensive logging
-                logger.warning(
-                    "Plausible settings unavailable; using tracking defaults",
-                    reply_id=ticket_reply_id,
-                    error=str(settings_exc),
-                )
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.warning(
-            "Plausible settings unavailable; tracking fallback in use",
-            reply_id=ticket_reply_id,
-            error=str(exc),
-        )
-
     if tracking_requested:
         try:
             from app.services import email_tracking
@@ -251,34 +348,19 @@ async def send_email(
                     reply_id=ticket_reply_id,
                 )
             else:
-                track_opens = module_settings.get("track_opens", True) if module_settings else True
-                track_clicks = module_settings.get("track_clicks", True) if module_settings else True
+                tracking_id = email_tracking.generate_tracking_id()
+                modified_html_body = email_tracking.insert_tracking_pixel(
+                    modified_html_body, tracking_id
+                )
+                modified_html_body = email_tracking.rewrite_links_for_tracking(
+                    modified_html_body, tracking_id
+                )
 
-                if track_opens or track_clicks:
-                    tracking_id = email_tracking.generate_tracking_id()
-
-                    # Insert tracking pixel for open tracking
-                    if track_opens:
-                        modified_html_body = email_tracking.insert_tracking_pixel(modified_html_body, tracking_id)
-
-                    # Rewrite links for click tracking
-                    if track_clicks:
-                        modified_html_body = email_tracking.rewrite_links_for_tracking(modified_html_body, tracking_id)
-
-                    logger.info(
-                        "Email tracking enabled",
-                        tracking_id=tracking_id,
-                        reply_id=ticket_reply_id,
-                        track_opens=track_opens,
-                        track_clicks=track_clicks,
-                    )
-                else:
-                    logger.info(
-                        "Email tracking disabled by Plausible module settings",
-                        reply_id=ticket_reply_id,
-                        track_opens=track_opens,
-                        track_clicks=track_clicks,
-                    )
+                logger.info(
+                    "Email tracking enabled",
+                    tracking_id=tracking_id,
+                    reply_id=ticket_reply_id,
+                )
         except Exception as exc:
             logger.error(
                 "Failed to apply email tracking",
@@ -294,8 +376,12 @@ async def send_email(
     from_address = sender or settings.smtp_from or settings.smtp_user or "no-reply@localhost"
     message["From"] = from_address
     message["To"] = ", ".join(to_addresses)
+    if settings.outbound_audit_bcc:
+        message["Bcc"] = str(settings.outbound_audit_bcc)
     if reply_to:
         message["Reply-To"] = reply_to
+    for header_name, header_value in (headers or {}).items():
+        message[header_name] = header_value
 
     if text_body:
         message.set_content(text_body)
@@ -304,11 +390,30 @@ async def send_email(
     else:
         message.set_content(modified_html_body, subtype="html")
 
-    for attachment in attachments or []:
+    html_part = message.get_body(preferencelist=("html",)) if modified_html_body else None
+    # Inline parts first: once a regular attachment converts the message to
+    # multipart/mixed, ``html_part`` may no longer refer to the HTML body.
+    ordered_attachments = sorted(
+        attachments or [], key=lambda item: not item.get("content_id")
+    )
+    for attachment in ordered_attachments:
         filename, content_bytes, mime_type = _normalise_attachment(attachment)
         maintype, _, subtype = mime_type.partition("/")
         if not maintype or not subtype:
             maintype, subtype = "application", "octet-stream"
+        content_id = str(attachment.get("content_id") or "").strip()
+        if content_id and html_part is not None:
+            # Inline images referenced as ``cid:`` must live alongside the HTML
+            # part in multipart/related so mail clients render them in place.
+            html_part.add_related(
+                content_bytes,
+                maintype=maintype,
+                subtype=subtype,
+                cid=f"<{content_id}>",
+                filename=filename,
+                disposition="inline",
+            )
+            continue
         message.add_attachment(
             content_bytes,
             maintype=maintype,
@@ -364,7 +469,7 @@ async def send_email(
     except EmailDispatchError as exc:
         if event_id is not None:
             try:
-                event_record = await webhook_monitor.record_manual_failure(
+                await webhook_monitor.record_manual_failure(
                     event_id,
                     attempt_number=1,
                     status="error",

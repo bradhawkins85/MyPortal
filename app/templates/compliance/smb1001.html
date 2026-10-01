@@ -1,0 +1,455 @@
+{% extends "base.html" %}
+
+{% block header_title %}
+  <div class="page-header-bar">
+    <div class="page-header-bar page-header-bar--record">
+      <span class="header__title-text">SMB1001 compliance</span>
+      {% if company %}<span class="page-header-bar__meta">{{ company.name }}</span>{% endif %}
+    </div>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="smb1001-filter">Filter controls</label>
+      <input type="search" id="smb1001-filter" class="form-input page-header-toolbar__search" placeholder="Filter controls" />
+      <label class="visually-hidden" for="smb1001-status-filter">Filter by status</label>
+      <select id="smb1001-status-filter" class="form-input page-header-toolbar__select">
+        <option value="">All statuses</option>
+        <option value="outstanding">Outstanding</option>
+        <option value="not_started">Not started</option>
+        <option value="in_progress">In progress</option>
+        <option value="non_compliant">Non-compliant</option>
+        <option value="compliant">Compliant</option>
+        <option value="not_applicable">Not applicable</option>
+      </select>
+    </div>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  {% if company %}
+    {% if has_essential8_records and feature_pack_available('essential8') %}
+      <a href="/compliance/essential8" class="button button--ghost">Legacy Essential 8 records</a>
+    {% endif %}
+    <a href="/compliance/attestation-report.pdf" class="button button--primary">Export attestation PDF</a>
+  {% endif %}
+{% endblock %}
+
+{% block title %}SMB1001 Compliance{% endblock %}
+
+{% macro status_label(status) -%}
+  {% if status == 'in_progress' %}In progress
+  {%- elif status == 'compliant' %}✓ Compliant
+  {%- elif status == 'non_compliant' %}✗ Non-compliant
+  {%- elif status == 'not_applicable' %}N/A
+  {%- else %}Not started{% endif %}
+{%- endmacro %}
+
+{% block content %}
+{% set achieved = progress.achieved_tier %}
+{% set next_tier = progress.next_tier %}
+<div class="management management--single compliance smb1001" data-layout>
+  <section class="management__content">
+    <p class="management__subtitle">Work through the SMB1001 cyber security certification tiers, from Bronze to Diamond. Each tier includes every control from the tiers below it.</p>
+
+    <div class="card card--panel compliance-summary-card">
+      <div class="compliance-summary__grid">
+        <div class="compliance-summary__item compliance-summary__item--accent">
+          <span class="compliance-summary__label">Tier achieved</span>
+          <span class="compliance-summary__value" data-smb1001-achieved>{{ achieved.name if achieved else 'None yet' }}</span>
+          <span class="compliance-summary__hint">
+            {% if next_tier %}{{ next_tier.remaining }} control{{ '' if next_tier.remaining == 1 else 's' }} left for {{ next_tier.name }}{% else %}All tiers complete{% endif %}
+          </span>
+        </div>
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">Target tier</span>
+          {% if can_manage %}
+          <select id="smb1001-target-tier" class="form-input" aria-label="Target tier">
+            {% for tier in tiers %}
+            <option value="{{ tier.tier_level }}" {% if tier.tier_level == progress.target_tier %}selected{% endif %}>{{ tier.name }}</option>
+            {% endfor %}
+          </select>
+          {% else %}
+          {% for tier in tiers if tier.tier_level == progress.target_tier %}
+          <span class="compliance-summary__value">{{ tier.name }}</span>
+          {% endfor %}
+          {% endif %}
+          <span class="compliance-summary__hint">{{ progress.target_done }} of {{ progress.target_total }} controls ({{ progress.target_percentage }}%)</span>
+        </div>
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">Outstanding for target</span>
+          <span class="compliance-summary__value">{{ progress.target_remaining }}</span>
+        </div>
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">All controls</span>
+          <span class="compliance-summary__value">{{ progress.overall_percentage }}%</span>
+          <span class="compliance-summary__hint">{{ progress.overall_done }} of {{ progress.overall_total }}</span>
+        </div>
+      </div>
+
+      <ol class="smb1001-tiers" aria-label="SMB1001 tiers">
+        {% for tier in tiers %}
+        <li class="smb1001-tier smb1001-tier--{{ tier.code }}{% if tier.achieved %} smb1001-tier--achieved{% endif %}{% if tier.tier_level == progress.target_tier %} smb1001-tier--target{% endif %}">
+          <a href="#tier-{{ tier.code }}" class="smb1001-tier__link">
+            <span class="smb1001-tier__name">Tier {{ tier.tier_level }} · {{ tier.name }}</span>
+            <span class="smb1001-tier__meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ tier.percentage }}" aria-label="{{ tier.name }} progress">
+              <span class="smb1001-tier__meter-fill" style="width: {{ tier.percentage }}%"></span>
+            </span>
+            <span class="smb1001-tier__meta">
+              {{ tier.done }}/{{ tier.total }} controls ·
+              {% if tier.achieved %}Achieved{% elif tier.complete %}Complete, lower tier outstanding{% else %}{{ tier.remaining }} to go{% endif %}
+            </span>
+            <span class="smb1001-tier__attestation">{{ 'Independent audit' if tier.attestation == 'independent' else 'Self-attested' }}</span>
+          </a>
+        </li>
+        {% endfor %}
+      </ol>
+
+      <div class="alert alert--info compliance__note">
+        <strong>How certification works:</strong> a tier is achieved when all of its controls, and every control in the tiers below it, are <strong>Compliant</strong> or <strong>Not applicable</strong>.
+        Bronze, Silver and Gold are self-attested by a company director; Platinum and Diamond require an audit by an independent verification organisation.
+        The checks here summarise the standard. Confirm the exact wording against the current SMB1001 edition before attesting.
+      </div>
+
+      {% if can_manage and essential8_import_count > 0 and feature_pack_available('essential8') %}
+      <div class="compliance-form__actions">
+        <button type="button" class="button button--ghost button--small" id="smb1001-import-e8">Import Essential 8 progress</button>
+        <span class="form__hint">
+          Copies matching Essential 8 progress into SMB1001 controls that have not been started.
+          {% if profile.essential8_imported_at %}Last imported {{ profile.essential8_imported_at[:10] }}.{% endif %}
+        </span>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="compliance-requirements">
+      {% for tier in tiers %}
+      {% set tier_controls = controls_by_tier.get(tier.tier_level, []) %}
+      <section class="card card--panel compliance-requirements__group" id="tier-{{ tier.code }}" data-tier="{{ tier.tier_level }}">
+        <div class="compliance-requirements__header">
+          <h2 class="compliance-requirements__title">
+            Tier {{ tier.tier_level }}: {{ tier.name }}
+            {% if tier.achieved %}<span class="badge badge--status-compliant">Achieved</span>{% endif %}
+            {% if tier.tier_level > progress.target_tier %}<span class="tag tag--muted">Beyond target</span>{% endif %}
+          </h2>
+          <button type="button" class="button button--ghost button--small" data-expand-all data-expanded="false">Expand all</button>
+        </div>
+        <p class="text--muted">{{ tier.description }}</p>
+        <div class="compliance-requirements__list">
+          {% for control in tier_controls %}
+          {% set record = control.compliance or {} %}
+          <details class="requirement-item card-collapsible" data-control-id="{{ control.id }}" data-status="{{ control.status }}">
+            <summary class="card__header card__header--collapsible requirement-item__header">
+              <div class="requirement-item__number">{{ control.code }}</div>
+              <div class="requirement-item__description">
+                <strong>{{ control.name }}</strong>
+                <span class="tag tag--muted">{{ control.domain_label }}</span>
+                {% if record.source == 'essential8' %}<span class="tag tag--muted" title="Status converted from Essential 8">From Essential 8</span>{% endif %}
+              </div>
+              <div class="card__collapsible-meta">
+                {% if control.compliance_help_url %}
+                <a href="{{ control.compliance_help_url }}" class="requirement-item__help-btn" title="Get compliance help: {{ control.compliance_help_label }}" aria-label="Get compliance help" onclick="event.stopPropagation()" rel="noopener">?</a>
+                {% endif %}
+                <div class="requirement-item__status">
+                  <span class="badge badge--status-{{ control.status }}" data-requirement-status>{{ status_label(control.status) }}</span>
+                </div>
+                <span class="card__toggle-icon" aria-hidden="true"></span>
+              </div>
+            </summary>
+            <div class="card-collapsible__content requirement-item__details">
+              <p>{{ control.description }}</p>
+              {% if control.verification %}
+              <p class="text--muted"><strong>How it is checked:</strong> {{ control.verification }}</p>
+              {% endif %}
+              <form class="compliance-form" data-control-form="{{ control.id }}">
+                <div class="form-field">
+                  <label for="smb-status-{{ control.id }}" class="form-label">Status</label>
+                  <select id="smb-status-{{ control.id }}" class="form-input" {% if not can_manage or control.status_locked %}disabled{% endif %}>
+                    {% for value, label in [('not_started', 'Not started'), ('in_progress', 'In progress'), ('compliant', 'Compliant'), ('non_compliant', 'Non-compliant'), ('not_applicable', 'Not applicable')] %}
+                    <option value="{{ value }}" {% if control.status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                  {% if control.status_reason %}
+                  <p class="form-help">{{ control.status_reason }}</p>
+                  {% endif %}
+                </div>
+                <div class="form-field">
+                  <label for="smb-evidence-{{ control.id }}" class="form-label">Evidence</label>
+                  <textarea id="smb-evidence-{{ control.id }}" class="form-input form-input--textarea" rows="2" placeholder="Links to reports, screenshots or documents" {% if not can_manage %}readonly{% endif %}>{{ record.evidence or '' }}</textarea>
+                </div>
+                <div class="form-field">
+                  <label for="smb-notes-{{ control.id }}" class="form-label">Notes</label>
+                  <textarea id="smb-notes-{{ control.id }}" class="form-input form-input--textarea" rows="2" placeholder="Implementation details, outstanding items" {% if not can_manage %}readonly{% endif %}>{{ record.notes or '' }}</textarea>
+                </div>
+                <div class="form-field">
+                  <label for="smb-owner-{{ control.id }}" class="form-label">Owner</label>
+                  <select id="smb-owner-{{ control.id }}" class="form-input" {% if not can_manage %}disabled{% endif %}>
+                    <option value="">Unassigned</option>
+                    {% for member in company_members %}
+                    <option value="{{ member.id }}" {% if record.owner_user_id == member.id %}selected{% endif %}>{{ member.email }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="smb-reviewed-{{ control.id }}" class="form-label">Last reviewed</label>
+                  <input type="date" id="smb-reviewed-{{ control.id }}" class="form-input" value="{{ record.last_reviewed_date or '' }}" {% if not can_manage %}readonly{% endif %} />
+                </div>
+                <div class="form-field">
+                  <label for="smb-target-{{ control.id }}" class="form-label">Target date</label>
+                  <input type="date" id="smb-target-{{ control.id }}" class="form-input" value="{{ record.target_compliance_date or '' }}" {% if not can_manage %}readonly{% endif %} />
+                </div>
+                <div class="form-field">
+                  <span class="form-label">Evidence files</span>
+                  {% if control.evidence_files %}
+                  <ul class="evidence-list">
+                    {% for evidence in control.evidence_files %}
+                    <li class="evidence-list__item" data-evidence-id="{{ evidence.id }}">
+                      <span class="tag tag--muted">v{{ evidence.version_number }}</span>
+                      <strong>{{ evidence.title }}</strong>
+                      {% if evidence.is_current %}<span class="tag tag--muted">Current</span>{% endif %}
+                      <div class="text--muted">
+                        <a href="/api/smb1001/companies/{{ company.id }}/evidence/{{ evidence.id }}/download">{{ evidence.file_name }}</a>
+                        {% if evidence.file_size_bytes %} · {{ evidence.file_size_bytes | filesizeformat }}{% endif %}
+                        {% if evidence.uploaded_at %} · {{ evidence.uploaded_at[:10] }}{% endif %}
+                        {% if can_manage %}
+                        · <button type="button" class="button button--danger button--small" data-delete-evidence="{{ evidence.id }}">Delete</button>
+                        {% endif %}
+                      </div>
+                    </li>
+                    {% endfor %}
+                  </ul>
+                  {% else %}
+                  <p class="text--muted">No evidence files uploaded yet.</p>
+                  {% endif %}
+                </div>
+                {% if can_manage %}
+                <div class="form-field">
+                  <label for="smb-evidence-title-{{ control.id }}" class="form-label">Evidence title</label>
+                  <input type="text" id="smb-evidence-title-{{ control.id }}" class="form-input" maxlength="255" placeholder="e.g. MFA enforcement report" />
+                </div>
+                <div class="form-field">
+                  <label for="smb-evidence-file-{{ control.id }}" class="form-label">Evidence file (max 15 MB)</label>
+                  <input type="file" id="smb-evidence-file-{{ control.id }}" class="form-input" />
+                </div>
+                {% endif %}
+                <div class="compliance-form__actions">
+                  {% if can_manage %}
+                  <button type="button" class="button button--primary button--small" data-save-control="{{ control.id }}">Save</button>
+                  <button type="button" class="button button--ghost button--small" data-upload-evidence="{{ control.id }}">Upload evidence</button>
+                  {% endif %}
+                  {% if control.compliance_help_url %}
+                  <a href="{{ control.compliance_help_url }}" class="button button--ghost button--small" rel="noopener" {% if control.compliance_help_url.startswith('http') %}target="_blank"{% endif %}>Get compliance help: {{ control.compliance_help_label }}</a>
+                  {% endif %}
+                  {% if control.show_help %}
+                  <button type="submit" form="smb-ticket-form-{{ control.id }}" class="button button--ghost button--small">Request technician help</button>
+                  {% endif %}
+                </div>
+              </form>
+              {% if control.engagement_letter and can_manage and control.status not in ['compliant', 'not_applicable'] %}
+              <form method="post" action="/compliance/smb1001/engagement-letter" class="compliance-form requirement-item__engagement-form">
+                {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                <div class="form-field">
+                  <label for="smb-engagement-recipient" class="form-label">Send a letter of engagement</label>
+                  <select id="smb-engagement-recipient" name="recipient_user_id" class="form-input" required>
+                    {% for member in company_members %}
+                    <option value="{{ member.id }}" {% if member.id == current_user_id %}selected{% endif %}>{{ member.email }}</option>
+                    {% endfor %}
+                  </select>
+                  <p class="form-help">Emails the letter of engagement to this company member and records it as evidence, marking {{ control.code }} compliant.{% if is_super_admin %} Edit the wording in <a href="/admin/message-templates">Message templates</a> (smb1001-engagement-letter).{% endif %}</p>
+                </div>
+                <div class="compliance-form__actions">
+                  <button type="submit" class="button button--primary button--small" {% if not company_members %}disabled{% endif %}>Send letter of engagement</button>
+                </div>
+              </form>
+              {% endif %}
+              {% if control.show_help %}
+              <form id="smb-ticket-form-{{ control.id }}" method="post" action="/compliance/smb1001/{{ control.id }}/ticket" class="requirement-item__ticket-form">
+                {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+              </form>
+              {% endif %}
+            </div>
+          </details>
+          {% else %}
+          <p class="text--muted">No controls are defined for this tier.</p>
+          {% endfor %}
+        </div>
+      </section>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const companyId = {{ (company.id if company else None) | tojson }};
+  const csrfToken = getCsrfToken();
+  const statusText = {
+    not_started: 'Not started',
+    in_progress: 'In progress',
+    compliant: '✓ Compliant',
+    non_compliant: '✗ Non-compliant',
+    not_applicable: 'N/A',
+  };
+
+  document.querySelectorAll('.requirement-item').forEach(item => {
+    item.addEventListener('toggle', () => item.classList.toggle('is-expanded', item.open));
+  });
+
+  document.querySelectorAll('[data-expand-all]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const section = btn.closest('.compliance-requirements__group');
+      if (!section) return;
+      const expand = btn.getAttribute('data-expanded') !== 'true';
+      section.querySelectorAll('.requirement-item').forEach(item => {
+        item.open = expand;
+        item.classList.toggle('is-expanded', expand);
+      });
+      btn.setAttribute('data-expanded', expand ? 'true' : 'false');
+      btn.textContent = expand ? 'Collapse all' : 'Expand all';
+    });
+  });
+
+  const filterInput = document.getElementById('smb1001-filter');
+  const statusFilter = document.getElementById('smb1001-status-filter');
+  function applyFilters() {
+    const text = (filterInput?.value || '').toLowerCase();
+    const wanted = statusFilter?.value || '';
+    document.querySelectorAll('.requirement-item').forEach(item => {
+      const status = item.dataset.status;
+      const statusMatch = !wanted
+        || (wanted === 'outstanding' ? !['compliant', 'not_applicable'].includes(status) : status === wanted);
+      item.style.display = statusMatch && item.textContent.toLowerCase().includes(text) ? '' : 'none';
+    });
+  }
+  filterInput?.addEventListener('input', applyFilters);
+  statusFilter?.addEventListener('change', applyFilters);
+
+  async function send(url, method, body) {
+    const response = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (!response.ok) {
+      let detail = 'Request failed';
+      try { detail = (await response.json()).detail || detail; } catch (error) { /* keep default */ }
+      throw new Error(detail);
+    }
+    return response.json();
+  }
+
+  document.querySelectorAll('[data-save-control]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!companyId) return;
+      const id = btn.dataset.saveControl;
+      const owner = parseInt(document.getElementById(`smb-owner-${id}`).value, 10);
+      const statusSelect = document.getElementById(`smb-status-${id}`);
+      const payload = {
+        status: statusSelect.value,
+        evidence: document.getElementById(`smb-evidence-${id}`).value || null,
+        notes: document.getElementById(`smb-notes-${id}`).value || null,
+        owner_user_id: Number.isFinite(owner) ? owner : null,
+        last_reviewed_date: document.getElementById(`smb-reviewed-${id}`).value || null,
+        target_compliance_date: document.getElementById(`smb-target-${id}`).value || null,
+      };
+      // Automatically checked statuses are reported, not stored.
+      const statusLocked = statusSelect.disabled;
+      if (statusLocked) delete payload.status;
+      try {
+        await send(`/api/smb1001/companies/${companyId}/controls/${id}/compliance`, 'PATCH', payload);
+        const item = document.querySelector(`[data-control-id="${id}"]`);
+        const badge = item?.querySelector('[data-requirement-status]');
+        if (item && !statusLocked) item.dataset.status = payload.status;
+        if (badge && !statusLocked) {
+          badge.className = `badge badge--status-${payload.status}`;
+          badge.textContent = statusText[payload.status] || 'Not started';
+        }
+        showNotification('Control saved. Refresh to update tier progress.', 'success');
+      } catch (error) {
+        showNotification(error.message || 'Failed to save control', 'error');
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-upload-evidence]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!companyId) return;
+      const id = btn.dataset.uploadEvidence;
+      const title = (document.getElementById(`smb-evidence-title-${id}`)?.value || '').trim();
+      const file = document.getElementById(`smb-evidence-file-${id}`)?.files?.[0];
+      if (!title || !file) {
+        showNotification('Choose a file and enter an evidence title', 'error');
+        return;
+      }
+      if (file.size > 15 * 1024 * 1024) {
+        showNotification('Evidence files must be 15 MB or smaller', 'error');
+        return;
+      }
+      const payload = new FormData();
+      payload.append('title', title);
+      payload.append('evidence_file', file);
+      btn.disabled = true;
+      try {
+        const response = await fetch(`/api/smb1001/companies/${companyId}/controls/${id}/evidence`, {
+          method: 'POST',
+          headers: { 'X-CSRF-Token': csrfToken },
+          body: payload,
+        });
+        if (!response.ok) {
+          let detail = 'Evidence upload failed';
+          try { detail = (await response.json()).detail || detail; } catch (error) { /* keep default */ }
+          throw new Error(detail);
+        }
+        window.location.reload();
+      } catch (error) {
+        showNotification(error.message || 'Evidence upload failed', 'error');
+        btn.disabled = false;
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-delete-evidence]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!companyId || !window.confirm('Delete this evidence file? This cannot be undone.')) return;
+      try {
+        await send(`/api/smb1001/companies/${companyId}/evidence/${btn.dataset.deleteEvidence}`, 'DELETE');
+        window.location.reload();
+      } catch (error) {
+        showNotification(error.message || 'Failed to delete evidence', 'error');
+      }
+    });
+  });
+
+  document.getElementById('smb1001-target-tier')?.addEventListener('change', async event => {
+    try {
+      await send(`/api/smb1001/companies/${companyId}/target-tier`, 'PUT', { target_tier: parseInt(event.target.value, 10) });
+      window.location.reload();
+    } catch (error) {
+      showNotification(error.message || 'Failed to update target tier', 'error');
+    }
+  });
+
+  document.getElementById('smb1001-import-e8')?.addEventListener('click', async () => {
+    try {
+      const result = await send(`/api/smb1001/companies/${companyId}/import-essential8`, 'POST');
+      showNotification(`${result.updated_count} control(s) updated from Essential 8`, 'success');
+      setTimeout(() => window.location.reload(), 800);
+    } catch (error) {
+      showNotification(error.message || 'Import failed', 'error');
+    }
+  });
+
+  function getCsrfToken() {
+    return document.cookie
+      .split('; ')
+      .find(row => row.startsWith('myportal_session_csrf='))
+      ?.split('=')[1] || '';
+  }
+
+  function showNotification(message, type) {
+    const notification = document.createElement('div');
+    notification.className = `compliance-toast compliance-toast--${type}`;
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    setTimeout(() => notification.remove(), 3000);
+  }
+});
+</script>
+{% endblock %}

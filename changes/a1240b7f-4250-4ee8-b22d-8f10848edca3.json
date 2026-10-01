@@ -1,0 +1,7 @@
+{
+  "guid": "a1240b7f-4250-4ee8-b22d-8f10848edca3",
+  "occurred_at": "2026-09-25T00:00Z",
+  "change_type": "Fix",
+  "summary": "Avoid logging an expected Microsoft Graph 404 as an error while recovering or replacing a stale M365 app registration.",
+  "content_hash": "c418e27a343de1ea4c857fa728e131a8cd89904dbfc6528f50b465e12bf5edde"
+}

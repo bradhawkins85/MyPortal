@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
+from app.core.logging import log_error
 from app.core.config import get_templates_config
 from app.repositories import port_documents as port_documents_repo
 from app.repositories import port_pricing as port_pricing_repo
@@ -23,7 +26,36 @@ from app.services.notifications import emit_notification
 router = APIRouter(prefix="/ports", tags=["Ports"])
 
 _templates_config = get_templates_config()
-_uploads_root = _templates_config.static_path / "uploads"
+# Legacy location: documents used to be stored under ``static/uploads`` and
+# were therefore publicly served from ``/static``.  Existing records keep
+# their ``uploads/ports/...`` storage paths and are still resolvable here.
+_legacy_uploads_root = _templates_config.static_path / "uploads"
+# New uploads live outside the static tree and are only reachable through the
+# authenticated download endpoint below.
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_uploads_root = _PROJECT_ROOT / "private_uploads"
+_PRIVATE_STORAGE_PREFIX = "private_uploads/"
+
+
+def _document_uploads_root(storage_path: str) -> Path:
+    if str(storage_path or "").startswith(_PRIVATE_STORAGE_PREFIX):
+        return _uploads_root
+    return _legacy_uploads_root
+
+
+def _resolve_port_document_path(storage_path: str) -> Path | None:
+    """Resolve a stored port document, refusing anything outside ``ports/``."""
+
+    uploads_root = _document_uploads_root(storage_path)
+    ports_root = (uploads_root / "ports").resolve()
+    candidate = (uploads_root.parent / str(storage_path or "")).resolve()
+    try:
+        candidate.relative_to(ports_root)
+    except ValueError:
+        return None
+    if not candidate.is_file():
+        return None
+    return candidate
 
 
 @router.get("", response_model=list[PortResponse])
@@ -146,7 +178,7 @@ async def upload_port_document(
     file: UploadFile = File(...),
     description: str | None = Form(default=None, max_length=255),
     _: None = Depends(require_database),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_super_admin),
 ):
     port = await ports_repo.get_port_by_id(port_id)
     if not port:
@@ -174,6 +206,32 @@ async def upload_port_document(
     return document
 
 
+@router.get("/{port_id}/documents/{document_id}/download")
+async def download_port_document(
+    port_id: int,
+    document_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(get_current_user),
+):
+    port = await ports_repo.get_port_by_id(port_id)
+    if not port:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Port not found")
+    document = await port_documents_repo.get_document(document_id)
+    if not document or document["port_id"] != port_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    file_path = _resolve_port_document_path(document["storage_path"])
+    if file_path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document file not found")
+    # Always a download of inert bytes: never render user uploads inline.
+    return FileResponse(
+        file_path,
+        filename=document.get("file_name") or file_path.name,
+        media_type="application/octet-stream",
+        content_disposition_type="attachment",
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
+
+
 @router.delete(
     "/{port_id}/documents/{document_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -192,10 +250,14 @@ async def delete_port_document(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     await port_documents_repo.delete_document(document_id)
     try:
-        delete_stored_file(document["storage_path"], _uploads_root)
-    except HTTPException:
+        delete_stored_file(document["storage_path"], _document_uploads_root(document["storage_path"]))
+    except HTTPException as exc:
         # If the path is invalid we still consider the DB delete authoritative.
-        pass
+        log_error(
+            "Port document file cleanup skipped after delete",
+            document_id=document_id,
+            error=str(exc),
+        )
     await emit_notification(
         event_type="port.document_deleted",
         message=f"Document {document['file_name']} removed from {port['name']}",

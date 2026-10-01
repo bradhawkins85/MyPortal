@@ -108,8 +108,11 @@ def test_admin_backup_jobs_page_renders(super_admin, monkeypatch):
     async def fake_list_companies():
         return [{"id": 7, "name": "Acme Pty Ltd"}]
 
+    editing_job = None
+
     async def fake_get_job(job_id):
-        return None
+        assert job_id == 1
+        return editing_job
 
     async def fake_build_history_grid(*, company_id=None, days=14, include_inactive=True):
         return {
@@ -158,6 +161,17 @@ def test_admin_backup_jobs_page_renders(super_admin, monkeypatch):
     # webhook URL is shown after picking a job to edit; verify the page also
     # renders the stat strip with today's pass count.
     assert "Today" in html
+    assert 'data-backup-editing-job-id=""' in html
+
+    editing_job = job
+    with TestClient(app) as client:
+        edit_response = client.get("/admin/backup-jobs?jobId=1")
+
+    assert edit_response.status_code == 200
+    edit_html = edit_response.text
+    assert 'data-backup-editing-job-id="1"' in edit_html
+    assert "Number.parseInt(jobModal.dataset.backupEditingJobId, 10)" in edit_html
+    assert "if (data.id === editId) { openJobModal('edit', data); break; }" in edit_html
 
 
 def test_backup_status_webhook_records_status(monkeypatch):

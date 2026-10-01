@@ -43,8 +43,6 @@ _OPEN_TICKET_STATUSES: tuple[str, ...] = ("new", "open", "pending", "in_progress
 # How many recent activity entries to surface.
 _RECENT_ACTIVITY_LIMIT = 5
 
-# Invoice statuses that count as "still open" for the attention list.
-_OPEN_INVOICE_STATUSES = {"draft", "sent", "overdue", "partial", "outstanding"}
 _CLOSED_INVOICE_STATUSES = {"paid", "void", "cancelled"}
 
 

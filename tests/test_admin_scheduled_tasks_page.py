@@ -181,13 +181,14 @@ def test_scheduled_tasks_page_renders_tasks(super_admin_context, monkeypatch):
     _, separator, header_html = html.partition('class="header__actions" data-header-actions')
     assert separator
     header_html, _, _ = header_html.partition("</header>")
-    assert 'aria-controls="scheduled-tasks-bulk-actions-menu"' in header_html
-    assert 'id="scheduled-tasks-bulk-actions-menu"' in header_html
+    assert 'aria-controls="scheduled-tasks-actions-menu"' in header_html
     assert ">Manage Tasks<" not in header_html
     assert 'data-task-create' in header_html
-    assert 'Redistribute selected' in header_html
-    assert 'data-scheduled-tasks-bulk-action="redistribute"' in header_html
+    assert 'data-bulk-task-create' in header_html
+    # Selection actions live in the bar above the list, not the page header.
+    assert 'data-scheduled-tasks-bulk-action="redistribute"' in html
     assert 'data-scheduled-tasks-redistribute-offset' in html
+    assert 'id="scheduled-tasks-redistribute-modal"' in html
 
 
 def test_scheduled_tasks_page_offers_rag_control_commands(super_admin_context, monkeypatch):
@@ -418,6 +419,62 @@ def test_bulk_delete_scheduled_tasks(super_admin_context, csrf_session, monkeypa
     assert "_flash=" in flash_cookie
     assert "success" in flash_cookie
     assert deleted == [[1, 2]]
+
+
+def test_bulk_create_scheduled_tasks_randomises_times_when_cron_is_blank(
+    super_admin_context, csrf_session, monkeypatch
+):
+    """A missing bulk cron assigns an independent random daily time per company."""
+    created = []
+    random_crons = iter(["7 1 * * *", "42 19 * * *"])
+
+    async def fake_list_companies():
+        return [{"id": 1, "name": "Acme"}, {"id": 2, "name": "Globex"}]
+
+    async def fake_create_task(**kwargs):
+        created.append(kwargs)
+
+    async def fake_refresh():
+        return None
+
+    monkeypatch.setattr(main_module.company_repo, "list_companies", fake_list_companies)
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "create_task", fake_create_task)
+    monkeypatch.setattr(main_module.scheduler_service, "refresh", fake_refresh)
+    monkeypatch.setattr(main_module, "_random_daily_cron", lambda: next(random_crons))
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/admin/scheduled-tasks/bulk-create",
+            data={
+                "command": "sync_assets",
+                "cron": "",
+                "companyIds": ["1", "2"],
+                "active": "on",
+                "_csrf": csrf_session.csrf_token,
+            },
+        )
+
+    assert response.status_code == 303
+    assert [task["cron"] for task in created] == ["7 1 * * *", "42 19 * * *"]
+
+
+def test_bulk_create_modal_describes_optional_random_schedule(super_admin_context, monkeypatch):
+    async def fake_list_tasks(include_inactive=False):
+        return []
+
+    async def fake_list_companies():
+        return [{"id": 1, "name": "Acme"}]
+
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "list_tasks", fake_list_tasks)
+    monkeypatch.setattr(main_module.company_repo, "list_companies", fake_list_companies)
+
+    with TestClient(app) as client:
+        response = client.get("/admin/scheduled-tasks")
+
+    assert response.status_code == 200
+    assert 'id="bulk-task-cron" name="cron" placeholder=' in response.text
+    assert "A random time each day" in response.text
+    assert "Leave blank to assign each company a random daily time." in response.text
 
 
 def test_bulk_delete_scheduled_tasks_no_ids(super_admin_context, csrf_session):

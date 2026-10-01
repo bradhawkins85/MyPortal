@@ -119,11 +119,12 @@ def test_csp_header_configuration(test_app):
     assert "frame-src 'self' https://cal.com https://app.cal.com" in csp
     assert "base-uri 'self'" in csp
     assert "form-action 'self'" in csp
-    # Check that unpkg.com is allowed for loading htmx in script-src directive
+    # Core portal JavaScript is self-hosted; only integration sources remain.
     assert (
-        "script-src 'self' 'unsafe-inline' https://unpkg.com https://cal.com https://app.cal.com https://static.cloudflareinsights.com"
+        "script-src 'self' 'unsafe-inline' https://cal.com https://app.cal.com https://static.cloudflareinsights.com"
         in csp
     )
+    assert "https://unpkg.com" not in csp
     # unsafe-eval must not be present (removed to harden CSP)
     assert "'unsafe-eval'" not in csp
 
@@ -218,7 +219,7 @@ def test_csp_with_plausible_analytics(test_app_with_plausible):
     assert "'self'" in csp
     assert "'unsafe-inline'" in csp
     assert "'unsafe-eval'" not in csp
-    assert "https://unpkg.com" in csp
+    assert "https://unpkg.com" not in csp
 
 
 def test_csp_filters_invalid_sources(test_app_with_invalid_sources):

@@ -1,0 +1,7 @@
+{
+  "guid": "1e561ab8-4525-4f95-9dae-1f23c81803c1",
+  "occurred_at": "2026-09-22T11:26Z",
+  "change_type": "Fix",
+  "summary": "Index complete, access-aware ticket conversations and knowledge-base articles for RAG matching",
+  "content_hash": "cf727798443dd787eafc559d98321778041e9f55ef3aa18b7fa16253e70034ae"
+}

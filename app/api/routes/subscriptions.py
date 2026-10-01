@@ -1,7 +1,8 @@
 """API routes for managing subscriptions."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -11,8 +12,11 @@ from app.api.dependencies.auth import get_current_user
 from app.api.dependencies.database import require_database
 from app.repositories import subscription_change_requests as change_requests_repo
 from app.repositories import subscriptions as subscriptions_repo
+from app.repositories import shop as shop_repo
 from app.repositories import user_companies as user_company_repo
 from app.services import subscription_changes as subscription_changes_service
+from app.services import subscription_billing
+from app.services import shop as shop_service
 
 router = APIRouter(prefix="/api/v1/subscriptions", tags=["Subscriptions"])
 
@@ -22,7 +26,7 @@ class SubscriptionResponse(BaseModel):
     
     id: str
     customer_id: int = Field(..., alias="customerId")
-    product_id: int = Field(..., alias="productId")
+    product_id: int | None = Field(None, alias="productId")
     product_name: str | None = Field(None, alias="productName")
     subscription_category_id: int | None = Field(None, alias="subscriptionCategoryId")
     category_name: str | None = Field(None, alias="categoryName")
@@ -33,11 +37,146 @@ class SubscriptionResponse(BaseModel):
     prorated_price: str | None = Field(None, alias="proratedPrice")
     status: str
     auto_renew: bool = Field(..., alias="autoRenew")
+    vendor: str | None = None
+    external_name: str | None = Field(None, alias="externalName")
+    external_sku: str | None = Field(None, alias="externalSku")
+    billing_frequency: str | None = Field(None, alias="billingFrequency")
+    reminder_only: bool = Field(False, alias="reminderOnly")
     created_at: str | None = Field(None, alias="createdAt")
     updated_at: str | None = Field(None, alias="updatedAt")
     
     class Config:
         populate_by_name = True
+
+
+class CreateExistingSubscriptionRequest(BaseModel):
+    """An externally billed subscription to begin managing in MyPortal."""
+
+    customer_id: int = Field(..., alias="customerId", gt=0)
+    product_id: int | None = Field(None, alias="productId", gt=0)
+    start_date: date = Field(..., alias="startDate")
+    quantity: int = Field(default=1, ge=1, le=9999)
+    auto_renew: bool = Field(default=True, alias="autoRenew")
+    end_date: date | None = Field(None, alias="endDate")
+    vendor: str | None = Field(None, min_length=1, max_length=255)
+    external_name: str | None = Field(
+        None, alias="externalName", min_length=1, max_length=255
+    )
+    external_sku: str | None = Field(None, alias="externalSku", max_length=255)
+    billing_frequency: str | None = Field(None, alias="billingFrequency", pattern="^(annual|monthly)$")
+    reminder_only: bool = Field(default=False, alias="reminderOnly")
+
+    class Config:
+        populate_by_name = True
+
+
+def _subscription_response(subscription: dict[str, Any]) -> SubscriptionResponse:
+    """Serialise repository values consistently for API responses."""
+    value = dict(subscription)
+    value["unit_price"] = str(subscription["unit_price"])
+    value["prorated_price"] = (
+        str(subscription["prorated_price"])
+        if subscription.get("prorated_price") is not None
+        else None
+    )
+    value["created_at"] = (
+        subscription["created_at"].isoformat() if subscription.get("created_at") else None
+    )
+    value["updated_at"] = (
+        subscription["updated_at"].isoformat() if subscription.get("updated_at") else None
+    )
+    return SubscriptionResponse.model_validate(value)
+
+
+@router.post("", response_model=SubscriptionResponse, status_code=status.HTTP_201_CREATED)
+async def create_existing_subscription(
+    payload: CreateExistingSubscriptionRequest,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+) -> SubscriptionResponse:
+    """Register an existing external subscription without issuing an initial invoice.
+
+    The subscription enters the standard renewal workflow. When auto-renewal is
+    enabled, its recurring invoice item starts at the next commitment boundary,
+    so the externally billed current term is not charged again. Only a super admin
+    can use this operation because it creates an active billing entitlement directly.
+    """
+    if not current_user.get("is_super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super admin privileges required to create existing subscriptions",
+        )
+
+    return await create_existing_subscription_record(payload, current_user)
+
+
+async def create_existing_subscription_record(
+    payload: CreateExistingSubscriptionRequest,
+    current_user: dict[str, Any],
+) -> SubscriptionResponse:
+    """Create an existing subscription after the caller has authorised its scope.
+
+    The public API retains its super-admin guard above.  Portal routes may use
+    this shared operation only after enforcing their own company-scoped write
+    permission and constraining externally billed records to reminder-only.
+    """
+
+    product = await shop_repo.get_product_by_id(payload.product_id) if payload.product_id else None
+    if payload.product_id and (not product or product.get("subscription_category_id") is None):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A valid subscription product is required",
+        )
+    if not product and not str(payload.external_name or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A Shop product or third-party subscription name is required",
+        )
+    if not product and not str(payload.vendor or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A vendor is required for a standalone third-party subscription",
+        )
+
+    commitment, _payment_frequency = (
+        shop_service.get_subscription_billing_plan(product or {})
+        or (payload.billing_frequency or "annual", payload.billing_frequency or "annual")
+    )
+    term_days = 30 if commitment == "monthly" else 365
+    end_date = payload.end_date or payload.start_date + timedelta(days=term_days)
+    if end_date <= payload.start_date:
+        raise HTTPException(status_code=400, detail="End date must be after start date")
+    unit_price = Decimal(str(shop_service.get_product_price(product, is_vip=False))) if product else Decimal("0")
+    subscription = await subscriptions_repo.create_subscription(
+        customer_id=payload.customer_id,
+        product_id=payload.product_id,
+        subscription_category_id=int(product["subscription_category_id"]) if product else None,
+        start_date=payload.start_date,
+        end_date=end_date,
+        quantity=payload.quantity,
+        unit_price=unit_price,
+        status="active",
+        auto_renew=payload.auto_renew,
+        created_by=int(current_user["id"]),
+        vendor=(payload.vendor or "").strip() or None,
+        external_name=(payload.external_name or "").strip() or None,
+        external_sku=(payload.external_sku or "").strip() or None,
+        billing_frequency=payload.billing_frequency or commitment,
+        reminder_only=payload.reminder_only,
+    )
+    if payload.auto_renew and not payload.reminder_only:
+        # This term was already billed externally. Schedule the recurring item
+        # at the next commitment boundary rather than billing the current term.
+        renewal_subscription = {
+            **subscription,
+            "start_date": subscription["end_date"],
+        }
+        await subscription_billing.sync_subscription_recurring_item(
+            renewal_subscription
+        )
+    # Deliberately do not create an invoice for the externally billed current
+    # term. The recurring item becomes eligible at the next commitment boundary.
+    return _subscription_response(subscription)
 
 
 async def _ensure_subscription_access(user: dict, customer_id: int) -> None:
@@ -222,6 +361,12 @@ async def update_subscription(
         auto_renew=update_data.auto_renew,
         end_date=update_data.end_date,
     )
+    if update_data.status == "canceled" and not subscription.get("reminder_only"):
+        from app.services.subscription_billing import sync_subscription_recurring_item
+
+        canceled = await subscriptions_repo.get_subscription(subscription_id)
+        if canceled:
+            await sync_subscription_recurring_item(canceled, cancellation_date=date.today())
     
     # Fetch and return the updated subscription
     updated = await subscriptions_repo.get_subscription(subscription_id)
@@ -271,6 +416,15 @@ async def delete_subscription(
             detail="Subscription not found"
         )
     
+    # End billing before removing the portal record. The recurring row is kept
+    # for audit/history and must never be deleted with the subscription.
+    from app.services.subscription_billing import deactivate_subscription_recurring_item
+
+    if not subscription.get("reminder_only"):
+        await deactivate_subscription_recurring_item(
+            subscription, cancellation_date=date.today()
+        )
+
     # Delete the subscription
     await subscriptions_repo.delete_subscription(subscription_id)
 
@@ -289,6 +443,8 @@ class ChangePreviewResponse(BaseModel):
     """Response model for subscription change preview."""
     
     current_quantity: int = Field(..., alias="currentQuantity")
+    current_quantity_at_term_end: int = Field(..., alias="currentQuantityAtTermEnd")
+    current_total_charges: str = Field(..., alias="currentTotalCharges")
     requested_change: int = Field(..., alias="requestedChange")
     change_type: str = Field(..., alias="changeType")
     new_net_additions: int = Field(..., alias="newNetAdditions")
@@ -358,6 +514,10 @@ async def preview_change(
     
     return ChangePreviewResponse(
         current_quantity=preview["current_quantity"],
+        current_quantity_at_term_end=(
+            preview["current_quantity"] + preview["current_net_impact"]["net_change"]
+        ),
+        current_total_charges=str(preview["current_net_impact"]["total_prorated_charges"]),
         requested_change=preview["requested_change"],
         change_type=preview["change_type"],
         new_net_additions=preview["new_net_additions"],
@@ -366,7 +526,9 @@ async def preview_change(
         new_quantity_at_term_end=preview["new_quantity_at_term_end"],
         new_total_charges=str(preview["new_total_charges"]),
         prorated_charge=(
-            str(preview["prorated_charge"]) if preview.get("prorated_charge") else None
+            str(preview["prorated_charge"])
+            if preview.get("prorated_charge") is not None
+            else None
         ),
         prorated_explanation=prorated_explanation,
         end_date=preview["end_date"].isoformat(),
@@ -559,7 +721,9 @@ async def get_pending_changes(
             quantity_change=change["quantity_change"],
             requested_at=change["requested_at"].isoformat(),
             prorated_charge=(
-                str(change["prorated_charge"]) if change.get("prorated_charge") else None
+                str(change["prorated_charge"])
+                if change.get("prorated_charge") is not None
+                else None
             ),
             notes=change.get("notes"),
         )

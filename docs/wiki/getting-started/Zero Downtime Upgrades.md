@@ -1,191 +1,118 @@
-# Zero-downtime upgrades
+# Zero-downtime immutable releases
 
-MyPortal supports two upgrade strategies that keep the public site
-reachable throughout a deploy:
+Production updates use two systemd slots and immutable, revision-named release
+directories. The Git checkout is a **control checkout**, never a serving tree.
 
-1. **Single-server graceful reload (Track B1).** Uvicorn workers cycle
-   on `SIGHUP` while nginx rides over the brief reload using
-   `proxy_next_upstream`. Recommended default.
-2. **Two-instance rolling deploy (Track B2).** Two MyPortal processes
-   (`myportal@blue` and `myportal@green`) sit behind a single nginx
-   upstream and share one database. `scripts/upgrade.sh --rolling`
-   drains and upgrades each side in turn.
+`scripts/install_production.sh` prepares a host for this layout and performs
+the first deployment with `scripts/upgrade.sh`. It creates the `myportal`
+service account, `/etc/myportal.env`, MariaDB and nginx. The coordinator
+refuses to run on a host that has not been prepared.
 
-For pulling fresh code into a *single area* of the app (tickets,
-knowledge base, …) without restarting anything, see
-[`feature_packs.md`](feature_packs.md). The two systems are
-complementary: feature packs eliminate the need to restart for routine
-code changes, and the strategies in this document handle the cases
-hot-reload cannot cover (middleware, dependency upgrades, Python
-itself).
+## Layout
 
-## Health endpoints
+* `/opt/myportal/releases/<git-sha>` contains application code, static assets,
+  templates, and a release-local `.venv`. A prepared directory is made
+  read-only before it is published.
+* `/opt/myportal/shared` contains mutable state and application data. Each
+  release's `var`, `private_uploads`, and `app/static/uploads` paths point here.
+  Existing upload data from a legacy single-checkout installation is copied
+  into shared storage on first use and is never removed from the old location.
+* `/opt/myportal/instances/{blue,green}` independently selects the release for
+  each service. `/opt/myportal/current` selects static/error assets exposed by
+  nginx and is changed only after cutover succeeds.
+* `/etc/nginx/conf.d/myportal-active.inc` is mandatory and contains exactly two
+  server declarations: one active and one `down`.
 
-Both upgrade strategies depend on two endpoints exposed by the app:
+Create the initial include before enabling the nginx site:
 
-| Path       | Purpose            | When to use                                              |
-| ---------- | ------------------ | -------------------------------------------------------- |
-| `/healthz` | Liveness probe     | systemd/k8s liveness, nginx active health checks         |
-| `/readyz`  | Readiness probe    | Rolling-deploy gating, "is this worker accepting work?"  |
-
-`/healthz` is cheap and always returns 200 while the event loop is
-responsive. `/readyz` only returns 200 after the database is reachable
-*and* every loaded feature pack is healthy; until then it returns 503
-with a per-check breakdown. The legacy `/health` endpoint remains for
-backwards compatibility.
-
-## Track B1 — Single-server graceful reload
-
-### Prerequisites
-
-* The systemd unit declares `ExecReload=/bin/kill -s HUP $MAINPID`
-  (the unit shipped in `docs/systemd-service.md` already does).
-* Uvicorn is invoked with `--workers N` (N ≥ 2). Single-worker
-  deployments still upgrade successfully but will see a small
-  connection-refused window during the cycle.
-* The nginx config at `deploy/nginx/myportal.conf` is installed; it
-  contains `proxy_next_upstream` + `proxy_next_upstream_tries 2` so
-  idempotent requests that land mid-cycle are retried automatically.
-
-### Upgrading
-
-```bash
-sudo -u myportal /opt/myportal/scripts/upgrade.sh --graceful
+```console
+sudo install -d -m 0755 /etc/nginx/conf.d
+printf '%s\n' \
+  'server 127.0.0.1:8001 max_fails=1 fail_timeout=5s;' \
+  'server 127.0.0.1:8002 down;' |
+  sudo tee /etc/nginx/conf.d/myportal-active.inc
+sudo nginx -t
 ```
 
-What the script does:
+Run the upgrade coordinator:
 
-1. `git pull` and `pip install -e .` in the existing venv.
-2. Runs the migration runner (idempotent; happens automatically at
-   startup as well).
-3. Invokes `systemctl reload myportal.service`, which sends `SIGHUP`.
-   Uvicorn starts new workers loaded with the new code, then drains
-   the old workers.
-4. Polls `http://127.0.0.1:8000/readyz` (override with
-   `MYPORTAL_READYZ_URL`) for up to `MYPORTAL_READY_TIMEOUT` seconds
-   (default 60) before reporting success.
-
-If the readiness probe fails the script exits non-zero; the previous
-workers usually remain alive long enough for nginx to keep serving
-while you investigate.
-
-### Constraints
-
-* **Additive migrations only.** Old workers must be able to keep
-  reading rows their version doesn't know about. Destructive changes
-  (drop column, narrow type) require the [expand/contract
-  workflow](#expand-contract-migration-policy) or a maintenance window.
-* **Dependency upgrades** that change Python ABI (e.g. swapping
-  cryptography wheels) usually require a full `systemctl restart`
-  rather than a graceful reload. Plan those as scheduled work.
-
-## Track B2 — Two-instance rolling deploy
-
-Use this when:
-
-* A single instance can't be safely cycled (long-running websocket
-  sessions, heavy in-process caches).
-* You want the option of pinning new code to one instance and
-  observing it before rolling it out everywhere.
-
-### One-time setup
-
-1. Install the templated systemd unit:
-
-   ```bash
-   sudo cp deploy/systemd/myportal@.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   ```
-
-2. Create a per-instance env file pinning the listen port:
-
-   ```bash
-   cat <<'ENV' | sudo tee /etc/myportal.blue.env
-   MYPORTAL_INSTANCE_PORT=8001
-   ENV
-   cat <<'ENV' | sudo tee /etc/myportal.green.env
-   MYPORTAL_INSTANCE_PORT=8002
-   ENV
-   ```
-
-3. Enable both services:
-
-   ```bash
-   sudo systemctl enable --now myportal@blue.service
-   sudo systemctl enable --now myportal@green.service
-   ```
-
-4. Replace `deploy/nginx/myportal.conf` with
-   `deploy/nginx/myportal-bluegreen.conf`:
-
-   ```bash
-   sudo cp deploy/nginx/myportal-bluegreen.conf \
-        /etc/nginx/sites-available/myportal.conf
-   sudo touch /etc/nginx/myportal-bluegreen.state
-   sudo chown myportal:myportal /etc/nginx/myportal-bluegreen.state
-   ```
-
-   Uncomment the `include /etc/nginx/myportal-bluegreen.state;` line
-   inside the `upstream` block — the upgrade script writes this file
-   to flip an instance to `down` during draining.
-
-### Upgrading
-
-```bash
-sudo -u myportal /opt/myportal/scripts/upgrade.sh --rolling
+```console
+sudo myportal-upgrade --rolling
 ```
 
-What the script does per instance (blue then green by default):
+`myportal-upgrade` is a small wrapper, installed and refreshed by every run of
+`scripts/upgrade.sh`, that runs the coordinator from your control checkout. The
+checkout is wherever you cloned the repository (`/opt/myportal/control` in the
+installation guide); `MYPORTAL_CONTROL_CHECKOUT` in `/etc/myportal.env` records
+it. On a server deployed before the wrapper existed, run
+`sudo <control checkout>/scripts/upgrade.sh --rolling` once and the wrapper is
+installed. Super administrators can also start the same upgrade from the
+portal's System updates page. Docker installations are upgraded with
+`myportal-docker upgrade` instead, which applies the same blue/green approach
+with two application containers behind an nginx container; see the Docker
+guide.
 
-1. Writes `server 127.0.0.1:<port> down;` into the state file and
-   reloads nginx. New requests go only to the other instance.
-2. Sleeps `MYPORTAL_DRAIN_SECONDS` (default 5s) so in-flight requests
-   on the drained instance can finish.
-3. `systemctl restart myportal@<instance>.service`.
-4. Polls `http://127.0.0.1:<port>/readyz` for up to
-   `MYPORTAL_READY_TIMEOUT` seconds.
-5. Re-enables the instance in the state file and reloads nginx.
+The coordinator installs `deploy/nginx/myportal-bluegreen.conf` using the
+host's `sites-available`/`sites-enabled` layout when present, or `conf.d` on
+other nginx installations. It validates the configuration and enables and
+starts nginx only after the candidate application instance has passed its
+readiness and smoke checks. The manual include creation above remains useful
+when validating nginx before the first upgrade, but the coordinator also
+creates it automatically.
 
-If any step fails the script aborts with the still-drained instance
-left out of rotation. The other instance keeps serving traffic; fix
-the failed side manually and re-run `--rolling`.
+The upgrade installs or refreshes `deploy/systemd/myportal@.service`, reloads
+systemd, and enables both instance units before it starts the inactive slot.
+This also upgrades older installations that previously had only
+`myportal.service`. The upgrade must therefore run as root (normally via
+`sudo`). Release directories are made read-only but remain readable and
+traversable by the unprivileged service account. Retrying an older prepared
+release repairs root-only directory permissions. A failure before nginx
+cutover leaves the existing upstream unchanged.
 
-### Multi-instance gotchas
+The release virtual environment is created only after the revision reaches its
+final `/opt/myportal/releases/<git-sha>` path because Python console scripts
+contain absolute interpreter paths. When retrying a release prepared by an
+older updater, the coordinator validates that the release interpreter can
+import `uvicorn` and rebuilds only a broken virtual environment.
 
-* **Sessions must be shared.** Use the Redis-backed session store
-  (already a project dependency) so a user mid-session is not pinned
-  to one instance.
-* **APScheduler must not double-fire.** Wrap any scheduled job that
-  must run exactly once with `singleton_run` from
-  `app/services/singleton_jobs.py`. The helper uses a database-backed
-  lease so only one instance executes the job each tick.
-* **In-process caches.** Audit `app/services/*` for caches that
-  outlive a single request; move anything that must be consistent
-  across instances into Redis.
-* **Webhooks and external callbacks.** Both instances will receive
-  callbacks via nginx; design idempotent handlers (already a
-  project-wide rule for webhook retries).
+The systemd instances invoke `uvicorn` with the release interpreter using
+`python -m uvicorn`. They do not execute the generated `bin/uvicorn` wrapper,
+so a stale console-script shebang from a previously prepared release cannot
+prevent the service from starting.
 
-## Expand/contract migration policy
+Upload directories are persistent writable storage rather than part of an
+immutable release. The upgrade creates them with ownership for the `myportal`
+service account and links both upload paths into every prepared release.
+Release immutability is enforced with read-only ownership modes rather than a
+systemd read-only bind mount, because such a mount also masks writes through
+the upload symlinks. The systemd unit explicitly declares the shared tree
+writable, while the service account has no write permission on release files.
 
-Destructive schema changes are incompatible with both upgrade
-strategies because the old and new code must coexist on the same
-database for the duration of a deploy (a few seconds for graceful
-reload, longer for rolling deploys).
+The deployer fetches (it never pulls or restores), exports the target commit to
+a staging directory, installs a private virtual environment, and makes the
+release read-only. It points only the inactive slot at that release, starts it,
+and requires both `/readyz` and the smoke endpoint to report the expected Git
+SHA. It then atomically writes the upstream include, runs `nginx -t`, reloads,
+waits `MYPORTAL_DRAIN_SECONDS`, and finally switches `current`.
 
-When a destructive change is unavoidable, split it across **three**
-releases:
+An error during startup, version validation, smoke testing, nginx validation,
+or cutover restores the old upstream, inactive-slot link, and `current` link.
+The former active process continues serving throughout preparation and
+validation. The previous known-good release is deliberately retained.
 
-1. **Expand release.** Add the new column/table and start
-   double-writing. The old code continues to read and write the old
-   column/table; it doesn't know the new one exists, and that's fine.
-2. **Migrate release.** Move readers to the new column/table. The old
-   column/table is still present, still being written by old code (if
-   any still exists), and still readable by the new code as a
-   fallback.
-3. **Contract release.** Once you're certain no live instances depend
-   on the old column/table, drop it.
+## Configuration
 
-A short `CONTRACT.md` note inside `migrations/` is encouraged for any
-contract step so reviewers can confirm the prior expand/migrate
-releases have shipped.
+The upgrade coordinator reads `/etc/myportal.env` by default, matching the
+`EnvironmentFile` used by `myportal@.service`. Set `MYPORTAL_ENV_FILE` only for
+a nonstandard deployment; legacy installations without `/etc/myportal.env`
+continue to use the control checkout's `.env` file.
+
+`MYPORTAL_READY_TIMEOUT` bounds the overall readiness retry window in seconds,
+`MYPORTAL_READY_REQUEST_TIMEOUT` bounds each readiness HTTP request (defaulting
+to 10 seconds so startup-time responses are not abandoned prematurely),
+`MYPORTAL_DRAIN_SECONDS` bounds the drain period, and
+`MYPORTAL_SMOKE_PATH` selects an idempotent smoke endpoint. Path overrides for
+test or nonstandard installations are listed in `.env.example`. The deployment
+user needs narrowly scoped permission to restart `myportal@*.service`, validate
+and reload nginx, and atomically replace the upstream include; it does not need
+recursive ownership permission.

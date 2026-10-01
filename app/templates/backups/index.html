@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% from "macros/counters.html" import counter_strip %}
+{% from "macros/tables.html" import table_column_picker %}
+
+{% block title %}Backups{% endblock %}
+
+{% set backup_columns = [
+  {"key": "name", "label": "Job"},
+  {"key": "tracking", "label": "Tracking"},
+  {"key": "app", "label": "Backup app"},
+  {"key": "frequency", "label": "Frequency"},
+  {"key": "source", "label": "Source"},
+  {"key": "destinations", "label": "Destinations"},
+  {"key": "keys", "label": "Encryption keys"},
+  {"key": "notes", "label": "Notes"},
+] %}
+
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text" title="Backup jobs for {{ company.name if company else 'this company' }}: what is backed up, where it goes and how to recover it.">Backups</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="backup-register-filter">Filter backups</label>
+      <input
+        id="backup-register-filter"
+        type="search"
+        class="form-input page-header-toolbar__search"
+        placeholder="Filter backups"
+        data-table-filter="backup-register-table"
+      />
+      {{ table_column_picker("backup-register", backup_columns) }}
+      <span class="page-header-toolbar__info" data-table-info aria-live="polite">{{ rows | length }} backup{{ '' if rows | length == 1 else 's' }}</span>
+    </div>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  {% set backup_actions = [] %}
+  {% if can_edit %}
+    {% set _ = backup_actions.append({"label": "Add backup", "type": "link", "variant": "primary", "href": "/backups/new"}) %}
+  {% endif %}
+  {% if is_super_admin %}
+    {% set _ = backup_actions.append({"label": "Backup history", "type": "link", "href": "/admin/backup-jobs",
+       "attrs": {"title": "Manage status-tracked jobs and their webhooks"}}) %}
+  {% endif %}
+  {{ page_header_actions(backup_actions) }}
+{% endblock %}
+
+{% block content %}
+{{ counter_strip([
+  {"label": "Status-tracked", "value": tracked_count, "variant": "info",
+   "title": "Jobs that report their status automatically"},
+  {"label": "Manual", "value": manual_count, "variant": "neutral",
+   "title": "Backups documented here that do not report their status"},
+  {"label": "Passed today", "value": status_counts['pass'], "variant": "success"},
+  {"label": "Warning today", "value": status_counts['warn'], "variant": "warning"},
+  {"label": "Failed today", "value": status_counts['fail'], "variant": "danger"},
+], total=rows | length, total_label="Backups") }}
+
+<section class="card card--panel">
+  <div class="card__body">
+    <div class="table-wrapper">
+      <table class="table" id="backup-register-table" data-table data-table-id="backup-register">
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string" data-column-key="name">Job</th>
+            <th scope="col" data-sort="string" data-column-key="tracking">Tracking</th>
+            <th scope="col" data-sort="string" data-column-key="app">Backup app</th>
+            <th scope="col" data-sort="string" data-column-key="frequency">Frequency</th>
+            <th scope="col" data-column-key="source">Source</th>
+            <th scope="col" data-column-key="destinations">Destinations</th>
+            <th scope="col" data-column-key="keys">Encryption keys</th>
+            <th scope="col" data-column-key="notes">Notes</th>
+            {% if can_edit %}<th scope="col" class="table__actions" data-column-key="actions">Actions</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            {% set details = row.details or {} %}
+            <tr>
+              <td data-label="Job" data-column-key="name">
+                <strong>{{ row.name }}</strong>
+                {% if row.description %}<div class="table__meta">{{ row.description }}</div>{% endif %}
+              </td>
+              <td data-label="Tracking" data-column-key="tracking">
+                {% if row.kind == 'tracked' %}
+                  <span class="status status--{{ row.status_variant }}" title="Today's reported status">{{ (row.today_status or 'unknown') | title }}</span>
+                  {% if not row.is_active %}<div class="table__meta">Tracking disabled</div>{% endif %}
+                {% else %}
+                  <span class="status status--neutral">Not tracked</span>
+                {% endif %}
+              </td>
+              <td data-label="Backup app" data-column-key="app">{{ details.backup_app_name or '—' }}</td>
+              <td data-label="Frequency" data-column-key="frequency">{{ details.frequency or '—' }}</td>
+              <td data-label="Source" data-column-key="source">{% if details.source %}<span class="backup-register__text">{{ details.source }}</span>{% else %}—{% endif %}</td>
+              <td data-label="Destinations" data-column-key="destinations">
+                {% if details.destinations %}
+                  <ul class="backup-register__list">{% for destination in details.destinations %}<li>{{ destination }}</li>{% endfor %}</ul>
+                {% else %}—{% endif %}
+              </td>
+              <td data-label="Encryption keys" data-column-key="keys">
+                {% set credential_ids = details.credential_ids or [] %}
+                {% set key_links = details.key_links or [] %}
+                {% if credential_ids or key_links %}
+                  <ul class="backup-register__list">
+                    {% for credential_id in credential_ids %}
+                      <li>
+                        {% if vault_available %}
+                          {% if is_company_admin and active_company_id %}<a href="/admin/companies/{{ active_company_id }}#credentials">{{ credential_names.get(credential_id, 'Credential #' ~ credential_id) }}</a>{% else %}{{ credential_names.get(credential_id, 'Credential #' ~ credential_id) }}{% endif %}
+                          <span class="table__meta">vault</span>
+                        {% else %}
+                          Vault credential
+                        {% endif %}
+                      </li>
+                    {% endfor %}
+                    {% for link in key_links %}
+                      <li><a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.label }}</a></li>
+                    {% endfor %}
+                  </ul>
+                {% else %}—{% endif %}
+              </td>
+              <td data-label="Notes" data-column-key="notes">{% if details.notes %}<span class="backup-register__text">{{ details.notes }}</span>{% else %}—{% endif %}</td>
+              {% if can_edit %}
+                <td class="table__actions" data-column-key="actions">
+                  <a class="button button--ghost button--small" href="{{ row.edit_url }}">{{ 'Edit details' if row.kind == 'tracked' else 'Edit' }}</a>
+                  {% if row.delete_url %}
+                    <form action="{{ row.delete_url }}" method="post" class="inline-form" data-confirm="Delete this backup entry?" onsubmit="return window.confirm(this.dataset.confirm);">
+                      {% include "partials/csrf.html" %}
+                      <button type="submit" class="button button--danger button--small">Delete</button>
+                    </form>
+                  {% endif %}
+                </td>
+              {% endif %}
+            </tr>
+          {% else %}
+            <tr><td colspan="{{ 9 if can_edit else 8 }}" class="table__empty">No backups recorded yet.{% if can_edit %} <a href="/backups/new">Add a backup</a> to document one.{% endif %}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -213,6 +213,9 @@ async def end_impersonation(
         raise OriginalSessionUnavailableError("Original session is no longer available")
 
     original_session = session_manager.hydrate_session(original_record)
+    # The record only holds the token digest; issue a fresh raw token so the
+    # browser gets a usable cookie instead of the stored hash.
+    original_session = await session_manager.rotate_session_token(original_session)
     current_time = datetime.now(timezone.utc)
     await auth_repo.update_session(
         original_session.id,

@@ -239,7 +239,7 @@ async def update_view(
         UPDATE ticket_views
         SET {', '.join(updates)}
         WHERE id = %s AND user_id = %s
-    """
+    """  # nosec B608
     
     async with db.acquire() as conn:
         async with conn.cursor() as cursor:

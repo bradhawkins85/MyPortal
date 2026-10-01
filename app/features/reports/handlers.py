@@ -27,8 +27,6 @@ def _can_configure_report(user: Any, membership: Any) -> bool:
 
 async def _load_report_context(request: Request):
     from app.repositories import companies as company_repo
-    from app.repositories import user_companies as user_company_repo
-
     user, redirect = await _main()._require_menu_page_access(
         request,
         "menu.reports",
@@ -49,7 +47,9 @@ async def _load_report_context(request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid company identifier",
         ) from exc
-    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    membership = await _main()._get_effective_company_membership(
+        request, user["id"], company_id
+    )
     company = await company_repo.get_company_by_id(company_id)
     return user, membership, company, company_id, None
 
@@ -90,7 +90,7 @@ def _delete_cover_image_file(relative_path: str) -> None:
         candidate.relative_to(base)
         candidate.unlink(missing_ok=True)
     except (ValueError, OSError):  # pragma: no cover - defensive
-        pass
+        return
 
 
 async def company_overview_report_page(request: Request):
@@ -156,7 +156,7 @@ async def company_overview_report_pdf(request: Request):
                 encoded = base64.b64encode(cover_file.read_bytes()).decode("ascii")
                 pdf_cover_image_data_uri = f"data:{mime};base64,{encoded}"
         except (ValueError, OSError):
-            pass
+            pdf_cover_image_data_uri = None
 
     report = await company_report_layout.build(company_id, company)
     base_context = await _main()._build_base_context(

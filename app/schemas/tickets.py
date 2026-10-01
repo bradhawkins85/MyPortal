@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
@@ -47,7 +47,19 @@ class TacticalRMMTicketCreate(BaseModel):
     )
     requester_id: str | int | None = None
     assigned_user_id: str | int | None = None
-    external_reference: Optional[str] = Field(default=None, max_length=128)
+    alert_id: str | int = Field(
+        ...,
+        description="Tactical RMM Alert primary key (for example {{alert.id}})",
+    )
+
+
+class TacticalRMMTicketResolve(BaseModel):
+    """Payload sent by a Tactical RMM alert resolved webhook."""
+
+    alert_id: str | int = Field(
+        ...,
+        description="Tactical RMM Alert primary key (for example {{alert.id}})",
+    )
 
 
 class TicketUpdate(BaseModel):
@@ -194,6 +206,8 @@ class TicketDashboardRow(BaseModel):
     task_count: int = 0
     has_open_tasks: bool = False
     open_task_count: int = 0
+    linked_asset_count: int = 0
+    suggested_asset_count: int = 0
     labels: list[str] = Field(default_factory=list)
     age_days: Optional[int] = None
     updated_age_hours: Optional[int] = None
@@ -203,6 +217,11 @@ class TicketDashboardRow(BaseModel):
     latest_reply_kind: Optional[str] = None
     latest_public_reply_email_status: Optional[str] = None
     ticket_update_actor_type: Optional[str] = None
+    sla_state: Optional[str] = None
+    sla_label: Optional[str] = None
+    sla_name: Optional[str] = None
+    sla_response_due_at: Optional[datetime] = None
+    sla_resolution_due_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -403,6 +422,8 @@ class TicketViewFilters(BaseModel):
     assigned_user_id: Optional[list[int]] = None
     module_slug: Optional[str] = None
     search: Optional[str] = None
+    column_filters: Optional[dict[str, dict[str, Any]]] = None
+    visible_columns: Optional[list[str]] = Field(default=None, max_length=64)
 
     model_config = ConfigDict(populate_by_name=True)
 
