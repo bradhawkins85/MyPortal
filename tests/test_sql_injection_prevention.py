@@ -7,6 +7,7 @@ lists, rather than merely demonstrating that a third-party SQL API can bind data
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -19,6 +20,7 @@ from app.repositories import (
     company_memberships,
     compliance_checks,
     email_blocklist,
+    infrastructure,
     imap_accounts,
     invoices,
     knowledge_base,
@@ -27,12 +29,15 @@ from app.repositories import (
     message_templates,
     port_pricing,
     ports,
+    processes,
     roles,
     scheduled_invoices,
     service_status,
     subscriptions,
     tray,
     users,
+    vault,
+    websites,
 )
 
 
@@ -95,6 +100,68 @@ def test_users_allowlisted_update_helper_separates_identifiers_and_values():
 
     with pytest.raises(ValueError, match="Unsupported update fields"):
         users._build_safe_update_clause({BAD_IDENTIFIER: INJECTION})
+
+
+def test_processes_reference_table_rejects_unknown_identifier(monkeypatch):
+    mocks = _mock_database(monkeypatch)
+
+    with pytest.raises(ValueError, match="Unsupported reference table"):
+        asyncio.run(
+            processes.company_reference_exists(
+                "assets; DROP TABLE tickets; --", 1, 7
+            )
+        )
+
+    for mock in mocks.values():
+        mock.assert_not_awaited()
+
+
+def test_vault_link_validation_rejects_unknown_identifier(monkeypatch):
+    mocks = _mock_database(monkeypatch)
+
+    with pytest.raises(ValueError, match="Unsupported credential link type"):
+        asyncio.run(vault._validate_links(1, [("asset; DROP TABLE assets; --", 7)]))
+
+    for mock in mocks.values():
+        mock.assert_not_awaited()
+
+
+def test_infrastructure_table_helpers_reject_unknown_identifier(monkeypatch):
+    mocks = _mock_database(monkeypatch)
+
+    with pytest.raises(ValueError, match="Invalid infrastructure record type"):
+        asyncio.run(
+            infrastructure.get_record("ip_networks; DROP TABLE ip_networks; --", 1, 7)
+        )
+
+    with pytest.raises(ValueError, match="Invalid record type"):
+        asyncio.run(
+            infrastructure.delete_record("racks; DROP TABLE rack_equipment; --", 7, 1)
+        )
+
+    for mock in mocks.values():
+        mock.assert_not_awaited()
+
+
+def test_websites_component_update_uses_fixed_sql_and_bound_message(monkeypatch):
+    mocks = _mock_database(monkeypatch)
+
+    with pytest.raises(ValueError, match="Unknown observation component"):
+        asyncio.run(
+            websites.record_component_failure(
+                7,
+                "dns; UPDATE websites SET monitor_tls = 0 --",
+                datetime.utcnow(),
+                INJECTION,
+            )
+        )
+
+    mocks["execute"].assert_not_awaited()
+    asyncio.run(websites.record_component_failure(7, "dns", datetime.utcnow(), INJECTION))
+    sql, params = mocks["execute"].await_args.args
+    assert "dns_failure_message = %s" in sql
+    assert INJECTION not in sql
+    assert params[1] == INJECTION
 
 
 @pytest.mark.parametrize(

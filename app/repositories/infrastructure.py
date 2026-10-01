@@ -10,6 +10,21 @@ from app.services import rack_item_types
 
 MAX_RACK_PORTS = 1000
 ADDRESS_STATES = {"available", "reserved", "assigned", "dhcp", "deprecated"}
+_INFRA_RECORD_SQL = {
+    "ip_networks": "SELECT * FROM ip_networks WHERE id=%s AND company_id=%s",
+    "racks": "SELECT * FROM racks WHERE id=%s AND company_id=%s",
+}
+_SLOT_CONFLICT_BASE_SQL = {
+    "rack_equipment_slots": "SELECT unit_number FROM rack_equipment_slots WHERE rack_id=%s AND ({conditions})",
+    "rack_reservation_slots": "SELECT unit_number FROM rack_reservation_slots WHERE rack_id=%s AND ({conditions})",
+}
+_RECORD_DELETE_SQL = {
+    "ip_networks": "DELETE FROM ip_networks WHERE id=%s AND company_id=%s",
+    "ip_addresses": "DELETE FROM ip_addresses WHERE id=%s AND company_id=%s",
+    "racks": "DELETE FROM racks WHERE id=%s AND company_id=%s",
+    "rack_equipment": "DELETE FROM rack_equipment WHERE id=%s AND company_id=%s",
+    "rack_reservations": "DELETE FROM rack_reservations WHERE id=%s AND company_id=%s",
+}
 
 
 def match_address_network(
@@ -96,12 +111,10 @@ async def import_discovered_address(
 
 
 async def get_record(table: str, company_id: int, record_id: int) -> dict[str, Any] | None:
-    if table not in {"ip_networks", "racks"}:
+    query = _INFRA_RECORD_SQL.get(table)
+    if query is None:
         raise ValueError("Invalid infrastructure record type")
-    return await db.fetch_one(
-        "SELECT * FROM " + table + " WHERE id=%s AND company_id=%s",
-        (record_id, company_id),
-    )
+    return await db.fetch_one(query, (record_id, company_id))
 
 
 def _number_ports(ports: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -398,7 +411,7 @@ async def _slot_conflict(rack_id: int, units: list[int], faces: list[str], lanes
     params = tuple(value for unit in units for slot_face in faces for lane in lanes
                    for value in (unit, slot_face, lane))
     for table in ("rack_equipment_slots", "rack_reservation_slots"):
-        sql = "SELECT unit_number FROM " + table + " WHERE rack_id=%s AND (" + conditions + ")"
+        sql = _SLOT_CONFLICT_BASE_SQL[table].format(conditions=conditions)
         args: tuple[Any, ...] = (rack_id, *params)
         if table == "rack_equipment_slots" and exclude_equipment_id is not None:
             sql += " AND equipment_id<>%s"
@@ -767,9 +780,11 @@ async def reserve_space(company_id: int, rack_id: int, start_unit: int, unit_hei
     params = tuple(value for unit in units for slot_face in faces for lane in lanes
                    for value in (unit, slot_face, lane))
     for table in ("rack_equipment_slots", "rack_reservation_slots"):
+        sql = _SLOT_CONFLICT_BASE_SQL[table].format(conditions=conditions)
         conflict = await db.fetch_one(
-            "SELECT unit_number FROM " + table + " WHERE rack_id=%s AND (" + conditions + ")",
-            (rack_id, *params))
+            sql,
+            (rack_id, *params),
+        )
         if conflict:
             raise ValueError(f"Rack unit {conflict['unit_number']} is already occupied or reserved")
     reservation_id = await db.execute_returning_lastrowid(
@@ -802,13 +817,20 @@ async def _delete_port_links(port_ids: list[int]) -> None:
 
 
 async def delete_record(table: str, record_id: int, company_id: int) -> None:
-    allowed = {"ip_networks", "ip_addresses", "racks", "rack_equipment", "rack_reservations"}
-    if table not in allowed:
+    delete_sql = _RECORD_DELETE_SQL.get(table)
+    if delete_sql is None:
         raise ValueError("Invalid record type")
     if table in {"racks", "rack_equipment"}:
-        column = "e.rack_id" if table == "racks" else "e.id"
-        ports = await db.fetch_all(
+        port_lookup_sql = (
             "SELECT p.id FROM rack_equipment_ports p JOIN rack_equipment e ON e.id=p.equipment_id"
-            " WHERE " + column + "=%s AND e.company_id=%s", (record_id, company_id)) or []
+            " WHERE e.rack_id=%s AND e.company_id=%s"
+            if table == "racks"
+            else "SELECT p.id FROM rack_equipment_ports p JOIN rack_equipment e ON e.id=p.equipment_id"
+            " WHERE e.id=%s AND e.company_id=%s"
+        )
+        ports = await db.fetch_all(
+            port_lookup_sql,
+            (record_id, company_id),
+        ) or []
         await _delete_port_links([int(row["id"]) for row in ports])
-    await db.execute("DELETE FROM " + table + " WHERE id=%s AND company_id=%s", (record_id, company_id))
+    await db.execute(delete_sql, (record_id, company_id))

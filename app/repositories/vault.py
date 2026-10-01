@@ -15,6 +15,12 @@ _LINK_TABLES = {
     "ticket": "tickets",
     "process_run": "process_runs",
 }
+_LINK_VALIDATION_SQL = {
+    "assets": "SELECT id FROM assets WHERE id = %s AND company_id = %s",
+    "staff": "SELECT id FROM staff WHERE id = %s AND company_id = %s",
+    "tickets": "SELECT id FROM tickets WHERE id = %s AND company_id = %s",
+    "process_runs": "SELECT id FROM process_runs WHERE id = %s AND company_id = %s",
+}
 
 
 async def _validate_links(company_id: int, links: list[tuple[str, int]]) -> None:
@@ -23,11 +29,7 @@ async def _validate_links(company_id: int, links: list[tuple[str, int]]) -> None
         table = _LINK_TABLES.get(target_type)
         if table is None:
             raise ValueError("Unsupported credential link type")
-        # ``table`` comes exclusively from the static allow-list above.
-        row = await db.fetch_one(
-            "SELECT id FROM " + table + " WHERE id = %s AND company_id = %s",
-            (target_id, company_id),
-        )
+        row = await db.fetch_one(_LINK_VALIDATION_SQL[table], (target_id, company_id))
         if row is None:
             raise ValueError("Credential link target is not in the company")
 

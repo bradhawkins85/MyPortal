@@ -9,6 +9,13 @@ REQUIRED_TABLES = (
     "credential_links",
     "audit_logs",
 )
+_TABLE_PROBE_SQL = {
+    "company_credential_features": "SELECT 1 AS ready FROM company_credential_features WHERE 1 = 0",
+    "credentials": "SELECT 1 AS ready FROM credentials WHERE 1 = 0",
+    "credential_secret_versions": "SELECT 1 AS ready FROM credential_secret_versions WHERE 1 = 0",
+    "credential_links": "SELECT 1 AS ready FROM credential_links WHERE 1 = 0",
+    "audit_logs": "SELECT 1 AS ready FROM audit_logs WHERE 1 = 0",
+}
 
 
 async def is_enabled(company_id: int) -> bool:
@@ -33,8 +40,7 @@ async def missing_prerequisite_tables() -> list[str]:
     missing: list[str] = []
     for table in REQUIRED_TABLES:
         try:
-            # Names are from the constant allow-list above, never user input.
-            await db.fetch_one(f"SELECT 1 AS ready FROM {table} WHERE 1 = 0")
+            await db.fetch_one(_TABLE_PROBE_SQL[table])
         except Exception:
             missing.append(table)
     return missing

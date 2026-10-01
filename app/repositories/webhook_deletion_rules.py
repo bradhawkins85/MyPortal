@@ -25,8 +25,12 @@ def _normalise(row: dict[str, Any]) -> dict[str, Any]:
 
 
 async def list_rules(*, enabled_only: bool = False) -> list[dict[str, Any]]:
-    where = " WHERE enabled = 1" if enabled_only else ""
-    rows = await db.fetch_all("SELECT * FROM webhook_deletion_rules" + where + " ORDER BY id")
+    if enabled_only:
+        rows = await db.fetch_all(
+            "SELECT * FROM webhook_deletion_rules WHERE enabled = 1 ORDER BY id"
+        )
+    else:
+        rows = await db.fetch_all("SELECT * FROM webhook_deletion_rules ORDER BY id")
     return [_normalise(row) for row in rows]
 
 

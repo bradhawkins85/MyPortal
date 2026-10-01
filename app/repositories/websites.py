@@ -127,6 +127,20 @@ async def replace_links(company_id: int, website_id: int, asset_ids: list[int], 
 
 
 CHECK_TYPES = {"website", "dns"}
+_COMPONENT_FAILURE_SQL = {
+    "certificate": (
+        "UPDATE websites SET certificate_failure_at = %s, "
+        "certificate_failure_message = %s WHERE id = %s"
+    ),
+    "registration": (
+        "UPDATE websites SET registration_failure_at = %s, "
+        "registration_failure_message = %s WHERE id = %s"
+    ),
+    "dns": (
+        "UPDATE websites SET dns_failure_at = %s, "
+        "dns_failure_message = %s WHERE id = %s"
+    ),
+}
 
 
 async def enqueue_check(website_id: int, *, check_type: str = "website",
@@ -393,16 +407,10 @@ async def record_dns_success(website_id: int, checked_at: datetime,
 
 async def record_component_failure(website_id: int, component: str, checked_at: datetime,
                                    message: str) -> None:
-    columns = {
-        "certificate": ("certificate_failure_at", "certificate_failure_message"),
-        "registration": ("registration_failure_at", "registration_failure_message"),
-        "dns": ("dns_failure_at", "dns_failure_message"),
-    }
-    if component not in columns:
+    statement = _COMPONENT_FAILURE_SQL.get(component)
+    if statement is None:
         raise ValueError("Unknown observation component")
-    at_column, message_column = columns[component]
-    await db.execute("UPDATE websites SET " + at_column + " = %s, " + message_column + " = %s WHERE id = %s",
-                     (checked_at, message[:500], website_id))
+    await db.execute(statement, (checked_at, message[:500], website_id))
 
 
 async def record_failure(website_id: int, checked_at: datetime, message: str) -> None:
