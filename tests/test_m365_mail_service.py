@@ -137,6 +137,35 @@ def test_message_marker_match_is_case_sensitive() -> None:
     assert not m365_mail._message_marker_matches_uid(marker, "aAMkAGraphId")
 
 
+def test_validate_graph_request_url_accepts_valid_graph_mail_request() -> None:
+    url = (
+        "https://graph.microsoft.com/v1.0/users/shared%40contoso.com/mailFolders/"
+        "inbox/messages?$top=50&$select=id,subject&$filter=isRead%20eq%20false"
+    )
+
+    validated = m365_mail._validate_graph_request_url(url, method="GET")
+
+    assert validated == url
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://graph.microsoft.com/v1.0/users/a/messages",
+        "https://evil.example/v1.0/users/a/messages",
+        "https://graph.microsoft.com@evil.example/v1.0/users/a/messages",
+        "https://graph.microsoft.com/v1.0/users/a/messages#fragment",
+        "https://graph.microsoft.com/v1.0/users/a/messages?next=https://evil.example",
+        "https://graph.microsoft.com/v1.0/users/a/messages?%ZZ=1",
+        "https://graph.microsoft.com/v1.0/users/a/messages;%2f..",
+        "https://graph.microsoft.com/v1.0/users/a/messages/%2e%2e/attachments",
+    ],
+)
+def test_validate_graph_request_url_rejects_unapproved_destinations(url: str) -> None:
+    with pytest.raises(ValueError, match="Rejected Microsoft Graph GET URL"):
+        m365_mail._validate_graph_request_url(url, method="GET")
+
+
 # ---------------------------------------------------------------------------
 # Account management
 # ---------------------------------------------------------------------------
