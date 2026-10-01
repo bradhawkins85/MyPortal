@@ -157,7 +157,7 @@ with the owning module (`m365-admin`, `m365-mail`).
 
 `syncro`, `ollama`, `smtp`, `smtp2go`, `m365-direct-delivery`, `imap`,
 `receive-sms`, `calls`, `voice-monitor`, `m365-mail`, `tacticalrmm`, `ntfy`,
-`apprise`, `uptimekuma`, `chatgpt-mcp`, `ollama-mcp`, `xero`, `sms-gateway`,
+`uptimekuma`, `chatgpt-mcp`, `ollama-mcp`, `xero`, `sms-gateway`,
 `m365-admin`, `call-recordings`, `whisperx`, `unifi-talk`, `reprocess-ai`,
 `password-pusher`, `hudu`, `huntress`, `trello`, `solidtime`, and
 `matrix-chat-assign`.
