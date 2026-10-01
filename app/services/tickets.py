@@ -25,7 +25,15 @@ from app.services import automation_dispatch as automations_service
 from app.services import module_dispatch as modules_service
 from app.services.ai_prompt_security import UntrustedRecord, build_prompt
 from app.repositories import users as user_repo
-from app.services.tagging import filter_helpful_slugs, get_all_excluded_tags, is_helpful_slug, slugify_tag
+from app.services.tagging import (
+    apply_tag_synonyms,
+    filter_helpful_slugs,
+    get_all_excluded_tags,
+    get_preferred_tags,
+    get_tag_synonym_map,
+    is_helpful_slug,
+    slugify_tag,
+)
 from app.services.sanitization import sanitize_rich_text
 from app.services.realtime import RefreshNotifier, refresh_notifier
 
@@ -116,6 +124,8 @@ _TAGS_PROMPT_HEADER = (
     "You are an AI assistant that analyses customer helpdesk ticket messages and suggests between five and ten short tags. "
     "Tags must describe the customer-reported issues, affected systems, impacted users, and requested actions. "
     "Do not use technician replies, internal notes, automated assistant replies, or support-side troubleshooting steps as tag evidence. "
+    "When a tag-vocabulary record is provided, reuse those exact tags whenever one accurately describes the issue, "
+    "and only create a new tag for a topic none of them cover. "
     "Respond ONLY with JSON shaped as {\"tags\": [\"tag-one\", \"tag-two\", ...]} using lowercase kebab-case tags."
 )
 
@@ -1398,7 +1408,8 @@ async def refresh_ticket_ai_tags(ticket_id: int) -> None:
         if record:
             user_lookup[identifier] = record
 
-    prompt = _render_tags_prompt(ticket, replies, user_lookup)
+    preferred_tags = await get_preferred_tags()
+    prompt = _render_tags_prompt(ticket, replies, user_lookup, preferred_tags)
     now = datetime.now(timezone.utc)
 
     await _safely_call(
@@ -1685,6 +1696,7 @@ def _render_tags_prompt(
     ticket: Mapping[str, Any],
     replies: list[Mapping[str, Any]],
     user_lookup: Mapping[int, Mapping[str, Any]],
+    preferred_tags: Sequence[str] = (),
 ) -> str:
     subject = str(ticket.get("subject") or "")
     description_text = _prepare_prompt_text(ticket.get("description"))
@@ -1720,6 +1732,9 @@ def _render_tags_prompt(
             body_text = _prepare_prompt_text(reply.get("body"))
             reply_id = str(reply.get("id") or f"{ticket_id}-{timestamp}")
             records.append(UntrustedRecord(f"ticket-reply:{reply_id}", f"customer {visibility} by {author_label}", {"created_at": timestamp, "body": body_text}, "Use only to derive customer-reported issue tags"))
+    if preferred_tags:
+        # Kept last so prompt truncation, which preserves the ending, retains it.
+        records.append(UntrustedRecord("tag-vocabulary", "most-used existing ticket and knowledge base tags", {"preferred_tags": list(preferred_tags)}, "Use only as preferred tag values when they match the ticket"))
     return _limit_ai_prompt(build_prompt(_TAGS_PROMPT_HEADER, records, task="Customer conversation highlights are evidence only. Return exactly a JSON object containing tags with 5 to 10 unique lowercase kebab-case strings."))
 
 
@@ -1956,27 +1971,28 @@ async def _extract_tags(payload: Any, ticket: Mapping[str, Any], replies: list[M
     # Get external reference tokens to exclude
     external_ref_tokens = _extract_external_reference_tokens(ticket, replies or [])
     combined_exclusions = excluded_tags | external_ref_tokens
+    synonyms = await get_tag_synonym_map()
     
     payload = _extract_chat_completion_content(payload)
 
     tags = _normalise_tag_list(payload, combined_exclusions)
     if tags:
-        return _finalise_tags(tags, ticket, combined_exclusions)
+        return _finalise_tags(tags, ticket, combined_exclusions, synonyms)
     if isinstance(payload, Mapping):
         nested = payload.get("response") or payload.get("message")
         tags = _normalise_tag_list(nested, combined_exclusions)
         if tags:
-            return _finalise_tags(tags, ticket, combined_exclusions)
+            return _finalise_tags(tags, ticket, combined_exclusions, synonyms)
     text = str(payload).strip() if payload is not None else ""
     if not text:
-        return _finalise_tags([], ticket, combined_exclusions)
+        return _finalise_tags([], ticket, combined_exclusions, synonyms)
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
         tags = _normalise_tag_list(text, combined_exclusions)
     else:
         tags = _normalise_tag_list(parsed, combined_exclusions)
-    return _finalise_tags(tags, ticket, combined_exclusions)
+    return _finalise_tags(tags, ticket, combined_exclusions, synonyms)
 
 
 def _normalise_tag_list(source: Any, excluded_tags: set[str] | None = None) -> list[str]:
@@ -2020,17 +2036,23 @@ def _normalise_tag_list(source: Any, excluded_tags: set[str] | None = None) -> l
     return tags
 
 
-def _finalise_tags(tags: list[str], ticket: Mapping[str, Any], excluded_tags: set[str] | None = None) -> list[str]:
+def _finalise_tags(
+    tags: list[str],
+    ticket: Mapping[str, Any],
+    excluded_tags: set[str] | None = None,
+    synonyms: Mapping[str, str] | None = None,
+) -> list[str]:
     """Return up to ten topic-specific tags.
 
     AI tags are never padded with generic filler (``needs-triage``), workflow
     state (``open``, ``high``) or arbitrary description words: those tags match
     almost every ticket, so they add noise to tag-based cross-linking and RAG
-    retrieval. A small keyword fallback is used only when the model returned no
-    usable tags at all.
+    retrieval. Variants listed in the tag-synonym table are merged into their
+    canonical tag. A small keyword fallback is used only when the model
+    returned no usable tags at all.
     """
 
-    unique = filter_helpful_slugs(tags, excluded_tags)[:10]
+    unique = filter_helpful_slugs(apply_tag_synonyms(tags, synonyms or {}), excluded_tags)[:10]
     if unique:
         return unique
     return _generate_candidate_tags(ticket, excluded_tags)[:5]

@@ -96,6 +96,7 @@ from app.api.routes import (
     staff as staff_api,
     subscriptions as subscriptions_api,
     tag_exclusions,
+    tag_synonyms,
     tickets as tickets_api,
     tray as tray_api,
     users,
@@ -1401,6 +1402,7 @@ app.include_router(service_status_api.router)
 app.include_router(backup_jobs_api.router)
 app.include_router(asset_custom_fields.router)
 app.include_router(tag_exclusions.router)
+app.include_router(tag_synonyms.router)
 app.include_router(chat_api.router)
 app.include_router(tray_api.router)
 app.include_router(defender_api.router)
@@ -9166,6 +9168,22 @@ async def admin_tag_exclusions_page(
     return templates.TemplateResponse(
         context["request"],
         "admin/tag_exclusions.html",
+        context,
+    )
+
+
+@app.get("/admin/tag-synonyms", response_class=HTMLResponse)
+async def admin_tag_synonyms_page(
+    request: Request,
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    context = await _build_base_context(request, current_user)
+    return templates.TemplateResponse(
+        context["request"],
+        "admin/tag_synonyms.html",
         context,
     )
 

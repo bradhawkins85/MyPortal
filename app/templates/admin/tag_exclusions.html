@@ -126,7 +126,7 @@
         }
 
         try {
-          const response = await fetch(`/api/tag-exclusions/${encodeURIComponent(slug)}`, {
+          const response = await fetch(`/api/tag-exclusions/${encodeURIComponent(tagSlug)}`, {
             method: 'DELETE',
             headers: {
               'X-CSRF-Token': csrfToken || '',

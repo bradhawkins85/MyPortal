@@ -1,0 +1,7 @@
+{
+  "guid": "aac9c2ab-2d5e-403f-84a6-773a3b154d3f",
+  "occurred_at": "2026-10-01T11:20Z",
+  "change_type": "Feature",
+  "summary": "Add a controlled AI tag vocabulary: ticket and knowledge base tag prompts now prefer the most-used existing tags, and a new AI tag synonyms page merges variant tags (for example outlook-crashing into outlook-crash) on new and existing tickets and articles so tag matching between tickets and articles is consistent",
+  "content_hash": "14bd9a901627f48d0ccc2f7827788a4d26b9f465e50bf08a1f6a6cd5a4961781"
+}
