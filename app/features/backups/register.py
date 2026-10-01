@@ -114,6 +114,10 @@ async def backups_page(request: Request):
             "details": entry,
         })
     rows.sort(key=lambda row: str(row["name"] or "").casefold())
+    status_counts = {"pass": 0, "warn": 0, "fail": 0}
+    for job in jobs:
+        if job.get("today_status") in status_counts:
+            status_counts[job["today_status"]] += 1
 
     return await _main()._render_template("backups/index.html", request, user, extra={
         "title": "Backups",
@@ -122,6 +126,7 @@ async def backups_page(request: Request):
         "rows": rows,
         "tracked_count": len(jobs),
         "manual_count": len(rows) - len(jobs),
+        "status_counts": status_counts,
         "vault_available": credentials is not None,
         "credential_names": credential_names,
     })
@@ -145,6 +150,7 @@ async def _render_form(
         "entry": entry or {},
         "job": job,
         "form_action": action,
+        "delete_url": f"/backups/{entry['id']}/delete" if entry and not job else None,
         "backup_apps": await repo.list_apps(),
         "frequency_suggestions": repo.FREQUENCY_SUGGESTIONS,
         "vault_credentials": credentials,

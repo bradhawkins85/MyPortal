@@ -1,20 +1,43 @@
 {% extends "base.html" %}
 
+{% from "macros/header.html" import page_header_actions %}
+
 {% block title %}{{ title }}{% endblock %}
 
 {% block header_title %}
-  <div class="header__title-content header__title-content--stacked">
-    <span class="header__title-text">{{ title }}</span>
-    <span class="header__title-meta">{% if job %}Status tracking for this job is managed in Backup history; document how it works here.{% else %}A backup that is documented here but does not report its status.{% endif %}</span>
+  <div class="page-header-bar page-header-bar--record">
+    <span class="header__title-text" title="{{ title }}">{{ title }}</span>
+    <span class="page-header-bar__meta">
+      {% if job %}
+        <span class="status status--info">Status-tracked</span>
+        <span>Status tracking is managed in Backup history; document how this job works here.</span>
+      {% else %}
+        <span class="status status--neutral">Not tracked</span>
+        <span>A backup documented here that does not report its status.</span>
+      {% endif %}
+    </span>
   </div>
 {% endblock %}
 
-{% block header_actions %}<a class="button button--ghost" href="/backups">Back to backups</a>{% endblock %}
+{% block header_actions %}
+  {% set backup_actions = [
+    {"label": "Save" if entry or job else "Add backup", "type": "submit", "variant": "primary",
+     "attrs": {"form": "backup-form"}}
+  ] %}
+  {% if delete_url %}
+    {% set _ = backup_actions.append({"label": "Delete backup", "type": "form", "action": delete_url, "variant": "danger",
+       "confirm": "Delete this backup entry? Its documented details will be removed."}) %}
+  {% endif %}
+  <div class="header-actions">
+    <a class="button button--ghost" href="/backups">Back to backups</a>
+    {{ page_header_actions(backup_actions, menu_id="backup-actions-menu") }}
+  </div>
+{% endblock %}
 
 {% block content %}
 <section class="card card--panel">
   <div class="card__body">
-    <form method="post" action="{{ form_action }}" class="form">
+    <form id="backup-form" method="post" action="{{ form_action }}" class="form">
       {% include "partials/csrf.html" %}
       <div class="form-field">
         <label class="form-label" for="backup-name">Name</label>
@@ -84,11 +107,6 @@
       <div class="form-field">
         <label class="form-label" for="backup-notes">Notes</label>
         <textarea id="backup-notes" name="notes" class="form-input form-input--textarea" rows="4" maxlength="4000">{{ entry.notes or '' }}</textarea>
-      </div>
-
-      <div class="form-actions">
-        <button type="submit" class="button button--primary">{{ 'Save' if entry or job else 'Add backup' }}</button>
-        <a class="button button--ghost" href="/backups">Cancel</a>
       </div>
     </form>
   </div>

@@ -6,7 +6,9 @@
    Action shape (dict):
      {
        "label":   "New ticket",            # required
-       "type":    "button" | "link" | "form",   # default "button"
+       "type":    "button" | "link" | "form" | "submit",   # default "button";
+                                            # "submit" submits the form named
+                                            # by attrs.form
        "variant": "primary" | "ghost" | "danger" | None,
        "href":    "/path",                  # for type="link"
        "action":  "/path",                  # for type="form"
@@ -56,7 +58,7 @@
   {%- elif kind == 'form' -%}
     <form method="{{ action.get('method', 'post') }}" action="{{ action.get('action', '#') }}"
           class="header-menu__form"
-          {%- if action.get('confirm') %} data-confirm="{{ action.confirm }}" onsubmit="return confirm({{ action.confirm | tojson }});"{% endif -%}>
+          {%- if action.get('confirm') %} data-confirm="{{ action.confirm }}" onsubmit="return window.confirm(this.dataset.confirm);"{% endif -%}>
       {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
       <button type="submit" class="{{ classes }}"{{ _render_attrs(action.get('attrs')) }}>
         {%- if action.get('icon') %}<span class="header-menu__icon" aria-hidden="true">{{ action.icon | safe }}</span>{% endif -%}
@@ -64,7 +66,7 @@
       </button>
     </form>
   {%- else -%}
-    <button type="button" class="{{ classes }}"{{ _render_attrs(action.get('attrs')) }}>
+    <button type="{{ 'submit' if kind == 'submit' else 'button' }}" class="{{ classes }}"{{ _render_attrs(action.get('attrs')) }}>
       {%- if action.get('icon') %}<span class="header-menu__icon" aria-hidden="true">{{ action.icon | safe }}</span>{% endif -%}
       <span>{{ action.label }}</span>
     </button>
