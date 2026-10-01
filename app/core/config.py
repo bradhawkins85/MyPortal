@@ -16,9 +16,9 @@ from pydantic import (
     model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from loguru import logger
 
 from app.core.features import discover_builtin_feature_pack_slugs
-from app.services.component_availability import parse_slug_list
 
 # Placeholder values that must be replaced before running in production. These
 # match the defaults distributed in ``.env.example`` and other template files.
@@ -47,6 +47,18 @@ _DEFAULT_FEATURE_PACK_SLUGS: tuple[str, ...] = tuple(
     discover_builtin_feature_pack_slugs()
 )
 _DEFAULT_FEATURE_PACKS: str = ",".join(_DEFAULT_FEATURE_PACK_SLUGS)
+
+
+def parse_slug_list(value: object) -> tuple[str, ...]:
+    """Parse a comma-separated slug list, trimming and de-duplicating it."""
+
+    if isinstance(value, (tuple, list, set, frozenset)):
+        parts = value
+    else:
+        parts = str(value or "").split(",")
+    return tuple(
+        dict.fromkeys(str(part).strip() for part in parts if str(part).strip())
+    )
 
 
 def _normalize_feature_packs(value: Any) -> str:
@@ -314,9 +326,7 @@ class Settings(BaseSettings):
             return value
         # A typo must not stop the portal from starting: ignore the unknown
         # slug(s) and keep disabling the valid ones.
-        from app.core.logging import log_warning
-
-        log_warning(
+        logger.warning(
             "DISABLED_FEATURE_PACKS contains unknown slug(s); ignoring them",
             unknown=unknown,
         )

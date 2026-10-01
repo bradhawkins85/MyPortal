@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -26,7 +27,7 @@ async def documentation_search(
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     current_user: dict = Depends(get_current_user),
 ) -> DocumentationSearchResponse:
-    from app import main as main_module
+    main_module = import_module("app.main")
 
     if not await main_module._has_menu_page_access(
         request, current_user, "menu.documentation_search"

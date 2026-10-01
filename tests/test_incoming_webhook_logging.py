@@ -282,6 +282,23 @@ def test_normalize_source_url_preserves_non_standard_port():
     ) == "https://example.com:8080/path"
 
 
+def test_normalize_source_url_logs_and_preserves_on_invalid_port(monkeypatch):
+    from app.services.webhook_monitor import _normalize_source_url
+
+    logged = []
+
+    def fake_log_error(message, **kwargs):
+        logged.append({"message": message, **kwargs})
+
+    monkeypatch.setattr(webhook_monitor, "log_error", fake_log_error)
+
+    original = "http://example.com:bad/webhook"
+    assert _normalize_source_url(original) == original
+    assert len(logged) == 1
+    assert "preserving original URL" in logged[0]["message"]
+    assert logged[0]["error"] == "ValueError"
+
+
 # ---------------------------------------------------------------------------
 # log_incoming_webhook stores normalised (https) source_url for public hosts
 # ---------------------------------------------------------------------------

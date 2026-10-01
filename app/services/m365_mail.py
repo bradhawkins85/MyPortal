@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from datetime import datetime, timedelta, timezone
+from importlib import import_module
 from typing import Any, Mapping
 from urllib.parse import quote, unquote, urlencode, urlsplit
 
@@ -12,14 +13,12 @@ from app.services.monitored_http import monitored_client
 
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
-from app.repositories import m365 as m365_repo
 from app.repositories import m365_mail_accounts as mail_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import tickets as tickets_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import m365 as m365_service
 from app.services import modules as modules_service
-from app.services import system_state
 from app.services import ticket_attachments as ticket_attachments_service
 from app.services import tickets as tickets_service
 from app.services import dmarc as dmarc_service
@@ -302,7 +301,7 @@ async def get_account(account_id: int) -> dict[str, Any] | None:
 
 
 async def _ensure_scheduled_task(account: Mapping[str, Any]) -> Mapping[str, Any]:
-    from app.services.scheduler import scheduler_service
+    scheduler_service = import_module("app.services.scheduler").scheduler_service
 
     account_id = account.get("id")
     if account_id is None:
@@ -662,7 +661,7 @@ async def force_reimport_message(account_id: int, message_uid: str) -> dict[str,
 
 
 async def delete_account(account_id: int) -> None:
-    from app.services.scheduler import scheduler_service
+    scheduler_service = import_module("app.services.scheduler").scheduler_service
 
     existing = await mail_repo.get_account(account_id)
     if not existing:
@@ -2270,7 +2269,13 @@ async def _embed_graph_inline_images(
     url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/{message_id_encoded}/attachments"
     try:
         data = await _graph_get(access_token, url)
-    except Exception:
+    except Exception as exc:
+        log_error(
+            "Failed to fetch Microsoft Graph inline attachments; keeping original HTML body",
+            upn=upn,
+            message_id=message_id,
+            error=str(exc),
+        )
         return html_body
 
     inline_images: dict[str, tuple[str, bytes]] = {}
@@ -2421,7 +2426,14 @@ async def _save_graph_attachments(
     url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/{message_id_encoded}/attachments"
     try:
         data = await _graph_get(access_token, url)
-    except Exception:
+    except Exception as exc:
+        log_error(
+            "Failed to fetch Microsoft Graph attachments for ticket import",
+            upn=upn,
+            message_id=message_id,
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
         return
 
     for attachment in data.get("value") or []:

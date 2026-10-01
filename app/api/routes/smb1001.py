@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from importlib import import_module
 from pathlib import Path
 from typing import BinaryIO, Literal, Optional
 from uuid import uuid4
@@ -228,7 +229,7 @@ _SAFE_DOWNLOAD_TYPES = frozenset(
 
 
 def _private_uploads_root() -> Path:
-    from app import main as main_module
+    main_module = import_module("app.main")
 
     return main_module._private_uploads_path
 

@@ -1541,6 +1541,33 @@ async def test_embed_graph_inline_images_fetches_value_when_content_bytes_missin
     assert "att%20inline%2F1" in value_urls[0]
 
 
+async def test_embed_graph_inline_images_logs_and_returns_original_html_on_graph_error(monkeypatch):
+    logged: list[dict[str, Any]] = []
+
+    async def fake_graph_get(access_token: str, url: str):
+        raise RuntimeError("graph unavailable")
+
+    def fake_log_error(message: str, **kwargs):
+        logged.append({"message": message, **kwargs})
+
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail, "log_error", fake_log_error)
+
+    original = "<img src='cid:image001@example.com'>"
+    body = await m365_mail._embed_graph_inline_images(
+        access_token="token",
+        upn="user@example.com",
+        message_id="msg-1",
+        html_body=original,
+    )
+
+    assert body == original
+    assert len(logged) == 1
+    assert "inline attachments" in logged[0]["message"]
+    assert logged[0]["upn"] == "user@example.com"
+    assert logged[0]["message_id"] == "msg-1"
+
+
 async def test_save_graph_attachments_fetches_value_when_content_bytes_missing(monkeypatch):
     """Attachments are saved even when Graph list response omits contentBytes."""
     captured: list[dict[str, Any]] = []
@@ -1626,6 +1653,38 @@ async def test_save_graph_attachments_still_uses_content_bytes_when_present(monk
     assert len(captured) == 1
     assert captured[0]["payload"] == b"hello"
     assert value_fetches == 0
+
+
+async def test_save_graph_attachments_logs_and_returns_when_graph_lookup_fails(monkeypatch):
+    logged: list[dict[str, Any]] = []
+    saved = 0
+
+    async def fake_graph_get(access_token: str, url: str):
+        raise RuntimeError("graph unavailable")
+
+    async def fake_save_email_attachment(**kwargs):
+        nonlocal saved
+        saved += 1
+        return {"id": 1}
+
+    def fake_log_error(message: str, **kwargs):
+        logged.append({"message": message, **kwargs})
+
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail, "_save_email_attachment", fake_save_email_attachment)
+    monkeypatch.setattr(m365_mail, "log_error", fake_log_error)
+
+    await m365_mail._save_graph_attachments(
+        access_token="token",
+        upn="user@example.com",
+        message_id="msg-1",
+        ticket_id=321,
+    )
+
+    assert saved == 0
+    assert len(logged) == 1
+    assert "ticket import" in logged[0]["message"]
+    assert logged[0]["ticket_id"] == 321
 
 
 async def test_save_graph_attachments_encodes_message_id(monkeypatch):

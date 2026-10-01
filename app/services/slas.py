@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from importlib import import_module
 from typing import Any, Sequence
 
 from app.repositories import slas as sla_repo
@@ -133,7 +134,7 @@ async def emit_due_events() -> int:
     if not ticket_ids:
         return 0
     from app.repositories import tickets as tickets_repo
-    from app.services import automations
+    automations = import_module("app.services.automations")
 
     statuses = await statuses_for_tickets(ticket_ids)
     emitted = 0

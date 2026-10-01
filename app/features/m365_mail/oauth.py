@@ -78,9 +78,9 @@ class AsyncPostClient(Protocol):
 
     async def __aexit__(
         self,
-        exc_type: type[BaseException] | None,
+        _exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        tb: TracebackType | None,
+        _tb: TracebackType | None,
     ) -> bool | None:
         pass
 
@@ -113,6 +113,8 @@ async def handle_m365_mail_auth_callback(
         account_id = 0
     code_verifier: str | None = state_data.get("code_verifier")
     redirect_uri = str(state_data.get("redirect_uri") or "")
+    if not redirect_uri:
+        redirect_uri = build_m365_redirect_uri(request)
 
     def _mail_auth_error(msg: str) -> RedirectResponse:
         return flash_redirect("/admin/modules/m365-mail", msg, "error")

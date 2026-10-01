@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from importlib import import_module
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
 from datetime import date, datetime, time, timezone
@@ -98,7 +99,7 @@ def _infer_feature_from_record(record: dict[str, Any]) -> str:
 
 
 def configure_logging() -> None:
-    from app.core.config import get_settings
+    get_settings = import_module("app.core.config").get_settings
 
     logger.remove()
     console_log_format = (

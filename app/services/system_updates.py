@@ -22,6 +22,7 @@ import asyncio
 import os
 import re
 import time
+from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -172,9 +173,8 @@ def expire_unclaimed_requests() -> None:
     if (datetime.now(timezone.utc) - started).total_seconds() < _UNCLAIMED_REQUEST_SECONDS:
         return
     try:
-        _FLAG_PATH.unlink()
-    except FileNotFoundError:
-        pass
+        with suppress(FileNotFoundError):
+            _FLAG_PATH.unlink()
     except OSError:
         return
     system_update_history.update(
@@ -323,10 +323,8 @@ def cancel_request(update_id: str) -> dict[str, Any]:
     record = system_update_history.get(update_id)
     if record.get("status") != "pending":
         raise ValueError("Only an update that has not started can be cancelled.")
-    try:
+    with suppress(FileNotFoundError):
         _FLAG_PATH.unlink()
-    except FileNotFoundError:
-        pass
     return system_update_history.update(
         update_id, status="failed", error="Cancelled by an administrator before it started.",
         completed=True,

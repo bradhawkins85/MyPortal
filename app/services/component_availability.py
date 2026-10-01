@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
+from loguru import logger
+
 from app.core.core_components import CORE_COMPONENTS_BY_SLUG, components_for_path
 from app.core.module_capabilities import (
     feature_pack_for_module,
@@ -140,15 +142,13 @@ def configure_component_availability(
     )
     unknown_modules = sorted(modules - set(known_modules))
     if unknown_packs or unknown_modules:
-        from app.core.logging import log_warning
-
         if unknown_packs:
-            log_warning(
+            logger.warning(
                 "DISABLED_FEATURE_PACKS contains unknown slug(s); ignoring them",
                 unknown=unknown_packs,
             )
         if unknown_modules:
-            log_warning(
+            logger.warning(
                 "DISABLED_MODULES contains unknown slug(s); ignoring them",
                 unknown=unknown_modules,
             )

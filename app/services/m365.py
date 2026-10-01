@@ -4682,6 +4682,7 @@ async def run_purview_preflight(
     ``repair`` is accepted for API compatibility, but role-group membership is
     never broadened automatically.
     """
+    _ = repair
     checked_at = datetime.now(timezone.utc)
     correlation_id = str(uuid.uuid4())
     creds = await get_credentials(company_id)

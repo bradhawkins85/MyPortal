@@ -3,6 +3,7 @@ from __future__ import annotations
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
+from importlib import import_module
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
@@ -90,7 +91,7 @@ async def _authorize(
             status_code=status.HTTP_403_FORBIDDEN, detail="Vault access denied"
         ) from None
     membership = await user_company_repo.get_user_company(user_id, company_id)
-    from app import main as main_module
+    main_module = import_module("app.main")
 
     if not membership or not main_module._membership_menu_can(
         user, membership, permission_key, write=write
