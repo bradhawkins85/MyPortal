@@ -235,6 +235,13 @@
           </div>
           <span class="visually-hidden" id="modal-ticket-description-label">Description</span>
         </div>
+        <section class="ticket-suggestions" data-ticket-suggestions hidden aria-live="polite" aria-labelledby="ticket-suggestions-title">
+          <h3 class="ticket-suggestions__title" id="ticket-suggestions-title">These might help</h3>
+          <ul class="ticket-suggestions__list" data-ticket-suggestions-list></ul>
+          <p class="ticket-suggestions__resolved" data-ticket-suggestions-resolved hidden>
+            Glad that sorted it. You can close this form, or carry on if you still need help.
+          </p>
+        </section>
         <div class="form-field">
           <label class="form-label" for="modal-ticket-attachments">Attachments (optional)</label>
           <input
@@ -262,6 +269,7 @@
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/purify.min.js') }}" defer></script>
   <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/ticket_suggestions.js') }}" defer></script>
   <script>
     // Initialize modal for ticket creation
     (function() {
