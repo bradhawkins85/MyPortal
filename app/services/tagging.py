@@ -315,9 +315,9 @@ async def merge_existing_tags(variant_slug: str, canonical_slug: str) -> dict[st
     """
 
     rag_outbox = import_module("app.services.rag_outbox")
-    patterns = {variant_slug, variant_slug.replace("-", " ")}
+    variant_text = variant_slug.replace("-", " ")
     tickets_updated = 0
-    for row in await tag_synonyms_repo.list_tickets_with_tag_text(patterns):
+    for row in await tag_synonyms_repo.list_tickets_with_tag_text(variant_slug, variant_text):
         updated = _replace_slug_tags(row["ai_tags"], variant_slug, canonical_slug)
         if updated is None:
             continue
@@ -327,7 +327,7 @@ async def merge_existing_tags(variant_slug: str, canonical_slug: str) -> dict[st
 
     articles_updated = 0
     canonical_text = canonical_slug.replace("-", " ")
-    for row in await tag_synonyms_repo.list_articles_with_tag_text(patterns):
+    for row in await tag_synonyms_repo.list_articles_with_tag_text(variant_slug, variant_text):
         ai_tags = _replace_slug_tags(row["ai_tags"], variant_slug, canonical_text)
         manual_tags = _replace_slug_tags(row["manual_ai_tags"], variant_slug, canonical_text)
         if ai_tags is None and manual_tags is None:

@@ -10,7 +10,7 @@ offered to the tagging prompts as preferred values.
 
 from datetime import datetime, timezone
 import json
-from typing import Any, Iterable
+from typing import Any
 
 from app.core.database import db
 
@@ -135,37 +135,34 @@ async def list_article_tags() -> list[list[str]]:
     ]
 
 
-async def list_tickets_with_tag_text(patterns: Iterable[str]) -> list[dict[str, Any]]:
-    """Return ``id``/``ai_tags`` for tickets whose stored tags contain any pattern."""
+async def list_tickets_with_tag_text(slug_text: str, display_text: str) -> list[dict[str, Any]]:
+    """Return ``id``/``ai_tags`` for tickets whose stored tags contain either text."""
 
-    clauses: list[str] = []
-    params: list[Any] = []
-    for pattern in patterns:
-        clauses.append("LOWER(CAST(ai_tags AS CHAR)) LIKE %s")
-        params.append(f"%{pattern}%")
-    if not clauses:
-        return []
     rows = await db.fetch_all(
-        f"SELECT id, ai_tags FROM tickets WHERE ai_tags IS NOT NULL AND ({' OR '.join(clauses)})",
-        tuple(params),
+        """
+        SELECT id, ai_tags
+        FROM tickets
+        WHERE ai_tags IS NOT NULL
+          AND (LOWER(CAST(ai_tags AS CHAR)) LIKE %s OR LOWER(CAST(ai_tags AS CHAR)) LIKE %s)
+        """,
+        (f"%{slug_text}%", f"%{display_text}%"),
     )
     return [{"id": int(row["id"]), "ai_tags": _decode_tags(row.get("ai_tags"))} for row in rows]
 
 
-async def list_articles_with_tag_text(patterns: Iterable[str]) -> list[dict[str, Any]]:
-    """Return tag columns for articles whose AI or manual tags contain any pattern."""
+async def list_articles_with_tag_text(slug_text: str, display_text: str) -> list[dict[str, Any]]:
+    """Return tag columns for articles whose AI or manual tags contain either text."""
 
-    clauses: list[str] = []
-    params: list[Any] = []
-    for pattern in patterns:
-        clauses.append("LOWER(CAST(ai_tags AS CHAR)) LIKE %s")
-        clauses.append("LOWER(CAST(manual_ai_tags AS CHAR)) LIKE %s")
-        params.extend([f"%{pattern}%", f"%{pattern}%"])
-    if not clauses:
-        return []
     rows = await db.fetch_all(
-        f"SELECT id, ai_tags, manual_ai_tags FROM knowledge_base_articles WHERE {' OR '.join(clauses)}",
-        tuple(params),
+        """
+        SELECT id, ai_tags, manual_ai_tags
+        FROM knowledge_base_articles
+        WHERE LOWER(CAST(ai_tags AS CHAR)) LIKE %s
+           OR LOWER(CAST(ai_tags AS CHAR)) LIKE %s
+           OR LOWER(CAST(manual_ai_tags AS CHAR)) LIKE %s
+           OR LOWER(CAST(manual_ai_tags AS CHAR)) LIKE %s
+        """,
+        (f"%{slug_text}%", f"%{display_text}%", f"%{slug_text}%", f"%{display_text}%"),
     )
     return [
         {

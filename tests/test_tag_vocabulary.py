@@ -123,14 +123,14 @@ async def test_merge_existing_tags_rewrites_tickets_and_articles(monkeypatch):
     enqueued: list[tuple[str, int]] = []
     repo = tagging.tag_synonyms_repo
 
-    async def fake_tickets(patterns):
-        assert set(patterns) == {"outlook-crashing", "outlook crashing"}
+    async def fake_tickets(slug_text, display_text):
+        assert (slug_text, display_text) == ("outlook-crashing", "outlook crashing")
         return [
             {"id": 1, "ai_tags": ["outlook-crashing", "vpn"]},
             {"id": 2, "ai_tags": ["outlook-crashing-badly"]},  # LIKE false positive
         ]
 
-    async def fake_articles(patterns):
+    async def fake_articles(slug_text, display_text):
         return [{"id": 9, "ai_tags": ["outlook crashing"], "manual_ai_tags": ["email"]}]
 
     async def fake_set_ticket(ticket_id, tags):
