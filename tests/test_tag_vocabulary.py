@@ -68,6 +68,14 @@ def test_ticket_tag_prompt_includes_preferred_tags():
     assert "preferred_tags" not in without
 
 
+def test_insights_prompt_includes_preferred_tags():
+    ticket = {"id": 4, "subject": "Outlook keeps crashing", "description": "Crashes on start."}
+    prompt = tickets_service._render_insights_prompt(ticket, [], {}, ["outlook-crash"])
+    assert '"preferred_tags":["outlook-crash"]' in prompt
+    assert "tag-vocabulary record" in prompt
+    assert "preferred_tags" not in tickets_service._render_insights_prompt(ticket, [], {})
+
+
 def test_kb_tag_prompt_includes_preferred_tags_as_text():
     prompt = kb_service._render_ai_tag_prompt("Outlook", None, [], "Fix crashes", ["outlook-crash"])
     assert '"preferred_tags":["outlook crash"]' in prompt
