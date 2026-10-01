@@ -1,35 +1,64 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 
+{% from "macros/counters.html" import counter_strip %}
+{% from "macros/tables.html" import table_column_picker %}
+
 {% block title %}Backups{% endblock %}
 
+{% set backup_columns = [
+  {"key": "name", "label": "Job"},
+  {"key": "tracking", "label": "Tracking"},
+  {"key": "app", "label": "Backup app"},
+  {"key": "frequency", "label": "Frequency"},
+  {"key": "source", "label": "Source"},
+  {"key": "destinations", "label": "Destinations"},
+  {"key": "keys", "label": "Encryption keys"},
+  {"key": "notes", "label": "Notes"},
+] %}
+
 {% block header_title %}
-  <div class="header__title-content header__title-content--stacked">
-    <span class="header__title-text">Backups</span>
-    <span class="header__title-meta">Backup jobs for {{ company.name if company else 'this company' }}: what is backed up, where it goes and how to recover it.</span>
+  <div class="page-header-bar">
+    <span class="header__title-text" title="Backup jobs for {{ company.name if company else 'this company' }}: what is backed up, where it goes and how to recover it.">Backups</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="backup-register-filter">Filter backups</label>
+      <input
+        id="backup-register-filter"
+        type="search"
+        class="form-input page-header-toolbar__search"
+        placeholder="Filter backups"
+        data-table-filter="backup-register-table"
+      />
+      {{ table_column_picker("backup-register", backup_columns) }}
+      <span class="page-header-toolbar__info" data-table-info aria-live="polite">{{ rows | length }} backup{{ '' if rows | length == 1 else 's' }}</span>
+    </div>
   </div>
 {% endblock %}
 
 {% block header_actions %}
+  {% set backup_actions = [] %}
   {% if can_edit %}
-    {{ page_header_actions([
-      {"label": "Add backup", "type": "link", "variant": "primary", "href": "/backups/new"}
-    ]) }}
+    {% set _ = backup_actions.append({"label": "Add backup", "type": "link", "variant": "primary", "href": "/backups/new"}) %}
   {% endif %}
+  {% if is_super_admin %}
+    {% set _ = backup_actions.append({"label": "Backup history", "type": "link", "href": "/admin/backup-jobs",
+       "attrs": {"title": "Manage status-tracked jobs and their webhooks"}}) %}
+  {% endif %}
+  {{ page_header_actions(backup_actions) }}
 {% endblock %}
 
 {% block content %}
+{{ counter_strip([
+  {"label": "Status-tracked", "value": tracked_count, "variant": "info",
+   "title": "Jobs that report their status automatically"},
+  {"label": "Manual", "value": manual_count, "variant": "neutral",
+   "title": "Backups documented here that do not report their status"},
+  {"label": "Passed today", "value": status_counts['pass'], "variant": "success"},
+  {"label": "Warning today", "value": status_counts['warn'], "variant": "warning"},
+  {"label": "Failed today", "value": status_counts['fail'], "variant": "danger"},
+], total=rows | length, total_label="Backups") }}
+
 <section class="card card--panel">
-  <header class="card__header card__header--stacked">
-    <div>
-      <h2 class="card__title">Backup jobs</h2>
-      <p class="card__subtitle">
-        {{ tracked_count }} status-tracked job{{ '' if tracked_count == 1 else 's' }} and
-        {{ manual_count }} manual entr{{ 'y' if manual_count == 1 else 'ies' }}.
-        Tracked jobs report their status automatically; manual entries document backups that do not.
-      </p>
-    </div>
-  </header>
   <div class="card__body">
     <div class="table-wrapper">
       <table class="table" id="backup-register-table" data-table data-table-id="backup-register">
@@ -96,7 +125,7 @@
                 <td class="table__actions" data-column-key="actions">
                   <a class="button button--ghost button--small" href="{{ row.edit_url }}">{{ 'Edit details' if row.kind == 'tracked' else 'Edit' }}</a>
                   {% if row.delete_url %}
-                    <form action="{{ row.delete_url }}" method="post" class="inline-form" data-confirm="Delete this backup entry?">
+                    <form action="{{ row.delete_url }}" method="post" class="inline-form" data-confirm="Delete this backup entry?" onsubmit="return window.confirm(this.dataset.confirm);">
                       {% include "partials/csrf.html" %}
                       <button type="submit" class="button button--danger button--small">Delete</button>
                     </form>
@@ -110,9 +139,6 @@
         </tbody>
       </table>
     </div>
-    {% if is_super_admin %}
-      <p class="form-help">Status-tracked jobs and their webhooks are managed in <a href="/admin/backup-jobs">Backup history</a>.</p>
-    {% endif %}
   </div>
 </section>
 {% endblock %}
