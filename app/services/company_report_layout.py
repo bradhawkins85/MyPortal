@@ -173,6 +173,7 @@ async def available_queries() -> list[dict[str, Any]]:
     return [
         query
         for query in await reporting_repo.list_queries()
+        if reporting_service.uses_company_context(str(query.get("sql_query") or ""))
         if _query_available(query.get("slug"))
     ]
 
