@@ -21403,3 +21403,8 @@ a.sch-item__company:focus-visible {
     white-space: normal;
   }
 }
+
+/* Assets & Network > Backups register */
+.backup-register__text { white-space: pre-wrap; }
+.backup-register__list { list-style: none; margin: 0; padding: 0; }
+.backup-register__list li + li { margin-top: 0.25rem; }

@@ -93,6 +93,13 @@ CORE_COMPONENTS: tuple[CoreComponent, ...] = (
         parent_pack="backups",
     ),
     CoreComponent(
+        "backup_register",
+        "Backups",
+        "Assets & Network backup register of tracked and manual backup jobs.",
+        ("/backups",),
+        parent_pack="backups",
+    ),
+    CoreComponent(
         "rag_index",
         "RAG Index",
         "RAG index administration, diagnostics and matching controls.",

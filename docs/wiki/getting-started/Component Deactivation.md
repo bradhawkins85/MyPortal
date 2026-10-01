@@ -100,6 +100,7 @@ one with its current status.
 | Shared Credentials | `shared_credentials` | `/shared-credentials`, `/credential-share`, `/api/vault` | — |
 | Backup History | `backup_history` | `/admin/backup-jobs`, `/api/backup-jobs` | pack `backups` is disabled |
 | Backup Summary | `backup_summary` | `/admin/backup-summary` | pack `backups` is disabled |
+| Backups (Assets & Network) | `backup_register` | `/backups` | pack `backups` is disabled |
 | RAG Index | `rag_index` | `/admin/rag`, `/rag`, `/api/rag` | — |
 | AI Quality | `ai_quality` | `/admin/ai-quality` | — |
 | AI Tag Synonyms | `ai_tag_synonyms` | `/admin/chat/ai-tag-synonyms`, `/chat/configuration` | — |

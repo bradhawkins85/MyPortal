@@ -25,6 +25,7 @@ EXPECTED_SLUGS = {
     "shared_credentials",
     "backup_history",
     "backup_summary",
+    "backup_register",
     "rag_index",
     "ai_quality",
     "ai_tag_synonyms",

@@ -172,6 +172,7 @@
           {% set can_access_ipam = feature_pack_available('ipam') and (is_super_admin or menu_access.get('menu.ipam') in ['read', 'write']) %}
           {% set can_access_racks = feature_pack_available('racks') and (is_super_admin or menu_access.get('menu.racks') in ['read', 'write']) %}
           {% set can_access_network_map = feature_pack_available('network_map') and feature_pack_available('assets') and (is_super_admin or menu_access.get('menu.network_map') in ['read', 'write']) %}
+          {% set can_access_backups = feature_pack_available('backup_register') and (is_super_admin or menu_access.get('menu.backups') in ['read', 'write']) %}
           {% set can_access_defender = feature_pack_available('defender') and (is_super_admin or menu_access.get('menu.defender') in ['read', 'write']) %}
           {% set can_access_voice_monitor = feature_pack_available('voice_monitor') and (is_super_admin or menu_access.get('menu.voice_monitor') in ['read', 'write']) %}
           {% set can_manage_licenses = (can_manage_licenses | default(false)) or is_super_admin or membership.get('can_manage_licenses') or can_access_m365_configuration or can_access_m365_licenses %}
@@ -434,6 +435,12 @@
               <a href="/network-map" {% if current_path.startswith('/network-map') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 2h6v5h-2v3h6v4h2v6h-6v-6h2v-2H7v2h2v6H3v-6h2v-4h6V7H9z"/></svg></span>
                 <span class="menu__label">Network map</span>
+              </a>
+            </li>{% endif %}
+          {% if can_access_backups %}<li class="menu__item">
+              <a href="/backups" {% if current_path == '/backups' or current_path.startswith('/backups/') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3C7 3 4 4.6 4 6.5v11C4 19.4 7 21 12 21s8-1.6 8-3.5v-11C20 4.6 17 3 12 3zm0 2c3.9 0 6 1.1 6 1.5S15.9 8 12 8 6 6.9 6 6.5 8.1 5 12 5zm6 12.5c0 .4-2.1 1.5-6 1.5s-6-1.1-6-1.5v-2.2c1.4.8 3.6 1.2 6 1.2s4.6-.4 6-1.2zm0-4.5c0 .4-2.1 1.5-6 1.5S6 13.4 6 13v-2.2c1.4.8 3.6 1.2 6 1.2s4.6-.4 6-1.2z"/></svg></span>
+                <span class="menu__label">Backups</span>
               </a>
             </li>{% endif %}
           {% if can_access_defender %}
