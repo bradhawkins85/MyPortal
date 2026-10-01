@@ -1,0 +1,7 @@
+{
+  "guid": "c9b42b4c-bb1b-4f85-8ef6-1b23ac5c63d8",
+  "occurred_at": "2026-09-30T23:45Z",
+  "change_type": "Feature",
+  "summary": "Scheduled tasks: the status tiles now filter the task list, and a task-type dropdown shows or hides specific task types.",
+  "content_hash": "d7b5819497d5f4a24f4bddb196c342a958d9938ec466d7e1e3c1adce5e232169"
+}

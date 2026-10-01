@@ -23,7 +23,7 @@ def test_technician_form_clears_secret_before_grant_request():
     assert clear_position < grant_position
 
 
-def test_credential_sections_are_collapsed_and_follow_company_details():
+def test_credential_sections_follow_company_details_and_start_hidden():
     template = Path("app/templates/admin/company_edit.html").read_text()
 
     company_details = template.index('data-company-edit-section="general"')
@@ -31,8 +31,8 @@ def test_credential_sections_are_collapsed_and_follow_company_details():
     credentials = template.index('data-company-edit-section="credentials"')
 
     assert company_details < vault_rollout < credentials
-    assert '<details class="card card--panel card-collapsible admin-grid__full" id="vault-rollout"' in template
-    assert '<details class="card card--panel card-collapsible admin-grid__full" id="credentials"' in template
-    assert '<span class="card__toggle-icon" aria-hidden="true"></span>' in template[vault_rollout:credentials]
-    assert " open" not in template[vault_rollout:template.index(">", vault_rollout)]
-    assert " open" not in template[credentials:template.index(">", credentials)]
+    assert '<section class="card card--panel ce-section" id="vault-rollout"' in template
+    assert '<section class="card card--panel ce-section" id="credentials"' in template
+    # The shared credentials section stays hidden until the vault is enabled.
+    assert " hidden " in template[credentials:template.index(">", credentials)]
+    assert "data-ce-link=\"{{ key }}\"{% if key == 'credentials' %} hidden{% endif %}" in template

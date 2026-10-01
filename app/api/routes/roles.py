@@ -110,6 +110,12 @@ async def delete_role(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
     if role.get("is_system"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete system role")
+    member_count = (await role_repo.count_members_by_role()).get(role_id, 0)
+    if member_count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Role is assigned to {member_count} company member{'s' if member_count != 1 else ''}; reassign them first",
+        )
     await role_repo.delete_role(role_id)
     await audit_service.record_delete(
         action="role.delete",

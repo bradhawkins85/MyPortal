@@ -170,6 +170,7 @@ def test_global_stat_strip_counts_all_benchmarks():
             {"cis_group": "intune_windows", "status": "fail", "check_name": "Windows check"},
             {"cis_group": "intune_ios", "status": "unknown", "check_name": "iOS check"},
             {"cis_group": "intune_macos", "status": "not_applicable", "check_name": "macOS check"},
+            {"cis_group": "", "status": "excluded", "check_name": "Excluded check"},
         ]
     )
 
@@ -178,6 +179,9 @@ def test_global_stat_strip_counts_all_benchmarks():
     assert '<span class="stat-strip__stat-label">Failed</span>' in html
     assert '<span class="stat-strip__stat-label">Unknown</span>' in html
     assert '<span class="stat-strip__stat-label">Not Applicable</span>' in html
+    assert '<span class="stat-strip__stat-label">Excluded</span>' in html
+    assert 'data-bp-status="excluded"' in html
+    assert '<span title="Excluded"' in html
     assert re.search(r'Passed</span>\s*<span class="stat-strip__stat-value">1</span>', html)
     assert re.search(r'Failed</span>\s*<span class="stat-strip__stat-value">1</span>', html)
     assert re.search(r'Unknown</span>\s*<span class="stat-strip__stat-value">1</span>', html)
@@ -219,6 +223,27 @@ def test_failed_checks_show_manual_support_ticket_action():
     )
 
     assert 'action="/m365/best-practices/ticket/bp_test"' in html
+
+
+def test_super_admin_check_actions_use_standard_dropdown_with_exclude():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+                "has_remediation": True,
+            }
+        ],
+        is_super_admin=True,
+    )
+
+    assert 'class="button button--ghost button--small header-menu__button"' in html
+    assert 'id="bp-actions-menu-bp_test"' in html
+    assert 'action="/m365/best-practices/exclude/bp_test"' in html
+    assert '>Exclude</button>' in html
     assert "Create ticket" in html
 
 
@@ -410,3 +435,24 @@ def test_settings_table_includes_create_ticket_on_fail_option():
     assert "Create Ticket" in html
     assert 'name="create_ticket_on_fail"' in html
     assert 'id="ticket-bp_test"' in html
+
+
+def test_settings_policy_alternatives_are_grouped_for_mutual_exclusion():
+    html = _render_best_practices_settings(
+        [
+            {
+                "id": "bp_lobby",
+                "name": "Lobby profile",
+                "description": "Description",
+                "enabled": True,
+                "auto_remediate": False,
+                "create_ticket_on_fail": False,
+                "excluded": False,
+                "has_remediation": True,
+                "alternative_group": "teams_global_lobby",
+            }
+        ]
+    )
+
+    assert 'data-policy-group="teams_global_lobby"' in html
+    assert "/static/js/m365_best_practices_settings.js" in html

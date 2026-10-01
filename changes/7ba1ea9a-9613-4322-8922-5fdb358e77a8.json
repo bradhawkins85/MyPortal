@@ -1,0 +1,7 @@
+{
+  "guid": "7ba1ea9a-9613-4322-8922-5fdb358e77a8",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "Fix",
+  "summary": "Prevent conflicting Microsoft Teams lobby policy profiles from causing an error when M365 best-practice settings are saved.",
+  "content_hash": "c9da02e5e326424ddd300dbfed0ec3f7f43654cc5b37652ff5a4679ffb0a2f7a"
+}

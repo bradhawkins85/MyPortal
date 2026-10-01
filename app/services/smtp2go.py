@@ -1291,6 +1291,22 @@ async def process_webhook_event(
         recipients_list = event_data.get("recipients")
         if isinstance(recipients_list, list) and recipients_list:
             recipient = recipients_list[0]
+    # Opens/deliveries caused by an administrator inspecting the configured
+    # audit BCC are not customer engagement and must not alter ticket status.
+    # A processed event can describe several recipients, so it is retained and
+    # its audit address is filtered from the per-recipient updates below.
+    from app.services import email_recipients as _email_recipients
+
+    if (
+        normalized_event_type != "processed"
+        and _email_recipients.is_outbound_audit_recipient(recipient)
+    ):
+        logger.debug(
+            "Ignoring SMTP2Go status event for outbound audit mailbox",
+            event_type=normalized_event_type,
+            smtp2go_message_id=smtp2go_message_id,
+        )
+        return None
     timestamp_str = event_data.get("timestamp") or event_data.get("time") or event_data.get("sendtime")
 
     # SMTP2Go uses hyphenated header-style keys for client metadata on
@@ -1475,8 +1491,6 @@ async def process_webhook_event(
         # aggregate ticket_replies updates above so the existing single-status
         # badge keeps working unchanged.
         try:
-            from app.services import email_recipients as _email_recipients
-
             # Capture detail to display in the popup. For opens this is the
             # client user-agent (per the new requirement); for bounces /
             # spam / rejected this is SMTP2Go's diagnostic message.

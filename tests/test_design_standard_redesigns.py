@@ -251,6 +251,9 @@ def test_out_of_office_renders_mailbox_cards_and_editor():
     assert "Couldn't read: Access denied" in html
     assert 'id="oof-modal"' in html
     assert 'name="mailboxes" value="dan@example.com"' in html
+    assert 'data-oof-select-visible' in html
+    assert 'data-oof-new' in html
+    assert '/static/js/m365_out_of_office.js' in html
     data = _json_block(html, "oof-data")
     assert data["mailboxes"][0]["setting"]["externalAudience"] == "contactsOnly"
     assert data["canWrite"] is True
@@ -454,3 +457,372 @@ def test_message_template_system_uses_match_the_slugs_myportal_sends():
         subscription_renewals._THIRD_PARTY_MONTHLY_TEMPLATE_SLUG,
     }
     assert renewal_slugs | {"signup_verification", "staff_invitation"} == set(SYSTEM_TEMPLATE_USES)
+
+
+def _issue_tracker_context(**overrides):
+    from types import SimpleNamespace
+
+    statuses = [
+        {"value": "new", "label": "New"},
+        {"value": "investigating", "label": "Investigating"},
+        {"value": "monitoring", "label": "Monitoring"},
+        {"value": "resolved", "label": "Resolved"},
+    ]
+    issues = [
+        {"issue_id": 1, "name": "M365 outage", "description": "Sign-in fails", "updated_at_iso": "2026-09-30T01:00:00+00:00",
+         "assignments": [
+             {"assignment_id": 11, "company_id": 5, "company_name": "Acme", "status": "investigating", "updated_at_iso": None},
+             {"assignment_id": 12, "company_id": 6, "company_name": "Globex", "status": "resolved", "updated_at_iso": None},
+         ]},
+        {"issue_id": 2, "name": "Printer driver", "description": None, "updated_at_iso": None,
+         "assignments": [
+             {"assignment_id": 21, "company_id": 5, "company_name": "Acme", "status": "monitoring", "updated_at_iso": None},
+         ]},
+        {"issue_id": 3, "name": "Old VPN", "description": None, "updated_at_iso": None, "assignments": []},
+    ]
+    context = {
+        "request": SimpleNamespace(url=SimpleNamespace(path="/admin/issues", query="")),
+        "issues": issues,
+        "issue_count": len(issues),
+        "issue_status_options": statuses,
+        "selected_status": None,
+        "selected_company_id": None,
+        "search_term": "",
+        "company_options": [{"id": 5, "name": "Acme"}, {"id": 6, "name": "Globex"}],
+        "editing_issue": None,
+        "csrf_token": "t",
+    }
+    context.update(overrides)
+    return context
+
+
+def test_issue_tracker_renders_issue_list_stats_and_editor():
+    html = _page_env().get_template("admin/issues.html").render(**_issue_tracker_context())
+
+    # One row per issue (not per company), with its health and company statuses.
+    assert html.count("data-iss-item") == 3
+    assert "iss-item--active" in html and "iss-item--monitoring" in html and "iss-item--unlinked" in html
+    assert 'action="/admin/issues/1/assignments/11/status"' in html
+    assert 'action="/admin/issues/1/assignments/12/delete"' in html
+    assert "stat-strip__stat--total" in html
+    assert 'href="/admin/issues?issueId=2" data-iss-edit="2"' in html
+    assert 'data-iss-delete hidden>Delete issue</button>' in html
+    # Standard popup modal pattern.
+    assert re.search(r'<div class="modal scf-modal" id="iss-modal" role="dialog" aria-modal="true" '
+                     r'aria-labelledby="iss-modal-title" aria-hidden="true" hidden>', html)
+    assert 'name="companyIds"' in html
+    data = _json_block(html, "iss-editor-data")
+    assert data["openIssueId"] is None
+    assert data["issues"][0]["assignments"][1] == {"company_id": 6, "company_name": "Globex", "status": "resolved"}
+
+
+def test_issue_tracker_empty_and_filtered_states():
+    empty = _page_env().get_template("admin/issues.html").render(
+        **_issue_tracker_context(issues=[], issue_count=0)
+    )
+    assert "No issues yet" in empty
+    assert "+ Create your first issue" in empty
+
+    filtered = _page_env().get_template("admin/issues.html").render(
+        **_issue_tracker_context(issues=[], issue_count=0, selected_status="resolved")
+    )
+    assert "No issues match these filters" in filtered
+    assert "Matching issues" in filtered
+
+
+def test_issue_tracker_opens_editor_for_requested_issue():
+    context = _issue_tracker_context()
+    editing = dict(context["issues"][2], issue_id=9, name="Hidden by filters")
+    html = _page_env().get_template("admin/issues.html").render(
+        **dict(context, editing_issue=editing)
+    )
+    data = _json_block(html, "iss-editor-data")
+    assert data["openIssueId"] == 9
+    assert data["issues"][-1]["name"] == "Hidden by filters"
+
+
+def test_service_status_admin_renders_service_list_and_editor():
+    from datetime import datetime
+
+    definitions = [
+        {"value": "operational", "label": "Operational", "description": "Working", "variant": "status--operational"},
+        {"value": "outage", "label": "Major outage", "description": "Down", "variant": "status--outage"},
+    ]
+    service = {
+        "id": 3, "name": "Email", "description": "Exchange Online", "status": "outage",
+        "status_message": "Some users can't send", "display_order": 2, "is_active": False,
+        "company_ids": [1, 2, 9], "tags": ["mail", "m365"], "updated_at": datetime(2026, 9, 1, 3, 4),
+        "ai_lookup_enabled": True, "ai_lookup_url": "https://status.example.com", "ai_lookup_prompt": "",
+        "ai_lookup_model_override": "", "ai_lookup_frequency_operational": 60,
+        "ai_lookup_frequency_degraded": 15, "ai_lookup_frequency_partial_outage": 10,
+        "ai_lookup_frequency_outage": 5, "ai_lookup_frequency_maintenance": 60,
+        "ai_lookup_last_checked_at": None, "ai_lookup_last_status": None, "ai_lookup_last_message": None,
+    }
+    html = _page_env().get_template("admin/service_status.html").render(
+        service_status_entries=[service],
+        service_status_summary={"total": 1, "by_status": {"operational": 0, "outage": 1}},
+        service_status_definitions=definitions,
+        service_status_lookup={d["value"]: d for d in definitions},
+        company_options=[{"id": 1, "name": "Acme"}, {"id": 2, "name": "Globex"}],
+        service_status_company_lookup={1: "Acme", 2: "Globex"},
+        service_status_public_urls={1: "/service-status/public/1/abc"},
+        service_status_editing=service,
+        service_status_default="operational",
+        csrf_token="t",
+    )
+
+    # Edit links work without JavaScript and open the editor with it.
+    assert 'href="/admin/service-status?serviceId=3" data-ssa-edit="3"' in html
+    assert "Acme, Globex + 1 more" in html
+    assert "Hidden from dashboards" in html
+    assert "AI checks every 5 min" in html
+    assert '<time data-utc="2026-09-01T03:04:00Z">' in html
+    assert 'id="service-modal"' in html and 'data-ssa-tab="visibility"' in html
+    assert 'name="companyIds" value="2"' in html
+    assert 'name="status" value="outage"' in html
+    assert 'id="ssa-delete-form"' in html
+    assert "service_status_admin.js" in html
+    data = _json_block(html, "service-status-editor-data")
+    assert data["services"][0]["tags"] == ["mail", "m365"]
+    assert data["editing"]["id"] == 3
+    assert data["frequencyDefaults"]["outage"] == 5
+    assert "strftime" not in (TEMPLATES / "admin/service_status.html").read_text()
+
+
+def test_service_status_admin_empty_state_offers_first_service():
+    html = _page_env().get_template("admin/service_status.html").render(
+        service_status_entries=[],
+        service_status_summary={"total": 0, "by_status": {}},
+        service_status_definitions=[],
+        service_status_lookup={},
+        company_options=[],
+        service_status_company_lookup={},
+        service_status_public_urls={},
+        service_status_editing=None,
+        service_status_default="operational",
+        csrf_token="t",
+    )
+
+    assert "No services yet" in html
+    assert "+ Add your first service" in html
+    assert 'id="public-pages-modal"' not in html
+
+
+def _render_roles(roles):
+    from app.security.menu_permissions import catalogue_for_api
+
+    env = _env()
+    template = env.get_template("admin/roles.html")
+    context = template.new_context({
+        "roles": roles,
+        "menu_permission_catalogue": catalogue_for_api(),
+        "companies": [],
+        "overview_company_id": None,
+        "overview_role_id": None,
+        "published_content_overview": [],
+        "counter_strip": env.get_template("macros/counters.html").module.counter_strip,
+    })
+    return "".join(template.blocks["content"](context))
+
+
+def test_roles_page_renders_catalogue_and_grouped_access_editor():
+    html = _render_roles([
+        {"id": 1, "name": "Staff", "description": "Everyday staff", "is_system": True,
+         "member_count": 12, "permissions": {"menu.tickets": "read", "menu.dashboard": "read"}},
+        {"id": 7, "name": "Helpdesk", "description": None, "is_system": False,
+         "member_count": 0, "permissions": {"menu.admin.technician": "write", "menu.tickets": "write"}},
+    ])
+
+    assert 'data-role-edit="7"' in html and 'data-role-clone="1"' in html
+    assert "12 members" in html and "Not assigned" in html
+    assert "rol-chip--elevated" in html  # Technician is called out on the list
+    assert 'class="modal scf-modal" id="role-modal" role="dialog"' in html
+    # Every catalogue permission gets one radio group; tickets and technician keep their wording.
+    ticket_row = html[html.index('data-role-perm="menu.tickets"'):]
+    ticket_row = ticket_row[: ticket_row.index("</li>")]
+    assert ">Own<" in ticket_row and ">All<" in ticket_row
+    tech_row = html[html.index('data-role-perm="menu.admin.technician"'):]
+    tech_row = tech_row[: tech_row.index("</li>")]
+    assert ">No<" in tech_row and ">Yes<" in tech_row and 'value="read"' not in tech_row
+    data = _json_block(html, "role-editor-data")
+    assert data["roles"][1] == {
+        "id": 7, "name": "Helpdesk", "description": "",
+        "permissions": {"menu.admin.technician": "write", "menu.tickets": "write"},
+        "isSystem": False, "members": 0,
+    }
+    assert {"key": "menu.tickets", "levels": ["none", "read", "write"]}.items() <= data["catalogue"][
+        [item["key"] for item in data["catalogue"]].index("menu.tickets")
+    ].items()
+
+
+def test_roles_page_empty_state_offers_first_role():
+    html = _render_roles([])
+
+    assert "No roles yet" in html
+    assert "+ Add your first role" in html
+
+
+def _scheduled_tasks_context(**overrides):
+    tasks = [
+        {"id": 1, "name": "Acme — Sync to Xero", "command": "sync_to_xero", "command_label": "Sync to Xero",
+         "command_group": "Billing and Xero", "company_id": 42, "company_name": "Acme",
+         "company_edit_url": "/admin/companies/42/edit", "cron": "1 15 L * *", "description": None,
+         "active": True, "exclude_from_calendar": False, "max_retries": 12, "retry_backoff_seconds": 300,
+         "last_status": "failed", "last_error": "Xero token expired", "last_run_iso": "2026-09-01T15:01:00+00:00",
+         "next_run_iso": "2026-09-30T15:01:00+00:00"},
+        {"id": 2, "name": "All companies — Sync staff directory", "command": "sync_staff",
+         "command_label": "Sync staff directory", "command_group": "Staff and assets", "company_id": None,
+         "company_name": "All companies", "company_edit_url": None, "cron": "30 3 * * *",
+         "description": "Nightly", "active": False, "exclude_from_calendar": True, "max_retries": 0,
+         "retry_backoff_seconds": 60, "last_status": None, "last_error": None, "last_run_iso": None,
+         "next_run_iso": None},
+    ]
+    context = {
+        "tasks": tasks,
+        "show_inactive": True,
+        "upgrade_status": {"configured_mode": "graceful"},
+        "command_options": [
+            {"value": "sync_staff", "label": "Sync staff directory", "group": "Staff and assets"},
+            {"value": "create_scheduled_ticket", "label": "Create scheduled ticket", "group": "Tickets"},
+            {"value": "sync_to_xero", "label": "Sync to Xero", "group": "Billing and Xero"},
+        ],
+        "company_options": [{"value": "", "label": "All companies"}, {"value": "42", "label": "Acme"}],
+        "bulk_company_options": [{"value": "42", "label": "Acme"}],
+        "schedule_timezone": "Australia/Brisbane",
+        "csrf_token": "t",
+    }
+    context.update(overrides)
+    return context
+
+
+def test_scheduled_tasks_render_grouped_list_with_editor_modals():
+    html = _page_env().get_template("admin/scheduled_tasks.html").render(**_scheduled_tasks_context())
+
+    # Tasks are grouped by what they do, with status and schedule readable at a glance.
+    groups = re.findall(r'class="scf-group__title sch-group__title"[^>]*>\s*([^<]+?)\s*<', html)
+    assert groups == ["Sync staff directory", "Sync to Xero"]
+    assert 'data-sch-group' in html and 'data-sch-item' in html
+    assert 'data-status="failed"' in html and 'data-status="paused"' in html
+    assert "Xero token expired" in html
+    assert 'data-sch-cron-summary="1 15 L * *"' in html
+    assert 'data-utc="2026-09-01T15:01:00+00:00"' in html
+    assert "Hidden from calendar" in html
+    assert "Australia/Brisbane" in html
+    # Header uses the shared actions macro with a single primary action.
+    assert html.count("button--primary") == 1
+    assert "data-task-create" in html and "data-bulk-task-create" in html
+    # Every modal follows the div.modal standard (see docs/design_audit_scan.py).
+    for modal_id in (
+        "task-editor-modal", "bulk-task-create-modal", "scheduled-tasks-redistribute-modal",
+        "task-logs-modal", "task-preview-modal",
+    ):
+        match = re.search(rf'<div class="modal[^"]*" id="{modal_id}"[^>]*>', html)
+        assert match, modal_id
+        for attribute in ('role="dialog"', 'aria-modal="true"', "aria-labelledby=", 'aria-hidden="true"', " hidden"):
+            assert attribute in match.group(0), (modal_id, attribute)
+    assert "<dialog" not in html
+    # Editor keeps the JSON API field names; commands are grouped by category.
+    assert 'id="task-command" name="command" required data-initial-focus' in html
+    assert '<optgroup label="Billing and Xero">' in html
+    assert 'name="cron"' in html and 'name="maxRetries"' in html and 'name="excludeFromCalendar"' in html
+    assert 'id="task-json-payload"' in html and 'id="bulk-task-json-payload"' in html
+    # Bulk forms still post the same fields.
+    assert 'action="/admin/scheduled-tasks/bulk-create"' in html and 'name="companyIds" value="42"' in html
+    assert 'data-scheduled-tasks-redistribute-hour' in html and 'data-scheduled-tasks-redistribute-offset' in html
+    data = _json_block(html, "scheduled-tasks-data")
+    assert data["timezone"] == "Australia/Brisbane"
+    assert data["tasks"][0]["cron"] == "1 15 L * *"
+    assert data["commandDefaults"]["generate_invoice"] == "1 0 L * *"
+    assert "scheduled_tasks.js" in html and "automation.js" not in html
+    # The stat strip filters the list: each tile is a toggle button keyed to a row attribute.
+    assert 'data-sch-filter-strip' in html
+    tiles = re.findall(r'data-sch-status="([a-z]+)" aria-pressed="false"', html)
+    # Tiles only appear when they would match something (no task has succeeded here).
+    assert tiles == ["failed", "never", "due", "paused", "hidden"]
+    assert 'data-sch-status-clear aria-pressed="true"' in html
+    assert 'data-last-status="failed"' in html and 'data-last-status="never"' in html
+    # Task types can be shown or hidden from a checklist dropdown.
+    assert 'data-sch-types' in html
+    types = re.findall(r'<input type="checkbox" value="([^"]+)" data-sch-type checked', html)
+    assert types == ["Sync staff directory", "Sync to Xero"]
+    assert 'data-type="Sync to Xero"' in html
+
+
+def test_scheduled_tasks_empty_state_offers_first_task():
+    html = _page_env().get_template("admin/scheduled_tasks.html").render(
+        **_scheduled_tasks_context(tasks=[], show_inactive=False)
+    )
+    assert "No active scheduled tasks" in html
+    assert "+ Add your first task" in html
+    # Paused tasks stay reachable from the toolbar switch.
+    assert 'name="show_inactive" value="1" data-sch-show-inactive' in html
+
+
+def _render_profile(**context) -> str:
+    from types import SimpleNamespace
+
+    from app import main as main_module
+
+    values = {
+        "request": SimpleNamespace(url=SimpleNamespace(path="/admin/profile", query=""), query_params={}),
+        "app_name": "MyPortal", "csrf_token": "t", "is_super_admin": False,
+        "has_authenticated_user": True, "active_membership": {}, "available_companies": [],
+        "module_enabled": {}, "enabled_module_slugs": [],
+        "current_user": {"id": 7, "email": "tech@example.com", "booking_link_url": "https://cal.example/me"},
+        "profile_totp_devices": [{"id": 1, "name": "Phone"}],
+        "profile_passkeys": [],
+        "profile_m365_contacts": {"connected": True, "account_email": "tech@example.com"},
+        "profile_show_technician_tools": True,
+        "matrix_chat_enabled": True,
+    }
+    values.update(context)
+    return main_module.templates.env.get_template("admin/profile.html").render(**values)
+
+
+def test_profile_page_uses_tabs_stats_and_modals():
+    html = _render_profile()
+
+    # Page-level actions live in the header, and the page title isn't repeated in a card.
+    assert 'data-profile-open="profile-password-modal"' in html
+    assert "management__title" not in html
+    # Security summary counts both second-factor methods.
+    assert re.search(r'data-profile-stat="total"[^>]*>\s*<span[^>]*>Sign-in methods</span>\s*<span[^>]*>1</span>', html)
+    for tab in ("security", "details", "integrations", "menu"):
+        assert f'data-profile-tab="{tab}"' in html and f'data-profile-panel="{tab}"' in html
+    # The tab bar is enhanced by JavaScript; without it every panel stays visible.
+    assert re.search(r'data-profile-tabs\s+hidden', html)
+    assert not re.search(r'data-profile-panel="\w+"[^>]*hidden', html)
+    # Contact, booking and Matrix details save together from one form.
+    contact = html[html.index('id="profile-contact-form"'):html.index("</form>", html.index('id="profile-contact-form"'))]
+    for field in ('id="mobile-number"', 'id="booking-link-url"', 'id="matrix-user-id"'):
+        assert field in contact
+    assert contact.count('type="submit"') == 1
+    # Existing account with an authenticator must confirm their password to add another.
+    assert not re.search(r'data-totp-password-field\s+hidden', html)
+    assert "data-profile-no-second-factor hidden" in html
+
+
+def test_profile_modals_follow_the_gold_standard():
+    html = _render_profile()
+    modal_ids = re.findall(r'<div class="modal scf-modal" id="([\w-]+)" role="dialog" aria-modal="true" aria-labelledby="[\w-]+"[^>]* hidden>', html)
+    assert modal_ids == [
+        "profile-password-modal", "profile-totp-modal", "profile-passkey-modal",
+        "profile-rename-modal", "profile-confirm-modal",
+    ]
+    assert "<dialog" not in html
+    for hook in (
+        'id="password-form"', "data-password-rules", 'name="confirm_password"',
+        "data-totp-qr", "data-totp-manual-toggle", 'id="totp-verify-form"', 'id="totp-code"',
+        'id="passkey-add-form"', 'id="passkey-rename-form"', 'id="profile-confirm-form"',
+        "auth_ui.js", "passkey_utils.js", "profile.js",
+    ):
+        assert hook in html, hook
+
+
+def test_profile_standard_user_sees_security_and_menu_only():
+    html = _render_profile(profile_show_technician_tools=False, profile_totp_devices=[])
+    assert 'data-profile-tab="details"' not in html
+    assert 'data-profile-tab="integrations"' not in html
+    assert "rich_text_editor.js" not in html
+    assert re.search(r'data-totp-password-field\s+hidden', html)
+    assert "data-profile-no-second-factor hidden" not in html

@@ -25,6 +25,7 @@
       {% if company %}
       <div class="management__header-actions compliance__header-actions">
         <span class="tag tag--muted">{{ company.name }}</span>
+        <a href="/compliance/attestation-report.pdf" class="button button--primary button--small">Export attestation PDF</a>
         {% if has_essential8_records and feature_pack_available('essential8') %}
         <a href="/compliance/essential8" class="button button--ghost button--small">Legacy Essential 8 records</a>
         {% endif %}
@@ -91,7 +92,7 @@
         The checks here summarise the standard. Confirm the exact wording against the current SMB1001 edition before attesting.
       </div>
 
-      {% if can_manage and has_essential8_records and feature_pack_available('essential8') %}
+      {% if can_manage and essential8_import_count > 0 and feature_pack_available('essential8') %}
       <div class="compliance-form__actions">
         <button type="button" class="button button--ghost button--small" id="smb1001-import-e8">Import Essential 8 progress</button>
         <span class="form__hint">
@@ -161,11 +162,14 @@
               <form class="compliance-form" data-control-form="{{ control.id }}">
                 <div class="form-field">
                   <label for="smb-status-{{ control.id }}" class="form-label">Status</label>
-                  <select id="smb-status-{{ control.id }}" class="form-input" {% if not can_manage %}disabled{% endif %}>
+                  <select id="smb-status-{{ control.id }}" class="form-input" {% if not can_manage or control.status_locked %}disabled{% endif %}>
                     {% for value, label in [('not_started', 'Not started'), ('in_progress', 'In progress'), ('compliant', 'Compliant'), ('non_compliant', 'Non-compliant'), ('not_applicable', 'Not applicable')] %}
                     <option value="{{ value }}" {% if control.status == value %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                   </select>
+                  {% if control.status_reason %}
+                  <p class="form-help">{{ control.status_reason }}</p>
+                  {% endif %}
                 </div>
                 <div class="form-field">
                   <label for="smb-evidence-{{ control.id }}" class="form-label">Evidence</label>
@@ -239,6 +243,23 @@
                   {% endif %}
                 </div>
               </form>
+              {% if control.engagement_letter and can_manage and control.status not in ['compliant', 'not_applicable'] %}
+              <form method="post" action="/compliance/smb1001/engagement-letter" class="compliance-form requirement-item__engagement-form">
+                {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                <div class="form-field">
+                  <label for="smb-engagement-recipient" class="form-label">Send a letter of engagement</label>
+                  <select id="smb-engagement-recipient" name="recipient_user_id" class="form-input" required>
+                    {% for member in company_members %}
+                    <option value="{{ member.id }}" {% if member.id == current_user_id %}selected{% endif %}>{{ member.email }}</option>
+                    {% endfor %}
+                  </select>
+                  <p class="form-help">Emails the letter of engagement to this company member and records it as evidence, marking {{ control.code }} compliant.{% if is_super_admin %} Edit the wording in <a href="/admin/message-templates">Message templates</a> (smb1001-engagement-letter).{% endif %}</p>
+                </div>
+                <div class="compliance-form__actions">
+                  <button type="submit" class="button button--primary button--small" {% if not company_members %}disabled{% endif %}>Send letter of engagement</button>
+                </div>
+              </form>
+              {% endif %}
               {% if control.show_help %}
               <form id="smb-ticket-form-{{ control.id }}" method="post" action="/compliance/smb1001/{{ control.id }}/ticket" class="requirement-item__ticket-form">
                 {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
@@ -320,20 +341,24 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!companyId) return;
       const id = btn.dataset.saveControl;
       const owner = parseInt(document.getElementById(`smb-owner-${id}`).value, 10);
+      const statusSelect = document.getElementById(`smb-status-${id}`);
       const payload = {
-        status: document.getElementById(`smb-status-${id}`).value,
+        status: statusSelect.value,
         evidence: document.getElementById(`smb-evidence-${id}`).value || null,
         notes: document.getElementById(`smb-notes-${id}`).value || null,
         owner_user_id: Number.isFinite(owner) ? owner : null,
         last_reviewed_date: document.getElementById(`smb-reviewed-${id}`).value || null,
         target_compliance_date: document.getElementById(`smb-target-${id}`).value || null,
       };
+      // Automatically checked statuses are reported, not stored.
+      const statusLocked = statusSelect.disabled;
+      if (statusLocked) delete payload.status;
       try {
         await send(`/api/smb1001/companies/${companyId}/controls/${id}/compliance`, 'PATCH', payload);
         const item = document.querySelector(`[data-control-id="${id}"]`);
         const badge = item?.querySelector('[data-requirement-status]');
-        if (item) item.dataset.status = payload.status;
-        if (badge) {
+        if (item && !statusLocked) item.dataset.status = payload.status;
+        if (badge && !statusLocked) {
           badge.className = `badge badge--status-${payload.status}`;
           badge.textContent = statusText[payload.status] || 'Not started';
         }

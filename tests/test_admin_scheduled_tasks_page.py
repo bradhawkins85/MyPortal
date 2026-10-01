@@ -181,13 +181,14 @@ def test_scheduled_tasks_page_renders_tasks(super_admin_context, monkeypatch):
     _, separator, header_html = html.partition('class="header__actions" data-header-actions')
     assert separator
     header_html, _, _ = header_html.partition("</header>")
-    assert 'aria-controls="scheduled-tasks-bulk-actions-menu"' in header_html
-    assert 'id="scheduled-tasks-bulk-actions-menu"' in header_html
+    assert 'aria-controls="scheduled-tasks-actions-menu"' in header_html
     assert ">Manage Tasks<" not in header_html
     assert 'data-task-create' in header_html
-    assert 'Redistribute selected' in header_html
-    assert 'data-scheduled-tasks-bulk-action="redistribute"' in header_html
+    assert 'data-bulk-task-create' in header_html
+    # Selection actions live in the bar above the list, not the page header.
+    assert 'data-scheduled-tasks-bulk-action="redistribute"' in html
     assert 'data-scheduled-tasks-redistribute-offset' in html
+    assert 'id="scheduled-tasks-redistribute-modal"' in html
 
 
 def test_scheduled_tasks_page_offers_rag_control_commands(super_admin_context, monkeypatch):
@@ -472,6 +473,7 @@ def test_bulk_create_modal_describes_optional_random_schedule(super_admin_contex
 
     assert response.status_code == 200
     assert 'id="bulk-task-cron" name="cron" placeholder=' in response.text
+    assert "A random time each day" in response.text
     assert "Leave blank to assign each company a random daily time." in response.text
 
 

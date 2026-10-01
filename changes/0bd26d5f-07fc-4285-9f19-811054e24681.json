@@ -1,0 +1,7 @@
+{
+  "guid": "0bd26d5f-07fc-4285-9f19-811054e24681",
+  "occurred_at": "2026-09-30T11:24:30.299633+00:00",
+  "change_type": "feature",
+  "summary": "Add a profile preference for an always-visible horizontal top navigation menu.",
+  "content_hash": "8433ae4b536cfb75710497cc3be4adb6c0ca1575209b74e0df343f4507377faa"
+}

@@ -22,6 +22,7 @@ _ALLOWED_COMPANY_COLUMNS = frozenset({
     "defender_scheduled_scan_time", "defender_auto_ticket_min_severity",
     "defender_auto_ticket_antivirus_off", "defender_auto_ticket_realtime_off",
     "defender_auto_ticket_tamper_off", "defender_auto_ticket_threat_detected",
+    "classic_outlook_signatures_enabled",
 })
 _ALLOWED_COMPANY_INPUTS = _ALLOWED_COMPANY_COLUMNS | frozenset({"email_domains"})
 
