@@ -1,0 +1,7 @@
+{
+  "guid": "ab880a4d-10d2-46ef-9e89-26668886cf0a",
+  "occurred_at": "2026-10-01T00:00Z",
+  "change_type": "Feature",
+  "summary": "The portal Create a ticket form now suggests up to three knowledge base articles and resolved tickets you can already see as you type the subject and description, each with a \"Did this fix it?\" prompt so you can solve common issues without raising a ticket.",
+  "content_hash": "a774c79b3f305efd1e0adedf0b63e98f5758112962fb7a53192e3b4c4c481ab5"
+}

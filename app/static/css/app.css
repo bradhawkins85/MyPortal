@@ -21677,3 +21677,62 @@ a.sch-item__company:focus-visible {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* Portal ticket form: KB article and resolved ticket suggestions */
+.ticket-suggestions {
+  display: grid;
+  gap: var(--space-gap-tight);
+  padding: var(--space-gap-base);
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-bg-sunken);
+}
+
+.ticket-suggestions[hidden] {
+  display: none;
+}
+
+.ticket-suggestions__title {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--hf-copy-strong);
+}
+
+.ticket-suggestions__list {
+  display: grid;
+  gap: var(--space-gap-tight);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ticket-suggestions__item {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.ticket-suggestions__item a {
+  color: var(--hf-accent);
+  font-weight: 600;
+}
+
+.ticket-suggestions__meta,
+.ticket-suggestions__summary {
+  margin: 0;
+  color: var(--hf-muted);
+  font-size: 0.85rem;
+}
+
+.ticket-suggestions__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-gap-tight);
+  font-size: 0.85rem;
+  color: var(--hf-copy);
+}
+
+.ticket-suggestions__resolved {
+  margin: 0;
+  color: var(--hf-success);
+}

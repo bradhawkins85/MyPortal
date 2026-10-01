@@ -436,6 +436,7 @@ async def retrieve_candidates(
     source_filters: Sequence[str] | None = None,
     limit: int | None = None,
     min_score: float | None = None,
+    rerank: bool = True,
 ) -> list[dict[str, Any]]:
     query_text = (query or "").strip()
     if not query_text:
@@ -570,7 +571,8 @@ async def retrieve_candidates(
         if len(diverse) >= max(1, resolved_limit):
             break
     diverse = _group_duplicate_candidates(diverse)
-    diverse = await _rerank(query_text, diverse)
+    if rerank:
+        diverse = await _rerank(query_text, diverse)
     log_info(
         "RAG hybrid retrieval completed",
         query=query_text,
