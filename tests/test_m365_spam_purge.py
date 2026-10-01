@@ -199,6 +199,67 @@ async def test_scc_invoke_uses_initial_domain_in_route_and_anchor(monkeypatch):
     )
 
 
+def _scc_client_factory(results: list):
+    """Build a FakeClient whose post() yields results in order (call or raise)."""
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            outcome = results.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+    return FakeClient
+
+
+@pytest.mark.anyio("asyncio")
+async def test_scc_invoke_retries_connect_timeout_then_succeeds(monkeypatch):
+    token = "header.payload.signature"
+    results = [
+        httpx.ConnectTimeout("connect timed out"),
+        httpx.ConnectTimeout("connect timed out"),
+        httpx.Response(200, json={"value": []}),
+    ]
+    monkeypatch.setattr(m365_service.httpx, "AsyncClient", _scc_client_factory(results))
+    sleep = AsyncMock()
+    monkeypatch.setattr(m365_service.asyncio, "sleep", sleep)
+
+    payload = await m365_service._scc_invoke_command(
+        token, "08fa9092-c049-429b-bd82-28119ef5dd7f", "New-ComplianceSearch",
+        {"Name": "search"}, organization="contoso.onmicrosoft.com",
+    )
+
+    assert payload == {"value": []}
+    assert sleep.await_count == 2
+    assert [call.args[0] for call in sleep.await_args_list] == [5, 10]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_scc_invoke_connect_timeout_exhaustion_is_actionable(monkeypatch):
+    token = "header.payload.signature"
+    results = [httpx.ConnectTimeout("connect timed out") for _ in range(3)]
+    monkeypatch.setattr(m365_service.httpx, "AsyncClient", _scc_client_factory(results))
+    monkeypatch.setattr(m365_service.asyncio, "sleep", AsyncMock())
+
+    with pytest.raises(
+        M365Error, match="New-ComplianceSearch request timed out \\(ConnectTimeout\\)"
+    ) as excinfo:
+        await m365_service._scc_invoke_command(
+            token, "08fa9092-c049-429b-bd82-28119ef5dd7f", "New-ComplianceSearch",
+            {"Name": "search"}, organization="contoso.onmicrosoft.com",
+        )
+    assert "ps.compliance.protection.outlook.com (HTTPS port 443)" in str(excinfo.value)
+
+
 def test_jwt_appid_supports_v2_azp_claim():
     header = base64.urlsafe_b64encode(json.dumps({"alg": "RS256"}).encode()).rstrip(b"=").decode()
     payload = base64.urlsafe_b64encode(json.dumps({"azp": "v2-client-id"}).encode()).rstrip(b"=").decode()

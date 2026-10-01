@@ -98,6 +98,21 @@ _COMPLIANCE_ROLE_VERIFY_DELAY_SECONDS = 2.0
 # The app must have the ``ComplianceManager.ReadWrite.All`` (or equivalent) application
 # permission and be assigned a Compliance Administrator (or global admin) role in the tenant.
 _SCC_SCOPE = "https://ps.compliance.protection.outlook.com/.default"
+# Purview InvokeCommand requests: a short connect timeout surfaces unreachable
+# endpoints quickly, while the read timeout stays generous because compliance
+# search creation can take long on large tenants.
+_SCC_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
+# Connect-phase failures (ConnectTimeout/ConnectError) mean the cmdlet request
+# was never delivered to Purview, so bounded retries are safe.
+_SCC_CONNECT_RETRIES = 2
+_SCC_CONNECT_RETRY_BASE_SECONDS = 5
+_SCC_CONNECT_RETRY_HINT = (
+    " The MyPortal server could not open a network connection to "
+    "ps.compliance.protection.outlook.com (HTTPS port 443). Verify outbound "
+    "internet access and DNS resolution from the MyPortal host or container "
+    "network, including any proxy or firewall between it and Microsoft "
+    "endpoints, then retry."
+)
 _SCC_ORGANIZATION_PATTERN = re.compile(
     r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.onmicrosoft\.com"
 )
@@ -2128,21 +2143,39 @@ async def _scc_invoke_command(
     appid = _jwt_appid(scc_token)
     if appid and route_organization:
         headers["X-AnchorMailbox"] = f"app:{appid}@{route_organization}"
-    try:
-        async with monitored_client(httpx.AsyncClient, timeout=30, follow_redirects=False) as client:
-            response = await _post_with_redirect(client, url, headers, payload)
-    except httpx.DecodingError as exc:
-        raise M365Error(
-            f"Security & Compliance {cmdlet_name} request decode error: {exc}"
-        ) from exc
-    except httpx.TimeoutException as exc:
-        raise M365Error(
-            f"Security & Compliance {cmdlet_name} request timed out ({type(exc).__name__})"
-        ) from exc
-    except httpx.NetworkError as exc:
-        raise M365Error(
-            f"Security & Compliance {cmdlet_name} network error ({type(exc).__name__})"
-        ) from exc
+    for attempt in range(_SCC_CONNECT_RETRIES + 1):
+        try:
+            async with monitored_client(httpx.AsyncClient, timeout=_SCC_TIMEOUT, follow_redirects=False) as client:
+                response = await _post_with_redirect(client, url, headers, payload)
+            break
+        except httpx.DecodingError as exc:
+            raise M365Error(
+                f"Security & Compliance {cmdlet_name} request decode error: {exc}"
+            ) from exc
+        except (httpx.ConnectTimeout, httpx.ConnectError) as exc:
+            if attempt < _SCC_CONNECT_RETRIES:
+                wait = _SCC_CONNECT_RETRY_BASE_SECONDS * (2 ** attempt)
+                log_warning(
+                    "Security & Compliance connection failed; retrying",
+                    cmdlet=cmdlet_name,
+                    attempt=attempt + 1,
+                    wait_seconds=wait,
+                    error=type(exc).__name__,
+                )
+                await asyncio.sleep(wait)
+                continue
+            raise M365Error(
+                f"Security & Compliance {cmdlet_name} request timed out "
+                f"({type(exc).__name__}){_SCC_CONNECT_RETRY_HINT}"
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise M365Error(
+                f"Security & Compliance {cmdlet_name} request timed out ({type(exc).__name__})"
+            ) from exc
+        except httpx.NetworkError as exc:
+            raise M365Error(
+                f"Security & Compliance {cmdlet_name} network error ({type(exc).__name__})"
+            ) from exc
     if response.status_code not in (200, 201, 204):
         error_detail = _exo_error_detail(response)
         log_error(
