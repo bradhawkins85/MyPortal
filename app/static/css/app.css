@@ -5556,7 +5556,9 @@ button.header-title-menu__link,
   background: rgba(15, 23, 42, 0.75);
   backdrop-filter: blur(6px);
   padding: calc(var(--space-gap-roomy) * 2.5);
-  z-index: 1000;
+  /* Sit above the sticky top navigation (1200) and its dropdowns (1250) so
+   * the dialog header and close button are never covered. Toasts stay above. */
+  z-index: 1300;
 }
 
 .modal[hidden] {
