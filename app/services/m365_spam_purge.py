@@ -46,6 +46,23 @@ def _organization_context_error(organization: str) -> m365_service.M365Error:
     )
 
 
+_AUTH_HINT = (
+    " Purview rejected the application's credentials. In Office 365 Diagnostics, "
+    "run permission repair so Exchange.ManageAsApp is granted on Microsoft Exchange "
+    "Online Protection, confirm the application holds the Compliance Administrator "
+    "role (eDiscoveryManager membership for search; Search And Purge for purge), "
+    "then retry. Role changes can take up to an hour to reach Purview."
+)
+
+
+def _failure_message(exc: Exception) -> str:
+    """Return the recorded error, adding remediation for authorization failures."""
+    message = str(exc)
+    if isinstance(exc, m365_service.M365Error) and exc.http_status in (401, 403):
+        message += _AUTH_HINT
+    return message[:2000]
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -144,7 +161,6 @@ async def start_search(request_id: int, company_id: int) -> dict[str, Any]:
     previous_status = str(request["search_status"]).lower()
     if previous_status not in {"draft", "failed"}:
         raise ValueError("Only draft or failed searches can be started")
-    await _require_purview_preflight(company_id)
     await purge_repo.update_request(request_id, {
         "search_status": "queued", "error_message": None, "search_details": None,
         "matched_items": 0, "matched_size": 0, "search_started_at": _utcnow(),
@@ -162,27 +178,11 @@ async def start_purge(request_id: int, company_id: int) -> dict[str, Any]:
         raise ValueError("The completed search contains no messages to purge")
     if str(request["purge_status"]).lower() not in {"not_started", "failed"}:
         raise ValueError("Purge has already been started")
-    await _require_purview_preflight(company_id)
     await purge_repo.update_request(request_id, {
         "purge_status": "queued", "error_message": None, "purge_started_at": _utcnow(),
     })
     _start_task(request_id, "purge")
     return (await purge_repo.get_request(request_id)) or request
-
-
-async def _require_purview_preflight(company_id: int) -> None:
-    result = await m365_service.run_purview_preflight(company_id)
-    if result["ready"]:
-        return
-    failed = ", ".join(
-        check["label"] for check in result["checks"]
-        if check["status"] in {"Failed", "Requires Admin Action"}
-    )
-    raise m365_service.M365Error(
-        "Purview preflight did not pass: " + (failed or "Purview organization unavailable")
-        + ". Open Office 365 Diagnostics for the remediation steps.",
-        http_status=503,
-    )
 
 
 async def _owned_request(request_id: int, company_id: int) -> dict[str, Any]:
@@ -283,7 +283,7 @@ async def _run_search(request_id: int, *, retry: bool = False) -> None:
     except Exception as exc:  # noqa: BLE001 - background boundary records safe error
         log_error("M365 spam search failed", request_id=request_id, error=str(exc))
         await purge_repo.update_request(request_id, {
-            "search_status": "failed", "error_message": str(exc)[:2000],
+            "search_status": "failed", "error_message": _failure_message(exc),
             "search_completed_at": _utcnow(),
         })
 
@@ -346,7 +346,7 @@ async def _run_purge(request_id: int) -> None:
     except Exception as exc:  # noqa: BLE001 - background boundary records safe error
         log_error("M365 spam purge failed", request_id=request_id, error=str(exc))
         await purge_repo.update_request(request_id, {
-            "purge_status": "failed", "error_message": str(exc)[:2000],
+            "purge_status": "failed", "error_message": _failure_message(exc),
             "purge_completed_at": _utcnow(),
         })
 

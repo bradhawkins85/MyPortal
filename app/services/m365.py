@@ -499,6 +499,40 @@ async def _get_sp_app_role_ids(access_token: str, app_id: str) -> tuple[str | No
         return None, set()
 
 
+async def _resolve_eop_manage_as_app_role(access_token: str) -> tuple[str | None, str | None]:
+    """Return the tenant's EOP service principal ID and its Exchange.ManageAsApp role ID.
+
+    EOP does not publish Exchange.ManageAsApp under the Exchange Online role
+    GUID, so the role is resolved by its ``value`` instead of a copied ID.
+    Returns ``None`` for whichever part the tenant does not expose.
+    """
+    try:
+        resp = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/servicePrincipals"
+            f"?$filter=appId eq '{_SCC_APP_ID}'&$select=id,appId,appRoles",
+        )
+    except M365Error:
+        return None, None
+    sp = next(iter(resp.get("value") or []), None)
+    if not isinstance(sp, dict) or not sp.get("id"):
+        return None, None
+    if sp.get("appId") and str(sp["appId"]).lower() != _SCC_APP_ID:
+        return None, None
+    role_id = next(
+        (
+            str(role.get("id"))
+            for role in sp.get("appRoles") or []
+            if isinstance(role, dict)
+            and role.get("id")
+            and str(role.get("value") or "") == "Exchange.ManageAsApp"
+            and "Application" in (role.get("allowedMemberTypes") or ["Application"])
+        ),
+        None,
+    )
+    return str(sp["id"]), role_id
+
+
 def _select_contract_resource(
     resource_name: str, app_id: str | None, items: list[dict[str, Any]]
 ) -> dict[str, Any] | None:
@@ -4736,6 +4770,10 @@ async def run_purview_preflight(
             admin_role_error = str(exc)
 
     permission_configured = False
+    # EOP publishes Exchange.ManageAsApp under its own role ID; accept it as
+    # well as the historical constant so a correctly granted role is seen.
+    eop_sp_id, eop_role_id = await _resolve_eop_manage_as_app_role(graph_token)
+    eop_role_ids = {_SCC_MANAGE_AS_APP_ROLE} | ({eop_role_id.lower()} if eop_role_id else set())
     app_object_id = str(creds.get("app_object_id") or "")
     try:
         if app_object_id:
@@ -4754,7 +4792,7 @@ async def run_purview_preflight(
         permission_configured = any(
             str(resource.get("resourceAppId") or "").lower() == _SCC_APP_ID
             and any(
-                str(access.get("id") or "").lower() == _SCC_MANAGE_AS_APP_ROLE
+                str(access.get("id") or "").lower() in eop_role_ids
                 and str(access.get("type") or "").lower() == "role"
                 for access in resource.get("resourceAccess") or []
             )
@@ -4779,9 +4817,11 @@ async def run_purview_preflight(
         resource_ids = {
             str(item.get("resourceId") or "")
             for item in assignments.get("value") or []
-            if str(item.get("appRoleId") or "").lower() == _SCC_MANAGE_AS_APP_ROLE
+            if str(item.get("appRoleId") or "").lower() in eop_role_ids
         }
-        for resource_id in resource_ids:
+        if eop_sp_id and eop_sp_id in resource_ids:
+            consent_granted = True
+        for resource_id in resource_ids if not consent_granted else ():
             resource = await _graph_get(
                 graph_token,
                 f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(resource_id)}?$select=appId",
@@ -5620,6 +5660,35 @@ async def try_grant_missing_permissions(
             except M365Error as exc:
                 log_error(
                     "try_grant_missing_permissions: unexpected Exchange grant failure",
+                    company_id=company_id,
+                    **_safe_m365_error_fields(exc),
+                )
+
+        # Purview (Security & Compliance) tokens are authorized by the EOP
+        # resource, not Exchange Online. Grant its ManageAsApp role by the ID
+        # the tenant actually publishes so spam search/purge can authenticate.
+        eop_sp_id, eop_role_id = await _resolve_eop_manage_as_app_role(access_token)
+        if eop_sp_id and eop_role_id and not any(
+            str(a.get("resourceId") or "") == eop_sp_id
+            and str(a.get("appRoleId") or "").lower() == eop_role_id.lower()
+            for a in assignment_list
+        ):
+            try:
+                await _post_app_role_assignment_with_retry(
+                    access_token,
+                    _app_role_assignment_url(eop_sp_id),
+                    {
+                        "principalId": sp_object_id,
+                        "resourceId": eop_sp_id,
+                        "appRoleId": eop_role_id,
+                    },
+                    max_attempts=3,
+                )
+                granted.append(f"eop:{eop_role_id}")
+                log_info("Granted EOP Exchange.ManageAsApp via connect flow", company_id=company_id)
+            except M365Error as exc:
+                log_error(
+                    "try_grant_missing_permissions: failed to grant EOP Exchange.ManageAsApp",
                     company_id=company_id,
                     **_safe_m365_error_fields(exc),
                 )
