@@ -426,6 +426,25 @@ class Settings(BaseSettings):
             "Increase for large corpora to avoid excluding older but relevant documents."
         ),
     )
+    rag_vector_prefilter: bool = Field(
+        default=True,
+        validation_alias="RAG_VECTOR_PREFILTER",
+        description=(
+            "Use the database vector index (MariaDB 11.7+) to pre-select the nearest "
+            "and best lexical chunks before hybrid scoring. Falls back to scoring "
+            "every active chunk in Python when the database has no vector support."
+        ),
+    )
+    rag_prefilter_top_k: int = Field(
+        default=400,
+        validation_alias="RAG_PREFILTER_TOP_K",
+        ge=50,
+        le=10000,
+        description=(
+            "Nearest chunks and full-text matches fetched per source type when the "
+            "vector pre-filter is active."
+        ),
+    )
     rag_min_score: float = Field(
         default=0.35,
         validation_alias=AliasChoices("RAG_MIN_SCORE", "MIN_SIMILARITY"),
