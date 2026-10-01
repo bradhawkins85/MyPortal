@@ -6,8 +6,70 @@
 {% endblock %}
 
 {% block header_title %}
-  <div class="header-title-menu">
-    <span class="header-title-menu__label">Shop admin</span>
+  <div class="header-title-menu page-header-bar">
+    <span class="header__title-text">Shop admin</span>
+    <div class="page-header-toolbar">
+      <input
+        type="search"
+        class="form-input page-header-toolbar__search"
+        placeholder="Search products"
+        aria-label="Search products"
+        name="search"
+        value="{{ search_term }}"
+        data-admin-product-search
+      />
+      <label class="page-header-toolbar__check">
+        <input type="checkbox" id="show-archived" {% if show_archived %}checked{% endif %} />
+        <span>Show archived</span>
+      </label>
+      <div class="dropdown" id="columns-dropdown">
+        <button
+          type="button"
+          class="button button--ghost button--compact"
+          id="columns-toggle"
+          aria-haspopup="true"
+          aria-expanded="false"
+          aria-controls="columns-menu"
+        >
+          Columns
+        </button>
+        <div class="dropdown__menu columns-menu" id="columns-menu" role="menu">
+          <label class="dropdown__item dropdown__item--checkbox">
+            <input type="checkbox" data-column-toggle="image" checked /> Image
+          </label>
+          <label class="dropdown__item dropdown__item--checkbox">
+            <input type="checkbox" data-column-toggle="name" checked /> Name
+          </label>
+          <label class="dropdown__item dropdown__item--checkbox">
+            <input type="checkbox" data-column-toggle="sku" checked /> SKU
+          </label>
+          <label class="dropdown__item dropdown__item--checkbox">
+            <input type="checkbox" data-column-toggle="vendor-sku" checked /> Vendor SKU
+          </label>
+          <label class="dropdown__item dropdown__item--checkbox">
+            <input type="checkbox" data-column-toggle="dbp" checked /> DBP
+          </label>
+          <label class="dropdown__item dropdown__item--checkbox">
+            <input type="checkbox" data-column-toggle="price" checked /> Price
+          </label>
+          <label class="dropdown__item dropdown__item--checkbox">
+            <input type="checkbox" data-column-toggle="vip" checked /> VIP
+          </label>
+          <label class="dropdown__item dropdown__item--checkbox">
+            <input type="checkbox" data-column-toggle="profit" checked /> Profit
+          </label>
+          <label class="dropdown__item dropdown__item--checkbox">
+            <input type="checkbox" data-column-toggle="vip-profit" checked /> VIP Profit
+          </label>
+          <label class="dropdown__item dropdown__item--checkbox">
+            <input type="checkbox" data-column-toggle="category" checked /> Category
+          </label>
+          <label class="dropdown__item dropdown__item--checkbox">
+            <input type="checkbox" data-column-toggle="stock" checked /> Stock
+          </label>
+        </div>
+      </div>
+    </div>
     <details class="header-title-menu__dropdown" data-header-menu>
       <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
         Shop tools
@@ -74,68 +136,6 @@
       <div>
         <h2 class="card__title">Product catalogue</h2>
         <p class="card__subtitle">Filter, sort, and manage catalogue items with real-time previews.</p>
-      </div>
-      <div class="card__controls">
-        <input
-          type="search"
-          class="form-input card__control"
-          placeholder="Search products"
-          aria-label="Search products"
-          name="search"
-          value="{{ search_term }}"
-          data-admin-product-search
-        />
-        <label class="checkbox card__control">
-          <input type="checkbox" id="show-archived" {% if show_archived %}checked{% endif %} />
-          <span>Show archived</span>
-        </label>
-        <div class="dropdown card__control" id="columns-dropdown">
-          <button
-            type="button"
-            class="button button--ghost"
-            id="columns-toggle"
-            aria-haspopup="true"
-            aria-expanded="false"
-            aria-controls="columns-menu"
-          >
-            Columns
-          </button>
-          <div class="dropdown__menu columns-menu" id="columns-menu" role="menu">
-            <label class="dropdown__item dropdown__item--checkbox">
-              <input type="checkbox" data-column-toggle="image" checked /> Image
-            </label>
-            <label class="dropdown__item dropdown__item--checkbox">
-              <input type="checkbox" data-column-toggle="name" checked /> Name
-            </label>
-            <label class="dropdown__item dropdown__item--checkbox">
-              <input type="checkbox" data-column-toggle="sku" checked /> SKU
-            </label>
-            <label class="dropdown__item dropdown__item--checkbox">
-              <input type="checkbox" data-column-toggle="vendor-sku" checked /> Vendor SKU
-            </label>
-            <label class="dropdown__item dropdown__item--checkbox">
-              <input type="checkbox" data-column-toggle="dbp" checked /> DBP
-            </label>
-            <label class="dropdown__item dropdown__item--checkbox">
-              <input type="checkbox" data-column-toggle="price" checked /> Price
-            </label>
-            <label class="dropdown__item dropdown__item--checkbox">
-              <input type="checkbox" data-column-toggle="vip" checked /> VIP
-            </label>
-            <label class="dropdown__item dropdown__item--checkbox">
-              <input type="checkbox" data-column-toggle="profit" checked /> Profit
-            </label>
-            <label class="dropdown__item dropdown__item--checkbox">
-              <input type="checkbox" data-column-toggle="vip-profit" checked /> VIP Profit
-            </label>
-            <label class="dropdown__item dropdown__item--checkbox">
-              <input type="checkbox" data-column-toggle="category" checked /> Category
-            </label>
-            <label class="dropdown__item dropdown__item--checkbox">
-              <input type="checkbox" data-column-toggle="stock" checked /> Stock
-            </label>
-          </div>
-        </div>
       </div>
     </header>
     <div class="table-wrapper">

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
+{% block header_title %}<span class="header__title-text">SLA templates</span>{% endblock %}
 {% block content %}
-<div class="page-header"><div><h1>SLA templates</h1><p class="text-muted">Define reusable targets for any ticket priorities your administrators use, then optionally apply a template to customers.</p></div></div>
+<p class="text-muted">Define reusable targets for any ticket priorities your administrators use, then optionally apply a template to customers.</p>
 {% if request.query_params.get('error') %}<div class="alert alert--danger">Enter a name and at least one unique priority with valid targets. Resolution must not be shorter than first response.</div>{% endif %}
 <div class="admin-grid">
   <section class="card card--panel"><div class="card__header"><h2 class="card__title">Existing templates</h2></div><div class="card__body">

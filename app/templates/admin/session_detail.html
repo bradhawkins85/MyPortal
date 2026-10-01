@@ -1,12 +1,20 @@
 {% extends "base.html" %}
-{% from "macros/header.html" import page_header_actions %}
+{% from "macros/header.html" import page_header_overflow %}
 
-{% block header_title %}<span class="header__title-text">Session drilldown</span>{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar page-header-bar--record">
+    <span class="header__title-text" title="{{ session_detail.display_name }}">{{ session_detail.display_name }}</span>
+    <span class="page-header-bar__meta">Session drilldown{% if session_detail.company_name %} · {{ session_detail.company_name }}{% endif %}</span>
+  </div>
+{% endblock %}
 
 {% block header_actions %}
-  {{ page_header_actions([
-    {"label": "All sessions", "type": "link", "variant": "ghost", "href": "/admin/sessions"}
-  ]) }}
+  <div class="header-actions">
+    <a class="button button--ghost" href="/admin/sessions">Back to sessions</a>
+    {{ page_header_overflow("session-actions", "Actions", [
+      {"label": "Revoke session", "type": "form", "variant": "danger", "action": "/admin/sessions/" ~ session_detail.id ~ "/revoke", "confirm": "Revoke this session? The user will be signed out of this browser."}
+    ]) }}
+  </div>
 {% endblock %}
 
 {% block content %}
@@ -16,10 +24,6 @@
         <h2 class="card__title">{{ session_detail.display_name }}</h2>
         <p class="card__subtitle">Correlated browser-session activity and audit events for governance review.</p>
       </div>
-      <form method="post" action="/admin/sessions/{{ session_detail.id }}/revoke" class="inline-form" onsubmit="return confirm('Revoke this session?');">
-        {% include "partials/csrf.html" %}
-        <button type="submit" class="button button--ghost button--danger">Revoke session</button>
-      </form>
     </header>
     <div class="card__body">
       <dl class="description-list">

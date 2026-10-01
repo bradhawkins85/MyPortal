@@ -698,7 +698,7 @@
       }
     });
 
-    const inactiveToggle = root.querySelector('[data-sch-show-inactive]');
+    const inactiveToggle = document.querySelector('[data-sch-show-inactive]');
     if (inactiveToggle && inactiveToggle.form) {
       inactiveToggle.addEventListener('change', () => {
         saveListState();
@@ -749,15 +749,15 @@
   }
 
   function initList(root, items) {
-    const search = root.querySelector('[data-sch-search]');
-    const sort = root.querySelector('[data-sch-sort]');
+    const search = document.querySelector('[data-sch-search]');
+    const sort = document.querySelector('[data-sch-sort]');
     const groups = Array.from(root.querySelectorAll('[data-sch-group]'));
     const noResults = root.querySelector('[data-sch-no-results]');
     const dueStat = root.querySelector('[data-sch-stat="due"]');
     const strip = root.querySelector('[data-sch-filter-strip]');
     const tiles = strip ? Array.from(strip.querySelectorAll('[data-sch-status]')) : [];
     const clearTile = strip ? strip.querySelector('[data-sch-status-clear]') : null;
-    const typesMenu = root.querySelector('[data-sch-types]');
+    const typesMenu = document.querySelector('[data-sch-types]');
     const typeBoxes = typesMenu ? Array.from(typesMenu.querySelectorAll('[data-sch-type]')) : [];
     const typesLabel = typesMenu ? typesMenu.querySelector('[data-sch-types-label]') : null;
     const dayMs = 86400000;

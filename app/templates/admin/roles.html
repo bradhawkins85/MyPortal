@@ -2,7 +2,24 @@
 {% from "macros/header.html" import page_header_actions %}
 {% from "macros/counters.html" import counter_strip %}
 
-{% block header_title %}Roles{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Roles</span>
+    {% if roles %}
+      <div class="page-header-toolbar">
+        <label class="visually-hidden" for="rol-search">Search roles</label>
+        <input id="rol-search" type="search" class="form-input page-header-toolbar__search" placeholder="Search roles" title="Search roles or permissions" data-role-search />
+        <label class="visually-hidden" for="rol-filter">Show</label>
+        <select class="form-input page-header-toolbar__select" id="rol-filter" data-role-filter>
+          <option value="">All roles</option>
+          <option value="custom">Custom roles</option>
+          <option value="system">System roles</option>
+          <option value="unassigned">Not assigned</option>
+        </select>
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}
 
 {% block header_actions %}
   {{ page_header_actions([
@@ -48,17 +65,6 @@
   </header>
   <div class="card__body card__body--stacked">
     {% if roles %}
-      <div class="scf-toolbar">
-        <input type="search" class="form-input scf-toolbar__search" placeholder="Search roles or permissions" aria-label="Search roles" data-role-search />
-        <label class="visually-hidden" for="rol-filter">Show</label>
-        <select class="form-input rol__filter" id="rol-filter" data-role-filter>
-          <option value="">All roles</option>
-          <option value="custom">Custom roles</option>
-          <option value="system">System roles</option>
-          <option value="unassigned">Not assigned</option>
-        </select>
-      </div>
-
       <ul class="scf-list rol__list" data-role-list>
         {% for role in roles %}
           {% set perms = role.permissions or {} %}

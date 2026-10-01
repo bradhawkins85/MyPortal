@@ -2,7 +2,18 @@
 {% from "macros/header.html" import page_header_actions %}
 {% from "macros/tables.html" import table_column_picker %}
 
-{% block header_title %}<span class="header__title-text">Approvals</span>{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Approvals</span>
+    {% if company %}
+      <div class="page-header-toolbar">
+        <label class="visually-hidden" for="approvals-filter">Filter approval types</label>
+        <input id="approvals-filter" type="search" class="form-input page-header-toolbar__search" placeholder="Filter approval types" data-table-filter="approvals-table" />
+        {{ table_column_picker("approvals", approval_columns) }}
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}
 {% block header_actions %}
   {% if company %}
     {{ page_header_actions([{"label": "Add approval type", "type": "link", "variant": "primary", "href": "#new-approval-type"}]) }}
@@ -39,10 +50,6 @@
     </section>
 
     <section class="card card--panel admin-grid__full">
-      <header class="card__header">
-        <div class="card__controls"><input type="search" class="form-input card__control" placeholder="Filter approval types" aria-label="Filter approval types" data-table-filter="approvals-table" /></div>
-        <div class="card__controls card__controls--right">{{ table_column_picker("approvals", approval_columns) }}</div>
-      </header>
       <div class="table-wrapper">
         <table class="table" id="approvals-table" data-table data-table-id="approvals" data-page-size-max="25">
           <thead><tr><th data-sort="string" data-column-key="name">Approval type</th><th data-sort="string" data-column-key="guid">GUID</th><th data-sort="string" data-column-key="description">Description</th><th data-sort="string" data-column-key="status">Status</th><th class="table__actions" data-column-key="actions">Actions</th></tr></thead>

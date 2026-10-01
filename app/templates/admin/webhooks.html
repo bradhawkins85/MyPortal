@@ -4,7 +4,53 @@
 {% from "macros/tables.html" import table_column_picker, empty_state %}
 
 {% block title %}Webhooks{% endblock %}
-{% block header_title %}Webhooks{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Webhooks</span>
+    <div class="page-header-toolbar" data-table-toolbar data-table-toolbar-for="webhooks-table">
+      <form class="page-header-toolbar__group" method="get" action="/admin/webhooks" role="search" aria-label="Search webhook history">
+        <label class="visually-hidden" for="webhook-search">Search history</label>
+        <input type="search" class="form-input page-header-toolbar__search" id="webhook-search" name="q" value="{{ webhook_search or '' }}" placeholder="Search history" title="Name, URL, error or payload text" />
+        <label class="visually-hidden" for="webhook-status">Queue state</label>
+        <select class="form-input page-header-toolbar__select" id="webhook-status" name="status" data-whm-autosubmit>
+          <option value="" {% if not webhook_status %}selected{% endif %}>All states</option>
+          <option value="failed" {% if webhook_status == 'failed' %}selected{% endif %}>Dead-letter queue (failed)</option>
+          <option value="pending" {% if webhook_status == 'pending' %}selected{% endif %}>Pending</option>
+          <option value="in_progress" {% if webhook_status == 'in_progress' %}selected{% endif %}>In progress</option>
+          <option value="succeeded" {% if webhook_status == 'succeeded' %}selected{% endif %}>Succeeded</option>
+        </select>
+        <label class="visually-hidden" for="webhook-event-limit">History window</label>
+        <select class="form-input page-header-toolbar__select" id="webhook-event-limit" name="event_limit" data-whm-autosubmit title="History window">
+          {% for option in webhook_event_limit_options %}
+            <option value="{{ option }}" {% if option == webhook_event_limit %}selected{% endif %}>Latest {{ '{:,}'.format(option) }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="button button--ghost button--compact">Search</button>
+        {% if webhook_search or webhook_status %}
+          <a class="button button--ghost button--compact" href="/admin/webhooks?event_limit={{ webhook_event_limit }}">Clear</a>
+        {% endif %}
+      </form>
+      <div class="page-header-toolbar__group">
+        <label class="visually-hidden" for="webhook-direction-filter">Direction</label>
+        <select class="form-input page-header-toolbar__select" id="webhook-direction-filter" data-table-column-filter="direction" data-table-column-filter-table="webhooks-table">
+          <option value="">All directions</option>
+          <option value="incoming">Incoming</option>
+          <option value="outgoing">Outgoing</option>
+        </select>
+        {{ table_column_picker("webhooks", [
+          {"key": "direction", "label": "Direction", "default_visible": false},
+          {"key": "name", "label": "Event"},
+          {"key": "target", "label": "Target"},
+          {"key": "status", "label": "Status"},
+          {"key": "attempts", "label": "Attempts"},
+          {"key": "next_attempt", "label": "Next attempt", "default_visible": false},
+          {"key": "last_error", "label": "Last error"},
+          {"key": "updated", "label": "Updated"},
+        ]) }}
+      </div>
+    </div>
+  </div>
+{% endblock %}
 {% block header_actions %}
   {{ page_header_actions([
     {"label": "New deletion rule", "variant": "primary", "attrs": {"data-deletion-rule-new": true, "aria-haspopup": "dialog", "aria-controls": "webhook-deletion-rule-modal"}},
@@ -42,57 +88,6 @@
       {% endif %}
     </div>
   </header>
-
-  <div class="table-toolbar whm-toolbar" data-table-toolbar data-table-toolbar-for="webhooks-table">
-    <form class="table-toolbar__filters" method="get" action="/admin/webhooks" role="search" aria-label="Search webhook history">
-      <div class="table-toolbar__field table-toolbar__field--search">
-        <label for="webhook-search">Search history</label>
-        <input type="search" class="form-input" id="webhook-search" name="q" value="{{ webhook_search or '' }}" placeholder="Name, URL, error or payload text" />
-      </div>
-      <div class="table-toolbar__field">
-        <label for="webhook-status">Queue state</label>
-        <select class="form-input" id="webhook-status" name="status" data-whm-autosubmit>
-          <option value="" {% if not webhook_status %}selected{% endif %}>All states</option>
-          <option value="failed" {% if webhook_status == 'failed' %}selected{% endif %}>Dead-letter queue (failed)</option>
-          <option value="pending" {% if webhook_status == 'pending' %}selected{% endif %}>Pending</option>
-          <option value="in_progress" {% if webhook_status == 'in_progress' %}selected{% endif %}>In progress</option>
-          <option value="succeeded" {% if webhook_status == 'succeeded' %}selected{% endif %}>Succeeded</option>
-        </select>
-      </div>
-      <div class="table-toolbar__field table-toolbar__field--narrow">
-        <label for="webhook-event-limit">History window</label>
-        <select class="form-input" id="webhook-event-limit" name="event_limit" data-whm-autosubmit>
-          {% for option in webhook_event_limit_options %}
-            <option value="{{ option }}" {% if option == webhook_event_limit %}selected{% endif %}>Latest {{ '{:,}'.format(option) }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="whm-toolbar__buttons">
-        <button type="submit" class="button button--ghost">Search history</button>
-        {% if webhook_search or webhook_status %}
-          <a class="button button--ghost" href="/admin/webhooks?event_limit={{ webhook_event_limit }}">Clear</a>
-        {% endif %}
-      </div>
-    </form>
-    <div class="table-toolbar__menus">
-      <label class="visually-hidden" for="webhook-direction-filter">Direction</label>
-      <select class="form-input whm-toolbar__direction" id="webhook-direction-filter" data-table-column-filter="direction" data-table-column-filter-table="webhooks-table">
-        <option value="">All directions</option>
-        <option value="incoming">Incoming</option>
-        <option value="outgoing">Outgoing</option>
-      </select>
-      {{ table_column_picker("webhooks", [
-        {"key": "direction", "label": "Direction", "default_visible": false},
-        {"key": "name", "label": "Event"},
-        {"key": "target", "label": "Target"},
-        {"key": "status", "label": "Status"},
-        {"key": "attempts", "label": "Attempts"},
-        {"key": "next_attempt", "label": "Next attempt", "default_visible": false},
-        {"key": "last_error", "label": "Last error"},
-        {"key": "updated", "label": "Updated"},
-      ]) }}
-    </div>
-  </div>
 
   {% if events %}
     <div class="table-wrapper">

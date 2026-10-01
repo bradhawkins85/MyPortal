@@ -9,8 +9,9 @@
   const rangeLabel = root.querySelector('[data-calendar-range]');
   const countLabel = root.querySelector('[data-calendar-count]');
   const statusBox = root.querySelector('[data-calendar-status]');
-  const searchInput = root.querySelector('[data-calendar-search]');
-  const inactiveInput = root.querySelector('[data-calendar-inactive]');
+  // Filters and navigation render in the page header bar, outside root.
+  const searchInput = document.querySelector('[data-calendar-search]');
+  const inactiveInput = document.querySelector('[data-calendar-inactive]');
 
   function startOfDay(date) { const result = new Date(date); result.setHours(0, 0, 0, 0); return result; }
   function addDays(date, days) { const result = new Date(date); result.setDate(result.getDate() + days); return result; }
@@ -130,9 +131,9 @@
       loadEvents();
     });
   });
-  root.querySelector('[data-calendar-prev]').addEventListener('click', () => { state.anchor = addDays(state.anchor, state.view === 'week' ? -7 : state.view === 'list' ? -30 : -1); loadEvents(); });
-  root.querySelector('[data-calendar-next]').addEventListener('click', () => { state.anchor = addDays(state.anchor, state.view === 'week' ? 7 : state.view === 'list' ? 30 : 1); loadEvents(); });
-  root.querySelector('[data-calendar-today]').addEventListener('click', () => { state.anchor = new Date(); loadEvents(); });
+  document.querySelector('[data-calendar-prev]').addEventListener('click', () => { state.anchor = addDays(state.anchor, state.view === 'week' ? -7 : state.view === 'list' ? -30 : -1); loadEvents(); });
+  document.querySelector('[data-calendar-next]').addEventListener('click', () => { state.anchor = addDays(state.anchor, state.view === 'week' ? 7 : state.view === 'list' ? 30 : 1); loadEvents(); });
+  document.querySelector('[data-calendar-today]').addEventListener('click', () => { state.anchor = new Date(); loadEvents(); });
   searchInput.addEventListener('input', () => { state.search = searchInput.value || ''; render(); });
   inactiveInput.addEventListener('change', () => { state.includeInactive = inactiveInput.checked; loadEvents(); });
   loadEvents();

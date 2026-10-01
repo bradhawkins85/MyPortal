@@ -1,7 +1,21 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}Business continuity plans{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Business continuity plans</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="bc-plans-filter">Filter plans</label>
+      <input
+        id="bc-plans-filter"
+        type="search"
+        class="form-input page-header-toolbar__search"
+        placeholder="Filter plans"
+        data-table-filter="bc-plans-table"
+      />
+    </div>
+  </div>
+{% endblock %}
 
 {% set plan_type_labels = {
   "disaster_recovery": "Disaster Recovery",
@@ -24,20 +38,8 @@
 {% block content %}
 <div class="bc-plans-admin">
   <section class="card card--panel bc-plans-admin__panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Business Continuity Plans</h2>
-        <p class="card__subtitle">Manage Disaster Recovery, Incident Response, and Business Continuity plans with version control and access permissions.</p>
-      </div>
-      <div class="card__controls">
-        <input
-          type="search"
-          class="form-input"
-          placeholder="Filter plans"
-          aria-label="Filter plans"
-          data-table-filter="bc-plans-table"
-        />
-      </div>
+    <header class="card__header">
+      <p class="card__subtitle">Manage Disaster Recovery, Incident Response, and Business Continuity plans with version control and access permissions.</p>
     </header>
     <div class="table-wrapper table-wrapper--short">
       <table class="table table--compact" id="bc-plans-table" data-table data-table-id="bc-plans">
