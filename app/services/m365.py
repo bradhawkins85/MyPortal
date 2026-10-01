@@ -4713,10 +4713,10 @@ async def run_purview_preflight(
     Microsoft explicitly excludes Purview compliance/eDiscovery cmdlets from
     app-only authentication support, so a ready result is best-effort: Purview
     can still reject an individual cmdlet, and that error is surfaced verbatim.
-    ``repair`` is accepted for API compatibility, but role-group membership is
-    never broadened automatically.
+    When ``repair`` is True and the SCC session is reachable, the preflight
+    will register the service principal in Purview and add it to the
+    eDiscoveryManager role group if either is missing, then re-verify.
     """
-    _ = repair
     checked_at = datetime.now(timezone.utc)
     correlation_id = str(uuid.uuid4())
     creds = await get_credentials(company_id)
@@ -4902,6 +4902,81 @@ async def run_purview_preflight(
                 if principal_identities & member_identities:
                     membership_ok = True
                     break
+            # When repair is requested and the SCC session is reachable,
+            # register the service principal and add it to the role group
+            # if either is missing, then re-verify.
+            if repair and not (registration_ok and membership_ok):
+                if not registration_ok:
+                    try:
+                        await _scc_invoke_command(
+                            scc_token, tenant_id, "New-ServicePrincipal",
+                            {"AppId": client_id, "ObjectId": object_id,
+                             "DisplayName": "MyPortal Purview eDiscovery"},
+                            organization=tenant_domain,
+                        )
+                        repaired.append("Registered service principal in Purview")
+                    except M365Error as exc:
+                        log_error(
+                            "Purview preflight repair: New-ServicePrincipal failed",
+                            error=str(exc),
+                        )
+                if not membership_ok:
+                    try:
+                        await _scc_invoke_command(
+                            scc_token, tenant_id, "Add-RoleGroupMember",
+                            {"Identity": "eDiscoveryManager", "Member": object_id},
+                            organization=tenant_domain,
+                        )
+                        repaired.append("Added to eDiscoveryManager role group")
+                    except M365Error as exc:
+                        log_error(
+                            "Purview preflight repair: Add-RoleGroupMember failed",
+                            error=str(exc),
+                        )
+                # Re-verify after repair attempts
+                if repaired:
+                    try:
+                        recheck_principals = await _scc_invoke_command(
+                            scc_token, tenant_id, "Get-ServicePrincipal",
+                            {"Identity": object_id}, organization=tenant_domain,
+                        )
+                        recheck_rows = recheck_principals.get("value") or recheck_principals.get("Value") or []
+                        if isinstance(recheck_rows, dict):
+                            recheck_rows = [recheck_rows]
+                        registration_ok = any(
+                            str(row.get("ObjectId") or row.get("ExternalDirectoryObjectId") or row.get("Identity") or "").lower() == object_id.lower()
+                            or str(row.get("AppId") or "").lower() == client_id.lower()
+                            for row in recheck_rows if isinstance(row, dict)
+                        )
+                    except M365Error:
+                        pass
+                    try:
+                        recheck_roles = await _scc_invoke_command(
+                            scc_token, tenant_id, "Get-RoleGroup",
+                            {"Identity": "eDiscoveryManager"}, organization=tenant_domain,
+                        )
+                        recheck_role_rows = recheck_roles.get("value") or recheck_roles.get("Value") or []
+                        if isinstance(recheck_role_rows, dict):
+                            recheck_role_rows = [recheck_role_rows]
+                        for row in recheck_role_rows if isinstance(recheck_role_rows, list) else []:
+                            if not isinstance(row, dict):
+                                continue
+                            members = row.get("Members") or row.get("members") or []
+                            if not isinstance(members, list):
+                                members = [members]
+                            member_identities = {
+                                str(value).lower()
+                                for member in members
+                                for value in (
+                                    member.values() if isinstance(member, dict) else (member,)
+                                )
+                                if value
+                            }
+                            if {object_id.lower(), client_id.lower()} & member_identities:
+                                membership_ok = True
+                                break
+                    except M365Error:
+                        pass
         except M365Error as exc:
             scc_error = str(exc)
             correlation_id = getattr(exc, "correlation_id", None) or correlation_id
