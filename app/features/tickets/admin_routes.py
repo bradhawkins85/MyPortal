@@ -53,11 +53,14 @@ from app.repositories import tickets as tickets_repo
 from app.repositories import email_blocklist as email_blocklist_repo
 from app.repositories import attachment_blocklist as attachment_blocklist_repo
 from app.repositories import approval_matrix as approval_matrix_repo
+from app.repositories import rag_index as rag_index_repo
+from app.repositories import rag_relationships as rag_relationship_repo
 from app.repositories import users as user_repo
 from app.repositories import site_settings as site_settings_repo
 from app.services import agent as agent_service
 from app.services import labour_types as labour_types_service
 from app.services import ticket_attachments as attachments_service
+from app.services import rag_index as rag_index_service
 from app.services import rag_retrieval
 from app.services import tickets as tickets_service
 from app.services import ticket_reply_suggestions as reply_suggestion_service
@@ -779,6 +782,67 @@ async def admin_suggest_ticket_reply(ticket_id: int, request: Request):
     return JSONResponse(result)
 
 
+async def _ticket_rag_document_id(ticket_id: int) -> int | None:
+    try:
+        document = await rag_index_repo.get_document_by_source(
+            "tickets", str(ticket_id), rag_index_service.embedding_model()
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        log_error("Failed to load ticket RAG document", ticket_id=ticket_id, error=str(exc))
+        return None
+    return int(document["id"]) if document else None
+
+
+@router.post(
+    "/admin/tickets/{ticket_id:int}/related/{relationship_id:int}/feedback",
+    response_class=JSONResponse,
+)
+async def admin_ticket_related_feedback(ticket_id: int, relationship_id: int, request: Request):
+    """Record a technician's 👍/👎 on one Related item for this ticket.
+
+    Body: ``{"rating": "up" | "down" | null}``; ``null`` clears the vote.
+    """
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not permitted")
+    try:
+        payload = await request.json()
+    except ValueError:
+        payload = None
+    if not isinstance(payload, Mapping):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expected a JSON object")
+    rating = payload.get("rating")
+    if rating is not None and rating not in rag_relationship_repo.FEEDBACK_RATINGS:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Rating must be up, down or null")
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    document_id = await _ticket_rag_document_id(ticket_id)
+    relationship = (
+        await rag_relationship_repo.get_relationship_for_document(relationship_id, document_id)
+        if document_id
+        else None
+    )
+    if not relationship:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Related item not found")
+    await rag_relationship_repo.save_relationship_feedback(
+        relationship=relationship,
+        ticket_id=ticket_id,
+        user_id=int(current_user["id"]),
+        rating=rating,
+    )
+    await audit_service.record(
+        action="tickets.related.feedback",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="ticket",
+        entity_id=ticket_id,
+        metadata={"relationship_id": relationship_id, "rating": rating},
+    )
+    return JSONResponse({"relationship_id": relationship_id, "rating": rating, "hidden": rating == "down"})
+
+
 @router.post("/admin/tickets/{ticket_id:int}/related/rescan", response_class=JSONResponse)
 async def admin_rescan_ticket_related(ticket_id: int, request: Request):
     main_module = _main()
@@ -818,8 +882,23 @@ async def admin_rescan_ticket_related(ticket_id: int, request: Request):
         ),
     )
 
-    items: list[dict[str, str]] = []
+    ticket_document_id = await _ticket_rag_document_id(ticket_id)
+    relationships: dict[int, dict[str, Any]] = {}
+    if ticket_document_id:
+        try:
+            relationships = await rag_relationship_repo.relationships_for_targets(
+                ticket_document_id,
+                [int(c.get("document_id") or 0) for c in rag_candidates],
+                ticket_id=ticket_id,
+            )
+        except Exception as exc:  # pragma: no cover - feedback must not break rescans
+            log_error("Failed to load related item feedback", ticket_id=ticket_id, error=str(exc))
+
+    items: list[dict[str, Any]] = []
     for candidate in rag_candidates:
+        relationship = relationships.get(int(candidate.get("document_id") or 0))
+        if relationship and relationship["voted_down"]:
+            continue
         source_type = str(candidate.get("source_type") or "")
         source_id = candidate.get("source_id")
         if source_type == "tickets":
@@ -839,6 +918,7 @@ async def admin_rescan_ticket_related(ticket_id: int, request: Request):
             "label": label,
             "url": url,
             "score": str(candidate.get("score") or ""),
+            "relationship_id": relationship["relationship_id"] if relationship else None,
         })
         if len(items) >= 12:
             break

@@ -558,11 +558,114 @@
         link.rel = 'noopener noreferrer';
         link.textContent = item.label || item.url || 'Related item';
         link.title = link.textContent;
+        if (item.relationship_id) {
+          const meta = document.createElement('div');
+          meta.className = 'ticket-related__meta';
+          meta.appendChild(buildVoteControls(item.relationship_id, item.my_rating));
+          li.appendChild(meta);
+        }
         li.appendChild(link);
         list.appendChild(li);
       });
       list.hidden = false;
       setStatus('');
+    }
+
+    function buildVoteControls(relationshipId, myRating) {
+      const group = document.createElement('span');
+      group.className = 'ticket-related__vote';
+      group.setAttribute('role', 'group');
+      group.setAttribute('aria-label', 'Was this related item useful?');
+      group.setAttribute('data-ticket-related-vote', '');
+      group.setAttribute('data-relationship-id', String(relationshipId));
+      [
+        ['up', '👍', 'Useful for this ticket', 'Mark as useful'],
+        ['down', '👎', 'Not relevant: hide from this ticket', 'Mark as not relevant and hide'],
+      ].forEach(([vote, glyph, title, label]) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ticket-related__vote-button';
+        button.setAttribute('data-vote', vote);
+        button.setAttribute('aria-pressed', vote === 'up' && myRating === 'up' ? 'true' : 'false');
+        button.title = title;
+        button.setAttribute('aria-label', label);
+        button.textContent = glyph;
+        group.appendChild(button);
+      });
+      return group;
+    }
+
+    async function sendVote(relationshipId, rating) {
+      const headers = { Accept: 'application/json', 'Content-Type': 'application/json' };
+      const csrfToken = getCsrfToken();
+      if (csrfToken) {
+        headers['X-CSRF-Token'] = csrfToken;
+      }
+      const response = await fetch(
+        `/admin/tickets/${encodeURIComponent(ticketId)}/related/${encodeURIComponent(relationshipId)}/feedback`,
+        { method: 'POST', headers, body: JSON.stringify({ rating }) },
+      );
+      if (!response.ok) {
+        throw new Error(`Feedback failed (${response.status})`);
+      }
+    }
+
+    function showHidden(item, group, relationshipId) {
+      const original = Array.from(item.childNodes);
+      const notice = document.createElement('span');
+      notice.className = 'ticket-related__hidden';
+      notice.textContent = 'Hidden from this ticket. ';
+      const undo = document.createElement('button');
+      undo.type = 'button';
+      undo.className = 'ticket-related__undo';
+      undo.textContent = 'Undo';
+      undo.addEventListener('click', async () => {
+        undo.disabled = true;
+        try {
+          await sendVote(relationshipId, null);
+          item.replaceChildren(...original);
+          group.querySelectorAll('[data-vote]').forEach((button) => {
+            button.setAttribute('aria-pressed', 'false');
+            button.disabled = false;
+          });
+        } catch (error) {
+          console.error('Failed to undo related item feedback:', error);
+          undo.disabled = false;
+        }
+      });
+      notice.appendChild(undo);
+      item.replaceChildren(notice);
+    }
+
+    if (list) {
+      list.addEventListener('click', async (event) => {
+        const button = event.target.closest('[data-vote]');
+        const group = button ? button.closest('[data-ticket-related-vote]') : null;
+        if (!button || !group || !list.contains(group)) {
+          return;
+        }
+        event.preventDefault();
+        const relationshipId = group.getAttribute('data-relationship-id');
+        const vote = button.getAttribute('data-vote');
+        const rating = button.getAttribute('aria-pressed') === 'true' ? null : vote;
+        const buttons = group.querySelectorAll('[data-vote]');
+        buttons.forEach((candidate) => { candidate.disabled = true; });
+        try {
+          await sendVote(relationshipId, rating);
+          buttons.forEach((candidate) => {
+            candidate.setAttribute('aria-pressed', candidate.getAttribute('data-vote') === rating ? 'true' : 'false');
+          });
+          const item = group.closest('.ticket-related__item');
+          if (rating === 'down' && item) {
+            showHidden(item, group, relationshipId);
+          }
+        } catch (error) {
+          console.error('Failed to save related item feedback:', error);
+          setStatus(error.message || 'Failed to save feedback.');
+        } finally {
+          buttons.forEach((candidate) => { candidate.disabled = false; });
+        }
+      });
     }
 
     async function scanRelated() {

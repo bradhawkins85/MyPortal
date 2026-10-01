@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "kind": "related_feedback",
+  "labels": [
+    {"id":"rel:1","relationship_type":"KNOWN_ISSUE","relevance_score":0.92,"confidence":0.9,"evaluated_model":"fixture-a","target_source_type":"knowledge_base","relevant":true},
+    {"id":"rel:2","relationship_type":"DUPLICATE","relevance_score":0.88,"confidence":0.86,"evaluated_model":"fixture-a","target_source_type":"tickets","relevant":true},
+    {"id":"rel:3","relationship_type":"RELATED","relevance_score":0.81,"confidence":0.7,"evaluated_model":"fixture-a","target_source_type":"assets","relevant":true},
+    {"id":"rel:4","relationship_type":"SUPPORTING","relevance_score":0.74,"confidence":0.66,"evaluated_model":"fixture-b","target_source_type":"knowledge_base","relevant":true},
+    {"id":"rel:5","relationship_type":"RELATED","relevance_score":0.68,"confidence":0.6,"evaluated_model":"fixture-b","target_source_type":"products","relevant":false},
+    {"id":"rel:6","relationship_type":"RELATED","relevance_score":0.62,"confidence":0.55,"evaluated_model":"fixture-b","target_source_type":"tickets","relevant":false}
+  ]
+}

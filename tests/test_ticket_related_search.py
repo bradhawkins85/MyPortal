@@ -82,6 +82,8 @@ async def test_stored_relationships_recheck_permission_and_include_evidence(monk
     async def evidence(*_args, **_kwargs):
         return [
             {
+                "relationship_id": 55,
+                "my_rating": "up",
                 "target_available": 1,
                 "source_type": "products",
                 "source_id": "12",
@@ -113,6 +115,8 @@ async def test_stored_relationships_recheck_permission_and_include_evidence(monk
     assert checked["user"] == {"id": 8}
     assert items == [
         {
+            "relationship_id": 55,
+            "my_rating": "up",
             "available": True,
             "type": "products",
             "label": "Replacement battery",
@@ -149,6 +153,8 @@ async def test_stored_relationships_distinguish_deleted_target(monkeypatch):
 
     assert items == [
         {
+            "relationship_id": None,
+            "my_rating": None,
             "available": False,
             "relationship_label": "Duplicate",
             "confidence_band": "Medium confidence",

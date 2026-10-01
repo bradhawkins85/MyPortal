@@ -10338,6 +10338,8 @@ async def _load_ticket_stored_related_items(
         evidence_rows = await rag_relationship_repo.list_relationship_evidence(
             int(document["id"]),
             limit=limit,
+            ticket_id=ticket_id,
+            user_id=int(user.get("id") or 0),
         )
     except Exception as exc:  # pragma: no cover - defensive UI fallback
         log_error("Failed to load stored ticket related content", ticket_id=ticket_id, error=str(exc))
@@ -10347,8 +10349,13 @@ async def _load_ticket_stored_related_items(
     seen_urls: set[str] = set()
     for row in evidence_rows:
         relationship_type = str(row.get("relationship_type") or "RELATED")
+        feedback = {
+            "relationship_id": row.get("relationship_id"),
+            "my_rating": row.get("my_rating"),
+        }
         if not bool(row.get("target_available")):
             items.append({
+                **feedback,
                 "available": False,
                 "relationship_label": _RELATIONSHIP_LABELS.get(relationship_type, "Related"),
                 "confidence_band": _relationship_confidence_band(row.get("confidence")),
@@ -10384,6 +10391,7 @@ async def _load_ticket_stored_related_items(
         label = str(row.get("title") or f"{source_type.title()} {source_id}").strip()[:180]
         reason = str(row.get("reason") or row.get("supporting_excerpt") or "").strip()[:300]
         items.append({
+            **feedback,
             "available": True,
             "type": source_type,
             "label": label,
