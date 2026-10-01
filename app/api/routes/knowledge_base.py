@@ -45,6 +45,51 @@ async def list_resolution_step_reviews(
     return await resolution_review_repo.list_entries(include_ignored=include_ignored)
 
 
+@router.get("/resolution-steps/recurring", summary="List recurring issues awaiting a consolidated article")
+async def list_recurring_issue_reviews(
+    include_ignored: bool = Query(False),
+    current_user: dict = Depends(require_super_admin),
+) -> list[dict]:
+    return await resolution_review_service.list_recurring_issues(include_ignored=include_ignored)
+
+
+@router.patch("/resolution-steps/recurring/{group_id}", summary="Ignore or restore a recurring issue entry")
+async def update_recurring_issue_review(
+    group_id: int,
+    payload: ResolutionReviewUpdate,
+    request: Request,
+    current_user: dict = Depends(require_super_admin),
+) -> dict[str, str]:
+    if not await resolution_review_service.get_recurring_issue(group_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recurring issue entry not found")
+    await resolution_review_repo.set_recurring_ignored(group_id, payload.ignored, int(current_user["id"]))
+    action = "ignore" if payload.ignored else "restore"
+    await audit_service.record(
+        action=f"knowledge_base.recurring_issue.{action}", request=request,
+        user_id=int(current_user["id"]), entity_type="ticket", entity_id=group_id,
+        before=None, after={"ignored": payload.ignored},
+    )
+    return {"status": "updated", "message": "Recurring issue ignored." if payload.ignored else "Recurring issue restored."}
+
+
+@router.post("/resolution-steps/recurring/{group_id}/generate", status_code=status.HTTP_201_CREATED, summary="Generate a consolidated draft article")
+async def generate_recurring_issue_article(
+    group_id: int,
+    request: Request,
+    current_user: dict = Depends(require_super_admin),
+) -> dict[str, object]:
+    try:
+        article = await resolution_review_service.generate_recurring_article(group_id, author_id=int(current_user["id"]))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await audit_service.record(
+        action="knowledge_base.recurring_issue.generate", request=request,
+        user_id=int(current_user["id"]), entity_type="knowledge_base_article", entity_id=int(article["id"]),
+        before=None, after={"group_id": group_id, "is_published": False},
+    )
+    return {"status": "created", "message": "Consolidated draft knowledge-base article created.", "article_id": article["id"], "slug": article["slug"]}
+
+
 @router.patch("/resolution-steps/{ticket_id}", summary="Ignore or restore a resolution-step entry")
 async def update_resolution_step_review(
     ticket_id: int,
