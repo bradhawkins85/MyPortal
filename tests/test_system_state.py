@@ -1,6 +1,8 @@
 """Tests for system_state helpers."""
 from __future__ import annotations
 
+import os
+import stat
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -96,6 +98,31 @@ def test_atomic_coordinator_normal_and_maintenance_phases(tmp_path, monkeypatch)
     assert draining["maintenance"] is True
     assert get_public_upgrade_state()["phase"] == "draining"
     assert not list(tmp_path.glob(".upgrade-state-*"))
+
+
+def test_write_upgrade_state_sets_restricted_permissions(tmp_path, monkeypatch):
+    state_path = tmp_path / "state" / "upgrade-state.json"
+    monkeypatch.setattr(system_state_module, "_UPGRADE_STATE_PATH", state_path)
+    write_upgrade_state(
+        upgrade_id="up-secure", target_revision="abc123", phase="preparing",
+        message="Preparing", mode="graceful",
+    )
+    assert stat.S_IMODE(state_path.parent.stat().st_mode) == 0o750
+    assert stat.S_IMODE(state_path.stat().st_mode) == 0o640
+
+
+def test_write_upgrade_state_replacement_resets_file_permissions(tmp_path, monkeypatch):
+    state_path = tmp_path / "state" / "upgrade-state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text("{}", encoding="utf-8")
+    os.chmod(state_path, 0o666)
+
+    monkeypatch.setattr(system_state_module, "_UPGRADE_STATE_PATH", state_path)
+    write_upgrade_state(
+        upgrade_id="up-replace", target_revision="def456", phase="preparing",
+        message="Preparing", mode="graceful",
+    )
+    assert stat.S_IMODE(state_path.stat().st_mode) == 0o640
 
 
 def test_failed_upgrade_leaves_maintenance(tmp_path, monkeypatch):
