@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import html
+import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -60,8 +64,23 @@ async def trello_webhook_receive(request: Request) -> JSONResponse:
     source_url = str(request.url)
     request_headers = dict(request.headers)
 
+    raw_body = await request.body()
+    if not _verify_trello_webhook_signature(request, raw_body):
+        await webhook_monitor.log_incoming_webhook(
+            name="Trello Webhook - Unauthorized",
+            source_url=source_url,
+            headers=request_headers,
+            response_status=401,
+            response_body="Invalid Trello webhook signature",
+            error_message="Invalid Trello webhook signature",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Trello webhook signature",
+        )
+
     try:
-        payload: dict[str, Any] = await request.json()
+        payload: dict[str, Any] = json.loads(raw_body)
     except Exception:
         await webhook_monitor.log_incoming_webhook(
             name="Trello Webhook - Invalid JSON",
@@ -265,6 +284,30 @@ def _build_public_callback_url(request: Request) -> str:
         return f"{str(request.base_url).rstrip('/')}{_WEBHOOK_PATH}"
 
     return f"{scheme}://{host}{_WEBHOOK_PATH}"
+
+
+def _verify_trello_webhook_signature(request: Request, raw_body: bytes) -> bool:
+    """Validate Trello's ``X-Trello-Webhook`` HMAC signature for POST events."""
+    settings = get_settings()
+    secret = str(getattr(settings, "trello_webhook_secret", None) or "").strip()
+    if not secret:
+        logger.error(
+            "Rejecting Trello webhook because TRELLO_WEBHOOK_SECRET is not configured"
+        )
+        return False
+
+    supplied_signature = str(request.headers.get("x-trello-webhook") or "").strip()
+    if not supplied_signature:
+        return False
+
+    callback_url = _build_public_callback_url(request)
+    mac = hmac.new(
+        secret.encode("utf-8"),
+        raw_body + callback_url.encode("utf-8"),
+        hashlib.sha1,
+    )
+    expected_signature = base64.b64encode(mac.digest()).decode("ascii")
+    return hmac.compare_digest(supplied_signature, expected_signature)
 
 
 _MAX_TICKET_SUBJECT_LENGTH = 255
