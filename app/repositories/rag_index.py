@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Mapping, Sequence
 
 from app.core.database import db
@@ -199,69 +200,80 @@ async def list_active_chunks(
 
 
 async def health() -> dict[str, Any]:
-    docs = await db.fetch_one(
-        "SELECT COUNT(*) AS count FROM rag_documents WHERE is_active = 1"
+    # Each statement is a single pass over its table so the admin page stays
+    # responsive on large indexes; the chunk aggregates are answered from the
+    # covering ``idx_rag_chunks_active_doc_tokens`` index rather than the
+    # clustered rows that carry chunk text and embeddings. The statements are
+    # independent, so they run concurrently on separate pool connections.
+    (
+        chunk_stats,
+        doc_stats,
+        by_source,
+        recent_documents,
+        recent_jobs,
+        outbox,
+        lag,
+    ) = await asyncio.gather(
+        db.fetch_one("""
+            SELECT SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active_count,
+                   SUM(CASE WHEN is_active = 0 THEN 1 ELSE 0 END) AS stale_count,
+                   COALESCE(SUM(CASE WHEN is_active = 1 THEN token_count END), 0) AS token_count,
+                   COALESCE(AVG(CASE WHEN is_active = 1 THEN token_count END), 0) AS avg_tokens,
+                   COALESCE(MAX(CASE WHEN is_active = 1 THEN token_count END), 0) AS max_tokens
+            FROM rag_chunks
+            """),
+        db.fetch_one("""
+            SELECT SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active_count,
+                   SUM(CASE WHEN is_active = 0 THEN 1 ELSE 0 END) AS inactive_count,
+                   MIN(CASE WHEN is_active = 1 THEN indexed_at END) AS first_indexed_at,
+                   MAX(CASE WHEN is_active = 1 THEN indexed_at END) AS last_indexed_at,
+                   COUNT(DISTINCT CASE WHEN is_active = 1 THEN company_id END) AS company_count,
+                   COUNT(DISTINCT CASE WHEN is_active = 1 THEN embedding_model END) AS model_count
+            FROM rag_documents
+            """),
+        db.fetch_all("""
+            SELECT d.source_type, COUNT(DISTINCT d.id) AS count, COUNT(c.id) AS chunk_count,
+                   COALESCE(SUM(c.token_count), 0) AS token_count, MAX(d.indexed_at) AS last_indexed_at
+            FROM rag_documents d
+            LEFT JOIN rag_chunks c ON c.is_active = 1 AND c.document_id = d.id
+            WHERE d.is_active = 1
+            GROUP BY d.source_type ORDER BY d.source_type
+            """),
+        db.fetch_all("""
+            SELECT id, source_type, source_id, company_id, title, embedding_model, indexed_at
+            FROM rag_documents WHERE is_active = 1 ORDER BY indexed_at DESC, id DESC LIMIT 10
+            """),
+        db.fetch_all("""
+            SELECT id, source_type, source_id, status, message, started_at, finished_at, created_at
+            FROM rag_index_jobs ORDER BY created_at DESC, id DESC LIMIT 10
+            """),
+        db.fetch_one("""
+            SELECT SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+                   SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+                   MIN(CASE WHEN status = 'pending' THEN created_at END) AS oldest_pending_at
+            FROM rag_index_outbox
+            """),
+        db.fetch_all("""
+            SELECT source_type,
+                   SUM(CASE WHEN source_updated_at > indexed_at THEN 1 ELSE 0 END) AS stale,
+                   MAX(TIMESTAMPDIFF(SECOND, indexed_at, source_updated_at)) AS max_lag_seconds
+            FROM rag_documents WHERE is_active = 1 GROUP BY source_type ORDER BY source_type
+            """),
     )
-    inactive_docs = await db.fetch_one(
-        "SELECT COUNT(*) AS count FROM rag_documents WHERE is_active = 0"
-    )
-    chunks = await db.fetch_one(
-        "SELECT COUNT(*) AS count FROM rag_chunks WHERE is_active = 1"
-    )
-    stale = await db.fetch_one(
-        "SELECT COUNT(*) AS count FROM rag_chunks WHERE is_active = 0"
-    )
-    token_stats = await db.fetch_one("""
-        SELECT COALESCE(SUM(token_count), 0) AS token_count,
-               COALESCE(AVG(token_count), 0) AS avg_tokens,
-               COALESCE(MAX(token_count), 0) AS max_tokens
-        FROM rag_chunks WHERE is_active = 1
-        """)
-    doc_stats = await db.fetch_one("""
-        SELECT MIN(indexed_at) AS first_indexed_at, MAX(indexed_at) AS last_indexed_at,
-               COUNT(DISTINCT company_id) AS company_count, COUNT(DISTINCT embedding_model) AS model_count
-        FROM rag_documents WHERE is_active = 1
-        """)
-    by_source = await db.fetch_all("""
-        SELECT d.source_type, COUNT(DISTINCT d.id) AS count, COUNT(c.id) AS chunk_count,
-               COALESCE(SUM(c.token_count), 0) AS token_count, MAX(d.indexed_at) AS last_indexed_at
-        FROM rag_documents d
-        LEFT JOIN rag_chunks c ON c.document_id = d.id AND c.is_active = 1
-        WHERE d.is_active = 1
-        GROUP BY d.source_type ORDER BY d.source_type
-        """)
-    recent_documents = await db.fetch_all("""
-        SELECT id, source_type, source_id, company_id, title, embedding_model, indexed_at
-        FROM rag_documents WHERE is_active = 1 ORDER BY indexed_at DESC, id DESC LIMIT 10
-        """)
-    recent_jobs = await db.fetch_all("""
-        SELECT id, source_type, source_id, status, message, started_at, finished_at, created_at
-        FROM rag_index_jobs ORDER BY created_at DESC, id DESC LIMIT 10
-        """)
-    outbox = await db.fetch_one("""
-        SELECT SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
-               SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
-               MIN(CASE WHEN status = 'pending' THEN created_at END) AS oldest_pending_at
-        FROM rag_index_outbox
-        """)
-    lag = await db.fetch_all("""
-        SELECT source_type,
-               SUM(CASE WHEN source_updated_at > indexed_at THEN 1 ELSE 0 END) AS stale,
-               MAX(TIMESTAMPDIFF(SECOND, indexed_at, source_updated_at)) AS max_lag_seconds
-        FROM rag_documents WHERE is_active = 1 GROUP BY source_type ORDER BY source_type
-        """)
+    chunk_stats = chunk_stats or {}
+    doc_stats = doc_stats or {}
     return {
-        "documents": int((docs or {}).get("count") or 0),
-        "inactive_documents": int((inactive_docs or {}).get("count") or 0),
-        "chunks": int((chunks or {}).get("count") or 0),
-        "stale_chunks": int((stale or {}).get("count") or 0),
-        "token_count": int((token_stats or {}).get("token_count") or 0),
-        "avg_tokens_per_chunk": float((token_stats or {}).get("avg_tokens") or 0),
-        "max_tokens_per_chunk": int((token_stats or {}).get("max_tokens") or 0),
-        "first_indexed_at": (doc_stats or {}).get("first_indexed_at"),
-        "last_indexed_at": (doc_stats or {}).get("last_indexed_at"),
-        "company_count": int((doc_stats or {}).get("company_count") or 0),
-        "model_count": int((doc_stats or {}).get("model_count") or 0),
+        "documents": int(doc_stats.get("active_count") or 0),
+        "inactive_documents": int(doc_stats.get("inactive_count") or 0),
+        "chunks": int(chunk_stats.get("active_count") or 0),
+        "stale_chunks": int(chunk_stats.get("stale_count") or 0),
+        "token_count": int(chunk_stats.get("token_count") or 0),
+        "avg_tokens_per_chunk": float(chunk_stats.get("avg_tokens") or 0),
+        "max_tokens_per_chunk": int(chunk_stats.get("max_tokens") or 0),
+        "first_indexed_at": doc_stats.get("first_indexed_at"),
+        "last_indexed_at": doc_stats.get("last_indexed_at"),
+        "company_count": int(doc_stats.get("company_count") or 0),
+        "model_count": int(doc_stats.get("model_count") or 0),
         "sources": by_source or [],
         "recent_documents": recent_documents or [],
         "recent_jobs": recent_jobs or [],
