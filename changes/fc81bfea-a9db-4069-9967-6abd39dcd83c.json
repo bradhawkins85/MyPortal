@@ -1,0 +1,7 @@
+{
+  "guid": "fc81bfea-a9db-4069-9967-6abd39dcd83c",
+  "occurred_at": "2026-09-21T00:00Z",
+  "change_type": "Fix",
+  "summary": "Preserve database environment credentials during atomic upgrades and honour configured MySQL ports.",
+  "content_hash": "4d2d97cd086f15f7d62c05b6a7d1b9f4904a3272794e2ca38c41a8ca427564cb"
+}

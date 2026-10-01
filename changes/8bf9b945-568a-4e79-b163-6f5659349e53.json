@@ -1,0 +1,7 @@
+{
+  "guid": "8bf9b945-568a-4e79-b163-6f5659349e53",
+  "occurred_at": "2026-09-24T05:04Z",
+  "change_type": "Fix",
+  "summary": "Grant tenant-wide admin consent when applying Microsoft 365 permissions",
+  "content_hash": "4d7b7bbe13aef72e4d2be23d68fb46579951d9796bca35992d704683f354283e"
+}

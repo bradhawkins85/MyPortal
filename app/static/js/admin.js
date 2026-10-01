@@ -401,14 +401,18 @@
 
         try {
           setButtonProcessing(button, true);
-          updateTicketAiStatus(button, 'Requesting AI regeneration. You can continue working while we update the summary.', false);
-          await requestJson(`/admin/tickets/${ticketId}/ai/reprocess`, {
+          updateTicketAiStatus(
+            button,
+            button.dataset.requestMessage || 'Requesting AI regeneration. You can continue working while we update the summary.',
+            false,
+          );
+          const response = await requestJson(`/admin/tickets/${ticketId}/ai/reprocess`, {
             method: 'POST',
             body: JSON.stringify({}),
           });
           updateTicketAiStatus(
             button,
-            'AI summary and tags will be regenerated shortly. Refresh the ticket in a moment to review the updates.',
+            response.message || 'AI processing was queued. Refresh the ticket in a moment to review the updates.',
             false,
           );
         } catch (error) {
@@ -1197,6 +1201,26 @@
       return cell;
     }
 
+    function createLastReplyStatusCell(status) {
+      const cell = document.createElement('td');
+      cell.dataset.label = 'Last Reply Status';
+      cell.dataset.column = 'last-reply-status';
+      cell.className = 'tickets-table__cell tickets-table__cell--last-reply-status';
+
+      const badgeClasses = {
+        Bounced: 'badge--danger',
+        Read: 'badge--success',
+        Delivered: 'badge--info',
+        Sent: 'badge--muted',
+      };
+      const displayStatus = status ? String(status) : 'No email status';
+      const badge = document.createElement('span');
+      badge.className = `badge ${badgeClasses[displayStatus] || 'badge--muted'}`;
+      badge.textContent = displayStatus;
+      cell.appendChild(badge);
+      return cell;
+    }
+
 
     function applyColumnVisibility() {
       const toggles = Array.from(document.querySelectorAll('[data-ticket-columns] .ticket-column-toggle'));
@@ -1279,8 +1303,15 @@
         companyDisplay = String(ticket.company_id);
       }
       appendTextCell('company', 'Company', companyDisplay);
+      const slaCell = document.createElement('td');
+      slaCell.dataset.label = 'SLA'; slaCell.dataset.column = 'sla';
+      const slaBadge = document.createElement('span');
+      slaBadge.className = `status status--${ticket.sla_state === 'breached' ? 'danger' : (ticket.sla_state === 'at_risk' ? 'warning' : (['met', 'on_track'].includes(ticket.sla_state) ? 'success' : 'neutral'))}`;
+      slaBadge.textContent = ticket.sla_label || 'No SLA'; slaBadge.title = ticket.sla_name || '';
+      slaCell.appendChild(slaBadge); row.appendChild(slaCell);
       appendTextCell('assigned', 'Assigned', ticket.assigned_user_email || '—');
       appendTextCell('updated', 'Updated', formatUpdatedAt(ticket.updated_at), { value: ticket.updated_at || '' });
+      row.appendChild(createLastReplyStatusCell(ticket.latest_public_reply_email_status));
       appendTextCell('review-date', 'Review Date', formatReviewDate(ticket.review_date), { value: ticket.review_date || '', className: reviewDateClass(ticket.review_date) });
       appendTextCell('category', 'Category', ticket.category || '—');
       appendTextCell('requester', 'Requester', ticket.requester_label || ticket.requester_email || ticket.requester_id || '—');
@@ -1388,526 +1419,43 @@
     registerTableRefreshHandler('tickets-table', handler);
 
     const searchInput = document.querySelector('[data-ticket-dashboard-search]');
+    const limitSelect = document.querySelector('[data-ticket-dashboard-limit]');
     const table = document.getElementById('tickets-table');
+    const refreshWithParams = (updateParams) => {
+      if (!(table instanceof HTMLTableElement)) return;
+      const endpoint = table.getAttribute('data-table-refresh-url');
+      if (!endpoint) return;
+      const [baseUrl, queryString = ''] = endpoint.split('?');
+      const params = new URLSearchParams(queryString);
+      updateParams(params);
+      table.setAttribute('data-table-refresh-url', params.toString() ? `${baseUrl}?${params.toString()}` : baseUrl);
+      table.dispatchEvent(new CustomEvent('table:refresh-request'));
+    };
     if (searchInput instanceof HTMLInputElement && table instanceof HTMLTableElement) {
       let timer = null;
       searchInput.addEventListener('input', () => {
         if (timer) window.clearTimeout(timer);
         timer = window.setTimeout(() => {
-          const endpoint = table.getAttribute('data-table-refresh-url');
-          if (!endpoint) return;
-          const [baseUrl, queryString = ''] = endpoint.split('?');
-          const params = new URLSearchParams(queryString);
-          if (searchInput.value.trim()) {
-            params.set('search', searchInput.value.trim());
-          } else {
-            params.delete('search');
-          }
-          table.setAttribute('data-table-refresh-url', params.toString() ? `${baseUrl}?${params.toString()}` : baseUrl);
-          table.dispatchEvent(new CustomEvent('table:refresh-request'));
+          refreshWithParams((params) => {
+            if (searchInput.value.trim()) params.set('search', searchInput.value.trim());
+            else params.delete('search');
+          });
         }, 300);
       });
     }
-  }
-
-  function parsePermissions(value) {
-    return value
-      .split(',')
-      .map((item) => item.trim())
-      .filter((item) => item.length > 0);
-  }
-
-  function getTemplatePayload(scriptId) {
-    if (!scriptId) {
-      return null;
-    }
-    const element = document.getElementById(scriptId);
-    if (!element) {
-      return null;
-    }
-    const text = element.textContent || element.innerText || '';
-    if (!text.trim()) {
-      return null;
-    }
-    try {
-      return JSON.parse(text);
-    } catch (error) {
-      return null;
-    }
-  }
-
-  function bindMessageTemplateForm() {
-    const form = document.getElementById('message-template-form');
-    if (!form) {
-      return;
-    }
-
-    const idField = form.querySelector('#message-template-id');
-    const slugField = form.querySelector('#message-template-slug');
-    const nameField = form.querySelector('#message-template-name');
-    const descriptionField = form.querySelector('#message-template-description');
-    const contentTypeField = form.querySelector('#message-template-content-type');
-    const contentField = form.querySelector('#message-template-content');
-    const editorContainer = form.querySelector('#message-template-content-editor');
-    const submitButton = form.querySelector('[data-template-submit]');
-    const formTitle = document.querySelector('[data-template-form-title]');
-    const resetButton = document.querySelector('[data-template-reset]');
-
-    let sunEditor = null;
-
-    function destroySunEditor() {
-      if (sunEditor) {
-        try {
-          sunEditor.destroy();
-        } catch (_) {}
-        sunEditor = null;
-      }
-    }
-
-    function initSunEditor(initialContent) {
-      destroySunEditor();
-      if (!editorContainer) {
-        return;
-      }
-      if (typeof SUNEDITOR === 'undefined') {
-        console.warn('SunEditor failed to load. HTML content editing is unavailable.');
-        contentField.style.display = '';
-        contentField.setAttribute('required', '');
-        if (editorContainer) {
-          editorContainer.style.display = 'none';
-        }
-        return;
-      }
-      editorContainer.innerHTML = '';
-      const sunTextarea = document.createElement('textarea');
-      sunTextarea.id = 'message-template-content-sun';
-      editorContainer.appendChild(sunTextarea);
-      sunEditor = SUNEDITOR.create(sunTextarea, {
-        width: '100%',
-        height: '300',
-        buttonList: [
-          ['undo', 'redo'],
-          ['bold', 'underline', 'italic', 'strike'],
-          ['fontColor', 'hiliteColor'],
-          ['outdent', 'indent'],
-          ['align', 'horizontalRule', 'list', 'lineHeight'],
-          ['link', 'image'],
-          ['removeFormat'],
-          ['codeView'],
-        ],
-      });
-      sunEditor.setContents(initialContent || '');
-    }
-
-    function switchEditorMode(contentType, content) {
-      if (contentType === 'text/html') {
-        contentField.style.display = 'none';
-        contentField.removeAttribute('required');
-        if (editorContainer) {
-          editorContainer.style.display = '';
-        }
-        initSunEditor(content !== undefined ? content : contentField.value);
-      } else {
-        destroySunEditor();
-        if (editorContainer) {
-          editorContainer.style.display = 'none';
-          editorContainer.innerHTML = '';
-        }
-        contentField.style.display = '';
-        contentField.setAttribute('required', '');
-        if (content !== undefined) {
-          contentField.value = content;
-        }
-      }
-    }
-
-    function getContentValue() {
-      if (sunEditor) {
-        return sunEditor.getContents();
-      }
-      return contentField.value;
-    }
-
-    function setFormState(mode, payload) {
-      if (mode === 'edit' && payload) {
-        idField.value = payload.id || '';
-        slugField.value = payload.slug || '';
-        nameField.value = payload.name || '';
-        descriptionField.value = payload.description || '';
-        contentTypeField.value = payload.content_type || 'text/plain';
-        contentField.value = payload.content || '';
-        if (formTitle) {
-          formTitle.textContent = 'Edit template';
-        }
-        if (submitButton) {
-          submitButton.textContent = 'Update template';
-        }
-      } else {
-        idField.value = '';
-        slugField.value = '';
-        nameField.value = '';
-        descriptionField.value = '';
-        contentTypeField.value = 'text/plain';
-        contentField.value = '';
-        if (formTitle) {
-          formTitle.textContent = 'New template';
-        }
-        if (submitButton) {
-          submitButton.textContent = 'Save template';
-        }
-      }
-      switchEditorMode(contentTypeField.value, payload ? payload.content || '' : '');
-    }
-
-    async function handleSubmit(event) {
-      event.preventDefault();
-      const templateId = idField.value.trim();
-      const content = getContentValue();
-      if (!content || !content.trim()) {
-        alert('Content is required.');
-        return;
-      }
-      const payload = {
-        slug: slugField.value.trim(),
-        name: nameField.value.trim(),
-        description: descriptionField.value.trim() || null,
-        content_type: contentTypeField.value,
-        content,
-      };
-
-      const method = templateId ? 'PUT' : 'POST';
-      const url = templateId
-        ? `/api/message-templates/${encodeURIComponent(templateId)}`
-        : '/api/message-templates/';
-
-      if (submitButton) {
-        submitButton.disabled = true;
-      }
-
-      try {
-        await requestJson(url, { method, body: JSON.stringify(payload) });
-        const message = templateId ? 'Template updated.' : 'Template created.';
-        window.location.href = `/admin/message-templates?success=${encodeURIComponent(message)}`;
-      } catch (error) {
-        alert(`Unable to save template: ${error.message}`);
-      } finally {
-        if (submitButton) {
-          submitButton.disabled = false;
-        }
-      }
-    }
-
-    form.addEventListener('submit', handleSubmit);
-
-    contentTypeField.addEventListener('change', () => {
-      switchEditorMode(contentTypeField.value, getContentValue());
-    });
-
-    if (resetButton) {
-      resetButton.addEventListener('click', () => {
-        setFormState('create');
-        slugField.focus();
-      });
-    }
-
-    if (!idField.value) {
-      setFormState('create');
-    } else {
-      switchEditorMode(contentTypeField.value, contentField.value);
-    }
-  }
-
-  function bindMessageTemplateCloneButtons() {
-    document.querySelectorAll('[data-template-clone]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const row = button.closest('tr');
-        if (!row) {
-          return;
-        }
-        const templateId = row.dataset.templateId;
-        if (!templateId) {
-          return;
-        }
-        const payload = getTemplatePayload(row.dataset.templateJson);
-        const templateName =
-          payload?.name || row.querySelector('[data-label="Name"]')?.textContent || 'this template';
-        if (!confirm(`Clone ${templateName.trim()}? A new template will be created with a unique slug.`)) {
-          return;
-        }
-        button.disabled = true;
-        try {
-          const cloned = await requestJson(
-            `/api/message-templates/${encodeURIComponent(templateId)}/clone`,
-            { method: 'POST' },
-          );
-          const message = `Template cloned as ${cloned.slug}.`;
-          window.location.href = `/admin/message-templates/${encodeURIComponent(
-            cloned.id,
-          )}/edit?success=${encodeURIComponent(message)}`;
-        } catch (error) {
-          alert(`Unable to clone template: ${error.message}`);
-          button.disabled = false;
-        }
-      });
-    });
-  }
-
-  function bindMessageTemplateDeleteButtons() {
-    document.querySelectorAll('[data-template-delete]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const row = button.closest('tr');
-        if (!row) {
-          return;
-        }
-        const templateId = row.dataset.templateId;
-        if (!templateId) {
-          return;
-        }
-        const payload = getTemplatePayload(row.dataset.templateJson);
-        const templateName =
-          payload?.name || row.querySelector('[data-label="Name"]')?.textContent || 'this template';
-        if (!confirm(`Delete ${templateName.trim()}? This action cannot be undone.`)) {
-          return;
-        }
-        try {
-          await requestJson(`/api/message-templates/${encodeURIComponent(templateId)}`, { method: 'DELETE' });
-          window.location.href = `/admin/message-templates?success=${encodeURIComponent('Template deleted.')}`;
-        } catch (error) {
-          alert(`Unable to delete template: ${error.message}`);
-        }
-      });
-    });
-  }
-
-  function bindRoleForm() {
-    const form = document.getElementById('role-form');
-    if (!form) {
-      return;
-    }
-    const modal = document.getElementById('role-modal');
-    const modalTitle = document.getElementById('role-modal-title');
-    const modalSubtitle = document.getElementById('role-modal-subtitle');
-    const submitButton = form.querySelector('[data-role-submit]');
-    const idField = form.querySelector('#role-id');
-    const nameField = form.querySelector('#role-name');
-    const descriptionField = form.querySelector('#role-description');
-    const permissionInputs = form.querySelectorAll('[data-permission-level]');
-    let activeRoleTrigger = null;
-
-    function getSelectedPermissions() {
-      const permissions = {};
-      permissionInputs.forEach((input) => {
-        if (!(input instanceof HTMLInputElement) || !input.checked) {
-          return;
-        }
-        const key = input.getAttribute('data-permission-key');
-        const level = input.value;
-        if (key && level && level !== 'none') {
-          permissions[key] = level;
-        }
-      });
-      return permissions;
-    }
-
-    function normalizePermissions(permissions) {
-      if (!permissions) {
-        return {};
-      }
-      if (Array.isArray(permissions)) {
-        const legacyMap = {
-          'chat.access': ['menu.chat', 'read'],
-          'helpdesk.technician': ['menu.tickets', 'write'],
-          'marketing.access': ['menu.marketing', 'write'],
-          'shop.access': ['menu.shop', 'read'],
-          'orders.access': ['menu.orders', 'read'],
-          'forms.access': ['menu.forms', 'read'],
-          'assets.manage': ['menu.assets', 'write'],
-          'licenses.manage': ['menu.m365.licenses', 'write'],
-          'licenses.order': ['menu.m365.licenses', 'write'],
-          'invoices.manage': ['menu.invoices', 'write'],
-          'staff.manage': ['menu.staff', 'write'],
-          'issues.manage': ['menu.issues', 'write'],
-          'compliance.access': ['menu.compliance', 'read'],
-          'continuity.access': ['menu.continuity', 'read'],
-          'compliance_checks.access': ['menu.compliance_checks', 'read'],
-          'compliance_checks.manage': ['menu.compliance_checks.library', 'write'],
-          'm365_best_practices.access': ['menu.m365.best_practices', 'read'],
-          'm365_user_mailboxes.access': ['menu.m365.user_mailboxes', 'read'],
-          'm365_shared_mailboxes.access': ['menu.m365.shared_mailboxes', 'read'],
-          'company.admin': ['menu.admin.company', 'write'],
-          'company.switch_all': ['menu.admin.technician', 'write'],
-        };
-        return permissions.reduce((acc, permission) => {
-          const mapped = legacyMap[permission];
-          if (mapped) {
-            acc[mapped[0]] = mapped[1];
+    if (limitSelect instanceof HTMLSelectElement && table instanceof HTMLTableElement) {
+      limitSelect.addEventListener('change', () => {
+        refreshWithParams((params) => {
+          if (limitSelect.value === 'all') {
+            params.set('all', 'true');
+            params.delete('limit');
+          } else {
+            params.set('limit', limitSelect.value);
+            params.delete('all');
           }
-          return acc;
-        }, {});
-      }
-      if (typeof permissions === 'object') {
-        const menuPermissions = permissions.menu && typeof permissions.menu === 'object' ? permissions.menu : permissions;
-        if (menuPermissions['menu.admin.technician'] === 'read') {
-          return { ...menuPermissions, 'menu.admin.technician': 'write' };
-        }
-        return menuPermissions;
-      }
-      return {};
-    }
-
-    function setSelectedPermissions(permissions) {
-      const permissionMap = normalizePermissions(permissions);
-      permissionInputs.forEach((input) => {
-        if (!(input instanceof HTMLInputElement)) {
-          return;
-        }
-        const key = input.getAttribute('data-permission-key');
-        const expectedLevel = key ? permissionMap[key] || 'none' : 'none';
-        input.checked = input.value === expectedLevel;
+        });
       });
     }
-
-    function updateModalText(mode, roleName) {
-      if (modalTitle) {
-        modalTitle.textContent = mode === 'edit' ? 'Edit role' : mode === 'clone' ? 'Clone role' : 'Create role';
-      }
-      if (modalSubtitle) {
-        if (mode === 'edit') {
-          modalSubtitle.textContent = `Update ${roleName || 'this role'} for every assigned member immediately.`;
-        } else if (mode === 'clone') {
-          modalSubtitle.textContent = `Review the copied permissions from ${roleName || 'the selected role'} before saving a new role.`;
-        } else {
-          modalSubtitle.textContent = 'Create a least-privilege permission set for company members.';
-        }
-      }
-      if (submitButton) {
-        submitButton.textContent = mode === 'edit' ? 'Save role' : mode === 'clone' ? 'Create clone' : 'Create role';
-      }
-    }
-
-    function openRoleModal(trigger, mode, row) {
-      activeRoleTrigger = trigger || null;
-      const roleName = row ? row.dataset.roleName || '' : '';
-      idField.value = mode === 'edit' && row ? row.dataset.roleId || '' : '';
-      nameField.value = mode === 'clone' && roleName ? `Copy of ${roleName}` : row ? row.dataset.roleName || '' : '';
-      descriptionField.value = row ? row.dataset.roleDescription || '' : '';
-      try {
-        const permissions = row ? JSON.parse(row.dataset.rolePermissions || '{}') : {};
-        setSelectedPermissions(permissions);
-      } catch (error) {
-        setSelectedPermissions({});
-      }
-      updateModalText(mode, roleName);
-      if (modal) {
-        modal.hidden = false;
-        modal.setAttribute('aria-hidden', 'false');
-      }
-      nameField.focus();
-      nameField.select();
-    }
-
-    function closeRoleModal() {
-      if (modal) {
-        modal.hidden = true;
-        modal.setAttribute('aria-hidden', 'true');
-      }
-      if (activeRoleTrigger) {
-        activeRoleTrigger.focus();
-        activeRoleTrigger = null;
-      }
-    }
-
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const roleId = idField.value;
-      const payload = {
-        name: nameField.value.trim(),
-        description: descriptionField.value.trim() || null,
-        permissions: getSelectedPermissions(),
-      };
-      const method = roleId ? 'PATCH' : 'POST';
-      const url = roleId ? `/roles/${roleId}` : '/roles';
-      try {
-        await requestJson(url, { method, body: JSON.stringify(payload) });
-        window.location.reload();
-      } catch (error) {
-        alert(`Unable to save role: ${error.message}`);
-      }
-    });
-
-    const resetButton = form.querySelector('[data-role-reset]');
-    if (resetButton) {
-      resetButton.addEventListener('click', () => {
-        idField.value = '';
-        nameField.value = '';
-        descriptionField.value = '';
-        setSelectedPermissions({});
-        updateModalText('create');
-        nameField.focus();
-      });
-    }
-
-    document.querySelectorAll('[data-role-create]').forEach((button) => {
-      button.addEventListener('click', () => {
-        openRoleModal(button, 'create', null);
-      });
-    });
-
-    document.querySelectorAll('[data-role-edit]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const row = button.closest('tr');
-        if (!row) {
-          return;
-        }
-        openRoleModal(button, 'edit', row);
-      });
-    });
-
-    document.querySelectorAll('[data-role-clone]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const row = button.closest('tr');
-        if (!row) {
-          return;
-        }
-        openRoleModal(button, 'clone', row);
-      });
-    });
-
-    if (modal) {
-      modal.addEventListener('click', (event) => {
-        if (event.target === modal || event.target.closest('[data-modal-close]')) {
-          event.preventDefault();
-          closeRoleModal();
-        }
-      });
-      document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && !modal.hidden) {
-          closeRoleModal();
-        }
-      });
-    }
-
-    document.querySelectorAll('[data-role-delete]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const row = button.closest('tr');
-        if (!row) {
-          return;
-        }
-        const roleId = row.dataset.roleId;
-        if (!roleId) {
-          return;
-        }
-        if (!confirm('Delete this role? This action cannot be undone.')) {
-          return;
-        }
-        try {
-          await requestJson(`/roles/${roleId}`, { method: 'DELETE' });
-          window.location.reload();
-        } catch (error) {
-          alert(`Unable to delete role: ${error.message}`);
-        }
-      });
-    });
   }
 
   function bindCompanyAssignForm() {
@@ -2851,21 +2399,34 @@
     function updateRowIdentifiers() {
       const rows = Array.from(list.querySelectorAll('[data-labour-row]'));
       rows.forEach((row, index) => {
+        const defaultInput = row.querySelector('input[name="defaultLabourType"]');
         const codeInput = row.querySelector('input[name="labourCode"]');
         const nameInput = row.querySelector('input[name="labourName"]');
+        const idInput = row.querySelector('input[name="labourId"]');
         const labels = Array.from(row.querySelectorAll('label'));
+        if (defaultInput) {
+          const defaultId = `labour-default-${index}`;
+          defaultInput.id = defaultId;
+          // New labour types do not have a database ID yet. Give their radio
+          // buttons a row-specific value so the server can identify which new
+          // record was selected as the default.
+          defaultInput.value = idInput && idInput.value ? idInput.value : `new-${index}`;
+          if (labels[0]) {
+            labels[0].setAttribute('for', defaultId);
+          }
+        }
         if (codeInput) {
           const codeId = `labour-code-${index}`;
           codeInput.id = codeId;
-          if (labels[0]) {
-            labels[0].setAttribute('for', codeId);
+          if (labels[1]) {
+            labels[1].setAttribute('for', codeId);
           }
         }
         if (nameInput) {
           const nameId = `labour-name-${index}`;
           nameInput.id = nameId;
-          if (labels[1]) {
-            labels[1].setAttribute('for', nameId);
+          if (labels[2]) {
+            labels[2].setAttribute('for', nameId);
           }
         }
       });
@@ -3846,10 +3407,6 @@
     });
     bindTicketAiReplaceDescription();
     bindTicketAiRefresh();
-    bindMessageTemplateForm();
-    bindMessageTemplateCloneButtons();
-    bindMessageTemplateDeleteButtons();
-    bindRoleForm();
     bindCompanyAssignForm();
     bindCompanyAssignmentControls();
     bindRecurringInvoiceItems();
@@ -3870,7 +3427,6 @@
     bindModal({ modalId: 'create-ticket-modal', triggerSelector: '[data-create-ticket-modal-open]' });
     bindModal({ modalId: 'canned-response-create-modal', triggerSelector: '[data-canned-response-create-open]' });
     bindModal({ modalId: 'create-api-key-modal', triggerSelector: '[data-create-api-key-modal-open]' });
-    bindModal({ modalId: 'create-issue-modal', triggerSelector: '[data-create-issue-modal-open]' });
     bindModal({
       modalId: 'edit-ticket-statuses-modal',
       triggerSelector: '[data-edit-ticket-statuses-open]',

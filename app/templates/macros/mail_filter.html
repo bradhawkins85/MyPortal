@@ -1,0 +1,63 @@
+{# Rule builder for the mailbox "which emails to import" filter.
+
+   Used by the IMAP and Microsoft 365 mailbox forms. The builder in
+   app/static/js/mail_filter_builder.js writes the same filter JSON into the
+   ``filterQuery`` textarea, which stays editable under "Advanced" (and is the
+   whole control when JavaScript is off). Filters the builder can't express,
+   such as nested groups, are left untouched and edited as JSON.
+
+   value – the stored filter (a mapping) or none
+#}
+{% macro mail_filter_field(value=none) -%}
+<div class="form-field form-field--wide mfb" data-mail-filter>
+  <fieldset class="stp__fieldset">
+    <legend class="form-label">Which emails to import</legend>
+    <div class="mfb__ui" data-mfb-ui hidden>
+      <div class="scf-choice-list mfb__modes" role="radiogroup" aria-label="Which emails to import">
+        <label class="scf-choice">
+          <input type="radio" name="mfb_mode" value="all" data-mfb-mode />
+          <span><strong>Every email</strong><span class="text-muted">Import everything that arrives in the folder.</span></span>
+        </label>
+        <label class="scf-choice">
+          <input type="radio" name="mfb_mode" value="rules" data-mfb-mode />
+          <span><strong>Only emails that match rules</strong><span class="text-muted">For example only one sender domain, or skip newsletters.</span></span>
+        </label>
+      </div>
+      <div class="mfb__rules" data-mfb-rules hidden>
+        <section class="mfb__group" aria-labelledby="mfb-include-title">
+          <h3 class="mfb__group-title" id="mfb-include-title">
+            Import emails that match
+            <label class="visually-hidden" for="mfb-match">Match all or any rules</label>
+            <select class="form-input mfb__match" id="mfb-match" data-mfb-match>
+              <option value="all">all</option>
+              <option value="any">any</option>
+            </select>
+            of these rules
+          </h3>
+          <ul class="mfb__list" data-mfb-list="include"></ul>
+          <button type="button" class="button button--ghost button--small" data-mfb-add="include">+ Add rule</button>
+        </section>
+        <section class="mfb__group" aria-labelledby="mfb-exclude-title">
+          <h3 class="mfb__group-title" id="mfb-exclude-title">But skip emails that match any of these <span class="scf-optional">optional</span></h3>
+          <ul class="mfb__list" data-mfb-list="exclude"></ul>
+          <button type="button" class="button button--ghost button--small" data-mfb-add="exclude">+ Add exception</button>
+        </section>
+      </div>
+      <p class="scf-sentence mfb__summary" role="status" aria-live="polite" data-mfb-summary></p>
+      <p class="callout callout--info mfb__complex" data-mfb-complex hidden>
+        This filter uses nested groups, which the rule builder can't show. Edit it as JSON below.
+      </p>
+    </div>
+    <details class="stp__advanced" data-mfb-advanced open>
+      <summary>Advanced: edit as JSON</summary>
+      <label class="visually-hidden" for="mfb-json">Message filter JSON</label>
+      <textarea class="form-input form-input--textarea stp__json" id="mfb-json" name="filterQuery" rows="8" spellcheck="false" placeholder='{"all": [{"field": "from.domain", "equals": "example.com"}]}'>{% if value %}{{ value | tojson(indent=2) }}{% endif %}</textarea>
+      <p class="form-help">
+        Supports nested <code>all</code> / <code>any</code> / <code>none</code> groups and any message field.
+        <a href="/docs/imap-filters" target="_blank" rel="noopener">View filter examples</a>.
+      </p>
+    </details>
+    <p class="scf-error" data-mfb-error hidden></p>
+  </fieldset>
+</div>
+{%- endmacro %}

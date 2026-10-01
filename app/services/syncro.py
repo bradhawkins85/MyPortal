@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+import math
 from time import monotonic
 from typing import Any
 from urllib.parse import urlparse
@@ -687,7 +688,7 @@ def _parse_numeric_value(value: Any) -> float | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):
-        if isinstance(value, float) and (value != value):  # NaN check
+        if isinstance(value, float) and math.isnan(value):  # NaN check
             return None
         return float(value)
     text = str(value).strip()

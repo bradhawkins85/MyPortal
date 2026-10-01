@@ -93,6 +93,7 @@ async def replace_labour_types(definitions: Sequence[dict[str, Any]]) -> list[di
         raw_code = _clean_code(str(entry.get("code")) if entry.get("code") is not None else None)
         raw_name = _clean_name(str(entry.get("name")) if entry.get("name") is not None else None)
         raw_rate = entry.get("rate")
+        is_default = bool(entry.get("is_default"))
         identifier = entry.get("id")
         labour_type_id: int | None = None
         if identifier is not None:
@@ -106,6 +107,7 @@ async def replace_labour_types(definitions: Sequence[dict[str, Any]]) -> list[di
                 "code": raw_code,
                 "name": raw_name,
                 "rate": raw_rate,
+                "is_default": is_default,
             }
         )
     return await labour_types_repo.replace_labour_types(cleaned_definitions)

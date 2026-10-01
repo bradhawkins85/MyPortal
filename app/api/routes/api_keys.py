@@ -35,6 +35,7 @@ def _format_response(row: dict) -> ApiKeyResponse:
         usage=row.get("usage", []),
         permissions=row.get("permissions", []),
         allowed_ips=row.get("ip_restrictions", []),
+        allowed_company_ids=row.get("allowed_company_ids", []),
         is_enabled=bool(row.get("is_enabled", True)),
     )
 
@@ -54,13 +55,6 @@ async def list_api_keys(
         order_by=order_by,
         order_direction=order_direction,
     )
-    await audit_service.log_action(
-        action="api_keys.list",
-        user_id=user.get("id"),
-        entity_type="api_key",
-        request=None,
-        metadata={"search": search, "include_expired": include_expired, "order_by": order_by, "order_direction": order_direction},
-    )
     return [_format_response(row) for row in rows]
 
 
@@ -76,22 +70,24 @@ async def create_api_key(
         expiry_date=payload.expiry_date,
         permissions=[permission.model_dump() for permission in payload.permissions],
         ip_restrictions=[entry.cidr for entry in payload.allowed_ips],
+        allowed_company_ids=payload.allowed_company_ids,
         is_enabled=payload.is_enabled,
     )
     formatted = _format_response(row).model_dump()
-    await audit_service.log_action(
-        action="api_keys.create",
+    await audit_service.record_create(
+        action="api_key.create",
+        request=request,
         user_id=user.get("id"),
         entity_type="api_key",
         entity_id=row["id"],
-        new_value={
+        after={
             "description": payload.description,
             "expiry_date": payload.expiry_date.isoformat() if payload.expiry_date else None,
             "permissions": formatted.get("permissions", []),
             "allowed_ips": [entry.cidr for entry in payload.allowed_ips],
+            "allowed_company_ids": payload.allowed_company_ids,
             "is_enabled": payload.is_enabled,
         },
-        request=request,
     )
     return ApiKeyCreateResponse(api_key=raw_key, **formatted)
 
@@ -119,17 +115,16 @@ async def delete_api_key(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
     await api_key_repo.delete_api_key(api_key_id)
-    await audit_service.log_action(
-        action="api_keys.delete",
+    await audit_service.record_delete(
+        action="api_key.delete",
+        request=request,
         user_id=user.get("id"),
         entity_type="api_key",
         entity_id=api_key_id,
-        previous_value={
+        before={
             "description": row.get("description"),
             "expiry_date": row.get("expiry_date").isoformat() if row.get("expiry_date") else None,
-            "key_preview": mask_api_key(row.get("key_prefix")),
         },
-        request=request,
     )
     return None
 
@@ -165,7 +160,6 @@ async def update_api_key(
         ]
         permissions_argument: list[dict[str, Any]] | None = permissions_payload
     else:
-        permissions_payload = existing.get("permissions", [])
         permissions_argument = None
 
     if "is_enabled" in fields_set:
@@ -175,11 +169,19 @@ async def update_api_key(
     else:
         is_enabled_argument = None
 
+    allowed_company_ids_argument = (
+        payload.allowed_company_ids
+        if "allowed_company_ids" in fields_set
+        else None
+    )
+
     update_kwargs: dict[str, Any] = {
         "description": new_description,
         "expiry_date": new_expiry,
         "permissions": permissions_argument,
     }
+    if allowed_company_ids_argument is not None:
+        update_kwargs["allowed_company_ids"] = allowed_company_ids_argument
     if is_enabled_argument is not None:
         update_kwargs["is_enabled"] = is_enabled_argument
 
@@ -188,28 +190,30 @@ async def update_api_key(
         **update_kwargs,
     )
 
-    await audit_service.log_action(
-        action="api_keys.update",
+    await audit_service.record(
+        action="api_key.update",
+        request=request,
         user_id=user.get("id"),
         entity_type="api_key",
         entity_id=api_key_id,
-        previous_value={
+        before={
             "description": existing.get("description"),
             "expiry_date": existing.get("expiry_date").isoformat()
             if isinstance(existing.get("expiry_date"), date)
             else None,
             "permissions": existing.get("permissions", []),
             "is_enabled": bool(existing.get("is_enabled", True)),
+            "allowed_company_ids": existing.get("allowed_company_ids", []),
         },
-        new_value={
+        after={
             "description": updated.get("description"),
             "expiry_date": updated.get("expiry_date").isoformat()
             if isinstance(updated.get("expiry_date"), date)
             else None,
             "permissions": updated.get("permissions", []),
             "is_enabled": bool(updated.get("is_enabled", True)),
+            "allowed_company_ids": updated.get("allowed_company_ids", []),
         },
-        request=request,
     )
 
     return _format_response(updated)
@@ -238,51 +242,56 @@ async def rotate_api_key(
         if payload.allowed_ips is not None
         else [entry.get("cidr") for entry in existing.get("ip_restrictions", [])]
     )
+    allowed_company_ids = (
+        payload.allowed_company_ids
+        if payload.allowed_company_ids is not None
+        else existing.get("allowed_company_ids", [])
+    )
     raw_key, new_row = await api_key_repo.create_api_key(
         description=new_description,
         expiry_date=new_expiry,
         permissions=permissions,
         ip_restrictions=allowed_ips,
+        allowed_company_ids=allowed_company_ids,
     )
     formatted = _format_response(new_row).model_dump()
     metadata = {
         "rotated_from": api_key_id,
         "retired_previous": bool(payload.retire_previous),
     }
-    await audit_service.log_action(
-        action="api_keys.rotate",
+    await audit_service.record_create(
+        action="api_key.rotate",
+        request=request,
         user_id=user.get("id"),
         entity_type="api_key",
         entity_id=new_row["id"],
-        previous_value=None,
-        new_value={
+        after={
             "description": new_description,
             "expiry_date": new_expiry.isoformat() if isinstance(new_expiry, date) else None,
             "permissions": formatted.get("permissions", []),
             "allowed_ips": [entry.cidr for entry in payload.allowed_ips]
             if payload.allowed_ips is not None
             else [entry.get("cidr") for entry in existing.get("ip_restrictions", [])],
+            "allowed_company_ids": allowed_company_ids,
         },
         metadata=metadata,
-        request=request,
     )
     if payload.retire_previous:
         retirement_date = date.today()
         await api_key_repo.update_api_key_expiry(api_key_id, retirement_date)
-        await audit_service.log_action(
-            action="api_keys.retire",
+        await audit_service.record(
+            action="api_key.retire",
+            request=request,
             user_id=user.get("id"),
             entity_type="api_key",
             entity_id=api_key_id,
-            previous_value={
+            before={
                 "description": existing.get("description"),
                 "expiry_date": existing.get("expiry_date").isoformat()
                 if isinstance(existing.get("expiry_date"), date)
                 else None,
-                "key_preview": mask_api_key(existing.get("key_prefix")),
             },
-            new_value={"expiry_date": retirement_date.isoformat()},
+            after={"description": existing.get("description"), "expiry_date": retirement_date.isoformat()},
             metadata={"rotated_to": new_row["id"]},
-            request=request,
         )
     return ApiKeyCreateResponse(api_key=raw_key, **formatted)

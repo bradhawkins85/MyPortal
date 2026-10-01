@@ -1,0 +1,7 @@
+{
+  "guid": "7e5577ba-44bb-42c5-991d-06e87331fd68",
+  "occurred_at": "2026-09-30T00:00:00Z",
+  "change_type": "fix",
+  "summary": "Keep top navigation menus closed after page refresh until explicitly opened.",
+  "content_hash": ""
+}

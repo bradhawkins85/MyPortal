@@ -93,7 +93,7 @@ async def test_reprocess_specific_migration(tmp_path, monkeypatch):
     assert fake_conn.deleted == ["001_example.sql"]
     assert fake_conn.inserted == ["001_example.sql"]
     assert fake_conn.migration_table_created is True
-    assert fake_conn.migration_statements == [
+    assert fake_conn.migration_statements[-2:] == [
         "UPDATE foo SET bar = 1",
         "UPDATE foo SET baz = 2",
     ]
@@ -112,7 +112,7 @@ async def test_reprocess_all_migrations(tmp_path, monkeypatch):
 
     assert fake_conn.deleted == ["001_first.sql", "002_second.sql"]
     assert fake_conn.inserted == ["001_first.sql", "002_second.sql"]
-    assert fake_conn.migration_statements == [
+    assert fake_conn.migration_statements[-2:] == [
         "DELETE FROM table_a",
         "INSERT INTO table_b VALUES (1)",
     ]

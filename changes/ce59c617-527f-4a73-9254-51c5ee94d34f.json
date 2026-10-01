@@ -1,0 +1,7 @@
+{
+  "guid": "ce59c617-527f-4a73-9254-51c5ee94d34f",
+  "occurred_at": "2026-10-01T00:00:00Z",
+  "change_type": "security",
+  "summary": "Pin js-yaml 4.3.2 to remediate a denial-of-service vulnerability in the tray application build dependency tree.",
+  "content_hash": "e3ceef0a94372403dc4fdf3698e3f7aa4139c46cc6d24568a9c5937f12fedb72"
+}

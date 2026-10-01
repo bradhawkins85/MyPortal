@@ -2,10 +2,33 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
+	"github.com/bradhawkins85/myportal-tray/internal/api"
 	"github.com/bradhawkins85/myportal-tray/internal/ipc"
 )
+
+func TestServiceChangesDefenderPreferencesOnlyThroughTamperAwarePolicy(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Preference changes must go through defender.ApplyPolicy, which skips
+	// changes Tamper Protection could block instead of attempting them.
+	for _, forbidden := range []string{"Add-MpPreference", "Set-MpPreference", "Remove-MpPreference"} {
+		if strings.Contains(string(source), forbidden) {
+			t.Errorf("tray service must not modify Defender preferences directly: found %q", forbidden)
+		}
+	}
+	if !strings.Contains(string(source), "defender.ApplyPolicy(") {
+		t.Error("tray service no longer applies the portal's Defender policy")
+	}
+}
 
 func TestDeliverUserSessionMessageQueuesAndLaunchesUIWhenNoIPCClient(t *testing.T) {
 	d := &daemon{}
@@ -36,5 +59,60 @@ func TestDeliverUserSessionMessageQueuesAndLaunchesUIWhenNoIPCClient(t *testing.
 	}
 	if again := d.consumePendingUIMessage(); again != nil {
 		t.Fatalf("pending message was not consumed: %#v", again)
+	}
+}
+
+func TestProcessDefenderCommandsDoesNotPollCommandsWhenExcluded(t *testing.T) {
+	commandPolls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/tray/defender/policy":
+			_ = json.NewEncoder(w).Encode(api.DefenderPolicy{Enabled: false})
+		case "/api/tray/defender/commands":
+			commandPolls++
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"commands": []api.DefenderCommand{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	d := &daemon{client: api.New(server.URL)}
+	d.processDefenderCommands()
+
+	if commandPolls != 0 {
+		t.Fatalf("command polls = %d, want 0 for an excluded device", commandPolls)
+	}
+}
+
+func TestProcessDefenderCommandsRechecksPolicyAfterClaim(t *testing.T) {
+	policyChecks := 0
+	resultUploads := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/tray/defender/policy":
+			policyChecks++
+			_ = json.NewEncoder(w).Encode(api.DefenderPolicy{Enabled: policyChecks == 1})
+		case "/api/tray/defender/commands":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"commands": []api.DefenderCommand{{
+				ID: 17, CommandType: "quick_scan",
+			}}})
+		case "/api/tray/defender/commands/17/result":
+			resultUploads++
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	d := &daemon{client: api.New(server.URL)}
+	d.processDefenderCommands()
+
+	if policyChecks != 2 {
+		t.Fatalf("policy checks = %d, want 2", policyChecks)
+	}
+	if resultUploads != 0 {
+		t.Fatalf("result uploads = %d, want 0 because the command must not execute", resultUploads)
 	}
 }

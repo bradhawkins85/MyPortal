@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, Mapping
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 _REDACTED: str = "[REDACTED]"
 
@@ -79,3 +80,30 @@ def redact_mapping(data: Any, *, max_depth: int = 4) -> Any:
 
 
 __all__ = ["redact_headers", "redact_mapping"]
+
+
+def redact_url_query(url: str) -> str:
+    """Redact values of sensitive query parameters in a URL or path.
+
+    ``/api/x?token=abc&page=2`` becomes ``/api/x?token=[REDACTED]&page=2``.
+    Used for access logs, where integrations such as Uptime Kuma may only be
+    able to pass their shared secret as a ``?token=`` parameter.
+    """
+
+    try:
+        text = str(url)
+        if "?" not in text:
+            return text
+        parts = urlsplit(text)
+        if not parts.query:
+            return text
+        pairs = parse_qsl(parts.query, keep_blank_values=True)
+        if not any(_SENSITIVE_KEY_PATTERN.search(key) for key, _ in pairs):
+            return text
+        query = urlencode(
+            [(key, _REDACTED if _SENSITIVE_KEY_PATTERN.search(key) else value) for key, value in pairs],
+            safe="[]",
+        )
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+    except Exception:  # pragma: no cover - never break logging
+        return str(url).split("?", 1)[0] + "?[REDACTED]"

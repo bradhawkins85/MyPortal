@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% set values = campaign_values or {} %}
+{% set form_action = "/admin/marketing/campaigns/" ~ campaign.id if campaign else "/admin/marketing/campaigns" %}
+
+{% block header_title %}{% if campaign %}Edit — {{ campaign.name }}{% else %}New campaign{% endif %}{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Back to campaign" if campaign else "Back to campaigns", "type": "link", "href": ("/admin/marketing/campaigns/" ~ campaign.id) if campaign else "/admin/marketing/campaigns"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+{% if error_message %}
+  <div class="alert alert--error" role="alert">{{ error_message }}</div>
+{% endif %}
+<form action="{{ form_action }}" method="post" class="admin-grid" data-campaign-form>
+  {% include "partials/csrf.html" %}
+  <input type="hidden" name="tz_offset" value="0" data-tz-offset />
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Email</h2>
+        <p class="card__subtitle">Saved campaigns stay as drafts until you review the recipients and send.</p>
+      </div>
+    </header>
+    <div class="form-grid">
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="campaign-name">Campaign name</label>
+        <input id="campaign-name" class="form-input" name="name" maxlength="160" value="{{ values.name or '' }}" required />
+        <p class="form-help">Only staff see this name.</p>
+      </div>
+      <fieldset class="form-field form-field--wide">
+        <legend class="form-label">Type</legend>
+        <label class="checkbox">
+          <input type="radio" name="category" value="updates" {% if (values.category or 'updates') == 'updates' %}checked{% endif %} />
+          <span>Updates: product, service or account changes. Always delivered.</span>
+        </label>
+        <label class="checkbox">
+          <input type="radio" name="category" value="sales" {% if values.category == 'sales' %}checked{% endif %} />
+          <span>Sales: adds an unsubscribe footer and skips contacts who have unsubscribed from sales emails.</span>
+        </label>
+      </fieldset>
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="campaign-subject">Subject</label>
+        <input id="campaign-subject" class="form-input" name="subject" maxlength="255" value="{{ values.subject or '' }}" placeholder="Changes to your {{ '{{ company.name }}' }} invoices" required />
+      </div>
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="campaign-template">Message template</label>
+        <select id="campaign-template" class="form-input" name="message_template_id">
+          <option value="">Use the body below</option>
+          {% for template in message_template_options %}
+            <option value="{{ template.id }}" {% if values.message_template_id|string == template.id|string %}selected{% endif %}>{{ template.name }}</option>
+          {% endfor %}
+        </select>
+        <p class="form-help">Templates are managed under <a href="/admin/message-templates">Message templates</a>.</p>
+      </div>
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="campaign-body">Body (HTML)</label>
+        <textarea id="campaign-body" class="form-input" name="body_html" rows="10">{{ values.body_html or '' }}</textarea>
+        <p class="form-help">Used when no message template is chosen.</p>
+      </div>
+      <details class="form-field form-field--wide">
+        <summary>Variables you can use in the subject and body</summary>
+        <ul>
+          {% for token, label in campaign_variables %}
+            <li><code>{{ '{{ ' ~ token ~ ' }}' }}</code> — {{ label }}</li>
+          {% endfor %}
+        </ul>
+      </details>
+      <div class="form-field">
+        <label class="form-label" for="campaign-sender-name">Sender name</label>
+        <input id="campaign-sender-name" class="form-input" name="sender_name" maxlength="160" value="{{ values.sender_name or '' }}" />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="campaign-sender-email">Sender email</label>
+        {% if can_choose_sender %}
+        <input id="campaign-sender-email" class="form-input" type="email" name="sender_email" value="{{ values.sender_email or '' }}" placeholder="{{ default_sender or '' }}" />
+        {% else %}
+        <input id="campaign-sender-email" class="form-input" type="email" value="{{ default_sender or '' }}" disabled />
+        <p class="form-help">Campaigns send from the portal's default address. Only Super Admins can change it.</p>
+        {% endif %}
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="campaign-reply-to">Reply-to address</label>
+        <input id="campaign-reply-to" class="form-input" type="email" name="reply_to" value="{{ values.reply_to or '' }}" />
+        <p class="form-help">Use a mailbox that MyPortal imports so replies become tickets.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="campaign-hours">Business hours</label>
+        <select id="campaign-hours" class="form-input" name="business_hours_source">
+          <option value="company" {% if (values.business_hours_source or 'company') == 'company' %}selected{% endif %}>Each recipient's company hours</option>
+          <option value="global" {% if values.business_hours_source == 'global' %}selected{% endif %}>Global business hours</option>
+        </select>
+        <p class="form-help">Emails outside these <a href="/admin/business-hours">business hours</a> wait until the next opening.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="campaign-scheduled">Send no earlier than</label>
+        <input id="campaign-scheduled" class="form-input" type="datetime-local" name="scheduled_for" data-scheduled-for data-utc-value="{{ values.scheduled_for.isoformat() if values.scheduled_for and values.scheduled_for.isoformat is defined else (values.scheduled_for or '') }}" />
+        <p class="form-help">Optional. Leave blank to start at the next business hours opening.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Audience</h2>
+        <p class="card__subtitle">Contacts must match every filter you set. You can preview everyone before sending.</p>
+      </div>
+    </header>
+    <div class="form-grid">
+      <fieldset class="form-field form-field--wide">
+        <legend class="form-label">Companies</legend>
+        {% if can_target_all_companies %}
+        <label class="checkbox">
+          <input type="radio" name="company_mode" value="all" {% if audience.company_mode == 'all' %}checked{% endif %} />
+          <span>All active companies</span>
+        </label>
+        {% endif %}
+        <label class="checkbox">
+          <input type="radio" name="company_mode" value="selected" {% if audience.company_mode == 'selected' %}checked{% endif %} />
+          <span>Only the companies selected below</span>
+        </label>
+      </fieldset>
+      <div class="form-field">
+        <label class="form-label" for="campaign-companies">Selected companies</label>
+        <select id="campaign-companies" class="form-input" name="company_ids" multiple size="8">
+          {% for company in company_options %}
+            <option value="{{ company.id }}" {% if company.id in audience.company_ids %}selected{% endif %}>{{ company.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="campaign-exclude-companies">Exclude companies</label>
+        <select id="campaign-exclude-companies" class="form-input" name="exclude_company_ids" multiple size="8">
+          {% for company in company_options %}
+            <option value="{{ company.id }}" {% if company.id in audience.exclude_company_ids %}selected{% endif %}>{{ company.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field form-field--wide">
+        <label class="checkbox">
+          <input type="checkbox" name="vip_only" value="1" {% if audience.vip_only %}checked{% endif %} />
+          <span>VIP companies only</span>
+        </label>
+      </div>
+      <fieldset class="form-field">
+        <legend class="form-label">Company has assets with</legend>
+        {% for field in asset_field_options %}
+          <label class="checkbox">
+            <input type="checkbox" name="asset_field_ids" value="{{ field.id }}" {% if field.id in audience.asset_field_ids %}checked{% endif %} />
+            <span>{{ field.name }}</span>
+          </label>
+        {% else %}
+          <p class="form-help">No checkbox asset fields exist yet. Add one (for example "Bitdefender") under asset custom fields.</p>
+        {% endfor %}
+        {% if asset_field_options %}<p class="form-help">Matches companies with at least one asset that has any ticked field.</p>{% endif %}
+      </fieldset>
+      <div class="form-field">
+        <label class="form-label" for="campaign-products">Company has an active subscription to</label>
+        <select id="campaign-products" class="form-input" name="product_ids" multiple size="8">
+          {% for product in product_options %}
+            <option value="{{ product.id }}" {% if product.id in audience.product_ids %}selected{% endif %}>{{ product.name }}</option>
+          {% endfor %}
+        </select>
+        <p class="form-help">Any of the selected products.</p>
+      </div>
+      <fieldset class="form-field form-field--wide">
+        <legend class="form-label">Contacts at those companies</legend>
+        <label class="checkbox">
+          <input type="radio" name="contact_scope" value="billing" {% if audience.contact_scope == 'billing' %}checked{% endif %} />
+          <span>Billing contacts</span>
+        </label>
+        <label class="checkbox">
+          <input type="radio" name="contact_scope" value="all" {% if audience.contact_scope == 'all' %}checked{% endif %} />
+          <span>All active staff</span>
+        </label>
+      </fieldset>
+      <div class="form-field">
+        <label class="form-label" for="campaign-job-titles">Job title contains</label>
+        <input id="campaign-job-titles" class="form-input" name="job_titles" value="{{ audience.job_titles | join(', ') }}" placeholder="Director, Manager" />
+        <p class="form-help">Separate with commas. Any one match counts.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="campaign-departments">Department contains</label>
+        <input id="campaign-departments" class="form-input" name="departments" value="{{ audience.departments | join(', ') }}" placeholder="Finance, Accounts" />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="campaign-include">Also send to</label>
+        <textarea id="campaign-include" class="form-input" name="include_emails" rows="3" placeholder="one@example.com">{{ audience.include_emails | join('\n') }}</textarea>
+        <p class="form-help">These addresses are added whatever the filters say.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="campaign-exclude">Never send to</label>
+        <textarea id="campaign-exclude" class="form-input" name="exclude_emails" rows="3">{{ audience.exclude_emails | join('\n') }}</textarea>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="button button--primary">Save and preview recipients</button>
+    </div>
+  </section>
+</form>
+<script nonce="{{ csp_nonce }}">
+(() => {
+  const form = document.querySelector('[data-campaign-form]');
+  if (!form) return;
+  const offset = form.querySelector('[data-tz-offset]');
+  const scheduled = form.querySelector('[data-scheduled-for]');
+  const pad = (value) => String(value).padStart(2, '0');
+  if (scheduled && scheduled.dataset.utcValue) {
+    const raw = scheduled.dataset.utcValue;
+    const moment = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(raw) ? raw : raw + 'Z');
+    if (!Number.isNaN(moment.getTime())) {
+      scheduled.value = `${moment.getFullYear()}-${pad(moment.getMonth() + 1)}-${pad(moment.getDate())}T${pad(moment.getHours())}:${pad(moment.getMinutes())}`;
+    }
+  }
+  form.addEventListener('submit', () => {
+    const value = scheduled && scheduled.value ? new Date(scheduled.value) : new Date();
+    offset.value = String(value.getTimezoneOffset());
+  });
+})();
+</script>
+{% endblock %}

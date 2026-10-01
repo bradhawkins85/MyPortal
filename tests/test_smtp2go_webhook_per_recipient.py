@@ -6,6 +6,8 @@ while still updating the aggregate ``ticket_replies`` columns the existing
 single-status badge depends on.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 
@@ -113,3 +115,36 @@ async def test_per_recipient_webhook_updates_independently(monkeypatch):
     # Bob's bounce captured the bounce reason.
     bounce_update = next(u for u in bob_updates if u['params'].get('last_event_type') == 'bounce')
     assert bounce_update['params'].get('detail') == "550 mailbox full"
+
+
+@pytest.mark.asyncio
+async def test_audit_bcc_open_does_not_update_reply_status(monkeypatch):
+    """Opening the audit copy must not make the ticket reply look opened."""
+    from app.services import email_recipients, smtp2go
+    from app.core import database
+
+    execute_calls = []
+    monkeypatch.setattr(
+        email_recipients,
+        "get_settings",
+        lambda: SimpleNamespace(outbound_audit_bcc="audit@example.com"),
+    )
+
+    async def fail_fetch_one(*args, **kwargs):
+        raise AssertionError("audit events must be discarded before database lookup")
+
+    async def mock_execute(query, params):
+        execute_calls.append((query, params))
+        return 1
+
+    monkeypatch.setattr(database.db, "fetch_one", fail_fetch_one)
+    monkeypatch.setattr(database.db, "execute", mock_execute)
+
+    result = await smtp2go.process_webhook_event("open", {
+        "email_id": "MSG-AUDIT",
+        "rcpt": "Audit mailbox <AUDIT@example.com>",
+        "time": "2026-09-30T01:02:03Z",
+    })
+
+    assert result is None
+    assert execute_calls == []

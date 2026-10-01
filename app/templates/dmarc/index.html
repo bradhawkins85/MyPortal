@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% from "macros/counters.html" import counter_strip %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <div class="page-header-bar page-header-bar--record">
+      <span class="header__title-text">DMARC reporting</span>
+      <span class="page-header-bar__meta">Coverage <time datetime="{{ range_start.isoformat() }}">{{ range_start.strftime("%-d %b %Y") }}</time> – <time datetime="{{ range_end.isoformat() }}">{{ range_end.strftime("%-d %b %Y") }}</time></span>
+    </div>
+    <form method="get" action="/dmarc" class="page-header-toolbar">
+      <label class="visually-hidden" for="dmarc-start">Reports from</label>
+      <input class="form-input" id="dmarc-start" name="start" type="date" title="Reports from" value="{{ filter_start.isoformat() if filter_start else '' }}">
+      <label class="visually-hidden" for="dmarc-end">Reports through</label>
+      <input class="form-input" id="dmarc-end" name="end" type="date" title="Reports through" value="{{ filter_end.isoformat() if filter_end else '' }}">
+      <label class="visually-hidden" for="dmarc-policy-domain">Policy domain</label>
+      <select class="form-input page-header-toolbar__select" id="dmarc-policy-domain" name="policy_domain"><option value="">All domains</option>{% for item in policy_domains %}<option value="{{ item.domain }}" {% if policy_domain == item.domain %}selected{% endif %}>{{ item.domain }}</option>{% endfor %}</select>
+      <button class="button button--ghost button--compact" type="submit">Apply</button>
+      <a class="button button--ghost button--compact" href="/dmarc">Reset</a>
+    </form>
+  </div>
+{% endblock %}
+{% block content %}
+<section class="card"><h2>Published policies</h2>
+  <p>The most recently reported policy for each domain in this date range is shown below.</p>
+  <div class="table-wrapper"><table class="table"><thead><tr><th>Policy domain</th><th>DKIM alignment (adkim)</th><th>SPF alignment (aspf)</th><th>Domain policy (p)</th><th>Subdomain policy (sp)</th><th>Non-existent subdomain policy (np)</th><th>Applied percentage (pct)</th></tr></thead><tbody>{% for item in policy_domains %}<tr><td>{{ item.domain }}</td><td>{{ 'Strict' if item.adkim == 's' else 'Relaxed' if item.adkim == 'r' else 'Default (relaxed)' }}</td><td>{{ 'Strict' if item.aspf == 's' else 'Relaxed' if item.aspf == 'r' else 'Default (relaxed)' }}</td><td>{{ item.policy|capitalize }}</td><td>{{ item.subdomain_policy|capitalize if item.subdomain_policy else 'Inherits domain policy' }}</td><td>{{ item.nonexistent_policy|capitalize if item.nonexistent_policy else 'Inherits subdomain policy' }}</td><td>{{ item.percentage if item.percentage is not none else 100 }}%</td></tr>{% else %}<tr><td colspan="7" class="table__empty">No published policies were reported in this date range.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+<section class="card"><h2>Overview</h2>
+  {{ counter_strip([
+    {'label': 'DMARC pass (aligned SPF or DKIM)', 'value': metrics.dmarc_pass or 0, 'variant': 'success'},
+    {'label': 'Disposition: reject', 'value': metrics.disposition_reject or 0, 'variant': 'danger'},
+    {'label': 'Disposition: quarantine', 'value': metrics.disposition_quarantine or 0, 'variant': 'warning'},
+    {'label': 'Disposition: none', 'value': metrics.disposition_none or 0, 'variant': 'neutral'},
+    {'label': 'Aligned SPF pass', 'value': metrics.spf_pass or 0, 'variant': 'info'},
+    {'label': 'Aligned DKIM pass', 'value': metrics.dkim_pass or 0, 'variant': 'warning'}
+    ,{'label': 'Forensic failures (RUF)', 'value': metrics.forensic_reports or 0, 'variant': 'danger'}
+  ], total=metrics.total_messages or 0, total_label='Total messages') }}
+  <p class="status-pill status-pill--info">Authentication results are distinct from DMARC alignment.</p>
+</section>
+{% if (metrics.total_messages or 0) > 0 %}
+<section class="card"><h2>Disposition statistics</h2>
+  <div class="table-wrapper"><table class="table"><thead><tr><th>Disposition</th><th>Message volume</th><th>Share</th></tr></thead>
+  <tbody>
+    <tr><td>None</td><td>{{ metrics.disposition_none or 0 }}</td><td>{{ '%.2f'|format(((metrics.disposition_none or 0) / (metrics.total_messages or 1)) * 100) }}%</td></tr>
+    <tr><td>Quarantine</td><td>{{ metrics.disposition_quarantine or 0 }}</td><td>{{ '%.2f'|format(((metrics.disposition_quarantine or 0) / (metrics.total_messages or 1)) * 100) }}%</td></tr>
+    <tr><td>Reject</td><td>{{ metrics.disposition_reject or 0 }}</td><td>{{ '%.2f'|format(((metrics.disposition_reject or 0) / (metrics.total_messages or 1)) * 100) }}%</td></tr>
+    <tr><td>Other / unspecified</td><td>{{ metrics.disposition_other or 0 }}</td><td>{{ '%.2f'|format(((metrics.disposition_other or 0) / (metrics.total_messages or 1)) * 100) }}%</td></tr>
+  </tbody></table></div>
+</section>
+{% endif %}
+{% if (metrics.forensic_reports or 0) > 0 %}
+<section class="card"><h2>Forensic detail availability</h2>
+  <p>The counts below show where DMARC forensic reports included optional investigation details.</p>
+  <div class="table-wrapper"><table class="table"><thead><tr><th>Detail</th><th>Reports with detail</th></tr></thead><tbody>
+    <tr><td>Reported domain</td><td>{{ metrics.forensic_with_reported_domain or 0 }}</td></tr>
+    <tr><td>Source IP</td><td>{{ metrics.forensic_with_source_ip or 0 }}</td></tr>
+    <tr><td>Delivery result</td><td>{{ metrics.forensic_with_delivery_result or 0 }}</td></tr>
+    <tr><td>Authentication results</td><td>{{ metrics.forensic_with_authentication_results or 0 }}</td></tr>
+    <tr><td>Original mail from</td><td>{{ metrics.forensic_with_original_mail_from or 0 }}</td></tr>
+    <tr><td>Original recipient</td><td>{{ metrics.forensic_with_original_rcpt_to or 0 }}</td></tr>
+    <tr><td>DKIM domain/selector</td><td>{{ metrics.forensic_with_dkim_details or 0 }}</td></tr>
+  </tbody></table></div>
+</section>
+{% endif %}
+{% if forensic_failures %}
+<section class="card"><h2>Recent rejected or quarantined forensic reports</h2>
+  <p>Sender and recipient values are only shown when the reporting provider included them in the DMARC forensic report.</p>
+  <div class="table-wrapper"><table class="table"><thead><tr><th>When</th><th>Result</th><th>Reported domain</th><th>Sender</th><th>Recipient</th><th>Source IP</th><th>Failure</th></tr></thead><tbody>
+    {% for item in forensic_failures %}
+    <tr>
+      <td>{% if item.occurred_at %}<time data-utc="{{ item.occurred_at_iso }}">{{ item.occurred_at }}</time>{% else %}Unknown{% endif %}</td>
+      <td>{{ item.delivery_result|capitalize if item.delivery_result else 'Unknown' }}</td>
+      <td>{{ item.reported_domain or 'Unknown' }}</td>
+      <td>{{ item.original_mail_from or 'Not provided' }}</td>
+      <td>{{ item.original_rcpt_to or 'Not provided' }}</td>
+      <td>{{ item.source_ip or 'Not provided' }}</td>
+      <td>{{ item.auth_failure or 'Not provided' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
+<section class="card"><h2>Summary by organization</h2>
+  <div class="table-wrapper"><table class="table"><thead><tr><th>Organization</th><th>Volume</th><th>Compliant</th><th>Non-compliant</th><th>Compliance rate</th><th>SPF pass</th><th>SPF fail</th><th>DKIM pass</th><th>DKIM fail</th><th>Unauthenticated</th><th>Disposition: none</th><th>Disposition: quarantine</th><th>Disposition: reject</th><th>Disposition: other</th></tr></thead>
+  <tbody>{% for organization in organizations %}<tr><td>{{ organization.organization }}</td><td>{{ organization.volume }}</td><td>{{ organization.compliant }}</td><td>{{ organization.non_compliant }}</td><td>{{ '%.2f'|format(organization.compliance_rate) }}%</td><td>{{ organization.spf_pass }}</td><td>{{ organization.spf_fail }}</td><td>{{ organization.dkim_pass }}</td><td>{{ organization.dkim_fail }}</td><td>{{ organization.unauthenticated }}</td><td>{{ organization.disposition_none }}</td><td>{{ organization.disposition_quarantine }}</td><td>{{ organization.disposition_reject }}</td><td>{{ organization.disposition_other }}</td></tr>{% else %}<tr><td colspan="14" class="table__empty">No DMARC reports were received in this date range.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% endblock %}

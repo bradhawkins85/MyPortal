@@ -9,6 +9,8 @@ from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 from app.core.config import get_settings
 
 import httpx
+
+from app.services.monitored_http import monitored_client
 from loguru import logger
 
 from app.repositories import companies as company_repo
@@ -169,12 +171,16 @@ def _strip_html(value: str, *, image_base_url: str | None = None) -> str:
         return ""
 
     # Rich-text replies can reach this integration with their markup entity-
-    # encoded (for example ``&lt;/span&gt;&lt;/div&gt;``).  HTMLParser decodes
-    # character references only while emitting text, so feeding that value
-    # directly would expose the decoded tags in the Trello comment instead of
-    # treating them as markup.  Decode once before parsing so block elements
-    # and ``br`` tags are handled by the parser and rendered as line breaks.
-    value = unescape(value)
+    # encoded, sometimes more than once after passing through the editor and
+    # sanitiser (for example ``&amp;lt;div&amp;gt;``). HTMLParser decodes
+    # character references while emitting text but does not parse the decoded
+    # text as markup, which would leak ``<div><br></div>`` into Trello. Decode
+    # boundedly before parsing so those tags are handled as HTML instead.
+    for _ in range(3):
+        decoded = unescape(value)
+        if decoded == value:
+            break
+        value = decoded
     parser = _TrelloCommentHTMLParser(image_base_url=image_base_url)
     parser.feed(value)
     parser.close()
@@ -286,7 +292,7 @@ async def add_comment_to_card(
     full_text = f"{MYPORTAL_COMMENT_PREFIX} {text}"
     url = f"{TRELLO_API_BASE}/cards/{quote(card_id, safe='')}/actions/comments"
     try:
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=_REQUEST_TIMEOUT) as client:
             response = await client.post(
                 url,
                 params={"key": api_key, "token": token},
@@ -329,7 +335,7 @@ async def get_card(
 
     url = f"{TRELLO_API_BASE}/cards/{card_id}"
     try:
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=_REQUEST_TIMEOUT) as client:
             response = await client.get(url, params={"key": api_key, "token": token})
             response.raise_for_status()
             return response.json()
@@ -355,7 +361,7 @@ async def list_webhooks(
     """
     url = f"{TRELLO_API_BASE}/tokens/{token}/webhooks"
     try:
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=_REQUEST_TIMEOUT) as client:
             response = await client.get(url, params={"key": api_key})
             response.raise_for_status()
             return response.json() or []
@@ -375,7 +381,7 @@ async def delete_webhook(
     """
     url = f"{TRELLO_API_BASE}/webhooks/{webhook_id}"
     try:
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=_REQUEST_TIMEOUT) as client:
             response = await client.delete(url, params={"key": api_key, "token": token})
             response.raise_for_status()
             return True
@@ -428,7 +434,7 @@ async def register_webhook(
 
     url = f"{TRELLO_API_BASE}/webhooks"
     try:
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=_REQUEST_TIMEOUT) as client:
             response = await client.post(
                 url,
                 params={"key": api_key, "token": token},
@@ -479,7 +485,7 @@ async def register_webhook(
                             hook.get("id"),
                         )
                     try:
-                        async with httpx.AsyncClient(
+                        async with monitored_client(httpx.AsyncClient,
                             timeout=_REQUEST_TIMEOUT
                         ) as client:
                             retry = await client.post(
@@ -612,7 +618,7 @@ async def validate_credentials_for_company(company: dict[str, Any]) -> dict[str,
 
     url = f"{TRELLO_API_BASE}/members/me"
     try:
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=_REQUEST_TIMEOUT) as client:
             response = await client.get(url, params={"key": api_key, "token": token})
         if response.status_code == 401:
             return {"status": "error", "message": "Invalid Trello API key or token"}

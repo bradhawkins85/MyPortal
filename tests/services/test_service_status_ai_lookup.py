@@ -6,6 +6,20 @@ import pytest
 from app.services import service_status as service_status_svc
 
 
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        ('{"status": "operational"}', {"status": "operational"}),
+        ('```json\n{"status": "degraded"}\n```', {"status": "degraded"}),
+        ('Result: {"status": "outage"}.', {"status": "outage"}),
+        ('not {valid json}', None),
+        ('["operational"]', None),
+    ],
+)
+def test_extract_json_object_fallbacks(response, expected):
+    assert service_status_svc._extract_json_object(response) == expected
+
+
 def _make_service(overrides=None):
     base = {
         "id": 1,

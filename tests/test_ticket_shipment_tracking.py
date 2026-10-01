@@ -41,7 +41,7 @@ async def test_startrack_fetch_sends_only_selected_filter_results(monkeypatch):
     <section>Large confusing page content Delivered signed by Wrong Person</section>
     """
 
-    async def fake_fetch(url):
+    async def fake_fetch(url, **kwargs):
         return html
 
     monkeypatch.setattr(svc, "_fetch_with_retries", fake_fetch)
@@ -425,7 +425,66 @@ async def test_process_due_shipment_watches_skips_not_due(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_process_due_shipment_watches_skips_public_reply_when_disabled(monkeypatch):
+async def test_process_due_shipment_watches_posts_unposted_in_transit_snapshot(monkeypatch):
+    now = datetime.now(timezone.utc)
+    previous_snapshot = {
+        "status": "In transit",
+        "eta_date": "2026-07-20",
+        "proof_of_delivery_date": None,
+        "signatory": None,
+        "items_in_transit": 1,
+        "onboard_for_delivery": 0,
+        "items_delivered": 0,
+        "tracking_events": [],
+    }
+    due_watch = {
+        "id": 1,
+        "ticket_id": 10,
+        "provider": "startrack",
+        "tracking_url": "https://www.startrack.com.au/track/ABC123",
+        "poll_interval_seconds": 60,
+        "last_checked_at": now - timedelta(minutes=5),
+        "last_snapshot": previous_snapshot,
+        "last_snapshot_hash": "existing-hash",
+        "last_posted_update_at": None,
+        "active": True,
+        "public_comments_enabled": True,
+    }
+
+    async def fake_list(limit=200):
+        return [due_watch]
+
+    async def fake_get(watch_id):
+        return due_watch
+
+    monkeypatch.setattr(svc.shipment_watch_repo, "list_active_watches", fake_list)
+    monkeypatch.setattr(svc.shipment_watch_repo, "get_watch_by_id", fake_get)
+    monkeypatch.setattr(svc.shipment_watch_repo, "update_watch_check_state", AsyncMock(return_value=None))
+
+    provider = svc.StarTrackProviderAdapter()
+    monkeypatch.setattr(provider, "fetch", AsyncMock(return_value={"url": due_watch["tracking_url"], "html": "", "text": "In transit"}))
+    monkeypatch.setattr(provider, "normalize", AsyncMock(return_value=svc.CanonicalShipmentSnapshot(**previous_snapshot)))
+    monkeypatch.setattr(svc, "detect_provider", lambda url: provider)
+
+    @asynccontextmanager
+    async def fake_lock(name, timeout=1):
+        yield True
+
+    monkeypatch.setattr(svc.db, "acquire_lock", fake_lock)
+    create_reply_mock = AsyncMock(return_value={"id": 100})
+    monkeypatch.setattr(svc.tickets_repo, "create_reply", create_reply_mock)
+    monkeypatch.setattr(svc.tickets_service, "emit_ticket_replied_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(svc.tickets_service, "emit_ticket_updated_event", AsyncMock(return_value=None))
+
+    result = await svc.process_due_shipment_watches(limit=10)
+
+    assert result["changed"] == 1
+    assert result["posted"] == 1
+    create_reply_mock.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_process_due_shipment_watches_posts_private_reply_when_public_comments_disabled(monkeypatch):
     now = datetime.now(timezone.utc)
     due_watch = {
         "id": 1,
@@ -492,10 +551,11 @@ async def test_process_due_shipment_watches_skips_public_reply_when_disabled(mon
 
     assert result["checked"] == 1
     assert result["changed"] == 1
-    assert result["posted"] == 0
-    create_reply_mock.assert_not_awaited()
-    emit_replied_mock.assert_not_awaited()
-    emit_updated_mock.assert_not_awaited()
+    assert result["posted"] == 1
+    create_reply_mock.assert_awaited_once()
+    assert create_reply_mock.await_args.kwargs["is_internal"] is True
+    emit_replied_mock.assert_awaited_once()
+    emit_updated_mock.assert_awaited_once()
     assert any(entry["watch_id"] == 1 for entry in updates)
 
 
@@ -533,3 +593,56 @@ def test_positive_poll_interval_uses_defined_interval():
     }
 
     assert svc._is_watch_due(watch, now_utc=now) is True
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://startrack.evil.com/track/ABC123",
+        "https://evilstartrack.com.au/track/ABC123",
+        "https://startrack.com.au.evil.com/track/ABC123",
+        "https://example.com/startrack/ABC123",
+    ],
+)
+def test_detect_provider_rejects_lookalike_hosts(url):
+    assert svc.detect_provider(url) is None
+
+
+def test_detect_provider_accepts_carrier_subdomain():
+    assert svc.detect_provider("https://msto.startrack.com.au/track-trace/?id=X") is not None
+    assert svc.detect_provider("https://startrack.com.au/track/X") is not None
+
+
+@pytest.mark.anyio
+async def test_fetch_rejects_stored_non_carrier_url_at_fetch_time():
+    with pytest.raises(ValueError):
+        await svc._fetch_with_retries("https://startrack.evil.com/track/X", retries=1)
+
+
+@pytest.mark.anyio
+async def test_fetch_blocks_redirect_off_carrier_domain(monkeypatch):
+    import socket
+
+    import httpx
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(302, headers={"Location": "http://attacker.example/metadata"})
+
+    real_client = httpx.AsyncClient
+
+    def client_factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(svc.httpx, "AsyncClient", client_factory)
+
+    with pytest.raises(ValueError):
+        await svc._fetch_with_retries("https://www.startrack.com.au/track/X", retries=1)
+    assert calls == ["https://www.startrack.com.au/track/X"]

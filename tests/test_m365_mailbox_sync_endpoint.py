@@ -1,15 +1,8 @@
-"""Tests for the async /m365/mailboxes/sync endpoint.
-
-Covers:
-- Endpoint returns 202 and queues the scheduled task when sync_m365_mailboxes task exists.
-- Endpoint falls back to sync_m365_data task when sync_m365_mailboxes not found.
-- Endpoint falls back to queuing sync_mailboxes directly when no task exists.
-- Non-super-admin receives 403 Forbidden.
-"""
+"""Tests for the durable /m365/mailboxes/sync endpoint."""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -43,6 +36,8 @@ def mock_startup(monkeypatch):
     monkeypatch.setattr(db, "run_migrations", fake_run_migrations)
     monkeypatch.setattr(scheduler_service, "start", fake_start)
     monkeypatch.setattr(scheduler_service, "stop", fake_stop)
+    monkeypatch.setattr(main_module.m365_jobs_service, "start_worker", lambda: None)
+    monkeypatch.setattr(main_module.m365_jobs_service, "stop_worker", fake_stop)
     monkeypatch.setattr(main_module.settings, "enable_csrf", False)
 
 
@@ -67,37 +62,19 @@ def _non_admin_context():
 # ---------------------------------------------------------------------------
 
 
-def test_sync_endpoint_queues_scheduled_task_and_returns_202(monkeypatch):
-    """When a sync_m365_mailboxes task exists the endpoint returns 202 immediately."""
-    fake_task = {"id": 7, "command": "sync_m365_mailboxes", "company_id": 42}
-
-    async def fake_get_first_task(company_id, commands):
-        if "sync_m365_mailboxes" in commands:
-            return fake_task
-        return None
-
-    # Capture coroutines passed to create_task; close them to avoid "never awaited" warnings.
-    queued_coros = []
-
-    def fake_create_task(coro):
-        queued_coros.append(coro.__name__ if hasattr(coro, "__name__") else str(coro))
-        coro.close()
-        return MagicMock()
+def test_sync_endpoint_returns_durable_job_id(monkeypatch):
+    """The accepted response identifies the persisted operation."""
+    enqueue = AsyncMock(return_value={"id": "job-123", "status": "queued"})
 
     monkeypatch.setattr(main_module, "_load_license_context", _super_admin_context())
-    monkeypatch.setattr(
-        main_module.scheduled_tasks_repo,
-        "get_first_task_for_company_by_commands",
-        fake_get_first_task,
-    )
-    monkeypatch.setattr(main_module.asyncio, "create_task", fake_create_task)
+    monkeypatch.setattr(main_module.m365_jobs_service, "enqueue", enqueue)
 
     with TestClient(app) as client:
         response = client.post("/m365/mailboxes/sync", headers=_JSON_HEADERS)
 
     assert response.status_code == 202
-    assert response.json() == {"queued": True}
-    assert len(queued_coros) == 1
+    assert response.json() == {"job_id": "job-123", "status": "queued"}
+    enqueue.assert_awaited_once_with(42, "mailbox_sync", "mailboxes")
 
 
 # ---------------------------------------------------------------------------
@@ -105,33 +82,18 @@ def test_sync_endpoint_queues_scheduled_task_and_returns_202(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_sync_endpoint_falls_back_to_direct_sync_when_no_task(monkeypatch):
-    """When no sync_m365_mailboxes / sync_m365_data / sync_o365 task exists it falls back to sync_mailboxes."""
-
-    async def fake_get_first_task(company_id, commands):
-        return None
-
-    queued_coros = []
-
-    def fake_create_task(coro):
-        queued_coros.append(coro.__name__ if hasattr(coro, "__name__") else str(coro))
-        coro.close()
-        return MagicMock()
+def test_sync_endpoint_returns_existing_active_job(monkeypatch):
+    """A double click follows the same active operation rather than duplicating it."""
+    enqueue = AsyncMock(return_value={"id": "existing-job", "status": "running"})
 
     monkeypatch.setattr(main_module, "_load_license_context", _super_admin_context())
-    monkeypatch.setattr(
-        main_module.scheduled_tasks_repo,
-        "get_first_task_for_company_by_commands",
-        fake_get_first_task,
-    )
-    monkeypatch.setattr(main_module.asyncio, "create_task", fake_create_task)
+    monkeypatch.setattr(main_module.m365_jobs_service, "enqueue", enqueue)
 
     with TestClient(app) as client:
         response = client.post("/m365/mailboxes/sync", headers=_JSON_HEADERS)
 
     assert response.status_code == 202
-    assert response.json() == {"queued": True}
-    assert len(queued_coros) == 1
+    assert response.json() == {"job_id": "existing-job", "status": "running"}
 
 
 # ---------------------------------------------------------------------------

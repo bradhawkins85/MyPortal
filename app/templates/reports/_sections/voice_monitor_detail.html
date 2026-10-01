@@ -1,0 +1,9 @@
+<section class="report-detail" data-report-detail="voice_monitor">
+  <header class="report-section__header"><h2>Voice Monitor details</h2><span>{{ section.detail_data.attempts }} attempts</span></header>
+  <p><strong>Packet/media quality:</strong> {{ section.detail_data.packet_quality or section.detail_data.media_quality or 'Not available' }}</p>
+  {% if section.detail_data.affected_destinations %}<h3>Affected destinations</h3><ul>{% for destination in section.detail_data.affected_destinations %}<li>{{ destination.label or 'Endpoint' }} — {{ destination.masked_destination }} ({{ destination.failures }} failures)</li>{% endfor %}</ul>{% endif %}
+  <h3>Recent incidents</h3>
+  {% if section.detail_data.recent_incidents %}<div class="table-wrapper"><table class="table report-table"><thead><tr><th>Endpoint</th><th>Destination</th><th>Timestamp</th><th>Status/category</th><th>Response</th><th>Answer / duration</th><th>Retries</th><th>Transcription</th></tr></thead><tbody>
+  {% for attempt in section.detail_data.recent_incidents %}<tr><td>{{ attempt.display_label or 'Deleted endpoint' }}</td><td>{{ attempt.masked_destination }}</td><td>{{ attempt.completed_at or attempt.queued_at }}</td><td>{{ attempt.outcome_status }} / {{ attempt.failure_category or 'unknown' }}</td><td>{{ attempt.provider_response_code or '—' }}</td><td>{{ attempt.answered_at or '—' }} / {{ attempt.duration_seconds ~ ' s' if attempt.duration_seconds is not none else '—' }}</td><td>{{ attempt.retry_count or 0 }}</td><td>{{ attempt.transcript_status or 'not requested' }}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<p>No incidents in this report period.</p>{% endif %}
+</section>

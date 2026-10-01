@@ -15,10 +15,17 @@ from app.features.m365_admin import PACK
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_m365_admin_pack_manifest_is_routeless():
+def test_m365_admin_pack_owns_spam_purge_routes():
     assert PACK.slug == "m365_admin"
     assert PACK.version
-    assert PACK.routers == ()
+    paths = {route.path for router in PACK.routers for route in router.routes}
+    assert "/m365/signatures" in paths
+    assert "/m365/signatures/new" in paths
+    assert "/m365/signatures/{template_id}/edit" in paths
+    assert "/m365/spam-purge" in paths
+    assert "/m365/spam-purge/api/requests" in paths
+    assert "/m365/spam-purge/api/requests/{request_id}/purge" in paths
+    assert "/m365/spam-purge/{request_id}/retry" in paths
 
 
 def test_m365_admin_pack_is_enabled_by_default():
@@ -26,7 +33,7 @@ def test_m365_admin_pack_is_enabled_by_default():
     assert "m365_admin" in default_feature_packs
 
     env_example = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
-    assert "m365_admin" in env_example
+    assert "FEATURE_PACKS=" not in env_example
 
 
 def test_m365_admin_pack_loads_and_reloads_cleanly():
@@ -38,13 +45,13 @@ def test_m365_admin_pack_loads_and_reloads_cleanly():
         loaded = registry.get("m365_admin")
         assert loaded is not None
         assert loaded.pack.slug == "m365_admin"
-        assert not loaded.mounted_routes
+        assert loaded.mounted_routes
 
         await registry.reload("m365_admin")
         reloaded = registry.get("m365_admin")
         assert reloaded is not None
         assert reloaded.pack.slug == "m365_admin"
-        assert not reloaded.mounted_routes
+        assert reloaded.mounted_routes
 
         await registry.unload_all()
 

@@ -1,0 +1,7 @@
+{
+  "guid": "31f56fb4-40b0-40d0-9c3f-fd71826991a6",
+  "occurred_at": "2026-09-27T07:05Z",
+  "change_type": "Feature",
+  "summary": "Rack power supplies (PSUs) are now ports fed from another unit's outlet: servers, switches and routers, storage, KVM consoles, fan trays, PDUs and UPSs can document one or more PSUs; servers and storage gain network ports and KVM consoles gain network and connected-device ports.",
+  "content_hash": "f9e0053e14b2f1560989f0e2e8ceba1a3f25b1863b30e0ffc1603b760b1efea1"
+}

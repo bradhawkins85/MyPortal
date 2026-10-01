@@ -1,0 +1,7 @@
+{
+  "guid": "5718b271-48f8-4fe7-8459-87a3ae1ac83f",
+  "occurred_at": "2026-10-01T00:00Z",
+  "change_type": "Feature",
+  "summary": "Add a Backups page under Assets & Network listing the company's status-tracked backup jobs alongside manual backup entries that are not tracked, recording each job's backup app (searchable, with new apps added by users), frequency, source, destinations, links to encryption keys in the credential vault or elsewhere, and notes",
+  "content_hash": "389dd28709e2075fa6cebac3ce72954c671114e94253afb6724346987adf9334"
+}

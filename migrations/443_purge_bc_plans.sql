@@ -1,0 +1,13 @@
+-- phase: data
+-- compatible-from: *
+-- compatible-to: *
+-- maintenance: false
+-- Migration 443: Remove every BC5/BC11 business continuity plan.
+-- Plans were never tied to a company (bc_plan.org_id was optional and not set
+-- by the app), so any company's users could see every plan. The app now sets
+-- org_id from the active company and scopes access to it. No customer data
+-- was held in these plans when this ran, so they are cleared rather than
+-- guessed into a company. Child rows (versions, contacts, processes, risks,
+-- attachments, reviews, acknowledgements, audit, change-log links, vendors)
+-- are removed by their ON DELETE CASCADE foreign keys.
+DELETE FROM bc_plan;

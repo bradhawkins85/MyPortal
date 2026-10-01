@@ -1,0 +1,7 @@
+{
+  "guid": "051cf5ca-67cb-4b7a-84ae-b63b6a91e03b",
+  "occurred_at": "2026-09-24T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed Microsoft 365 spam purge preflight failures caused by probing Purview with an Exchange Online-only cmdlet.",
+  "content_hash": "b733d0b368d909175cb0112ab6b02220e30a853113a330b6efc4be79c6d31b0a"
+}

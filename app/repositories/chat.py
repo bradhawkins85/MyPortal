@@ -77,24 +77,53 @@ async def list_rooms(
 
     where = " AND ".join(clauses)
     params.extend([limit, offset])
-    rows = await db.fetch_all(
-        f"""SELECT r.*,
-               (SELECT COUNT(*) FROM chat_room_participants p WHERE p.room_id = r.id AND p.role IN ('technician','admin')) AS tech_participant_count,
-               CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) AS assigned_tech_display_name,
-               COALESCE(NULLIF(a.name, ''), NULLIF(td.hostname, ''), td.device_uid) AS device_name,
-               c.name AS company_name,
-               td.console_user AS console_user
-            FROM chat_rooms r
-            LEFT JOIN users u ON u.id = r.assigned_tech_user_id
-            LEFT JOIN tray_devices td ON td.id = r.tray_device_id
-            LEFT JOIN assets a ON a.id = td.asset_id
-            LEFT JOIN companies c ON c.id = r.company_id
-            {unattended_join}
-            WHERE {where}
-            ORDER BY r.updated_at DESC LIMIT %s OFFSET %s""",
+    query = (
+        "SELECT r.*, "  # nosec B608
+        "(SELECT COUNT(*) FROM chat_room_participants p WHERE p.room_id = r.id AND p.role IN ('technician','admin')) AS tech_participant_count, "
+        "CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) AS assigned_tech_display_name, "
+        "COALESCE(NULLIF(a.name, ''), NULLIF(td.hostname, ''), td.device_uid) AS device_name, "
+        "c.name AS company_name, "
+        "td.console_user AS console_user "
+        "FROM chat_rooms r "
+        "LEFT JOIN users u ON u.id = r.assigned_tech_user_id "
+        "LEFT JOIN tray_devices td ON td.id = r.tray_device_id "
+        "LEFT JOIN assets a ON a.id = td.asset_id "
+        "LEFT JOIN companies c ON c.id = r.company_id "
+        f"{unattended_join} "
+        f"WHERE {where} "
+        "ORDER BY r.updated_at DESC LIMIT %s OFFSET %s"
+    )
+    rows = await db.fetch_all(query, tuple(params))
+    return [dict(r) for r in rows]
+
+
+async def count_rooms(
+    *,
+    company_id: int | None = None,
+    user_id: int | None = None,
+    status: str | None = None,
+) -> int:
+    """Count chat rooms matching the visibility filters used by ``list_rooms``."""
+    clauses = ["1=1"]
+    params: list[Any] = []
+
+    if company_id is not None:
+        clauses.append("r.company_id = %s")
+        params.append(company_id)
+    if user_id is not None:
+        clauses.append(
+            "r.id IN (SELECT room_id FROM chat_room_participants WHERE user_id = %s)"
+        )
+        params.append(user_id)
+    if status:
+        clauses.append("r.status = %s")
+        params.append(status)
+
+    row = await db.fetch_one(
+        f"SELECT COUNT(*) AS count FROM chat_rooms r WHERE {' AND '.join(clauses)}",  # nosec B608
         tuple(params),
     )
-    return [dict(r) for r in rows]
+    return int(row.get("count", 0)) if row else 0
 
 
 def _placeholders(count: int) -> str:
@@ -105,7 +134,7 @@ async def list_rooms_by_ids(room_ids: list[int]) -> list[dict[str, Any]]:
     if not room_ids:
         return []
     rows = await db.fetch_all(
-        f"SELECT * FROM chat_rooms WHERE id IN ({_placeholders(len(room_ids))})",
+        f"SELECT * FROM chat_rooms WHERE id IN ({_placeholders(len(room_ids))})",  # nosec B608
         tuple(room_ids),
     )
     return [dict(r) for r in rows]
@@ -116,12 +145,13 @@ async def delete_rooms(room_ids: list[int]) -> int:
         return 0
     placeholders = _placeholders(len(room_ids))
     params = tuple(room_ids)
-    await db.execute(f"DELETE FROM chat_ticket_reply_links WHERE room_id IN ({placeholders})", params)
-    await db.execute(f"DELETE FROM matrix_ai_analysis_queue WHERE chat_room_id IN ({placeholders})", params)
-    await db.execute(f"DELETE FROM chat_invites WHERE room_id IN ({placeholders})", params)
-    await db.execute(f"DELETE FROM chat_room_participants WHERE room_id IN ({placeholders})", params)
-    await db.execute(f"DELETE FROM chat_messages WHERE room_id IN ({placeholders})", params)
-    return await db.execute_rowcount(f"DELETE FROM chat_rooms WHERE id IN ({placeholders})", params)
+    # The IN placeholders are derived only from the supplied room id count; values remain bound.
+    await db.execute(f"DELETE FROM chat_ticket_reply_links WHERE room_id IN ({placeholders})", params)  # nosec B608
+    await db.execute(f"DELETE FROM matrix_ai_analysis_queue WHERE chat_room_id IN ({placeholders})", params)  # nosec B608
+    await db.execute(f"DELETE FROM chat_invites WHERE room_id IN ({placeholders})", params)  # nosec B608
+    await db.execute(f"DELETE FROM chat_room_participants WHERE room_id IN ({placeholders})", params)  # nosec B608
+    await db.execute(f"DELETE FROM chat_messages WHERE room_id IN ({placeholders})", params)  # nosec B608
+    return await db.execute_rowcount(f"DELETE FROM chat_rooms WHERE id IN ({placeholders})", params)  # nosec B608
 
 
 async def create_room(
@@ -168,8 +198,9 @@ async def update_room(room_id: int, **fields: Any) -> None:
         raise ValueError(f"Cannot update chat_rooms fields: {invalid}")
     set_clauses = ", ".join(f"{k} = %s" for k in fields)
     params = list(fields.values()) + [room_id]
+    # Room columns are constrained by _ROOM_UPDATABLE_FIELDS and values remain bound.
     await db.execute(
-        f"UPDATE chat_rooms SET {set_clauses} WHERE id = %s",
+        f"UPDATE chat_rooms SET {set_clauses} WHERE id = %s",  # nosec B608
         tuple(params),
     )
 
@@ -522,8 +553,9 @@ async def update_invite(invite_id: int, **fields: Any) -> None:
         raise ValueError(f"Cannot update chat_invites fields: {invalid}")
     set_clauses = ", ".join(f"{k} = %s" for k in fields)
     params = list(fields.values()) + [invite_id]
+    # Invite columns are constrained by _INVITE_UPDATABLE_FIELDS and values remain bound.
     await db.execute(
-        f"UPDATE chat_invites SET {set_clauses} WHERE id = %s",
+        f"UPDATE chat_invites SET {set_clauses} WHERE id = %s",  # nosec B608
         tuple(params),
     )
 
@@ -552,9 +584,6 @@ async def save_sync_state(next_batch: str) -> None:
                ON DUPLICATE KEY UPDATE next_batch = VALUES(next_batch), updated_at = VALUES(updated_at)""",
             (next_batch, now),
         )
-
-_AI_QUEUE_ACTIVE_STATUSES = ("queued", "processing")
-
 
 def _json_dumps(value: Any) -> str | None:
     if value is None:
@@ -720,22 +749,50 @@ async def get_active_ai_queue_item(chat_room_id: int) -> dict[str, Any] | None:
 async def list_due_ai_queue_items(due_before: datetime, limit: int = 25) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """SELECT * FROM matrix_ai_analysis_queue
-           WHERE status IN ('queued','processing') AND next_attempt_at <= %s
+           WHERE status = 'queued' AND next_attempt_at <= %s
            ORDER BY next_attempt_at ASC LIMIT %s""",
         (due_before, limit),
     )
     return [dict(r) for r in rows]
 
 
+async def claim_ai_queue_item(queue_id: int, when: datetime, retry_count: int) -> bool:
+    """Claim queued work once, even when multiple worker loops select it."""
+    rowcount = await db.execute_rowcount(
+        """UPDATE matrix_ai_analysis_queue
+           SET status = 'processing', last_attempt_at = %s, retry_count = %s
+           WHERE id = %s AND status = 'queued'""",
+        (when, retry_count, queue_id),
+    )
+    return rowcount == 1
+
+
 async def update_ai_queue_item(queue_id: int, **fields: Any) -> None:
-    allowed = {"last_attempt_at", "retry_count", "status", "cancellation_reason", "next_attempt_at", "result_payload"}
+    allowed = {"last_attempt_at", "retry_count", "status", "cancellation_reason", "next_attempt_at", "result_payload", "recommendation_key", "send_status", "matrix_event_id"}
     invalid = set(fields) - allowed
     if invalid:
         raise ValueError(f"Cannot update matrix_ai_analysis_queue fields: {invalid}")
     if "result_payload" in fields:
         fields["result_payload"] = _json_dumps(fields["result_payload"])
     set_clauses = ", ".join(f"{key} = %s" for key in fields)
-    await db.execute(f"UPDATE matrix_ai_analysis_queue SET {set_clauses} WHERE id = %s", tuple(fields.values()) + (queue_id,))
+    # Queue columns are constrained by the explicit local allowlist and values remain bound.
+    await db.execute(  # nosec B608
+        "UPDATE matrix_ai_analysis_queue SET " + set_clauses + " WHERE id = %s",
+        tuple(fields.values()) + (queue_id,),
+    )
+
+
+async def mark_ai_recommendation_sending(queue_id: int, recommendation_key: str) -> bool:
+    """Persist the outbox key before I/O and allow retries of the same send only."""
+    rowcount = await db.execute_rowcount(
+        """UPDATE matrix_ai_analysis_queue
+           SET recommendation_key = %s, send_status = 'sending'
+           WHERE id = %s
+             AND (send_status IS NULL OR send_status IN ('pending','failed','sending'))
+             AND (recommendation_key IS NULL OR recommendation_key = %s)""",
+        (recommendation_key, queue_id, recommendation_key),
+    )
+    return rowcount == 1
 
 
 async def cancel_active_ai_queue_for_room(chat_room_id: int, reason: str) -> None:

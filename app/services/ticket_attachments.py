@@ -3,19 +3,22 @@ from __future__ import annotations
 
 import base64
 import binascii
-import os
+import hashlib
 import re
 import secrets
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 import importlib
 from fastapi import UploadFile
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from PIL import Image, UnidentifiedImageError
 
 from app.core.config import get_settings
 from app.core.logging import log_debug, log_error, log_info
 from app.repositories import ticket_attachments as attachments_repo
+from app.repositories import attachment_blocklist as blocklist_repo
 
 
 # Maximum file size: 50 MB
@@ -98,6 +101,48 @@ _INLINE_IMAGE_EXTENSIONS = {
     "image/webp": "webp",
 }
 
+_BLOCKLIST_THUMBNAIL_SIZE = (256, 256)
+
+# Extensions that browsers may render as active content (HTML/SVG/XML/script).
+# Stored files never keep these so a guessed media type cannot turn an
+# attachment into script on the portal origin.
+_DANGEROUS_STORED_EXTENSIONS = {
+    "html", "htm", "xhtml", "xht", "svg", "svgz", "xml", "xsl", "xslt",
+    "rdf", "shtml", "js", "mjs",
+}
+
+
+def create_blocklist_thumbnail(contents: bytes, mime_type: str | None) -> tuple[bytes | None, str | None]:
+    """Create a small, inert JPEG preview for blocklisted raster images."""
+    if not mime_type or not mime_type.lower().startswith("image/"):
+        return None, None
+    try:
+        with Image.open(BytesIO(contents)) as image:
+            image.thumbnail(_BLOCKLIST_THUMBNAIL_SIZE)
+            # Flatten transparency onto white so every Pillow-supported raster
+            # mode can be represented consistently as a compact RGB JPEG.
+            rgba = image.convert("RGBA")
+            flattened = Image.new("RGB", rgba.size, "white")
+            flattened.paste(rgba, mask=rgba.getchannel("A"))
+            output = BytesIO()
+            flattened.save(output, format="JPEG", quality=80, optimize=True)
+            return output.getvalue(), "image/jpeg"
+    except (UnidentifiedImageError, OSError, ValueError):
+        return None, None
+
+
+def content_hash(contents: bytes) -> str:
+    """Return the stable, non-reversible identifier used by the blocklist."""
+    return hashlib.sha256(contents).hexdigest()
+
+
+async def ensure_not_blocked(contents: bytes) -> str:
+    """Reject content already flagged by a technician, regardless of its name."""
+    digest = content_hash(contents)
+    if await blocklist_repo.is_blocked(digest):
+        raise ValueError("This attachment is on the attachment blocklist and was discarded")
+    return digest
+
 
 def _get_upload_directory() -> Path:
     """Get the base upload directory for ticket attachments.
@@ -120,6 +165,8 @@ def _generate_secure_filename(original_filename: str) -> str:
         # Limit extension length and sanitize
         extension = extension[:10]
         extension = "".join(c for c in extension if c.isalnum())
+        if extension in _DANGEROUS_STORED_EXTENSIONS:
+            extension = "bin"
     
     # Generate random filename
     random_name = secrets.token_urlsafe(32)
@@ -211,6 +258,8 @@ async def save_uploaded_file(
         if file_size > MAX_FILE_SIZE:
             raise ValueError(f"File size {file_size} exceeds maximum")
 
+        await ensure_not_blocked(contents)
+
         # Validate MIME type from actual file bytes (defeats spoofed Content-Type).
         actual_mime = _sniff_mime_type(contents[:_MAGIC_HEADER_BYTES])
         if actual_mime and actual_mime not in ALLOWED_MIME_TYPES:
@@ -274,6 +323,8 @@ async def save_file_bytes(
     file_size = len(contents)
     if file_size > MAX_FILE_SIZE:
         raise ValueError(f"File size {file_size} exceeds maximum")
+
+    await ensure_not_blocked(contents)
 
     # Validate MIME type from actual file bytes.
     actual_mime = _sniff_mime_type(contents[:_MAGIC_HEADER_BYTES])
@@ -369,6 +420,81 @@ async def persist_inline_images_for_ticket_body(
     return "".join(rewritten_parts), created_attachments
 
 
+_TICKET_ATTACHMENT_IMAGE_PATTERN = re.compile(
+    r'(<img\b[^>]*?\bsrc\s*=\s*)(["\'])'
+    r'(?:https?://[^"\'/\s]+)?/api/tickets/(\d+)/attachments/(\d+)/download/?(?:\?[^"\']*)?'
+    r'\2',
+    re.IGNORECASE,
+)
+
+
+async def embed_ticket_images_for_email(
+    ticket_id: int | None,
+    html_body: str,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Rewrite ticket attachment ``<img>`` sources to ``cid:`` references.
+
+    Inline images pasted into replies are stored as ticket attachments and the
+    reply body references the authenticated download endpoint. Email
+    recipients cannot load that URL, so outgoing mail must carry the image
+    bytes as inline (``Content-ID``) parts instead. Only images belonging to
+    ``ticket_id`` are embedded; other references are left untouched.
+    """
+
+    if not ticket_id or not html_body or "/attachments/" not in html_body:
+        return html_body, []
+
+    inline_attachments: list[dict[str, Any]] = []
+    content_ids: dict[int, str] = {}
+
+    async def _content_id_for(attachment_id: int) -> str | None:
+        if attachment_id in content_ids:
+            return content_ids[attachment_id]
+        attachment = await attachments_repo.get_attachment(attachment_id)
+        if not attachment or int(attachment.get("ticket_id") or 0) != int(ticket_id):
+            return None
+        mime_type = str(attachment.get("mime_type") or "").lower()
+        extension = _INLINE_IMAGE_EXTENSIONS.get(mime_type)
+        if not extension:
+            return None
+        try:
+            contents = attachment_path(attachment).read_bytes()
+        except OSError as exc:
+            log_error(
+                "Inline ticket image unavailable for email",
+                ticket_id=ticket_id,
+                attachment_id=attachment_id,
+                error=str(exc),
+            )
+            return None
+        content_id = f"ticket-image-{attachment_id}.{extension}"
+        content_ids[attachment_id] = content_id
+        inline_attachments.append(
+            {
+                "filename": content_id,
+                "content": contents,
+                "mime_type": mime_type,
+                "content_id": content_id,
+            }
+        )
+        return content_id
+
+    rewritten_parts: list[str] = []
+    last_index = 0
+    for match in _TICKET_ATTACHMENT_IMAGE_PATTERN.finditer(html_body):
+        prefix, quote, url_ticket_id, attachment_id = match.groups()
+        replacement = match.group(0)
+        if int(url_ticket_id) == int(ticket_id):
+            content_id = await _content_id_for(int(attachment_id))
+            if content_id:
+                replacement = f"{prefix}{quote}cid:{content_id}{quote}"
+        rewritten_parts.append(html_body[last_index:match.start()])
+        rewritten_parts.append(replacement)
+        last_index = match.end()
+    rewritten_parts.append(html_body[last_index:])
+    return "".join(rewritten_parts), inline_attachments
+
+
 async def delete_attachment_file(attachment: dict[str, Any]) -> None:
     """Delete an attachment file and database record."""
     filename = attachment.get("filename")
@@ -398,6 +524,47 @@ async def delete_attachment_file(attachment: dict[str, Any]) -> None:
             # Don't raise - file might already be gone, record is deleted
 
 
+def attachment_path(attachment: dict[str, Any]) -> Path:
+    """Locate an attachment in current or legacy private storage."""
+    path = get_attachment_file_path(str(attachment.get("filename") or ""))
+    if not path.exists():
+        legacy = get_legacy_attachment_file_path(str(attachment.get("filename") or ""))
+        if legacy.exists():
+            return legacy
+    return path
+
+
+async def block_attachment(
+    attachment: dict[str, Any], *, created_by_user_id: int | None, remove_existing: bool
+) -> tuple[dict[str, Any], int]:
+    """Block an attachment's bytes and optionally purge every historical match."""
+    path = attachment_path(attachment)
+    if not path.exists():
+        raise FileNotFoundError("Attachment file not found")
+    contents = path.read_bytes()
+    digest = content_hash(contents)
+    thumbnail_data, thumbnail_mime_type = create_blocklist_thumbnail(
+        contents, attachment.get("mime_type")
+    )
+    entry = await blocklist_repo.add(
+        digest,
+        original_filename=attachment.get("original_filename"),
+        file_size=int(attachment.get("file_size") or path.stat().st_size),
+        mime_type=attachment.get("mime_type"),
+        created_by_user_id=created_by_user_id,
+        thumbnail_data=thumbnail_data,
+        thumbnail_mime_type=thumbnail_mime_type,
+    )
+    removed = 0
+    targets = await attachments_repo.list_all_attachments() if remove_existing else [attachment]
+    for candidate in targets:
+        candidate_path = attachment_path(candidate)
+        if candidate_path.exists() and content_hash(candidate_path.read_bytes()) == digest:
+            await delete_attachment_file(candidate)
+            removed += 1
+    return entry, removed
+
+
 def _safe_attachment_path(base_dir: Path, filename: str) -> Path:
     """Resolve an attachment path under *base_dir* without allowing traversal."""
     if not filename:
@@ -416,10 +583,69 @@ def get_attachment_file_path(filename: str) -> Path:
     return _safe_attachment_path(upload_dir, filename)
 
 
+def _legacy_upload_directory() -> Path:
+    return Path(__file__).resolve().parents[1] / "static" / "uploads" / "tickets"
+
+
 def get_legacy_attachment_file_path(filename: str) -> Path:
     """Get the pre-private-storage path used by older email attachment saves."""
-    legacy_dir = Path(__file__).resolve().parents[1] / "static" / "uploads" / "tickets"
-    return _safe_attachment_path(legacy_dir, filename)
+    return _safe_attachment_path(_legacy_upload_directory(), filename)
+
+
+def migrate_legacy_attachment_files(
+    *,
+    legacy_dir: Path | None = None,
+    target_dir: Path | None = None,
+    dry_run: bool = False,
+) -> dict[str, int]:
+    """Move legacy ``static/uploads/tickets`` files into private storage.
+
+    ``ticket_attachments.filename`` stores only the bare generated file name,
+    and every reader resolves it against private storage first, so moving a
+    file needs no database change.  The step is idempotent: files already in
+    private storage with identical content are removed from the legacy folder,
+    and a name clash with *different* content is left untouched and counted
+    as a conflict for manual review.  Symlinks and sub-directories are
+    skipped.  Works across filesystems (Docker keeps the two stores in
+    separate volumes).
+    """
+    import filecmp
+    import os
+    import shutil
+
+    source = legacy_dir if legacy_dir is not None else _legacy_upload_directory()
+    counts = {"moved": 0, "duplicates_removed": 0, "conflicts": 0, "skipped": 0}
+    if source.is_symlink() or not source.is_dir():
+        return counts
+    target = target_dir if target_dir is not None else _get_upload_directory()
+    if not dry_run:
+        target.mkdir(parents=True, exist_ok=True)
+    for entry in sorted(source.iterdir()):
+        if entry.is_symlink() or not entry.is_file() or entry.name.startswith("."):
+            counts["skipped"] += 1
+            continue
+        destination = target / entry.name
+        if destination.exists() or destination.is_symlink():
+            if destination.is_file() and not destination.is_symlink() and filecmp.cmp(entry, destination, shallow=False):
+                if not dry_run:
+                    entry.unlink()
+                counts["duplicates_removed"] += 1
+            else:
+                log_error("Legacy ticket attachment conflicts with private file", filename=entry.name)
+                counts["conflicts"] += 1
+            continue
+        if dry_run:
+            counts["moved"] += 1
+            continue
+        partial = target / f".{entry.name}.migrating"
+        shutil.copyfile(entry, partial)
+        os.chmod(partial, 0o600)
+        os.replace(partial, destination)
+        entry.unlink()
+        counts["moved"] += 1
+    if counts["moved"] or counts["duplicates_removed"] or counts["conflicts"]:
+        log_info("Legacy ticket attachment migration", dry_run=dry_run, **counts)
+    return counts
 
 
 def generate_open_access_token(attachment_id: int, expires_in_seconds: int = 86400) -> str:
@@ -433,6 +659,8 @@ def generate_open_access_token(attachment_id: int, expires_in_seconds: int = 864
     Returns:
         Signed token string
     """
+    # Retained for API compatibility; token age is enforced by verify_open_access_token(max_age=...).
+    _ = expires_in_seconds
     # Use the secret key from settings
     config = get_settings()
     secret_key = getattr(config, "secret_key", "change-me-in-production")

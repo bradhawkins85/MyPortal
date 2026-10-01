@@ -360,6 +360,7 @@ def test_mcp_disabled_by_default():
         # Set required settings
         os.environ["SESSION_SECRET"] = "test"
         os.environ["TOTP_ENCRYPTION_KEY"] = "A" * 64
+        os.environ["ENVIRONMENT"] = "test"
         
         from app.core import config
         config.get_settings.cache_clear()

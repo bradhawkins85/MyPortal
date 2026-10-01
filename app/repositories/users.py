@@ -22,6 +22,7 @@ _ALLOWED_UPDATE_COLUMNS = {
     "is_active",
     "email_verified_at",
     "force_password_change",
+    "passkey_user_handle",
 }
 
 
@@ -85,10 +86,34 @@ async def list_users() -> List[dict[str, Any]]:
     return list(rows)
 
 
+async def list_active_users_for_admin() -> List[dict[str, Any]]:
+    """Return active portal accounts with the context needed by the admin UI."""
+    rows = await db.fetch_all(
+        """
+        SELECT u.id, u.email, u.first_name, u.last_name, u.mobile_phone,
+               u.company_id, u.is_super_admin, u.last_login_at,
+               c.name AS company_name
+        FROM users AS u
+        LEFT JOIN companies AS c ON c.id = u.company_id
+        WHERE u.is_active = 1
+        ORDER BY LOWER(COALESCE(u.last_name, '')),
+                 LOWER(COALESCE(u.first_name, '')), LOWER(u.email), u.id
+        """
+    )
+    return [dict(row) for row in rows]
+
+
+async def count_active_super_admins() -> int:
+    row = await db.fetch_one(
+        "SELECT COUNT(*) AS count FROM users WHERE is_active = 1 AND is_super_admin = 1"
+    )
+    return int(row["count"]) if row else 0
+
+
 async def list_users_for_company(company_id: int) -> List[dict[str, Any]]:
     rows = await db.fetch_all(
         """
-        SELECT id, email
+        SELECT id, email, first_name, last_name, is_super_admin
         FROM users
         WHERE company_id = %s
         ORDER BY LOWER(email), id
@@ -148,7 +173,11 @@ async def update_user(user_id: int, **updates: Any) -> dict[str, Any]:
     log_info("Updating user", user_id=user_id, fields=list(updates.keys()))
     columns, params = _build_safe_update_clause(updates)
     params.append(user_id)
-    await db.execute(f"UPDATE users SET {columns} WHERE id = %s", tuple(params))
+    # Columns are produced by _build_safe_update_clause's explicit allowlist; values remain bound.
+    await db.execute(  # nosec B608
+        f"UPDATE users SET {columns} WHERE id = %s",  # nosec B608
+        tuple(params),
+    )
     updated = await get_user_by_id(user_id)
     if not updated:
         log_error("User not found after update", user_id=user_id)

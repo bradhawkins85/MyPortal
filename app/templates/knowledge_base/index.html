@@ -12,7 +12,22 @@
 {% block title %}Knowledge base{% endblock %}
 
 {% block header_title %}
-  <span class="header__title-text">Knowledge base</span>
+  <div class="page-header-bar">
+    <span class="header__title-text">Knowledge base</span>
+    {% if kb_articles %}
+      <div class="page-header-toolbar">
+        <label for="knowledge-base-filter" class="visually-hidden">Filter articles</label>
+        <input
+          type="search"
+          id="knowledge-base-filter"
+          class="form-input page-header-toolbar__search"
+          placeholder="Filter articles"
+          data-table-filter="knowledge-base-table"
+          autocomplete="off"
+        />
+      </div>
+    {% endif %}
+  </div>
 {% endblock %}
 
 {% block sidebar_menu %}
@@ -61,18 +76,18 @@
 
 {% block content %}
 <div class="knowledge-base">
-  <section class="card card--panel knowledge-base__list">
-    <div class="knowledge-base__filters">
-      <label for="knowledge-base-filter" class="visually-hidden">Filter articles</label>
-      <input
-        type="search"
-        id="knowledge-base-filter"
-        class="input"
-        placeholder="Filter articles"
-        data-table-filter="knowledge-base-table"
-        autocomplete="off"
-      />
+  <section class="card card--panel knowledge-base__results" data-knowledge-base-results hidden aria-live="polite">
+    <header class="knowledge-base__results-header">
+      <h2 class="card__title">Search results</h2>
+      <button type="button" class="button button--ghost button--small" data-knowledge-base-results-clear>Clear</button>
+    </header>
+    <div class="knowledge-base__ollama" data-knowledge-base-ollama hidden>
+      <p class="knowledge-base__ollama-status" data-knowledge-base-ollama-status></p>
+      <div data-knowledge-base-ollama-body></div>
     </div>
+    <div data-knowledge-base-results-body></div>
+  </section>
+  <section class="card card--panel knowledge-base__list">
     {% if kb_articles %}
     <div class="table-wrapper table-wrapper--short">
       <table class="table table--compact" id="knowledge-base-table" data-table data-table-id="knowledge-base">

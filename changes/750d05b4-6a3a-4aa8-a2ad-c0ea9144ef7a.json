@@ -1,0 +1,7 @@
+{
+  "guid": "750d05b4-6a3a-4aa8-a2ad-c0ea9144ef7a",
+  "occurred_at": "2026-09-15T00:00Z",
+  "change_type": "Enhancement",
+  "summary": "Persist Microsoft 365 best-practice status filters and add checks table filtering and sorting",
+  "content_hash": "e7ca40bf58ebe75d572a977500df7010b676122726c97b06c30d178fbbf947e5"
+}

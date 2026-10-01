@@ -1,0 +1,7 @@
+{
+  "guid": "29bc24e6-3eb8-4de8-88ba-99953878f0b8",
+  "occurred_at": "2026-09-15T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed Microsoft Forms phishing-protection remediation by provisioning its required read-write Microsoft Graph permission.",
+  "content_hash": "6f9e7808f4774561880b30c85fb3c2d6ba9ca9fa73f27a0b97311c89e63065cd"
+}

@@ -1,7 +1,7 @@
 """Service for fetching the latest MyPortal Tray installers from GitHub Releases.
 
-On startup (and optionally on demand) the app calls :func:`fetch_latest_tray_installers`
-which:
+Scheduled and administrator-triggered actions call
+:func:`fetch_latest_tray_installers`, which:
 
 1. Queries the GitHub Releases API for the latest release of the configured
    repository.
@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+
+from app.services.monitored_http import monitored_client
 
 from app.core.logging import log_error, log_info, log_warning
 
@@ -208,7 +210,7 @@ async def _fetch(
     headers = _build_headers(github_token)
     results = {asset_name: False for asset_name in _ASSET_NAMES}
 
-    async with httpx.AsyncClient(follow_redirects=True) as client:
+    async with monitored_client(httpx.AsyncClient, follow_redirects=True) as client:
         release = await _get_latest_release(client, repo, headers)
         if release is None:
             return results

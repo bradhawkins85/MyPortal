@@ -725,12 +725,19 @@ async def test_sync_account_skips_filtered_message(monkeypatch):
     assert fetch_commands and fetch_commands[0][1][1] == "(BODY.PEEK[] FLAGS)"
 
 
-async def test_sync_account_skips_when_restart_pending(monkeypatch):
+async def test_sync_account_checks_mailbox_when_restart_pending(monkeypatch):
+    """A pending application upgrade must not pause inbound email imports."""
     monkeypatch.setattr(imap.system_state, "is_restart_pending", lambda: True)
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        assert slug == "imap"
+        return {"enabled": False}
+
+    monkeypatch.setattr(imap.modules_service, "get_module", fake_get_module)
 
     result = await imap.sync_account(9)
 
-    assert result == {"status": "skipped", "reason": "pending_restart"}
+    assert result == {"status": "skipped", "reason": "Module disabled"}
 
 
 async def test_clone_account_creates_unique_copy(monkeypatch):
@@ -1183,3 +1190,19 @@ async def test_find_existing_ticket_for_reply_matches_resolved_reference(monkeyp
     assert ticket is not None
     assert ticket["id"] == 24417
     assert ticket["status"] == "resolved"
+
+
+async def test_find_existing_ticket_for_reply_rejects_closed_ticket_number(monkeypatch):
+    async def fake_fetch_all(query: str, _params: tuple[object, ...]):
+        if "ticket_number" in query:
+            return [{"id": 24417, "ticket_number": "24417", "status": "closed"}]
+        return []
+
+    monkeypatch.setattr(imap.db, "fetch_all", fake_fetch_all)
+
+    ticket = await imap._find_existing_ticket_for_reply(
+        "Re: Ticket #24417 - Onboard New Laptops",
+        "customer@example.com",
+    )
+
+    assert ticket is None

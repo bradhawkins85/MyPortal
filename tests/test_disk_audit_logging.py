@@ -168,8 +168,8 @@ class TestLogAction:
             assert disk_call_kwargs["ip_address"] == "10.0.0.1"
 
     @pytest.mark.asyncio
-    async def test_log_action_extracts_forwarded_ip(self):
-        """Test that log_action prefers X-Forwarded-For header."""
+    async def test_log_action_ignores_untrusted_forwarded_ip(self):
+        """X-Forwarded-For is ignored unless the peer is a trusted proxy."""
         mock_request = MagicMock()
         mock_request.headers.get.return_value = "203.0.113.50, 70.41.3.18"
         mock_request.client.host = "10.0.0.1"
@@ -184,9 +184,9 @@ class TestLogAction:
                 request=mock_request,
             )
 
-            # Verify first IP from X-Forwarded-For was used
+            # The peer is not a trusted proxy, so the socket address is used
             db_call_kwargs = mock_repo.create_audit_log.call_args[1]
-            assert db_call_kwargs["ip_address"] == "203.0.113.50"
+            assert db_call_kwargs["ip_address"] == "10.0.0.1"
 
     @pytest.mark.asyncio
     async def test_log_action_includes_api_key_in_disk_log(self):

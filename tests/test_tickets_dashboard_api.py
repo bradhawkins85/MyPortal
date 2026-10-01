@@ -155,6 +155,28 @@ def test_ticket_dashboard_endpoint(monkeypatch):
     global_status_counts_mock.assert_awaited_once_with()
 
 
+def test_ticket_dashboard_all_option_removes_result_limit(monkeypatch):
+    load_state_mock = AsyncMock(
+        return_value=tickets_service.TicketDashboardState(
+            tickets=[], total=725, status_counts=Counter(), available_statuses=[],
+            status_definitions=[], modules=[], companies=[], technicians=[],
+            company_lookup={}, user_lookup={},
+        )
+    )
+    monkeypatch.setattr(tickets_service, "load_dashboard_state", load_state_mock)
+    monkeypatch.setattr(tickets_repo, "count_tickets_by_status", AsyncMock(return_value={}))
+
+    app.dependency_overrides[require_helpdesk_technician] = lambda: {"id": 1, "is_super_admin": True}
+    try:
+        response = TestClient(app).get("/api/tickets/dashboard", params={"all": "true"})
+    finally:
+        app.dependency_overrides.pop(require_helpdesk_technician, None)
+
+    assert response.status_code == 200
+    assert response.json()["filters"]["limit"] == 725
+    assert load_state_mock.await_args.kwargs["limit"] is None
+
+
 def test_list_ticket_statuses_endpoint(monkeypatch):
     client = TestClient(app)
 

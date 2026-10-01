@@ -1,0 +1,7 @@
+{
+  "guid": "47a92636-fdbc-4ea9-b32d-0af663b06b74",
+  "occurred_at": "2026-09-27T00:00Z",
+  "change_type": "Security",
+  "summary": "Self-host the pinned htmx 1.9.10 build and remove the unpkg script permission from the portal Content Security Policy.",
+  "content_hash": "51d1cbd40af22ff7fa38c0d5d0075021f9fb6e1f60a9679b92a4fc8dafbc09f6"
+}

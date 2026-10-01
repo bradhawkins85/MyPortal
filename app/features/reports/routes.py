@@ -32,6 +32,16 @@ router.add_api_route(
     methods=["POST"],
 )
 router.add_api_route(
+    "/reports/company-overview/settings/export",
+    handlers.company_overview_report_settings_export,
+    methods=["GET"],
+)
+router.add_api_route(
+    "/reports/company-overview/settings/import",
+    handlers.company_overview_report_settings_import,
+    methods=["POST"],
+)
+router.add_api_route(
     "/admin/reports/pdf-cover-image",
     handlers.admin_report_cover_image_page,
     methods=["GET"],

@@ -14,10 +14,13 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from typing import Optional
 
 from app.api.dependencies.bc_rbac import (
+    get_active_company_id,
     require_bc_admin,
     require_bc_approver,
     require_bc_editor,
+    require_bc_plan_in_active_company,
     require_bc_viewer,
+    resolve_plan_company_id,
 )
 from app.core.config import get_settings
 from app.repositories import bc3 as bc_repo
@@ -58,7 +61,11 @@ from app.schemas.bc5_models import (
     BCVersionListItem,
 )
 
-router = APIRouter(prefix="/api/bc", tags=["Business Continuity (BC5)"])
+router = APIRouter(
+    prefix="/api/bc",
+    tags=["Business Continuity (BC5)"],
+    dependencies=[Depends(require_bc_plan_in_active_company)],
+)
 
 
 # ============================================================================
@@ -287,6 +294,7 @@ async def list_plans(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
     current_user: dict = Depends(require_bc_viewer),
+    active_company_id: int | None = Depends(get_active_company_id),
 ) -> BCPaginatedResponse:
     """
     List BC plans with filtering and pagination.
@@ -310,10 +318,16 @@ async def list_plans(
         status_value = status.value if status else None
     
     offset = (page - 1) * per_page
-    
+
+    # Plans are listed per company; super admins see every company's plans.
+    org_id = None
+    if not current_user.get("is_super_admin"):
+        org_id = resolve_plan_company_id(current_user, active_company_id)
+
     # Get plans
     plans = await bc_repo.list_plans(
         status=status_value,
+        org_id=org_id,
         owner_user_id=owner,
         template_id=template_id,
         search_query=q,
@@ -324,6 +338,7 @@ async def list_plans(
     # Get total count
     total = await bc_repo.count_plans(
         status=status_value,
+        org_id=org_id,
         owner_user_id=owner,
         template_id=template_id,
         search_query=q,
@@ -345,6 +360,7 @@ async def list_plans(
 async def create_plan(
     plan_data: BCPlanCreate,
     current_user: dict = Depends(require_bc_editor),
+    active_company_id: int | None = Depends(get_active_company_id),
 ) -> BCPlanDetail:
     """
     Create a new BC plan.
@@ -368,7 +384,7 @@ async def create_plan(
         title=plan_data.title,
         owner_user_id=current_user["id"],
         status=plan_data.status.value,
-        org_id=plan_data.org_id,
+        org_id=resolve_plan_company_id(current_user, active_company_id, plan_data.org_id),
         template_id=plan_data.template_id,
     )
     

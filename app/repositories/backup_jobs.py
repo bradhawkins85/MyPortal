@@ -74,7 +74,7 @@ async def list_jobs(
         FROM backup_jobs
         {where}
         ORDER BY company_id, name
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return [job for job in (_normalise_job(row) for row in rows) if job]
@@ -204,8 +204,9 @@ async def update_job(
     if not sets:
         return await get_job(job_id)
     params.append(int(job_id))
-    await db.execute(
-        f"UPDATE backup_jobs SET {', '.join(sets)} WHERE id = %s",
+    # The SET fragment is assembled only from fixed function arguments above; values remain bound.
+    await db.execute(  # nosec B608
+        f"UPDATE backup_jobs SET {', '.join(sets)} WHERE id = %s",  # nosec B608
         tuple(params),
     )
     return await get_job(job_id)
@@ -354,7 +355,7 @@ async def list_events_in_range(
         FROM backup_job_events
         {where}
         ORDER BY backup_job_id, event_date
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return [event for event in (_normalise_event(row) for row in rows) if event]
@@ -381,7 +382,7 @@ async def latest_event_per_job(
         ) latest
           ON e.backup_job_id = latest.backup_job_id
          AND e.event_date = latest.max_date
-        """,
+        """,  # nosec B608
         tuple(ids),
     )
     out: dict[int, dict[str, Any]] = {}

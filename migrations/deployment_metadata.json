@@ -1,0 +1,203 @@
+{
+  "schema_version": 1,
+  "migrations": {
+    "376_third_party_subscriptions.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "377_change_approval_matrix.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "378_super_admin_role_switcher.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "379_approval_selector_options.sql": {
+      "phase": "data",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "380_approval_configuration_guids.sql": {
+      "phase": "contract",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": true
+    },
+    "381_stat_strip_reporting_queries.sql": {
+      "phase": "data",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "382_rebuild_rag_access_scopes.sql": {
+      "phase": "data",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "382_ticket_reply_fulltext_search.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "390_ticket_resolution_steps.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "392_kb_resolution_step_reviews.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "397_m365_durable_jobs.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "394_webhook_deletion_rules.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "398_m365_mailbox_source_completeness.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "400_m365_mail_auth_binding.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "405_websites_monitoring.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "403_asset_typed_relationships.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "406_expiration_register.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "407_network_and_rack_documentation.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "410_credential_vault.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "411_credential_vault_lifecycle.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "412_onboarding_credential_grants.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "413_standing_credential_grants.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "414_credential_feature_flags.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "415_manual_assets.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "416_bcp_component_asset_links.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "417_workflow_vault_credentials.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "418_website_check_scheduler.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "419_workflow_external_grant_idempotency.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "421_website_observations.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "432_ipam_discovered_device_source.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "433_typed_website_check_jobs.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "433_rack_details_and_reservations.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "434_rack_item_types_and_ports.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    }
+  }
+}

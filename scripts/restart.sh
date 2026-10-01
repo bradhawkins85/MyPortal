@@ -196,7 +196,10 @@ select_python() {
 
 PYTHON_BIN=$(select_python)
 
+ensure_env_default "$PYTHON_BIN" "DISABLED_FEATURE_PACKS" ""
+ensure_env_default "$PYTHON_BIN" "DISABLED_MODULES" ""
 ensure_env_default "$PYTHON_BIN" "ENABLE_AUTO_REFRESH" "false"
+ensure_env_default "$PYTHON_BIN" "ASSET_TYPE_MODE" "auto"
 
 if [[ -z "$PYTHON_BIN" ]]; then
   echo "Error: Unable to locate a python interpreter for dependency installation." >&2
@@ -204,8 +207,8 @@ if [[ -z "$PYTHON_BIN" ]]; then
 fi
 
 echo "Using python interpreter at ${PYTHON_BIN}" >&2
-cleanup_invalid_distribution "$PYTHON_BIN"
-"$PYTHON_BIN" -m pip install -e "$PROJECT_ROOT"
+# Restart is deliberately side-effect free: dependency preparation belongs to
+# the verified staging phase in upgrade.sh, never the service disruption path.
 
 restart_service() {
   local custom_command

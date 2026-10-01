@@ -1,0 +1,7 @@
+{
+  "guid": "68dce80a-aed6-46cb-a7cb-1d5a26c5521c",
+  "occurred_at": "2026-08-19T00:00Z",
+  "change_type": "Feature",
+  "summary": "Add scheduled IEEE MAC vendor imports and identify discovered device vendors.",
+  "content_hash": "abee89590e92232d46409aef97b36eba976e69cbe4bf6fc033bbb7a34d93828d"
+}

@@ -1,0 +1,7 @@
+{
+  "guid": "20a2ef6e-74b2-40d5-8abb-8943ed56b3d2",
+  "occurred_at": "2026-09-27T06:41Z",
+  "change_type": "Feature",
+  "summary": "The rack Item list and port links section now remembers whether it was expanded or collapsed.",
+  "content_hash": "74b46245f5a6031d10fcd04326f3ff7b00fc1fbecdd053586cb253e6da907547"
+}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime, timezone
+from contextlib import suppress
 from typing import Any
 
 from app.core.database import db
@@ -14,17 +15,15 @@ async def _ensure_connection() -> None:
 
     is_connected = getattr(db, "is_connected", None)
     if callable(is_connected):
-        try:
+        with suppress(Exception):
             if is_connected():
                 return
-        except Exception:  # pragma: no cover - defensive guard
-            pass
     connect = getattr(db, "connect", None)
     if not connect:
         return
     result = connect()
     if hasattr(result, "__await__"):
-        await result
+        _ = await result
 
 
 def _make_aware(value: Any) -> datetime | None:
@@ -75,7 +74,7 @@ async def list_templates(
         {where}
         ORDER BY updated_at DESC
         LIMIT %s OFFSET %s
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return [record for row in rows if (record := _normalise_record(row))]
@@ -139,19 +138,21 @@ async def create_template(
 async def update_template(template_id: int, **fields: Any) -> MessageTemplateRecord | None:
     if not fields:
         return await get_template(template_id)
-    await _ensure_connection()
     assignments: list[str] = []
     params: list[Any] = []
+    allowed = {"slug", "name", "description", "content_type", "content"}
+    unknown = set(fields) - allowed
+    if unknown:
+        raise ValueError(f"Unsupported message template fields: {', '.join(sorted(unknown))}")
+    await _ensure_connection()
     for key, value in fields.items():
-        if key not in {"slug", "name", "description", "content_type", "content"}:
-            continue
         assignments.append(f"{key} = %s")
         params.append(value)
     if not assignments:
         return await get_template(template_id)
     params.append(template_id)
-    await db.execute(
-        f"UPDATE message_templates SET {', '.join(assignments)} WHERE id = %s",
+    await db.execute(  # nosec B608
+        f"UPDATE message_templates SET {', '.join(assignments)} WHERE id = %s",  # nosec B608
         tuple(params),
     )
     return await get_template(template_id)

@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "assets/_type_picker.html" import asset_type_picker %}
+
+{% block header_title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
+{% block title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% endblock %}
+{% block header_actions %}
+  {% set detail_actions = [{"label": "Start process", "type": "link", "href": "/processes/start?asset_id=" ~ asset.id}, {"label": "Back to Assets", "type": "link", "href": "/assets"}] %}
+  {% if not customer_safe %}{% set _ = detail_actions.append({"label": "Company credentials", "type": "link", "href": "/admin/companies/" ~ asset.company_id ~ "/edit#credentials"}) %}{% endif %}
+  {% if is_super_admin and not customer_safe %}{% set _ = detail_actions.append({"label": "Customer preview", "type": "link", "href": "/assets/" ~ asset.id ~ "?customer_preview=true"}) %}{% endif %}
+  {{ page_header_actions(detail_actions) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  {% if customer_safe %}
+    <div class="alert alert--info admin-grid__full" role="status">Customer view — internal notes, custom fields, tickets, integration identifiers and inaccessible links are omitted.</div>
+  {% endif %}
+  {% if asset.archived_at %}
+    <div class="alert alert--warning admin-grid__full" role="status">
+      This asset is archived. Its ticket links, identifiers, custom fields, and documentation remain available.
+    </div>
+  {% endif %}
+  {% if required_missing %}
+    <div class="alert alert--warning admin-grid__full" role="status">
+      Documentation incomplete. Required for {{ asset.type or 'this type' }}: {{ required_missing | join(', ') }}.
+    </div>
+  {% endif %}
+
+  {% if not customer_safe %}<section class="card card--panel admin-grid__full">
+    <header class="card__header"><div><h2 class="card__title">Network and rack assignments</h2><p class="card__subtitle">Open the dedicated workspace to manage each assignment.</p></div></header>
+    <div class="card__body"><dl class="definition-list">
+      <dt>IP addresses</dt><dd>{% for address in infrastructure_links.addresses %}<a href="/ipam#address-{{ address.id }}"><code>{{ address.address }}</code></a> <span class="text-muted">{{ address.network_name }}</span>{% if not loop.last %}<br>{% endif %}{% else %}<a href="/ipam#addresses">No documented address</a>{% endfor %}</dd>
+      <dt>Rack positions</dt><dd>{% for placement in infrastructure_links.placements %}<a href="/racks?rack={{ placement.rack_id }}#rack-{{ placement.rack_id }}">{{ placement.rack_name }} · {{ placement.face|title }} U{{ placement.start_unit }}{% if placement.unit_height > 1 %}–{{ placement.start_unit + placement.unit_height - 1 }}{% endif %}</a>{% if not loop.last %}<br>{% endif %}{% else %}<a href="/racks">Not placed in a rack</a>{% endfor %}</dd>
+    </dl></div>
+  </section>{% endif %}
+
+  {% if network_interfaces is not none %}{% set ni = network_interfaces %}{% set own_endpoints = [] %}{% for interface in ni.interfaces %}{% set _ = own_endpoints.append('interface:' ~ interface.id) %}{% endfor %}<section class="card card--panel admin-grid__full" id="interfaces">
+    <header class="card__header"><div><h2 class="card__title">Network interfaces</h2><p class="card__subtitle">Ports and radios on this device and what they connect to. They draw this device on the <a href="/network-map">network map</a>, including when it is not in a rack.</p></div></header>
+    <div class="card__body">
+      <div class="table-wrapper"><table class="table"><thead><tr><th>Interface</th><th>Kind</th><th>Address</th><th>Settings</th><th>Connected to</th>{% if can_edit_network_map %}<th class="table__actions">Actions</th>{% endif %}</tr></thead><tbody>
+        {% for interface in ni.interfaces %}<tr id="interface-{{ interface.id }}">
+          <td><strong>{{ interface.name }}</strong>{% if interface.mac_address %}<br><code class="text-muted">{{ interface.mac_address }}</code>{% endif %}</td>
+          <td>{% if interface.is_radio %}<span class="status status--info">{{ interface.kind_label }}</span>{% else %}{{ interface.kind_label }}{% endif %}</td>
+          <td>{% if interface.ip_address %}<code>{{ interface.ip_address }}</code>{% else %}—{% endif %}</td>
+          <td>{% if interface.is_radio %}{{ interface.radio_summary or '—' }}{% else %}{{ [interface.speed_mbps ~ ' Mbps' if interface.speed_mbps else none, 'VLAN ' ~ interface.vlan if interface.vlan else none] | select | join(' · ') or '—' }}{% endif %}</td>
+          <td>{% for link in interface.links %}<span>{{ link.peer }} <span class="text-muted">({{ link.medium }})</span></span>{% if can_edit_network_map %}<form class="form-inline" method="post" action="/api/network-map/links/{{ link.id }}/delete" data-confirm="Remove this link?">{% include "partials/csrf.html" %}<input type="hidden" name="next" value="/assets/{{ asset.id }}#interfaces"><button class="button button--ghost button--small" type="submit">Unlink</button></form>{% endif %}{% if not loop.last %}<br>{% endif %}{% else %}<span class="text-muted">Not linked</span>{% endfor %}</td>
+          {% if can_edit_network_map %}<td class="table__actions"><form method="post" action="/api/network-map/interfaces/{{ interface.id }}/delete" data-confirm="Remove this interface and its links?">{% include "partials/csrf.html" %}<input type="hidden" name="next" value="/assets/{{ asset.id }}#interfaces"><button class="button button--danger button--small" type="submit">Remove</button></form></td>{% endif %}
+        </tr>{% else %}<tr><td colspan="6">No interfaces documented. Racked equipment ports are documented in <a href="/racks">Racks</a>.</td></tr>{% endfor %}
+      </tbody></table></div>
+      {% if can_edit_network_map %}<div class="network-interface-forms">
+        <form class="form-stack" method="post" action="/api/network-map/interfaces" data-interface-form>{% include "partials/csrf.html" %}
+          <h3>Add interface</h3>
+          <input type="hidden" name="asset_id" value="{{ asset.id }}"><input type="hidden" name="next" value="/assets/{{ asset.id }}#interfaces">
+          <div class="form-row">
+            <label>Name<input class="input" name="name" maxlength="64" required placeholder="eth0, Port 1, Radio 1"></label>
+            <label>Kind<select class="input" name="kind" data-interface-kind>{% for key, label in ni.interface_kinds.items() %}<option value="{{ key }}" {% if key == ('radio' if asset_type.radio and not ni.interfaces else 'ethernet') %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+            <label>IP address<select class="input" name="ip_address_id"><option value="">None</option>{% for address in infrastructure_links.addresses %}<option value="{{ address.id }}">{{ address.address }} ({{ address.network_name }})</option>{% endfor %}</select></label>
+          </div>
+          <div class="form-row">
+            <label>MAC address<input class="input" name="mac_address" maxlength="32"></label>
+            <label>Speed (Mbps)<input class="input" name="speed_mbps" type="number" min="1" max="1000000"></label>
+            <label>VLAN(s)<input class="input" name="vlan" maxlength="64" placeholder="10, 20-30"></label>
+          </div>
+          <fieldset data-radio-fields><legend>Radio settings</legend><div class="form-row">
+            <label>Mode<select class="input" name="radio_mode"><option value="">Not set</option>{% for key, label in ni.radio_modes.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+            <label>Frequency (MHz)<input class="input" name="frequency_mhz" type="number" min="1" max="300000" placeholder="5800"></label>
+            <label>Channel width (MHz)<input class="input" name="channel_width_mhz" type="number" min="1" max="10000"></label>
+            <label>SSID / link name<input class="input" name="ssid" maxlength="64"></label>
+            <label>Azimuth (°)<input class="input" name="azimuth_deg" type="number" min="0" max="359"></label>
+            <label>Tx power (dBm)<input class="input" name="tx_power_dbm" type="number" min="-40" max="60"></label>
+            <label>Antenna gain (dBi)<input class="input" name="antenna_gain_dbi" type="number" min="-10" max="60"></label>
+          </div></fieldset>
+          <div class="form-row"><label>Notes<input class="input" name="notes" maxlength="255"></label></div>
+          <div><button class="button button--primary" type="submit">Add interface</button></div>
+        </form>
+        {% if ni.interfaces %}<form class="form-stack" method="post" action="/api/network-map/links" data-link-form>{% include "partials/csrf.html" %}
+          <h3>Link an interface</h3>
+          <input type="hidden" name="next" value="/assets/{{ asset.id }}#interfaces">
+          <div class="form-row">
+            <label>This device's interface<select class="input" name="a" required>{% for interface in ni.interfaces %}<option value="interface:{{ interface.id }}" data-radio="{{ '1' if interface.is_radio else '0' }}">{{ interface.name }}</option>{% endfor %}</select></label>
+            <label>Connects to<select class="input" name="b" required><option value="">Choose an interface or rack port</option>{% for option in ni.endpoint_options if option.value not in own_endpoints %}<option value="{{ option.value }}" data-radio="{{ '1' if option.radio else '0' }}">{{ option.label }}</option>{% endfor %}</select></label>
+            <label>Medium<select class="input" name="medium" data-link-medium>{% for key, label in ni.media.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+          </div>
+          <div class="form-row">
+            <label>Label<input class="input" name="label" maxlength="191" placeholder="Uplink to warehouse"></label>
+            <label>Speed (Mbps)<input class="input" name="speed_mbps" type="number" min="1" max="1000000"></label>
+            <label>Distance (m)<input class="input" name="distance_m" type="number" min="0" max="1000000"></label>
+            <label data-wireless-field>Frequency (MHz)<input class="input" name="frequency_mhz" type="number" min="1" max="300000"></label>
+            <label data-wireless-field>Signal (dBm)<input class="input" name="signal_dbm" type="number" min="-150" max="0"></label>
+          </div>
+          <div><button class="button button--primary" type="submit">Add link</button></div>
+          <p class="form-help">Radio interfaces carry wireless links and can link to several radios (point-to-multipoint); a wired port has one link.</p>
+        </form>{% endif %}
+      </div>{% endif %}
+    </div>
+  </section>{% endif %}
+
+  {% if can_view_asset_photos %}<section class="card card--panel admin-grid__full asset-photos" id="asset-photos">
+    <header class="card__header"><div><h2 class="card__title">Photos</h2><p class="card__subtitle">Photos stay with this asset through archive, restore, and reconciliation.</p></div></header>
+    <div class="card__body">
+      {% if can_edit_asset_photos %}
+      <form class="asset-photo-upload" data-asset-photo-upload action="/assets/{{ asset.id }}/photos" method="post" enctype="multipart/form-data">
+        {% include "partials/csrf.html" %}
+        <input type="hidden" name="idempotency_key" data-photo-key>
+        <div class="asset-photo-actions">
+          <label class="button button--primary" for="asset-camera">Take photo</label>
+          <input class="visually-hidden" id="asset-camera" data-photo-input type="file" name="photo" accept="image/jpeg,image/png,image/webp" capture="environment">
+          <label class="button button--ghost" for="asset-picker">Choose image</label>
+          <input class="visually-hidden" id="asset-picker" data-photo-input type="file" accept="image/jpeg,image/png,image/webp">
+        </div>
+        <div class="asset-photo-preview" data-photo-preview hidden>
+          <img alt="Photo preview" data-photo-preview-image>
+          <div class="form-group"><label class="form-label" for="photo-caption">Caption <span class="field-optional">optional</span></label><input class="input" id="photo-caption" name="caption" maxlength="500"></div>
+          <label class="checkbox"><input name="customer_visible" type="checkbox" value="true"> <span>Allow customer portal users to view this photo</span></label>
+          <div class="asset-photo-actions"><button class="button button--primary" type="submit">Upload photo</button><button class="button button--ghost" type="button" data-photo-retake>Retake / choose another</button><button class="button button--ghost" type="button" data-photo-cancel>Cancel</button></div>
+        </div>
+        <p class="form-help">JPEG, PNG, or WebP; maximum 15 MB. Photos are internal unless explicitly shared.</p>
+        <div class="asset-photo-progress" data-photo-progress hidden>
+          <progress max="100" value="0" aria-label="Photo upload progress"></progress>
+          <span data-photo-progress-label>0%</span>
+        </div>
+        <p data-photo-status role="status" aria-live="polite"></p>
+      </form>
+      {% endif %}
+      <div class="asset-photo-gallery">
+        {% for photo in asset_photos %}<article class="asset-photo-card">
+          <a href="/assets/{{ asset.id }}/photos/{{ photo.id }}/original"><img loading="lazy" src="/assets/{{ asset.id }}/photos/{{ photo.id }}/thumbnail" alt="{{ photo.caption or 'Asset photo' }}"></a>
+          {% if can_edit_asset_photos %}<form method="post" action="/assets/{{ asset.id }}/photos/{{ photo.id }}">
+            {% include "partials/csrf.html" %}<label class="form-label">Caption<input class="input" name="caption" maxlength="500" value="{{ photo.caption or '' }}"></label>
+            <label class="form-label">Order<input class="input" name="sort_order" type="number" min="0" max="10000" value="{{ photo.sort_order }}"></label>
+            <label class="checkbox"><input name="customer_visible" type="checkbox" value="true" {% if photo.customer_visible %}checked{% endif %}> <span>Customer visible</span></label>
+            <button class="button button--ghost button--small" type="submit">Save</button>
+          </form><form method="post" action="/assets/{{ asset.id }}/photos/{{ photo.id }}/delete" data-confirm="Delete this photo permanently?">{% include "partials/csrf.html" %}<button class="button button--danger button--small" type="submit">Delete</button></form>
+          {% else %}<p>{{ photo.caption or '' }}</p>{% endif %}
+        </article>{% else %}<p class="text-muted">No photos attached.</p>{% endfor %}
+      </div>
+    </div>
+  </section>{% endif %}
+
+  {% if not customer_safe %}<section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div><h2 class="card__title">Operational documentation</h2>
+      <p class="card__subtitle">These fields are maintained manually and are never overwritten by asset sync.</p></div>
+    </header>
+    <form method="post" action="/assets/{{ asset.id }}">
+      <div class="card__body">
+        {% if asset.provenance == 'manual' %}
+        <div class="alert alert--info" role="status">Manually documented asset — integrations cannot overwrite it until an authorised match is approved.</div>
+        <div class="form-group"><label class="form-label" for="asset-name">Name</label><input class="input" id="asset-name" name="name" maxlength="255" required value="{{ asset.name or '' }}" {% if not can_edit %}disabled{% endif %}></div>
+        <div class="form-group"><label class="form-label" for="asset-type">Type</label>{{ asset_type_picker(asset_type_mode, asset_type_groups, custom_asset_types, asset_type, asset_type_label, not can_edit) }}</div>
+        <div class="form-group"><label class="form-label" for="asset-status">Status</label><input class="input" id="asset-status" name="status" maxlength="255" value="{{ asset.status or '' }}" {% if not can_edit %}disabled{% endif %}></div>
+        <div class="form-group"><label class="form-label" for="asset-serial">Serial number</label><input class="input" id="asset-serial" name="serial_number" maxlength="255" value="{{ asset.serial_number or '' }}" {% if not can_edit %}disabled{% endif %}></div>
+        {% endif %}
+        <div class="form-group"><label class="form-label" for="asset-owner">Owner</label>
+          <input class="input" id="asset-owner" name="owner" maxlength="255" value="{{ asset.owner or '' }}" {% if not can_edit %}disabled{% endif %}></div>
+        <div class="form-group"><label class="form-label" for="asset-support">Support contact</label>
+          <input class="input" id="asset-support" name="support_contact" maxlength="255" value="{{ asset.support_contact or '' }}" {% if not can_edit %}disabled{% endif %}></div>
+        <div class="form-group"><label class="form-label" for="asset-criticality">Criticality</label>
+          <select class="input" id="asset-criticality" name="criticality" {% if not can_edit %}disabled{% endif %}>
+            <option value="">Not set</option>{% for value in ['low', 'medium', 'high', 'critical'] %}<option value="{{ value }}" {% if asset.criticality == value %}selected{% endif %}>{{ value | title }}</option>{% endfor %}
+          </select></div>
+        <div class="form-group"><label class="form-label" for="asset-location">Location</label>
+          <input class="input" id="asset-location" name="location" maxlength="255" value="{{ asset.location or '' }}" {% if not can_edit %}disabled{% endif %}></div>
+        <div class="form-group"><label class="form-label" for="asset-review">Review status</label>
+          <select class="input" id="asset-review" name="review_status" {% if not can_edit %}disabled{% endif %}>
+            {% for value, label in [('not_reviewed', 'Not reviewed'), ('needs_review', 'Needs review'), ('reviewed', 'Reviewed')] %}<option value="{{ value }}" {% if (asset.review_status or 'not_reviewed') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select></div>
+        <div class="form-group"><label class="form-label" for="asset-notes">Operational notes</label>
+          <textarea class="input" id="asset-notes" name="operational_notes" rows="8" {% if not can_edit %}disabled{% endif %}>{{ asset.operational_notes or '' }}</textarea>
+          <small class="form-help">Do not store passwords, recovery codes, or other secrets here.</small></div>
+        <div class="form-group"><label class="form-label" for="asset-references">External references</label>
+          <textarea class="input" id="asset-references" name="external_references" rows="5" placeholder="Runbook | https://docs.example.com/runbook" {% if not can_edit %}disabled{% endif %}>{% for reference in references %}{{ reference.label }} | {{ reference.url }}{% if not loop.last %}
+{% endif %}{% endfor %}</textarea>
+          <small class="form-help">One non-sensitive HTTP(S) link per line, optionally prefixed with a label and |.</small></div>
+      </div>
+      {% if can_edit %}<footer class="card__footer"><button class="button button--primary" type="submit">Save documentation</button></footer>{% endif %}
+    </form>
+  </section>{% endif %}
+
+  {% if linked_runbooks %}<section class="card card--panel admin-grid__full">
+    <header class="card__header"><div><h2 class="card__title">Linked runbooks</h2><p class="card__subtitle">Knowledge-base procedures linked directly to this asset.</p></div></header>
+    <div class="card__body"><ul>{% for article in linked_runbooks %}<li><a href="/knowledge-base/articles/{{ article.slug }}">{{ article.title }}</a> <span class="status status--{{ 'success' if article.is_published else 'warning' }}">{{ article.lifecycle_status | replace('_', ' ') | title }}</span>{% if article.review_due_at_iso %} <span class="text-muted">Review due <span data-utc="{{ article.review_due_at_iso }}">{{ article.review_due_at_iso }}</span></span>{% endif %}</li>{% endfor %}</ul></div>
+  </section>{% endif %}
+
+  {% if linked_websites %}<section class="card card--panel admin-grid__full">
+    <header class="card__header"><div><h2 class="card__title">Linked websites</h2><p class="card__subtitle">Website documentation and monitoring associated with this asset.</p></div></header>
+    <div class="card__body"><ul>{% for website in linked_websites %}<li><a href="/websites/{{ website.id }}">{{ website.name }}</a> <span class="text-muted">{{ website.url }}</span></li>{% endfor %}</ul></div>
+  </section>{% endif %}
+
+  {% if bcp_context %}<section class="card card--panel admin-grid__full">
+    <header class="card__header"><div><h2 class="card__title">Business continuity context</h2><p class="card__subtitle">Plans and recovery components that depend on this canonical asset.</p></div></header>
+    <div class="card__body"><ul>
+      {% for context in bcp_context %}<li>
+        <a href="/bcp/recovery">{{ context.title or ('Plan ' ~ context.plan_id) }}</a>
+        {% if context.version %}<span class="text-muted">version {{ context.version }}</span>{% endif %}
+        — {{ context.component_type | replace('_', ' ') | title }}: {{ context.component_label or ('Component ' ~ context.component_id) }}
+        {% if context.unlinked_at %}<span class="status status--neutral">Historical link</span>{% endif %}
+      </li>{% endfor %}
+    </ul></div>
+  </section>{% endif %}
+
+  <section class="card card--panel">
+    <header class="card__header"><h2 class="card__title">{{ 'Manual inventory' if asset.provenance == 'manual' else 'Synced inventory' }}</h2></header>
+    <div class="card__body"><dl class="definition-list">
+      <dt>Asset ID</dt><dd>{{ asset.id }}</dd><dt>Company</dt><dd>{{ company.name if company else asset.company_id }}</dd>
+      <dt>Type</dt><dd><span class="asset-type-badge"><img src="{{ asset_type.icon }}" alt="" width="20" height="20"> {{ asset_type_label }}</span>{% if asset.provenance != 'manual' and asset.type and asset.type != asset_type_label %} <span class="text-muted">(reported as {{ asset.type }})</span>{% endif %}</dd><dt>Status</dt><dd>{{ asset.status or '—' }}</dd>
+      <dt>Serial number</dt><dd>{{ asset.serial_number or '—' }}</dd><dt>Warranty</dt><dd>{{ asset.warranty_status or '—' }}{% if asset.warranty_end_date %} (ends {{ asset.warranty_end_date }}){% endif %}</dd>
+      {% if not customer_safe %}<dt>Syncro ID</dt><dd>{{ asset.syncro_asset_id or '—' }}</dd><dt>Tactical ID</dt><dd>{{ asset.tactical_asset_id or '—' }}</dd>{% endif %}
+      <dt>Provenance</dt><dd>{{ 'Manual' if asset.provenance == 'manual' else 'Integration' }}</dd>
+      <dt>Last sync</dt><dd>{{ asset.last_sync or ('Not applicable' if asset.provenance == 'manual' else 'Never') }}</dd>
+    </dl><p class="text-muted">{{ 'Inventory and documentation are technician-maintained.' if asset.provenance == 'manual' else 'Inventory fields above are sync-owned; operational documentation is manual-owned.' }}</p>
+    {% if can_edit and asset.provenance != 'manual' %}<form class="form-inline" method="post" action="/assets/{{ asset.id }}/asset-type">{% include "partials/csrf.html" %}
+      <label class="form-label" for="asset-type-override">Asset type</label>
+      <select class="input" id="asset-type-override" name="asset_type">
+        <option value="" {% if asset.asset_type_source != 'manual' %}selected{% endif %}>Automatic from sync ({{ derived_asset_type.label }})</option>
+        {% for group in synced_asset_type_groups %}<optgroup label="{{ group.label }}">{% for item in group.types %}<option value="{{ item.key }}" {% if asset.asset_type_source == 'manual' and item.key == asset_type.key %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</optgroup>{% endfor %}
+      </select>
+      <button class="button button--ghost button--small" type="submit">Save type</button>
+      <small class="form-help">Sync keeps a type you choose here. Choose Automatic to follow what the integration reports.</small>
+    </form>{% endif %}</div>
+  </section>
+
+  {% if not customer_safe %}<section class="card card--panel">
+    <header class="card__header"><h2 class="card__title">Custom fields</h2></header>
+    <div class="card__body"><dl class="definition-list">
+      {% for field in custom_fields %}<dt>{{ field.display_name or field.name }}</dt><dd>
+        {% if asset.provenance == 'manual' and can_edit %}
+          {% if field.field_type == 'checkbox' %}<label class="checkbox"><input form="manual-custom-fields" name="custom_{{ field.id }}" value="1" type="checkbox" {% if field.value %}checked{% endif %}><span>Yes</span></label>
+          {% elif field.field_type == 'date' %}<input form="manual-custom-fields" class="input" name="custom_{{ field.id }}" type="date" value="{{ field.value or '' }}">
+          {% elif field.field_type == 'url' %}<input form="manual-custom-fields" class="input" name="custom_{{ field.id }}" type="url" value="{{ field.value or '' }}">
+          {% else %}<input form="manual-custom-fields" class="input" name="custom_{{ field.id }}" value="{{ field.value or '' }}">{% endif %}
+        {% elif field.field_type == 'url' and field.value %}<a href="{{ field.value }}" target="_blank" rel="noopener noreferrer">{{ field.value }}</a>{% elif field.field_type == 'checkbox' %}{{ 'Yes' if field.value else 'No' }}{% else %}{{ field.value or '—' }}{% endif %}
+      </dd>{% else %}<p class="text-muted">No custom fields configured.</p>{% endfor %}
+    </dl>{% if asset.provenance == 'manual' and can_edit %}<form id="manual-custom-fields" method="post" action="/assets/{{ asset.id }}"><input type="hidden" name="name" value="{{ asset.name }}"><input type="hidden" name="type" value="{{ asset.type or '' }}"><input type="hidden" name="asset_type" value="{{ asset_type.key }}"><input type="hidden" name="status" value="{{ asset.status or '' }}"><input type="hidden" name="serial_number" value="{{ asset.serial_number or '' }}"><input type="hidden" name="location" value="{{ asset.location or '' }}"><input type="hidden" name="review_status" value="{{ asset.review_status or 'not_reviewed' }}"><button class="button button--primary" type="submit">Save custom fields</button></form>{% endif %}</div>
+  </section>{% endif %}
+
+  {% if not customer_safe and reconciliation_candidates %}<section class="card card--panel admin-grid__full">
+    <header class="card__header"><div><h2 class="card__title">Possible integration matches</h2><p class="card__subtitle">Review identifiers before linking. A name alone is never merged automatically.</p></div></header>
+    <div class="card__body"><ul>{% for candidate in reconciliation_candidates %}<li><strong>{{ candidate.source | title }}</strong> — {{ candidate.external_id }}{% if candidate.last_error %}<span class="text-muted">{{ candidate.last_error }}</span>{% endif %}{% if can_edit %}<form class="form-inline" method="post" action="/assets/{{ asset.id }}/reconciliation/{{ candidate.id }}/approve"><button class="button button--primary button--small" type="submit">Approve match</button></form>{% endif %}</li>{% endfor %}</ul></div>
+  </section>{% endif %}
+
+  {% if not customer_safe %}<section class="card card--panel admin-grid__full" id="source-records">
+    <header class="card__header"><div><h2 class="card__title">Data provenance and ownership</h2><p class="card__subtitle">Integration-owned inventory is refreshed by its source. Notes, references, relationships, photos, and custom fields remain manually owned.</p></div></header>
+    <div class="card__body"><div class="table-wrapper"><table class="table"><thead><tr><th>Source</th><th>Source record</th><th>Status</th><th>Fields owned by source</th><th>Last successful update</th></tr></thead><tbody>
+      {% for source in asset_sources %}<tr><td>{{ source.source | replace('_', ' ') | title }}</td><td><a href="#source-record-{{ source.id }}" id="source-record-{{ source.id }}"><code>{{ source.external_id }}</code></a></td><td><span class="status status--{{ 'success' if source.status == 'active' else 'warning' }}">{{ source.status | replace('_', ' ') | title }}</span></td><td>{{ source.owned_fields | join(', ') or 'Record linkage only' }}</td><td>{% if source.last_success_at %}<span data-utc="{{ source.last_success_at }}">{{ source.last_success_at }}</span>{% else %}Never{% endif %}</td></tr>
+      {% else %}<tr><td colspan="5">No integration source is linked. This asset is manually owned.</td></tr>{% endfor %}
+    </tbody></table></div></div>
+  </section>{% endif %}
+
+  {% if not customer_safe %}<section class="card card--panel">
+    <header class="card__header"><h2 class="card__title">Linked tickets</h2></header>
+    <div class="card__body"><ul>
+      {% for ticket in tickets %}<li><a href="/admin/tickets/{{ ticket.id }}">#{{ ticket.id }} — {{ ticket.subject or 'Ticket' }}</a> <span class="text-muted">{{ ticket.status or '' }}</span></li>
+      {% else %}<li class="text-muted">No tickets link to this asset.</li>{% endfor %}
+    </ul></div>
+  </section>{% endif %}
+
+  {% if can_view_asset_relationships %}<section class="card card--panel admin-grid__full">
+    <header class="card__header"><div><h2 class="card__title">Relationships</h2>
+      <p class="card__subtitle">Typed links to company assets and accessible support documentation.</p></div></header>
+    <div class="card__body">
+      <ul>
+        {% for relationship in relationships %}<li>
+          <strong>{{ 'Inbound' if relationship.direction == 'inbound' else 'Outbound' }}:</strong>
+          {{ relationship_types.get(relationship.relationship_type, relationship.relationship_type) }} —
+          <a href="{{ relationship.target.url }}">{{ relationship.target.label }}</a>
+          <span class="text-muted">{{ relationship.target.type }} · {{ relationship.target.context }}</span>
+          {% if can_edit_asset_relationships %}<form method="post" action="/assets/{{ asset.id }}/relationships/{{ relationship.id }}/delete" class="form-inline"><button class="button button--ghost button--small" type="submit">Remove</button></form>{% endif %}
+        </li>{% else %}<li class="text-muted">No relationships documented.</li>{% endfor %}
+      </ul>
+      {% if can_edit_asset_relationships %}
+      <form method="post" action="/assets/{{ asset.id }}/relationships">
+        <div class="form-group"><label class="form-label" for="relationship-type">Relationship</label><select class="input" id="relationship-type" name="relationship_type" required>{% for value, label in relationship_types.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label class="form-label" for="relationship-target">Find a record</label><select class="input" id="relationship-target" name="target_key" required data-searchable="on" data-searchable-placeholder="Search by name, type, status, URL or network"><option value="">Select an accessible record</option>{% for item in relationship_targets %}<option value="{{ item.key }}">{{ item.type }} — {{ item.label }} · {{ item.context }}</option>{% endfor %}</select><small class="form-help">Only active records in this company that you can access are shown.</small></div>
+        <button class="button button--primary" type="submit">Add relationship</button>
+      </form>
+      {% endif %}
+    </div>
+  </section>{% endif %}
+
+  {% if references %}<section class="card card--panel admin-grid__full"><header class="card__header"><h2 class="card__title">References</h2></header><div class="card__body"><ul>
+    {% for reference in references %}<li><a href="{{ reference.url }}" target="_blank" rel="noopener noreferrer">{{ reference.label }}</a></li>{% endfor %}
+  </ul></div></section>{% endif %}
+
+  {% if can_edit %}
+  <section class="card card--panel admin-grid__full"><form method="post" action="/assets/{{ asset.id }}/publish"><input type="hidden" name="action" value="{{ 'unpublish' if asset.customer_visible else 'publish' }}"><div class="form-field"><label class="form-label" for="asset-customer-roles">Published to customer roles</label><select class="form-input" id="asset-customer-roles" name="allowed_role_ids" multiple size="5" {% if asset.customer_visible %}disabled{% endif %}>{% for role in customer_roles %}<option value="{{ role.id }}" {% if role.id in customer_role_ids %}selected{% endif %}>{{ role.name }}</option>{% endfor %}</select><p class="form-help">New publications deny access until at least one role is selected. Roles also require the Published assets permission.</p></div><button class="button button--primary" type="submit">{{ 'Remove from customer portal' if asset.customer_visible else 'Publish to customer portal' }}</button><p class="form-help">Assets are internal by default. Customer views contain only approved inventory fields.</p></form></section>
+  <section class="card card--panel admin-grid__full"><form method="post" action="/assets/{{ asset.id }}/archive"><input type="hidden" name="action" value="{{ 'restore' if asset.archived_at else 'archive' }}"><button class="button button--ghost" type="submit">{{ 'Restore asset' if asset.archived_at else 'Archive asset' }}</button><p class="form-help">Archiving is reversible and retains identifiers, ticket links, custom values, and documentation.</p></form></section>{% endif %}
+</div>
+{% include "partials/csrf.html" %}
+{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script>{% if can_edit_network_map %}<script src="{{ static_url('/static/js/network_map.js') }}" defer></script>{% endif %}{% endblock %}

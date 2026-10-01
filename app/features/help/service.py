@@ -7,10 +7,15 @@ subfolder (section), and renders individual articles to sanitised HTML.
 from __future__ import annotations
 
 import pathlib
-from typing import TypedDict
+from collections.abc import Callable, Iterable
+from typing import NotRequired, TypedDict
 
 import nh3
 from markdown_it import MarkdownIt
+
+from app.core.logging import log_warning
+
+from .requirements import ARTICLE_REQUIREMENTS, SECTION_REQUIREMENTS
 
 # Allowed HTML tags and attributes after markdown rendering
 _ALLOWED_TAGS: frozenset[str] = frozenset((
@@ -48,6 +53,8 @@ class HelpArticle(TypedDict):
     section: str
     section_slug: str
     path: pathlib.Path
+    # Set by ``filter_sections`` when the documented feature is not active.
+    inactive: NotRequired[bool]
 
 
 class HelpSection(TypedDict):
@@ -133,6 +140,96 @@ def find_article(section_slug: str, article_slug: str, wiki_dir: pathlib.Path | 
                 path=md_file,
             )
     return None
+
+
+RequirementCheck = Callable[[str], bool]
+
+
+def article_requirements(article: HelpArticle) -> tuple[tuple[str, ...], ...]:
+    """Return the section and article requirement groups for *article*."""
+    return (
+        SECTION_REQUIREMENTS.get(article["section_slug"], ()),
+        ARTICLE_REQUIREMENTS.get(f"{article['section_slug']}/{article['name']}", ()),
+    )
+
+
+def article_visible(article: HelpArticle, is_active: RequirementCheck) -> bool:
+    """Return True when every requirement group of *article* has an active entry."""
+    return all(
+        not group or any(is_active(requirement) for requirement in group)
+        for group in article_requirements(article)
+    )
+
+
+def filter_sections(
+    sections: Iterable[HelpSection],
+    is_active: RequirementCheck,
+    *,
+    keep_inactive: bool = False,
+) -> list[HelpSection]:
+    """Drop articles for inactive features, and sections left without articles.
+
+    With ``keep_inactive`` every article is kept and those for inactive
+    features are flagged ``inactive`` instead (used for super administrators).
+    """
+    filtered: list[HelpSection] = []
+    for section in sections:
+        articles: list[HelpArticle] = []
+        for article in section["articles"]:
+            visible = article_visible(article, is_active)
+            if visible or keep_inactive:
+                articles.append(HelpArticle(**{**article, "inactive": not visible}))
+        if articles:
+            filtered.append(HelpSection(name=section["name"], slug=section["slug"], articles=articles))
+    return filtered
+
+
+def build_requirement_check(
+    *,
+    pack_available: Callable[[str], bool],
+    module_available: Callable[[str], bool],
+    enabled_modules: Iterable[str] | None,
+) -> RequirementCheck:
+    """Build a checker for ``pack:<slug>`` / ``module:<slug>`` requirements.
+
+    ``enabled_modules`` of ``None`` means module state could not be read; the
+    deployment availability policy is used on its own in that case.
+    """
+    enabled = frozenset(enabled_modules) if enabled_modules is not None else None
+
+    def is_active(requirement: str) -> bool:
+        kind, _, slug = requirement.partition(":")
+        if kind == "pack":
+            return pack_available(slug)
+        if kind == "module":
+            if not module_available(slug):
+                return False
+            return enabled is None or slug in enabled
+        return True
+
+    return is_active
+
+
+async def load_requirement_check() -> RequirementCheck:
+    """Return a checker reflecting the active feature packs and modules."""
+    from app.services import modules as modules_service
+    from app.services.component_availability import get_component_availability
+
+    availability = get_component_availability()
+    try:
+        enabled_modules: list[str] | None = [
+            str(module["slug"])
+            for module in await modules_service.list_modules()
+            if module.get("enabled")
+        ]
+    except Exception as exc:  # pragma: no cover - database outage
+        log_warning("Unable to load module state for help filtering", error=str(exc))
+        enabled_modules = None
+    return build_requirement_check(
+        pack_available=availability.feature_pack_available,
+        module_available=availability.module_available,
+        enabled_modules=enabled_modules,
+    )
 
 
 def render_article(article: HelpArticle) -> str:

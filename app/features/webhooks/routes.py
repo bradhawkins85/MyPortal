@@ -8,6 +8,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
 from app.repositories import webhook_events as webhook_events_repo
+from app.repositories import webhook_deletion_rules as deletion_rules_repo
 
 
 router = APIRouter(tags=["Webhooks"])
@@ -23,13 +24,17 @@ def _main():
 async def admin_webhooks(
     request: Request,
     q: str = "",
+    status: str = "",
     event_limit: int = Query(default=1000, ge=1, le=5000),
 ):
     main_module = _main()
     current_user, redirect = await main_module._require_super_admin_page(request)
     if redirect:
         return redirect
-    events = await webhook_events_repo.list_events(search=q, limit=event_limit)
+    status_filter = str(status or "").strip().lower() or None
+    events = await webhook_events_repo.list_events(
+        status=status_filter, search=q, limit=event_limit
+    )
     prepared_events: list[dict[str, Any]] = []
     for event in events:
         serialised_event = main_module._serialise_mapping(event)
@@ -37,12 +42,26 @@ async def admin_webhooks(
         serialised_event["updated_iso"] = main_module._to_iso(event.get("updated_at"))
         serialised_event["next_attempt_iso"] = main_module._to_iso(event.get("next_attempt_at"))
         prepared_events.append(serialised_event)
+    prepared_rules: list[dict[str, Any]] = []
+    for rule in await deletion_rules_repo.list_rules():
+        serialised_rule = main_module._serialise_mapping(rule)
+        serialised_rule["next_run_at"] = main_module._to_iso(rule.get("next_run_at"))
+        serialised_rule["last_run_at"] = main_module._to_iso(rule.get("last_run_at"))
+        prepared_rules.append(serialised_rule)
+    status_counts = {
+        state: await webhook_events_repo.count_events_by_status(state)
+        for state in ("failed", "pending", "in_progress", "succeeded")
+    }
     extra = {
-        "title": "Webhook delivery queue",
+        "title": "Webhooks",
+        "webhook_status_counts": status_counts,
         "events": prepared_events,
         "webhook_search": q,
+        "webhook_status": status_filter or "",
         "webhook_event_limit": event_limit,
         "webhook_event_limit_options": (200, 500, 1000, 2500, 5000),
+        "deletion_rules": prepared_rules,
+        "retention": await deletion_rules_repo.get_retention(),
     }
     return await main_module._render_template(
         "admin/webhooks.html",

@@ -78,3 +78,19 @@ def verify_password(password: str, hashed: str) -> bool:
         # limit. Treat this as a failed verification to avoid leaking errors during
         # authentication attempts.
         return False
+
+
+_DUMMY_PASSWORD_HASH: str | None = None
+
+
+def get_dummy_password_hash() -> str:
+    """Return a throwaway hash in the current format.
+
+    Verifying a password against it costs the same as a real check, so code
+    paths for unknown accounts can match the timing of known ones and not
+    reveal which email addresses are registered.
+    """
+    global _DUMMY_PASSWORD_HASH
+    if _DUMMY_PASSWORD_HASH is None:
+        _DUMMY_PASSWORD_HASH = hash_password(urandom(16).hex())
+    return _DUMMY_PASSWORD_HASH

@@ -9,7 +9,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.dependencies.bc_rbac import require_bc_editor, require_bc_viewer
+from app.api.dependencies.bc_rbac import (
+    require_bc_editor,
+    require_bc_plan_in_active_company,
+    require_bc_viewer,
+)
 from app.repositories import bc3 as bc_repo
 from app.schemas.bc3_models import (
     BCContactCreate,
@@ -23,7 +27,11 @@ from app.schemas.bc3_models import (
     BCVendorUpdate,
 )
 
-router = APIRouter(prefix="/api/bc/plans", tags=["Business Continuity - Supportive Entities (BC11)"])
+router = APIRouter(
+    prefix="/api/bc/plans",
+    tags=["Business Continuity - Supportive Entities (BC11)"],
+    dependencies=[Depends(require_bc_plan_in_active_company)],
+)
 
 
 # ============================================================================

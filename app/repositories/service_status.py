@@ -17,7 +17,7 @@ async def _load_company_assignments(service_ids: Sequence[int]) -> dict[int, lis
         FROM service_status_service_companies
         WHERE service_id IN ({placeholders})
         ORDER BY service_id, company_id
-        """,
+        """,  # nosec B608
         tuple(int(service_id) for service_id in service_ids),
     )
     assignments: dict[int, list[int]] = defaultdict(list)
@@ -122,6 +122,20 @@ _SELECT_COLUMNS = (
     "ai_lookup_frequency_maintenance, "
     "ai_lookup_last_checked_at, ai_lookup_last_status, ai_lookup_last_message"
 )
+_ALLOWED_SERVICE_COLUMNS = frozenset({
+    "name", "description", "status", "status_message", "display_order", "is_active",
+    "tags", "updated_by", "ai_lookup_enabled", "ai_lookup_url", "ai_lookup_prompt",
+    "ai_lookup_model_override", "ai_lookup_frequency_operational",
+    "ai_lookup_frequency_degraded", "ai_lookup_frequency_partial_outage",
+    "ai_lookup_frequency_outage", "ai_lookup_frequency_maintenance",
+    "ai_lookup_last_checked_at", "ai_lookup_last_status", "ai_lookup_last_message",
+})
+
+
+def _validate_service_fields(payload: dict[str, Any]) -> None:
+    unknown = set(payload) - _ALLOWED_SERVICE_COLUMNS
+    if unknown:
+        raise ValueError(f"Unsupported service fields: {', '.join(sorted(unknown))}")
 
 
 async def list_services(*, include_inactive: bool = False) -> list[dict[str, Any]]:
@@ -136,7 +150,7 @@ async def list_services(*, include_inactive: bool = False) -> list[dict[str, Any
         FROM service_status_services
         {where_clause}
         ORDER BY display_order ASC, name ASC
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     service_ids = [row.get("id") for row in rows if row.get("id") is not None]
@@ -150,7 +164,7 @@ async def get_service(service_id: int) -> dict[str, Any] | None:
         SELECT {_SELECT_COLUMNS}
         FROM service_status_services
         WHERE id = %s
-        """,
+        """,  # nosec B608
         (service_id,),
     )
     if not row:
@@ -160,12 +174,13 @@ async def get_service(service_id: int) -> dict[str, Any] | None:
 
 
 async def create_service(payload: dict[str, Any], *, company_ids: Sequence[int] | None = None) -> dict[str, Any]:
+    _validate_service_fields(payload)
     if not payload:
         raise ValueError("Missing payload for service creation")
     columns = ", ".join(payload.keys())
     placeholders = ", ".join(["%s"] * len(payload))
     service_id = await db.execute_returning_lastrowid(
-        f"INSERT INTO service_status_services ({columns}) VALUES ({placeholders})",
+        f"INSERT INTO service_status_services ({columns}) VALUES ({placeholders})",  # nosec B608
         tuple(payload.values()),
     )
     if not service_id:
@@ -180,6 +195,7 @@ async def update_service(
     *,
     company_ids: Sequence[int] | None = None,
 ) -> dict[str, Any]:
+    _validate_service_fields(updates)
     if updates:
         assignments: list[str] = []
         params: list[Any] = []
@@ -187,7 +203,7 @@ async def update_service(
             assignments.append(f"{column} = %s")
             params.append(value)
         params.append(service_id)
-        sql = f"UPDATE service_status_services SET {', '.join(assignments)} WHERE id = %s"
+        sql = f"UPDATE service_status_services SET {', '.join(assignments)} WHERE id = %s"  # nosec B608
         await db.execute(sql, tuple(params))
     if company_ids is not None:
         await replace_service_companies(service_id, company_ids)
@@ -201,7 +217,7 @@ async def find_service_by_name(name: str) -> dict[str, Any] | None:
         FROM service_status_services
         WHERE LOWER(name) = LOWER(%s) AND is_active = 1
         LIMIT 1
-        """,
+        """,  # nosec B608
         (name,),
     )
     if not row:
@@ -222,7 +238,7 @@ async def list_services_due_for_ai_lookup() -> list[dict[str, Any]]:
         FROM service_status_services
         WHERE is_active = 1 AND ai_lookup_enabled = 1
         ORDER BY ai_lookup_last_checked_at ASC, id ASC
-        """,
+        """,  # nosec B608
         (),
     )
     service_ids = [row.get("id") for row in rows if row.get("id") is not None]

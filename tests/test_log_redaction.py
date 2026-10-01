@@ -56,3 +56,51 @@ def test_redact_mapping_masks_sensitive_keys_recursively():
 
 def test_redact_headers_handles_none():
     assert redact_headers(None) == {}
+
+
+def test_redact_url_query_masks_token_values():
+    from app.core.log_redaction import redact_url_query
+
+    redacted = redact_url_query("/api/integration-modules/uptimekuma/alerts?token=s3cr3t&page=2")
+    assert "s3cr3t" not in redacted
+    assert "token=" in redacted and "page=2" in redacted
+    assert redact_url_query("/plain/path") == "/plain/path"
+    assert redact_url_query("/x?page=2") == "/x?page=2"
+
+
+def test_uvicorn_access_log_redacts_query_tokens():
+    import logging
+
+    from app.core import logging as app_logging
+
+    app_logging._configure_uvicorn_access_logging(verbose=True)
+    access_logger = logging.getLogger("uvicorn.access")
+    record = logging.LogRecord(
+        "uvicorn.access", logging.INFO, __file__, 1,
+        '%s - "%s %s HTTP/%s" %d',
+        ("1.2.3.4:5", "POST", "/api/integration-modules/uptimekuma/alerts?token=s3cr3t", "1.1", 202),
+        None,
+    )
+    assert all(f.filter(record) for f in access_logger.filters)
+    assert "s3cr3t" not in record.getMessage()
+    # Re-configuring must not stack duplicate filters.
+    app_logging._configure_uvicorn_access_logging(verbose=True)
+    assert sum(isinstance(f, app_logging._UvicornQuerySecretFilter) for f in access_logger.filters) == 1
+
+
+def test_tray_websocket_ignores_query_string_token():
+    import asyncio
+
+    from app import main as app_main
+
+    closed: list[int] = []
+
+    class FakeWebSocket:
+        headers: dict[str, str] = {}
+        query_params = {"token": "device-token"}
+
+        async def close(self, code: int = 1000) -> None:
+            closed.append(code)
+
+    asyncio.run(app_main.tray_device_socket(FakeWebSocket(), "device-1"))
+    assert closed == [4401]

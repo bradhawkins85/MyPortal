@@ -39,6 +39,12 @@ def test_verify_email_accepts_new_token_and_marks_user_verified(monkeypatch):
         monkeypatch.setattr(auth_routes.user_repo, "get_user_by_id", fake_get_user_by_id)
         monkeypatch.setattr(auth_routes.user_repo, "update_user", fake_update_user)
         monkeypatch.setattr(auth_routes.auth_repo, "mark_account_verification_token_used", fake_mark_account_verification_token_used)
+        invalidated: list[int] = []
+
+        async def fake_invalidate(user_id: int):
+            invalidated.append(user_id)
+
+        monkeypatch.setattr(auth_routes.auth_repo, "invalidate_account_verification_tokens_for_user", fake_invalidate)
 
         response = await auth_routes.verify_email(token)
 
@@ -48,6 +54,7 @@ def test_verify_email_accepts_new_token_and_marks_user_verified(monkeypatch):
         assert updates["is_active"] == 1
         assert isinstance(updates["email_verified_at"], datetime)
         assert used_tokens == [stored_token]
+        assert invalidated == [42]
 
     asyncio.run(run_test())
 

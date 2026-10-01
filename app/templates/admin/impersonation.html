@@ -1,21 +1,18 @@
 {% extends "base.html" %}
 
-{% block header_title %}Impersonation{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Impersonation</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="impersonation-filter">Filter users</label>
+      <input id="impersonation-filter" type="search" class="form-input page-header-toolbar__search" placeholder="Filter users" data-table-filter="impersonation-table" />
+    </div>
+  </div>
+{% endblock %}
 
 {% block content %}
   <div class="admin-grid admin-grid--columns">
     <section class="card card--panel admin-grid__full">
-      <header class="card__header">
-        <div class="card__controls">
-          <input
-            type="search"
-            class="form-input"
-            placeholder="Filter users"
-            aria-label="Filter users"
-            data-table-filter="impersonation-table"
-          />
-        </div>
-      </header>
       <div class="table-wrapper">
         <table class="table" id="impersonation-table" data-table data-table-id="impersonation">
           <thead>

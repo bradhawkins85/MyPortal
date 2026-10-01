@@ -1,7 +1,7 @@
 <section class="card card--panel" data-report-section="essential8_detail">
   <header class="card__header report-section__header">
     <h2>Essential 8 — Per-control breakdown</h2>
-    <span class="report-section__meta">{{ section.detail_data.total or 0 }} controls</span>
+    <span class="report-section__meta">{{ section.detail_data.total or 0 }} controls{% if section.detail_data.generated_at %} · export snapshot {{ section.detail_data.generated_at[:16].replace('T', ' ') }}{% endif %}</span>
   </header>
   <div class="card__body">
     {% set controls = section.detail_data.controls or [] %}
@@ -15,6 +15,9 @@
             <th>ML1</th>
             <th>ML2</th>
             <th>ML3</th>
+            <th>Requirements</th>
+            <th>Evidence refs</th>
+            <th>Pending approvals</th>
           </tr>
         </thead>
         <tbody>
@@ -41,6 +44,9 @@
                   {{ control.ml3 | replace('_', ' ') | title }}
                 </span>
               </td>
+              <td>{{ control.requirement_count or 0 }}</td>
+              <td>{{ control.evidence_reference_count or 0 }}</td>
+              <td>{{ control.pending_approval_count or 0 }}</td>
             </tr>
           {% endfor %}
         </tbody>

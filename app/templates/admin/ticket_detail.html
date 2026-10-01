@@ -1,15 +1,79 @@
 {% extends "base.html" %}
-{% from "macros/header.html" import page_header_actions %}
+{% from "macros/header.html" import page_header_overflow %}
 
 
-{% block header_title %}Ticket detail{% endblock %}
+{% block header_title %}
+  <div class="header-title-menu ticket-detail-header">
+    <span class="header-title-menu__label ticket-detail-header__subject" title="{{ ticket.subject }}">{{ ticket.subject }}</span>
+    <span class="ticket-detail-header__sla">
+      <span class="status status--{{ 'danger' if ticket_sla.state == 'breached' else ('warning' if ticket_sla.state == 'at_risk' else ('success' if ticket_sla.state in ['met','on_track'] else 'neutral')) }}" title="SLA">{{ ticket_sla.name ~ ' · ' if ticket_sla.name else '' }}{{ ticket_sla.label }}</span>
+      {%- if ticket_sla.paused %}
+        <span class="ticket-detail-header__sla-meta">Timer paused{% if ticket_sla.paused_reason == 'outside_business_hours' %} (outside business hours){% endif %}</span>
+      {%- endif %}
+      {%- if ticket_sla.resolution_due_at %}
+        <span class="ticket-detail-header__sla-meta">Resolution due <span data-utc="{{ ticket_sla.resolution_due_at.isoformat() }}">{{ ticket_sla.resolution_due_at.isoformat() }}</span></span>
+      {%- endif %}
+    </span>
+  </div>
+{% endblock %}
 
 {% block header_actions %}
-  {{ page_header_actions([
+  {% set ticket_header_actions = [
+    {"label": "Start process", "type": "link", "href": "/processes/start?ticket_id=" ~ ticket.id},
     {"label": "Clock history", "type": "button", "attrs": {"data-ticket-page-clock-history": true}},
-    {"label": "Audit Trail", "type": "button", "attrs": {"data-ticket-automation-history-open": true, "data-ticket-id": ticket.id}},
-    {"label": "All tickets", "type": "link", "href": "/admin/tickets"}
-  ]) }}
+    {"label": "Audit Trail", "type": "button", "attrs": {"data-ticket-automation-history-open": true, "data-ticket-id": ticket.id}}
+  ] %}
+  {% if not ticket.xero_invoice_number and is_super_admin and module_enabled.get('xero', false) %}
+    {% set _ = ticket_header_actions.append({"label": "Bill Now", "type": "button", "attrs": {"data-ticket-bill-now": ticket.id}}) %}
+  {% endif %}
+  {% if can_delete_ticket %}
+    {% set _ = ticket_header_actions.append({
+      "label": "Delete ticket",
+      "type": "form",
+      "variant": "danger",
+      "action": "/admin/tickets/" ~ ticket.id ~ "/delete",
+      "attrs": {"data-confirm": "Delete ticket " ~ ticket.id ~ "? This cannot be undone."}
+    }) %}
+  {% endif %}
+  <div class="ticket-detail-header__actions">
+    <a href="/admin/tickets" class="button button--ghost">Back to tickets</a>
+    {% if module_enabled.get('hudu', false) and hudu_company_url %}
+      <a
+        href="{{ hudu_company_url }}"
+        target="_blank"
+        rel="noreferrer noopener"
+        class="button button--ghost"
+        title="Open company in Hudu"
+        aria-label="Open company in Hudu"
+      >
+        <span class="button__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false" fill="currentColor">
+            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+          </svg>
+        </span>
+        Hudu
+      </a>
+    {% endif %}
+    {% if solidtime_links and solidtime_links.enabled and solidtime_links.timer_url %}
+      <a
+        href="{{ solidtime_links.timer_url }}"
+        target="_blank"
+        rel="noreferrer noopener"
+        class="button button--ghost"
+        title="Open Solidtime timer for this ticket"
+        aria-label="Open Solidtime timer for this ticket"
+      >
+        <span class="button__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false" fill="currentColor">
+            <title>Solidtime timer</title>
+            <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 18a8 8 0 110-16 8 8 0 010 16zm.5-13H11v6l5.2 3.1.8-1.3-4.5-2.7V7z"/>
+          </svg>
+        </span>
+        Solidtime
+      </a>
+    {% endif %}
+    {{ page_header_overflow('ticket-actions-menu', 'Actions', ticket_header_actions) }}
+  </div>
 {% endblock %}
 {% block extra_head %}
   {{ super() }}
@@ -18,91 +82,49 @@
 
 {% block content %}
   <div
-    class="management management--single"
+    class="management management--single management--ticket-detail"
     data-layout
     data-admin-ticket-detail
     data-ticket-id="{{ ticket.id }}"
   >
     <section class="management__content">
-      <header class="management__header">
-        <div>
-          <h1 class="management__title">{{ ticket.subject }}</h1>
-          {% set ticket_status = (ticket.status or 'open') %}
-          {% set ai_badge_map = {'succeeded': 'badge--success', 'error': 'badge--danger', 'skipped': 'badge--muted', 'unknown': 'badge--muted'} %}
-          {% set ai_date_color_map = {'succeeded': '#bbf7d0', 'error': '#fecaca', 'skipped': 'rgba(226, 232, 240, 0.75)', 'unknown': 'rgba(226, 232, 240, 0.75)'} %}
-          {% set resolution_label_map = {'likely_resolved': 'Likely Resolved', 'likely_in_progress': 'Likely In Progress'} %}
-          {% set resolution_badge_map = {'likely_resolved': 'badge--success', 'likely_in_progress': 'badge--warning'} %}
-          {% set ai_status_value = ticket.ai_summary_status if ticket.ai_summary_status is not none else 'skipped' %}
-          {% set ai_status_lower = ai_status_value | lower %}
-          {% set ai_status_label = ai_status_lower.replace('_', ' ') | title %}
-          {% set tag_status_value = ticket.ai_tags_status if ticket.ai_tags_status is not none else 'skipped' %}
-          {% set tag_status_lower = tag_status_value | lower %}
-          {% set ticket_status_label = ticket_status_label_map.get(ticket_status, ticket_status.replace('_', ' ').title()) %}
-        </div>
-        <div class="management__header-actions">
-          <a href="/admin/tickets" class="button button--ghost">Back to tickets</a>
-          {% if module_enabled.get('hudu', false) and hudu_company_url %}
-            <a
-              href="{{ hudu_company_url }}"
-              target="_blank"
-              rel="noreferrer noopener"
-              class="button button--ghost"
-              title="Open company in Hudu"
-              aria-label="Open company in Hudu"
-            >
-              <span class="button__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false" fill="currentColor">
-                  <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
-                </svg>
-              </span>
-              Hudu
-            </a>
-          {% endif %}
-          {% if solidtime_links and solidtime_links.enabled and solidtime_links.timer_url %}
-            <a
-              href="{{ solidtime_links.timer_url }}"
-              target="_blank"
-              rel="noreferrer noopener"
-              class="button button--ghost"
-              title="Open Solidtime timer for this ticket"
-              aria-label="Open Solidtime timer for this ticket"
-            >
-              <span class="button__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false" fill="currentColor">
-                  <title>Solidtime timer</title>
-                  <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 18a8 8 0 110-16 8 8 0 010 16zm.5-13H11v6l5.2 3.1.8-1.3-4.5-2.7V7z"/>
-                </svg>
-              </span>
-              Solidtime
-            </a>
-          {% endif %}
-          {% if can_delete_ticket %}
-            <form
-              action="/admin/tickets/{{ ticket.id }}/delete"
-              method="post"
-              class="inline-form"
-              data-confirm="Delete ticket {{ ticket.id }}? This cannot be undone."
-            >
-              {% if csrf_token %}
-                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-              {% endif %}
-              <button type="submit" class="button button--danger">Delete ticket</button>
-            </form>
-          {% endif %}
-        </div>
-      </header>
+      {% set ticket_status = (ticket.status or 'open') %}
+      {% set ai_badge_map = {'succeeded': 'badge--success', 'error': 'badge--danger', 'skipped': 'badge--muted', 'unknown': 'badge--muted'} %}
+      {% set ai_date_color_map = {'succeeded': '#bbf7d0', 'error': '#fecaca', 'skipped': 'rgba(226, 232, 240, 0.75)', 'unknown': 'rgba(226, 232, 240, 0.75)'} %}
+      {% set resolution_label_map = {'likely_resolved': 'Likely Resolved', 'likely_in_progress': 'Likely In Progress'} %}
+      {% set resolution_badge_map = {'likely_resolved': 'badge--success', 'likely_in_progress': 'badge--warning'} %}
+      {% set ai_status_value = ticket.ai_summary_status if ticket.ai_summary_status is not none else 'skipped' %}
+      {% set ai_status_lower = ai_status_value | lower %}
+      {% set ai_status_label = ai_status_lower.replace('_', ' ') | title %}
+      {% set tag_status_value = ticket.ai_tags_status if ticket.ai_tags_status is not none else 'skipped' %}
+      {% set tag_status_lower = tag_status_value | lower %}
+      {% set ticket_status_label = ticket_status_label_map.get(ticket_status, ticket_status.replace('_', ' ').title()) %}
+
 
       <div class="management__body management__body--columns management__body--ticket-detail management__body--ticket-detail-admin">
         <div class="management__column management__column--details">
-          <details class="card card--panel card-collapsible">
+          <details class="card card--panel card-collapsible" open>
             <summary class="card__header card__header--collapsible">
               <h2 class="card__title">Ticket details</h2>
               <div class="card__collapsible-meta">
+                {% if ticket_business_hours and ticket_business_hours.configured %}
+                  <span
+                    class="status status--{{ 'success' if ticket_business_hours.open else 'warning' }}"
+                    title="{{ 'Company' if ticket_business_hours.source == 'company' else 'Global' }} business hours ({{ ticket_business_hours.timezone }}), local time {{ ticket_business_hours.local_time }}{% if ticket_business_hours.next_change_local %}. {{ 'Closes' if ticket_business_hours.open else 'Opens' }} {{ ticket_business_hours.next_change_local }}{% endif %}"
+                    data-ticket-business-hours
+                  >Customer {{ 'open' if ticket_business_hours.open else 'closed' }}</span>
+                {% endif %}
                 <span class="card__toggle-icon" aria-hidden="true"></span>
               </div>
             </summary>
             <div class="card-collapsible__content">
-            <form id="ticket-details-form" action="/admin/tickets/{{ ticket.id }}/details" method="post" class="form card__form" data-ticket-details-autosave>
+            {% if ticket_deferred_automations %}
+              <p class="form-help" data-ticket-deferred-automations>
+                Waiting for business hours:
+                {% for deferred in ticket_deferred_automations %}{{ deferred.automation_name }}{% if deferred.run_after %} (<span data-utc="{{ deferred.run_after.isoformat() }}">{{ deferred.run_after.isoformat() }}</span>){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+              </p>
+            {% endif %}
+            <form id="ticket-details-form" action="/admin/tickets/{{ ticket.id }}/details" method="post" class="form card__form ticket-details-form" data-ticket-details-autosave>
               {% if csrf_token %}
                 <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
               {% endif %}
@@ -119,9 +141,10 @@
                   placeholder="Briefly describe the request"
                 />
               </div>
+              <div class="ticket-details-form__pair">
               <div class="form-field">
                 <label class="form-label" for="ticket-status-detail">Status</label>
-                <select id="ticket-status-detail" name="status" class="form-input">
+                <select id="ticket-status-detail" name="status" class="form-input" data-searchable="on">
                   {% if ticket_status not in ticket_selectable_status_values %}
                     <option value="{{ ticket_status }}" selected>{{ ticket_status_label }}</option>
                   {% endif %}
@@ -134,7 +157,7 @@
               </div>
               <div class="form-field">
                 <label class="form-label" for="ticket-priority-detail">Priority</label>
-                <select id="ticket-priority-detail" name="priority" class="form-input">
+                <select id="ticket-priority-detail" name="priority" class="form-input" data-searchable="on">
                   {% for priority_option in ticket_priority_options %}
                     {% set priority_value = priority_option|lower %}
                     <option value="{{ priority_value }}" {% if priority_value == (ticket.priority or 'normal')|lower %}selected{% endif %}>
@@ -143,9 +166,21 @@
                   {% endfor %}
                 </select>
               </div>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ticket-assigned-detail">Assigned to</label>
+                <select id="ticket-assigned-detail" name="assignedUserId" class="form-input" data-searchable="on">
+                  <option value="">Unassigned</option>
+                  {% for user in ticket_user_options %}
+                    <option value="{{ user.id }}" {% if user.id == ticket.assigned_user_id %}selected{% endif %}>
+                      {{ user.email }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
               <div class="form-field">
                 <label class="form-label" for="ticket-company-detail">Company</label>
-                <select id="ticket-company-detail" name="companyId" class="form-input">
+                <select id="ticket-company-detail" name="companyId" class="form-input" data-searchable="on">
                   <option value="">Not linked</option>
                   {% for company_option in ticket_company_options %}
                     <option value="{{ company_option.id }}" {% if company_option.id == ticket.company_id %}selected{% endif %}>
@@ -161,6 +196,7 @@
                   name="requesterId"
                   class="form-input"
                   data-ticket-requester-select
+                  data-searchable="on"
                   {% if not ticket.company_id %}disabled aria-disabled="true"{% endif %}
                 >
                   <option value="">Not set</option>
@@ -185,7 +221,7 @@
                   {% endif %}
                 </p>
               </div>
-              <div class="form-field">
+              <div class="form-field ticket-details-contact">
                 <span class="form-label">Requester phone</span>
                 {% if ticket_requester_phone_display %}
                   <p class="form-help">Mobile: {{ ticket_requester_phone_display }}</p>
@@ -196,13 +232,28 @@
                 {% if not ticket_requester_phone_display and not ticket_company_phone_display %}
                   <p class="form-help">—</p>
                 {% endif %}
-                {% if ticket_requester_lookup_name %}
-                  <div data-outlook-contact-phones data-requester-name="{{ ticket_requester_lookup_name }}">
+                {% if ticket_requester_lookup_name and feature_pack_available('outlook_contacts') %}
+                  <div
+                    data-outlook-contact-phones
+                    data-requester-name="{{ ticket_requester_lookup_name }}"
+                    data-ticket-id="{{ ticket.id }}"
+                    {% if ticket.requester_staff_id %}data-requester-staff-id="{{ ticket.requester_staff_id }}"{% endif %}
+                  >
                     <button type="button" class="button button--ghost button--small" data-outlook-contact-load>Check Outlook contacts</button>
                     <p class="form-help" data-outlook-contact-status hidden></p>
                     <div data-outlook-contact-results></div>
                   </div>
                 {% endif %}
+              </div>
+              <div class="form-field">
+                <span class="form-label">Change Type</span>
+                {% if ticket.company_id %}
+                  <select class="form-input" name="approvalConfigurationId" data-searchable="on" {% if not ticket_approval_configurations %}disabled{% endif %}>
+                    <option value="">Select change type</option>
+                    {% for option in ticket_approval_configurations %}<option value="{{ option.id }}" {% if ticket_approval_workflow and option.id == ticket_approval_workflow.configuration_id %}selected{% endif %}>{{ option.name }}</option>{% endfor %}
+                  </select>
+                  {% if not ticket_approval_configurations %}<p class="form-help">No approval types are configured for this company.</p>{% endif %}
+                {% else %}<p class="form-help">Link a company before selecting a change type.</p>{% endif %}
               </div>
               <div class="form-field">
                 <label class="form-label" for="ticket-review-date-detail">Review Date</label>
@@ -214,17 +265,6 @@
                   value="{{ ticket.review_date.isoformat() if ticket.review_date else '' }}"
                 />
                 <p class="form-help">Flag when this ticket should be reviewed again.</p>
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="ticket-assigned-detail">Assigned to</label>
-                <select id="ticket-assigned-detail" name="assignedUserId" class="form-input">
-                  <option value="">Unassigned</option>
-                  {% for user in ticket_user_options %}
-                    <option value="{{ user.id }}" {% if user.id == ticket.assigned_user_id %}selected{% endif %}>
-                      {{ user.email }}
-                    </option>
-                  {% endfor %}
-                </select>
               </div>
               <p class="form-help" data-ticket-details-autosave-status role="status" aria-live="polite">Changes save automatically when you leave a field.</p>
             </form>
@@ -317,7 +357,7 @@
                       {% endif %}
                       <div style="margin-top: 12px; display: flex; gap: 8px; align-items: flex-start; flex-direction: column;">
                         <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
-                          <select class="form-input" data-watcher-select style="flex: 1;">
+                          <select class="form-input" data-watcher-select data-searchable="on" style="flex: 1;">
                             <option value="">Select a staff member to add...</option>
                             {% if ticket_watcher_staff_options %}
                               {% for staff_user in ticket_watcher_staff_options %}
@@ -480,14 +520,14 @@
                                 <button 
                                   type="button" 
                                   class="tag__remove" 
-                                  onclick="removeTag('{{ tag }}')"
+                                  onclick="removeTag({{ tag | tojson | forceescape }})"
                                   aria-label="Remove tag {{ tag }}"
                                   title="Remove this tag"
                                 >×</button>
                                 <button
                                   type="button"
                                   class="tag__exclude"
-                                  onclick="excludeAndRemoveTag('{{ tag }}')"
+                                  onclick="excludeAndRemoveTag({{ tag | tojson | forceescape }})"
                                   aria-label="Exclude tag {{ tag }} from future use"
                                   title="Remove and exclude from future use"
                                 ><svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true"><path d="M8.27 3 3 8.27v7.46L8.27 21h7.46L21 15.73V8.27L15.73 3H8.27zm4.5 13h-1.5v-1.5h1.5V16zm0-3h-1.5V8h1.5v5z"/></svg></button>
@@ -547,17 +587,14 @@
                 <p class="text-muted" style="margin-bottom: 1rem;">
                   Schedule a call with {{ ticket_assigned_user.email }} to discuss this ticket.
                 </p>
-                <button
-                  data-cal-link="{{ ticket_assigned_user.booking_link_url }}"
-                  data-ticket-id="{{ ticket.id }}"
-                  data-ticket-subject="{{ ticket.subject | e }}"
-                  data-user-name="{{ ([user.first_name, user.last_name] | select | join(' ')) | e }}"
-                  data-user-email="{{ (user.email or '') | e }}"
-                  data-user-phone="{{ (user.mobile_phone or '') | e }}"
+                <a
+                  href="{{ ticket_booking_link_url or ticket_assigned_user.booking_link_url }}"
+                  target="_blank"
+                  rel="noreferrer noopener"
                   class="button button--primary"
                 >
                   Book a Call
-                </button>
+                </a>
               </div>
             </article>
           {% endif %}
@@ -625,13 +662,22 @@
               >
                 {% for item in ticket_related_items %}
                   <li class="ticket-related__item">
-                    <a
-                      class="ticket-related__link"
-                      href="{{ item.url }}"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="{{ item.label }}"
-                    >{{ item.label }}</a>
+                    <div class="ticket-related__meta">
+                      <span class="status status--info">{{ item.relationship_label }}</span>
+                      <span class="status status--neutral">{{ item.confidence_band }}{% if item.score is defined %} · {{ item.score }}%{% endif %}</span>
+                    </div>
+                    {% if item.available %}
+                      <a
+                        class="ticket-related__link"
+                        href="{{ item.url }}"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="{{ item.label }}"
+                      >{{ item.label }}</a>
+                      {% if item.reason %}<div class="ticket-related__reason">{{ item.reason }}</div>{% endif %}
+                    {% else %}
+                      <span class="ticket-related__unavailable">{{ item.label }}</span>
+                    {% endif %}
                   </li>
                 {% endfor %}
               </ul>
@@ -741,17 +787,17 @@
             </div>
           </details>
 
-          {% if ticket.ai_summary or ticket.ai_summary_status %}
+          {% if ticket.ai_summary or ticket.ai_summary_status or can_reprocess_ticket_ai %}
             <details class="card card--panel card-collapsible" data-ticket-ai-card open>
               <summary class="card__header card__header--collapsible">
-                <div style="display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap;">
+                <div class="ticket-ai-summary__heading">
                   <h2 class="card__title">AI Summary</h2>
                   {% if ticket.ai_summary_updated_at %}
                     <span class="card__subtitle" style="margin: 0; color: {{ ai_date_color_map.get(ai_status_lower, 'rgba(226, 232, 240, 0.75)') }}">Updated {{ ticket.ai_summary_updated_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</span>
                   {% endif %}
                 </div>
                 <div class="card__collapsible-meta">
-                  <div class="button-group" style="align-items: center;">
+                  <div class="button-group ticket-ai-summary__actions">
                     {% set resolution_label = resolution_label_map.get(ticket.ai_resolution_state) %}
                     {% if resolution_label %}
                       <span class="badge {{ resolution_badge_map.get(ticket.ai_resolution_state, 'badge--muted') }}" style="align-self: center;">{{ resolution_label }}</span>
@@ -768,22 +814,26 @@
                     >
                       <span data-button-label>Replace description</span>
                     </button>
+                    {% if can_reprocess_ticket_ai %}
+                    {% set reprocess_tags_only = ticket_status == 'closed' %}
                     <button
                       type="button"
                       class="button button--ghost button--small"
                       data-ticket-ai-refresh
                       data-ticket-id="{{ ticket.id }}"
-                      data-processing-label="Reprocessing AI summary and AI tags…"
-                      aria-label="Reprocess AI summary and AI tags"
-                      title="Reprocess AI summary and AI tags"
+                      data-processing-label="{{ 'Reprocessing AI tags…' if reprocess_tags_only else 'Reprocessing AI summary and AI tags…' }}"
+                      data-request-message="{{ 'Requesting AI tag regeneration. You can continue working while tags update.' if reprocess_tags_only else 'Requesting AI regeneration. You can continue working while we update the summary.' }}"
+                      aria-label="{{ 'Reprocess AI tags' if reprocess_tags_only else 'Reprocess AI summary and AI tags' }}"
+                      title="{{ 'Reprocess AI tags' if reprocess_tags_only else 'Reprocess AI summary and AI tags' }}"
                     >
-                      <span class="sr-only" data-button-label>Reprocess AI summary and AI tags</span>
+                      <span class="sr-only" data-button-label>{{ 'Reprocess AI tags' if reprocess_tags_only else 'Reprocess AI summary and AI tags' }}</span>
                       <span class="button__icon" aria-hidden="true" data-button-icon>
                         <svg viewBox="0 0 24 24" focusable="false">
                           <path d="M12 4a8 8 0 0 1 7.75 6.11 1 1 0 0 1-1.94.46A6 6 0 1 0 17 16h1.59l-1.3-1.29a1 1 0 1 1 1.42-1.42l3 3a1 1 0 0 1 0 1.42l-3 3a1 1 0 0 1-1.42-1.42L18.59 18H17a8 8 0 1 1-5-14Z" />
                         </svg>
                       </span>
                     </button>
+                    {% endif %}
                   </div>
                   <span class="card__toggle-icon" aria-hidden="true"></span>
                 </div>
@@ -818,6 +868,64 @@
                 </div>
               </div>
             </details>
+          {% endif %}
+
+          {% if ticket.status in ['resolved', 'closed'] %}
+          <details class="card card--panel card-collapsible" data-ticket-resolution-panel>
+            <summary class="card__header card__header--collapsible">
+              <div class="card__title-group">
+                <h2 class="card__title">Resolution Steps</h2>
+                {% if ticket.resolution_steps_status == 'queued' %}
+                  <span class="status status--info">Generating…</span>
+                {% elif ticket.resolution_steps_status == 'error' %}
+                  <span class="status status--danger">Generation failed</span>
+                {% elif ticket.resolution_steps %}
+                  <span class="status status--success">Available</span>
+                {% endif %}
+              </div>
+              <div class="card__collapsible-meta">
+                <span class="card__toggle-icon" aria-hidden="true"></span>
+              </div>
+            </summary>
+            <div class="card__body">
+              <form action="/admin/tickets/{{ ticket.id }}/resolution-steps" method="post" class="form">
+                {% include "partials/csrf.html" %}
+                <div class="form-field">
+                  <span class="form-label" id="admin-resolution-steps-label">Final resolution outline</span>
+                  <div class="rich-text-editor" data-rich-text-editor aria-labelledby="admin-resolution-steps-label">
+                    <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Resolution formatting options">
+                      <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="bold" aria-label="Bold"><span aria-hidden="true">B</span></button>
+                      <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="italic" aria-label="Italic"><span aria-hidden="true">I</span></button>
+                      <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="insertUnorderedList" aria-label="Bulleted list"><span aria-hidden="true">•</span></button>
+                      <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="insertOrderedList" aria-label="Numbered list"><span aria-hidden="true">1.</span></button>
+                    </div>
+                    <div class="rich-text-editor__surface" data-rich-text-content contenteditable="true" role="textbox" aria-labelledby="admin-resolution-steps-label" aria-multiline="true" data-placeholder="Add the final steps that resolved this ticket…">{{ ticket.resolution_steps | default('', true) | safe }}</div>
+                    <textarea name="resolutionSteps" class="rich-text-editor__fallback" data-rich-text-value data-rich-text-fallback aria-labelledby="admin-resolution-steps-label">{{ ticket.resolution_steps or '' }}</textarea>
+                  </div>
+                  <p class="form-help">
+                    {% if ticket.resolution_steps_source == 'ai_generated' %}AI generated.{% elif ticket.resolution_steps_source == 'manually_edited' %}Manually edited.{% endif %}
+                    Saving or regenerating refreshes the ticket's RAG index.
+                  </p>
+                </div>
+                {% if ticket.resolution_steps_status == 'error' %}
+                  <p class="form-help form-help--error" role="alert">Resolution generation failed. The ticket remains resolved and any previously saved outline is unchanged.</p>
+                {% endif %}
+                <div class="form-actions">
+                  <button class="button button--primary" type="submit">Save resolution steps</button>
+                  <button class="button button--secondary" type="submit" formaction="/admin/tickets/{{ ticket.id }}/resolution-steps/reprocess" data-resolution-reprocess>Regenerate with AI</button>
+                </div>
+              </form>
+            </div>
+          </details>
+          {% endif %}
+
+          {% if ticket_approval_workflow and ticket_approval_workflow.pending_count %}
+          <section class="card card--panel" data-ticket-approvals>
+            <header class="card__header"><div><h2 class="card__title">Pending Approvals</h2><p class="card__subtitle">{{ ticket_approval_workflow.configuration_name }} · {{ ticket_approval_workflow.pending_count }} outstanding</p></div></header>
+            <div class="table-wrapper"><table class="table"><thead><tr><th>Required approver</th><th>Role</th><th>Status</th><th>Decision</th></tr></thead><tbody>
+              {% for approval in ticket_approval_workflow.decisions %}<tr><td>{{ approval.approver_name }}{% if approval.approver_email %}<div class="form-help">{{ approval.approver_email }}</div>{% endif %}</td><td>{{ approval.approver_kind|title }}</td><td><span class="status status--{{ 'warning' if approval.status == 'pending' else ('success' if approval.status == 'approved' else 'danger') }}">{{ approval.status|title }}</span></td><td><form method="post" action="/admin/tickets/{{ ticket.id }}/approvals/{{ approval.id }}" class="button-group">{% include "partials/csrf.html" %}<button class="button button--small button--ghost" name="decision" value="approved" type="submit">Approve</button><button class="button button--small button--ghost" name="decision" value="denied" type="submit">Deny</button></form></td></tr>{% endfor %}
+            </tbody></table></div>
+          </section>
           {% endif %}
 
           <details class="card card--panel card-collapsible" data-ticket-tasks-card>
@@ -858,11 +966,17 @@
             <div class="card-collapsible__content">
               <div class="card__body">
                 <div class="form-field">
-                  <label class="form-label" for="ticket-assets">Assets</label>
+                  <div class="ticket-assets-lookup__header">
+                    <label class="form-label" for="ticket-assets">Assets</label>
+                    <button type="button" class="button button--small button--ghost" data-requester-assets-lookup data-endpoint="/admin/tickets/{{ ticket.id }}/requester-assets" {% if not ticket.requester_id and not ticket.requester_staff_id %}disabled aria-disabled="true"{% endif %}>
+                      <span aria-hidden="true">⌕</span> Look up requester assets
+                    </button>
+                  </div>
                 <select
                   id="ticket-assets"
                   class="form-input"
                   data-ticket-asset-selector
+                  data-searchable="on"
                   data-assets-endpoint-template="/api/companies/{companyId}/assets"
                   data-initial-options="{{ ticket_asset_options | tojson | forceescape }}"
                   data-selected-assets="{{ ticket_asset_selection | tojson | forceescape }}"
@@ -891,6 +1005,11 @@
                     Choose an asset to link. Linked devices appear below.
                   {% endif %}
                 </p>
+                <div class="ticket-assets-lookup" data-requester-assets-results hidden>
+                  <p class="form-help" data-requester-assets-status role="status" aria-live="polite"></p>
+                  <div data-requester-assets-options></div>
+                  <button type="button" class="button button--small" data-requester-assets-link hidden>Link selected assets</button>
+                </div>
                 <div
                   class="ticket-assets-linked"
                   data-ticket-linked-assets
@@ -902,6 +1021,18 @@
                   data-ticket-subject="{{ ticket.subject | e }}"
                 >
                   <ul class="ticket-assets-linked__list" data-linked-assets-list>
+                    {% for asset in ticket_suggested_assets %}
+                      {% set suggested_name = asset.name or ('Asset ' ~ asset.asset_id) %}
+                      <li class="ticket-assets-linked__item ticket-assets-linked__item--suggested">
+                        <span class="ticket-assets-linked__name">{{ suggested_name }}</span>
+                        <span class="badge badge--warning">Suggested</span>
+                        <span class="ticket-assets-linked__meta">Matched {{ asset.matched_username }}</span>
+                        <form method="post" action="/admin/tickets/{{ ticket.id }}/assets/{{ asset.asset_id }}/confirm">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                          <button type="submit" class="button button--small">Confirm asset</button>
+                        </form>
+                      </li>
+                    {% endfor %}
                     {% for asset in ticket_assets %}
                       {% set serial_value = asset.serial_number %}
                       {% set status_value = asset.status %}
@@ -950,6 +1081,7 @@
                           <p class="ticket-assets-linked__meta">{{ meta_parts | join(' · ') }}</p>
                         {% endif %}
                         <div class="ticket-assets-linked__actions">
+                          <a href="/assets/{{ asset.asset_id }}" class="button button--ghost button--small">Documentation</a>
                           {% if tactical_link %}
                             <a
                               href="{{ tactical_link }}"
@@ -1034,6 +1166,7 @@
                       class="attachment-card__preview"
                       href="/api/tickets/{{ ticket.id }}/attachments/{{ attachment.id }}/download"
                       title="Open {{ attachment.original_filename or attachment.filename }}"
+                      {% if attachment.mime_type in ('image/jpeg', 'image/png', 'image/gif', 'image/webp') %}data-attachment-image-preview{% endif %}
                     >
                       {% if attachment.mime_type in ('image/jpeg', 'image/png', 'image/gif', 'image/webp') %}
                         <img
@@ -1058,12 +1191,34 @@
                         <p class="attachment-card__name">
                           <a
                             href="/api/tickets/{{ ticket.id }}/attachments/{{ attachment.id }}/download"
+                            download
                             title="{{ attachment.original_filename or attachment.filename }}"
                           >
                             {{ attachment.original_filename or attachment.filename }}
                           </a>
                         </p>
+                      </div>
+                      <p class="attachment-card__date">
+                        {% if attachment.uploaded_iso %}
+                          <span data-utc="{{ attachment.uploaded_iso }}"></span>
+                        {% else %}
+                          <span class="visually-hidden">Upload date unavailable</span>
+                        {% endif %}
+                      </p>
+                      <div class="attachment-card__footer">
                         <div class="attachment-card__actions">
+                          <button
+                            type="button"
+                            class="button button--ghost button--small attachment-card__action"
+                            data-block-attachment
+                            data-attachment-id="{{ attachment.id }}"
+                            data-can-remove-existing="{{ 'true' if is_super_admin else 'false' }}"
+                            aria-label="Block this attachment content"
+                            title="Block this file so matching attachments are discarded"
+                          >
+                            <svg class="attachment-card__block-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 2a7.96 7.96 0 0 1 5.13 1.87L5.87 17.13A8 8 0 0 1 12 4Zm0 16a7.96 7.96 0 0 1-5.13-1.87L18.13 6.87A8 8 0 0 1 12 20Z"/></svg>
+                            <span class="visually-hidden">Block</span>
+                          </button>
                           <button
                             type="button"
                             class="button button--ghost button--small attachment-card__action"
@@ -1071,16 +1226,12 @@
                             data-attachment-id="{{ attachment.id }}"
                             aria-label="Remove attachment"
                           >
-                            Remove
+                            <svg class="attachment-card__remove-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-1 12H8L7 9Zm3 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg>
+                            <span class="visually-hidden">Remove</span>
                           </button>
                         </div>
+                        <p class="attachment-card__meta">{{ attachment.file_size | filesizeformat }}</p>
                       </div>
-                      <p class="attachment-card__meta">
-                        {{ attachment.file_size | filesizeformat }}
-                        {% if attachment.uploaded_iso %}
-                          · <span data-utc="{{ attachment.uploaded_iso }}"></span>
-                        {% endif %}
-                      </p>
                     </div>
                   </article>
                 {% endfor %}
@@ -1104,20 +1255,16 @@
               </div>
             </summary>
             <div class="card-collapsible__content card__body">
-              <form action="/admin/tickets/{{ ticket.id }}/expenses" method="post" class="form card__form">
-                <div class="form-grid form-grid--2">
-                  <div class="form-field">
-                    <label class="form-label" for="ticket-expense-description">Description</label>
-                    <input class="form-input" id="ticket-expense-description" name="description" type="text" placeholder="Parking, freight, tolls" required>
-                  </div>
-                  <div class="form-field">
-                    <label class="form-label" for="ticket-expense-amount">Amount</label>
-                    <input class="form-input" id="ticket-expense-amount" name="amount" type="number" min="0.01" step="0.01" required>
-                  </div>
+              <form action="/admin/tickets/{{ ticket.id }}/expenses" method="post" class="form card__form ticket-expense-form">
+                <div class="form-field">
+                  <label class="form-label" for="ticket-expense-description">Description</label>
+                  <input class="form-input" id="ticket-expense-description" name="description" type="text" placeholder="Parking, freight, tolls" required>
                 </div>
-                <div class="form-actions">
-                  <button type="submit" class="button button--secondary">Add expense</button>
+                <div class="form-field ticket-expense-form__amount">
+                  <label class="form-label" for="ticket-expense-amount">Amount</label>
+                  <input class="form-input" id="ticket-expense-amount" name="amount" type="number" min="0.01" step="0.01" required>
                 </div>
+                <button type="submit" class="button button--secondary ticket-expense-form__submit">Add expense</button>
               </form>
               {% if ticket_expenses %}
                 <div class="table-responsive">
@@ -1151,7 +1298,7 @@
         </div>
 
         <div class="management__column management__column--activity">
-          <details class="card card--panel card-collapsible" open>
+          <details class="card card--panel card-collapsible ticket-reply-composer" open>
             <summary class="card__header card__header--collapsible">
               <div class="card__title-group">
                 <h2 class="card__title">Add a reply</h2>
@@ -1163,11 +1310,34 @@
               </div>
             </summary>
             <div class="card-collapsible__content">
-            <form id="ticket-reply-form" action="/admin/tickets/{{ ticket.id }}/replies" method="post" class="form card__form ticket-reply-form" enctype="multipart/form-data" data-ticket-reply-cache data-ticket-reply-cache-ticket-id="{{ ticket.id }}">
+            <form
+              id="ticket-reply-form"
+              action="/admin/tickets/{{ ticket.id }}/replies"
+              method="post"
+              class="form card__form ticket-reply-form"
+              enctype="multipart/form-data"
+              data-ticket-reply-cache
+              data-ticket-reply-cache-ticket-id="{{ ticket.id }}"
+              data-has-company="{{ 'true' if ticket.company_id is not none else 'false' }}"
+              data-has-requester="{{ 'true' if ticket.requester_id is not none or ticket.requester_staff_id is not none else 'false' }}"
+            >
               {% if csrf_token %}
                 <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
               {% endif %}
-              <div class="form-field">
+              <p
+                class="form-error"
+                role="alert"
+                aria-live="assertive"
+                data-ticket-reply-error
+                {% if not reply_error %}hidden{% endif %}
+              >{{ reply_error or '' }}</p>
+              <div class="ticket-reply-context" aria-label="Reply delivery details">
+                <span><strong>To:</strong> {{ ticket_requester_lookup_name or 'Requester' }}</span>
+                <span><strong>Channel:</strong> Email</span>
+                <span data-reply-visibility><strong>Visibility:</strong> Public reply</span>
+              </div>
+              <div class="ticket-reply-compose-grid">
+              <div class="form-field ticket-reply-message">
                 <span class="form-label" id="ticket-reply-label">Reply</span>
                 <div
                   class="rich-text-editor"
@@ -1279,9 +1449,10 @@
                     aria-labelledby="ticket-reply-label"
                     placeholder="Write your reply..."
                     required
-                  ></textarea>
+                  >{{ reply_body or '' }}</textarea>
                 </div>
               </div>
+              <div class="ticket-reply-extras">
               <div class="form-field">
                 <label class="form-label" for="ticket-reply-attachments">Attachments (optional)</label>
                 <input
@@ -1294,6 +1465,31 @@
                 />
                 <p class="form-help">You can upload multiple files. Server limit: 50MB per file.</p>
               </div>
+              <div class="ticket-reply-flags">
+              <div class="form-field form-field--checkbox">
+                <label class="checkbox">
+                  <input type="checkbox" name="isInternal" value="true" />
+                  <span>Write an internal note instead</span>
+                </label>
+              </div>
+              <div class="form-field form-field--checkbox">
+                <label class="checkbox">
+                  <input type="checkbox" name="isResolutionStep" value="true" data-resolution-classification="resolution" />
+                  <span>Mark this reply as a resolution step</span>
+                </label>
+                <p class="form-help">Resolution steps receive extra emphasis when AI creates the final resolution outline.</p>
+              </div>
+              <div class="form-field form-field--checkbox">
+                <label class="checkbox">
+                  <input type="checkbox" name="isNotResolutionStep" value="true" data-resolution-classification="excluded" />
+                  <span>Not a resolution step</span>
+                </label>
+                <p class="form-help">Explicitly exclude this entry from AI resolution step generation.</p>
+              </div>
+              </div>
+              <details class="ticket-reply-worklog" open>
+                <summary>Time &amp; billing</summary>
+              <div class="ticket-reply-worklog__fields">
               <div class="form-field">
                 <label class="form-label" for="ticket-reply-minutes">Minutes spent</label>
                 <input
@@ -1310,7 +1506,7 @@
               </div>
               <div class="form-field">
                 <label class="form-label" for="ticket-reply-labour">Labour type</label>
-                <select id="ticket-reply-labour" name="labourTypeId" class="form-input">
+                <select id="ticket-reply-labour" name="labourTypeId" class="form-input" data-searchable="on">
                   <option value="">No labour type</option>
                   {% for labour_type in ticket_labour_types %}
                     <option value="{{ labour_type.id }}"{% if labour_type.is_default %} selected{% endif %}>
@@ -1323,12 +1519,6 @@
               <div class="form-grid form-grid--auto">
                 <div class="form-field form-field--checkbox">
                   <label class="checkbox">
-                    <input type="checkbox" name="isInternal" value="true" />
-                    <span>Mark as internal note</span>
-                  </label>
-                </div>
-                <div class="form-field form-field--checkbox">
-                  <label class="checkbox">
                     <input
                       type="checkbox"
                       name="isBillable"
@@ -1339,6 +1529,10 @@
                   </label>
                 </div>
               </div>
+              </div>
+              </details>
+              </div>
+              </div>
               <div class="form-actions ticket-reply-actions">
                 <div class="ticket-page-clock" data-ticket-page-clock data-ticket-id="{{ ticket.id }}" aria-live="polite">
                   <span class="ticket-page-clock__label">Time open</span>
@@ -1346,12 +1540,12 @@
                 </div>
                 <div class="ticket-reply-submit" data-ticket-reply-submit>
                   <input type="hidden" name="replyStatus" value="" data-ticket-reply-status-input />
-                  <button type="submit" class="button button--primary ticket-reply-submit__primary">Post reply</button>
-                  <details class="ticket-reply-submit__status-menu">
+                  <button type="submit" class="button button--primary ticket-reply-submit__primary" data-reply-submit-label>Send reply</button>
+                  <details class="ticket-reply-submit__status-menu" data-floating-menu data-floating-menu-placement="top">
                     <summary class="button button--primary ticket-reply-submit__toggle" aria-label="Post reply with a selected ticket status">
                       <span aria-hidden="true">▾</span>
                     </summary>
-                    <div class="ticket-reply-submit__menu" role="menu" aria-label="Post reply and set status">
+                    <div class="ticket-reply-submit__menu" data-floating-menu-panel role="menu" aria-label="Post reply and set status">
                       {% for status_definition in ticket_status_definitions %}
                         <button type="submit" value="{{ status_definition.tech_status }}" class="ticket-reply-submit__menu-item" role="menuitem" onclick="this.form.querySelector('[data-ticket-reply-status-input]').value = this.value;">
                           {{ status_definition.tech_label }}
@@ -1376,233 +1570,257 @@
             <header class="card__header ticket-split-toolbar">
               <div>
                 <h2 class="card__title">Conversation history</h2>
-                <p class="card__subtitle">Select conversation items to split them into a new ticket.</p>
+                <p class="card__subtitle">Showing the latest meaningful updates first.</p>
               </div>
               <div class="ticket-split-toolbar__actions">
+                <button type="button" class="button button--secondary button--small" data-ticket-select-mode aria-pressed="false">Select messages</button>
                 <button type="button" class="button button--secondary button--small" data-show-split-hidden hidden>Show hidden split history</button>
-                <button type="button" class="button button--primary button--small" data-split-selected disabled>Split selected</button>
+                <button type="button" class="button button--primary button--small" data-split-selected disabled hidden>Split selected</button>
               </div>
             </header>
             <div class="card__body">
-              {% if ticket_replies or ticket_call_recordings %}
+              <div class="ticket-history-filters" aria-label="Filter conversation">
+                <button type="button" class="is-active" data-history-filter="all" aria-pressed="true">All</button>
+                <button type="button" data-history-filter="customer" aria-pressed="false">Customer</button>
+                <button type="button" data-history-filter="technician" aria-pressed="false">Technician</button>
+                <button type="button" data-history-filter="internal" aria-pressed="false">Internal</button>
+                <button type="button" data-history-filter="automation" aria-pressed="false">Automation</button>
+              </div>
+              {% if ticket_timeline_entries %}
                 <div class="timeline timeline--conversation" data-ticket-timeline data-ticket-id="{{ ticket.id }}">
-                  {% for reply in ticket_replies %}
-                    <article
-                      class="timeline__event{% if reply.is_split_hidden %} timeline__event--split-hidden{% endif %}"
-                      data-ticket-reply
-                      {% if reply.is_split_hidden %}data-split-hidden="true" hidden{% endif %}
-                  data-reply-id="{{ reply.id }}"
-                  data-reply-minutes="{{ reply.minutes_spent if reply.minutes_spent is not none else '' }}"
-                  data-reply-billable="{{ 'true' if reply.is_billable else 'false' }}"
-                  data-reply-labour="{{ reply.labour_type_id if reply.labour_type_id is not none else '' }}"
-                >
-                      <header class="timeline__header">
-                        <div class="timeline__header-main">
-                          {% if not reply.is_split_hidden %}
-                            <label class="ticket-split-select">
-                              <input type="checkbox" data-split-reply-checkbox value="{{ reply.id }}" aria-label="Select reply {{ reply.id }} for ticket split" />
-                            </label>
-                          {% endif %}
-                          <span class="timeline__timestamp">
-                            {{ reply.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.created_at else '—' }}
-                          </span>
-                          <span class="timeline__action">
-                            {{ reply.author.email if reply.author else (reply.author_display_name or reply.author_email or 'System') }}
-                            {% if reply.is_internal %}
-                              <span class="badge badge--muted">Internal</span>
-                            {% endif %}
-                            {% if reply.is_split_hidden %}
-                              <span class="badge badge--warning">Split to #{{ reply.split_to_ticket_number or reply.split_to_ticket_id }}</span>
-                            {% endif %}
-                            {% if reply.has_email_tracking %}
-                              {% set _reply_recipient_count = reply.recipient_count|default(0) %}
-                              {% set _is_multi_recipient = _reply_recipient_count and _reply_recipient_count > 1 %}
-                              {% if reply.is_email_bounced %}
-                                {% set bounce_time = reply.email_bounced_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_bounced_at else 'unknown' %}
-                                {% set _badge_html %}<span class="badge badge--danger" title="Email bounced on {{ bounce_time }}">✗ Bounced</span>{% endset %}
-                              {% elif reply.is_email_opened %}
-                                {% set open_count_text = reply.email_open_count ~ (' time' if reply.email_open_count == 1 else ' times') %}
-                                {% set first_open = reply.email_opened_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_opened_at else '' %}
-                                {% set tooltip = 'Email opened ' ~ open_count_text %}
-                                {% if first_open %}
-                                  {% set tooltip = tooltip ~ ' · First opened: ' ~ first_open %}
-                                {% endif %}
-                                {% set _badge_html %}<span class="badge badge--success" title="{{ tooltip }}">✓ Read</span>{% endset %}
-                              {% elif reply.is_email_delivered %}
-                                {% set delivery_time = reply.email_delivered_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_delivered_at else 'unknown' %}
-                                {% set _badge_html %}<span class="badge badge--info" title="Email delivered on {{ delivery_time }}">✓ Delivered</span>{% endset %}
-                              {% else %}
-                                {% set sent_time = reply.email_sent_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_sent_at else '' %}
-                                {% set tooltip = 'Email sent' ~ (' on ' ~ sent_time if sent_time else '') ~ ', not yet delivered' %}
-                                {% set _badge_html %}<span class="badge badge--muted" title="{{ tooltip }}">📧 Sent</span>{% endset %}
-                              {% endif %}
-                              {% if _is_multi_recipient %}
-                                <button
-                                  type="button"
-                                  class="badge-trigger"
-                                  data-email-recipients-trigger
-                                  data-reply-id="{{ reply.id }}"
-                                  data-recipient-count="{{ _reply_recipient_count }}"
-                                  aria-haspopup="dialog"
-                                  aria-controls="email-recipients-modal"
-                                  title="Show per-recipient delivery status ({{ _reply_recipient_count }} recipients)"
-                                >{{ _badge_html|safe }}</button>
-                              {% else %}
-                                {{ _badge_html|safe }}
-                              {% endif %}
-                            {% endif %}
-                          </span>
-                          <span
-                            class="timeline__meta timeline__meta-group"
-                            data-reply-time-summary
-                            {% if not reply.time_summary %}hidden{% endif %}
-                            aria-label="Time spent details"
-                          >
-                            {% if reply.minutes_spent is not none %}
-                              <span class="timeline__chip timeline__chip--time">
-                                ⏱️ {{ reply.minutes_spent }} minute{{ 's' if reply.minutes_spent != 1 else '' }}
-                              </span>
-                            {% endif %}
-                            {% if not reply.external_reference %}
-                              <span class="timeline__chip {{ 'timeline__chip--billable' if reply.is_billable else 'timeline__chip--nonbillable' }}">
-                                {{ 'Billable' if reply.is_billable else 'Non-billable' }}
-                              </span>
-                            {% endif %}
-                            {% if reply.labour_type_name %}
-                              <span class="timeline__chip timeline__chip--labour">{{ reply.labour_type_name }}</span>
-                            {% endif %}
-                          </span>
-                        </div>
-                        <div class="timeline__header-controls">
-                          <button
-                            type="button"
-                            class="button button--ghost button--icon timeline__edit-button"
-                            {% if reply.is_split_hidden %}hidden disabled{% endif %}
-                            data-reply-edit
-                            aria-label="Edit time entry"
-                            aria-controls="reply-time-modal"
-                            aria-haspopup="dialog"
-                            title="Edit time entry"
-                          >
-                            <span class="visually-hidden">Edit time entry</span>
-                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                              <path d="M20.71 7.04a1 1 0 0 0 0-1.41L18.37 3.3a1 1 0 0 0-1.41 0L6 14.25V18h3.75l10.96-10.96Z" />
-                              <path d="M5 20h14a1 1 0 1 0 0-2H5a1 1 0 1 0 0 2Z" />
-                            </svg>
-                          </button>
-                        </div>
-                      </header>
-                      <div class="timeline__body">
-                        <div
-                          class="timeline__message"
-                          data-timeline-message
-                        >
-                          <div
-                            class="rich-text-viewer timeline__message-content"
-                            data-timeline-message-content
-                          >
-                            {{ reply.body | safe }}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          class="button button--ghost button--small timeline__message-toggle"
-                          data-timeline-message-toggle
-                          data-more-label="Show more"
-                          data-less-label="Show less"
-                          hidden
-                          aria-expanded="false"
-                        >
-                          Show more
-                        </button>
-                      </div>
-                    </article>
-                  {% endfor %}
-                  
-                  {% for recording in ticket_call_recordings %}
-                    <article
-                      class="timeline__event timeline__event--call-recording"
-                      data-call-recording
-                      data-recording-id="{{ recording.id }}"
-                      data-recording-minutes="{{ recording.minutes_spent if recording.minutes_spent is not none else '' }}"
-                      data-recording-billable="{{ 'true' if recording.is_billable else 'false' }}"
-                      data-recording-labour="{{ recording.labour_type_id if recording.labour_type_id is not none else '' }}"
-                    >
-                      <header class="timeline__header">
-                        <div class="timeline__header-main">
-                          <span class="timeline__timestamp">
-                            {{ recording.call_date.astimezone().strftime('%Y-%m-%d %H:%M') if recording.call_date else '—' }}
-                          </span>
-                          <span class="timeline__action">
-                            <strong>📞 Call Recording:</strong> {{ recording.caller_name or 'Unknown' }} → {{ recording.callee_name or 'Unknown' }}
-                          </span>
-                          <span
-                            class="timeline__meta timeline__meta-group"
-                            data-recording-time-summary
-                            {% if not recording.time_summary %}hidden{% endif %}
-                            aria-label="Time spent details"
-                          >
-                            {% if recording.minutes_spent is not none %}
-                              <span class="timeline__chip timeline__chip--time">
-                                ⏱️ {{ recording.minutes_spent }} minute{{ 's' if recording.minutes_spent != 1 else '' }}
-                              </span>
-                            {% endif %}
-                            <span class="timeline__chip {{ 'timeline__chip--billable' if recording.is_billable else 'timeline__chip--nonbillable' }}">
-                              {{ 'Billable' if recording.is_billable else 'Non-billable' }}
+                  {% for timeline_entry in ticket_timeline_entries %}
+                    {% if timeline_entry.type == 'call_recording' %}
+                      {% set recording = timeline_entry %}
+                      <article
+                        class="timeline__event timeline__event--call-recording"
+                        data-call-recording
+                        data-recording-id="{{ recording.id }}"
+                        data-recording-minutes="{{ recording.minutes_spent if recording.minutes_spent is not none else '' }}"
+                        data-recording-billable="{{ 'true' if recording.is_billable else 'false' }}"
+                        data-recording-labour="{{ recording.labour_type_id if recording.labour_type_id is not none else '' }}"
+                      >
+                        <header class="timeline__header">
+                          <div class="timeline__header-main">
+                            <span class="timeline__timestamp">
+                              {{ recording.call_date.astimezone().strftime('%Y-%m-%d %H:%M') if recording.call_date else '—' }}
                             </span>
-                            {% if recording.labour_type_name %}
-                              <span class="timeline__chip timeline__chip--labour">{{ recording.labour_type_name }}</span>
-                            {% endif %}
-                          </span>
-                        </div>
-                        <div class="timeline__header-controls">
-                          <button
-                            type="button"
-                            class="button button--ghost button--icon timeline__edit-button"
-                            {% if reply.is_split_hidden %}hidden disabled{% endif %}
-                            data-recording-edit
-                            aria-label="Edit time entry"
-                            aria-controls="recording-time-modal"
-                            aria-haspopup="dialog"
-                            title="Edit time entry"
-                          >
-                            <span class="visually-hidden">Edit time entry</span>
-                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                              <path d="M20.71 7.04a1 1 0 0 0 0-1.41L18.37 3.3a1 1 0 0 0-1.41 0L6 14.25V18h3.75l10.96-10.96Z" />
-                              <path d="M5 20h14a1 1 0 1 0 0-2H5a1 1 0 1 0 0 2Z" />
-                            </svg>
-                          </button>
-                        </div>
-                      </header>
-                      <div class="timeline__body">
-                        <div class="timeline__message" data-timeline-message>
-                          <p><strong>File:</strong> {{ recording.file_name }}</p>
-                          {% if recording.duration_seconds %}
-                            <p><strong>Duration:</strong> {{ recording.duration_seconds }} seconds</p>
-                          {% endif %}
-                          {% if recording.transcription %}
-                            <div class="timeline__message-content" data-timeline-message-content>
-                              <p><strong>Transcription:</strong></p>
-                              <div class="rich-text-viewer">{{ recording.transcription }}</div>
-                            </div>
+                            <span class="timeline__action">
+                              <strong>📞 Call Recording:</strong> {{ recording.caller_name or 'Unknown' }} → {{ recording.callee_name or 'Unknown' }}
+                            </span>
+                            <span
+                              class="timeline__meta timeline__meta-group"
+                              data-recording-time-summary
+                              {% if not recording.time_summary %}hidden{% endif %}
+                              aria-label="Time spent details"
+                            >
+                              {% if recording.minutes_spent is not none %}
+                                <span class="timeline__chip timeline__chip--time">
+                                  ⏱️ {{ recording.minutes_spent }} minute{{ 's' if recording.minutes_spent != 1 else '' }}
+                                </span>
+                              {% endif %}
+                              <span class="timeline__chip {{ 'timeline__chip--billable' if recording.is_billable else 'timeline__chip--nonbillable' }}">
+                                {{ 'Billable' if recording.is_billable else 'Non-billable' }}
+                              </span>
+                              {% if recording.labour_type_name %}
+                                <span class="timeline__chip timeline__chip--labour">{{ recording.labour_type_name }}</span>
+                              {% endif %}
+                            </span>
+                          </div>
+                          <div class="timeline__header-controls">
                             <button
                               type="button"
-                              class="button button--ghost button--small timeline__message-toggle"
-                              data-timeline-message-toggle
-                              data-more-label="Show transcription"
-                              data-less-label="Hide transcription"
-                              hidden
-                              aria-expanded="false"
+                              class="button button--ghost button--icon timeline__edit-button"
+                              data-recording-edit
+                              aria-label="Edit time entry"
+                              aria-controls="recording-time-modal"
+                              aria-haspopup="dialog"
+                              title="Edit time entry"
                             >
-                              Show transcription
+                              <span class="visually-hidden">Edit time entry</span>
+                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <path d="M20.71 7.04a1 1 0 0 0 0-1.41L18.37 3.3a1 1 0 0 0-1.41 0L6 14.25V18h3.75l10.96-10.96Z" />
+                                <path d="M5 20h14a1 1 0 1 0 0-2H5a1 1 0 1 0 0 2Z" />
+                              </svg>
                             </button>
-                          {% else %}
-                            <p class="text-muted">No transcription available.</p>
-                          {% endif %}
+                          </div>
+                        </header>
+                        <div class="timeline__body">
+                          <div class="timeline__message" data-timeline-message>
+                            <p><strong>File:</strong> {{ recording.file_name }}</p>
+                            {% if recording.duration_seconds %}
+                              <p><strong>Duration:</strong> {{ recording.duration_seconds }} seconds</p>
+                            {% endif %}
+                            {% if recording.transcription %}
+                              <div class="timeline__message-content" data-timeline-message-content>
+                                <p><strong>Transcription:</strong></p>
+                                <div class="rich-text-viewer">{{ recording.transcription }}</div>
+                              </div>
+                              <button
+                                type="button"
+                                class="button button--ghost button--small timeline__message-toggle"
+                                data-timeline-message-toggle
+                                data-more-label="Show transcription"
+                                data-less-label="Hide transcription"
+                                hidden
+                                aria-expanded="false"
+                              >
+                                Show transcription
+                              </button>
+                            {% else %}
+                              <p class="text-muted">No transcription available.</p>
+                            {% endif %}
+                          </div>
                         </div>
-                      </div>
-                    </article>
+                      </article>
+                    {% else %}
+                      {% set reply = timeline_entry %}
+                      {% set reply_is_automation = reply.external_reference and reply.external_reference.startswith('shipment-watch:') %}
+                      <article
+                        class="timeline__event timeline__event--{{ 'internal' if reply.is_internal else ('automation' if reply_is_automation else ('technician' if reply.author_id and reply.author_id != ticket.requester_id else 'customer')) }}{% if reply.is_split_hidden %} timeline__event--split-hidden{% endif %}"
+                        data-ticket-reply
+                        data-message-kind="{{ 'internal' if reply.is_internal else ('automation' if reply_is_automation else ('technician' if reply.author_id and reply.author_id != ticket.requester_id else 'customer')) }}"
+                        {% if reply.is_split_hidden %}data-split-hidden="true" hidden{% endif %}
+                        data-reply-id="{{ reply.id }}"
+                        data-reply-minutes="{{ reply.minutes_spent if reply.minutes_spent is not none else '' }}"
+                        data-reply-billable="{{ 'true' if reply.is_billable else 'false' }}"
+                        data-reply-labour="{{ reply.labour_type_id if reply.labour_type_id is not none else '' }}"
+                      >
+                        <header class="timeline__header">
+                          <div class="timeline__header-main">
+                            {% if not reply.is_split_hidden %}
+                              <label class="ticket-split-select">
+                                <input type="checkbox" data-split-reply-checkbox value="{{ reply.id }}" aria-label="Select reply {{ reply.id }} for ticket split" />
+                              </label>
+                            {% endif %}
+                            <span class="timeline__timestamp">
+                              {{ reply.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.created_at else '—' }}
+                            </span>
+                            <span class="timeline__action">
+                              {{ reply.author.email if reply.author else (reply.author_display_name or reply.author_email or 'System') }}
+                              <span class="timeline__direction">{{ 'Internal note' if reply.is_internal else ('Automation' if reply_is_automation else ('Technician reply' if reply.author_id and reply.author_id != ticket.requester_id else 'Customer message')) }}</span>
+                              {% if reply.is_internal %}
+                                <span class="badge badge--muted">Internal</span>
+                              {% endif %}
+                              {% if reply.is_resolution_step %}
+                                <span class="status status--success">Resolution step</span>
+                              {% elif reply.is_not_resolution_step %}
+                                <span class="status status--neutral">Not a resolution step</span>
+                              {% endif %}
+                              {% if reply.is_split_hidden %}
+                                <span class="badge badge--warning">Split to #{{ reply.split_to_ticket_number or reply.split_to_ticket_id }}</span>
+                              {% endif %}
+                              {% if reply.has_email_tracking %}
+                                {% set _reply_recipient_count = reply.recipient_count|default(0) %}
+                                {% set _is_multi_recipient = _reply_recipient_count and _reply_recipient_count > 1 %}
+                                {% if reply.is_email_bounced %}
+                                  {% set bounce_time = reply.email_bounced_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_bounced_at else 'unknown' %}
+                                  {% set _badge_html %}<span class="badge badge--danger" title="Email bounced on {{ bounce_time }}">✗ Bounced</span>{% endset %}
+                                {% elif reply.is_email_opened %}
+                                  {% set open_count_text = reply.email_open_count ~ (' time' if reply.email_open_count == 1 else ' times') %}
+                                  {% set first_open = reply.email_opened_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_opened_at else '' %}
+                                  {% set tooltip = 'Email opened ' ~ open_count_text %}
+                                  {% if first_open %}
+                                    {% set tooltip = tooltip ~ ' · First opened: ' ~ first_open %}
+                                  {% endif %}
+                                  {% set _badge_html %}<span class="badge badge--success" title="{{ tooltip }}">✓ Read</span>{% endset %}
+                                {% elif reply.is_email_delivered %}
+                                  {% set delivery_time = reply.email_delivered_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_delivered_at else 'unknown' %}
+                                  {% set _badge_html %}<span class="badge badge--info" title="Email delivered on {{ delivery_time }}">✓ Delivered</span>{% endset %}
+                                {% else %}
+                                  {% set sent_time = reply.email_sent_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_sent_at else '' %}
+                                  {% set tooltip = 'Email sent' ~ (' on ' ~ sent_time if sent_time else '') ~ ', not yet delivered' %}
+                                  {% set _badge_html %}<span class="badge badge--muted" title="{{ tooltip }}">📧 Sent</span>{% endset %}
+                                {% endif %}
+                                {% if _is_multi_recipient %}
+                                  <button
+                                    type="button"
+                                    class="badge-trigger"
+                                    data-email-recipients-trigger
+                                    data-reply-id="{{ reply.id }}"
+                                    data-recipient-count="{{ _reply_recipient_count }}"
+                                    aria-haspopup="dialog"
+                                    aria-controls="email-recipients-modal"
+                                    title="Show per-recipient delivery status ({{ _reply_recipient_count }} recipients)"
+                                  >{{ _badge_html|safe }}</button>
+                                {% else %}
+                                  {{ _badge_html|safe }}
+                                {% endif %}
+                              {% endif %}
+                            </span>
+                            <span
+                              class="timeline__meta timeline__meta-group"
+                              data-reply-time-summary
+                              {% if not reply.time_summary %}hidden{% endif %}
+                              aria-label="Time spent details"
+                            >
+                              {% if reply.minutes_spent is not none %}
+                                <span class="timeline__chip timeline__chip--time">
+                                  ⏱️ {{ reply.minutes_spent }} minute{{ 's' if reply.minutes_spent != 1 else '' }}
+                                </span>
+                              {% endif %}
+                              {% if not reply.external_reference %}
+                                <span class="timeline__chip {{ 'timeline__chip--billable' if reply.is_billable else 'timeline__chip--nonbillable' }}">
+                                  {{ 'Billable' if reply.is_billable else 'Non-billable' }}
+                                </span>
+                              {% endif %}
+                              {% if reply.labour_type_name %}
+                                <span class="timeline__chip timeline__chip--labour">{{ reply.labour_type_name }}</span>
+                              {% endif %}
+                            </span>
+                          </div>
+                          <div class="timeline__header-controls">
+                            <button
+                              type="button"
+                              class="button button--ghost button--icon timeline__edit-button"
+                              {% if reply.is_split_hidden %}hidden disabled{% endif %}
+                              data-reply-edit
+                              aria-label="Edit time entry"
+                              aria-controls="reply-time-modal"
+                              aria-haspopup="dialog"
+                              title="Edit time entry"
+                            >
+                              <span class="visually-hidden">Edit time entry</span>
+                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <path d="M20.71 7.04a1 1 0 0 0 0-1.41L18.37 3.3a1 1 0 0 0-1.41 0L6 14.25V18h3.75l10.96-10.96Z" />
+                                <path d="M5 20h14a1 1 0 1 0 0-2H5a1 1 0 1 0 0 2Z" />
+                              </svg>
+                            </button>
+                          </div>
+                        </header>
+                        <div class="timeline__body">
+                          <div
+                            class="timeline__message"
+                            data-timeline-message
+                          >
+                            <div
+                              class="rich-text-viewer timeline__message-content"
+                              data-timeline-message-content
+                            >
+                              {{ reply.body | safe }}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            class="button button--ghost button--small timeline__message-toggle"
+                            data-timeline-message-toggle
+                            data-more-label="Show more"
+                            data-less-label="Show less"
+                            hidden
+                            aria-expanded="false"
+                          >
+                            Expand message
+                          </button>
+                          <form action="/admin/tickets/{{ ticket.id }}/replies/{{ reply.id }}/resolution-step" method="post" class="form-actions">
+                            {% include "partials/csrf.html" %}
+                            <button type="submit" name="state" value="resolution" class="button button--ghost button--small"{% if reply.is_resolution_step %} disabled aria-pressed="true"{% endif %}>Mark as resolution step</button>
+                            <button type="submit" name="state" value="excluded" class="button button--ghost button--small"{% if reply.is_not_resolution_step %} disabled aria-pressed="true"{% endif %}>Not a resolution step</button>
+                            {% if reply.is_resolution_step or reply.is_not_resolution_step %}<button type="submit" name="state" value="neutral" class="button button--ghost button--small">Clear selection</button>{% endif %}
+                          </form>
+                        </div>
+                      </article>
+                    {% endif %}
                   {% endfor %}
+                  <button type="button" class="button button--secondary ticket-history-load" data-history-load-earlier hidden>Load earlier messages</button>
                 </div>
               {% else %}
                 <p class="card__empty">No replies or call recordings have been posted yet.</p>
@@ -1664,7 +1882,7 @@
         </div>
         <div class="form-field">
           <label class="form-label" for="reply-time-labour">Labour type</label>
-          <select id="reply-time-labour" class="form-input" data-reply-time-labour>
+          <select id="reply-time-labour" class="form-input" data-reply-time-labour data-searchable="on">
             <option value="">No labour type</option>
             {% for labour_type in ticket_labour_types %}
               <option value="{{ labour_type.id }}">
@@ -1712,7 +1930,7 @@
         </div>
         <div class="form-field">
           <label class="form-label" for="recording-time-labour">Labour type</label>
-          <select id="recording-time-labour" class="form-input" data-recording-time-labour>
+          <select id="recording-time-labour" class="form-input" data-recording-time-labour data-searchable="on">
             <option value="">No labour type</option>
             {% for labour_type in ticket_labour_types %}
               <option value="{{ labour_type.id }}">
@@ -1815,6 +2033,38 @@
         const html = event && event.detail && typeof event.detail.html === 'string' ? event.detail.html : '';
         descriptionEditor.setContents(html);
         syncDescriptionField();
+      });
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const billNowButton = document.querySelector('[data-ticket-bill-now]');
+      if (!billNowButton) {
+        return;
+      }
+      billNowButton.addEventListener('click', async () => {
+        const ticketId = billNowButton.getAttribute('data-ticket-bill-now');
+        if (!ticketId) {
+          return;
+        }
+        if (!window.confirm('Create a ticket-only invoice for this ticket? The invoice draft needs approval before it is pushed to Xero.')) {
+          return;
+        }
+        billNowButton.disabled = true;
+        try {
+          const response = await fetch('/api/invoices/bill-now', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticketId: Number(ticketId), approvalRequired: true })
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(payload.detail?.reason || payload.detail || 'Unable to create manual invoice draft.');
+          }
+          window.location.href = payload.redirectUrl || `/invoices/${payload.invoice_id}`;
+        } catch (error) {
+          window.alert(error.message || 'Unable to create manual invoice draft.');
+          billNowButton.disabled = false;
+        }
       });
     });
 

@@ -1,5 +1,50 @@
 (function () {
 
+  document.querySelectorAll('[data-resolution-classification]').forEach((checkbox) => {
+    checkbox.addEventListener('change', () => {
+      if (!checkbox.checked) return;
+      const form = checkbox.closest('form');
+      form?.querySelectorAll('[data-resolution-classification]').forEach((other) => {
+        if (other !== checkbox) other.checked = false;
+      });
+    });
+  });
+
+  document.querySelectorAll('[data-resolution-reprocess]').forEach((button) => {
+    button.addEventListener('click', async (event) => {
+      event.preventDefault();
+      const original = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Generating…';
+      try {
+        const response = await fetch(button.formAction, {
+          method: 'POST',
+          body: new FormData(button.form),
+          headers: { Accept: 'application/json' },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.detail || 'Unable to regenerate resolution steps.');
+        if (window.__portalToast) {
+          window.__portalToast.show(
+            payload.message || 'Resolution steps will be regenerated shortly.',
+            { variant: 'success' },
+          );
+        }
+        button.textContent = 'Queued';
+        window.setTimeout(() => window.location.reload(), 1200);
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = original;
+        const message = error.message || 'Unable to regenerate resolution steps.';
+        if (window.__portalToast) {
+          window.__portalToast.show(message, { variant: 'error' });
+        } else {
+          window.alert(message);
+        }
+      }
+    });
+  });
+
   function initialiseOutlookContactLookup() {
     const root = document.querySelector('[data-outlook-contact-phones]');
     if (!root) return;
@@ -25,10 +70,47 @@
         phones.forEach((item) => {
           const line = document.createElement('p');
           line.className = 'form-help';
-          const link = document.createElement('a');
-          link.href = `tel:${item.phone}`;
-          link.textContent = item.phone;
-          line.append(`${item.name}: `, link);
+          const dialButton = document.createElement('button');
+          dialButton.type = 'button';
+          dialButton.className = 'click-to-call';
+          dialButton.textContent = item.phone;
+          dialButton.title = `Call ${item.phone}`;
+          dialButton.addEventListener('click', () => {
+            const clickToCall = window.__portalClickToCall;
+            if (clickToCall && clickToCall.isEnabled()) {
+              clickToCall.call(item.phone);
+              return;
+            }
+            status.textContent = 'Enable click to call in your profile to dial this number.';
+          });
+          line.append(`${item.name}: `, dialButton);
+
+          const staffId = root.dataset.requesterStaffId;
+          const ticketId = root.dataset.ticketId;
+          if (staffId && ticketId) {
+            const attachButton = document.createElement('button');
+            attachButton.type = 'button';
+            attachButton.className = 'button button--ghost button--small';
+            attachButton.textContent = 'Attach to contact';
+            attachButton.addEventListener('click', async () => {
+              attachButton.disabled = true;
+              try {
+                const attachResponse = await fetch(`/api/tickets/${encodeURIComponent(ticketId)}/requester/mobile`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ phone: item.phone }),
+                });
+                const attachPayload = await attachResponse.json().catch(() => ({}));
+                if (!attachResponse.ok) throw new Error(attachPayload.detail || 'Unable to attach number');
+                attachButton.textContent = 'Attached';
+                status.textContent = 'Mobile number attached to the requester contact.';
+              } catch (error) {
+                attachButton.disabled = false;
+                status.textContent = error.message || 'Unable to attach number.';
+              }
+            });
+            line.append(' ', attachButton);
+          }
           results.appendChild(line);
         });
       } catch (error) {
@@ -330,6 +412,8 @@
     const dialog = document.querySelector('[data-ticket-page-clock-dialog]');
     const historyContent = dialog && dialog.querySelector('[data-ticket-page-clock-history-content]');
     const closeButton = dialog && dialog.querySelector('[data-ticket-page-clock-close]');
+    const replyForm = document.querySelector('#ticket-reply-form');
+    const minutesInput = replyForm && replyForm.querySelector('[name="minutesSpent"]');
     let clockId = null;
     const openedAt = Date.now();
 
@@ -349,6 +433,13 @@
     const tick = () => { if (display) display.textContent = formatDuration((Date.now() - openedAt) / 1000); };
     tick();
     window.setInterval(tick, 1000);
+    if (replyForm && minutesInput) {
+      replyForm.addEventListener('submit', () => {
+        if (minutesInput.value.trim() === '') {
+          minutesInput.value = String(Math.round((Date.now() - openedAt) / 60000));
+        }
+      });
+    }
 
     async function send(path, keepalive) {
       return fetch(`/admin/tickets/${encodeURIComponent(ticketId)}/page-clocks${path}`, {
@@ -378,9 +469,26 @@
     let wakeLock = null;
     async function requestWakeLock() {
       if (document.visibilityState !== 'visible' || !navigator.wakeLock) return;
-      try { wakeLock = await navigator.wakeLock.request('screen'); } catch (error) { /* permission/device dependent */ }
+      if (wakeLock) return;
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; }, { once: true });
+      } catch (error) { /* permission/device dependent */ }
     }
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') requestWakeLock(); });
+    async function releaseWakeLock() {
+      if (!wakeLock) return;
+      const heldWakeLock = wakeLock;
+      wakeLock = null;
+      try { await heldWakeLock.release(); } catch (error) { /* browser dependent */ }
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        requestWakeLock();
+        return;
+      }
+      releaseWakeLock();
+    });
+    window.addEventListener('pagehide', () => { releaseWakeLock(); }, { once: true });
     requestWakeLock();
 
     if (historyButton && dialog && historyContent) {
@@ -839,6 +947,11 @@
     const initialCompanyId = select.dataset.initialCompanyId || '';
     const ticketNumber = (linkedContainer.dataset.ticketNumber || '').trim();
     const ticketSubject = (linkedContainer.dataset.ticketSubject || '').trim();
+    const lookupButton = document.querySelector('[data-requester-assets-lookup]');
+    const lookupResults = document.querySelector('[data-requester-assets-results]');
+    const lookupStatus = document.querySelector('[data-requester-assets-status]');
+    const lookupOptions = document.querySelector('[data-requester-assets-options]');
+    const lookupLink = document.querySelector('[data-requester-assets-link]');
 
     const tacticalBaseUrl = tacticalBaseUrlRaw.replace(/\/+$/, '');
     const optionLookup = new Map();
@@ -1287,6 +1400,49 @@
       select.value = '';
     });
 
+    if (lookupButton && lookupResults && lookupStatus && lookupOptions && lookupLink) {
+      lookupButton.addEventListener('click', async () => {
+        lookupResults.hidden = false;
+        lookupStatus.textContent = 'Looking up requester assets…';
+        lookupOptions.innerHTML = '';
+        lookupLink.hidden = true;
+        lookupButton.disabled = true;
+        try {
+          const response = await fetch(lookupButton.dataset.endpoint || '', { headers: { Accept: 'application/json' } });
+          if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
+          const assets = await response.json();
+          assets.forEach((asset) => {
+            const option = normaliseOption(asset);
+            if (!option || linkedMap.has(option.id)) return;
+            optionLookup.set(option.id, option);
+            const label = document.createElement('label');
+            label.className = 'ticket-assets-lookup__option';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.value = option.id;
+            checkbox.setAttribute('data-requester-asset-choice', '');
+            const text = document.createElement('span');
+            const reasons = Array.isArray(asset.match_reasons) ? asset.match_reasons.join(' · ') : '';
+            text.textContent = reasons ? `${option.label} — ${reasons}` : option.label;
+            label.append(checkbox, text);
+            lookupOptions.appendChild(label);
+          });
+          const count = lookupOptions.querySelectorAll('[data-requester-asset-choice]').length;
+          lookupStatus.textContent = count ? `${count} matching asset${count === 1 ? '' : 's'} found. Select assets to link.` : 'No assets associated with this requester were found.';
+          lookupLink.hidden = count === 0;
+        } catch (error) {
+          console.error('Failed to look up requester assets', error);
+          lookupStatus.textContent = 'Unable to look up requester assets. Please try again.';
+        } finally {
+          lookupButton.disabled = false;
+        }
+      });
+      lookupLink.addEventListener('click', () => {
+        lookupOptions.querySelectorAll('[data-requester-asset-choice]:checked').forEach((choice) => addLinkedAssetById(choice.value));
+        lookupResults.hidden = true;
+      });
+    }
+
     linkedContainer.addEventListener('click', (event) => {
       const target = event.target instanceof Element ? event.target : null;
       if (!target) {
@@ -1322,8 +1478,13 @@
           })
           .then((data) => {
             if (data.room_id) {
-              window.location.href = `/chat?room=${encodeURIComponent(data.room_id)}`;
+              if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+                window.__portalToast.show('Chat created successfully.', { variant: 'success' });
+              }
+              chatButton.disabled = false;
+              return;
             }
+            throw new Error('Chat room was not returned.');
           })
           .catch((error) => {
             console.error('Failed to open tray chat', error);
@@ -2589,6 +2750,38 @@
     const ticketId = container.getAttribute('data-ticket-id');
     const emptyMessage = document.querySelector('[data-attachments-empty]');
 
+    const imageLinks = container.querySelectorAll('[data-attachment-image-preview]');
+    if (imageLinks.length) {
+      const modal = document.createElement('dialog');
+      modal.className = 'attachment-image-modal';
+      modal.setAttribute('aria-labelledby', 'attachment-image-modal-title');
+      modal.innerHTML = `
+        <header class="attachment-image-modal__header">
+          <h2 class="attachment-image-modal__title" id="attachment-image-modal-title"></h2>
+          <button class="attachment-image-modal__close" type="button" aria-label="Close image preview">&times;</button>
+        </header>
+        <img class="attachment-image-modal__image" alt="">
+      `;
+      document.body.appendChild(modal);
+      const modalImage = modal.querySelector('.attachment-image-modal__image');
+      const modalTitle = modal.querySelector('.attachment-image-modal__title');
+      modal.querySelector('.attachment-image-modal__close').addEventListener('click', () => modal.close());
+      modal.addEventListener('click', (event) => {
+        if (event.target === modal) modal.close();
+      });
+      imageLinks.forEach((link) => {
+        link.addEventListener('click', (event) => {
+          event.preventDefault();
+          const thumbnail = link.querySelector('img');
+          const name = thumbnail?.alt.replace(/^Preview of /, '') || 'Attachment preview';
+          modalImage.src = thumbnail?.src || link.href;
+          modalImage.alt = name;
+          modalTitle.textContent = name;
+          modal.showModal();
+        });
+      });
+    }
+
     function updateEmptyState() {
       const remaining = container.querySelector('[data-attachment-id]');
       if (emptyMessage) {
@@ -2650,6 +2843,32 @@
         handleRemove(button);
       });
     });
+
+    const blockButtons = container.querySelectorAll('[data-block-attachment]');
+    blockButtons.forEach((button) => {
+      button.addEventListener('click', async () => {
+        const attachmentId = button.getAttribute('data-attachment-id');
+        if (!attachmentId || !ticketId || !window.confirm('Block this file content and discard this attachment? Future identical files will not be saved.')) return;
+        const removeExisting = button.getAttribute('data-can-remove-existing') === 'true'
+          && window.confirm('Also permanently remove identical attachments from all past tickets to reclaim storage?');
+        button.disabled = true;
+        try {
+          const response = await fetch(`/api/tickets/${ticketId}/attachments/${attachmentId}/blocklist?remove_existing=${removeExisting}`, {
+            method: 'POST',
+            headers: {'X-CSRF-Token': getCsrfToken()},
+          });
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.detail || 'Failed to block attachment');
+          }
+          button.closest('[data-attachment-id]')?.remove();
+          updateEmptyState();
+        } catch (error) {
+          alert(error instanceof Error ? error.message : 'Failed to block attachment');
+          button.disabled = false;
+        }
+      });
+    });
   }
 
   function getTicketIdFromPath() {
@@ -2662,9 +2881,24 @@
     if (!timeline) return;
     const ticketId = timeline.getAttribute('data-ticket-id');
     const splitButton = document.querySelector('[data-split-selected]');
+    const selectModeButton = document.querySelector('[data-ticket-select-mode]');
     const showHiddenButton = document.querySelector('[data-show-split-hidden]');
     const checkboxes = Array.from(document.querySelectorAll('[data-split-reply-checkbox]'));
     const hiddenReplies = Array.from(document.querySelectorAll('[data-split-hidden="true"]'));
+
+    if (selectModeButton) {
+      selectModeButton.addEventListener('click', () => {
+        const active = selectModeButton.getAttribute('aria-pressed') !== 'true';
+        timeline.classList.toggle('is-selecting', active);
+        selectModeButton.setAttribute('aria-pressed', active ? 'true' : 'false');
+        selectModeButton.textContent = active ? 'Cancel selection' : 'Select messages';
+        if (splitButton) splitButton.hidden = !active;
+        if (!active) {
+          checkboxes.forEach((checkbox) => { checkbox.checked = false; });
+          if (splitButton) splitButton.disabled = true;
+        }
+      });
+    }
 
     if (showHiddenButton && hiddenReplies.length > 0) {
       showHiddenButton.hidden = false;
@@ -2727,6 +2961,88 @@
     });
 
     updateButton();
+  }
+
+  function initialiseTicketHistory() {
+    const timeline = document.querySelector('[data-ticket-timeline]');
+    if (!timeline) return;
+    const messages = Array.from(timeline.querySelectorAll('[data-ticket-reply]'));
+    const loadButton = timeline.querySelector('[data-history-load-earlier]');
+    const filters = Array.from(document.querySelectorAll('[data-history-filter]'));
+    let visibleLimit = 8;
+    let activeFilter = 'all';
+
+    function render() {
+      const matching = messages.filter((message) => activeFilter === 'all' || message.dataset.messageKind === activeFilter);
+      messages.forEach((message) => {
+        const matches = matching.includes(message);
+        const withinLimit = matching.indexOf(message) < visibleLimit;
+        message.hidden = !matches || !withinLimit || message.dataset.splitHidden === 'true';
+      });
+      if (loadButton) {
+        loadButton.hidden = matching.length <= visibleLimit;
+        const remaining = Math.max(0, matching.length - visibleLimit);
+        loadButton.textContent = `Load earlier messages (${remaining})`;
+      }
+    }
+
+    filters.forEach((button) => button.addEventListener('click', () => {
+      activeFilter = button.dataset.historyFilter || 'all';
+      visibleLimit = 8;
+      filters.forEach((candidate) => {
+        const active = candidate === button;
+        candidate.classList.toggle('is-active', active);
+        candidate.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+      render();
+    }));
+    loadButton?.addEventListener('click', () => {
+      visibleLimit += 8;
+      render();
+    });
+    render();
+  }
+
+  function initialiseReplyVisibility() {
+    const form = document.querySelector('#ticket-reply-form');
+    const internal = form && form.querySelector('input[name="isInternal"]');
+    const visibility = document.querySelector('[data-reply-visibility]');
+    const submit = document.querySelector('[data-reply-submit-label]');
+    const error = form && form.querySelector('[data-ticket-reply-error]');
+    if (!(form instanceof HTMLFormElement) || !(internal instanceof HTMLInputElement)) return;
+    const assignmentError = () => {
+      const hasCompany = form.dataset.hasCompany === 'true';
+      const hasRequester = form.dataset.hasRequester === 'true';
+      if (!hasCompany && !internal.checked && !hasRequester) {
+        return 'Set a Company and Requester before sending a public reply.';
+      }
+      if (!hasCompany) {
+        return `Set a Company before ${internal.checked ? 'adding an internal note' : 'sending a public reply'}.`;
+      }
+      if (!internal.checked && !hasRequester) {
+        return 'Set a Requester before sending a public reply.';
+      }
+      return '';
+    };
+    const showError = (message) => {
+      if (!(error instanceof HTMLElement)) return;
+      error.textContent = message;
+      error.hidden = !message;
+    };
+    const update = () => {
+      if (visibility) visibility.innerHTML = `<strong>Visibility:</strong> ${internal.checked ? 'Internal only' : 'Public reply'}`;
+      if (submit) submit.textContent = internal.checked ? 'Add internal note' : 'Send reply';
+      showError(assignmentError());
+    };
+    form.addEventListener('submit', (event) => {
+      const message = assignmentError();
+      if (!message) return;
+      event.preventDefault();
+      showError(message);
+      error?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+    internal.addEventListener('change', update);
+    update();
   }
 
 
@@ -3094,6 +3410,8 @@
 
     initialisePersistentTicketSections();
     initialiseTicketSplit();
+    initialiseTicketHistory();
+    initialiseReplyVisibility();
     initialiseReplyTimeEditing();
     initialiseCallRecordingTimeEditing();
     initialiseTicketDetailsAutosave();

@@ -1,0 +1,7 @@
+{
+  "guid": "5a9d1957-62c9-417c-bf61-ae3fc525abee",
+  "occurred_at": "2026-09-29T00:00Z",
+  "change_type": "Feature",
+  "summary": "Add global and per-company business hours with closures, pause-or-skip business hours options for automations, business-hours SLA timers, and a customer open/closed indicator on tickets.",
+  "content_hash": "a310f0d817fedd72caf52144412de3e27a08bd8bd0f4c8210ee83d2d78934690"
+}

@@ -1,0 +1,7 @@
+{
+  "guid": "ce444c28-ea02-4bcc-802f-370c0bdd7c39",
+  "occurred_at": "2026-09-27T05:25Z",
+  "change_type": "Feature",
+  "summary": "Added a default rack equipment catalogue (servers, switches and routers, SAN/NAS storage, patch panels, KVM consoles, PDUs, UPSs, fan trays, shelves and blanking panels, cable management) with faceplate images in rack positions, a Device images toggle, and names that default to the linked asset or type.",
+  "content_hash": "68e6f047372176693cb12dc6b780f168f26c054a4ef2539959325cd61c82392b"
+}

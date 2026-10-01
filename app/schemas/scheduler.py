@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.services.cron_expression import validate as validate_cron_expression
 
 
 class ScheduledTaskBase(BaseModel):
@@ -20,6 +22,11 @@ class ScheduledTaskBase(BaseModel):
     model_config = {
         "populate_by_name": True,
     }
+
+    @field_validator("cron")
+    @classmethod
+    def validate_cron(cls, value: str) -> str:
+        return validate_cron_expression(value)
 
 
 class ScheduledTaskCreate(ScheduledTaskBase):
@@ -40,6 +47,11 @@ class ScheduledTaskUpdate(BaseModel):
     model_config = {
         "populate_by_name": True,
     }
+
+    @field_validator("cron")
+    @classmethod
+    def validate_cron(cls, value: str | None) -> str | None:
+        return validate_cron_expression(value) if value is not None else None
 
 
 class ScheduledTaskResponse(BaseModel):
@@ -162,3 +174,37 @@ class RunTaskResponse(BaseModel):
 class WebhookEventsBulkDeleteResponse(BaseModel):
     status: Literal["failed", "succeeded"]
     deleted: int
+
+
+class WebhookDeletionCondition(BaseModel):
+    field: str = Field(min_length=1, max_length=100)
+    operator: Literal["equals", "not_equals", "contains", "not_contains", "starts_with", "ends_with", "is_empty", "is_not_empty", "greater_than", "less_than"]
+    value: Any = None
+
+
+class WebhookDeletionRuleInput(BaseModel):
+    name: str = Field(min_length=1, max_length=150)
+    execution_type: Literal["event", "scheduled"] = Field(validation_alias="executionType")
+    cron_expression: str | None = Field(default=None, validation_alias="cronExpression")
+    conditions: list[WebhookDeletionCondition] = Field(min_length=1, max_length=20)
+    enabled: bool = True
+
+    model_config = {"populate_by_name": True}
+
+    @field_validator("cron_expression")
+    @classmethod
+    def validate_optional_cron(cls, value: str | None) -> str | None:
+        return validate_cron_expression(value) if value else None
+
+
+class WebhookDeletionRuleResponse(WebhookDeletionRuleInput):
+    id: int
+    next_run_at: datetime | None = Field(default=None, serialization_alias="nextRunAt")
+    last_run_at: datetime | None = Field(default=None, serialization_alias="lastRunAt")
+
+
+class WebhookRetentionInput(BaseModel):
+    enabled: bool
+    retention_value: int = Field(ge=0, le=5256000, validation_alias="retentionValue")
+    retention_unit: Literal["immediately", "minutes", "hours", "days"] = Field(validation_alias="retentionUnit")
+    model_config = {"populate_by_name": True}

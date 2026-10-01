@@ -11,6 +11,7 @@ from app.repositories import shop as shop_repo
 from app.repositories import subscriptions as subscriptions_repo
 from app.services import shop as shop_service
 from app.services import subscription_pricing
+from app.services import subscription_billing
 
 
 async def create_subscriptions_from_order(
@@ -18,6 +19,7 @@ async def create_subscriptions_from_order(
     order_number: str,
     company_id: int,
     user_id: int,
+    cart_items: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Create subscriptions for all eligible products in an order.
     
@@ -48,6 +50,11 @@ async def create_subscriptions_from_order(
     
     created_subscriptions: list[dict[str, Any]] = []
     today = date.today()
+    cart_item_lookup = {
+        int(item.get("product_id") or 0): item
+        for item in (cart_items or [])
+        if int(item.get("product_id") or 0) > 0
+    }
     
     for item in order_items:
         product_id = int(item["product_id"])
@@ -85,11 +92,35 @@ async def create_subscriptions_from_order(
             # Fallback for legacy products without commitment_type
             term_days = 365
         
-        # Calculate subscription dates
-        start_date = today
+        # Adopt manually maintained recurring items by SKU. Their already billed
+        # quantity and schedule are retained; only the newly ordered quantity is
+        # added, so existing licences are never invoiced again.
+        existing_recurring = await subscription_billing.find_existing_item(company_id, product)
+        adopted_quantity = 0
+        if existing_recurring:
+            adopted_quantity = subscription_billing.recurring_quantity(existing_recurring)
+
+        # Calculate subscription dates, preserving an adopted item's term.
+        cart_item = cart_item_lookup.get(product_id)
+        start_date = (
+            existing_recurring.get("start_date")
+            if existing_recurring and existing_recurring.get("start_date")
+            else today
+        )
         end_date = subscription_pricing.calculate_full_term_end_date(
             start_date, term_days
         )
+        prorated_price = None
+        if existing_recurring and existing_recurring.get("end_date"):
+            end_date = existing_recurring["end_date"]
+        elif (
+            cart_item
+            and bool(cart_item.get("coterm_enabled"))
+            and cart_item.get("coterm_end_date")
+            and cart_item.get("coterm_price") is not None
+        ):
+            end_date = cart_item["coterm_end_date"]
+            prorated_price = Decimal(str(cart_item["coterm_price"]))
         
         # Create the subscription
         try:
@@ -99,15 +130,31 @@ async def create_subscriptions_from_order(
                 subscription_category_id=subscription_category_id,
                 start_date=start_date,
                 end_date=end_date,
-                quantity=quantity,
+                quantity=adopted_quantity + quantity,
                 unit_price=unit_price,
-                prorated_price=None,  # Full term in v1
+                prorated_price=prorated_price,
                 status="active",
                 auto_renew=True,
                 created_by=user_id,
             )
-            
+            recurring_item = await subscription_billing.sync_subscription_recurring_item(
+                subscription,
+                existing=existing_recurring,
+                preserve_existing_schedule=existing_recurring is not None,
+            )
+
+            from app.services.invoice_generator import generate_subscription_invoice
+
+            purchase_unit_price = prorated_price if prorated_price is not None else unit_price
             created_subscriptions.append(subscription)
+
+            invoice_result = await generate_subscription_invoice(
+                company_id,
+                recurring_item=recurring_item,
+                quantity=quantity,
+                unit_amount=Decimal(str(purchase_unit_price)),
+            )
+            subscription["invoice_result"] = invoice_result
             
             logger.info(
                 "Created subscription from order",

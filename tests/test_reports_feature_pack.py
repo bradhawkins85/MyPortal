@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
 
 import app.main as main_module
@@ -16,6 +18,8 @@ EXPECTED = {
     ("GET", "/reports/company-overview.pdf"),
     ("GET", "/reports/company-overview/settings"),
     ("POST", "/reports/company-overview/settings"),
+    ("GET", "/reports/company-overview/settings/export"),
+    ("POST", "/reports/company-overview/settings/import"),
     ("GET", "/admin/reports/pdf-cover-image"),
     ("POST", "/admin/reports/pdf-cover-image"),
     ("POST", "/admin/reports/pdf-cover-image/delete"),
@@ -67,10 +71,12 @@ def test_reports_pack_owns_handlers():
     assert report_routes.router.routes[1].endpoint == report_handlers.company_overview_report_pdf
     assert report_routes.router.routes[2].endpoint == report_handlers.company_overview_report_settings_page
     assert report_routes.router.routes[3].endpoint == report_handlers.company_overview_report_settings_save
-    assert report_routes.router.routes[4].endpoint == report_handlers.admin_report_cover_image_page
-    assert report_routes.router.routes[5].endpoint == report_handlers.admin_report_cover_image_upload
-    assert report_routes.router.routes[6].endpoint == report_handlers.admin_report_cover_image_delete
-    assert report_routes.router.routes[7].endpoint == report_handlers.admin_report_cover_image_preview
+    assert report_routes.router.routes[4].endpoint == report_handlers.company_overview_report_settings_export
+    assert report_routes.router.routes[5].endpoint == report_handlers.company_overview_report_settings_import
+    assert report_routes.router.routes[6].endpoint == report_handlers.admin_report_cover_image_page
+    assert report_routes.router.routes[7].endpoint == report_handlers.admin_report_cover_image_upload
+    assert report_routes.router.routes[8].endpoint == report_handlers.admin_report_cover_image_delete
+    assert report_routes.router.routes[9].endpoint == report_handlers.admin_report_cover_image_preview
 
 
 def test_reports_pack_loads_and_reloads_cleanly():
@@ -105,3 +111,48 @@ def test_reports_pack_loads_and_reloads_cleanly():
         await registry.unload_all()
 
     asyncio.new_event_loop().run_until_complete(_run())
+
+
+def test_report_designer_rows_are_collapsible_and_draggable():
+    """The row boundary and reorder controls should remain part of the UI."""
+
+    template = Path("app/templates/reports/settings.html").read_text()
+
+    assert '<details class="designer-row">' in template
+    assert 'class="designer-row__summary"' in template
+    assert 'class="drag" draggable="true"' in template
+    assert "rows.addEventListener('dragstart'" in template
+    assert "rows.addEventListener('dragover'" in template
+    assert "rows.addEventListener('drop'" in template
+
+
+def test_report_designer_exposes_import_export_controls():
+    """Admins should be able to move a designed report between companies."""
+
+    template = Path("app/templates/reports/settings.html").read_text()
+
+    assert 'href="/reports/company-overview/settings/export"' in template
+    assert 'action="/reports/company-overview/settings/import"' in template
+    assert 'name="layout_import_file"' in template
+    assert 'name="layout_import_json"' in template
+
+
+def test_company_overview_spacing_has_fallback_values():
+    """Report spacing must work even when the global theme omits space tokens."""
+
+    template = Path("app/templates/reports/index.html").read_text()
+
+    assert ".report-page{display:flex;flex-direction:column;gap:var(--space-4,1rem);padding:var(--space-3,.75rem)}" in template
+    assert "padding:var(--space-4,1rem)" in template
+    assert "gap:var(--space-3,.75rem)" in template
+
+
+def test_company_overview_pdf_tables_have_explicit_print_colours():
+    """Table text must not inherit white foregrounds from coloured report cells."""
+
+    template = Path("app/templates/reports/pdf.html").read_text()
+
+    assert "table{width:100%;border-collapse:collapse;font-size:7pt;table-layout:fixed;background:#fff;color:#1f2937}" in template
+    assert "th,td{border:1px solid #d1d5db;padding:3pt;overflow-wrap:anywhere;background:#fff;color:#1f2937}" in template
+    assert "th{background:#f3f4f6;color:#111827;font-weight:bold}" in template
+    assert ".card__header,.report-section__header{color:#111827}" in template

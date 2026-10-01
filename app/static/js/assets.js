@@ -3,8 +3,15 @@
 
   function loadVisibleColumns(defaultColumns) {
     try {
-      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-      if (Array.isArray(stored) && stored.every((item) => typeof item === 'string')) {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw === null) {
+        return defaultColumns;
+      }
+      const stored = JSON.parse(raw);
+      // A list holding only the locked "name" column was persisted on first load by an
+      // earlier bug, so treat it like no preference rather than hiding every column.
+      const onlyLockedColumn = stored.length === 1 && stored[0] === 'name';
+      if (Array.isArray(stored) && stored.length > 0 && !onlyLockedColumn && stored.every((item) => typeof item === 'string')) {
         return stored;
       }
     } catch (err) {
@@ -321,7 +328,6 @@
     const trayNotificationCheckbox = document.getElementById('asset-send-tray-notification');
     const noFieldsMessage = document.getElementById('no-fields-message');
     let currentAssetId = null;
-    let currentAssetName = '';
     let fieldDefinitions = [];
 
     async function loadFieldDefinitions() {
@@ -402,8 +408,6 @@
 
     async function openModal(assetId, assetName) {
       currentAssetId = assetId;
-      currentAssetName = assetName;
-      
       assetNameElement.textContent = `Asset: ${assetName}`;
       
       const [definitions, values] = await Promise.all([
@@ -418,7 +422,6 @@
     function closeModal() {
       modal.style.display = 'none';
       currentAssetId = null;
-      currentAssetName = '';
       if (trayNotificationCheckbox instanceof HTMLInputElement) {
         trayNotificationCheckbox.checked = false;
       }

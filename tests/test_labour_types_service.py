@@ -253,14 +253,21 @@ async def test_replace_labour_types_cleans_definitions(monkeypatch):
 
     await labour_types_service.replace_labour_types(
         [
-            {"code": "  STD  ", "name": "  Standard  ", "rate": 80.0},
+            {
+                "code": "  STD  ",
+                "name": "  Standard  ",
+                "rate": 80.0,
+                "is_default": True,
+            },
             {"code": "ADV", "name": "Advanced", "id": "3"},
         ]
     )
 
     assert captured[0]["code"] == "STD"
     assert captured[0]["name"] == "Standard"
+    assert captured[0]["is_default"] is True
     assert captured[1]["id"] == 3  # coerced from string
+    assert captured[1]["is_default"] is False
 
 
 @pytest.mark.anyio

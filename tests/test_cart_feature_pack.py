@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
 
 import app.main as main_module
@@ -17,6 +19,8 @@ EXPECTED = {
     ("POST", "/cart/remove"),
     ("POST", "/cart/place-order"),
 }
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _routes_for(app: FastAPI) -> set[tuple[str, str]]:
@@ -67,6 +71,19 @@ def test_app_main_no_longer_defines_cart_handlers():
         )
 
 
+def test_cart_pack_runtime_dependencies_remain_available_from_main():
+    """Protect dependencies used by the cart pack's legacy main-module seam."""
+    for name in (
+        "shop_repo",
+        "subscriptions_repo",
+        "subscription_shop_integration",
+    ):
+        assert hasattr(main_module, name), (
+            f"app.main must expose {name} while cart routes resolve dependencies "
+            "through the legacy main-module seam."
+        )
+
+
 def test_cart_pack_loads_and_reloads_cleanly():
     import asyncio
 
@@ -96,3 +113,14 @@ def test_cart_pack_loads_and_reloads_cleanly():
         await registry.unload_all()
 
     asyncio.new_event_loop().run_until_complete(_run())
+
+
+def test_cart_quantity_controls_auto_save_without_remove_column():
+    template = (REPO_ROOT / "app/templates/shop/cart.html").read_text()
+    script = (REPO_ROOT / "app/static/js/cart.js").read_text()
+
+    assert '>Remove</th>' not in template
+    assert 'name="remove"' not in template
+    assert "data-cart-quantity" in template
+    assert "input.addEventListener('input'" in script
+    assert "Number(input.value) === 0" in script

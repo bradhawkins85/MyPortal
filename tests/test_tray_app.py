@@ -658,6 +658,155 @@ def test_resolve_config_filters_menu_nodes_by_company(tray_db, run):
     assert cfg_7["menu"][-1]["children"][0]["label"] == "only company 7"
 
 
+def test_resolve_config_expands_service_status_link_for_device_company(
+    tray_db, run, monkeypatch
+):
+    import json
+    from app.repositories import tray as repo
+    from app.services import service_status as status_svc
+    from app.services import tray as svc
+
+    company = {
+        "id": 42,
+        "name": "Example Co",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-02-01T00:00:00+00:00",
+        "archived": 0,
+    }
+
+    async def fake_get_company(company_id):
+        return company if company_id == 42 else None
+
+    async def fake_get_tooltip_name():
+        return "MyPortal"
+
+    monkeypatch.setattr(svc.companies_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(svc._settings, "portal_url", "https://portal.example.test/")
+    monkeypatch.setattr(
+        svc.site_settings_repo, "get_tray_icon_tooltip_name", fake_get_tooltip_name
+    )
+    run(
+        repo.create_menu_config(
+            name="status-link-variable",
+            scope="global",
+            scope_ref_id=None,
+            payload_json=json.dumps(
+                [
+                    {
+                        "type": "link",
+                        "label": "Service Status",
+                        "url": svc.SERVICE_STATUS_URL_VARIABLE,
+                    }
+                ]
+            ),
+            display_text=None,
+            env_allowlist=None,
+            branding_icon_url=None,
+            enabled=True,
+            created_by_user_id=None,
+        )
+    )
+
+    cfg = run(svc.resolve_config_for_device({"company_id": 42, "asset_id": None}))
+    token = status_svc.build_public_status_token(
+        42, seed=status_svc.public_status_token_seed(company)
+    )
+
+    assert cfg["menu"] == [
+        {
+            "type": "link",
+            "label": "Service Status",
+            "url": f"https://portal.example.test/service-status/public/42/{token}",
+        }
+    ]
+
+
+def test_resolve_config_omits_service_status_link_without_company(
+    tray_db, run, monkeypatch
+):
+    import json
+    from app.repositories import tray as repo
+    from app.services import tray as svc
+
+    async def fake_get_tooltip_name():
+        return "MyPortal"
+
+    monkeypatch.setattr(
+        svc.site_settings_repo, "get_tray_icon_tooltip_name", fake_get_tooltip_name
+    )
+
+    run(
+        repo.create_menu_config(
+            name="status-link-without-company",
+            scope="device",
+            scope_ref_id=9876,
+            payload_json=json.dumps(
+                [
+                    {
+                        "type": "link",
+                        "label": "Service Status",
+                        "url": svc.SERVICE_STATUS_URL_VARIABLE,
+                    }
+                ]
+            ),
+            display_text=None,
+            env_allowlist=None,
+            branding_icon_url=None,
+            enabled=True,
+            created_by_user_id=None,
+        )
+    )
+
+    cfg = run(svc.resolve_config_for_device({"company_id": None, "asset_id": 9876}))
+
+    assert cfg["menu"] == []
+
+
+def test_resolve_config_omits_service_status_link_without_portal_url(
+    tray_db, run, monkeypatch
+):
+    import json
+    from app.repositories import tray as repo
+    from app.services import tray as svc
+
+    async def fake_get_company(company_id):
+        return {"id": company_id, "name": "Example Co", "archived": 0}
+
+    async def fake_get_tooltip_name():
+        return "MyPortal"
+
+    monkeypatch.setattr(svc.companies_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(svc._settings, "portal_url", None)
+    monkeypatch.setattr(
+        svc.site_settings_repo, "get_tray_icon_tooltip_name", fake_get_tooltip_name
+    )
+    run(
+        repo.create_menu_config(
+            name="status-link-without-portal-url",
+            scope="company",
+            scope_ref_id=64,
+            payload_json=json.dumps(
+                [
+                    {
+                        "type": "link",
+                        "label": "Service Status",
+                        "url": svc.SERVICE_STATUS_URL_VARIABLE,
+                    }
+                ]
+            ),
+            display_text=None,
+            env_allowlist=None,
+            branding_icon_url=None,
+            enabled=True,
+            created_by_user_id=None,
+        )
+    )
+
+    cfg = run(svc.resolve_config_for_device({"company_id": 64, "asset_id": None}))
+
+    assert cfg["menu"] == []
+
+
 # ---------------------------------------------------------------------------
 # HTTP endpoints (TestClient) — exercises auth middleware too
 # ---------------------------------------------------------------------------
@@ -1216,6 +1365,54 @@ def test_tray_icon_rejects_invalid_magic_bytes():
     assert not is_valid_ico(b"\x00\x00\x02\x00" + b"\x00" * 20)
 
 
+def test_tray_icon_default_png_is_valid_png():
+    """build_default_png_bytes returns a raw PNG (no ICO wrapper)."""
+    from app.services.tray_icon import build_default_png_bytes
+
+    data = build_default_png_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_extract_png_from_ico_round_trips_default():
+    """PNG extracted from the default ICO matches the raw default PNG."""
+    from app.services.tray_icon import (
+        _extract_png_from_ico,
+        build_default_icon_bytes,
+        build_default_png_bytes,
+    )
+
+    png = _extract_png_from_ico(build_default_icon_bytes())
+    assert png is not None
+    assert png == build_default_png_bytes()
+
+
+def test_extract_png_from_ico_returns_none_for_bmp_ico():
+    """_extract_png_from_ico returns None when the ICO payload is not PNG."""
+    import struct
+
+    from app.services.tray_icon import _extract_png_from_ico
+
+    # Construct a minimal ICO containing BMP-style data (no PNG magic).
+    bmp_payload = b"\x28\x00\x00\x00" + b"\x00" * 40  # DIB header stub
+    header = b"\x00\x00\x01\x00" + struct.pack("<H", 1)
+    entry = struct.pack(
+        "<BBBBHHII",
+        32, 32, 0, 0, 1, 32,
+        len(bmp_payload),
+        len(header) + 16,
+    )
+    ico = header + entry + bmp_payload
+    assert _extract_png_from_ico(ico) is None
+
+
+def test_get_tray_icon_png_falls_back_to_default_when_no_upload(tmp_path, run):
+    """get_tray_icon_png_bytes returns the default PNG when no file is uploaded."""
+    from app.services.tray_icon import build_default_png_bytes, get_tray_icon_png_bytes
+
+    data = run(get_tray_icon_png_bytes(tmp_path))
+    assert data == build_default_png_bytes()
+
+
 def test_assets_open_chat_uses_path_room_url():
     source = Path("app/static/js/assets.js").read_text()
     assert "window.location.href = `/chat/${encodeURIComponent(data.room_id)}`;" in source
@@ -1269,10 +1466,10 @@ def test_tray_submit_ticket_passes_external_reference(monkeypatch, run):
     from app.api.routes import tray as tray_routes
     from app.schemas.tray import TrayTicketSubmitRequest
 
-    async def fake_get_device_by_uid(uid):
+    async def fake_get_device_by_auth_hash(token_hash):
         return {
             "id": 1,
-            "device_uid": uid,
+            "device_uid": "device-1",
             "company_id": None,
             "asset_id": None,
             "status": "active",
@@ -1294,7 +1491,7 @@ def test_tray_submit_ticket_passes_external_reference(monkeypatch, run):
         return {"id": 77, "ticket_number": "TKT-77"}
 
     monkeypatch.setattr(
-        tray_routes.tray_repo, "get_device_by_uid", fake_get_device_by_uid
+        tray_routes.tray_repo, "get_device_by_auth_hash", fake_get_device_by_auth_hash
     )
     monkeypatch.setattr(
         tray_routes.users_repo, "get_user_by_email", fake_get_user_by_email
@@ -1314,7 +1511,7 @@ def test_tray_submit_ticket_passes_external_reference(monkeypatch, run):
     )
 
     class RequestWithoutAuth:
-        headers = {}
+        headers = {"Authorization": "Bearer device-token"}
 
     result = run(
         tray_routes.tray_submit_ticket(

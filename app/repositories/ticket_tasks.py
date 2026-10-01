@@ -112,7 +112,7 @@ async def update_task(
     if not assignments:
         return await get_task(task_id)
     
-    query = f"UPDATE ticket_tasks SET {', '.join(assignments)} WHERE id = %s"
+    query = f"UPDATE ticket_tasks SET {', '.join(assignments)} WHERE id = %s"  # nosec B608
     params.append(task_id)
     await db.execute(query, tuple(params))
     return await get_task(task_id)

@@ -4,7 +4,17 @@
 {% set check = assignment.check if assignment else {} %}
 {% set check_title = check.title if check else 'Compliance Check' %}
 
-{% block header_title %}{{ check_title }}{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar page-header-bar--record">
+    <span class="header__title-text" title="{{ check_title }}">{{ check_title }}</span>
+    {% if check or company %}
+      <span class="page-header-bar__meta">
+        {% if check %}{% if check.category %}<span class="tag tag--muted">{{ check.category.code }}</span>{% endif %}<span>{{ check.code }}</span>{% endif %}
+        {% if company %}<span>· {{ company.name }}</span>{% endif %}
+      </span>
+    {% endif %}
+  </div>
+{% endblock %}
 {% block title %}{{ check_title }}{% endblock %}
 
 {% block header_actions %}
@@ -16,22 +26,6 @@
 {% block content %}
 <div class="management management--single compliance-checks-detail" data-layout>
   <section class="management__content">
-    <header class="management__header">
-      <div>
-        <h1 class="management__title">{{ check_title }}</h1>
-        {% if check %}
-        <p class="management__subtitle">
-          <span class="tag tag--muted">{{ check.category.code if check.category else '' }}</span>
-          {{ check.code }}
-        </p>
-        {% endif %}
-      </div>
-      {% if company %}
-      <div class="management__header-actions">
-        <span class="tag tag--muted">{{ company.name }}</span>
-      </div>
-      {% endif %}
-    </header>
 
     <div class="layout-cols layout-cols--2">
       {# Left: Check details + update form #}

@@ -1,7 +1,15 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}<span class="header__title-text">AI Tag Exclusions</span>{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">AI Tag Exclusions</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="exclusions-filter">Filter tag exclusions</label>
+      <input id="exclusions-filter" type="search" class="form-input page-header-toolbar__search" placeholder="Filter exclusions" data-table-filter="exclusions-table" />
+    </div>
+  </div>
+{% endblock %}
 
 {% block header_actions %}
   {{ page_header_actions([]) }}
@@ -10,15 +18,6 @@
 {% block content %}
   <div class="admin-grid">
     <section class="card card--panel">
-      <header class="card__header">
-        <input
-          type="search"
-          class="form-input"
-          placeholder="Filter exclusions"
-          aria-label="Filter tag exclusions"
-          data-table-filter="exclusions-table"
-        />
-      </header>
       <div class="table-wrapper">
         <table class="table" id="exclusions-table" data-table data-table-id="tag-exclusions">
           <thead>

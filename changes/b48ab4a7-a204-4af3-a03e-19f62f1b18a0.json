@@ -1,0 +1,7 @@
+{
+  "guid": "b48ab4a7-a204-4af3-a03e-19f62f1b18a0",
+  "occurred_at": "2026-08-19T00:00Z",
+  "change_type": "Feature",
+  "summary": "Add bulk actions for updating selected discovered devices.",
+  "content_hash": "2b77ee3619eea3e136728a1fa2180eee84d60415eb09c191fdfe5b4033b00b36"
+}

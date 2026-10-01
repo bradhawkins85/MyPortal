@@ -1,0 +1,7 @@
+{
+  "guid": "c7ce505f-82e0-42e8-9ea1-6de1c7ebe6b6",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed the ticket reply email delivery popup showing \"Internal server error\" for every reply: the Microsoft 365 read-status refresh queried a table that does not exist, and a refresh failure no longer hides the recorded per-recipient delivery status.",
+  "content_hash": "a3b2164d2a230a3d079a0455b6bd06904dbb65c2c81fc8ef61133a60d07648ce"
+}

@@ -14,167 +14,6 @@
     }
   }
 
-  const FILTER_SNIPPETS = [
-    {
-      label: 'Match ticket status equals "open"',
-      value: toJsonTemplate({
-        match: {
-          'ticket.status': 'open',
-        },
-      }),
-    },
-    {
-      label: 'Match ticket priority equals "high"',
-      value: toJsonTemplate({
-        match: {
-          'ticket.priority': 'high',
-        },
-      }),
-    },
-    {
-      label: 'Ticket is older than 30 days',
-      value: toJsonTemplate({
-        greater_than: {
-          'ticket.age_days': 30,
-        },
-      }),
-    },
-    {
-      label: 'Ticket has not been updated for 7 days',
-      value: toJsonTemplate({
-        greater_than: {
-          'ticket.updated_age_days': 7,
-        },
-      }),
-    },
-    {
-      label: 'Ticket has been in current status for 24 hours',
-      value: toJsonTemplate({
-        greater_than: {
-          'ticket.in_status_age_hours': 24,
-        },
-      }),
-    },
-    {
-      label: 'Ticket has not had a reply for 24 hours',
-      value: toJsonTemplate({
-        greater_than: {
-          'ticket.last_reply_age_hours': 24,
-        },
-      }),
-    },
-    {
-      label: 'Match any ticket status open or pending',
-      value: toJsonTemplate({
-        any: [
-          { match: { 'ticket.status': 'open' } },
-          { match: { 'ticket.status': 'pending' } },
-        ],
-      }),
-    },
-    {
-      label: 'Require ticket status open and priority high',
-      value: toJsonTemplate({
-        all: [
-          { match: { 'ticket.status': 'open' } },
-          { match: { 'ticket.priority': 'high' } },
-        ],
-      }),
-    },
-    {
-      label: 'Exclude cancelled ticket status',
-      value: toJsonTemplate({
-        not: {
-          match: {
-            'ticket.status': 'cancelled',
-          },
-        },
-      }),
-    },
-    {
-      label: 'Match nested payload customer ID',
-      value: toJsonTemplate({
-        match: {
-          'payload.customer.id': 12345,
-        },
-      }),
-    },
-    {
-      label: 'Match updates performed by technicians',
-      value: toJsonTemplate({
-        match: {
-          'ticket_update.actor_type': 'technician',
-        },
-      }),
-    },
-    {
-      label: 'Match updates performed by requesters',
-      value: toJsonTemplate({
-        match: {
-          'ticket_update.actor_type': 'requester',
-        },
-      }),
-    },
-    {
-      label: 'Match updates performed by watchers',
-      value: toJsonTemplate({
-        match: {
-          'ticket_update.actor_type': 'watcher',
-        },
-      }),
-    },
-    {
-      label: 'Match updates performed by automations',
-      value: toJsonTemplate({
-        match: {
-          'ticket_update.actor_type': 'automation',
-        },
-      }),
-    },
-    {
-      label: 'Match updates performed by the system',
-      value: toJsonTemplate({
-        match: {
-          'ticket_update.actor_type': 'system',
-        },
-      }),
-    },
-    {
-      label: 'Reply is an internal note',
-      value: toJsonTemplate({
-        match: {
-          'reply.is_internal': true,
-        },
-      }),
-    },
-    {
-      label: 'Reply is a public message',
-      value: toJsonTemplate({
-        match: {
-          'reply.is_internal': false,
-        },
-      }),
-    },
-    {
-      label: 'Module equals Trello',
-      value: toJsonTemplate({
-        match: {
-          'ticket.module_slug': 'trello',
-        },
-      }),
-    },
-    {
-      label: 'External ID is not empty',
-      value: toJsonTemplate({
-        not: {
-          match: {
-            'ticket.external_reference': null,
-          },
-        },
-      }),
-    },
-  ];
-
   const ACTION_SNIPPETS = {
     smtp: [
       {
@@ -483,11 +322,12 @@
     ],
     'reprocess-ai': [
       {
-        label: 'Refresh AI summary and tags',
+        label: 'Refresh all ticket AI',
         value: toJsonTemplate({
           ticket_id: '{{ ticket.id }}',
           refresh_summary: true,
           refresh_tags: true,
+          refresh_resolution: true,
         }),
       },
       {
@@ -496,6 +336,7 @@
           ticket_id: '{{ ticket.id }}',
           refresh_summary: true,
           refresh_tags: false,
+          refresh_resolution: false,
         }),
       },
       {
@@ -504,6 +345,16 @@
           ticket_id: '{{ ticket.id }}',
           refresh_summary: false,
           refresh_tags: true,
+          refresh_resolution: false,
+        }),
+      },
+      {
+        label: 'Refresh AI resolution steps only',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          refresh_summary: false,
+          refresh_tags: false,
+          refresh_resolution: true,
         }),
       },
     ],
@@ -980,6 +831,10 @@
         jsonPayloadTextarea.value = '';
       }
     }
+    if (jsonPayloadTextarea) {
+      // Let the structured ticket payload editor refresh its fields.
+      jsonPayloadTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+    }
 
     let maxRetriesValue = Number(taskData.max_retries ?? taskData.maxRetries ?? 12);
     if (!Number.isFinite(maxRetriesValue) || maxRetriesValue < 0) {
@@ -1287,7 +1142,7 @@
             return;
           }
         } else {
-          alert('JSON payload is required for scheduled ticket creation.');
+          alert('Enter a subject for the ticket this task creates.');
           return;
         }
       }
@@ -1485,9 +1340,6 @@
       }
       if (jsonPayloadField) {
         jsonPayloadField.hidden = !requiresPayload;
-      }
-      if (jsonPayloadInput) {
-        jsonPayloadInput.required = Boolean(requiresPayload);
       }
     };
 
@@ -1888,6 +1740,7 @@
           [
             'ticket.subject',
             'ticket.body',
+            'ticket.initial_body',
             'ticket.status',
             'ticket.priority',
             'ticket.requester_email',
@@ -1909,6 +1762,8 @@
             'ticket.task_count',
             'ticket.has_open_tasks',
             'ticket.open_task_count',
+            'ticket.linked_asset_count',
+            'ticket.suggested_asset_count',
             'ticket.ai_tags',
             'ticket.labels',
             'ticket.age_days',
@@ -1916,6 +1771,7 @@
             'ticket.in_status_age_hours',
             'ticket.last_reply_age_hours',
             'ticket_update.actor_type',
+            'reply.body',
             'reply.is_internal',
             'reply.kind',
           ].forEach((field) => {

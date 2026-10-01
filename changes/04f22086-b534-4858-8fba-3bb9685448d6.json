@@ -1,0 +1,7 @@
+{
+  "guid": "04f22086-b534-4858-8fba-3bb9685448d6",
+  "occurred_at": "2026-08-20T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed the macOS tray client icon, authenticated chat and ticket actions, and Windows-style environment variable values such as the computer name.",
+  "content_hash": "703cfab6f8d829096a78ac57f7a803217384ee2105d463c9e93d9e99e56d6414"
+}

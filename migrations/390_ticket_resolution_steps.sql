@@ -1,0 +1,6 @@
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS resolution_steps TEXT NULL;
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS resolution_steps_status VARCHAR(32) NULL;
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS resolution_steps_model VARCHAR(128) NULL;
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS resolution_steps_source VARCHAR(32) NULL;
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS resolution_steps_updated_at DATETIME(6) NULL;
+ALTER TABLE ticket_replies ADD COLUMN IF NOT EXISTS is_resolution_step TINYINT(1) NOT NULL DEFAULT 0;

@@ -16,6 +16,7 @@ from app.features.staff import handlers as staff_handlers
 
 EXPECTED = {
     ("GET", "/staff"),
+    ("GET", "/staff/addstaff"),
     ("GET", "/staff/workflows/onboarding"),
     ("GET", "/staff/workflows/onboarding/policy"),
     ("POST", "/staff/workflows/onboarding/policy"),
@@ -32,12 +33,14 @@ EXPECTED = {
     ("POST", "/api/staff/workflows/executions/{execution_id}/resume"),
     ("POST", "/staff"),
     ("PUT", "/staff/{staff_id}"),
+    ("GET", "/api/staff/{staff_id}/tickets"),
     ("POST", "/api/staff/{staff_id}/offboarding/request"),
     ("DELETE", "/staff/{staff_id}"),
     ("POST", "/staff/enabled"),
     ("POST", "/staff/{staff_id}/verify"),
     ("POST", "/staff/{staff_id}/invite"),
     ("POST", "/api/staff/{staff_id}/m365/reset-password"),
+    ("POST", "/api/staff/{staff_id}/m365/export-onedrive"),
     ("POST", "/api/staff/{staff_id}/m365/sign-in"),
 }
 

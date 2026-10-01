@@ -1,9 +1,101 @@
 {% extends "base.html" %}
-{% from 'macros/mobile.html' import mobile_collapsible %}
 {% from "macros/header.html" import page_header_actions %}
 {% from "macros/counters.html" import counter_strip %}
 
 {% block title %}Notifications{% endblock %}
+
+{% block header_title %}
+  {% set notification_filters = namespace(active=0) %}
+  {% for key in ['event_type', 'created_from', 'created_to'] %}
+    {% if filters[key] %}{% set notification_filters.active = notification_filters.active + 1 %}{% endif %}
+  {% endfor %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Notifications</span>
+    <form id="notification-filters" class="page-header-toolbar" method="get">
+      <label class="visually-hidden" for="notifications-search">Search</label>
+      <input
+        type="search"
+        id="notifications-search"
+        name="q"
+        class="form-input page-header-toolbar__search"
+        placeholder="Search notifications"
+        value="{{ filters.query }}"
+      />
+      <label class="visually-hidden" for="notifications-read-state">Read state</label>
+      <select id="notifications-read-state" name="read_state" class="form-input page-header-toolbar__select">
+        {% for value, label in read_options %}
+          <option value="{{ value }}" {% if filters.read_state == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <div class="header-menu page-header-toolbar__menu" data-header-menu>
+        <button type="button" class="button button--ghost button--compact header-menu__button" data-header-menu-toggle aria-haspopup="true" aria-expanded="false" aria-controls="notification-filter-panel">
+          <span>Filters{% if notification_filters.active %} ({{ notification_filters.active }}){% endif %}</span>
+          <svg class="header-menu__chevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14"><path fill="currentColor" d="M5.5 7.5 10 12l4.5-4.5z" /></svg>
+        </button>
+        <div id="notification-filter-panel" class="header-menu__panel header-menu__panel--form" data-header-menu-panel hidden>
+          <div class="form-field">
+            <label class="form-label" for="notifications-event-type">Event type</label>
+            <select id="notifications-event-type" name="event_type" class="form-input">
+              <option value="">All event types</option>
+              {% for event_type in event_type_options %}
+                <option value="{{ event_type }}" {% if filters.event_type == event_type %}selected{% endif %}>{{ event_type }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="notifications-sort-by">Sort by</label>
+            <select id="notifications-sort-by" name="sort_by" class="form-input">
+              {% for value, label in sort_options %}
+                <option value="{{ value }}" {% if filters.sort_by == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="notifications-sort-order">Sort order</label>
+            <select id="notifications-sort-order" name="sort_order" class="form-input">
+              {% for value, label in order_options %}
+                <option value="{{ value }}" {% if filters.sort_order == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="notifications-created-from">Created from</label>
+            <input
+              type="datetime-local"
+              id="notifications-created-from"
+              name="created_from"
+              class="form-input"
+              value="{{ filters.created_from }}"
+            />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="notifications-created-to">Created to</label>
+            <input
+              type="datetime-local"
+              id="notifications-created-to"
+              name="created_to"
+              class="form-input"
+              value="{{ filters.created_to }}"
+            />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="notifications-page-size">Page size</label>
+            <select id="notifications-page-size" name="page_size" class="form-input">
+              {% for size in page_size_options %}
+                <option value="{{ size }}" {% if filters.page_size == size %}selected{% endif %}>{{ size }} per page</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="header-menu__panel-actions">
+            <button type="button" class="button button--ghost button--compact" data-notification-reset {% if not filters_active %}disabled{% endif %}>Reset</button>
+            <button type="submit" class="button button--primary button--compact">Apply filters</button>
+          </div>
+        </div>
+      </div>
+      <input type="hidden" name="page" value="{{ filters.page }}" data-notification-page-field />
+    </form>
+  </div>
+{% endblock %}
 
 {% block header_actions %}
   {{ page_header_actions([
@@ -30,88 +122,7 @@
     total_attrs={"data-total-notifications": "", "data-label": "Total"}
   ) }}
 
-    {% call mobile_collapsible('Filters', open=False) %}
   <section class="card card--panel">
-    <form id="notification-filters" class="filters filters--compact" method="get">
-      <div class="filters__group filters__group--wide">
-        <label for="notifications-search">Search</label>
-        <input
-          type="search"
-          id="notifications-search"
-          name="q"
-          class="input"
-          placeholder="Search notifications"
-          value="{{ filters.query }}"
-        />
-      </div>
-      <div class="filters__group">
-        <label for="notifications-event-type">Event type</label>
-        <select id="notifications-event-type" name="event_type" class="input">
-          <option value="">All event types</option>
-          {% for event_type in event_type_options %}
-            <option value="{{ event_type }}" {% if filters.event_type == event_type %}selected{% endif %}>{{ event_type }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="filters__group">
-        <label for="notifications-read-state">Read state</label>
-        <select id="notifications-read-state" name="read_state" class="input">
-          {% for value, label in read_options %}
-            <option value="{{ value }}" {% if filters.read_state == value %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="filters__group">
-        <label for="notifications-sort-by">Sort by</label>
-        <select id="notifications-sort-by" name="sort_by" class="input">
-          {% for value, label in sort_options %}
-            <option value="{{ value }}" {% if filters.sort_by == value %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="filters__group">
-        <label for="notifications-sort-order">Sort order</label>
-        <select id="notifications-sort-order" name="sort_order" class="input">
-          {% for value, label in order_options %}
-            <option value="{{ value }}" {% if filters.sort_order == value %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="filters__group">
-        <label for="notifications-created-from">Created from</label>
-        <input
-          type="datetime-local"
-          id="notifications-created-from"
-          name="created_from"
-          class="input"
-          value="{{ filters.created_from }}"
-        />
-      </div>
-      <div class="filters__group">
-        <label for="notifications-created-to">Created to</label>
-        <input
-          type="datetime-local"
-          id="notifications-created-to"
-          name="created_to"
-          class="input"
-          value="{{ filters.created_to }}"
-        />
-      </div>
-      <div class="filters__group">
-        <label for="notifications-page-size">Page size</label>
-        <select id="notifications-page-size" name="page_size" class="input">
-          {% for size in page_size_options %}
-            <option value="{{ size }}" {% if filters.page_size == size %}selected{% endif %}>{{ size }} per page</option>
-          {% endfor %}
-        </select>
-      </div>
-      <input type="hidden" name="page" value="{{ filters.page }}" data-notification-page-field />
-      <div class="filters__group filters__group--actions">
-        <button type="submit" class="button button--ghost">Apply filters</button>
-        <button type="button" class="button button--ghost" data-notification-reset {% if not filters_active %}disabled{% endif %}>Reset</button>
-      </div>
-    </form>
-    {% endcall %}
 
     {% if notifications %}
     <div class="table-wrapper">

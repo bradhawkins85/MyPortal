@@ -1,63 +1,39 @@
 {% extends "base.html" %}
 
-{% block header_title %}Chat{% endblock %}
-{% from "macros/header.html" import page_header_actions %}
-
-{% block header_actions %}
-  {% set chat_actions = [
-    {"label": "New chat", "variant": "primary", "type": "button",
-     "attrs": {"data-create-chat-modal-open": "", "aria-haspopup": "dialog", "aria-controls": "create-chat-modal"}},
-  ] %}
-  {% if is_super_admin | default(false) %}
-    {% set chat_actions = chat_actions + [{"label": "AI tag synonyms", "type": "link", "href": "/admin/chat/ai-tag-synonyms"}, {"label": "Auto-assign rules", "type": "link", "href": "/chat/auto-assign"}] %}
-  {% endif %}
-  {% if is_super_admin | default(false) %}
-    {% set chat_actions = chat_actions + [{"label": "Delete selected", "variant": "danger", "type": "button", "attrs": {"id": "bulk-delete-chats", "disabled": "disabled"}}] %}
-  {% endif %}
-  {{ page_header_actions(chat_actions) }}
-{% endblock %}
-
-{% block content %}
-<section class="card card--panel">
-  {% if csrf_token %}<input type="hidden" id="chat-csrf-token" value="{{ csrf_token }}" />{% endif %}
-  <header class="card__header">
-    <div class="card__controls">
-      <form method="get" autocomplete="off" class="tickets-toolbar__form" id="chat-filter-form">
-        <div class="tickets-toolbar__field form-field--checkbox">
-          <label class="form-checkbox" for="chat-show-closed-filter">
-            <input
-              id="chat-show-closed-filter"
-              type="checkbox"
-              name="show_closed"
-              value="1"
-              data-auto-filter
-              {% if show_closed_filter %}checked{% endif %}
-            />
-            <span>Show Closed Chats</span>
-          </label>
-        </div>
-        {% if is_staff %}
-        <div class="tickets-toolbar__field">
-          <label class="form-label" for="chat-unattended-filter">Show</label>
-          <select id="chat-unattended-filter" name="unattended" class="form-input" data-auto-filter>
-            <option value="">All sessions</option>
-            <option value="1" {% if unattended_filter == '1' %}selected{% endif %}>Unattended only</option>
-          </select>
-        </div>
-        {% endif %}
-        <div class="tickets-toolbar__field">
-          <label class="form-label" for="chat-table-filter">Filter chats</label>
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Chat</span>
+    <div class="page-header-toolbar">
+      <form method="get" autocomplete="off" class="page-header-toolbar__group" id="chat-filter-form">
+        <label class="page-header-toolbar__check" for="chat-show-closed-filter">
           <input
-            id="chat-table-filter"
-            type="search"
-            class="form-input"
-            placeholder="Filter chats…"
-            data-table-filter="chat-rooms-table"
+            id="chat-show-closed-filter"
+            type="checkbox"
+            name="show_closed"
+            value="1"
+            data-auto-filter
+            {% if show_closed_filter %}checked{% endif %}
           />
-        </div>
+          <span>Show closed</span>
+        </label>
+        {% if is_staff %}
+        <label class="visually-hidden" for="chat-unattended-filter">Show</label>
+        <select id="chat-unattended-filter" name="unattended" class="form-input page-header-toolbar__select" data-auto-filter>
+          <option value="">All sessions</option>
+          <option value="1" {% if unattended_filter == '1' %}selected{% endif %}>Unattended only</option>
+        </select>
+        {% endif %}
+        <label class="visually-hidden" for="chat-table-filter">Filter chats</label>
+        <input
+          id="chat-table-filter"
+          type="search"
+          class="form-input page-header-toolbar__search"
+          placeholder="Filter chats"
+          data-table-filter="chat-rooms-table"
+        />
       </form>
-      <div class="ticket-columns" data-chat-columns>
-        <button type="button" class="button button--ghost ticket-columns__toggle" data-columns-toggle aria-haspopup="true" aria-expanded="false">
+      <div class="ticket-columns ticket-header-toolbar__menu" data-chat-columns>
+        <button type="button" class="button button--ghost button--compact ticket-columns__toggle" data-columns-toggle aria-haspopup="true" aria-expanded="false">
           Columns
           <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
         </button>
@@ -110,7 +86,27 @@
         </div>
       </div>
     </div>
-  </header>
+  </div>
+{% endblock %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_actions %}
+  {% set chat_actions = [
+    {"label": "New chat", "variant": "primary", "type": "button",
+     "attrs": {"data-create-chat-modal-open": "", "aria-haspopup": "dialog", "aria-controls": "create-chat-modal"}},
+  ] %}
+  {% if is_super_admin | default(false) %}
+    {% set chat_actions = chat_actions + [{"label": "AI tag synonyms", "type": "link", "href": "/admin/chat/ai-tag-synonyms"}, {"label": "Auto-assign rules", "type": "link", "href": "/chat/auto-assign"}] %}
+  {% endif %}
+  {% if is_super_admin | default(false) %}
+    {% set chat_actions = chat_actions + [{"label": "Delete selected", "variant": "danger", "type": "button", "attrs": {"id": "bulk-delete-chats", "disabled": "disabled"}}] %}
+  {% endif %}
+  {{ page_header_actions(chat_actions) }}
+{% endblock %}
+
+{% block content %}
+<section class="card card--panel">
+  {% if csrf_token %}<input type="hidden" id="chat-csrf-token" value="{{ csrf_token }}" />{% endif %}
   {% if not rooms %}
     <div class="alert alert--info" role="status">No chats found.{% if not is_staff %} Start a new chat to begin.{% endif %}</div>
   {% endif %}
@@ -177,6 +173,14 @@
                       data-assigned="{{ room.assigned_tech_user_id | default('') }}"
                       title="Assign to me and join">
                 {% if room.assigned_tech_user_id %}Reassign & Join{% else %}Assign & Join{% endif %}
+              </button>
+            {% endif %}
+            {% if room.status == 'open' and (is_staff or room.created_by_user_id == current_user_id) %}
+              <button type="button"
+                      class="button button--sm button--danger btn-close-chat"
+                      data-room-id="{{ room.id }}"
+                      data-room-subject="{{ room.subject | e }}">
+                Close Chat
               </button>
             {% endif %}
           </td>
@@ -334,6 +338,33 @@
           return;
         }
         window.location.href = '/chat/' + roomId;
+      } catch(err) {
+        alert('Network error: ' + err.message);
+        this.disabled = false;
+      }
+    });
+  });
+
+  // Close chat buttons
+  document.querySelectorAll('.btn-close-chat').forEach(btn => {
+    btn.addEventListener('click', async function() {
+      const roomId = this.dataset.roomId;
+      const subject = this.dataset.roomSubject || `chat #${roomId}`;
+      if (!confirm(`Close “${subject}”?`)) return;
+      this.disabled = true;
+      try {
+        const resp = await fetch(`/api/chat/rooms/${roomId}/close`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+          body: '{}',
+        });
+        if (resp.ok) {
+          window.location.reload();
+        } else {
+          const err = await resp.json();
+          alert(err.detail || 'Failed to close chat');
+          this.disabled = false;
+        }
       } catch(err) {
         alert('Network error: ' + err.message);
         this.disabled = false;

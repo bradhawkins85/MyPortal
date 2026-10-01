@@ -136,6 +136,49 @@ async def test_log_incoming_webhook_redacts_sensitive_headers():
 
 
 @pytest.mark.asyncio
+async def test_log_incoming_webhook_records_source_ip_from_forwarded_header():
+    with patch('app.repositories.webhook_events.create_event', new_callable=AsyncMock) as mock_create, \
+         patch('app.repositories.webhook_events.record_attempt', new_callable=AsyncMock), \
+         patch('app.repositories.webhook_events.mark_event_completed', new_callable=AsyncMock), \
+         patch('app.repositories.webhook_events.get_event', new_callable=AsyncMock) as mock_get:
+
+        mock_create.return_value = {'id': 790}
+        mock_get.return_value = {'id': 790, 'status': 'succeeded'}
+
+        await webhook_monitor.log_incoming_webhook(
+            name="Webhook with IP",
+            source_url="https://example.com/webhook",
+            headers={"X-Forwarded-For": "198.51.100.22, 10.0.0.1"},
+            response_status=200,
+        )
+
+        create_kwargs = mock_create.call_args.kwargs
+        assert create_kwargs["metadata"] == {"source_ip": "198.51.100.22"}
+
+
+@pytest.mark.asyncio
+async def test_log_incoming_webhook_prefers_explicit_source_ip():
+    with patch('app.repositories.webhook_events.create_event', new_callable=AsyncMock) as mock_create, \
+         patch('app.repositories.webhook_events.record_attempt', new_callable=AsyncMock), \
+         patch('app.repositories.webhook_events.mark_event_completed', new_callable=AsyncMock), \
+         patch('app.repositories.webhook_events.get_event', new_callable=AsyncMock) as mock_get:
+
+        mock_create.return_value = {'id': 791}
+        mock_get.return_value = {'id': 791, 'status': 'succeeded'}
+
+        await webhook_monitor.log_incoming_webhook(
+            name="Webhook explicit IP",
+            source_url="https://example.com/webhook",
+            headers={"X-Forwarded-For": "198.51.100.40"},
+            source_ip="203.0.113.11",
+            response_status=200,
+        )
+
+        create_kwargs = mock_create.call_args.kwargs
+        assert create_kwargs["metadata"] == {"source_ip": "203.0.113.11"}
+
+
+@pytest.mark.asyncio
 async def test_enqueue_event_sets_direction_outgoing():
     """Test that enqueue_event sets direction to outgoing."""
     with patch('app.repositories.webhook_events.create_event', new_callable=AsyncMock) as mock_create, \
@@ -237,6 +280,23 @@ def test_normalize_source_url_preserves_non_standard_port():
     assert _normalize_source_url(
         "http://example.com:8080/path"
     ) == "https://example.com:8080/path"
+
+
+def test_normalize_source_url_logs_and_preserves_on_invalid_port(monkeypatch):
+    from app.services.webhook_monitor import _normalize_source_url
+
+    logged = []
+
+    def fake_log_error(message, **kwargs):
+        logged.append({"message": message, **kwargs})
+
+    monkeypatch.setattr(webhook_monitor, "log_error", fake_log_error)
+
+    original = "http://example.com:bad/webhook"
+    assert _normalize_source_url(original) == original
+    assert len(logged) == 1
+    assert "preserving original URL" in logged[0]["message"]
+    assert logged[0]["error"] == "ValueError"
 
 
 # ---------------------------------------------------------------------------

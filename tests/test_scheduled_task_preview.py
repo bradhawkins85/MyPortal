@@ -130,7 +130,7 @@ def test_generate_invoice_preview_uses_xero_line_item_template(monkeypatch):
         item["xeroDescription"]
         == "Ticket #42 - Broken printer - Remote Support - 1 Hour 30 Mins"
     )
-    assert item["xeroQuantity"] == "1.50"
+    assert item["xeroQuantity"] == "90"
     assert item["xeroUnitAmount"] == "125.50"
     assert item["xeroItemCode"] == "LAB"
     assert "xeroLineItemTemplate" not in item

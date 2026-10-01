@@ -96,7 +96,7 @@ async def update_attachment(attachment_id: int, **fields) -> None:
         UPDATE ticket_attachments
         SET {', '.join(set_clauses)}
         WHERE id = ?
-    """
+    """  # nosec B608
     
     await db.execute(query, tuple(values))
     log_debug(f"Updated attachment {attachment_id}")
@@ -114,3 +114,13 @@ async def count_attachments(ticket_id: int) -> int:
     query = "SELECT COUNT(*) as count FROM ticket_attachments WHERE ticket_id = ?"
     row = await db.fetch_one(query, (ticket_id,))
     return row["count"] if row else 0
+
+
+async def list_all_attachments() -> list[dict[str, Any]]:
+    """List attachment records across tickets for super-admin storage cleanup."""
+    rows = await db.fetch_all(
+        """SELECT id, ticket_id, filename, original_filename, file_size,
+                  mime_type, access_level, uploaded_by_user_id, uploaded_at
+           FROM ticket_attachments ORDER BY id"""
+    )
+    return [dict(row) for row in rows]

@@ -9,10 +9,11 @@ from urllib.parse import urlparse
 
 from app.repositories import reporting as reporting_repo
 from app.services import reporting as reporting_service
+from app.services.stat_strips import build_items
 from app.services.system_variables import get_system_variables
 
 MAX_PANELS = 80
-PANEL_TYPES = {"link", "stat", "variable", "graph"}
+PANEL_TYPES = {"link", "stat", "stat_strip", "variable", "graph"}
 GRAPH_TYPES = {"bar", "line", "area", "doughnut"}
 COLOUR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 GRAPH_Y_RE = re.compile(r"^Y(?:[1-9][0-9]*)?$")
@@ -96,7 +97,7 @@ def validate_layout(value: Any) -> dict[str, Any]:
             ("x", 0, 0, 11),
             ("y", index, 0, 500),
             ("w", 4, 1, 12),
-            ("h", 2, 1, 12),
+            ("h", 2, 0, 12),
         ):
             try:
                 panel[key] = max(low, min(high, int(raw.get(key, default))))
@@ -117,7 +118,12 @@ def validate_layout(value: Any) -> dict[str, Any]:
         else:
             panel["report"] = str(raw.get("report") or "")[:120]
             if panel_type == "stat":
-                panel["function"] = "list" if raw.get("function") == "list" else "count"
+                panel["detail_report"] = str(raw.get("detail_report") or "")[:120]
+                panel["function"] = (
+                    raw.get("function")
+                    if raw.get("function") in {"list", "listall"}
+                    else "count"
+                )
                 if panel["function"] == "count":
                     try:
                         panel["compare_value"] = float(raw.get("compare_value", 0))
@@ -150,7 +156,7 @@ async def resolve_layout(
                 item["value"] = variables.get(
                     panel.get("variable", ""), "Not available"
                 )
-            elif panel["type"] in {"stat", "graph"}:
+            elif panel["type"] in {"stat", "stat_strip", "graph"}:
                 report = await reporting_repo.get_query_by_slug(panel.get("report", ""))
                 permitted = report and (
                     can_run_all
@@ -165,14 +171,38 @@ async def resolve_layout(
                     report["sql_query"], company_id=company_id
                 )
                 rows, columns = result["rows"], result["columns"]
-                if panel["type"] == "stat":
-                    item["value"] = (
-                        len(rows)
-                        if panel.get("function") == "count"
-                        else (
+                if panel["type"] == "stat_strip":
+                    item["stat_strip_data"] = build_items(result)
+                elif panel["type"] == "stat":
+                    detail_slug = panel.get("detail_report", "")
+                    if detail_slug:
+                        detail_report = await reporting_repo.get_query_by_slug(
+                            detail_slug
+                        )
+                        detail_permitted = detail_report and (
+                            can_run_all
+                            or await reporting_repo.user_has_permission(
+                                detail_report["id"], user_id
+                            )
+                        )
+                        if detail_permitted:
+                            item["detail_url"] = (
+                                f"/reporting?report={int(detail_report['id'])}"
+                            )
+                    if panel.get("function") == "count":
+                        item["value"] = len(rows)
+                    elif panel.get("function") == "listall":
+                        item["table_data"] = {
+                            "columns": columns,
+                            "rows": [
+                                [row.get(column) for column in columns]
+                                for row in rows[:8]
+                            ],
+                        }
+                    else:
+                        item["value"] = (
                             [row.get(columns[0]) for row in rows[:8]] if columns else []
                         )
-                    )
                 else:
                     # X supplies labels and Y/Y1/Y2/... supply series. Other
                     # query columns are deliberately ignored.

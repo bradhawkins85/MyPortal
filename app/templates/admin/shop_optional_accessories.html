@@ -1,14 +1,35 @@
 {% extends "base.html" %}
-{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}
-  <span class="header__title-text">Optional accessories</span>
+  <div class="page-header-bar">
+    <span class="header__title-text">Optional accessories</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="optional-accessories-filter">Search accessories</label>
+      <input
+        id="optional-accessories-filter"
+        type="search"
+        class="form-input page-header-toolbar__search"
+        placeholder="Search accessories"
+        data-table-filter="optional-accessories-table"
+      />
+      {% if show_dismissed %}
+        <a href="/admin/shop/optional-accessories" class="button button--ghost button--compact">View pending</a>
+      {% else %}
+        <a href="/admin/shop/optional-accessories?show=dismissed" class="button button--ghost button--compact">View dismissed</a>
+      {% endif %}
+      <span class="page-header-toolbar__info">{{ accessories | length }} item{{ 's' if accessories | length != 1 else '' }}</span>
+    </div>
+  </div>
 {% endblock %}
 
 {% block header_actions %}
-  {{ page_header_actions([
-    {"label": "Back to shop", "type": "link", "href": "/admin/shop"}
-  ]) }}
+  <a class="button button--ghost" href="/admin/shop">Back to shop</a>
+  {% if not show_dismissed %}
+    <form action="/admin/shop/optional-accessories/sync" method="post" class="inline-form">
+      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+      <button type="submit" class="button button--primary">Sync from feed</button>
+    </form>
+  {% endif %}
 {% endblock %}
 
 {% block content %}
@@ -28,31 +49,6 @@
               These items appear as optional accessories (cross-sells) in the stock feed for products already in your shop, but have not yet been imported. Import an item to add it to your shop, or dismiss it to remove it from this list.
             </p>
           {% endif %}
-        </div>
-        <div class="card__controls">
-          {% if not show_dismissed %}
-            <form action="/admin/shop/optional-accessories/sync" method="post" class="inline-form">
-              {% if csrf_token %}
-              <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-              {% endif %}
-              <button type="submit" class="button button--ghost button--small">
-                Sync from feed
-              </button>
-            </form>
-          {% endif %}
-          {% if show_dismissed %}
-            <a href="/admin/shop/optional-accessories" class="button button--ghost button--small">View pending</a>
-          {% else %}
-            <a href="/admin/shop/optional-accessories?show=dismissed" class="button button--ghost button--small">View dismissed</a>
-          {% endif %}
-          <input
-            type="search"
-            class="form-input card__control"
-            placeholder="Search accessories"
-            aria-label="Search accessories"
-            data-table-filter="optional-accessories-table"
-          />
-          <span class="badge badge--muted">{{ accessories | length }} item{{ 's' if accessories | length != 1 else '' }}</span>
         </div>
       </header>
 

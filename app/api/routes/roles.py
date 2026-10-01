@@ -36,13 +36,13 @@ async def create_role(
         permissions=payload.permissions,
         is_system=payload.is_system,
     )
-    await audit_service.log_action(
-        action="role.created",
+    await audit_service.record_create(
+        action="role.create",
+        request=request,
         user_id=current_user["id"],
         entity_type="role",
         entity_id=created["id"],
-        new_value=created,
-        request=request,
+        after=created,
     )
     return created
 
@@ -86,14 +86,14 @@ async def update_role(
         )
     data = payload.model_dump(exclude_unset=True)
     updated = await role_repo.update_role(role_id, **data)
-    await audit_service.log_action(
-        action="role.updated",
+    await audit_service.record(
+        action="role.update",
+        request=request,
         user_id=current_user["id"],
         entity_type="role",
         entity_id=role_id,
-        previous_value=role,
-        new_value=updated,
-        request=request,
+        before=role,
+        after=updated,
     )
     return updated
 
@@ -110,14 +110,19 @@ async def delete_role(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
     if role.get("is_system"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete system role")
+    member_count = (await role_repo.count_members_by_role()).get(role_id, 0)
+    if member_count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Role is assigned to {member_count} company member{'s' if member_count != 1 else ''}; reassign them first",
+        )
     await role_repo.delete_role(role_id)
-    await audit_service.log_action(
-        action="role.deleted",
+    await audit_service.record_delete(
+        action="role.delete",
+        request=request,
         user_id=current_user["id"],
         entity_type="role",
         entity_id=role_id,
-        previous_value=role,
-        new_value=None,
-        request=request,
+        before=role,
     )
     return None

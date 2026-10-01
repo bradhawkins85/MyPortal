@@ -24,6 +24,15 @@ def test_strip_html_parses_entity_encoded_markup_and_preserves_line_breaks():
     assert trello_service._strip_html(body) == "First line\nSecond line\nThird line"
 
 
+def test_strip_html_parses_doubly_encoded_editor_markup():
+    body = (
+        "&amp;lt;div&amp;gt;&amp;lt;br&amp;gt;&amp;lt;/div&amp;gt;"
+        "&amp;lt;div&amp;gt;Ticket update&amp;lt;/div&amp;gt;"
+    )
+
+    assert trello_service._strip_html(body) == "Ticket update"
+
+
 def test_strip_html_renders_ticket_images_as_absolute_markdown():
     body = '<div>Screenshot attached</div><img src="/api/tickets/25055/attachments/9977/download" alt="">'
 

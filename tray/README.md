@@ -87,6 +87,48 @@ In CI these targets run as separate jobs on `windows-latest` and `macos-latest`
 runners respectively. The resulting artifacts are downloaded into `dist/` before
 the MSI / .pkg installer jobs run.
 
+The Windows MSI workflow imports the same password-protected self-signed
+code-signing certificate on every build. It signs and verifies the Go agents,
+the executables in the Electron chat-shell runtime, and the final MSI with
+SHA-256 before uploading the installer. Keeping one PFX means every release has
+the same publisher identity and certificate thumbprint until the certificate is
+deliberately rotated.
+
+#### Set up the Windows signing certificate
+
+Run the setup script once on a trusted Windows workstation with PowerShell 5.1
+or later. Do not run it for each release:
+
+```powershell
+cd tray
+.\scripts\New-WindowsSigningCertificate.ps1 -OutputDirectory .\signing
+```
+
+The script prompts for a PFX password and creates three files:
+
+- `myportal-tray-signing.pfx` — private certificate; store this securely.
+- `myportal-tray-signing.pfx.base64` — value for the GitHub Actions secret.
+- `myportal-tray-signing.cer` — public certificate for endpoint trust policy.
+
+In the GitHub repository, open **Settings → Secrets and variables → Actions**
+and create these repository secrets:
+
+| Secret | Value |
+| --- | --- |
+| `WINDOWS_SIGNING_CERTIFICATE_PFX` | Entire contents of `myportal-tray-signing.pfx.base64` |
+| `WINDOWS_SIGNING_CERTIFICATE_PASSWORD` | Password entered when generating the PFX |
+
+Delete the local base64 file after configuring GitHub. Retain an access-controlled
+backup of the PFX and its password; losing either requires certificate rotation.
+Deploy `myportal-tray-signing.cer` to **Trusted Root Certification Authorities**
+and **Trusted Publishers** on managed endpoints before installing the signed
+agent. A self-signed certificate is not trusted automatically.
+
+To rotate an expiring or compromised certificate, run the script again, replace
+both GitHub secrets together, deploy the new `.cer` to endpoints, and retain the
+old public certificate while older signed releases remain in use. Never commit
+the PFX, password, base64 file, or generated certificate to this repository.
+
 ### Build installer packages
 
 ```sh
@@ -148,7 +190,44 @@ The chat shell binary is installed to:
 - **Windows**: `%ProgramFiles%\MyPortalTray\chat-shell\myportal-tray-chat.exe` (current unpacked Electron install) or `%ProgramFiles%\MyPortalTray\myportal-tray-chat.exe` (legacy single-file install fallback)
 - **macOS**: `/Library/MyPortal/Tray/myportal-tray-chat.app/Contents/MacOS/myportal-tray-chat`
 
+## Classic Outlook signatures
+
+When a company enables **Classic Outlook** sync on the portal's Signature
+management page, the per-user UI agent on Windows keeps each user's Classic
+Outlook signature in line with the company's current primary template
+(`ui/outlook_signatures*.go`). It runs about 45 seconds after the UI starts,
+then hourly and whenever the service relays `config_changed`:
+
+1. Reads the email address of every mail account in the user's Outlook
+   profiles (`HKCU\Software\Microsoft\Office\16.0|15.0\Outlook\Profiles`).
+2. Posts those addresses to `POST /api/tray/outlook-signatures`. The portal
+   renders the signature only for addresses on the company's email domains that
+   match an active staff record, and returns `enabled: false` when the company
+   has not opted in.
+3. Writes `MyPortal (<address>).htm/.rtf/.txt` to the user's signatures folder
+   (`%APPDATA%\Microsoft\Signatures`, or its localised name), only when the
+   content changed or a file is missing.
+4. Sets that signature as the account's new-message and reply/forward default,
+   sets it as the default for accounts added later
+   (`Common\MailSettings\NewSignature`/`ReplySignature`), and turns on the
+   per-user `DisableRoamingSignatures` switches so Outlook's cloud signature
+   sync does not replace the files.
+
+Signatures the user created themselves are never modified or deleted.
+Outlook for Mac keeps signatures in its own database and is not managed.
+
 ## Configuration
+
+### Network scanning
+
+When network scanning is enabled by the portal, the Windows service uses the
+Windows PowerShell and .NET networking APIs already included with Windows. On
+Windows Server 2012 R2 and older systems, it uses WMI and `arp.exe` compatibility
+fallbacks instead of the newer NetTCPIP module. It
+discovers hosts with ICMP, the neighbor table, reverse DNS, and a bounded scan
+of common TCP ports. Each connected network is limited to its local `/24`, so
+the tray no longer installs or requires Nmap on Windows. macOS and Linux builds
+continue to use Nmap.
 
 ### Windows
 
@@ -182,11 +261,77 @@ See [docs/tray_app.md](../docs/tray_app.md) for the full architecture document.
 .\installer\windows\install.ps1 -PortalURL 'https://portal.example.com' -EnrolToken 'TOKEN'
 ```
 
+To exclude the installed Tray binaries and runtime data from Microsoft Defender,
+run the RMM exclusion script as LocalSystem or an administrator. The script is
+idempotent and defaults to `%ProgramFiles%\MyPortalTray` and
+`%ProgramData%\MyPortal\tray`:
+
+This script only excludes the Tray agent itself. Exclusions and scheduled scans
+configured on the portal's **Windows Defender** page are applied by the agent
+(see below).
+
+```powershell
+.\integrations\tacticalrmm\set-tray-defender-exclusions.ps1
+```
+
+Custom paths can be supplied when an installation uses non-standard locations:
+
+```powershell
+.\integrations\tacticalrmm\set-tray-defender-exclusions.ps1 `
+    -ExclusionPath 'C:\Apps\MyPortalTray', 'D:\MyPortalData'
+```
+
+### Windows Defender policy and Tamper Protection
+
+When Windows Defender management is enabled for a company, the service
+reconciles the portal policy every five minutes:
+
+- **Exclusions** (path, process, extension) are added with `Add-MpPreference`.
+  The agent records what it added in `%ProgramData%\MyPortal\tray\defender-policy.json`
+  and only ever removes those entries, so exclusions set locally or by another
+  tool are left alone. Defender has no registry exclusions; registry entries
+  are reported as unsupported.
+- **Scheduled scans** set `ScanParameters`, `ScanScheduleDay` and
+  `ScanScheduleTime`. The original schedule is restored when the portal
+  schedule is disabled.
+
+The agent never attempts a change that Tamper Protection could block:
+
+- Exclusion changes are skipped while Tamper Protection is on, unless Defender
+  reports that Tamper Protection does not cover exclusions
+  (`HKLM\SOFTWARE\Microsoft\Windows Defender\Features\TPExclusions` = 0).
+- Settings controlled by Group Policy or Intune (`DisableLocalAdminMerge`, a
+  managed scan schedule) are skipped because the local value would be ignored.
+- Every change is verified by reading the preferences back. A change Defender
+  discards is reported and not retried until the policy or the device's
+  protection settings change.
+
+The outcome of each setting is shown in the portal's **Policy** column.
+
 ### macOS (bash, RMM one-liner)
 
 ```bash
 MYPORTAL_URL='https://portal.example.com' ENROL_TOKEN='TOKEN' bash installer/macos/install.sh
 ```
+
+### macOS — Tactical RMM
+
+Use `integrations/tacticalrmm/install-tray-macos.sh` instead of the generic
+one-liner above. Add it to TRMM as a **bash** script (run as **root**) and
+configure the required variables as protected Script Variables:
+
+| Variable | Required | Description |
+|---|---|---|
+| `MYPORTAL_URL` | ✅ | Full URL of the MyPortal server |
+| `ENROL_TOKEN` | ✅ | Per-company install token |
+| `AUTO_UPDATE` | — | `true` (default) or `false` |
+| `PORTAL_API_KEY` | — | MyPortal API key — enables immediate TRMM sync |
+| `TRMM_AGENT_ID` | — | Set to `{{agent.agent_id}}` (required with `PORTAL_API_KEY`) |
+
+When `PORTAL_API_KEY` and `TRMM_AGENT_ID` are provided the script also waits
+for initial enrolment and calls `/api/tray/trmm-sync` to link the device
+immediately. See `docs/wiki/integrations/Tactical RMM Tray Agent Sync.md` for
+the full setup guide.
 
 
 ### macOS uninstaller

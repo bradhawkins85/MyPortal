@@ -17,12 +17,40 @@
           {'label': 'Pass', 'value': section.data.counts.pass, 'variant': 'success'},
           {'label': 'Warn', 'value': section.data.counts.warn, 'variant': 'warning'},
           {'label': 'Fail', 'value': section.data.counts.fail, 'variant': 'danger'},
+          {'label': 'Critical fail', 'value': section.data.exposure.critical, 'variant': 'danger'},
+          {'label': 'High fail', 'value': section.data.exposure.high, 'variant': 'warning'},
           {'label': 'Error', 'value': section.data.counts.error, 'variant': 'danger'},
           {'label': 'N/A', 'value': section.data.counts.not_applicable, 'variant': 'neutral'},
           {'label': 'Unknown', 'value': section.data.counts.unknown, 'variant': 'neutral'},
           {'label': 'Pass rate', 'value': section.data.pass_percentage ~ '%', 'variant': 'info'},
         ]
       ) }}
+      <div class="report-meta-grid" style="display:grid;gap:0.75rem;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));margin-top:1rem">
+        <div>
+          <strong>Current exposure</strong>
+          <div class="text-muted">Weighted risk points: {{ section.data.exposure.risk_points }}</div>
+        </div>
+        <div>
+          <strong>30-day fail trend</strong>
+          <div class="text-muted">
+            {% if section.data.trend.fail_delta is not none %}
+              {{ '%+d'|format(section.data.trend.fail_delta) }} failed checks
+            {% else %}
+              Not enough history yet
+            {% endif %}
+          </div>
+        </div>
+        <div>
+          <strong>30-day secure-score trend</strong>
+          <div class="text-muted">
+            {% if section.data.trend.secure_score_delta is not none %}
+              {{ '%+.1f'|format(section.data.trend.secure_score_delta) }} points
+            {% else %}
+              Not enough history yet
+            {% endif %}
+          </div>
+        </div>
+      </div>
     {% else %}
       <p class="report-empty">No M365 best practice results have been recorded yet.</p>
     {% endif %}

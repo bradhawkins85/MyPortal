@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block title %}Add external subscription - {{ app_name }}{% endblock %}
+{% block header_title %}<span class="header__title-text">Add external subscription</span>{% endblock %}
+{% block header_actions %}<a class="button button--ghost" href="/admin/subscriptions">Back to subscriptions</a>{% endblock %}
+
+{% block content %}
+<section class="card card--panel subscription-create-card">
+  <header class="card__header">
+    <div>
+      <h1 class="card__title">Register an existing subscription</h1>
+      <p class="card__description">Add a Shop-linked or standalone vendor subscription. Reminder-only records notify the customer but are never invoiced by MyPortal.</p>
+    </div>
+  </header>
+
+  {% if failure_message %}
+    <div class="alert alert--danger" role="alert">{{ failure_message }}</div>
+  {% endif %}
+  {% if form_errors %}
+    <div class="alert alert--danger" role="alert">
+      <strong>Please correct the following:</strong>
+      <ul>{% for error in form_errors.values() %}<li>{{ error }}</li>{% endfor %}</ul>
+    </div>
+  {% endif %}
+
+  <form method="post" action="/admin/subscriptions/create" class="subscription-create-form" novalidate>
+    {% include "partials/csrf.html" %}
+    <div class="form-grid">
+      <div class="form-field">
+        <label class="form-label" for="customer_id">Customer <span aria-hidden="true">*</span></label>
+        <select class="form-input" id="customer_id" name="customer_id" required aria-invalid="{{ 'true' if form_errors.customer_id else 'false' }}">
+          <option value="">Select a customer</option>
+          {% for company in companies %}<option value="{{ company.id }}" {% if form_values.customer_id|string == company.id|string %}selected{% endif %}>{{ company.name }}</option>{% endfor %}
+        </select>
+        {% if form_errors.customer_id %}<p class="form-error">{{ form_errors.customer_id }}</p>{% endif %}
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="product_id">Shop subscription product <span class="field-optional">(optional)</span></label>
+        <select class="form-input" id="product_id" name="product_id" aria-invalid="{{ 'true' if form_errors.product_id else 'false' }}">
+          <option value="">Standalone third-party subscription</option>
+          {% for product in products %}<option value="{{ product.id }}" {% if form_values.product_id|string == product.id|string %}selected{% endif %}>{{ product.name }}{% if product.sku %} ({{ product.sku }}){% endif %}</option>{% endfor %}
+        </select>
+        {% if form_errors.product_id %}<p class="form-error">{{ form_errors.product_id }}</p>{% endif %}
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="vendor">Vendor <span aria-hidden="true">*</span></label>
+        <input class="form-input" id="vendor" name="vendor" maxlength="255" value="{{ form_values.vendor or '' }}" list="subscription-vendors" required aria-invalid="{{ 'true' if form_errors.vendor else 'false' }}">
+        <datalist id="subscription-vendors"><option value="Microsoft"><option value="Adobe"><option value="Amazon Web Services"><option value="Google"></datalist>
+        <p class="form-helper">Select a known vendor or enter any vendor name.</p>
+        {% if form_errors.vendor %}<p class="form-error">{{ form_errors.vendor }}</p>{% endif %}
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="external_name">Third-party subscription name <span class="field-optional">(required without a Shop product)</span></label>
+        <input class="form-input" id="external_name" name="external_name" maxlength="255" value="{{ form_values.external_name or '' }}" aria-invalid="{{ 'true' if form_errors.external_name else 'false' }}">
+        {% if form_errors.external_name %}<p class="form-error">{{ form_errors.external_name }}</p>{% endif %}
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="external_sku">Vendor SKU <span class="field-optional">(optional; duplicates allowed)</span></label>
+        <input class="form-input" id="external_sku" name="external_sku" maxlength="255" value="{{ form_values.external_sku or '' }}">
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="start_date">Current term start date <span aria-hidden="true">*</span></label>
+        <input class="form-input" id="start_date" name="start_date" type="date" value="{{ form_values.start_date }}" required aria-invalid="{{ 'true' if form_errors.start_date else 'false' }}">
+        <p class="form-helper">The end date is calculated from the product's billing commitment.</p>
+        {% if form_errors.start_date %}<p class="form-error">{{ form_errors.start_date }}</p>{% endif %}
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="end_date">Renewal or expiry date <span class="field-optional">(optional)</span></label>
+        <input class="form-input" id="end_date" name="end_date" type="date" value="{{ form_values.end_date or '' }}" aria-invalid="{{ 'true' if form_errors.end_date else 'false' }}">
+        <p class="form-helper">If omitted, this is calculated from the billing frequency.</p>
+        {% if form_errors.end_date %}<p class="form-error">{{ form_errors.end_date }}</p>{% endif %}
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="billing_frequency">Billing frequency <span aria-hidden="true">*</span></label>
+        <select class="form-input" id="billing_frequency" name="billing_frequency" required>
+          <option value="annual" {% if form_values.billing_frequency == 'annual' %}selected{% endif %}>Annual</option>
+          <option value="monthly" {% if form_values.billing_frequency == 'monthly' %}selected{% endif %}>Monthly</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="quantity">Quantity <span aria-hidden="true">*</span></label>
+        <input class="form-input" id="quantity" name="quantity" type="number" min="1" max="9999" step="1" value="{{ form_values.quantity }}" required aria-invalid="{{ 'true' if form_errors.quantity else 'false' }}">
+        {% if form_errors.quantity %}<p class="form-error">{{ form_errors.quantity }}</p>{% endif %}
+      </div>
+    </div>
+    <label class="checkbox-row" for="auto_renew">
+      <input id="auto_renew" name="auto_renew" type="checkbox" {% if form_values.auto_renew %}checked{% endif %}>
+      <span>Automatically renew this subscription at the end of its term</span>
+    </label>
+    <label class="checkbox-row" for="reminder_only">
+      <input id="reminder_only" name="reminder_only" type="checkbox" {% if form_values.reminder_only %}checked{% endif %}>
+      <span><strong>Reminder only</strong> — the external vendor invoices this subscription; MyPortal must not generate an invoice.</span>
+    </label>
+    <div class="form-actions">
+      <a class="button button--ghost" href="/admin/subscriptions">Cancel</a>
+      <button class="button" type="submit">Create subscription</button>
+    </div>
+  </form>
+</section>
+
+<style>
+.subscription-create-card { max-width: 62rem; margin: 0 auto; }
+.subscription-create-form { display: grid; gap: 1.5rem; }
+.subscription-create-form .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.subscription-create-form .form-field { min-width: 0; }
+.subscription-create-form .form-error { color: var(--color-danger, #b42318); margin: .35rem 0 0; }
+.subscription-create-form .checkbox-row { display: flex; align-items: flex-start; gap: .6rem; }
+.subscription-create-form .form-actions { display: flex; justify-content: flex-end; gap: .75rem; }
+.subscription-create-card .alert { margin-bottom: 1rem; }
+@media (max-width: 720px) { .subscription-create-form .form-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}

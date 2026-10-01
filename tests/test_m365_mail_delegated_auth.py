@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from app.features.m365_mail import admin_routes
 from app.services import m365_mail
 
 
@@ -29,6 +30,7 @@ def _fake_account(
     access_token: str | None = None,
     token_expires_at: datetime | None = None,
     tenant_id: str | None = None,
+    **extra: Any,
 ) -> dict[str, Any]:
     return {
         "id": 1,
@@ -42,6 +44,7 @@ def _fake_account(
         "access_token": access_token,
         "token_expires_at": token_expires_at,
         "tenant_id": tenant_id,
+        **extra,
     }
 
 
@@ -76,6 +79,97 @@ def test_enrich_strips_tokens():
 # ---------------------------------------------------------------------------
 # _account_has_delegated_tokens
 # ---------------------------------------------------------------------------
+
+
+async def test_validate_mailbox_access_uses_mail_resource(monkeypatch):
+    requests: list[tuple[str, str]] = []
+
+    async def fake_graph_get(token: str, url: str):
+        requests.append((token, url))
+        return {"id": "inbox-id"}
+
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+
+    await m365_mail.validate_mailbox_access("mail-token", "shared+help@contoso.com")
+
+    assert requests == [
+        (
+            "mail-token",
+            "https://graph.microsoft.com/v1.0/users/"
+            "shared%2Bhelp%40contoso.com/mailFolders/inbox?$select=id",
+        )
+    ]
+    assert "?$select=id,userPrincipalName" not in requests[0][1]
+
+
+async def test_validate_mailbox_access_uses_me_for_signed_in_mailbox(monkeypatch):
+    requests: list[str] = []
+
+    async def fake_graph_get(token: str, url: str):
+        requests.append(url)
+        return {"id": "inbox-id"}
+
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+
+    await m365_mail.validate_mailbox_access(
+        "mail-token",
+        "Support@Contoso.com",
+        signed_in_address="support@contoso.com",
+    )
+
+    assert requests == [
+        "https://graph.microsoft.com/v1.0/me/mailFolders/inbox?$select=id"
+    ]
+
+
+def test_delegated_scope_supports_shared_mailboxes():
+    assert "https://graph.microsoft.com/Mail.ReadWrite " in m365_mail.DELEGATED_MAIL_SCOPE
+    assert (
+        "https://graph.microsoft.com/Mail.ReadWrite.Shared"
+        in m365_mail.DELEGATED_MAIL_SCOPE
+    )
+
+
+async def test_authorize_uses_user_pkce_client_not_company_client(monkeypatch):
+    class MainStub:
+        async def _require_super_admin_page(self, request):
+            return {"id": 1, "is_super_admin": True}, None
+
+        def _build_m365_redirect_uri(self, request):
+            return "https://portal.example/m365/callback"
+
+        async def _new_m365_oauth_state(self, request, **kwargs):
+            assert kwargs["client_id"] == "user-pkce-client"
+            return "state"
+
+    async def fake_get_account(account_id):
+        return {"id": account_id, "company_id": 42}
+
+    async def fake_user_client(*, redirect_uri=None):
+        assert redirect_uri == "https://portal.example/m365/callback"
+        return "user-pkce-client"
+
+    async def forbidden_company_client(*args, **kwargs):
+        raise AssertionError("company tenant client must not authorize mailbox users")
+
+    monkeypatch.setattr(admin_routes, "_main", lambda: MainStub())
+    monkeypatch.setattr(m365_mail, "get_account", fake_get_account)
+    monkeypatch.setattr(
+        admin_routes.m365_service, "generate_pkce_pair", lambda: ("verifier", "challenge")
+    )
+    monkeypatch.setattr(
+        admin_routes.m365_service, "get_effective_pkce_client_id", fake_user_client
+    )
+    monkeypatch.setattr(
+        admin_routes.m365_service,
+        "get_effective_pkce_client_id_for_company",
+        forbidden_company_client,
+    )
+
+    response = await admin_routes.admin_m365_mail_authorize(7, object())
+
+    assert response.status_code == 303
+    assert "client_id=user-pkce-client" in response.headers["location"]
 
 
 def test_has_delegated_tokens_true():
@@ -236,9 +330,20 @@ async def test_sync_delegated_403_falls_back_to_client_credentials(monkeypatch):
         company_id=5,
         refresh_token="enc:refresh",
         tenant_id="tenant-123",
+        auth_company_id=5,
+        auth_connection_id=50,
+        auth_tenant_id="tenant-123",
+        auth_binding_status="verified",
+        app_fallback_enabled=True,
+        mailbox_app_authorized=True,
     )
     _patch_common(monkeypatch)
     monkeypatch.setattr(m365_mail.mail_repo, "get_account", lambda _: _coro(account))
+    monkeypatch.setattr(
+        m365_mail.mail_repo,
+        "get_verified_auth_connection",
+        lambda _: _coro({"id": 50, "company_id": 5, "tenant_id": "tenant-123"}),
+    )
 
     async def fake_acquire_delegated(acct):
         return "delegated-token"
@@ -271,9 +376,8 @@ async def test_sync_delegated_403_falls_back_to_client_credentials(monkeypatch):
     assert call_count["acquire"] == 1
 
 
-async def test_sync_delegated_403_falls_back_via_provisioned_company(monkeypatch):
-    """A 403 with delegated auth (no company_id) should discover a provisioned
-    company and fall back to client_credentials."""
+async def test_sync_delegated_403_never_borrows_provisioned_company(monkeypatch):
+    """A global mailbox must not borrow another company's app token after a 403."""
     from app.services.m365 import M365Error
 
     account = _fake_account(
@@ -309,16 +413,23 @@ async def test_sync_delegated_403_falls_back_via_provisioned_company(monkeypatch
     monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
 
     result = await m365_mail.sync_account(1)
-    assert result["status"] == "succeeded"
-    assert call_count["graph_get"] == 2
+    assert result["status"] == "completed_with_errors"
+    assert call_count["graph_get"] == 1
+    assert call_count["acquire"] == 0
 
 
 async def test_sync_delegated_403_fallback_then_client_creds_also_403(monkeypatch):
     """When both delegated and client_credentials get 403, surface actionable error."""
     from app.services.m365 import M365Error
-    account = _fake_account(company_id=5, refresh_token="enc:refresh", tenant_id="tenant-123")
+    account = _fake_account(
+        company_id=5, refresh_token="enc:refresh", tenant_id="tenant-123",
+        auth_company_id=5, auth_connection_id=50, auth_tenant_id="tenant-123",
+        auth_binding_status="verified", app_fallback_enabled=True,
+        mailbox_app_authorized=True,
+    )
     _patch_common(monkeypatch)
     monkeypatch.setattr(m365_mail.mail_repo, "get_account", lambda _: _coro(account))
+    monkeypatch.setattr(m365_mail.mail_repo, "get_verified_auth_connection", lambda _: _coro({"id": 50, "company_id": 5, "tenant_id": "tenant-123"}))
     async def fake_acquire_delegated(acct):
         return "delegated-token"
     monkeypatch.setattr(m365_mail, "_acquire_delegated_access_token", fake_acquire_delegated)
@@ -351,9 +462,15 @@ async def test_sync_delegated_403_retries_unread_filter_with_client_credentials(
     """
     from app.services.m365 import M365Error
 
-    account = _fake_account(company_id=5, refresh_token="enc:refresh", tenant_id="tenant-123")
+    account = _fake_account(
+        company_id=5, refresh_token="enc:refresh", tenant_id="tenant-123",
+        auth_company_id=5, auth_connection_id=50, auth_tenant_id="tenant-123",
+        auth_binding_status="verified", app_fallback_enabled=True,
+        mailbox_app_authorized=True,
+    )
     _patch_common(monkeypatch)
     monkeypatch.setattr(m365_mail.mail_repo, "get_account", lambda _: _coro(account))
+    monkeypatch.setattr(m365_mail.mail_repo, "get_verified_auth_connection", lambda _: _coro({"id": 50, "company_id": 5, "tenant_id": "tenant-123"}))
 
     async def fake_acquire_delegated(acct):
         return "delegated-token"
@@ -381,3 +498,73 @@ async def test_sync_delegated_403_retries_unread_filter_with_client_credentials(
     assert [token for token, _url in seen_urls] == ["delegated-token", "client-creds-token"]
     assert all("$filter=isRead%20eq%20false" in url for _token, url in seen_urls)
     assert all("$orderby=receivedDateTime%20asc" not in url for _token, url in seen_urls)
+
+
+async def test_sync_delegated_401_forces_token_refresh_and_retries(monkeypatch):
+    """A revoked cached delegated token is refreshed once after Graph returns 401."""
+    from app.services.m365 import M365Error
+
+    account = _fake_account(
+        company_id=5,
+        refresh_token="enc:refresh",
+        access_token="enc:cached",
+        token_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        tenant_id="tenant-123",
+    )
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", lambda _: _coro(account))
+
+    refresh_flags: list[bool] = []
+
+    async def fake_acquire_delegated(acct, *, force_refresh=False):
+        refresh_flags.append(force_refresh)
+        return "refreshed-token" if force_refresh else "cached-token"
+
+    seen_tokens: list[str] = []
+
+    async def fake_graph_get(token, url):
+        seen_tokens.append(token)
+        if token == "cached-token":
+            raise M365Error("Unauthorized", http_status=401)
+        return {"value": [], "@odata.nextLink": None}
+
+    monkeypatch.setattr(m365_mail, "_acquire_delegated_access_token", fake_acquire_delegated)
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] == "succeeded"
+    assert refresh_flags == [False, True]
+    assert seen_tokens == ["cached-token", "refreshed-token"]
+
+
+async def test_sync_app_401_bypasses_token_cache_and_retries(monkeypatch):
+    """A rejected app token is reacquired without consulting the token cache."""
+    from app.services.m365 import M365Error
+
+    account = _fake_account(company_id=5)
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", lambda _: _coro(account))
+
+    acquire_calls: list[dict[str, Any]] = []
+
+    async def fake_acquire_token(company_id, **kwargs):
+        assert company_id == 5
+        acquire_calls.append(kwargs)
+        return "fresh-app-token" if kwargs.get("force_refresh") else "cached-app-token"
+
+    async def fake_graph_get(token, url):
+        if token == "cached-app-token":
+            raise M365Error("Unauthorized", http_status=401)
+        return {"value": [], "@odata.nextLink": None}
+
+    monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] == "succeeded"
+    assert acquire_calls == [
+        {"force_client_credentials": True},
+        {"force_client_credentials": True, "force_refresh": True},
+    ]

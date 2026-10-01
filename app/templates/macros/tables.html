@@ -55,6 +55,9 @@
    bulk_actions: list of action dicts (same shape as header.html actions);
                  each must carry an `attrs` entry with the per-page
                  data-* hook used by the existing JS to enable/disable it.
+   header: render the compact variant for {% block header_title %} (see
+           Design Guidelines → Page header bar). Labels become visually
+           hidden and selects submit on change.
 #}
 {% macro table_toolbar(table_id,
                        search=True,
@@ -71,32 +74,37 @@
                        bulk_actions_label='Bulk actions',
                        method='get',
                        form_id=None,
-                       extra_class='') -%}
-  <div class="table-toolbar {{ extra_class }}" data-table-toolbar
+                       extra_class='',
+                       header=False) -%}
+  {%- set field_class = 'page-header-toolbar__group' if header else 'table-toolbar__field' -%}
+  {%- set label_class = ' class="visually-hidden"' if header else '' -%}
+  {%- set select_class = 'form-input page-header-toolbar__select' if header else 'input' -%}
+  {%- set autosubmit = ' onchange="this.form.submit()"' if header else '' -%}
+  <div class="{{ 'page-header-toolbar' if header else 'table-toolbar' }} {{ extra_class }}" data-table-toolbar
        data-table-toolbar-for="{{ table_id }}">
     {%- if search or filters or page_sizes -%}
-      <form class="table-toolbar__filters"
+      <form class="{{ 'page-header-toolbar__group' if header else 'table-toolbar__filters' }}"
             method="{{ method }}"
             {% if form_id %}id="{{ form_id }}"{% endif %}
             autocomplete="off">
         {%- if search -%}
-          <div class="table-toolbar__field table-toolbar__field--search">
+          <div class="{{ field_class }}{% if not header %} table-toolbar__field--search{% endif %}">
             <label class="visually-hidden" for="{{ table_id }}-search">{{ search_placeholder }}</label>
             <input type="search"
                    id="{{ table_id }}-search"
                    name="{{ search_name }}"
-                   class="input"
+                   class="{{ 'form-input page-header-toolbar__search' if header else 'input' }}"
                    placeholder="{{ search_placeholder }}"
                    value="{{ search_value or '' }}"
                    data-table-filter="{{ table_id }}" />
           </div>
         {%- endif -%}
         {%- for filter in (filters or []) -%}
-          <div class="table-toolbar__field">
-            <label for="{{ table_id }}-filter-{{ filter.name }}">{{ filter.label }}</label>
+          <div class="{{ field_class }}">
+            <label{{ label_class | safe }} for="{{ table_id }}-filter-{{ filter.name }}">{{ filter.label }}</label>
             <select id="{{ table_id }}-filter-{{ filter.name }}"
                     name="{{ filter.name }}"
-                    class="input">
+                    class="{{ select_class }}"{{ autosubmit | safe }}>
               {%- for option in filter.options -%}
                 {%- set opt_value = option[0] if option is iterable and option is not string and option|length > 1 else option -%}
                 {%- set opt_label = option[1] if option is iterable and option is not string and option|length > 1 else option -%}
@@ -106,9 +114,9 @@
           </div>
         {%- endfor -%}
         {%- if page_sizes -%}
-          <div class="table-toolbar__field table-toolbar__field--narrow">
-            <label for="{{ table_id }}-page-size">Page size</label>
-            <select id="{{ table_id }}-page-size" name="{{ page_size_name }}" class="input">
+          <div class="{{ field_class }}{% if not header %} table-toolbar__field--narrow{% endif %}">
+            <label{{ label_class | safe }} for="{{ table_id }}-page-size">Page size</label>
+            <select id="{{ table_id }}-page-size" name="{{ page_size_name }}" class="{{ select_class }}"{{ autosubmit | safe }}>
               {%- for size in page_sizes -%}
                 <option value="{{ size }}" {% if page_size and page_size|string == size|string %}selected{% endif %}>{{ size }} per page</option>
               {%- endfor -%}
@@ -118,7 +126,7 @@
       </form>
     {%- endif -%}
 
-    <div class="table-toolbar__menus">
+    <div class="{{ 'page-header-toolbar__group' if header else 'table-toolbar__menus' }}">
       {%- if columns -%}
         {{ table_column_picker(table_id, columns, column_picker_label) }}
       {%- endif -%}
@@ -233,7 +241,7 @@
   <form method="{{ button.method|default('post') }}" 
         action="{{ button.action }}" 
         style="display: inline;"
-        {% if button.confirm %}onsubmit="return confirm('{{ button.confirm }}')"{% endif %}>
+        {% if button.confirm %}onsubmit="return confirm({{ button.confirm | tojson | forceescape }})"{% endif %}>
     {% if csrf_token %}
     <input type="hidden" name="_csrf" value="{{ csrf_token }}">
     {% endif %}

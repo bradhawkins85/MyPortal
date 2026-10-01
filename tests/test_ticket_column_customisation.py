@@ -11,7 +11,7 @@ TEMPLATE_PATH = (
     / "app" / "templates" / "admin" / "tickets.html"
 )
 
-EXPECTED_COLUMNS = ["id", "status", "priority", "company", "assigned", "updated"]
+EXPECTED_COLUMNS = ["id", "status", "priority", "company", "sla", "assigned", "updated", "last-reply-status"]
 ALWAYS_VISIBLE_COLUMNS = ["subject"]
 
 
@@ -27,22 +27,37 @@ def test_columns_toggle_button_present():
     assert '>Columns<' in html
 
 
-def test_dashboard_controls_precede_stats_and_full_width_table():
-    """The dashboard uses one control row followed by the full-width ticket list."""
+def test_dashboard_controls_live_in_header_bar_above_full_width_stats_and_table():
+    """List controls sit in the header bar so the stat strip and table span the page."""
     html = _template_html()
-    quick_search_index = html.index('id="ticket-quick-filter"')
-    group_by_index = html.index('data-ticket-group-by')
-    columns_index = html.index('data-ticket-columns')
-    stats_index = html.index('data-ticket-stats')
-    table_index = html.index('id="tickets-table"')
+    header = html[html.index("{% block header_title %}"):html.index("{% block content %}")]
+    content = html[html.index("{% block content %}"):]
 
-    assert quick_search_index < group_by_index < stats_index < table_index
-    assert quick_search_index < columns_index < stats_index
+    for marker in (
+        "data-view-select",
+        "data-update-view",
+        "data-delete-view",
+        'id="ticket-quick-filter"',
+        'id="ticket-result-limit"',
+        "data-ticket-group-by",
+        "data-ticket-columns",
+        "data-ticket-stat-controls",
+        "data-table-info",
+    ):
+        assert marker in header, marker
+        assert marker not in content, marker
+
+    assert header.index('id="ticket-quick-filter"') < header.index('id="ticket-result-limit"')
+    assert header.index("data-ticket-group-by") < header.index("data-ticket-columns")
+    assert "ticket-filters-panel" not in html
+    assert content.index("data-ticket-stats") < content.index('id="tickets-table"')
+    assert '<option value="200" selected>200 tickets</option>' in html
+    assert '<option value="500">500 tickets</option>' in html
+    assert '<option value="all">All tickets</option>' in html
 
     css = (TEMPLATE_PATH.parent.parent.parent / "static" / "css" / "app.css").read_text(encoding="utf-8")
-    assert "grid-template-columns: minmax(260px, 320px) minmax(260px, 340px) minmax(0, 1fr);" in css
-    assert ".ticket-dashboard__overview .table-wrapper" in css
-    assert "grid-column: 1 / -1;" in css
+    assert "grid-template-columns: minmax(260px, 320px) minmax(260px, 340px) minmax(0, 1fr);" not in css
+    assert ".ticket-header-toolbar {" in css
 
 
 def test_ticket_stats_render_every_status_with_customisation_controls():
@@ -128,6 +143,18 @@ def test_next_ticket_number_handler_is_always_rendered():
     assert "{% if show_next_ticket_number %}\n    <script>" not in html
 
 
+def test_bulk_action_modals_render_outside_the_filtered_page_header():
+    """Fixed ticket modals retain their permissions outside the header block."""
+    html = _template_html()
+    header_block_index = html.index("{% block header_title %}")
+    content_block_index = html.index("{% block content %}")
+
+    assert html.index("{% set can_bulk_edit_tickets =") < header_block_index
+    assert html.index("{% set can_merge_tickets =") < header_block_index
+    assert content_block_index < html.index('id="bulk-edit-tickets-modal"')
+    assert content_block_index < html.index('id="merge-tickets-modal"')
+
+
 def test_column_panel_present():
     """The column customisation panel should be rendered."""
     html = _template_html()
@@ -142,6 +169,18 @@ def test_all_customisable_column_toggles_present():
         assert f'class="ticket-column-toggle" data-column="{column}"' in html, (
             f"Expected toggle for column '{column}' to be present in the panel"
         )
+
+
+def test_group_expansion_state_is_persisted():
+    """Collapsed ticket groups should be restored after the page reloads."""
+    javascript = (
+        TEMPLATE_PATH.parent.parent.parent / "static" / "js" / "ticket_views.js"
+    ).read_text(encoding="utf-8")
+
+    assert "portal.tickets.collapsedGroups" in javascript
+    assert "this.collapsedGroups = this.loadCollapsedGroups()" in javascript
+    assert "this.saveCollapsedGroups()" in javascript
+    assert "this.updateGroupVisibility()" in javascript
 
 
 def test_subject_column_toggle_is_disabled():
@@ -229,6 +268,35 @@ def test_table_cell_data_column_attributes():
         )
 
 
+def test_ticket_refresh_rows_include_last_reply_status_column():
+    """Refreshed ticket rows must include Last Reply Status to stay aligned with headers."""
+    javascript = (
+        TEMPLATE_PATH.parent.parent.parent / "static" / "js" / "admin.js"
+    ).read_text(encoding="utf-8")
+
+    build_row_start = javascript.index("function buildRow(ticket)")
+    build_row_end = javascript.index("function patchRows(items)", build_row_start)
+    build_row = javascript[build_row_start:build_row_end]
+
+    updated_cell_index = build_row.index("appendTextCell('updated', 'Updated'")
+    last_reply_cell_index = build_row.index(
+        "row.appendChild(createLastReplyStatusCell(ticket.latest_public_reply_email_status))"
+    )
+    review_date_cell_index = build_row.index("appendTextCell('review-date', 'Review Date'")
+
+    assert updated_cell_index < last_reply_cell_index < review_date_cell_index
+    assert "cell.dataset.column = 'last-reply-status'" in javascript
+    assert "No email status" in javascript
+
+
+def test_last_reply_status_empty_state_is_visible():
+    """The Last Reply Status column should not appear blank when no email tracking exists."""
+    html = _template_html()
+    last_reply_cell = html[html.index('data-column="last-reply-status"', html.index('<tbody>')):]
+    last_reply_cell = last_reply_cell[:last_reply_cell.index("</td>")]
+
+    assert '<span class="badge badge--muted">No email status</span>' in last_reply_cell
+
 
 def test_ticket_update_actor_type_column_is_available():
     """The automation variable ticket_update.actor_type should be available as a ticket column."""
@@ -283,6 +351,8 @@ def test_column_filters_are_saved_and_active_headers_are_highlighted():
 
     assert "column_filters: this.filterState.columnFilters" in js
     assert "view.filters.column_filters || {}" in js
+    assert "visible_columns: window.ticketColumns" in js
+    assert "window.ticketColumns.applyVisibleColumns(view.filters.visible_columns)" in js
     assert "ticket-column-filter--active" in css
     assert "ticket-status-filter--active" in css
 
@@ -295,6 +365,19 @@ def test_localStorage_storage_key_in_js():
     )
     js_content = js_path.read_text(encoding="utf-8")
     assert "portal.tickets.columns" in js_content
+
+
+def test_saved_views_can_read_and_apply_ticket_column_layouts():
+    """Column controls expose their current selection to the saved-view manager."""
+    js_path = (
+        Path(__file__).resolve().parent.parent
+        / "app" / "static" / "js" / "ticket_columns.js"
+    )
+    js_content = js_path.read_text(encoding="utf-8")
+
+    assert "window.ticketColumns" in js_content
+    assert "getVisibleColumns()" in js_content
+    assert "applyVisibleColumns(columns)" in js_content
 
 
 def test_subject_column_always_visible_in_js():

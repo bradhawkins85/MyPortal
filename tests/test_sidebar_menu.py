@@ -125,6 +125,9 @@ def test_company_admin_sees_authorised_menu_items(company_admin_context):
     assert 'href="/orders"' not in html
     assert 'href="/licenses"' not in html
     assert 'href="/assets"' not in html
+    assert 'action="/auth/logout"' in html
+    assert 'name="_csrf" value="csrf-token"' in html
+    assert "Log out" in html
 
 
 def test_m365_menu_item_has_data_menu_key(monkeypatch):
@@ -201,6 +204,60 @@ def test_m365_menu_item_has_data_menu_key(monkeypatch):
         "Office 365 expandable menu item must carry data-menu-key so it is included "
         "in left menu customisation"
     )
+
+
+def test_hidden_expandable_sidebar_items_are_not_displayed():
+    """Expandable groups hidden by user preferences must override their flex display."""
+    stylesheet = Path("app/static/css/app.css").read_text()
+
+    assert ".menu__item--expandable[hidden]" in stylesheet
+    hidden_rule = stylesheet.split(".menu__item--expandable[hidden]", 1)[1].split("}", 1)[0]
+    assert "display: none" in hidden_rule
+
+
+def test_sidebar_custom_groups_have_profile_controls_and_nested_styles():
+    base_template = Path("app/templates/base.html").read_text()
+    profile_template = Path("app/templates/admin/profile.html").read_text()
+    profile_script = Path("app/static/js/profile.js").read_text()
+    stylesheet = Path("app/static/css/app.css").read_text()
+
+    assert "buildCustomGroup" in base_template
+    assert "sidebarGroupIcons" in base_template
+    assert "data-sidebar-add-group" in profile_template
+    assert "SIDEBAR_GROUP_ICONS" in profile_script
+    assert "renderSidebarItems({ focusKey: groupKey, focusControl: 'name' })" in profile_script
+    assert "inputToFocus.scrollIntoView({ block: 'nearest' })" in profile_script
+    assert "data-sidebar-expand-all" in profile_template
+    assert "menu-editor__children" in stylesheet
+    assert "menu__submenu--custom" in stylesheet
+
+
+def test_sidebar_applies_grouped_defaults_and_delegates_toggles():
+    base_template = Path("app/templates/base.html").read_text()
+
+    # First visits render the grouped default rather than a flat list.
+    assert "sidebar_default_preferences()" in base_template
+    assert "loadCachedSidebarPreferences() || sidebarDefaultPreferences" in base_template
+    # One delegated handler, so rebuilt groups never double-toggle.
+    assert "sidebarMenuRoot?.addEventListener('click'" in base_template
+    assert "document.querySelectorAll('[data-menu-toggle]').forEach" not in base_template
+
+
+def test_top_navigation_dropdowns_are_exclusive_and_aligned():
+    base_template = Path("app/templates/base.html").read_text()
+    stylesheet = Path("app/static/css/app.css").read_text()
+
+    assert "if (item !== menuItem) setMenuItemExpanded(item, false);" in base_template
+    assert "setMenuItemExpanded(item, false);" in base_template
+    assert "let activeDropdownFound = false;" not in base_template
+    assert "const selectedLink = event.target.closest('.menu__submenu a[href]');" in base_template
+    assert "body.navigation--top .menu__item--expandable:hover > .menu__submenu" not in stylesheet
+    top_header_rule = stylesheet.split("body.navigation--top .layout__header {", 1)[1].split("}", 1)[0]
+    assert "position: relative" in top_header_rule
+    assert "top: auto" in top_header_rule
+    assert "position: sticky" not in top_header_rule
+    assert "top: 4.5rem" not in top_header_rule
+
 
 def test_profile_menu_permission_shows_my_profile_for_non_admin(monkeypatch):
     user = {"id": 7, "email": "user@example.com", "is_super_admin": False}
@@ -329,13 +386,13 @@ def test_non_admin_with_profile_permission_can_open_profile_page(monkeypatch):
         response = client.get("/admin/profile")
 
     assert response.status_code == 200
-    assert "Manage your account security" in response.text
+    assert 'id="profile-panel-security"' in response.text
     assert response.text.count("rich_text_editor.js") == 0
-    assert "Notification Contact" not in response.text
-    assert "Booking Link" not in response.text
-    assert "Matrix Username" not in response.text
+    assert 'id="mobile-number"' not in response.text
+    assert 'id="booking-link-url"' not in response.text
+    assert 'id="matrix-user-id"' not in response.text
     assert "Email signature" not in response.text
-    assert "profile-columns--standard" in response.text
+    assert 'data-profile-tab="details"' not in response.text
 
 
 def test_technician_with_profile_permission_keeps_profile_contact_tools(monkeypatch):
@@ -402,12 +459,12 @@ def test_technician_with_profile_permission_keeps_profile_contact_tools(monkeypa
         response = client.get("/admin/profile")
 
     assert response.status_code == 200
-    assert "Notification Contact" in response.text
-    assert "Booking Link" in response.text
-    assert "Matrix Username" in response.text
+    assert 'id="mobile-number"' in response.text
+    assert 'id="booking-link-url"' in response.text
+    assert 'id="matrix-user-id"' in response.text
     assert "Email signature" in response.text
     assert response.text.count("rich_text_editor.js") == 1
-    assert "profile-columns--standard" not in response.text
+    assert 'data-profile-tab="details"' in response.text
 
 
 def test_bcp_menu_replaces_business_continuity(company_admin_context):
@@ -616,6 +673,45 @@ def test_staff_menu_no_access_overrides_staff_assignment_levels():
     assert nested_menu_access["menu.staff"] == "none"
 
 
+def test_staff_assignment_scope_overrides_role_staff_menu_access():
+    for role_access in ("read", "write"):
+        menu_access = main_module._build_menu_access_map(
+            is_super_admin=False,
+            membership_data={
+                "menu_permissions": {"menu.staff": role_access},
+                "staff_permission": 0,
+                "can_manage_staff": True,
+            },
+        )
+
+        assert menu_access["menu.staff"] == "none"
+
+
+def test_staff_link_hidden_without_department_or_all_staff_access():
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+    env = Environment(loader=FileSystemLoader("app/templates"), autoescape=select_autoescape(["html"]))
+    env.globals["static_url"] = lambda path: path
+    template = env.get_template("base.html")
+
+    for role_access in ("read", "write"):
+        html = template.render(
+            request=type("Request", (), {"url": type("Url", (), {"path": "/"})()})(),
+            current_user={"id": 2, "is_super_admin": False},
+            active_membership={"staff_permission": 0, "can_manage_staff": True},
+            staff_permission=0,
+            can_manage_staff=True,
+            menu_access={"menu.dashboard": "read", "menu.staff": role_access},
+            available_companies=[],
+            cart_summary={"item_count": 0, "total_quantity": 0, "subtotal": 0},
+            notification_unread_count=0,
+            plausible_config={"enabled": False},
+            csrf_token="csrf-token",
+        )
+
+        assert 'href="/staff"' not in html
+
+
 def test_staff_link_hidden_when_staff_menu_no_access_even_with_staff_assignment():
     from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -645,6 +741,35 @@ def test_staff_link_hidden_when_staff_menu_no_access_even_with_staff_assignment(
     assert 'href="/staff"' not in html
 
 
+def test_staff_link_hidden_without_an_active_company_membership():
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+    env = Environment(loader=FileSystemLoader("app/templates"), autoescape=select_autoescape(["html"]))
+    env.globals["static_url"] = lambda path: path
+    html = env.get_template("base.html").render(
+        request=type("Request", (), {"url": type("Url", (), {"path": "/"})()})(),
+        current_user={"id": 2, "is_super_admin": False},
+        active_membership=None,
+        staff_permission=3,
+        can_manage_staff=True,
+        menu_access={"menu.dashboard": "read", "menu.staff": "write"},
+        available_companies=[],
+        cart_summary={"item_count": 0, "total_quantity": 0, "subtotal": 0},
+        notification_unread_count=0,
+        plausible_config={"enabled": False},
+        csrf_token="csrf-token",
+    )
+
+    assert 'href="/staff"' not in html
+
+
+def test_network_devices_link_uses_its_own_permission():
+    template = Path("app/templates/base.html").read_text(encoding="utf-8")
+
+    assert "menu_access.get('menu.network_devices') in ['read', 'write']" in template
+    assert "{% if can_access_network_devices %}" in template
+
+
 def test_tickets_menu_permission_uses_no_access_own_all_levels():
     no_access = main_module._build_menu_access_map(
         is_super_admin=False,
@@ -670,9 +795,8 @@ def test_tickets_menu_permission_uses_no_access_own_all_levels():
 def test_tickets_role_ui_labels_are_no_access_own_all():
     template = Path("app/templates/admin/roles.html").read_text()
 
-    assert "permission.key == 'menu.tickets'" in template
-    assert "{{ 'Own' if is_ticket_permission else 'Read Only' }}" in template
-    assert "{{ 'All' if is_ticket_permission else ('Yes' if is_boolean_permission else 'Read/Write') }}" in template
+    assert "'menu.tickets': {'none': 'No access', 'read': 'Own', 'write': 'All'}" in template
+    assert "'menu.admin.technician': {'none': 'No', 'write': 'Yes'}" in template
     assert "All opens <code>/tickets</code> for company tickets" in template
 
 

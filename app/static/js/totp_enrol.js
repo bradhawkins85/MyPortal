@@ -6,12 +6,42 @@
 
   const secretInput = document.getElementById('totp-secret');
   const linkInput = document.getElementById('totp-link');
+  const qrImage = root.querySelector('[data-totp-qr]');
+  const qrPlaceholder = root.querySelector('[data-totp-qr-placeholder]');
+  const manualToggle = root.querySelector('[data-totp-manual-toggle]');
+  const manualSetup = root.querySelector('[data-totp-manual]');
   const form = document.getElementById('totp-enrol-form');
   const nameInput = document.getElementById('totp-name');
   const codeInput = document.getElementById('totp-code');
   const submitButton = root.querySelector('[data-totp-submit]');
   const refreshButton = root.querySelector('[data-totp-refresh]');
   const logoutButton = root.querySelector('[data-logout]');
+  const qrContainer = root.querySelector('[data-totp-qr-container]');
+  let setupSecret = '';
+  let setupLink = '';
+
+  function renderManualValues() {
+    const expanded = manualToggle && manualToggle.getAttribute('aria-expanded') === 'true';
+    if (secretInput) {
+      secretInput.value = expanded ? setupSecret : '';
+    }
+    if (linkInput) {
+      linkInput.value = expanded ? setupLink : '';
+    }
+  }
+
+  function setQrLoading(loading) {
+    if (qrPlaceholder) {
+      qrPlaceholder.hidden = !loading;
+    }
+    if (qrImage && loading) {
+      qrImage.hidden = true;
+      qrImage.removeAttribute('src');
+    }
+    if (qrContainer) {
+      qrContainer.setAttribute('aria-busy', String(loading));
+    }
+  }
 
   function getCsrfToken() {
     const meta = document.querySelector('meta[name="csrf-token"]');
@@ -69,13 +99,18 @@
     if (refreshButton) {
       refreshButton.disabled = true;
     }
+    setQrLoading(true);
     try {
       const result = await requestJson('/auth/totp/setup', { method: 'POST' });
-      if (secretInput) {
-        secretInput.value = result.secret || '';
+      setupSecret = result.secret || '';
+      setupLink = result.otpauth_url || '';
+      renderManualValues();
+      if (qrImage) {
+        qrImage.src = result.qr_code_data_uri || '';
+        qrImage.hidden = !result.qr_code_data_uri;
       }
-      if (linkInput) {
-        linkInput.value = result.otpauth_url || '';
+      if (result.qr_code_data_uri) {
+        setQrLoading(false);
       }
       if (codeInput) {
         codeInput.value = '';
@@ -127,6 +162,16 @@
     refreshButton.addEventListener('click', () => startSetup());
   }
 
+  if (manualToggle && manualSetup) {
+    manualToggle.addEventListener('click', () => {
+      const showing = manualSetup.hidden;
+      manualSetup.hidden = !showing;
+      manualToggle.setAttribute('aria-expanded', String(showing));
+      manualToggle.textContent = showing ? 'Hide manual setup' : 'Cannot scan the code?';
+      renderManualValues();
+    });
+  }
+
   if (logoutButton) {
     logoutButton.addEventListener('click', async () => {
       try {
@@ -147,6 +192,13 @@
       }
       try {
         await navigator.clipboard.writeText(target.value);
+        const originalLabel = button.textContent;
+        button.textContent = 'Copied';
+        button.setAttribute('aria-label', `${originalLabel} (copied)`);
+        window.setTimeout(() => {
+          button.textContent = originalLabel;
+          button.removeAttribute('aria-label');
+        }, 1600);
         toast('Copied to clipboard.', 'success');
       } catch (error) {
         target.focus();

@@ -26,6 +26,7 @@ else:
     _WEASYPRINT_IMPORT_ERROR = None
 
 from app.repositories import bc3 as bc_repo
+from app.repositories import audit_logs as audit_log_repo
 from app.repositories import bcp as bcp_repo
 from app.repositories import users as user_repo
 
@@ -285,11 +286,8 @@ def _add_docx_table(
         col_labels = [col.get("label", col.get("column_id")) for col in columns]
     else:
         # Infer from first row
-        if table_data:
-            col_ids = list(table_data[0].keys())
-            col_labels = [col.replace("_", " ").title() for col in col_ids]
-        else:
-            return
+        col_ids = list(table_data[0].keys())
+        col_labels = [col.replace("_", " ").title() for col in col_ids]
     
     # Create table with header row
     table = doc.add_table(rows=1 + len(table_data), cols=len(col_ids))
@@ -432,6 +430,7 @@ async def export_to_pdf(
 async def export_bcp_to_pdf(
     plan_id: int,
     event_log_limit: int = 100,
+    visible_asset_ids: set[int] | None = None,
 ) -> tuple[io.BytesIO, str]:
     """
     Export a Business Continuity Plan to template-faithful PDF format.
@@ -470,7 +469,7 @@ async def export_bcp_to_pdf(
         raise ValueError(f"Plan {plan_id} not found")
     
     # Gather all required data for the PDF
-    data = await _gather_bcp_export_data(plan_id, event_log_limit)
+    data = await _gather_bcp_export_data(plan_id, event_log_limit, visible_asset_ids)
     
     # Compute content hash from gathered data
     content_hash = compute_content_hash(data, {"plan_id": plan_id, "plan_title": plan["title"]})
@@ -486,7 +485,9 @@ async def export_bcp_to_pdf(
     return pdf_buffer, content_hash
 
 
-async def _gather_bcp_export_data(plan_id: int, event_log_limit: int) -> dict[str, Any]:
+async def _gather_bcp_export_data(
+    plan_id: int, event_log_limit: int, visible_asset_ids: set[int] | None = None
+) -> dict[str, Any]:
     """
     Gather all data needed for BCP PDF export.
     
@@ -510,6 +511,7 @@ async def _gather_bcp_export_data(plan_id: int, event_log_limit: int) -> dict[st
     
     # Section 3: Business Impact Analysis
     critical_activities = await bcp_repo.list_critical_activities(plan_id, sort_by="importance")
+    dependency_mappings = await bcp_repo.list_dependency_mappings(plan_id)
     # Add humanized RTO to each activity
     for activity in critical_activities:
         if activity.get("impact") and activity["impact"].get("rto_hours") is not None:
@@ -527,6 +529,7 @@ async def _gather_bcp_export_data(plan_id: int, event_log_limit: int) -> dict[st
     # Get event log - last N entries
     # First try to get from active incident, otherwise get all
     active_incident = await bcp_repo.get_active_incident(plan_id)
+    incidents = await bcp_repo.list_incidents(plan_id)
     if active_incident:
         all_event_log = await bcp_repo.list_event_log_entries(
             plan_id, 
@@ -541,8 +544,18 @@ async def _gather_bcp_export_data(plan_id: int, event_log_limit: int) -> dict[st
     
     # Section 5: Recovery
     recovery_actions = await bcp_repo.list_recovery_actions(plan_id)
+    asset_links: list[dict[str, Any]] = []
+    if visible_asset_ids is not None:
+        asset_links = await bcp_repo.list_component_asset_links(plan_id, "recovery_action")
+        asset_links = [
+            link for link in asset_links if int(link["asset_id"]) in visible_asset_ids
+        ]
+    asset_links_by_action: dict[int, list[dict[str, Any]]] = {}
+    for link in asset_links:
+        asset_links_by_action.setdefault(int(link["component_id"]), []).append(link)
     # Enrich recovery actions with humanized RTO and owner names
     for action in recovery_actions:
+        action["asset_links"] = asset_links_by_action.get(int(action["id"]), [])
         if action.get("rto_hours") is not None:
             action["rto_humanized"] = humanize_hours(action["rto_hours"])
         if action.get("owner_id"):
@@ -557,6 +570,12 @@ async def _gather_bcp_export_data(plan_id: int, event_log_limit: int) -> dict[st
     # Section 6: Rehearse/Maintain/Review
     training_items = await bcp_repo.list_training_items(plan_id)
     review_items = await bcp_repo.list_review_items(plan_id)
+    plan_change_log = await audit_log_repo.list_audit_logs(
+        entity_type="bcp_plan",
+        entity_id=plan_id,
+        action="bcp.plan.update",
+        limit=10,
+    )
     
     # Enrich roles with user names for assignments
     for role in roles:
@@ -564,6 +583,26 @@ async def _gather_bcp_export_data(plan_id: int, event_log_limit: int) -> dict[st
             if assignment.get("user_id"):
                 user = await user_repo.get_user_by_id(assignment["user_id"])
                 assignment["user_name"] = user.get("name") if user else "Unknown"
+    for item in review_items:
+        if item.get("reviewed_by_user_id"):
+            reviewer = await user_repo.get_user_by_id(item["reviewed_by_user_id"])
+            item["reviewer_name"] = reviewer.get("name") if reviewer else None
+        if item.get("approved_by_user_id"):
+            approver = await user_repo.get_user_by_id(item["approved_by_user_id"])
+            item["approver_name"] = approver.get("name") if approver else None
+    normalised_plan_change_log = []
+    for entry in plan_change_log:
+        before = entry.get("previous_value") or {}
+        after = entry.get("new_value") or {}
+        normalised_plan_change_log.append(
+            {
+                "changed_at": entry.get("created_at"),
+                "changed_by": entry.get("user_email") or f"User {entry.get('user_id')}",
+                "changed_fields": sorted(set(before.keys()) | set(after.keys())),
+                "before": before,
+                "after": after,
+            }
+        )
     
     return {
         # Section 1
@@ -575,6 +614,7 @@ async def _gather_bcp_export_data(plan_id: int, event_log_limit: int) -> dict[st
         "backup_items": backup_items,
         # Section 3
         "critical_activities": critical_activities,
+        "dependency_mappings": dependency_mappings,
         # Section 4
         "checklist_items": checklist_items,
         "evacuation": evacuation,
@@ -583,6 +623,7 @@ async def _gather_bcp_export_data(plan_id: int, event_log_limit: int) -> dict[st
         "roles": roles,
         "contacts": contacts,
         "event_log": event_log,
+        "incidents": incidents,
         # Section 5
         "recovery_actions": recovery_actions,
         "crisis_recovery_checklist": crisis_recovery_checklist,
@@ -592,6 +633,7 @@ async def _gather_bcp_export_data(plan_id: int, event_log_limit: int) -> dict[st
         # Section 6
         "training_items": training_items,
         "review_items": review_items,
+        "plan_change_log": normalised_plan_change_log,
     }
 
 

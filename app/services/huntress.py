@@ -22,6 +22,8 @@ from typing import Any, Mapping
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
@@ -109,7 +111,7 @@ async def is_module_enabled() -> bool:
 
 
 def _client(credentials: Mapping[str, str]) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
+    return monitored_client(httpx.AsyncClient,
         base_url=credentials["base_url"],
         auth=(credentials["api_key"], credentials["api_secret"]),
         timeout=REQUEST_TIMEOUT,
@@ -118,13 +120,13 @@ def _client(credentials: Mapping[str, str]) -> httpx.AsyncClient:
 
 
 def _oauth_token_client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=REQUEST_TIMEOUT)
+    return monitored_client(httpx.AsyncClient, timeout=REQUEST_TIMEOUT)
 
 
 def _bearer_client(
     credentials: Mapping[str, str], access_token: str
 ) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
+    return monitored_client(httpx.AsyncClient,
         base_url=credentials["base_url"],
         timeout=REQUEST_TIMEOUT,
         headers={

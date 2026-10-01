@@ -24,7 +24,7 @@ def _normalise_query(row: dict[str, Any] | None) -> dict[str, Any] | None:
             try:
                 record[key] = int(record[key])
             except (TypeError, ValueError):
-                pass
+                continue
     return record
 
 
@@ -72,15 +72,15 @@ async def create_query(
 async def update_query(
     query_id: int,
     *,
-    slug: str,
     name: str,
     description: str | None,
     sql_query: str,
 ) -> None:
+    """Update editable fields while leaving the report's existing slug intact."""
     await db.execute(
-        "UPDATE reporting_queries SET slug = %s, name = %s, description = %s, "
+        "UPDATE reporting_queries SET name = %s, description = %s, "
         "sql_query = %s WHERE id = %s",
-        (slug, name, description, sql_query, int(query_id)),
+        (name, description, sql_query, int(query_id)),
     )
 
 

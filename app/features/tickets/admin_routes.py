@@ -22,6 +22,7 @@ Mirrors the routes that used to live in ``app/main.py``:
 from __future__ import annotations
 
 import asyncio
+import base64
 import re
 from collections.abc import Sequence
 from datetime import date, datetime, timezone
@@ -35,7 +36,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from app.core.database import db
 from app.core.logging import log_debug, log_error, log_info
 from app.features.tickets.form_helpers import get_last_form_value
-from app.security.flash import flash_redirect
+from app.security.csrf import parse_csrf_form
+from app.security.flash import _safe_redirect_target, flash_redirect
 from app.repositories import assets as assets_repo
 from app.repositories import automations as automation_repo
 from app.repositories import companies as company_repo
@@ -48,6 +50,8 @@ from app.repositories import ticket_expenses as expenses_repo
 from app.repositories import ticket_clocks as ticket_clocks_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import email_blocklist as email_blocklist_repo
+from app.repositories import attachment_blocklist as attachment_blocklist_repo
+from app.repositories import approval_matrix as approval_matrix_repo
 from app.repositories import users as user_repo
 from app.repositories import site_settings as site_settings_repo
 from app.services import agent as agent_service
@@ -58,11 +62,165 @@ from app.services import tickets as tickets_service
 from app.services import ticket_shipment_tracking as shipment_watch_service
 from app.services import message_templates as message_template_service
 from app.services import unbill_tickets as unbill_tickets_service
+from app.services import audit as audit_service
 from app.services import tray as tray_service
 from app.services.sanitization import sanitize_rich_text
 
 
 router = APIRouter(tags=["Tickets"])
+
+
+@router.get("/admin/companies/{company_id:int}/change-approval-matrix", response_class=HTMLResponse)
+async def admin_change_approval_matrix(company_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    if not await company_repo.get_company_by_id(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    return RedirectResponse("/admin/approvals", status_code=status.HTTP_303_SEE_OTHER)
+
+
+def _approval_redirect(message: str, category: str = "success") -> RedirectResponse:
+    return flash_redirect("/admin/approvals", message, category)
+
+
+def _approval_form_values(form: Any) -> tuple[dict[str, Any], str | None]:
+    name = str(form.get("name") or "").strip()
+    description = str(form.get("description") or "").strip()[:500] or None
+    values = {"name": name, "description": description, "technician_user_ids": [],
+              "technical_role_ids": [], "contact_staff_ids": [], "company_roles": [],
+              "job_titles": []}
+    if not name or len(name) > 120:
+        return values, "Enter a change type name of 120 characters or fewer."
+    return values, None
+
+
+@router.get("/admin/approvals", response_class=HTMLResponse)
+async def admin_approvals(request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    company_id = getattr(request.state, "active_company_id", None)
+    company = await company_repo.get_company_by_id(int(company_id)) if company_id else None
+    configurations = []
+    if company:
+        configurations = await approval_matrix_repo.list_configurations(int(company_id), include_inactive=True)
+    return await main_module._render_template(
+        "admin/approvals.html", request, current_user,
+        extra={"title": "Approvals", "company": company, "configurations": configurations,
+               },
+    )
+
+
+@router.post("/admin/companies/{company_id:int}/change-approval-matrix", response_class=HTMLResponse)
+async def admin_create_change_approval(company_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    active_company_id = getattr(request.state, "active_company_id", None)
+    if not active_company_id or int(active_company_id) != company_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Approval configurations are limited to the selected company")
+    form = await parse_csrf_form(request)
+    values, error = _approval_form_values(form)
+    if error:
+        return _approval_redirect(error, "error")
+    if await approval_matrix_repo.configuration_name_exists(company_id, values["name"]):
+        return _approval_redirect("An approval type with that name already exists for this company.", "error")
+    await approval_matrix_repo.create_configuration(
+        company_id=company_id, name=values.pop("name"), description=values.pop("description"),
+        technician_user_id=int(current_user["id"]), **values,
+    )
+    return _approval_redirect("Approval type created.")
+
+
+@router.post("/admin/approvals", response_class=HTMLResponse)
+async def admin_create_approval(request: Request):
+    company_id = getattr(request.state, "active_company_id", None)
+    if not company_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select a company first")
+    return await admin_create_change_approval(int(company_id), request)
+
+
+@router.post("/admin/approvals/{configuration_id:int}", response_class=HTMLResponse)
+async def admin_update_approval(configuration_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    company_id = getattr(request.state, "active_company_id", None)
+    if not company_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select a company first")
+    form = await parse_csrf_form(request)
+    values, error = _approval_form_values(form)
+    if error:
+        return _approval_redirect(error, "error")
+    if await approval_matrix_repo.configuration_name_exists(int(company_id), values["name"], exclude_configuration_id=configuration_id):
+        return _approval_redirect("An approval type with that name already exists for this company.", "error")
+    updated = await approval_matrix_repo.update_configuration(
+        configuration_id=configuration_id, company_id=int(company_id),
+        name=values.pop("name"), description=values.pop("description"),
+        technician_user_id=int(current_user["id"]), **values,
+    )
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Approval configuration not found")
+    return _approval_redirect("Approval type updated.")
+
+
+@router.post("/admin/approvals/{configuration_id:int}/status", response_class=HTMLResponse)
+async def admin_set_approval_status(configuration_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    company_id = getattr(request.state, "active_company_id", None)
+    if not company_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select a company first")
+    form = await parse_csrf_form(request)
+    is_active = str(form.get("isActive") or "").lower() == "true"
+    if not await approval_matrix_repo.set_configuration_active(configuration_id, int(company_id), is_active):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Approval configuration not found")
+    return _approval_redirect("Approval type activated." if is_active else "Approval type deactivated.")
+
+
+@router.post("/admin/tickets/{ticket_id:int}/approval-configuration", response_class=HTMLResponse)
+async def admin_assign_ticket_approval(ticket_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    form = await parse_csrf_form(request)
+    try:
+        configuration_id = int(form.get("approvalConfigurationId") or 0)
+        await approval_matrix_repo.assign_to_ticket(
+            ticket_id=ticket_id, configuration_id=configuration_id,
+            assigned_by_user_id=int(current_user["id"]),
+        )
+    except (TypeError, ValueError) as exc:
+        return flash_redirect(f"/admin/tickets/{ticket_id}", str(exc), "error")
+    return flash_redirect(f"/admin/tickets/{ticket_id}", "Change approval requirements assigned.", "success")
+
+
+@router.post("/admin/tickets/{ticket_id:int}/approvals/{decision_id:int}", response_class=HTMLResponse)
+async def admin_set_ticket_approval(ticket_id: int, decision_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    form = await parse_csrf_form(request)
+    try:
+        updated = await approval_matrix_repo.set_decision(
+            ticket_id=ticket_id, decision_id=decision_id,
+            decision_status=str(form.get("decision") or "").lower(),
+            decided_by_user_id=int(current_user["id"]),
+        )
+    except ValueError as exc:
+        return flash_redirect(f"/admin/tickets/{ticket_id}", str(exc), "error")
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Approval not found")
+    return flash_redirect(f"/admin/tickets/{ticket_id}", "Approval decision updated.", "success")
 
 _RELATED_STOP_WORDS = {
     "about", "after", "again", "also", "and", "are", "attachment", "attachments",
@@ -193,25 +351,12 @@ def _safe_related_url(url: str | None) -> str | None:
 
 
 def _source_url(source_type: str, item: dict[str, Any]) -> str | None:
-    supplied_url = _safe_related_url(item.get("url"))
-    if supplied_url:
-        return supplied_url
-    identifier = item.get("id")
-    if source_type == "tickets" and identifier:
-        return f"/admin/tickets/{identifier}"
-    if source_type == "assets" and identifier:
-        return f"/admin/assets/{identifier}"
-    if source_type == "companies" and identifier:
-        return f"/admin/companies/{identifier}"
-    if source_type == "staff" and identifier:
-        return f"/admin/staff/{identifier}"
-    if source_type == "orders" and item.get("order_number"):
-        return f"/admin/orders/{item['order_number']}"
-    if source_type == "chats" and identifier:
-        return f"/chat/{identifier}"
-    if source_type == "issues" and identifier:
-        return f"/admin/issues/{identifier}"
-    return None
+    from app.services.rag_urls import canonical_source_url
+
+    identifier = item.get("id") or item.get("slug") or item.get("order_number")
+    return canonical_source_url(
+        source_type, identifier, metadata=item, supplied_url=item.get("url")
+    )
 
 
 def _source_relevance_score(item: dict[str, Any], search_terms: set[str]) -> int:
@@ -249,7 +394,7 @@ def _related_items_from_agent_sources(
                     if int(raw_item.get("id")) == current_ticket_id:
                         continue
                 except (TypeError, ValueError):
-                    pass
+                    continue
             if meaningful_terms and _source_relevance_score(raw_item, meaningful_terms) == 0:
                 continue
             url = _source_url(item_type, raw_item)
@@ -307,15 +452,7 @@ def _parse_requester_value(raw: Any) -> tuple[str | None, int | None]:
     return prefix, numeric_id
 
 def _safe_local_redirect_target(raw: str | None, *, fallback: str) -> str:
-    candidate = (raw or "").strip()
-    if not candidate:
-        return fallback
-    parsed = urlsplit(candidate)
-    if parsed.scheme or parsed.netloc:
-        return fallback
-    if not candidate.startswith("/") or candidate.startswith("//"):
-        return fallback
-    return candidate
+    return _safe_redirect_target(raw or "", fallback=fallback)
 
 
 
@@ -391,6 +528,51 @@ async def admin_delete_email_blocklist_entry(entry_id: int, request: Request):
     await email_blocklist_repo.delete_entry(entry_id)
     return flash_redirect("/admin/tickets/email-blocklist", "Email address removed from the blocklist.", "success")
 
+
+@router.get("/admin/tickets/attachment-blocklist", response_class=HTMLResponse)
+async def admin_attachment_blocklist_page(request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    entries = await attachment_blocklist_repo.list_entries()
+    for entry in entries:
+        entry["created_iso"] = _iso_utc(entry.get("created_at"))
+        thumbnail_data = entry.pop("thumbnail_data", None)
+        thumbnail_mime_type = entry.pop("thumbnail_mime_type", None)
+        entry["thumbnail_data_uri"] = (
+            f"data:{thumbnail_mime_type};base64,{base64.b64encode(thumbnail_data).decode('ascii')}"
+            if thumbnail_data and thumbnail_mime_type == "image/jpeg"
+            else None
+        )
+    return await main_module._render_template(
+        "admin/attachment_blocklist.html",
+        request,
+        current_user,
+        extra={"title": "Attachment blocklist", "entries": entries},
+    )
+
+
+@router.post("/admin/tickets/attachment-blocklist/{entry_id:int}/delete")
+async def admin_delete_attachment_blocklist_entry(entry_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    await attachment_blocklist_repo.delete(entry_id)
+    await audit_service.record(
+        action="ticket.attachment_blocklist.remove",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="ticket_attachment_blocklist",
+        entity_id=entry_id,
+    )
+    return flash_redirect(
+        "/admin/tickets/attachment-blocklist",
+        "Attachment removed from the blocklist.",
+        "success",
+    )
+
 @router.get("/admin/tickets", response_class=HTMLResponse)
 async def admin_tickets_page(
     request: Request,
@@ -429,6 +611,28 @@ async def admin_ticket_detail(
         current_user,
         ticket_id=ticket_id,
     )
+
+
+@router.get("/admin/tickets/{ticket_id:int}/requester-assets", response_class=JSONResponse)
+async def admin_ticket_requester_assets(ticket_id: int, request: Request):
+    """Find assets associated with this ticket's requester."""
+    main_module = _main()
+    _current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    assets = await assets_repo.list_assets_for_ticket_requester(ticket_id)
+    return JSONResponse([
+        {
+            "id": asset.get("id"), "name": asset.get("name"),
+            "serial_number": asset.get("serial_number"), "status": asset.get("status"),
+            "tactical_asset_id": asset.get("tactical_asset_id"),
+            "match_reasons": asset.get("match_reasons", []),
+        }
+        for asset in assets
+    ])
 
 
 async def _ticket_clock_user(request: Request, ticket_id: int) -> tuple[dict[str, Any], int]:
@@ -598,7 +802,7 @@ async def admin_rescan_ticket_related(ticket_id: int, request: Request):
                 if int(source_id) == ticket_id:
                     continue
             except (TypeError, ValueError):
-                pass
+                source_id = None
         url = _safe_related_url(candidate.get("url"))
         if not url:
             url = _source_url(source_type, {"id": source_id, "url": candidate.get("url")})
@@ -702,9 +906,9 @@ async def admin_create_ticket(request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     if assigned_user_id is not None:
-        has_permission = await membership_repo.user_has_permission(
+        has_permission = await membership_repo.user_has_role_permission(
             assigned_user_id,
-            main_module.HELPDESK_PERMISSION_KEY,
+            tickets_service.TICKET_ASSIGNEE_PERMISSION_KEY,
         )
         if not has_permission:
             return await main_module._render_tickets_dashboard(
@@ -842,6 +1046,8 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     await tickets_repo.set_ticket_status(ticket_id, status_value)
+    if status_value in {"resolved", "closed"}:
+        await tickets_service.refresh_ticket_resolution_steps(ticket_id)
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
     await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
@@ -917,6 +1123,14 @@ def _build_ticket_status_payloads(
     return statuses
 
 
+def _is_default_labour_type(identifier: Any, default_value: Any, index: int) -> bool:
+    """Match the selected radio value to an existing or unsaved labour type."""
+    return bool(
+        (identifier and str(identifier) == str(default_value))
+        or str(default_value) == f"new-{index}"
+    )
+
+
 @router.post("/admin/tickets/statuses", response_class=HTMLResponse)
 async def admin_replace_ticket_statuses(request: Request):
     main_module = _main()
@@ -983,7 +1197,7 @@ async def admin_replace_labour_types(request: Request):
                 rate_value = float(rate_str.strip())
             except (ValueError, TypeError):
                 rate_value = None
-        is_default = identifier and str(identifier) == str(default_id)
+        is_default = _is_default_labour_type(identifier, default_id, index)
         definitions.append(
             {
                 "id": identifier,
@@ -1286,9 +1500,9 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
                 error_message="Select a valid assignee.",
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
-        has_permission = await membership_repo.user_has_permission(
+        has_permission = await membership_repo.user_has_role_permission(
             assigned_user_id,
-            main_module.HELPDESK_PERMISSION_KEY,
+            tickets_service.TICKET_ASSIGNEE_PERMISSION_KEY,
         )
         if not has_permission:
             return await main_module._render_ticket_detail(
@@ -1394,6 +1608,19 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
 
     await tickets_repo.update_ticket(ticket_id, **update_fields)
     await tickets_repo.set_ticket_status(ticket_id, status_value)
+    approval_configuration_raw = form.get("approvalConfigurationId")
+    if approval_configuration_raw:
+        try:
+            await approval_matrix_repo.assign_to_ticket(
+                ticket_id=ticket_id,
+                configuration_id=int(approval_configuration_raw),
+                assigned_by_user_id=int(current_user["id"]),
+            )
+        except (TypeError, ValueError) as exc:
+            return await main_module._render_ticket_detail(
+                request, current_user, ticket_id=ticket_id,
+                error_message=str(exc), status_code=status.HTTP_400_BAD_REQUEST,
+            )
     if shipment_tracking_url:
         try:
             await shipment_watch_service.upsert_watch(
@@ -1444,10 +1671,31 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     return flash_redirect(destination, message, "success")
 
 
+@router.post(
+    "/admin/tickets/{ticket_id:int}/assets/{asset_id:int}/confirm",
+    response_class=HTMLResponse,
+)
+async def admin_confirm_suggested_asset(ticket_id: int, asset_id: int, request: Request):
+    """Promote an automation suggestion to an explicitly linked ticket asset."""
+    main_module = _main()
+    _current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    if not await tickets_repo.get_ticket(ticket_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    confirmed = await tickets_repo.confirm_ticket_suggested_asset(ticket_id, asset_id)
+    if not confirmed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset suggestion not found")
+    await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
+    return flash_redirect(
+        f"/admin/tickets/{ticket_id}", "Suggested asset linked to ticket.", "success"
+    )
+
+
 @router.post("/admin/tickets/{ticket_id:int}/ai/reprocess", response_class=JSONResponse)
 async def admin_reprocess_ticket_ai(ticket_id: int, request: Request):
     main_module = _main()
-    current_user, redirect = await main_module._require_helpdesk_page(request)
+    current_user, redirect = await main_module._require_super_admin_page(request)
     if redirect:
         return redirect
 
@@ -1455,19 +1703,21 @@ async def admin_reprocess_ticket_ai(ticket_id: int, request: Request):
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
-    try:
-        await tickets_service.refresh_ticket_ai_summary(ticket_id)
-    except Exception as exc:  # pragma: no cover - defensive against unexpected failures
-        log_error(
-            "Failed to queue ticket AI summary refresh",
-            ticket_id=ticket_id,
-            user_id=current_user.get("id"),
-            error=str(exc),
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to refresh AI summary.",
-        ) from exc
+    is_closed = str(ticket.get("status") or "").strip().lower() == "closed"
+    if not is_closed:
+        try:
+            await tickets_service.refresh_ticket_ai_summary(ticket_id)
+        except Exception as exc:  # pragma: no cover - defensive against unexpected failures
+            log_error(
+                "Failed to queue ticket AI summary refresh",
+                ticket_id=ticket_id,
+                user_id=current_user.get("id"),
+                error=str(exc),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Unable to refresh AI summary.",
+            ) from exc
 
     try:
         await tickets_service.refresh_ticket_ai_tags(ticket_id)
@@ -1483,12 +1733,73 @@ async def admin_reprocess_ticket_ai(ticket_id: int, request: Request):
             detail="Unable to refresh AI tags.",
         ) from exc
 
-    return JSONResponse(
-        {
-            "status": "queued",
-            "message": "AI summary and tags will be regenerated shortly.",
-        }
+    message = (
+        "AI tags will be regenerated shortly."
+        if is_closed
+        else "AI summary and tags will be regenerated shortly."
     )
+    return JSONResponse({"status": "queued", "message": message})
+
+
+@router.post("/admin/tickets/{ticket_id:int}/resolution-steps", response_class=HTMLResponse)
+async def admin_update_resolution_steps(ticket_id: int, request: Request):
+    """Save technician-edited resolution steps and refresh their RAG document."""
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    form = await parse_csrf_form(request)
+    sanitized = sanitize_rich_text(str(form.get("resolutionSteps") or ""))
+    await tickets_repo.update_ticket(
+        ticket_id,
+        resolution_steps=sanitized.html if sanitized.has_rich_content else None,
+        resolution_steps_status="succeeded",
+        resolution_steps_source="manually_edited",
+        resolution_steps_updated_at=datetime.now(timezone.utc),
+    )
+    from app.services import rag_outbox
+    await rag_outbox.enqueue("tickets", ticket_id)
+    return flash_redirect(f"/admin/tickets/{ticket_id}", "Resolution steps saved.", "success")
+
+
+@router.post("/admin/tickets/{ticket_id:int}/resolution-steps/reprocess", response_class=JSONResponse)
+async def admin_reprocess_resolution_steps(ticket_id: int, request: Request):
+    main_module = _main()
+    _current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    if str(ticket.get("status") or "").casefold() not in {"resolved", "closed"}:
+        raise HTTPException(status_code=409, detail="Resolution steps are available for resolved or closed tickets.")
+    await tickets_service.refresh_ticket_resolution_steps(ticket_id)
+    return JSONResponse({"status": "queued", "message": "Resolution steps will be regenerated shortly."})
+
+
+@router.post("/admin/tickets/{ticket_id:int}/replies/{reply_id:int}/resolution-step", response_class=HTMLResponse)
+async def admin_toggle_reply_resolution_step(ticket_id: int, reply_id: int, request: Request):
+    main_module = _main()
+    _current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    form = await parse_csrf_form(request)
+    requested_state = str(form.get("state") or "").casefold()
+    if requested_state not in {"resolution", "excluded", "neutral"}:
+        requested_state = "resolution" if str(form.get("flagged") or "").casefold() in {"1", "true", "on", "yes"} else "neutral"
+    flagged = requested_state == "resolution"
+    excluded = requested_state == "excluded"
+    if not await tickets_repo.set_reply_resolution_step(reply_id, ticket_id, flagged, excluded):
+        raise HTTPException(status_code=404, detail="Ticket reply not found")
+    message = {
+        "resolution": "Reply marked as a resolution step.",
+        "excluded": "Reply excluded from resolution step generation.",
+        "neutral": "Reply returned to normal resolution step consideration.",
+    }[requested_state]
+    return flash_redirect(f"/admin/tickets/{ticket_id}#conversation", message, "success")
 
 
 @router.post("/admin/tickets/{ticket_id:int}/delete", response_class=HTMLResponse)
@@ -1678,13 +1989,16 @@ async def admin_bulk_delete_tickets(request: Request):
 
 
 
-def _ticket_template_context(ticket: Mapping[str, Any]) -> dict[str, Any]:
+def _ticket_template_context(ticket: Mapping[str, Any], company_variables: Mapping[str, str] | None = None) -> dict[str, Any]:
     requester_name = str(ticket.get("requester_name") or ticket.get("requester_display_name") or "").strip()
     requester_email = str(ticket.get("requester_email") or "").strip()
     return {
         "ticket": dict(ticket),
         "requester": {"name": requester_name, "email": requester_email},
-        "company": {"name": str(ticket.get("company_name") or "").strip()},
+        "company": {
+            "name": str(ticket.get("company_name") or "").strip(),
+            "variables": dict(company_variables or {}),
+        },
     }
 
 
@@ -1779,7 +2093,13 @@ async def admin_list_ticket_canned_responses(ticket_id: int, request: Request):
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     enriched_ticket = await tickets_service._enrich_ticket_context(ticket)
-    context = _ticket_template_context(enriched_ticket)
+    from app.repositories import company_variables as company_variables_repo
+
+    company_id = enriched_ticket.get("company_id")
+    company_variables = (
+        await company_variables_repo.value_map(int(company_id)) if company_id is not None else {}
+    )
+    context = _ticket_template_context(enriched_ticket, company_variables)
     responses = []
     for response in await canned_responses_repo.list_responses():
         responses.append({
@@ -1795,10 +2115,14 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
     current_user, redirect = await main_module._require_helpdesk_page(request)
     if redirect:
         return redirect
-    form = await request.form()
+    form = await parse_csrf_form(request)
     body_value = form.get("body", "")
     body_raw = str(body_value) if isinstance(body_value, str) else ""
     is_internal = str(form.get("isInternal", "")).lower() in {"1", "true", "on", "yes"}
+    is_resolution_step = str(form.get("isResolutionStep", "")).lower() in {"1", "true", "on", "yes"}
+    is_not_resolution_step = str(form.get("isNotResolutionStep", "")).lower() in {"1", "true", "on", "yes"}
+    if is_not_resolution_step:
+        is_resolution_step = False
     minutes_input_raw = form.get("minutesSpent", "")
     minutes_input = str(minutes_input_raw).strip() if isinstance(minutes_input_raw, str) else ""
     minutes_spent: int | None = None
@@ -1871,6 +2195,19 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    assignment_error = tickets_service.reply_assignment_error(
+        ticket, is_internal=is_internal
+    )
+    if assignment_error:
+        return await main_module._render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            reply_error=assignment_error,
+            reply_body=body_raw,
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
 
     status_definitions = await tickets_service.list_status_definitions()
     selectable_status_definitions = [
@@ -1953,6 +2290,8 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             minutes_spent=minutes_spent,
             is_billable=is_billable,
             labour_type_id=labour_type_id,
+            is_resolution_step=is_resolution_step,
+            is_not_resolution_step=is_not_resolution_step,
         )
         mentioned_user_ids = await _valid_mentioned_user_ids(ticket, _parse_mentioned_user_ids(form))
         if mentioned_user_ids:
@@ -1989,6 +2328,8 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
         # Technicians should not be automatically added as ticket watchers when replying.
         if reply_status:
             await tickets_repo.set_ticket_status(ticket_id, reply_status)
+            if reply_status in {"resolved", "closed"}:
+                await tickets_service.refresh_ticket_resolution_steps(ticket_id)
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
         await tickets_service.refresh_ticket_ai_tags(ticket_id)
         await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)

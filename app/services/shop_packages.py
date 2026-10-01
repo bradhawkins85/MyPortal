@@ -37,7 +37,7 @@ def _build_product_candidate(
         "product_image_url": source.get("product_image_url"),
         "product_description": source.get("product_description"),
         "product_description_html": sanitize_rich_text(
-            str(source.get("product_description") or "")
+            str(source.get("product_description") or ""), allow_embeds=True
         ).html,
         "product_archived": bool(source.get("product_archived")),
         "priority": priority,
@@ -121,7 +121,7 @@ def _prepare_package_items(
 
         prepared_item = dict(item)
         prepared_item["product_description_html"] = sanitize_rich_text(
-            str(item.get("product_description") or "")
+            str(item.get("product_description") or ""), allow_embeds=True
         ).html
         prepared_item["quantity"] = quantity
         prepared_item["primary_product"] = primary_candidate
@@ -176,7 +176,7 @@ def _compute_package_metrics(
 
         if quantity <= 0:
             stock_levels.append(stock)
-        elif quantity > 0:
+        else:
             stock_levels.append(stock // quantity)
 
     if not stock_levels:

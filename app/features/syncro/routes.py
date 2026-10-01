@@ -253,7 +253,7 @@ async def route_import_syncro_companies(request: Request):
         )
 
     background_tasks.queue_background_task(
-        lambda: company_importer.import_all_companies(),
+        company_importer.import_all_companies,
         task_id=task_id,
         description="syncro-company-import",
         on_complete=_on_success,
