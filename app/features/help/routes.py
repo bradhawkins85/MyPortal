@@ -4,6 +4,10 @@ Provides:
 
 * ``GET /help``                              – Help index listing all sections and articles.
 * ``GET /help/{section_slug}/{article_slug}`` – Renders a single help article.
+
+Articles documenting a feature pack or module that is not active are hidden
+(see ``requirements.py``); super administrators still see them, marked
+inactive.
 """
 
 from __future__ import annotations
@@ -13,7 +17,14 @@ import re
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 
-from .service import find_article, list_sections, render_article
+from .service import (
+    article_visible,
+    filter_sections,
+    find_article,
+    list_sections,
+    load_requirement_check,
+    render_article,
+)
 
 
 router = APIRouter(tags=["Help"])
@@ -28,6 +39,10 @@ def _validate_slug(slug: str, label: str) -> None:
     """Raise 404 if *slug* contains characters outside the allowed set."""
     if not _SLUG_RE.match(slug):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Invalid {label}")
+
+
+def _is_super_admin(user: dict | None) -> bool:
+    return bool(user and user.get("is_super_admin"))
 
 
 def _main():
@@ -46,7 +61,10 @@ async def help_index(request: Request):
     if redirect:
         return redirect
 
-    sections = list_sections()
+    is_active = await load_requirement_check()
+    sections = filter_sections(
+        list_sections(), is_active, keep_inactive=_is_super_admin(user)
+    )
     return await main_module._render_template(
         "help/index.html",
         request,
@@ -72,12 +90,19 @@ async def help_article(request: Request, section_slug: str, article_slug: str):
     _validate_slug(section_slug, "section")
     _validate_slug(article_slug, "article")
 
+    is_active = await load_requirement_check()
     article = find_article(section_slug, article_slug)
     if not article:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+    # Articles for inactive feature packs or modules are hidden, except from
+    # super administrators who see them flagged as inactive.
+    keep_inactive = _is_super_admin(user)
+    article["inactive"] = not article_visible(article, is_active)
+    if article["inactive"] and not keep_inactive:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
 
     content_html = render_article(article)
-    sections = list_sections()
+    sections = filter_sections(list_sections(), is_active, keep_inactive=keep_inactive)
 
     return await main_module._render_template(
         "help/article.html",

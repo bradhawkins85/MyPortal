@@ -1,0 +1,3 @@
+{%- macro importance_badge(level, labels) -%}
+<span class="status status--{{ {'critical':'error','high':'warning','medium':'info','low':'neutral'}.get(level, 'neutral') }}">{{ labels.get(level, level|title) }}</span>
+{%- endmacro -%}

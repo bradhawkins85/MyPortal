@@ -1,0 +1,7 @@
+{
+  "guid": "9e7aa12e-4e12-4df7-b302-b18f6dea0f0a",
+  "occurred_at": "2026-09-30T09:00Z",
+  "change_type": "Feature",
+  "summary": "Replace the IMAP and Microsoft 365 mailbox Message filter JSON box with a rule builder (sender, subject, recipients and more, plus exceptions) and a plain-English summary, keeping the JSON under Advanced",
+  "content_hash": "c018c2c6cc1d473fcd63225b80b412a3c3166a04019c302b97fee19e5c5983db"
+}

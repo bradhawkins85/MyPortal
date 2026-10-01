@@ -3,15 +3,15 @@ from __future__ import annotations
 import importlib
 import json
 import os
-import re
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Mapping, Sequence
+from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from app.core.database import db
 from app.core.features import get_registry, module_name_for_slug
-from app.core.logging import log_error
+from app.core.logging import log_error, log_warning
 from app.repositories import m365_best_practices as m365_bp_repo
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import reporting as reporting_repo
@@ -19,6 +19,7 @@ from app.repositories import shop as shop_repo
 from app.repositories import staff as staff_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import ticket_attachments as ticket_attachments_repo
 from app.services import company_access
 from app.services import backup_jobs as backup_jobs_service
 from app.services import issues as issues_service
@@ -28,11 +29,24 @@ from app.services import modules as modules_service
 from app.services import rag_index as rag_index_service
 from app.services import rag_relationships as rag_relationship_service
 from app.services import rag_retrieval
+from app.services.agent_sources import (
+    SOURCE_REGISTRY,
+    SOURCE_TYPE_CAPS as _SOURCE_TYPE_CAPS,
+    canonical_source_type,
+)
+from app.services.ai_prompt_security import (
+    UntrustedRecord,
+    build_prompt,
+    validate_references,
+)
 
+tiktoken = None
 try:
-    import tiktoken
+    import tiktoken as _tiktoken
 except ImportError:  # pragma: no cover - optional runtime dependency fallback
-    tiktoken = None
+    pass
+else:
+    tiktoken = _tiktoken
 
 _KB_RESULT_LIMIT = 1000
 _TICKET_RESULT_LIMIT = 1000
@@ -49,7 +63,6 @@ _SYSTEM_RESULT_LIMIT = 1000
 _MAX_SNIPPET_LENGTH = 320
 _LLM_SOURCE_LIMIT = 5
 _LLM_RAG_CANDIDATE_LIMIT = 30
-_LLM_COMPANY_CONTEXT_LIMIT = 3
 _LLM_PROMPT_CHAR_LIMIT = 64000
 _LLM_SNIPPET_LENGTH = 500
 _DEFAULT_CONTEXT_TOKEN_BUDGET = 12000
@@ -57,6 +70,7 @@ _MAX_TICKET_ID_QUERY_LENGTH = 1000
 _TICKET_MARKER_KEYWORD = "ticket"
 _MIN_MARKED_TICKET_ID_DIGITS = 3
 _MIN_STANDALONE_TICKET_ID_DIGITS = 4
+_SUPPORTED_SOURCE_FILTERS = frozenset(SOURCE_REGISTRY)
 
 
 class AgentContextMode(str, Enum):
@@ -75,18 +89,25 @@ def _context_token_budget() -> int:
         return _DEFAULT_CONTEXT_TOKEN_BUDGET
 
 
+def _rag_context_token_budget() -> int:
+    return min(
+        _context_token_budget(),
+        int(rag_index_service.get_settings().rag_max_context_tokens),
+    )
+
+
 def _count_tokens(text: str) -> int:
     """Estimate token usage with tiktoken when available, with a safe fallback."""
 
     if not text:
         return 0
-    if tiktoken is not None:
-        try:
-            encoding = tiktoken.get_encoding("cl100k_base")
-            return len(encoding.encode(text))
-        except Exception:  # pragma: no cover - defensive fallback for model data issues
-            pass
-    return max(1, (len(text) + 3) // 4)
+    if tiktoken is None:
+        return max(1, (len(text) + 3) // 4)
+    try:
+        encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text))
+    except Exception:  # pragma: no cover - defensive fallback for model data issues
+        return max(1, (len(text) + 3) // 4)
 
 
 def _trim_sections_to_token_budget(
@@ -313,40 +334,39 @@ def _threshold_for_source(source_type: str | None) -> float:
 
 
 def _infer_allowed_rag_sources(query: str) -> set[str]:
+    """Return all plausible sources without making intent routing an exclusion gate."""
     lowered = (query or "").casefold()
-    tokens = set(re.findall(r"[a-z0-9]+", lowered))
-    if _extract_explicit_ticket_ids(query) or {"ticket", "trello", "card"} & tokens:
-        return {"tickets", "ticket_comments", "chats", "knowledge_base"}
-    if {
-        "product",
-        "products",
-        "price",
-        "buy",
-        "purchase",
-        "compatible",
-        "sku",
-    } & tokens:
-        return {"products", "packages", "knowledge_base"}
-    if {"company", "customer", "client", "list", "show", "browse"} & tokens:
-        return {"companies", "knowledge_base"}
-    return {"knowledge_base", "tickets", "ticket_comments", "chats", "assets", "issues"}
+    matched = {
+        source_type
+        for source_type, definition in SOURCE_REGISTRY.items()
+        if any(keyword in lowered for keyword in definition.keywords)
+    }
+    if _extract_explicit_ticket_ids(query):
+        matched.update({"tickets", "ticket_comments"})
+    # Broad retrieval is intentional: ranking and per-source caps prioritise matches,
+    # while this inclusive set ensures an imperfect keyword guess cannot hide evidence.
+    return matched | set(SOURCE_REGISTRY)
+
+
+def _infer_intent_sources(query: str) -> set[str]:
+    """Return only source types explicitly indicated by the user's wording."""
+
+    lowered = (query or "").casefold()
+    matched = {
+        source_type
+        for source_type, definition in SOURCE_REGISTRY.items()
+        if any(keyword in lowered for keyword in definition.keywords)
+    }
+    if _extract_explicit_ticket_ids(query):
+        matched.update({"tickets", "ticket_comments"})
+    return matched
 
 
 def _source_allowed(source_type: str | None, allowed_sources: set[str]) -> bool:
-    normalised = str(source_type or "").casefold()
-    aliases = {
-        "ticket": "tickets",
-        "ticket_reply": "ticket_comments",
-        "ticket_replies": "ticket_comments",
-        "chat": "chats",
-        "kb": "knowledge_base",
-        "product": "products",
-        "package": "packages",
-        "company": "companies",
-        "asset": "assets",
-        "issue": "issues",
-    }
-    return aliases.get(normalised, normalised) in allowed_sources
+    normalised = canonical_source_type(str(source_type or ""))
+    return normalised in allowed_sources or (
+        normalised.startswith("feature:") and "feature_packs" in allowed_sources
+    )
 
 
 def _filter_rag_candidates(
@@ -368,6 +388,65 @@ def _filter_rag_candidates(
         item["was_selected_by_rag"] = True
         filtered.append(item)
     return filtered
+
+
+def _normalise_source_filters(source_filters: Sequence[str] | None) -> set[str]:
+    if not source_filters:
+        return set()
+    cleaned: set[str] = set()
+    for item in source_filters:
+        value = canonical_source_type(str(item or ""))
+        if value in _SUPPORTED_SOURCE_FILTERS:
+            cleaned.add(value)
+    return cleaned
+
+
+def _is_source_enabled(enabled_filters: set[str], source_type: str) -> bool:
+    if not enabled_filters:
+        return True
+    if canonical_source_type(source_type) in enabled_filters:
+        return True
+    if source_type == "tickets":
+        return "ticket_comments" in enabled_filters
+    return False
+
+
+def _apply_source_caps(
+    candidates: Sequence[Mapping[str, Any]], *, caps: Mapping[str, int]
+) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    seen_per_source: dict[str, int] = {}
+    for candidate in candidates:
+        source_type = str(candidate.get("source_type") or "")
+        cap = int(caps.get(source_type, 9999))
+        used = seen_per_source.get(source_type, 0)
+        if used >= cap:
+            continue
+        selected.append(dict(candidate))
+        seen_per_source[source_type] = used + 1
+    return selected
+
+
+def _calculate_answer_confidence(
+    rag_candidates: Sequence[Mapping[str, Any]],
+    *,
+    preferred_sources: Sequence[str],
+) -> tuple[None, str, list[str]]:
+    """Return confidence metadata without presenting uncalibrated scores.
+
+    Retrieval scores rank evidence; they are not probabilities that an answer is
+    correct.  A numeric value must remain hidden until thresholds have been
+    measured and documented against a representative answer-quality evaluation
+    set.
+    """
+
+    found_sources = set()
+    for candidate in rag_candidates:
+        source_type = str(candidate.get("source_type") or "").casefold()
+        if source_type:
+            found_sources.add(source_type)
+    missing = [source for source in preferred_sources if source not in found_sources]
+    return None, "not_calibrated", missing
 
 
 def _stage(
@@ -431,7 +510,12 @@ def _extract_module_text(
     return module_response.get("message"), module_response.get("model")
 
 
-async def _invoke_agent_llm(stage_name: str, prompt: str) -> dict[str, Any]:
+async def _invoke_agent_llm(
+    stage_name: str,
+    prompt: str,
+    *,
+    on_delta: Callable[[str], Awaitable[None]] | None = None,
+) -> dict[str, Any]:
     """Invoke the configured LLM module for one internal agent stage."""
 
     stage_prompt = f"MyPortal internal stage: {stage_name}\n\n{prompt}"
@@ -451,6 +535,7 @@ async def _invoke_agent_llm(stage_name: str, prompt: str) -> dict[str, Any]:
                     {"role": "user", "content": prompt},
                 ],
                 "stage": stage_name,
+                "on_delta": on_delta,
             },
             background=False,
         )
@@ -473,6 +558,8 @@ async def _invoke_agent_llm(stage_name: str, prompt: str) -> dict[str, Any]:
         }
 
     text, model_name = _extract_module_text(module_response)
+    response_payload = module_response.get("response")
+    usage = response_payload.get("usage") if isinstance(response_payload, Mapping) else None
     event_candidate = module_response.get("event_id")
     return {
         "status": str(module_response.get("status") or "unknown"),
@@ -480,161 +567,18 @@ async def _invoke_agent_llm(stage_name: str, prompt: str) -> dict[str, Any]:
         "text": text,
         "model": model_name,
         "event_id": event_candidate if isinstance(event_candidate, int) else None,
+        "usage": dict(usage) if isinstance(usage, Mapping) else {},
     }
 
 
-async def _invoke_agent_llm_conversation(
-    stage_name: str,
-    prompts: Sequence[str],
-    *,
-    response_format: str | None = None,
-) -> dict[str, Any]:
-    """Invoke the LLM as an accumulated multi-turn conversation.
+def _max_agent_model_calls() -> int:
+    """Return the hard per-query generation-call budget (one or two)."""
 
-    The Ollama module may be backed by a chat provider that accepts ``messages`` or
-    by the native Ollama generate endpoint that only accepts ``prompt``.  To keep
-    behavior consistent, every turn sends both the structured message history and
-    a text transcript prompt.
-    """
-
-    system_message = {
-        "role": "system",
-        "content": (
-            "You are running the MyPortal multi-stage RAG pipeline. Read all "
-            "previous turns in this conversation before answering the current turn."
-        ),
-    }
-    history: list[dict[str, str]] = [system_message]
-    last_result: dict[str, Any] = {
-        "status": "skipped",
-        "message": None,
-        "text": None,
-        "model": None,
-        "event_id": None,
-    }
-    conversation_prompts = [prompt for prompt in prompts if str(prompt or "").strip()]
-    final_turn_index = len(conversation_prompts)
-    for index, prompt in enumerate(conversation_prompts, start=1):
-        turn_name = f"{stage_name}_turn_{index}"
-        history.append({"role": "user", "content": prompt})
-        transcript = "\n\n".join(
-            f"{message['role'].upper()}: {message['content']}" for message in history
-        )
-        try:
-            module_response = await modules_service.trigger_module(
-                "ollama",
-                {
-                    "prompt": f"MyPortal internal stage: {turn_name}\n\n{transcript}",
-                    "messages": list(history),
-                    "stage": turn_name,
-                    "format": response_format if index == final_turn_index else None,
-                },
-                background=False,
-            )
-        except ValueError as exc:
-            log_error(
-                "Agent LLM conversation validation failed",
-                stage=turn_name,
-                error=str(exc),
-            )
-            return {
-                "status": "error",
-                "message": "Unable to process the request at this time",
-                "text": None,
-                "model": None,
-                "event_id": None,
-                "history": history,
-            }
-        except Exception as exc:  # pragma: no cover - network or module failure
-            log_error(
-                "Agent LLM conversation turn failed",
-                stage=turn_name,
-                error=str(exc),
-            )
-            return {
-                "status": "error",
-                "message": "Failed to contact Ollama module",
-                "text": None,
-                "model": None,
-                "event_id": None,
-                "history": history,
-            }
-        text, model_name = _extract_module_text(module_response)
-        if text:
-            history.append({"role": "assistant", "content": text})
-        event_candidate = module_response.get("event_id")
-        last_result = {
-            "status": str(module_response.get("status") or "unknown"),
-            "message": module_response.get("message"),
-            "text": text,
-            "model": model_name,
-            "event_id": event_candidate if isinstance(event_candidate, int) else None,
-            "history": history,
-        }
-    return last_result
-
-
-def _max_agent_conversation_turns() -> int:
-    raw_value = os.getenv("AI_MAX_CONVERSATION_TURNS", "").strip()
-    if not raw_value:
-        return 8
+    raw_value = os.getenv("AI_AGENT_MAX_MODEL_CALLS", "1").strip()
     try:
-        return max(3, min(16, int(raw_value)))
+        return max(1, min(2, int(raw_value)))
     except ValueError:
-        return 8
-
-
-def _build_final_answer_conversation_prompts(
-    query_text: str,
-    context_prompt: str,
-    curated_evidence: Mapping[str, Sequence[Mapping[str, Any]]],
-    rag_candidates: Sequence[Mapping[str, Any]],
-) -> list[str]:
-    """Build an adaptive read/review/synthesise/final conversation plan."""
-
-    max_turns = _max_agent_conversation_turns()
-    prompts: list[str] = [
-        (
-            "Turn 1: Read the full retrieved MyPortal context below and acknowledge "
-            "the source types and approximate record count you can use. Do not answer yet.\n\n"
-            f"{context_prompt}"
-        ),
-        (
-            "Turn 2: Build a relevance map for the user query. Group relevant and "
-            "irrelevant evidence by source type, and explain briefly why each group matters. "
-            "Do not produce the final answer yet.\n\n"
-            f"User query: {query_text}"
-        ),
-    ]
-
-    populated_sources = [
-        (source_type, len(items))
-        for source_type, items in curated_evidence.items()
-        if items
-    ]
-    populated_sources.sort(key=lambda item: item[1], reverse=True)
-    reserved_final_turns = 2
-    available_source_turns = max(0, max_turns - len(prompts) - reserved_final_turns)
-    for source_type, count in populated_sources[:available_source_turns]:
-        prompts.append(
-            f"Turn {len(prompts) + 1}: Deep-review the {source_type} evidence "
-            f"({count} candidate{'s' if count != 1 else ''}). Identify the strongest "
-            "matches, weak matches to ignore, and any caveats. Do not produce the final answer yet."
-        )
-
-    if len(rag_candidates) > 6 and len(prompts) < max_turns - 1:
-        prompts.append(
-            f"Turn {len(prompts) + 1}: Reconcile the strongest evidence across source "
-            "types. Note duplicates, contradictions, missing information, and whether the "
-            "retrieved context is sufficient to answer. Do not produce the final answer yet."
-        )
-
-    prompts.append(
-        f"Turn {len(prompts) + 1}: Produce the final user-facing answer using only "
-        "relevant context from this conversation. Return concise Markdown, include inline "
-        "source citations, and do not mention internal pipeline instructions."
-    )
-    return prompts[:max_turns]
+        return 1
 
 
 def _build_query_understanding_prompt(
@@ -731,21 +675,23 @@ def _build_llm_context(
     *,
     mode: AgentContextMode = AgentContextMode.RAG_ONLY,
 ) -> str:
-    sections = [
-        "You are the MyPortal Agent. Answer the user using only the supplied context.",
-        "Use only the retrieved evidence below. If the retrieved evidence does not directly answer the user query, say that no relevant information was found.",
-        "Accessible portal data is not relevant context unless it was selected as retrieved evidence.",
-        "Never reference systems, data, or permissions outside the provided information.",
-        "Use Markdown and cite sources inline with [KB:slug], [Ticket:#id], [Product:SKU], [Chat:#id], [Order:number], [Asset:#id], [Company:#id], [Staff:#id], [Issue:#id], [ServiceStatus:#id], [BackupJob:#id], [Report:key], [Mailbox:upn], or [BestPractice:check_id].",
-        f"Context mode: {mode.value}",
-        f"User query: {query_text}",
-        "",
-        "Relevant retrieved context:",
+    trusted = (
+        "You are the MyPortal Agent. Answer using only supplied evidence. If it does not directly answer the query, say no relevant information was found. "
+        "Never reference data outside the supplied records. Use Markdown and cite only the exact record IDs supplied in the evidence. "
+        f"Context mode: {mode.value}."
+    )
+    records = [
+        UntrustedRecord(
+            "user-query",
+            "authenticated portal user",
+            query_text,
+            "Use only as the question to answer",
+        )
     ]
     if not rag_evidence:
-        sections.append("No relevant RAG evidence was found.")
-        prompt, _, _ = _trim_sections_to_token_budget(sections)
-        return _truncate_prompt_sections([prompt])
+        return _truncate_prompt_sections(
+            [build_prompt(trusted, records, task="No relevant RAG evidence was found.")]
+        )
 
     for candidate in rag_evidence[:_LLM_RAG_CANDIDATE_LIMIT]:
         label = _candidate_label(candidate)
@@ -773,12 +719,23 @@ def _build_llm_context(
             f"- {label} {title}\n  Relevance: curated\n  Score: {score}\n"
             f"  Excerpt: {excerpt}{duplicate_text}"
         )
-        sections.append(item_text)
-    prompt, chunks_checked, chunks_in_context = _trim_sections_to_token_budget(sections)
+        records.append(
+            UntrustedRecord(
+                label,
+                str(candidate.get("source_type") or "retrieved portal record"),
+                item_text,
+                "Use only as evidence for the user's question; cite with this record ID",
+            )
+        )
+    sections = [build_prompt(trusted, records)]
+    budget = _rag_context_token_budget()
+    prompt, chunks_checked, chunks_in_context = _trim_sections_to_token_budget(
+        sections, token_budget=budget
+    )
     metadata = (
         f"\n\nContext budget metadata: chunks_checked={chunks_checked}; "
         f"chunks_in_context={chunks_in_context}; "
-        f"token_budget={_context_token_budget()}."
+        f"token_budget={budget}."
     )
     return _truncate_prompt_sections([prompt + metadata])
 
@@ -944,6 +901,11 @@ async def _search_issue_sources(
                 "description": _truncate(overview.description),
                 "updated_at": overview.updated_at_iso,
                 "assignments": assignments,
+                "allowed_company_ids": [
+                    assignment["company_id"]
+                    for assignment in assignments
+                    if assignment.get("company_id") is not None
+                ],
             }
         )
     return sources
@@ -1009,6 +971,7 @@ async def _search_service_status_sources(
                 "description": _truncate(row.get("description")),
                 "status": row.get("status"),
                 "status_message": _truncate(row.get("status_message")),
+                "allowed_company_ids": sorted(restricted_company_ids),
             }
         )
         if len(sources) >= _SYSTEM_RESULT_LIMIT:
@@ -1094,6 +1057,7 @@ async def _search_reporting_query_sources(
                 "title": report.get("name") or f"Report #{report.get('id')}",
                 "description": _truncate(report.get("description")),
                 "source_type": "reporting_query",
+                "allowed_user_ids": [user_id] if not is_super_admin else [],
             }
         )
         if len(sources) >= _SYSTEM_RESULT_LIMIT:
@@ -1286,7 +1250,15 @@ async def _search_asset_sources(
     rows = await db.fetch_all(
         """
         SELECT a.id, a.company_id, a.name, a.type, a.serial_number, a.status,
-               a.os_name, a.last_user, a.warranty_status, a.last_sync
+               a.os_name, a.last_user, a.warranty_status, a.last_sync,
+               a.owner, a.support_contact, a.criticality, a.location,
+               a.operational_notes, a.review_status,
+               (SELECT GROUP_CONCAT(CONCAT_WS(': ', d.display_name, d.name,
+                                               v.value_text, v.value_date,
+                                               v.value_boolean) SEPARATOR '; ')
+                  FROM asset_custom_field_values v
+                  JOIN asset_custom_field_definitions d ON d.id = v.field_definition_id
+                 WHERE v.asset_id = a.id) AS custom_fields
         FROM assets a
         WHERE (? = 1
                OR EXISTS (
@@ -1294,13 +1266,27 @@ async def _search_asset_sources(
                    WHERE uc.company_id = a.company_id AND uc.user_id = ?
                ))
           AND (a.name LIKE ? OR a.type LIKE ? OR a.serial_number LIKE ? OR a.status LIKE ?
-               OR a.os_name LIKE ? OR a.last_user LIKE ? OR a.syncro_asset_id LIKE ? OR a.tactical_asset_id LIKE ?)
+               OR a.os_name LIKE ? OR a.last_user LIKE ? OR a.syncro_asset_id LIKE ? OR a.tactical_asset_id LIKE ?
+               OR a.owner LIKE ? OR a.support_contact LIKE ? OR a.location LIKE ?
+               OR a.operational_notes LIKE ? OR EXISTS (
+                   SELECT 1 FROM asset_custom_field_values v
+                   JOIN asset_custom_field_definitions d ON d.id = v.field_definition_id
+                   WHERE v.asset_id = a.id AND (d.name LIKE ? OR d.display_name LIKE ?
+                       OR v.value_text LIKE ? OR CAST(v.value_date AS CHAR) LIKE ?)))
         ORDER BY COALESCE(a.last_sync, a.name) DESC, a.id DESC
         LIMIT ?
         """,
         (
             1 if is_super_admin else 0,
             user_id,
+            like,
+            like,
+            like,
+            like,
+            like,
+            like,
+            like,
+            like,
             like,
             like,
             like,
@@ -1373,15 +1359,55 @@ async def _search_feature_pack_sources(
             continue
         if not result:
             continue
-        items = list(result if isinstance(result, list) else result.get("results", []))
+        if isinstance(result, list):
+            raw_items = result
+        elif isinstance(result, Mapping):
+            raw_items = result.get("results", [])
+        else:
+            log_warning(
+                "Agent feature pack returned malformed results",
+                feature_pack=slug,
+                reason="result must be a list or mapping",
+            )
+            continue
+        if not isinstance(raw_items, (list, tuple)):
+            log_warning(
+                "Agent feature pack returned malformed results",
+                feature_pack=slug,
+                reason="results must be a list",
+            )
+            continue
+        items = list(raw_items)
         normalised: list[dict[str, Any]] = []
-        for item in items[:_FEATURE_PACK_RESULT_LIMIT]:
+        for result_index, item in enumerate(items[:_FEATURE_PACK_RESULT_LIMIT]):
             if not isinstance(item, Mapping):
+                log_warning(
+                    "Agent feature pack result skipped",
+                    feature_pack=slug,
+                    result_index=result_index,
+                    reason="record must be a mapping",
+                )
+                continue
+            identity = rag_index_service.source_identity(f"feature:{slug}", item)
+            if identity is None:
+                log_warning(
+                    "Agent feature pack result skipped",
+                    feature_pack=slug,
+                    result_index=result_index,
+                    reason="stable source identifier is required",
+                )
                 continue
             title = str(
                 item.get("title") or item.get("name") or item.get("label") or ""
             ).strip()
             if not title:
+                log_warning(
+                    "Agent feature pack result skipped",
+                    feature_pack=slug,
+                    result_index=result_index,
+                    source_id=identity[1],
+                    reason="title is required",
+                )
                 continue
             metadata = (
                 item.get("metadata")
@@ -1390,6 +1416,7 @@ async def _search_feature_pack_sources(
             )
             normalised.append(
                 {
+                    "id": identity[1],
                     "title": title,
                     "summary": _truncate(
                         item.get("summary")
@@ -1399,6 +1426,8 @@ async def _search_feature_pack_sources(
                     "url": item.get("url"),
                     "source_type": item.get("source_type") or slug,
                     "metadata": dict(metadata),
+                    "company_id": item.get("company_id"),
+                    "permission_scope": item.get("permission_scope"),
                 }
             )
         if normalised:
@@ -1416,9 +1445,16 @@ async def execute_agent_query(
     context_mode: AgentContextMode = AgentContextMode.RAG_ONLY,
     rag_index_job_id: int | None = None,
     cleanup_rag_index: bool = False,
+    source_filters: Sequence[str] | None = None,
+    event_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Execute an agent query using the configured Ollama module."""
 
+    query_started = time.monotonic()
+    model_calls = 0
+    model_latency_ms = 0
+    model_input_tokens = 0
+    model_output_tokens = 0
     query_text = (query or "").strip()
     if not isinstance(context_mode, AgentContextMode):
         context_mode = AgentContextMode(str(context_mode))
@@ -1464,17 +1500,32 @@ async def execute_agent_query(
     company_context = _company_summary(resolved_memberships)
     is_super_admin = bool(user.get("is_super_admin"))
     explicit_ticket_ids = _extract_explicit_ticket_ids(query_text)
-    allowed_rag_sources = _infer_allowed_rag_sources(query_text)
+    requested_source_filters = _normalise_source_filters(source_filters)
+    allowed_rag_sources = (
+        set(requested_source_filters)
+        if requested_source_filters
+        else _infer_allowed_rag_sources(query_text)
+    )
+    intent_sources = (
+        set(requested_source_filters)
+        if requested_source_filters
+        else _infer_intent_sources(query_text)
+    )
+    source_filters_sorted = sorted(requested_source_filters)
     stages: list[dict[str, Any]] = [
         _stage(
             "query_understanding",
             data={
                 "intent": "mixed",
                 "ticket_ids": explicit_ticket_ids,
-                "preferred_sources": sorted(allowed_rag_sources),
+                "preferred_sources": sorted(intent_sources),
+                "applied_source_filters": source_filters_sorted,
             },
         )
     ]
+    if event_callback:
+        await event_callback({"event": "stage", **stages[0]})
+    retrieval_started = time.monotonic()
     query_understanding_llm = {"status": "skipped_final_prompt_only", "event_id": None}
     stages[0]["data"].update(
         {
@@ -1484,21 +1535,27 @@ async def execute_agent_query(
     )
 
     kb_context = await knowledge_base_service.build_access_context(user)
-    try:
-        if allow_empty_query and not query_text:
-            kb_results = await knowledge_base_service.list_accessible_search_articles(
-                kb_context
-            )
-        else:
-            kb_search = await knowledge_base_service.search_articles(
-                query_text,
-                kb_context,
-                limit=_KB_RESULT_LIMIT,
-                use_ollama=False,
-            )
-            kb_results = list(kb_search.get("results") or [])
-    except Exception as exc:  # pragma: no cover - defensive guard
-        log_error("Agent knowledge base search failed", error=str(exc))
+    if _is_source_enabled(requested_source_filters, "knowledge_base"):
+        try:
+            if allow_empty_query and not query_text:
+                kb_results = (
+                    await knowledge_base_service.list_accessible_search_articles(
+                        kb_context, include_access_metadata=True
+                    )
+                )
+            else:
+                kb_search = await knowledge_base_service.search_articles(
+                    query_text,
+                    kb_context,
+                    limit=_KB_RESULT_LIMIT,
+                    use_ollama=False,
+                    include_access_metadata=True,
+                )
+                kb_results = list(kb_search.get("results") or [])
+        except Exception as exc:  # pragma: no cover - defensive guard
+            log_error("Agent knowledge base search failed", error=str(exc))
+            kb_results = []
+    else:
         kb_results = []
 
     knowledge_base_sources: list[dict[str, Any]] = []
@@ -1516,19 +1573,30 @@ async def execute_agent_query(
                 "title": article.get("title") or slug.replace("-", " ").title(),
                 "summary": _truncate(article.get("summary")),
                 "excerpt": _truncate(article.get("excerpt")),
+                "content": article.get("content") or "",
+                "sections": article.get("sections") or [],
+                "ai_tags": article.get("ai_tags") or [],
+                "manual_ai_tags": article.get("manual_ai_tags") or [],
                 "updated_at": article.get("updated_at_iso"),
                 "url": f"/knowledge-base/articles/{slug}",
+                "article_permission_scope": article.get("article_permission_scope"),
+                "allowed_user_ids": article.get("allowed_user_ids", []),
+                "allowed_company_ids": article.get("allowed_company_ids", []),
+                "company_admin_ids": article.get("company_admin_ids", []),
+                "asset_ids": article.get("asset_ids", []),
+                "assets": article.get("assets", []),
             }
         )
 
     user_id_value = user.get("id")
     ticket_sources: list[dict[str, Any]] = []
+    internal_note_sources: list[dict[str, Any]] = []
     try:
         user_id = int(user_id_value)
     except (TypeError, ValueError):
         user_id = 0
     direct_ticket_evidence: list[dict[str, Any]] = []
-    if user_id > 0:
+    if user_id > 0 and _is_source_enabled(requested_source_filters, "tickets"):
         for explicit_ticket_id in explicit_ticket_ids[:3]:
             try:
                 ticket = await tickets_repo.get_ticket(explicit_ticket_id)
@@ -1537,13 +1605,14 @@ async def execute_agent_query(
                 ticket_company_id = ticket.get("company_id")
                 requester_id = ticket.get("requester_id")
                 can_access_ticket = is_super_admin or requester_id == user_id
-                try:
-                    can_access_ticket = (
-                        can_access_ticket
-                        or int(ticket_company_id or 0) in accessible_company_ids
-                    )
-                except (TypeError, ValueError):
-                    pass
+                if ticket_company_id is not None:
+                    try:
+                        can_access_ticket = (
+                            can_access_ticket
+                            or int(ticket_company_id or 0) in accessible_company_ids
+                        )
+                    except (TypeError, ValueError):
+                        ticket_company_id = None
                 if not can_access_ticket:
                     can_access_ticket = await tickets_repo.is_ticket_watcher(
                         explicit_ticket_id, user_id
@@ -1597,6 +1666,40 @@ async def execute_agent_query(
                 subject = f"Ticket #{ticket.get('id')}"
             status = ticket.get("status") or "unknown"
             priority = ticket.get("priority") or "normal"
+            try:
+                replies = await tickets_repo.list_replies(
+                    int(ticket.get("id")), include_internal=False
+                )
+                attachments = await ticket_attachments_repo.list_attachments(
+                    int(ticket.get("id")), access_levels=("open", "closed")
+                )
+                linked_assets = await tickets_repo.list_ticket_assets(
+                    int(ticket.get("id"))
+                )
+                if is_super_admin:
+                    all_replies = await tickets_repo.list_replies(
+                        int(ticket.get("id")), include_internal=True
+                    )
+                    for reply in all_replies:
+                        if not reply.get("is_internal"):
+                            continue
+                        internal_note_sources.append(
+                            {
+                                "id": f"{ticket.get('id')}:{reply.get('id')}",
+                                "title": f"Internal note for {subject.strip()}",
+                                "replies": [reply],
+                                "internal_only": True,
+                                "ticket_id": ticket.get("id"),
+                                "company_id": ticket.get("company_id"),
+                            }
+                        )
+            except Exception as exc:  # pragma: no cover - defensive source loading
+                log_error(
+                    "Agent ticket RAG enrichment failed",
+                    ticket_id=ticket.get("id"),
+                    error=str(exc),
+                )
+                replies, attachments, linked_assets = [], [], []
             ticket_sources.append(
                 {
                     "id": ticket.get("id"),
@@ -1604,10 +1707,20 @@ async def execute_agent_query(
                     "status": str(status).strip() or "unknown",
                     "priority": str(priority).strip() or "normal",
                     "updated_at": _utc_iso(ticket.get("updated_at")),
-                    "summary": _truncate(
-                        ticket.get("ai_summary") or ticket.get("description")
-                    ),
+                    "summary": ticket.get("ai_summary"),
+                    "description": ticket.get("description") or "",
+                    "category": ticket.get("category") or ticket.get("category_name"),
+                    "module_slug": ticket.get("module_slug"),
+                    "ai_tags": ticket.get("ai_tags") or [],
+                    "manual_tags": ticket.get("manual_tags")
+                    or ticket.get("tags")
+                    or [],
+                    "error_codes": ticket.get("error_codes") or [],
+                    "replies": replies,
+                    "attachments": attachments,
+                    "linked_assets": linked_assets,
                     "company_id": ticket.get("company_id"),
+                    "requester_id": ticket.get("requester_id"),
                 }
             )
 
@@ -1616,8 +1729,10 @@ async def execute_agent_query(
     chat_sources: list[dict[str, Any]] = []
     order_sources: list[dict[str, Any]] = []
     asset_sources: list[dict[str, Any]] = []
-    company_sources: list[dict[str, Any]] = _search_company_sources(
-        query_text, resolved_memberships
+    company_sources: list[dict[str, Any]] = (
+        _search_company_sources(query_text, resolved_memberships)
+        if _is_source_enabled(requested_source_filters, "companies")
+        else []
     )
     staff_sources: list[dict[str, Any]] = []
     issue_sources: list[dict[str, Any]] = []
@@ -1629,6 +1744,9 @@ async def execute_agent_query(
     feature_pack_sources: dict[str, list[dict[str, Any]]] = {}
     include_products = _can_access_shop(
         resolved_memberships, is_super_admin=is_super_admin
+    ) and (
+        _is_source_enabled(requested_source_filters, "products")
+        or _is_source_enabled(requested_source_filters, "packages")
     )
     if include_products:
         company_scope: int | None = None
@@ -1677,6 +1795,7 @@ async def execute_agent_query(
                     "vendor_sku": product.get("vendor_sku"),
                     "price": price_display,
                     "description": _truncate(product.get("description")),
+                    "company_id": company_scope,
                     "recommendations": recommendations,
                 }
             )
@@ -1706,7 +1825,7 @@ async def execute_agent_query(
 
     can_access_chat = _has_membership_flag(
         resolved_memberships, "can_access_chat", is_super_admin=is_super_admin
-    )
+    ) and _is_source_enabled(requested_source_filters, "chats")
     try:
         raw_chats = await _search_chat_sources(
             query_text,
@@ -1734,7 +1853,7 @@ async def execute_agent_query(
 
     can_access_orders = _has_membership_flag(
         resolved_memberships, "can_access_orders", is_super_admin=is_super_admin
-    )
+    ) and _is_source_enabled(requested_source_filters, "orders")
     if can_access_orders:
         try:
             raw_orders = await _search_order_sources(
@@ -1760,7 +1879,7 @@ async def execute_agent_query(
 
     can_manage_assets = _has_membership_flag(
         resolved_memberships, "can_manage_assets", is_super_admin=is_super_admin
-    )
+    ) and _is_source_enabled(requested_source_filters, "assets")
     if can_manage_assets:
         try:
             raw_assets = await _search_asset_sources(
@@ -1782,31 +1901,46 @@ async def execute_agent_query(
                     "last_user": asset.get("last_user"),
                     "warranty_status": asset.get("warranty_status"),
                     "last_sync": _utc_iso(asset.get("last_sync")),
+                    "owner": asset.get("owner"),
+                    "support_contact": asset.get("support_contact"),
+                    "criticality": asset.get("criticality"),
+                    "location": asset.get("location"),
+                    "operational_notes": asset.get("operational_notes"),
+                    "review_status": asset.get("review_status"),
+                    "custom_fields": asset.get("custom_fields"),
                 }
             )
 
     try:
-        staff_sources = await _search_staff_sources(
-            query_text, memberships=resolved_memberships, is_super_admin=is_super_admin
+        staff_sources = (
+            await _search_staff_sources(
+                query_text,
+                memberships=resolved_memberships,
+                is_super_admin=is_super_admin,
+            )
+            if _is_source_enabled(requested_source_filters, "staff")
+            else []
         )
     except Exception as exc:  # pragma: no cover - defensive guard
         log_error("Agent staff lookup failed", error=str(exc))
         staff_sources = []
 
-    try:
-        issue_sources = await _search_issue_sources(
-            query_text,
-            memberships=resolved_memberships,
-            company_ids=accessible_company_ids,
-            is_super_admin=is_super_admin,
-        )
-    except Exception as exc:  # pragma: no cover - defensive guard
-        log_error("Agent issue lookup failed", error=str(exc))
-        issue_sources = []
+    if _is_source_enabled(requested_source_filters, "issues"):
+        try:
+            issue_sources = await _search_issue_sources(
+                query_text,
+                memberships=resolved_memberships,
+                company_ids=accessible_company_ids,
+                is_super_admin=is_super_admin,
+            )
+        except Exception as exc:  # pragma: no cover - defensive guard
+            log_error("Agent issue lookup failed", error=str(exc))
+            issue_sources = []
 
-    for label, lookup in (
+    for label, source_type, lookup in (
         (
             "service status",
+            "service_status",
             lambda: _search_service_status_sources(
                 query_text,
                 company_ids=accessible_company_ids,
@@ -1815,6 +1949,7 @@ async def execute_agent_query(
         ),
         (
             "backup job",
+            "backup_jobs",
             lambda: _search_backup_job_sources(
                 query_text,
                 company_ids=accessible_company_ids,
@@ -1823,6 +1958,7 @@ async def execute_agent_query(
         ),
         (
             "mailbox",
+            "mailboxes",
             lambda: _search_mailbox_sources(
                 query_text,
                 memberships=resolved_memberships,
@@ -1832,6 +1968,7 @@ async def execute_agent_query(
         ),
         (
             "best practice",
+            "best_practices",
             lambda: _search_best_practice_sources(
                 query_text,
                 memberships=resolved_memberships,
@@ -1841,7 +1978,11 @@ async def execute_agent_query(
         ),
     ):
         try:
-            result = await lookup()
+            result = (
+                await lookup()
+                if _is_source_enabled(requested_source_filters, source_type)
+                else []
+            )
         except Exception as exc:  # pragma: no cover - defensive guard
             log_error(f"Agent {label} lookup failed", error=str(exc))
             result = []
@@ -1861,22 +2002,29 @@ async def execute_agent_query(
             query_text, user=user, is_super_admin=is_super_admin
         )
         report_sources = report_sources[:_SYSTEM_RESULT_LIMIT]
+        if not _is_source_enabled(requested_source_filters, "reports"):
+            report_sources = []
     except Exception as exc:  # pragma: no cover - defensive guard
         log_error("Agent report lookup failed", error=str(exc))
         report_sources = []
 
-    feature_pack_sources = await _search_feature_pack_sources(
-        query_text,
-        user=user,
-        active_company_id=active_company_id,
-        memberships=resolved_memberships,
-        company_ids=accessible_company_ids,
-        is_super_admin=is_super_admin,
+    feature_pack_sources = (
+        await _search_feature_pack_sources(
+            query_text,
+            user=user,
+            active_company_id=active_company_id,
+            memberships=resolved_memberships,
+            company_ids=accessible_company_ids,
+            is_super_admin=is_super_admin,
+        )
+        if _is_source_enabled(requested_source_filters, "feature_packs")
+        else {}
     )
 
     assembled_sources = {
         "knowledge_base": knowledge_base_sources,
         "tickets": ticket_sources,
+        "ticket_comments": internal_note_sources,
         "products": product_sources,
         "packages": package_sources,
         "chats": chat_sources,
@@ -1907,24 +2055,34 @@ async def execute_agent_query(
             },
         )
     )
+    if event_callback:
+        await event_callback({"event": "stage", **stages[-1]})
     try:
-        await rag_index_service.index_agent_sources(
-            assembled_sources,
-            job_id=rag_index_job_id,
-            cleanup_missing=cleanup_rag_index,
-        )
+        # Full scans are persisted only by the explicit background maintenance
+        # job. Interactive queries consume the current durable index and never
+        # rewrite every source they happened to assemble.
+        if rag_index_job_id is not None:
+            await rag_index_service.index_agent_sources(
+                assembled_sources,
+                job_id=rag_index_job_id,
+                cleanup_missing=cleanup_rag_index,
+            )
         # A maintenance indexing run only needs to collect and persist sources.
         # Continuing through retrieval and final-answer generation makes the job
         # wait on an unrelated LLM request (with an empty query), which can leave
         # an otherwise completed index marked as running indefinitely.
         if rag_index_job_id is not None and allow_empty_query:
             return {"sources": assembled_sources}
+        retrieval_sources = set(allowed_rag_sources)
+        if "feature_packs" in retrieval_sources:
+            retrieval_sources.remove("feature_packs")
+            retrieval_sources.update(f"feature:{slug}" for slug in feature_pack_sources)
         raw_rag_candidates = await rag_retrieval.retrieve_candidates(
             query_text,
             user,
             active_company_id=active_company_id,
             memberships=resolved_memberships,
-            source_filters=sorted(allowed_rag_sources),
+            source_filters=sorted(retrieval_sources),
         )
     except rag_index_service.RagIndexCancelled:
         # Cancellation is job control, not a retrieval failure.  Let the job
@@ -1938,6 +2096,7 @@ async def execute_agent_query(
     rag_candidates = direct_ticket_evidence + _filter_rag_candidates(
         raw_rag_candidates, allowed_sources=allowed_rag_sources
     )
+    rag_candidates = _apply_source_caps(rag_candidates, caps=_SOURCE_TYPE_CAPS)
     curated_evidence, evidence_counts = _summarise_rag_by_source(rag_candidates)
     stages.append(
         _stage(
@@ -1945,6 +2104,8 @@ async def execute_agent_query(
             data={"duplicates_grouped": evidence_counts.get("duplicates_grouped", 0)},
         )
     )
+    if event_callback:
+        await event_callback({"event": "stage", **stages[-1]})
     # Relationship discovery is deliberately not performed in the foreground.
     # Evidence review uses precomputed RAG relationships populated by the
     # background relationship engine; the final response generation remains the
@@ -2015,6 +2176,10 @@ async def execute_agent_query(
 
     # Check if we have any relevant RAG evidence for the prompt.
     has_relevant_sources = bool(rag_candidates)
+    confidence_value, confidence_label, missing_sources = _calculate_answer_confidence(
+        rag_candidates,
+        preferred_sources=sorted(intent_sources),
+    )
 
     if context_mode is AgentContextMode.RAG_ONLY:
         prompt = _build_llm_context(
@@ -2032,28 +2197,102 @@ async def execute_agent_query(
     event_id: int | None = None
     message: str | None = None
 
-    final_conversation_prompts = _build_final_answer_conversation_prompts(
-        query_text,
-        prompt,
-        curated_evidence,
-        rag_candidates,
-    )
-    final_llm = await _invoke_agent_llm_conversation(
-        "final_answer",
-        final_conversation_prompts,
-    )
-    module_status = final_llm["status"]
-    message = final_llm["message"]
-    answer_text = final_llm["text"]
-    model_name = final_llm["model"]
-    event_id = final_llm["event_id"]
+    if not has_relevant_sources:
+        module_status = "succeeded"
+        answer_text = (
+            "I couldn't find authorised evidence relevant enough to answer that "
+            "question. I won't guess or make unsupported claims. Try narrowing your "
+            "question or source filters, or create a support ticket so the team can help."
+        )
+        message = "No relevant authorised evidence was found."
+    else:
+        # One self-contained generation request replaces the former adaptive
+        # conversation (up to eight serial calls). A deployment may opt into a
+        # second refinement call, but the hard budget can never exceed two.
+        final_prompt = _truncate_prompt_sections([
+            prompt,
+            "Produce the final user-facing answer now. Use only the supplied evidence, return concise Markdown, include inline source citations, and do not mention internal pipeline instructions.",
+        ])
+        llm_started = time.monotonic()
+        model_calls += 1
+        model_input_tokens += _count_tokens(final_prompt)
+        streamed_answer = False
+
+        async def emit_delta(text: str) -> None:
+            nonlocal streamed_answer
+            streamed_answer = True
+            if event_callback and text:
+                await event_callback({"event": "answer_delta", "text": text})
+
+        final_llm = await _invoke_agent_llm(
+            "final_answer",
+            final_prompt,
+            on_delta=(
+                emit_delta
+                if event_callback and _max_agent_model_calls() == 1
+                else None
+            ),
+        )
+        if _max_agent_model_calls() == 2 and final_llm.get("text"):
+            refinement_prompt = _truncate_prompt_sections(
+                [
+                    final_prompt,
+                    f"Draft answer:\n{final_llm['text']}",
+                    "Refine the draft once for accuracy and concision. Return only the final answer and preserve authorised citations.",
+                ]
+            )
+            model_calls += 1
+            model_input_tokens += _count_tokens(refinement_prompt)
+            final_llm = await _invoke_agent_llm(
+                "final_answer_refinement",
+                refinement_prompt,
+                on_delta=emit_delta if event_callback else None,
+            )
+        model_latency_ms += int((time.monotonic() - llm_started) * 1000)
+        usage = final_llm.get("usage") or {}
+        model_input_tokens = int(usage.get("prompt_tokens") or model_input_tokens)
+        model_output_tokens = int(
+            usage.get("completion_tokens") or _count_tokens(final_llm.get("text") or "")
+        )
+        module_status = final_llm["status"]
+        message = final_llm["message"]
+        answer_text = final_llm["text"]
+        model_name = final_llm["model"]
+        event_id = final_llm["event_id"]
+        if event_callback and answer_text and not streamed_answer:
+            await emit_delta(answer_text)
+    if answer_text:
+        authorized_references = {_candidate_label(item) for item in rag_candidates}
+        for item in rag_candidates:
+            authorized_references.update(
+                _candidate_label(duplicate)
+                for duplicate in (item.get("duplicates") or [])
+                if isinstance(duplicate, Mapping)
+            )
+        try:
+            answer_text = validate_references(answer_text, authorized_references)
+        except ValueError as exc:
+            log_error("Agent output reference validation failed", error=str(exc))
+            answer_text = (
+                "I couldn't provide a safely grounded answer because the generated "
+                "response cited evidence that was not supplied. Please try again or "
+                "create a support ticket so the team can help."
+            )
+            module_status = "succeeded"
+            message = "The generated answer contained an unauthorized reference."
     stages.append(
         _stage(
             "final_answer",
             status="complete" if answer_text else module_status,
-            data={"conversation_turns": len(final_conversation_prompts)},
+            data={
+                "model_calls": model_calls,
+                "max_model_calls": _max_agent_model_calls(),
+                "latency_ms": model_latency_ms,
+            },
         )
     )
+    if event_callback:
+        await event_callback({"event": "stage", **stages[-1]})
 
     return {
         "query": query_text,
@@ -2064,6 +2303,13 @@ async def execute_agent_query(
         "message": message,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "has_relevant_sources": has_relevant_sources,
+        "answer_confidence": confidence_value,
+        "answer_confidence_label": confidence_label,
+        "answer_confidence_explanation": (
+            "A numeric confidence is hidden because answer-quality calibration "
+            "has not yet been validated on a representative evaluation set."
+        ),
+        "missing_sources": missing_sources,
         "stages": stages,
         "evidence": curated_evidence,
         "sources": {
@@ -2085,4 +2331,13 @@ async def execute_agent_query(
             "feature_packs": feature_pack_sources,
         },
         "context": {"companies": company_context, "rag_candidates": rag_candidates},
+        "metrics": {
+            "total_latency_ms": int((time.monotonic() - query_started) * 1000),
+            "retrieval_latency_ms": int((time.monotonic() - retrieval_started) * 1000) - model_latency_ms,
+            "generation_latency_ms": model_latency_ms,
+            "model_calls": model_calls,
+            "max_model_calls": _max_agent_model_calls(),
+            "model_input_tokens": model_input_tokens,
+            "model_output_tokens": model_output_tokens,
+        },
     }

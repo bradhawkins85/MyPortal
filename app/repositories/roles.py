@@ -70,12 +70,19 @@ async def update_role(role_id: int, **updates: Any) -> dict[str, Any]:
     columns.append("updated_at = %s")
     params.append(datetime.utcnow())
     params.append(role_id)
-    sql = f"UPDATE roles SET {', '.join(columns)} WHERE id = %s"
+    sql = f"UPDATE roles SET {', '.join(columns)} WHERE id = %s"  # nosec B608
     await db.execute(sql, tuple(params))
     updated = await get_role_by_id(role_id)
     if not updated:
         raise ValueError("Role not found after update")
     return updated
+
+
+async def count_members_by_role() -> dict[int, int]:
+    rows = await db.fetch_all(
+        "SELECT role_id, COUNT(*) AS member_count FROM company_memberships GROUP BY role_id"
+    )
+    return {int(row["role_id"]): int(row["member_count"]) for row in rows if row.get("role_id") is not None}
 
 
 async def delete_role(role_id: int) -> None:

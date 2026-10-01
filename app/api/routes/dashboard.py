@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.repositories import dashboard_layouts as layouts_repo
 from app.repositories import reporting as reporting_repo
+from app.repositories import user_companies as user_company_repo
+from app.security.menu_permissions import menu_has_access, normalize_menu_permissions
 from app.services import dashboard_layouts as layouts_service
 from app.services.system_variables import get_system_variables
 
@@ -23,16 +25,46 @@ def _company_id(request: Request) -> int | None:
 
 
 async def _editable(user: dict, request: Request) -> bool:
-    # Every authenticated user owns a personal dashboard layout. Report
-    # visibility is enforced separately by the catalog and resolver.
-    return bool(user.get("id"))
+    """Return whether the active role grants write access to the dashboard."""
+    if user.get("is_super_admin"):
+        return True
+
+    membership = getattr(request.state, "active_membership", None)
+    company_id = _company_id(request) or user.get("company_id")
+    if membership is None and company_id is not None:
+        try:
+            membership = await user_company_repo.get_user_company(
+                int(user["id"]), int(company_id)
+            )
+        except (TypeError, ValueError):
+            membership = None
+        if membership is not None:
+            request.state.active_membership = membership
+
+    permissions = normalize_menu_permissions(
+        (membership or {}).get("menu_permissions")
+        or (membership or {}).get("permissions")
+    )
+    return menu_has_access(permissions, "menu.dashboard", write=True)
+
+
+async def _require_editable(user: dict, request: Request) -> None:
+    if not await _editable(user, request):
+        raise HTTPException(
+            status_code=403,
+            detail="Dashboard editing requires Read/Write Dashboard access.",
+        )
 
 
 @router.get("")
 async def get_dashboard(request: Request, user: dict = Depends(get_current_user)):
     user_id = int(user["id"])
-    personal = await layouts_repo.get_personal(user_id)
     company_id = _company_id(request)
+    editable = await _editable(user, request)
+    # Read-only roles must always inherit the layout assigned to their active
+    # company.  In particular, do not let an old personal layout continue to
+    # override the centrally managed layout after a role loses write access.
+    personal = await layouts_repo.get_personal(user_id) if editable else None
     company = await layouts_repo.get_company(company_id) if company_id else None
     source = "personal" if personal else "company" if company else "default"
     layout = layouts_service.validate_layout(
@@ -47,7 +79,7 @@ async def get_dashboard(request: Request, user: dict = Depends(get_current_user)
     return {
         "layout": resolved,
         "source": source,
-        "editable": await _editable(user, request),
+        "editable": editable,
         "can_assign_company": bool(user.get("is_super_admin")),
     }
 
@@ -56,10 +88,7 @@ async def get_dashboard(request: Request, user: dict = Depends(get_current_user)
 async def save_dashboard(
     payload: dict[str, Any], request: Request, user: dict = Depends(get_current_user)
 ):
-    if not await _editable(user, request):
-        raise HTTPException(
-            status_code=403, detail="Dashboard editing requires technician access."
-        )
+    await _require_editable(user, request)
     try:
         layout = layouts_service.validate_layout(payload)
     except layouts_service.InvalidDashboardLayout as exc:
@@ -73,6 +102,7 @@ async def resolve_dashboard(
     payload: dict[str, Any], request: Request, user: dict = Depends(get_current_user)
 ):
     """Resolve an edited, unsaved layout so its panels can preview live data."""
+    await _require_editable(user, request)
     try:
         layout = layouts_service.validate_layout(payload)
     except layouts_service.InvalidDashboardLayout as exc:
@@ -87,7 +117,8 @@ async def resolve_dashboard(
 
 
 @router.delete("")
-async def reset_dashboard(user: dict = Depends(get_current_user)):
+async def reset_dashboard(request: Request, user: dict = Depends(get_current_user)):
+    await _require_editable(user, request)
     await layouts_repo.delete_personal(int(user["id"]))
     return {"reset": True}
 

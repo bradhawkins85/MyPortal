@@ -7,6 +7,53 @@ from app.repositories import shop as shop_repo
 from app.services.notifications import emit_notification
 
 
+def get_subscription_price_options(product: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return the positive, customer-facing prices configured for a subscription."""
+    options: list[dict[str, Any]] = []
+    fields = (
+        ("price_monthly_commitment", "Monthly commitment · monthly payment", "/month"),
+        ("price_annual_monthly_payment", "Annual commitment · monthly payment", "/month"),
+        ("price_annual_annual_payment", "Annual commitment · annual payment", "/year"),
+    )
+    for field, label, suffix in fields:
+        raw_price = product.get(field)
+        if raw_price is None:
+            continue
+        try:
+            price = Decimal(str(raw_price))
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+        if price > 0:
+            options.append({"label": label, "price": price, "suffix": suffix})
+    return options
+
+
+def get_subscription_billing_plan(product: Mapping[str, Any]) -> tuple[str, str] | None:
+    """Return the effective commitment and payment frequency for a product.
+
+    Newer subscription products may leave the legacy selector columns empty and
+    configure just one of the three price fields instead.  In that case the
+    configured field is the authoritative billing plan.
+    """
+    commitment = str(product.get("commitment_type") or "").strip().lower()
+    payment = str(product.get("payment_frequency") or "").strip().lower()
+    if commitment in {"monthly", "annual"} and payment in {"monthly", "annual"}:
+        return commitment, payment
+
+    configured: list[tuple[str, str]] = []
+    for field, plan in (
+        ("price_monthly_commitment", ("monthly", "monthly")),
+        ("price_annual_monthly_payment", ("annual", "monthly")),
+        ("price_annual_annual_payment", ("annual", "annual")),
+    ):
+        try:
+            if product.get(field) is not None and Decimal(str(product[field])) > 0:
+                configured.append(plan)
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+    return configured[0] if len(configured) == 1 else None
+
+
 def get_product_price(product: Mapping[str, Any], *, is_vip: bool = False) -> Decimal:
     """Return the appropriate price for a product.
 
@@ -19,8 +66,8 @@ def get_product_price(product: Mapping[str, Any], *, is_vip: bool = False) -> De
     price (when *is_vip* is ``True`` and ``vip_price`` is set) and finally to
     the standard ``price`` field.
     """
-    commitment_type = product.get("commitment_type")
-    payment_frequency = product.get("payment_frequency")
+    billing_plan = get_subscription_billing_plan(product)
+    commitment_type, payment_frequency = billing_plan or (None, None)
 
     if commitment_type == "monthly":
         custom_price = product.get("price_monthly_commitment")
@@ -35,6 +82,19 @@ def get_product_price(product: Mapping[str, Any], *, is_vip: bool = False) -> De
             custom_price = product.get("price_annual_annual_payment")
             if custom_price is not None:
                 return Decimal(str(custom_price))
+
+    # A subscription product can expose several independent price options.
+    # Legacy rows selected one option on the product; new rows deliberately do
+    # not. Use the lowest monthly-equivalent option until the customer chooses
+    # an option. A single configured option is resolved above at its actual
+    # charge amount (in particular, an annual price must not be divided by 12).
+    if product.get("subscription_category_id") is not None:
+        options = [
+            option["price"] / (12 if option["suffix"] == "/year" else 1)
+            for option in get_subscription_price_options(product)
+        ]
+        if options:
+            return min(options)
 
     if is_vip and product.get("vip_price") is not None:
         return Decimal(str(product["vip_price"]))

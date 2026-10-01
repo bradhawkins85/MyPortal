@@ -1,0 +1,7 @@
+{
+  "guid": "09a23eb5-b4cb-4ba7-b1cf-dea84a5fa76d",
+  "occurred_at": "2026-09-30T07:00Z",
+  "change_type": "Feature",
+  "summary": "Redesign Staff intake fields as a searchable card list with a modal editor, option builder, Paste a list import and live preview instead of an inline table of value:Label strings",
+  "content_hash": "1c8b36cc44a38e7a050428b610c50a2abe927b50a972830ca9e3fada8979eb18"
+}

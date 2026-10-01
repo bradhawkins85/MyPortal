@@ -28,8 +28,11 @@ from app.repositories import assets as assets_repo
 from app.repositories import companies as companies_repo
 from app.repositories import site_settings as site_settings_repo
 from app.repositories import tray as tray_repo
+from app.services import service_status as service_status_service
 
 _settings = get_settings()
+
+SERVICE_STATUS_URL_VARIABLE = "{{service_status_url}}"
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +477,48 @@ def _filter_menu_nodes_for_company(
     return filtered
 
 
+async def _expand_menu_url_variables(
+    nodes: list[dict[str, Any]], company_id: int | None
+) -> list[dict[str, Any]]:
+    """Resolve server-owned link variables while retaining legacy link nodes.
+
+    The tray clients already know how to open ``link`` nodes, so resolving the
+    URL here makes Service Status available without requiring an agent update.
+    """
+
+    company = None
+    if company_id is not None:
+        company = await companies_repo.get_company_by_id(int(company_id))
+    status_url = None
+    portal_base_url = str(_settings.portal_url or "").strip().rstrip("/")
+    if company and int(company.get("archived") or 0) != 1 and portal_base_url:
+        token = service_status_service.build_public_status_token(
+            int(company_id),
+            seed=service_status_service.public_status_token_seed(company),
+        )
+        status_url = (
+            f"{portal_base_url}/service-status/public/{int(company_id)}/{token}"
+        )
+
+    def expand(node_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        expanded: list[dict[str, Any]] = []
+        for raw_node in node_list:
+            node = dict(raw_node)
+            if node.get("type") == "link" and node.get("url") == SERVICE_STATUS_URL_VARIABLE:
+                if status_url is None:
+                    continue
+                node["url"] = status_url
+            children = node.get("children")
+            if isinstance(children, list):
+                node["children"] = expand(children)
+                if node.get("type") == "submenu" and not node["children"]:
+                    continue
+            expanded.append(node)
+        return expanded
+
+    return expand(nodes)
+
+
 async def resolve_config_for_device(device: dict[str, Any]) -> dict[str, Any]:
     """Return the menu config payload + branding to send to ``device``.
 
@@ -523,6 +568,8 @@ async def resolve_config_for_device(device: dict[str, Any]) -> dict[str, Any]:
         version = int(chosen.get("version") or 1)
     else:
         payload = list(_DEFAULT_MENU)
+
+    payload = await _expand_menu_url_variables(payload, company_id)
 
     return {
         "version": version,

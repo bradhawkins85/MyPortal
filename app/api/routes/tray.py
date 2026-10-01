@@ -26,6 +26,8 @@ from decimal import Decimal
 from typing import Any
 from urllib.parse import quote
 
+import httpx
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
@@ -36,7 +38,7 @@ from app.api.dependencies.auth import (
 )
 from app.api.dependencies.api_keys import require_api_key
 from app.core.config import get_settings
-from app.core.logging import log_error, log_info
+from app.core.logging import log_error, log_info, log_warning
 from app.security.client_ip import get_client_ip
 from app.repositories import assets as assets_repo
 from app.repositories import chat as chat_repo
@@ -45,6 +47,7 @@ from app.repositories import tray as tray_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import site_settings as site_settings_repo
 from app.repositories import users as users_repo
+from app.repositories import user_companies as user_company_repo
 from app.repositories import staff as staff_repo
 from app.schemas.tray import (
     TrayChatStartRequest,
@@ -54,6 +57,8 @@ from app.schemas.tray import (
     TrayEnrolRequest,
     TrayEnrolResponse,
     TrayHeartbeatRequest,
+    TrayOutlookSignaturesRequest,
+    TrayOutlookSignaturesResponse,
     NetworkScanRequest,
     TrayInstallTokenCreate,
     TrayInstallTokenResponse,
@@ -73,6 +78,7 @@ from app.schemas.tray import (
 from app.services import audit as audit_service
 from app.services import chat_ticket_sync
 from app.services import chat_ntfy_notifications
+from app.services import m365_signature_deployment as signature_deploy_service
 from app.services import matrix as matrix_service
 from app.services import matrix_ai_waiting_assistant
 from app.services import tacticalrmm as tacticalrmm_service
@@ -150,17 +156,37 @@ async def _resolve_tray_device(
     token = ""
     if auth_header.lower().startswith("bearer "):
         token = auth_header.split(" ", 1)[1].strip()
-    if token:
-        device = await tray_repo.get_device_by_auth_hash(tray_service.hash_token(token))
-        if not device:
-            raise HTTPException(
-                status_code=401, detail="Tray device authentication failed"
-            )
-    if device is None and payload.device_uid:
-        device = await tray_repo.get_device_by_uid(payload.device_uid)
-    if not device or device.get("status") == "revoked":
+    # The bearer auth token is the only accepted device identity: a
+    # client-supplied ``device_uid`` is not a secret and must not be enough
+    # to file tickets into the device's company.
+    if not token:
+        raise HTTPException(
+            status_code=401, detail="Tray device authentication required"
+        )
+    device = await tray_repo.get_device_by_auth_hash(tray_service.hash_token(token))
+    if not device:
+        raise HTTPException(
+            status_code=401, detail="Tray device authentication failed"
+        )
+    if device.get("status") == "revoked":
         raise HTTPException(status_code=404, detail="Device not found")
     return device
+
+
+async def _user_belongs_to_company(
+    user: dict[str, Any] | None, company_id: int | None
+) -> bool:
+    """Return whether ``user`` is a member of the tray device's company."""
+
+    if not user or company_id is None:
+        return False
+    if user.get("company_id") is not None and int(user["company_id"]) == int(company_id):
+        return True
+    try:
+        membership = await user_company_repo.get_user_company(int(user["id"]), int(company_id))
+    except (KeyError, TypeError, ValueError):
+        return False
+    return membership is not None
 
 
 async def _validate_tray_answers(
@@ -227,6 +253,27 @@ async def enrol_device(
 
     existing = await tray_repo.get_device_by_uid(device_uid)
     if existing:
+        # An install token only authorises (re-)enrolment within its own
+        # company, and must never resurrect a device an admin has revoked.
+        if existing.get("status") == "revoked":
+            log_warning(
+                "Tray re-enrolment refused for revoked device",
+                device_uid=device_uid,
+                install_token_id=token_record.get("id"),
+            )
+            raise HTTPException(status_code=403, detail="Device has been revoked")
+        existing_company = existing.get("company_id")
+        if (int(existing_company) if existing_company is not None else None) != (
+            int(company_id) if company_id is not None else None
+        ):
+            log_warning(
+                "Tray re-enrolment refused for device owned by another company",
+                device_uid=device_uid,
+                install_token_id=token_record.get("id"),
+            )
+            raise HTTPException(
+                status_code=409, detail="Device is already enrolled to another company"
+            )
         await tray_repo.update_device_auth(
             int(existing["id"]),
             auth_token_hash=auth_hash,
@@ -296,7 +343,10 @@ async def sync_trmm_agent(
 
     try:
         asset_id = await asset_importer.sync_tactical_agent(
-            int(company_id), agent_id=agent_id, tray_device_uid=tray_agent_id
+            int(company_id),
+            agent_id=agent_id,
+            tray_device_uid=tray_agent_id,
+            create_asset_if_missing=payload.create_asset_if_missing,
         )
     except tacticalrmm_service.TacticalRMMConfigurationError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -352,12 +402,43 @@ async def get_device_config(
             5, int(device.get("network_scan_interval_minutes") or 360)
         ),
         network_scan_wan_cidrs=[
-            item for item in str(device.get("network_scan_wan_cidrs") or "").splitlines() if item
+            item
+            for item in str(device.get("network_scan_wan_cidrs") or "").splitlines()
+            if item
         ],
         network_scan_local_cidrs=[
-            item for item in str(device.get("network_scan_local_cidrs") or "").splitlines() if item
+            item
+            for item in str(device.get("network_scan_local_cidrs") or "").splitlines()
+            if item
         ],
     )
+
+
+@router.post(
+    "/outlook-signatures",
+    response_model=TrayOutlookSignaturesResponse,
+    summary="Render the active signature for this device's Classic Outlook accounts",
+)
+async def get_outlook_signatures(
+    payload: TrayOutlookSignaturesRequest,
+    device: dict = Depends(get_current_tray_device),
+) -> TrayOutlookSignaturesResponse:
+    """Return rendered signatures for Outlook accounts found on the device.
+
+    Signatures are only returned when the device's company has opted in, and
+    only for addresses on that company's email domains that match an active
+    staff record, so a device cannot read signatures for another company.
+    """
+    company_id = device.get("company_id")
+    company = (
+        await companies_repo.get_company_by_id(int(company_id)) if company_id else None
+    )
+    if not company or not company.get("classic_outlook_signatures_enabled"):
+        return TrayOutlookSignaturesResponse(enabled=False)
+    result = await signature_deploy_service.render_classic_outlook_signatures(
+        int(company_id), payload.addresses
+    )
+    return TrayOutlookSignaturesResponse(enabled=True, **result)
 
 
 @router.post("/network-scan", summary="Upload network discovery results")
@@ -373,8 +454,12 @@ async def upload_network_scan(
         for item in str(device.get("network_scan_wan_cidrs") or "").splitlines()
         if item
     ]
-    if configured_wan and not any(payload.wan_ip in network for network in configured_wan):
-        raise HTTPException(status_code=403, detail="WAN IP is outside this scanner's allowed ranges")
+    if configured_wan and not any(
+        payload.wan_ip in network for network in configured_wan
+    ):
+        raise HTTPException(
+            status_code=403, detail="WAN IP is outside this scanner's allowed ranges"
+        )
     configured_local = [
         ipaddress.ip_network(item)
         for item in str(device.get("network_scan_local_cidrs") or "").splitlines()
@@ -396,7 +481,8 @@ async def upload_network_scan(
             parsed_subnet.subnet_of(network) for network in configured_local
         ):
             raise HTTPException(
-                status_code=403, detail=f"Subnet is outside this scanner's allowed ranges: {raw_subnet}"
+                status_code=403,
+                detail=f"Subnet is outside this scanner's allowed ranges: {raw_subnet}",
             )
         subnet = str(parsed_subnet)
         if subnet not in subnets:
@@ -406,7 +492,9 @@ async def upload_network_scan(
     if not subnets:
         for host in hosts:
             try:
-                subnet = str(ipaddress.ip_network(f"{host['ip_address']}/24", strict=False))
+                subnet = str(
+                    ipaddress.ip_network(f"{host['ip_address']}/24", strict=False)
+                )
             except ValueError:
                 continue
             if subnet not in subnets:
@@ -652,40 +740,18 @@ async def tray_submit_ticket(
 ) -> TrayTicketSubmitResponse:
     """Create a support ticket submitted via the tray icon.
 
-    The bearer auth token is the preferred device identity and is used to link
-    the ticket to the corresponding asset and company.  ``device_uid`` remains
-    accepted as a backwards-compatible fallback for older tray clients that do
-    not send bearer auth. Name, email, and phone are provided by the user in
-    the tray dialog. The requester is matched by email first, then by phone
-    number when no email match exists.
+    The bearer auth token is required and identifies the device, which links
+    the ticket to the corresponding asset and company.  A body ``device_uid``
+    is ignored for authentication. Name, email, and phone are provided by the
+    user in the tray dialog. The requester is matched (within the device's
+    company only) by email first, then by phone number when no email match
+    exists.
 
     Dynamic question answers are validated server-side against the current
     question definitions.  Required visible questions must have a non-empty
     value; select questions must use a declared option.
     """
-    # Prefer the bearer auth token when available. Older tray clients also send
-    # device_uid in the JSON body, but relying exclusively on that body value
-    # makes submissions fragile when the UI has an auth token yet cannot read
-    # the service-written DeviceUID from registry/state. The token already
-    # identifies the enrolled device, so use it as the authoritative source and
-    # keep device_uid as a backwards-compatible fallback for existing clients.
-    device = None
-    auth_header = request.headers.get("Authorization", "")
-    token = ""
-    if auth_header.lower().startswith("bearer "):
-        token = auth_header.split(" ", 1)[1].strip()
-    if token:
-        device = await tray_repo.get_device_by_auth_hash(tray_service.hash_token(token))
-        if not device:
-            raise HTTPException(
-                status_code=401, detail="Tray device authentication failed"
-            )
-
-    if device is None and payload.device_uid:
-        device = await tray_repo.get_device_by_uid(payload.device_uid)
-
-    if not device or device.get("status") == "revoked":
-        raise HTTPException(status_code=404, detail="Device not found")
+    device = await _resolve_tray_device(payload, request)
 
     company_id: int | None = device.get("company_id")
     asset_id: int | None = device.get("asset_id")
@@ -698,7 +764,11 @@ async def tray_submit_ticket(
     # phone match, including when the phone belongs to another user.
     requester_id: int | None = None
     requester_staff_id: int | None = None
+    # Only match portal users that belong to the device's company so a tray
+    # submission cannot attach a ticket to another tenant's user account.
     existing_user = await users_repo.get_user_by_email(normalised_email)
+    if not await _user_belongs_to_company(existing_user, company_id):
+        existing_user = None
     if existing_user is None and company_id is not None:
         staff_member = await staff_repo.get_staff_by_company_and_email(
             int(company_id), normalised_email
@@ -707,6 +777,8 @@ async def tray_submit_ticket(
             requester_staff_id = int(staff_member["id"])
     if existing_user is None and requester_staff_id is None and payload.phone:
         existing_user = await users_repo.get_user_by_phone(payload.phone)
+        if not await _user_belongs_to_company(existing_user, company_id):
+            existing_user = None
     if existing_user:
         requester_id = int(existing_user["id"])
 
@@ -853,26 +925,14 @@ async def tray_submit_syncro_ticket(
         if staff and staff.get("syncro_contact_id"):
             syncro_contact_id = str(staff.get("syncro_contact_id"))
 
-    if syncro_contact_id is None:
-        staff = await staff_repo.get_staff_by_email(normalised_email)
-        if staff and staff.get("syncro_contact_id"):
-            syncro_contact_id = str(staff.get("syncro_contact_id"))
-            if syncro_customer_id is None and staff.get("company_id"):
-                staff_company = await companies_repo.get_company_by_id(
-                    int(staff["company_id"])
-                )
-                if staff_company and staff_company.get("syncro_company_id"):
-                    syncro_customer_id = str(staff_company.get("syncro_company_id"))
-
-    if syncro_contact_id is None or syncro_customer_id is None:
+    # Requester matching is limited to the device's company: a claimed email
+    # must never link the ticket to another tenant's Syncro contact/customer.
+    if syncro_contact_id is None and syncro_customer_id is not None:
         contact = await syncro_service.find_contact_by_email(normalised_email)
         if contact:
-            syncro_contact_id = syncro_contact_id or contact.get("id")
-            syncro_customer_id = (
-                syncro_customer_id
-                or contact.get("customer_id")
-                or contact.get("customerId")
-            )
+            contact_customer_id = contact.get("customer_id") or contact.get("customerId")
+            if str(contact_customer_id) == str(syncro_customer_id):
+                syncro_contact_id = contact.get("id")
 
     full_description = _compose_ticket_description(
         payload=payload,
@@ -949,7 +1009,7 @@ def _issue_ticket_form_token(device: dict[str, Any], mode: str) -> tuple[str, st
 
 def _parse_ticket_form_token(token: str) -> dict[str, Any] | None:
     try:
-        payload = json.loads(decrypt_secret(token))
+        payload = json.loads(decrypt_secret(token, allow_plaintext=False))
     except Exception:
         return None
     try:
@@ -982,6 +1042,7 @@ def _render_ticket_form(
     success: str | None = None,
     branding_display_name: str | None = None,
     branding_icon_url: str = "/tray/icon.ico",
+    unauthenticated: bool = False,
 ) -> str:
     values = values or {}
     title = "Create Syncro Ticket" if mode == "syncro" else "Submit Ticket"
@@ -1002,6 +1063,13 @@ def _render_ticket_form(
             f'<label class="field"><span>{_html.escape(label + star)}</span>'
             f'<input name="{name}" type="{field_type}" value="{_html.escape(values.get(name, ""))}" '
             f'placeholder="{_html.escape(placeholder)}"{req}></label>'
+        )
+    if unauthenticated:
+        fields.insert(
+            3,
+            '<label class="field"><span>Computer Name *</span>'
+            f'<input name="computer_name" type="text" value="{_html.escape(values.get("computer_name", ""))}" '
+            'placeholder="e.g. RECEPTION-PC" maxlength="255" required></label>',
         )
     fields.append(
         '<label class="field"><span>Description</span>'
@@ -1077,6 +1145,27 @@ def _render_ticket_form(
     )
     disabled = " disabled" if success else ""
     meta_json = _html.escape(json.dumps(question_meta), quote=True)
+    form_action = (
+        "/api/tray/ticket-form/fallback" if unauthenticated else "/api/tray/ticket-form"
+    )
+    device_copy = (
+        "Device authentication was unavailable. You can still send a support request; "
+        "enter the computer name so we can identify it."
+        if unauthenticated
+        else "This secure tray form is authenticated by your enrolled tray device and links the request to this computer."
+    )
+    captcha = ""
+    captcha_script = ""
+    if unauthenticated:
+        captcha = (
+            f'<div id="fallback-recaptcha" class="g-recaptcha" data-size="invisible" '
+            f'data-sitekey="{_html.escape(_settings.recaptcha_site_key, quote=True)}" '
+            'data-callback="submitFallbackTicket"></div>'
+            '<p class="recaptcha-notice">This site is protected by reCAPTCHA and the Google '
+            '<a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a> '
+            'and <a href="https://policies.google.com/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a> apply.</p>'
+        )
+        captcha_script = '<script src="https://www.google.com/recaptcha/api.js" async defer></script>'
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{_html.escape(title)} - {_html.escape(brand_name)}</title>
@@ -1090,16 +1179,17 @@ def _render_ticket_form(
 .main{{padding:28px;overflow:auto}}.card{{max-width:860px;background:white;border:1px solid var(--line);border-radius:16px;padding:24px;box-shadow:0 10px 30px rgba(15,23,42,.06)}}
 .field{{display:grid;gap:8px;margin-bottom:18px}}.field span{{font-weight:600}}input,textarea,select{{width:100%;border:1px solid #cbd5e1;border-radius:10px;padding:11px 12px;font:inherit}}textarea{{resize:vertical}}.check{{display:flex;gap:8px;align-items:center}}.check input{{width:auto}}
 .actions{{display:flex;justify-content:flex-end;gap:12px;margin-top:24px}}button{{border:0;border-radius:10px;padding:12px 18px;font-weight:700;cursor:pointer}}.primary{{background:var(--primary);color:white}}.secondary{{background:#e5e7eb;color:#111827}}
+.recaptcha-notice{{margin:4px 0 0;color:var(--muted);font-size:13px;line-height:1.5}}.recaptcha-notice a{{color:#0b6f77;text-decoration:underline;text-underline-offset:2px}}
 .alert{{border-radius:12px;padding:12px 14px;margin-bottom:18px}}.alert-error{{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}}.alert-success{{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}}
 @media(max-width:760px){{.shell{{display:block}}.nav{{padding:16px}}.main{{padding:16px}}}}
-</style></head><body><div class="shell"><aside class="nav"><div class="brand"><img src="{_html.escape(branding_icon_url, quote=True)}" alt=""><h1>{_html.escape(brand_name)}</h1></div><p>This secure tray form is authenticated by your enrolled tray device and links the request to this computer.</p></aside><header class="header"><h2>{_html.escape(title)}</h2><p>{_html.escape(intro)}</p></header><main class="main"><form class="card" method="post" action="/api/tray/ticket-form"><input type="hidden" name="token" value="{_html.escape(token)}"><input type="hidden" name="csrf" value="{_html.escape(csrf)}"><input type="hidden" id="question-meta" value="{meta_json}">{notice}{done}{"".join(fields)}<div class="actions"><button type="button" class="secondary" onclick="window.close()">Cancel</button><button class="primary" type="submit"{disabled}>Send Request</button></div></form></main></div>
+</style>{captcha_script}</head><body><div class="shell"><aside class="nav"><div class="brand"><img src="{_html.escape(branding_icon_url, quote=True)}" alt=""><h1>{_html.escape(brand_name)}</h1></div><p>{_html.escape(device_copy)}</p></aside><header class="header"><h2>{_html.escape(title)}</h2><p>{_html.escape(intro)}</p></header><main class="main"><form class="card" method="post" action="{form_action}"><input type="hidden" name="token" value="{_html.escape(token)}"><input type="hidden" name="csrf" value="{_html.escape(csrf)}"><input type="hidden" id="question-meta" value="{meta_json}">{notice}{done}{"".join(fields)}{captcha}<div class="actions"><button type="button" class="secondary" onclick="window.close()">Cancel</button><button class="primary" type="submit"{disabled}>Send Request</button></div></form></main></div>
 <script>
 const meta=JSON.parse(document.getElementById('question-meta').value||'[]');
 function valueFor(id){{const el=document.querySelector(`[data-question-input="${{id}}"]`);if(!el)return'';if(el.type==='checkbox')return el.checked?'Yes':'No';return (el.value||'').trim();}}
 function matches(c){{const actual=valueFor(c.parent_question_id).toLowerCase();const expected=(c.expected_value||'').toLowerCase();if(c.operator==='not_equals')return actual!==expected;if(c.operator==='contains')return actual.includes(expected);return actual===expected;}}
 function updateVisibility(){{for(const q of meta){{const row=document.querySelector(`[data-question="${{q.id}}"]`);if(!row)continue;const visible=!q.conditions||q.conditions.length===0||q.conditions.every(matches);row.style.display=visible?'grid':'none';const input=row.querySelector('[data-question-input]');if(input)input.dataset.visible=visible?'1':'0';}}}}
 document.addEventListener('input',updateVisibility);document.addEventListener('change',updateVisibility);updateVisibility();
-const form=document.querySelector('form');['name','email','phone'].forEach(k=>{{const el=form.elements[k];const saved=localStorage.getItem('myportal.tray.ticket.'+k);if(el&&!el.value&&saved)el.value=saved;}});form.addEventListener('submit',()=>{{['name','email','phone'].forEach(k=>{{const el=form.elements[k];if(el)localStorage.setItem('myportal.tray.ticket.'+k,el.value||'');}});}});
+const form=document.querySelector('form');['name','email','phone'].forEach(k=>{{const el=form.elements[k];const saved=localStorage.getItem('myportal.tray.ticket.'+k);if(el&&!el.value&&saved)el.value=saved;}});form.addEventListener('submit',event=>{{['name','email','phone'].forEach(k=>{{const el=form.elements[k];if(el)localStorage.setItem('myportal.tray.ticket.'+k,el.value||'');}});if(document.getElementById('fallback-recaptcha')&&window.grecaptcha){{event.preventDefault();grecaptcha.execute();}}}});function submitFallbackTicket(){{HTMLFormElement.prototype.submit.call(form);}}
 </script></body></html>"""
 
 
@@ -1136,7 +1226,9 @@ async def issue_ticket_token(
 )
 async def tacticalrmm_ticket_url_action(
     request: Request,
-    tray_agent_id: str = Query(alias="TrayAgentID", min_length=1, max_length=255),
+    tray_agent_id: str | None = Query(
+        default=None, alias="TrayAgentID", min_length=1, max_length=255
+    ),
 ) -> RedirectResponse:
     """Launch an asset-linked ticket form from a Tactical RMM URL Action.
 
@@ -1146,13 +1238,18 @@ async def tacticalrmm_ticket_url_action(
     the form URL.
     """
 
-    device_uid = tray_agent_id.strip()
+    device_uid = (tray_agent_id or "").strip()
     device = await tray_repo.get_device_by_uid(device_uid)
     if not device or device.get("status") == "revoked":
-        raise HTTPException(status_code=404, detail="Tray device not found")
+        log_info("Tactical RMM URL Action using unauthenticated ticket fallback")
+        return RedirectResponse(
+            url="/api/tray/ticket-form/fallback",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
     if not device.get("asset_id"):
-        raise HTTPException(
-            status_code=409, detail="Tray device is not linked to an asset"
+        return RedirectResponse(
+            url="/api/tray/ticket-form/fallback",
+            status_code=status.HTTP_303_SEE_OTHER,
         )
 
     token, _csrf = _issue_ticket_form_token(device, "myportal")
@@ -1164,6 +1261,167 @@ async def tacticalrmm_ticket_url_action(
     return RedirectResponse(
         url=_ticket_form_url(token, request),
         status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+async def _verify_recaptcha(response_token: str, request: Request) -> bool:
+    """Verify a fallback-form reCAPTCHA response without exposing the secret."""
+
+    if not _settings.recaptcha_secret_key or not response_token:
+        return False
+    data = {
+        "secret": _settings.recaptcha_secret_key,
+        "response": response_token,
+    }
+    client_ip = get_client_ip(request)
+    if client_ip:
+        data["remoteip"] = client_ip
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            response = await client.post(
+                "https://www.google.com/recaptcha/api/siteverify", data=data
+            )
+            response.raise_for_status()
+            result = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        log_error("tray.fallback.recaptcha_unavailable", error=str(exc))
+        return False
+    return result.get("success") is True
+
+
+async def _render_fallback_ticket_form(
+    *,
+    error: str | None = None,
+    values: dict[str, str] | None = None,
+    success: str | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    questions = await tq_service.get_questions_for_company(None)
+    brand_name = await site_settings_repo.get_tray_icon_tooltip_name()
+    return HTMLResponse(
+        _render_ticket_form(
+            token="",
+            csrf="",
+            mode="myportal",
+            questions=questions,
+            branding_display_name=brand_name,
+            error=error,
+            values=values,
+            success=success,
+            unauthenticated=True,
+        ),
+        status_code=status_code,
+    )
+
+
+@router.get(
+    "/ticket-form/fallback", response_class=HTMLResponse, include_in_schema=False
+)
+async def tray_ticket_form_fallback() -> HTMLResponse:
+    """Display the public fallback when a tray device cannot authenticate."""
+
+    return await _render_fallback_ticket_form()
+
+
+@router.post(
+    "/ticket-form/fallback", response_class=HTMLResponse, include_in_schema=False
+)
+async def tray_ticket_form_fallback_submit(request: Request) -> HTMLResponse:
+    """Validate reCAPTCHA and create an unlinked ticket without requiring sign-in."""
+
+    form = await request.form()
+    values = {
+        k: str(v)
+        for k, v in form.multi_items()
+        if isinstance(k, str) and isinstance(v, str)
+    }
+    required = ("name", "email", "subject", "computer_name")
+    if any(not str(form.get(field) or "").strip() for field in required):
+        return await _render_fallback_ticket_form(
+            error="Complete all required fields, including Computer Name.",
+            values=values,
+            status_code=422,
+        )
+    if not _settings.recaptcha_site_key or not _settings.recaptcha_secret_key:
+        return await _render_fallback_ticket_form(
+            error="Spam verification is not configured. Please contact support.",
+            values=values,
+            status_code=503,
+        )
+    if not await _verify_recaptcha(
+        str(form.get("g-recaptcha-response") or ""), request
+    ):
+        return await _render_fallback_ticket_form(
+            error="Spam verification failed. Please complete reCAPTCHA and try again.",
+            values=values,
+            status_code=400,
+        )
+
+    email = str(form.get("email") or "").strip().lower()
+    name = str(form.get("name") or "").strip()
+    phone = str(form.get("phone") or "").strip()
+    computer_name = str(form.get("computer_name") or "").strip()[:255]
+    existing_user = await users_repo.get_user_by_email(email)
+    requester_id = int(existing_user["id"]) if existing_user else None
+    description_parts = [f"**Computer Name:** {_html.escape(computer_name)}"]
+    if requester_id is None:
+        contact = f"**Name:** {_html.escape(name)}  |  **Email:** {_html.escape(email)}"
+        if phone:
+            contact += f"  |  **Phone:** {_html.escape(phone)}"
+        description_parts.append(contact)
+    description = str(form.get("description") or "").strip()
+    if description:
+        description_parts.extend(["", description])
+    questions = await tq_service.get_questions_for_company(None)
+    submitted_answers = []
+    for question in questions:
+        qid = int(question.get("id") if isinstance(question, dict) else question.id)
+        field_type = str(
+            question.get("field_type")
+            if isinstance(question, dict)
+            else question.field_type
+        )
+        answer = (
+            "No"
+            if field_type == "boolean" and form.get(f"answer_{qid}") is None
+            else str(form.get(f"answer_{qid}") or "")
+        )
+        submitted_answers.append({"question_id": qid, "value": answer})
+    answer_errors = tq_service.validate_answers(questions, submitted_answers)
+    if answer_errors:
+        return await _render_fallback_ticket_form(
+            error="; ".join(answer_errors), values=values, status_code=422
+        )
+    additional = tq_service.build_additional_details(questions, submitted_answers)
+    if additional:
+        description_parts.extend(["", additional])
+    sanitized = sanitize_rich_text("\n".join(description_parts))
+    ticket = await tickets_service.create_ticket(
+        subject=str(form.get("subject") or "").strip()[:500],
+        description=sanitized.html,
+        requester_id=requester_id,
+        company_id=None,
+        assigned_user_id=None,
+        priority="normal",
+        status=await tickets_service.resolve_status_or_default(None),
+        category=None,
+        module_slug=None,
+        external_reference=None,
+        trigger_automations=True,
+        initial_reply_author_id=requester_id,
+        requester_email=email if requester_id is None else None,
+    )
+    ticket_number = ticket.get("ticket_number") or f"#{ticket['id']}"
+    if questions and submitted_answers:
+        snapshots = tq_service.build_answer_snapshots(questions, submitted_answers)
+        if snapshots:
+            await tq_repo.create_answers(int(ticket["id"]), snapshots)
+    log_info(
+        "Unauthenticated tray fallback ticket submitted",
+        ticket_id=ticket.get("id"),
+    )
+    return await _render_fallback_ticket_form(
+        success=f"Your ticket {ticket_number} has been submitted. We will be in touch soon."
     )
 
 
@@ -1928,6 +2186,31 @@ def _serialise_device(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def room_accessible_to_device(room: dict[str, Any] | None, device: dict[str, Any]) -> bool:
+    """Return whether a tray ``device`` may open popup chat for ``room``.
+
+    The room must belong to the device's company and, when the room is
+    linked to a specific tray device, to this device.
+    """
+
+    if not room:
+        return False
+    try:
+        device_company = int(device.get("company_id") or 0)
+        room_company = int(room.get("company_id") or 0)
+    except (TypeError, ValueError):
+        return False
+    if not device_company or room_company != device_company:
+        return False
+    room_device = room.get("tray_device_id")
+    if room_device is not None:
+        try:
+            return int(room_device) == int(device.get("id") or 0)
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
 async def _attach_room_to_device(room_id: int, device_id: int) -> None:
     """Set the ``tray_device_id`` link on ``chat_rooms``.
 
@@ -1938,8 +2221,9 @@ async def _attach_room_to_device(room_id: int, device_id: int) -> None:
 
     placeholder = "?" if db.is_sqlite() else "%s"
     try:
+        # Backend placeholder token is selected from the active DB adapter; both values stay bound.
         await db.execute(
-            f"UPDATE chat_rooms SET tray_device_id = {placeholder} "
+            f"UPDATE chat_rooms SET tray_device_id = {placeholder} "  # nosec B608
             f"WHERE id = {placeholder}",
             (device_id, room_id),
         )
@@ -2335,7 +2619,7 @@ def _parse_popup_session(request: Request) -> dict[str, Any] | None:
     if not raw:
         return None
     try:
-        decoded = decrypt_secret(raw)
+        decoded = decrypt_secret(raw, allow_plaintext=False)
         payload = json.loads(decoded)
     except Exception:
         return None
@@ -2372,7 +2656,7 @@ async def issue_chat_token(
     try:
         body = await request.json()
     except Exception:
-        pass
+        body = {}
 
     room_id: int | None = body.get("room_id") or None
     if room_id is not None:
@@ -2402,7 +2686,7 @@ async def issue_chat_token(
     # popup must not turn that stale launch into a brand-new user chat.
     if room_id is not None:
         requested_room = await chat_repo.get_room(int(room_id))
-        if not requested_room:
+        if not requested_room or not room_accessible_to_device(requested_room, device):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Chat room not found"
             )
@@ -2607,8 +2891,12 @@ async def popup_chat_send_message(
                 "room_id": room_id,
             },
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        log_error(
+            "popup_chat_send_message: failed to broadcast refresh",
+            room_id=room_id,
+            error=str(exc),
+        )
 
     msg_data = {
         k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in msg.items()

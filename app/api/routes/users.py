@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
@@ -33,7 +34,7 @@ def _audit_user_view(user: dict | None) -> dict | None:
     return {key: value for key, value in user.items() if key not in _USER_SENSITIVE_FIELDS}
 
 
-@router.get("/me/sidebar-preferences", response_model=dict[str, list[str]])
+@router.get("/me/sidebar-preferences", response_model=dict[str, Any])
 async def get_my_sidebar_preferences(
     _: None = Depends(require_database),
     current_user: dict = Depends(get_current_user),
@@ -41,7 +42,7 @@ async def get_my_sidebar_preferences(
     return await sidebar_preferences_repo.get_user_sidebar_preferences(int(current_user["id"]))
 
 
-@router.put("/me/sidebar-preferences", response_model=dict[str, list[str]])
+@router.put("/me/sidebar-preferences", response_model=dict[str, Any])
 async def update_my_sidebar_preferences(
     payload: dict,
     _: None = Depends(require_database),
@@ -51,6 +52,14 @@ async def update_my_sidebar_preferences(
         int(current_user["id"]),
         payload,
     )
+
+
+@router.delete("/me/sidebar-preferences", response_model=dict[str, Any])
+async def reset_my_sidebar_preferences(
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    return await sidebar_preferences_repo.reset_user_sidebar_preferences(int(current_user["id"]))
 
 
 @router.get("/me/preferences")
@@ -135,7 +144,7 @@ async def create_user(
         company_id=payload.company_id,
     )
     if payload.company_id:
-        try:
+        with suppress(Exception):
             existing = await membership_repo.get_membership_by_company_user(
                 payload.company_id, created["id"]
             )
@@ -148,9 +157,6 @@ async def create_user(
                         role_id=default_role["id"],
                         status="active",
                     )
-        except Exception:
-            # Membership creation is best-effort to avoid blocking user provisioning
-            pass
     await audit_service.record(
         action="user.create",
         request=request,
@@ -192,8 +198,11 @@ async def update_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     data = payload.model_dump(exclude_unset=True)
-    if "is_super_admin" in data and not current_user.get("is_super_admin"):
-        data.pop("is_super_admin")
+    if not current_user.get("is_super_admin"):
+        # A user's default company decides which tenant their session opens
+        # in, so only super admins may change it.
+        data.pop("is_super_admin", None)
+        data.pop("company_id", None)
     updated = await user_repo.update_user(user_id, **data)
     metadata: dict[str, object] | None = None
     if "is_super_admin" in data and bool(user.get("is_super_admin")) != bool(data["is_super_admin"]):

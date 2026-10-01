@@ -53,6 +53,7 @@ def test_extract_agent_details_handles_beta_agent_payload():
         "agent_id": "OEBIMTvujlppgOaNxYerEVowqDstjsGeNKCsnSSz",
         "operating_system": "Windows 10 Pro, 64 bit v22H2 (build 19045.6456)",
         "last_seen": "2025-11-04T02:40:20.840228Z",
+        "boot_time": "2025-11-03T08:15:00Z",
         "plat": "windows",
         "services": [],
     }
@@ -63,6 +64,7 @@ def test_extract_agent_details_handles_beta_agent_payload():
     assert details["os_name"] == "Windows 10 Pro, 64 bit v22H2 (build 19045.6456)"
     assert details["tactical_asset_id"] == "OEBIMTvujlppgOaNxYerEVowqDstjsGeNKCsnSSz"
     assert details["last_sync"] == "2025-11-04T02:40:20.840228Z"
+    assert details["boot_time"] == "2025-11-03T08:15:00Z"
 
 
 def test_extract_agent_details_joins_cpu_model_list():
@@ -232,6 +234,78 @@ def test_extract_agent_details_full_table_serialiser_payload():
     assert details["tactical_asset_id"] == "OEBIMTvujlppgOaNxYerEVowqDstjsGeNKCsnSSz"
     assert details["site_name"] == "Head Office"
     assert details["client_name"] == "Acme Corp"
+
+
+@pytest.mark.parametrize("serial_number", [None, "", "To Be Filled By O.E.M."])
+def test_extract_agent_details_falls_back_to_motherboard_serial(serial_number):
+    agent = {
+        "hostname": "OEM-PC",
+        "serial_number": serial_number,
+        "wmi_detail": {
+            "motherboard": [[{"Manufacturer": "OEM", "SerialNumber": "BOARD-123"}]]
+        },
+    }
+
+    details = tacticalrmm.extract_agent_details(agent)
+
+    assert details["serial_number"] == "BOARD-123"
+
+
+def test_extract_agent_details_keeps_valid_device_serial():
+    agent = {
+        "hostname": "SERIAL-PC",
+        "serial_number": "DEVICE-456",
+        "wmi_detail": {"motherboard_serial_number": "BOARD-123"},
+    }
+
+    details = tacticalrmm.extract_agent_details(agent)
+
+    assert details["serial_number"] == "DEVICE-456"
+
+
+def test_extract_agent_details_ignores_processor_id_and_uses_physicaldrive0():
+    agent = {
+        "hostname": "CPU-ID-PC",
+        "serial_number": "",
+        "wmi_detail": {
+            "motherboard": [[{"SerialNumber": ""}]],
+            "cpu": [[{"Name": "Intel CPU"}, {"ProcessorId": "CPU-ABC-123"}]],
+            "disks": [
+                [
+                    {"DeviceID": r"\\.\PHYSICALDRIVE0"},
+                    {"SerialNumber": "DISK-456"},
+                ]
+            ],
+        },
+    }
+
+    details = tacticalrmm.extract_agent_details(agent)
+
+    assert details["serial_number"] == "DISK-456"
+
+
+def test_extract_agent_details_falls_back_to_physicaldrive0_after_motherboard():
+    agent = {
+        "hostname": "DISK-ID-PC",
+        "serial_number": None,
+        "wmi_detail": {
+            "motherboard": [[{"SerialNumber": None}]],
+            "physical_disks": [
+                [
+                    {"DeviceID": r"\\.\PHYSICALDRIVE1"},
+                    {"SerialNumber": "WRONG-DISK"},
+                ],
+                [
+                    {"DeviceID": r"\\.\PHYSICALDRIVE0"},
+                    {"SerialNumber": "SYSTEM-DISK-789"},
+                ],
+            ],
+        },
+    }
+
+    details = tacticalrmm.extract_agent_details(agent)
+
+    assert details["serial_number"] == "SYSTEM-DISK-789"
 
 
 def test_extract_agent_details_reads_explicit_machine_type():

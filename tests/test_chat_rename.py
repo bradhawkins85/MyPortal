@@ -65,6 +65,34 @@ def test_rename_room_allows_technician_and_updates_subject(monkeypatch):
     asyncio.run(run_test())
 
 
+def test_technician_permission_without_flag_passes_staff_checks(monkeypatch):
+    """get_current_user never sets is_helpdesk_technician; the permission must be looked up."""
+
+    async def run_test():
+        monkeypatch.setattr(chat_routes._settings, "matrix_enabled", True)
+        checked = []
+
+        async def fake_has_permission(user_id, permission):
+            checked.append((user_id, permission))
+            return True
+
+        async def fake_get_room(room_id: int):
+            return None
+
+        monkeypatch.setattr(
+            chat_routes.chat_access.membership_repo, "user_has_permission", fake_has_permission
+        )
+        monkeypatch.setattr(chat_routes.chat_repo, "get_room", fake_get_room)
+
+        for handler in (chat_routes.join_room, chat_routes.create_ticket_from_room):
+            with pytest.raises(HTTPException) as exc:
+                await handler(42, request=None, current_user={"id": 9, "is_super_admin": False})
+            assert exc.value.status_code == 404  # passed the staff check, room missing
+        assert checked and checked[0] == (9, "helpdesk.technician")
+
+    asyncio.run(run_test())
+
+
 def test_rename_room_rejects_non_staff(monkeypatch):
     async def run_test():
         monkeypatch.setattr(chat_routes._settings, "matrix_enabled", True)

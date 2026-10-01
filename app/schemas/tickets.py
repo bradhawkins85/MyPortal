@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
@@ -422,6 +422,8 @@ class TicketViewFilters(BaseModel):
     assigned_user_id: Optional[list[int]] = None
     module_slug: Optional[str] = None
     search: Optional[str] = None
+    column_filters: Optional[dict[str, dict[str, Any]]] = None
+    visible_columns: Optional[list[str]] = Field(default=None, max_length=64)
 
     model_config = ConfigDict(populate_by_name=True)
 

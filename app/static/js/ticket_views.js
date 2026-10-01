@@ -118,7 +118,7 @@
       }
 
       // View selector
-      const viewSelect = this.container.querySelector('[data-view-select]');
+      const viewSelect = document.querySelector('[data-view-select]');
       if (viewSelect) {
         viewSelect.addEventListener('change', (e) => {
           const viewId = parseInt(e.target.value);
@@ -131,13 +131,13 @@
       }
 
       // Save view button
-      const saveViewBtn = this.container.querySelector('[data-save-view]');
+      const saveViewBtn = document.querySelector('[data-save-view]');
       if (saveViewBtn) {
         saveViewBtn.addEventListener('click', () => this.showSaveViewModal());
       }
 
       // Update view button
-      const updateViewBtn = this.container.querySelector('[data-update-view]');
+      const updateViewBtn = document.querySelector('[data-update-view]');
       if (updateViewBtn) {
         updateViewBtn.addEventListener('click', () => this.updateCurrentView());
       }
@@ -176,7 +176,7 @@
       });
 
       // Delete view button
-      const deleteViewBtn = this.container.querySelector('[data-delete-view]');
+      const deleteViewBtn = document.querySelector('[data-delete-view]');
       if (deleteViewBtn) {
         deleteViewBtn.addEventListener('click', () => this.deleteCurrentView());
       }
@@ -797,7 +797,7 @@
         if (response.ok) {
           const view = await response.json();
           this.currentView = view;
-          const viewSelect = this.container.querySelector('[data-view-select]');
+          const viewSelect = document.querySelector('[data-view-select]');
           if (viewSelect) {
             viewSelect.value = String(view.id);
           }
@@ -808,6 +808,9 @@
             this.filterState.statuses = view.filters.status || [];
             this.filterState.priorities = view.filters.priority || [];
             this.filterState.columnFilters = view.filters.column_filters || {};
+            if (Array.isArray(view.filters.visible_columns) && window.ticketColumns) {
+              window.ticketColumns.applyVisibleColumns(view.filters.visible_columns);
+            }
             // Update UI checkboxes
             this.updateFilterUI();
           }
@@ -864,7 +867,9 @@
       this.container.querySelectorAll('[data-status-filter]').forEach(checkbox => {
         checkbox.checked = this.filterState.statuses.includes(checkbox.value);
       });
-      Object.keys(this.filterState.columnFilters).forEach((column) => this.populateColumnFilterPanel(column));
+      this.container.querySelectorAll('[data-column-filter-menu]').forEach((menu) => {
+        this.populateColumnFilterPanel(menu.dataset.columnFilterMenu);
+      });
       this.updateActiveFilterHeaders();
     }
 
@@ -888,6 +893,7 @@
           status: this.filterState.statuses,
           priority: this.filterState.priorities,
           column_filters: this.filterState.columnFilters,
+          visible_columns: window.ticketColumns ? window.ticketColumns.getVisibleColumns() : null,
         },
         grouping_field: this.groupingField,
         grouping_fields: this.groupingFields,
@@ -995,11 +1001,11 @@
      * Render view selector
      */
     renderViewSelector(selectedViewId = null) {
-      const viewSelect = this.container.querySelector('[data-view-select]');
+      const viewSelect = document.querySelector('[data-view-select]');
       if (!viewSelect) return;
 
       const activeViewId = selectedViewId || (this.currentView && this.currentView.id);
-      viewSelect.innerHTML = '<option value="">Select a view...</option>';
+      viewSelect.innerHTML = '<option value="">Saved views…</option>';
       this.views.forEach(view => {
         const option = document.createElement('option');
         option.value = view.id;
@@ -1014,9 +1020,9 @@
      */
     updateViewActions() {
       const hasCurrentView = Boolean(this.currentView);
-      const saveViewBtn = this.container.querySelector('[data-save-view]');
-      const updateViewBtn = this.container.querySelector('[data-update-view]');
-      const deleteViewBtn = this.container.querySelector('[data-delete-view]');
+      const saveViewBtn = document.querySelector('[data-save-view]');
+      const updateViewBtn = document.querySelector('[data-update-view]');
+      const deleteViewBtn = document.querySelector('[data-delete-view]');
 
       if (saveViewBtn) {
         saveViewBtn.hidden = hasCurrentView;
@@ -1034,7 +1040,7 @@
      * Update table info
      */
     updateTableInfo(visible, total) {
-      const infoElement = this.container.querySelector('[data-table-info]');
+      const infoElement = document.querySelector('[data-table-info]');
       if (infoElement) {
         infoElement.textContent = `Showing ${visible} of ${total} tickets`;
       }

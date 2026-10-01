@@ -4,11 +4,16 @@
 {% block header_title %}Marketing pages{% endblock %}
 
 {% block header_actions %}
+  {% set help_link_actions = [{"label": "Email campaigns", "type": "link", "href": "/admin/marketing/campaigns", "variant": "primary"}] %}
   {% if is_super_admin %}
-    {{ page_header_actions([
-      {"label": "Essential 8 help links", "type": "link", "href": "/admin/marketing/essential8-help-links", "variant": "ghost"}
-    ]) }}
+    {% if feature_pack_available('smb1001') %}
+      {% set _ = help_link_actions.append({"label": "SMB1001 help links", "type": "link", "href": "/admin/marketing/smb1001-help-links", "variant": "ghost"}) %}
+    {% endif %}
+    {% if feature_pack_available('essential8') %}
+      {% set _ = help_link_actions.append({"label": "Essential 8 help links", "type": "link", "href": "/admin/marketing/essential8-help-links", "variant": "ghost"}) %}
+    {% endif %}
   {% endif %}
+  {{ page_header_actions(help_link_actions) }}
 {% endblock %}
 
 {% block content %}

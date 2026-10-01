@@ -1,0 +1,7 @@
+{
+  "guid": "e338e5b2-d042-4321-a4ce-6f548d5edf49",
+  "occurred_at": "2026-10-01T00:00Z",
+  "change_type": "Fix",
+  "summary": "Large popup modals now appear above the top navigation bar, so their title and close button are always visible and reachable.",
+  "content_hash": "54dc5c1658b5d42b6bb2507aec2b445ae1405b7732e3198df9caf445605dd93b"
+}

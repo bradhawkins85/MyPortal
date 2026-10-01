@@ -8,13 +8,60 @@
 {% endif %}
 
 {% set is_shop_super_admin = is_super_admin | default(current_user and current_user.get('is_super_admin')) %}
+{% set can_edit_shop_items = can_edit_shop_items | default(is_shop_super_admin) %}
 {% set show_packages = show_packages | default(false) %}
 {% set showing_product_category = (current_category is number) and not show_packages and not show_featured %}
 {% set show_main_shop_card = current_category is not none and not showing_category_cards %}
 
-{% block header_title_content %}
-  <div class="header__title-content">
-    <span class="header__title-text">{{ super() }}</span>
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">{{ title | default('Shop') }}</span>
+    <div class="page-header-toolbar">
+      {# Keep the action same-origin so an internal HTTP proxy hop cannot leak
+         into the browser-facing URL and violate the form-action CSP. #}
+      <form method="get" action="{{ request.url_for('shop_page').path }}" class="page-header-toolbar__group" role="search">
+        {% if current_category is not none %}
+          <input type="hidden" name="category" value="{{ 'packages' if show_packages else current_category }}" />
+        {% endif %}
+        <input
+          type="search"
+          name="q"
+          class="form-input page-header-toolbar__search"
+          placeholder="{{ 'Search packages' if show_packages else 'Search featured products' if show_featured else 'Search products' }}"
+          aria-label="{{ 'Search packages' if show_packages else 'Search featured products' if show_featured else 'Search products' }}"
+          value="{{ search_term or '' }}"
+          data-shop-search
+        />
+        {% if not show_subscriptions %}
+          <label class="page-header-toolbar__check shop-out-of-stock-toggle">
+            <input
+              type="checkbox"
+              name="showOutOfStock"
+              value="1"
+              {% if show_out_of_stock %}checked{% endif %}
+              data-submit-on-change
+            />
+            <span>Show out of stock</span>
+          </label>
+        {% endif %}
+      </form>
+      {% if not showing_category_cards %}
+        <div class="shop-view-toggle" role="group" aria-label="Product display style" data-shop-view-toggle>
+          <button type="button" class="button button--ghost button--compact shop-view-toggle__button" data-shop-view="card" aria-pressed="true" title="Card view">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path fill="currentColor" d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6Z" />
+            </svg>
+            <span>Cards</span>
+          </button>
+          <button type="button" class="button button--ghost button--compact shop-view-toggle__button" data-shop-view="row" aria-pressed="false" title="Row view">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path fill="currentColor" d="M4 5h16v4H4V5Zm0 10h16v4H4v-4Z" />
+            </svg>
+            <span>Rows</span>
+          </button>
+        </div>
+      {% endif %}
+    </div>
   </div>
 {% endblock %}
 
@@ -56,32 +103,6 @@
       <div class="shop-card-header__title">
         <h2 class="card__title">{{ 'Product categories' if showing_category_cards else 'Available packages' if show_packages else 'Featured products' if show_featured else 'Available products' }}</h2>
       </div>
-      <div class="card__controls shop-toolbar">
-        <form method="get" action="{{ request.url_for('shop_page') }}" class="shop-search-form" role="search">
-          {% if current_category is not none %}
-            <input type="hidden" name="category" value="{{ 'packages' if show_packages else current_category }}" />
-          {% endif %}
-          <input
-            type="search"
-            name="q"
-            class="form-input card__control"
-            placeholder="{{ 'Search packages' if show_packages else 'Search featured products' if show_featured else 'Search products' }}"
-            aria-label="{{ 'Search packages' if show_packages else 'Search featured products' if show_featured else 'Search products' }}"
-            value="{{ search_term or '' }}"
-            data-shop-search
-          />
-          <label class="checkbox card__control shop-out-of-stock-toggle">
-            <input
-              type="checkbox"
-              name="showOutOfStock"
-              value="1"
-              {% if show_out_of_stock %}checked{% endif %}
-              data-submit-on-change
-            />
-            <span>Show Out Of Stock Items</span>
-          </label>
-        </form>
-      </div>
     </header>
     {% if showing_category_cards %}
       <div class="shop-card-grid shop-card-grid--categories">
@@ -118,6 +139,14 @@
         {% endfor %}
       </div>
     {% else %}
+      {% if show_subscriptions %}
+        <nav class="shop-subscription-types" aria-label="Subscription types">
+          <a class="button{% if subscription_type is none %} button--primary{% else %} button--ghost{% endif %}" href="?category=subscriptions">All subscriptions</a>
+          {% for subscription_category in subscription_categories %}
+            <a class="button{% if subscription_type == subscription_category.id %} button--primary{% else %} button--ghost{% endif %}" href="?category=subscriptions&amp;subscriptionType={{ subscription_category.id }}">{{ subscription_category.name }}</a>
+          {% endfor %}
+        </nav>
+      {% endif %}
       <div class="shop-card-grid">
         {% if show_main_shop_card %}
           <a class="shop-product-card shop-product-card--navigation" href="{{ request.url_for('shop_page') }}">
@@ -135,6 +164,7 @@
           </a>
         {% endif %}
         {% for product in products %}
+          {% set is_subscription = product.subscription_category_id is defined and product.subscription_category_id is not none %}
           <article class="shop-product-card{% if product.is_package %} shop-product-card--package{% endif %}" {% if product.is_package %}data-package-id="{{ product.id }}"{% else %}data-product-id="{{ product.id }}"{% endif %} data-stock="{{ product.stock }}">
             <div class="shop-product-card__media">
               {% if product.is_package %}
@@ -168,18 +198,26 @@
                 <p class="package-meta">Includes {{ product.product_count }} {{ 'product' if product.product_count == 1 else 'products' }} ({{ item_count }} {{ 'item' if item_count == 1 else 'items' }})</p>
               {% endif %}
               <div class="shop-product-card__meta">
-                <strong>${{ '%.2f'|format(product.price) }}</strong>
-                {{ stock_helpers.stock_status_badge(product.stock, low_stock_threshold, product.stock <= 0) }}
+                {% if is_subscription and product.has_multiple_subscription_prices %}
+                  <button type="button" class="button button--ghost button--sm" data-product-details="{{ product.id }}">More Info</button>
+                {% elif is_subscription and product.subscription_price_options %}
+                  {% set subscription_price = product.subscription_price_options[0] %}
+                  <strong>${{ '%.2f'|format(subscription_price.price) }}{{ subscription_price.suffix }}</strong>
+                {% else %}
+                  <strong>${{ '%.2f'|format(product.price) }}</strong>
+                {% endif %}
+                {% if not is_subscription %}
+                  {{ stock_helpers.stock_status_badge(product.stock, low_stock_threshold, product.stock <= 0) }}
+                {% endif %}
               </div>
             </div>
             <div class="shop-product-card__actions">
               {% if not product.is_package %}
                 <button type="button" class="button button--ghost" data-product-details="{{ product.id }}">Details</button>
               {% endif %}
-              {% set is_subscription = product.subscription_category_id is defined and product.subscription_category_id is not none %}
               {% set has_active_subscription = is_subscription and product.id in active_subscription_product_ids %}
               {% if has_active_subscription %}
-                <a href="/subscriptions" class="button button--primary">Manage</a>
+                <a href="/subscriptions#subscription-{{ product.active_subscription_id }}" class="button button--primary">Manage</a>
               {% elif cart_allowed %}
                 <form action="{{ '/cart/add-package' if product.is_package else '/cart/add' }}" method="post" class="inline-form shop-product-card__cart">
                   {% include "partials/csrf.html" %}
@@ -202,6 +240,21 @@
 
 <div class="modal" id="product-details-modal" role="dialog" aria-modal="true" data-cart-allowed="{{ 'true' if cart_allowed else 'false' }}" hidden>
   <div class="modal__content modal__content--product-details" role="document">
+    {% if can_edit_shop_items %}
+      <a
+        href="/admin/shop"
+        class="modal__icon-action product-details-edit-link"
+        data-product-edit-link
+        aria-label="Edit product"
+        title="Edit product"
+        hidden
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+          <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm17.71-10.04a1 1 0 0 0 0-1.42l-2.5-2.5a1 1 0 0 0-1.42 0l-1.96 1.96 3.75 3.75 2.13-1.79z" />
+        </svg>
+        <span class="visually-hidden">Edit product</span>
+      </a>
+    {% endif %}
     {% if is_shop_super_admin %}
       <form
         method="post"

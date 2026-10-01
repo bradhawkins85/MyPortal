@@ -12,6 +12,7 @@ _ALLOWED_COMPANY_COLUMNS = frozenset({
     "name", "address", "phone", "is_vip", "syncro_company_id", "xero_id",
     "tacticalrmm_client_id", "hudu_id", "huntress_organization_id",
     "huntress_sat_account_id", "invoice_due_days", "payment_method", "require_po",
+    "xero_auto_send_subscription_invoices", "xero_auto_send_product_invoices",
     "offboarding_email_forwarding_enabled", "default_ticket_replies_billable",
     "onedrive_export_site_id", "onedrive_export_site_name", "onedrive_export_drive_id",
     "trello_board_id", "trello_api_key", "trello_token", "csp_tenant_id", "archived",
@@ -21,6 +22,7 @@ _ALLOWED_COMPANY_COLUMNS = frozenset({
     "defender_scheduled_scan_time", "defender_auto_ticket_min_severity",
     "defender_auto_ticket_antivirus_off", "defender_auto_ticket_realtime_off",
     "defender_auto_ticket_tamper_off", "defender_auto_ticket_threat_detected",
+    "classic_outlook_signatures_enabled",
 })
 _ALLOWED_COMPANY_INPUTS = _ALLOWED_COMPANY_COLUMNS | frozenset({"email_domains"})
 
@@ -41,6 +43,12 @@ def _normalise_company(row: dict[str, Any]) -> dict[str, Any]:
         normalised["archived"] = int(normalised["archived"])
     if "invoice_due_days" in normalised and normalised["invoice_due_days"] is not None:
         normalised["invoice_due_days"] = int(normalised["invoice_due_days"])
+    for field in (
+        "xero_auto_send_subscription_invoices",
+        "xero_auto_send_product_invoices",
+    ):
+        if field in normalised and normalised[field] is not None:
+            normalised[field] = int(normalised[field])
     if (
         "default_ticket_replies_billable" in normalised
         and normalised["default_ticket_replies_billable"] is not None
@@ -187,7 +195,7 @@ async def _bulk_email_domains(company_ids: Sequence[int]) -> dict[int, list[str]
         FROM company_email_domains
         WHERE company_id IN ({placeholders})
         ORDER BY company_id, domain
-        """,
+        """,  # nosec B608
         tuple(company_ids),
     )
     grouped: dict[int, list[str]] = defaultdict(list)
@@ -229,7 +237,7 @@ async def create_company(**data: Any) -> dict[str, Any]:
     columns = ", ".join(data.keys())
     placeholders = ", ".join(["%s"] * len(data))
     company_id = await db.execute_returning_lastrowid(
-        f"INSERT INTO companies ({columns}) VALUES ({placeholders})",
+        f"INSERT INTO companies ({columns}) VALUES ({placeholders})",  # nosec B608
         tuple(data.values()),
     )
     if not company_id:
@@ -265,7 +273,11 @@ async def update_company(company_id: int, **updates: Any) -> dict[str, Any]:
 
     columns = ", ".join(f"{column} = %s" for column in updates.keys())
     params = list(updates.values()) + [company_id]
-    await db.execute(f"UPDATE companies SET {columns} WHERE id = %s", tuple(params))
+    # Columns are produced by the explicit company update allowlist above; values remain bound.
+    await db.execute(  # nosec B608
+        f"UPDATE companies SET {columns} WHERE id = %s",  # nosec B608
+        tuple(params),
+    )
     updated = await get_company_by_id(company_id)
     if not updated:
         raise ValueError("Company not found after update")

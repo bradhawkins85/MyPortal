@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import AliasChoices, BaseModel, EmailStr, Field
 
@@ -141,6 +141,42 @@ class StaffWorkflowWebhookCallback(BaseModel):
     company_id: Optional[int] = Field(default=None, validation_alias=AliasChoices("company_id", "companyId"))
     staff_id: Optional[int] = Field(default=None, validation_alias=AliasChoices("staff_id", "staffId"))
     payload: dict[str, Any] | None = None
+    values: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Values made available to later workflow steps as ${vars.<name>}. "
+            "Names containing password/secret/token/key are treated as secrets."
+        ),
+    )
+    secret_values: dict[str, Optional[str]] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("secret_values", "secretValues"),
+        description="Secret values, encrypted at rest and redacted from workflow logs.",
+    )
+    outcome: Literal["success", "failed"] = Field(
+        default="success",
+        description="Use 'failed' to stop the workflow and mark it failed.",
+    )
+    error: Optional[str] = Field(default=None, max_length=2000)
+
+
+class StaffWorkflowPendingWebhookItem(BaseModel):
+    execution_id: int = Field(alias="executionId")
+    company_id: int = Field(alias="companyId")
+    company_name: Optional[str] = Field(default=None, alias="companyName")
+    staff_id: int = Field(alias="staffId")
+    direction: str
+    workflow_key: Optional[str] = Field(default=None, alias="workflowKey")
+    state: Optional[str] = None
+    step_name: Optional[str] = Field(default=None, alias="stepName")
+    paused_at: Optional[str] = Field(default=None, alias="pausedAt")
+    requested_at: Optional[str] = Field(default=None, alias="requestedAt")
+    requested_by_name: Optional[str] = Field(default=None, alias="requestedByName")
+    requested_by_email: Optional[str] = Field(default=None, alias="requestedByEmail")
+    resume_url: str = Field(alias="resumeUrl")
+    staff: dict[str, Any]
+
+    model_config = {"populate_by_name": True}
 
 
 class StaffWorkflowManualActionRequest(BaseModel):
@@ -172,6 +208,8 @@ class StaffRequestResponse(BaseModel):
     custom_fields: dict[str, Any] = Field(default_factory=dict)
     status: str = "pending"
     requested_by_user_id: Optional[int] = None
+    requested_by_name: Optional[str] = None
+    requested_by_email: Optional[str] = None
     requested_at: Optional[datetime] = None
     approved_by_user_id: Optional[int] = None
     approved_at: Optional[datetime] = None
@@ -215,6 +253,8 @@ class StaffResponse(BaseModel):
     onboarding_completed_at: Optional[datetime] = None
     approval_status: str = "pending"
     requested_by_user_id: Optional[int] = None
+    requested_by_name: Optional[str] = None
+    requested_by_email: Optional[str] = None
     requested_at: Optional[datetime] = None
     approved_by_user_id: Optional[int] = None
     approved_at: Optional[datetime] = None

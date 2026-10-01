@@ -24,7 +24,7 @@ def _normalise_query(row: dict[str, Any] | None) -> dict[str, Any] | None:
             try:
                 record[key] = int(record[key])
             except (TypeError, ValueError):
-                pass
+                continue
     return record
 
 

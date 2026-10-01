@@ -1,0 +1,458 @@
+import re
+from pathlib import Path
+
+from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader
+
+
+def _render_best_practices(
+    results,
+    catalog=None,
+    secure_score=None,
+    can_manage_account_exclusions=False,
+    can_edit_notes=False,
+    can_submit_tickets=True,
+    is_super_admin=False,
+    batch_scopes=None,
+):
+    templates = Path(__file__).parents[1] / "app" / "templates"
+    loader = ChoiceLoader(
+        [
+            DictLoader(
+                {
+                    "base.html": (
+                        "{% block header_title %}{% endblock %}"
+                        "{% block title %}{% endblock %}"
+                        "{% block header_actions %}{% endblock %}"
+                        "{% block styles %}{% endblock %}"
+                        "{% block content %}{% endblock %}"
+                        "{% block scripts %}{% endblock %}"
+                    )
+                }
+            ),
+            FileSystemLoader(templates),
+        ]
+    )
+    template = Environment(loader=loader, autoescape=True).get_template(
+        "m365/best_practices.html"
+    )
+    return template.render(
+        results=results,
+        catalog=catalog or [],
+        has_credentials=True,
+        is_super_admin=is_super_admin,
+        can_manage_account_exclusions=can_manage_account_exclusions,
+        secure_score=secure_score,
+        can_edit_notes=can_edit_notes,
+        can_submit_tickets=can_submit_tickets,
+        batch_scopes=batch_scopes or [],
+    )
+
+
+def _render_best_practices_settings(catalog):
+    templates = Path(__file__).parents[1] / "app" / "templates"
+    loader = ChoiceLoader(
+        [
+            DictLoader(
+                {
+                    "base.html": (
+                        "{% block header_title %}{% endblock %}"
+                        "{% block title %}{% endblock %}"
+                        "{% block header_actions %}{% endblock %}"
+                        "{% block styles %}{% endblock %}"
+                        "{% block content %}{% endblock %}"
+                        "{% block scripts %}{% endblock %}"
+                    ),
+                    "macros/header.html": (
+                        "{% macro page_header_actions(actions) %}{% endmacro %}"
+                    ),
+                }
+            ),
+            FileSystemLoader(templates),
+        ]
+    )
+    template = Environment(loader=loader, autoescape=True).get_template(
+        "m365/best_practices_settings.html"
+    )
+    return template.render(catalog=catalog, company={"id": 1, "name": "Contoso"})
+
+
+def test_wholly_not_applicable_section_is_hidden_but_global_stat_strip_remains():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "intune_windows",
+                "status": "not_applicable",
+                "check_name": "Windows-only check",
+            }
+        ],
+        catalog=[{"cis_group": "intune_windows"}],
+    )
+
+    assert "CIS Intune Benchmark – Windows" not in html
+    assert "bp-table-intune-windows" not in html
+    assert html.count('class="stat-strip bp-filter-strip"') == 1
+    assert "Not Applicable" in html
+
+
+def test_mixed_section_keeps_results_without_rendering_section_stat_strip():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "intune_windows",
+                "status": "pass",
+                "check_name": "Applicable check",
+            },
+            {
+                "cis_group": "intune_windows",
+                "status": "not_applicable",
+                "check_name": "Unsupported check",
+            },
+        ]
+    )
+
+    assert "CIS Intune Benchmark – Windows" in html
+    assert html.count('class="stat-strip bp-filter-strip"') == 1
+    assert "Not Applicable" in html
+
+
+def test_results_table_supports_persisted_filtering_and_sorting():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "pass",
+                "check_name": "Secure defaults",
+                "details": "Enabled",
+            }
+        ]
+    )
+
+    assert 'data-table-id="m365-best-practices-bp-table-m365"' in html
+    assert 'data-table-filter="bp-table-m365"' in html
+    assert 'data-column-key="check" data-sort="string"' in html
+    assert 'data-column-key="evaluated" data-sort="date"' in html
+    assert '/static/js/tables.js' in html
+    assert '/static/js/m365_best_practices.js' in html
+
+
+def test_stat_filter_script_persists_one_global_status_filter():
+    script = (
+        Path(__file__).parents[1] / "app" / "static" / "js" / "m365_best_practices.js"
+    ).read_text()
+
+    assert "myportal.m365BestPractices.statusFilters.global" in script
+    assert "window.localStorage.setItem(STORAGE_KEY" in script
+    assert "document.querySelectorAll('.bp-results-table')" in script
+
+
+def test_score_history_is_available_from_page_header():
+    html = _render_best_practices([])
+
+    assert 'href="/m365/best-practices/history"' in html
+    assert "Score history" in html
+
+
+def test_secure_score_is_shown_in_main_stat_strip():
+    html = _render_best_practices(
+        [{"cis_group": "", "status": "pass", "check_name": "Secure Score"}],
+        secure_score={"current": 42.5, "maximum": 80.0, "percentage": 53.1},
+    )
+
+    assert "Secure Score" in html
+    assert "53.1%" in html
+    assert "Microsoft Secure Score: 42.5/80.0" in html
+
+
+def test_global_stat_strip_counts_all_benchmarks():
+    html = _render_best_practices(
+        [
+            {"cis_group": "", "status": "pass", "check_name": "Main check"},
+            {"cis_group": "intune_windows", "status": "fail", "check_name": "Windows check"},
+            {"cis_group": "intune_ios", "status": "unknown", "check_name": "iOS check"},
+            {"cis_group": "intune_macos", "status": "not_applicable", "check_name": "macOS check"},
+            {"cis_group": "", "status": "excluded", "check_name": "Excluded check"},
+        ]
+    )
+
+    assert html.count('class="stat-strip bp-filter-strip"') == 1
+    assert '<span class="stat-strip__stat-label">Passed</span>' in html
+    assert '<span class="stat-strip__stat-label">Failed</span>' in html
+    assert '<span class="stat-strip__stat-label">Unknown</span>' in html
+    assert '<span class="stat-strip__stat-label">Not Applicable</span>' in html
+    assert '<span class="stat-strip__stat-label">Excluded</span>' in html
+    assert 'data-bp-status="excluded"' in html
+    assert '<span title="Excluded"' in html
+    assert re.search(r'Passed</span>\s*<span class="stat-strip__stat-value">1</span>', html)
+    assert re.search(r'Failed</span>\s*<span class="stat-strip__stat-value">1</span>', html)
+    assert re.search(r'Unknown</span>\s*<span class="stat-strip__stat-value">1</span>', html)
+    assert re.search(r'Not Applicable</span>\s*<span class="stat-strip__stat-value">1</span>', html)
+    assert "CIS Intune Benchmark – Windows" in html
+    assert "CIS Intune Benchmark – iOS / iPadOS" in html
+    assert "CIS Intune Benchmark – macOS" not in html
+
+
+def test_account_findings_show_exclusion_state_without_mutation_controls():
+    html = _render_best_practices([
+        {
+            "cis_group": "", "status": "fail", "check_id": "bp_test",
+            "check_name": "Account check", "details": "Review accounts",
+            "affected_accounts": [
+                {"id": "one", "name": "one@example.com", "excluded": False},
+                {"id": "two", "name": "two@example.com", "excluded": True},
+            ],
+        }
+    ])
+
+    # Users without account-exclusion permission can still see excluded status.
+    assert "one@example.com" in html
+    assert "two@example.com — excluded" in html
+    assert "/m365/best-practices/account-exclusion/bp_test" not in html
+
+
+def test_failed_checks_show_manual_support_ticket_action():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+            }
+        ]
+    )
+
+    assert 'action="/m365/best-practices/ticket/bp_test"' in html
+
+
+def test_super_admin_check_actions_use_standard_dropdown_with_exclude():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+                "has_remediation": True,
+            }
+        ],
+        is_super_admin=True,
+    )
+
+    assert 'class="button button--ghost button--small header-menu__button"' in html
+    assert 'id="bp-actions-menu-bp_test"' in html
+    assert 'action="/m365/best-practices/exclude/bp_test"' in html
+    assert '>Exclude</button>' in html
+    assert "Create ticket" in html
+
+
+def test_failed_checks_show_priority_regression_and_runbook_details():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Regression detected: this check changed from pass to fail since the last successful evaluation.",
+                "risk_severity": "critical",
+                "risk_score": 90,
+                "business_impact": "Control failure can enable tenant compromise.",
+                "regression_detected": True,
+                "remediation": "Disable the unsafe setting.",
+                "remediation_runbook": ["Confirm scope.", "Disable the unsafe setting.", "Re-run the check."],
+                "rollback_guidance": "Restore the prior configuration if users are impacted.",
+            }
+        ]
+    )
+
+    assert "Priority" in html
+    assert "critical" in html
+    assert "90/100" in html
+    assert "Regression" in html
+    assert "Runbook" in html
+    assert "Rollback:" in html
+
+
+def test_account_findings_show_per_account_exclude_and_restore_controls_when_permitted():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+                "affected_accounts": [
+                    {"id": "one", "name": "one@example.com", "excluded": False},
+                    {"id": "two", "name": "two@example.com", "excluded": True},
+                ],
+            }
+        ],
+        can_manage_account_exclusions=True,
+    )
+
+    assert "/m365/best-practices/account-exclusion/bp_test" in html
+    assert "Exclude" in html
+    assert "Restore" in html
+
+
+def test_super_admins_see_batch_remediation_controls():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+                "has_remediation": True,
+                "batch_scope": "m365",
+            }
+        ],
+        is_super_admin=True,
+        batch_scopes=[{"id": "m365", "label": "Microsoft 365", "pending_count": 1}],
+    )
+
+    assert "Batch remediation" in html
+    assert 'action="/m365/best-practices/remediate-batch"' in html
+    assert 'name="scope" value="m365"' in html
+
+
+def test_notes_are_shown_and_editable_for_techs():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+                "notes": "Customer approved temporary exception.",
+            }
+        ],
+        can_edit_notes=True,
+    )
+
+    assert "Customer approved temporary exception." in html
+    assert 'action="/m365/best-practices/note/bp_test"' in html
+    assert "Save note" in html
+
+
+def test_failed_remediation_shows_failure_reason():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+                "remediation_status": "failed",
+                "remediated_at": None,
+                "remediation_failure_reason": "Microsoft Graph denied the update.",
+            }
+        ]
+    )
+
+    assert "✗ Remediation failed" in html
+    assert "Microsoft Graph denied the update." in html
+
+
+def test_failed_remediation_hides_empty_failure_reason():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+                "remediation_status": "failed",
+                "remediated_at": None,
+                "remediation_failure_reason": None,
+            }
+        ]
+    )
+
+    assert "✗ Remediation failed" in html
+    assert " — " not in html
+
+
+def test_non_failed_checks_hide_manual_support_ticket_action():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "pass",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+            }
+        ]
+    )
+
+    assert "/m365/best-practices/ticket/bp_test" not in html
+    assert "Create ticket" not in html
+    assert ">Actions<" not in html
+
+
+def test_ticket_action_hides_without_ticket_submission_permission():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+            }
+        ],
+        can_submit_tickets=False,
+    )
+
+    assert "/m365/best-practices/ticket/bp_test" not in html
+    assert "Create ticket" not in html
+
+
+def test_settings_table_includes_create_ticket_on_fail_option():
+    html = _render_best_practices_settings(
+        [
+            {
+                "id": "bp_test",
+                "name": "Test check",
+                "description": "Description",
+                "enabled": True,
+                "auto_remediate": False,
+                "create_ticket_on_fail": True,
+                "excluded": False,
+                "has_remediation": True,
+            }
+        ]
+    )
+
+    assert "Create Ticket" in html
+    assert 'name="create_ticket_on_fail"' in html
+    assert 'id="ticket-bp_test"' in html
+
+
+def test_settings_policy_alternatives_are_grouped_for_mutual_exclusion():
+    html = _render_best_practices_settings(
+        [
+            {
+                "id": "bp_lobby",
+                "name": "Lobby profile",
+                "description": "Description",
+                "enabled": True,
+                "auto_remediate": False,
+                "create_ticket_on_fail": False,
+                "excluded": False,
+                "has_remediation": True,
+                "alternative_group": "teams_global_lobby",
+            }
+        ]
+    )
+
+    assert 'data-policy-group="teams_global_lobby"' in html
+    assert "/static/js/m365_best_practices_settings.js" in html

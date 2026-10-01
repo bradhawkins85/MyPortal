@@ -1,0 +1,7 @@
+{
+  "guid": "1e2028db-a09c-40c4-8d28-04697e6a643c",
+  "occurred_at": "2026-09-25T03:40Z",
+  "change_type": "Fix",
+  "summary": "Decrypt cached Microsoft 365 application access tokens before using them with Microsoft Graph.",
+  "content_hash": "91a5517e05fbd0d719796b8159713b9d757358882c9726f750d1e66d910ce233"
+}

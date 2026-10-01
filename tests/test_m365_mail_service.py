@@ -137,6 +137,35 @@ def test_message_marker_match_is_case_sensitive() -> None:
     assert not m365_mail._message_marker_matches_uid(marker, "aAMkAGraphId")
 
 
+def test_validate_graph_request_url_accepts_valid_graph_mail_request() -> None:
+    url = (
+        "https://graph.microsoft.com/v1.0/users/shared%40contoso.com/mailFolders/"
+        "inbox/messages?$top=50&$select=id,subject&$filter=isRead%20eq%20false"
+    )
+
+    validated = m365_mail._validate_graph_request_url(url, method="GET")
+
+    assert validated == url
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://graph.microsoft.com/v1.0/users/a/messages",
+        "https://evil.example/v1.0/users/a/messages",
+        "https://graph.microsoft.com@evil.example/v1.0/users/a/messages",
+        "https://graph.microsoft.com/v1.0/users/a/messages#fragment",
+        "https://graph.microsoft.com/v1.0/users/a/messages?next=https://evil.example",
+        "https://graph.microsoft.com/v1.0/users/a/messages?%ZZ=1",
+        "https://graph.microsoft.com/v1.0/users/a/messages;%2f..",
+        "https://graph.microsoft.com/v1.0/users/a/messages/%2e%2e/attachments",
+    ],
+)
+def test_validate_graph_request_url_rejects_unapproved_destinations(url: str) -> None:
+    with pytest.raises(ValueError, match="Rejected Microsoft Graph GET URL"):
+        m365_mail._validate_graph_request_url(url, method="GET")
+
+
 # ---------------------------------------------------------------------------
 # Account management
 # ---------------------------------------------------------------------------
@@ -234,23 +263,36 @@ async def test_delete_account_no_op_for_missing(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-async def test_sync_account_skips_when_restart_pending(monkeypatch):
-    """sync_account returns skipped status when restart is pending."""
+async def test_sync_account_checks_mailbox_when_restart_pending(monkeypatch):
+    """A pending application upgrade must not pause inbound email imports."""
     monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: True)
+
+    async def fake_get_account(account_id: int):
+        return None
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        return {"enabled": False}
+
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
 
     result = await m365_mail.sync_account(1)
 
     assert result["status"] == "skipped"
-    assert result["reason"] == "pending_restart"
+    assert result["reason"] == "Module disabled"
 
 
 async def test_sync_account_skips_when_module_disabled(monkeypatch):
     """sync_account returns skipped when module is disabled."""
     monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
 
+    async def fake_get_account(account_id: int):
+        return None
+
     async def fake_get_module(slug: str, *, redact: bool = True):
         return {"enabled": False}
 
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
     monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
 
     result = await m365_mail.sync_account(1)
@@ -303,11 +345,11 @@ async def test_sync_account_error_no_credentials(monkeypatch):
     result = await m365_mail.sync_account(1)
 
     assert result["status"] == "error"
-    assert "credentials" in result["error"].lower()
+    assert "not linked to a company" in result["error"].lower()
 
 
-async def test_sync_account_uses_provisioned_company_when_none(monkeypatch):
-    """sync_account uses a provisioned company for auth when account has no company_id."""
+async def test_sync_account_never_borrows_another_company_token(monkeypatch):
+    """An unlinked mailbox must not authenticate as an arbitrary company."""
     monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
 
     async def fake_get_module(slug: str, *, redact: bool = True):
@@ -350,8 +392,9 @@ async def test_sync_account_uses_provisioned_company_when_none(monkeypatch):
 
     result = await m365_mail.sync_account(1)
 
-    assert result["status"] == "succeeded"
-    assert acquired_company_ids == [10]  # Should pick min(provisioned)
+    assert result["status"] == "error"
+    assert "not linked to a company" in result["error"].lower()
+    assert acquired_company_ids == []
 
 
 async def test_sync_account_error_no_upn(monkeypatch):
@@ -887,6 +930,8 @@ async def test_sync_account_no_company_resolves_from_email(monkeypatch):
             "id": 1,
             "active": True,
             "company_id": None,
+            "refresh_token": "encrypted-mailbox-refresh-token",
+            "tenant_id": "mailbox-tenant",
             "user_principal_name": "user@example.com",
             "folder": "Inbox",
             "process_unread_only": True,
@@ -900,6 +945,9 @@ async def test_sync_account_no_company_resolves_from_email(monkeypatch):
         return {7}
 
     async def fake_acquire_token(company_id, **kwargs):
+        return "fake-access-token"
+
+    async def fake_acquire_delegated(account, **kwargs):
         return "fake-access-token"
 
     graph_messages = {
@@ -969,6 +1017,7 @@ async def test_sync_account_no_company_resolves_from_email(monkeypatch):
     monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
     monkeypatch.setattr(m365_mail.m365_repo, "list_provisioned_company_ids", fake_list_provisioned)
     monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(m365_mail, "_acquire_delegated_access_token", fake_acquire_delegated)
     monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
     monkeypatch.setattr(m365_mail.mail_repo, "get_message", fake_get_message)
     monkeypatch.setattr(m365_mail.mail_repo, "upsert_message", fake_upsert_message)
@@ -1521,6 +1570,33 @@ async def test_embed_graph_inline_images_fetches_value_when_content_bytes_missin
     assert "att%20inline%2F1" in value_urls[0]
 
 
+async def test_embed_graph_inline_images_logs_and_returns_original_html_on_graph_error(monkeypatch):
+    logged: list[dict[str, Any]] = []
+
+    async def fake_graph_get(access_token: str, url: str):
+        raise RuntimeError("graph unavailable")
+
+    def fake_log_error(message: str, **kwargs):
+        logged.append({"message": message, **kwargs})
+
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail, "log_error", fake_log_error)
+
+    original = "<img src='cid:image001@example.com'>"
+    body = await m365_mail._embed_graph_inline_images(
+        access_token="token",
+        upn="user@example.com",
+        message_id="msg-1",
+        html_body=original,
+    )
+
+    assert body == original
+    assert len(logged) == 1
+    assert "inline attachments" in logged[0]["message"]
+    assert logged[0]["upn"] == "user@example.com"
+    assert logged[0]["message_id"] == "msg-1"
+
+
 async def test_save_graph_attachments_fetches_value_when_content_bytes_missing(monkeypatch):
     """Attachments are saved even when Graph list response omits contentBytes."""
     captured: list[dict[str, Any]] = []
@@ -1606,6 +1682,38 @@ async def test_save_graph_attachments_still_uses_content_bytes_when_present(monk
     assert len(captured) == 1
     assert captured[0]["payload"] == b"hello"
     assert value_fetches == 0
+
+
+async def test_save_graph_attachments_logs_and_returns_when_graph_lookup_fails(monkeypatch):
+    logged: list[dict[str, Any]] = []
+    saved = 0
+
+    async def fake_graph_get(access_token: str, url: str):
+        raise RuntimeError("graph unavailable")
+
+    async def fake_save_email_attachment(**kwargs):
+        nonlocal saved
+        saved += 1
+        return {"id": 1}
+
+    def fake_log_error(message: str, **kwargs):
+        logged.append({"message": message, **kwargs})
+
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail, "_save_email_attachment", fake_save_email_attachment)
+    monkeypatch.setattr(m365_mail, "log_error", fake_log_error)
+
+    await m365_mail._save_graph_attachments(
+        access_token="token",
+        upn="user@example.com",
+        message_id="msg-1",
+        ticket_id=321,
+    )
+
+    assert saved == 0
+    assert len(logged) == 1
+    assert "ticket import" in logged[0]["message"]
+    assert logged[0]["ticket_id"] == 321
 
 
 async def test_save_graph_attachments_encodes_message_id(monkeypatch):

@@ -1,0 +1,7 @@
+{
+  "guid": "539c8ddf-610e-4743-8234-cde2d7ad1d2e",
+  "occurred_at": "2026-09-23T00:00Z",
+  "change_type": "Documentation",
+  "summary": "Add application worker scaling guidance to the in-app help centre.",
+  "content_hash": "5564d1625823955413a4d047660a5de5dfa3c5b50ccac0af4bc13ca4014dba64"
+}

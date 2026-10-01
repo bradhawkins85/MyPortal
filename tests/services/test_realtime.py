@@ -63,3 +63,39 @@ async def test_broadcast_refresh_cleans_up_failed_sockets() -> None:
     second = await notifier.broadcast_refresh()
     assert second.attempted == 0
 
+
+async def test_chat_message_events_are_filtered_per_connection() -> None:
+    from app.services.realtime import ConnectionAccess
+
+    async def resolver(room_id: int) -> set[int] | None:
+        return {10} if room_id == 5 else None
+
+    notifier = RefreshNotifier(room_access_resolver=resolver)
+    member = StubWebSocket()
+    outsider = StubWebSocket()
+    staff = StubWebSocket()
+    anonymous = StubWebSocket()
+    await notifier.connect(member, access=ConnectionAccess(user_id=10))  # type: ignore[arg-type]
+    await notifier.connect(outsider, access=ConnectionAccess(user_id=11))  # type: ignore[arg-type]
+    await notifier.connect(staff, access=ConnectionAccess(user_id=1, is_privileged=True))  # type: ignore[arg-type]
+    await notifier.connect(anonymous)  # type: ignore[arg-type]
+
+    await notifier.broadcast_refresh(
+        topics=["chat:room:5"],
+        data={"message": {"body": "secret"}, "room_id": 5},
+    )
+
+    assert member.sent_messages[0]["data"]["message"]["body"] == "secret"
+    assert staff.sent_messages[0]["data"]["message"]["body"] == "secret"
+    assert outsider.sent_messages == []
+    assert anonymous.sent_messages == []
+
+    # Mixed topics keep the non-room topics but drop room data for outsiders.
+    await notifier.broadcast_refresh(
+        topics=["chat:room:5", "chat:rooms"],
+        data={"room_id": 5, "subject": "Private"},
+    )
+    assert outsider.sent_messages[-1]["topics"] == ["chat:rooms"]
+    assert "data" not in outsider.sent_messages[-1]
+    assert member.sent_messages[-1]["data"]["subject"] == "Private"
+

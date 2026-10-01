@@ -37,8 +37,9 @@ async def list_company_memberships(company_id: int) -> list[dict[str, Any]]:
         )
         membership["user_permissions"] = user_permissions
         # Combine role and user permissions for total permissions
-        all_permissions = set(membership.get("permissions", [])) | set(user_permissions)
-        membership["combined_permissions"] = sorted(all_permissions)
+        membership["combined_permissions"] = _combined_permission_names(
+            membership.get("permissions"), user_permissions
+        )
         result.append(membership)
     return result
 
@@ -63,8 +64,9 @@ async def get_membership_by_id(membership_id: int) -> Optional[dict[str, Any]]:
     )
     membership["user_permissions"] = user_permissions
     # Combine role and user permissions
-    all_permissions = set(membership.get("permissions", [])) | set(user_permissions)
-    membership["combined_permissions"] = sorted(all_permissions)
+    membership["combined_permissions"] = _combined_permission_names(
+        membership.get("permissions"), user_permissions
+    )
     return membership
 
 
@@ -99,7 +101,7 @@ async def list_memberships_for_user(user_id: int, *, status: str | None = "activ
         INNER JOIN roles AS r ON r.id = m.role_id
         WHERE {where_clause}
         ORDER BY m.company_id
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return [_normalise_membership(row) for row in rows]
@@ -163,7 +165,7 @@ async def update_membership(membership_id: int, **updates: Any) -> dict[str, Any
         columns.append(f"{column} = %s")
         params.append(value)
     params.append(membership_id)
-    sql = f"UPDATE company_memberships SET {', '.join(columns)} WHERE id = %s"
+    sql = f"UPDATE company_memberships SET {', '.join(columns)} WHERE id = %s"  # nosec B608
     await db.execute(sql, tuple(params))
     updated = await get_membership_by_id(membership_id)
     if not updated:
@@ -191,6 +193,14 @@ async def get_first_membership_with_permission(user_id: int, permission: str) ->
 
 
 async def user_has_permission(user_id: int, permission: str) -> bool:
+    # A selected Super Admin simulation role is authoritative for this request:
+    # do not fall through to the account's real Super Admin bypass or direct
+    # user grants.
+    from app.services.role_switching import effective_role_has_permission
+
+    simulated_decision = effective_role_has_permission(permission)
+    if simulated_decision is not None:
+        return simulated_decision
     # Check if user is super admin first
     user_record = await user_repo.get_user_by_id(user_id)
     if user_record and bool(user_record.get("is_super_admin")):
@@ -215,7 +225,32 @@ async def user_has_permission(user_id: int, permission: str) -> bool:
     return False
 
 
+async def user_has_role_permission(user_id: int, permission: str) -> bool:
+    """Return whether a user is a Super Admin or an active role grants a permission.
+
+    Unlike :func:`user_has_permission`, this deliberately excludes per-user
+    grants.  It is intended for eligibility rules, such as ticket assignment,
+    that explicitly require membership of a qualifying role.
+    """
+    user_record = await user_repo.get_user_by_id(user_id)
+    if user_record and bool(user_record.get("is_super_admin")):
+        return True
+
+    memberships = await list_memberships_for_user(user_id, status="active")
+    return any(
+        _permission_matches(membership.get("permissions") or [], permission)
+        for membership in memberships
+    )
+
+
 async def list_users_with_permission(permission: str) -> List[dict[str, Any]]:
+    """Return role-qualified users and Super Admins for privileged selectors.
+
+    Super Admin accounts intentionally remain eligible even when they have no
+    active membership carrying ``permission``.  Ticket assignment selectors
+    use this helper, and administrators must be assignable without weakening
+    the role-permission filter for ordinary users.
+    """
     rows = await db.fetch_all(
         """
         SELECT
@@ -351,6 +386,20 @@ def _legacy_permission_set(raw: Any) -> set[str]:
 
 def _permission_matches(raw: Any, permission: str) -> bool:
     return permission in _legacy_permission_set(raw)
+
+
+def _combined_permission_names(role_permissions: Any, user_permissions: Any) -> list[str]:
+    """Return hashable legacy permission names from mixed stored payloads.
+
+    Role permissions can be either the legacy string list or the current
+    tri-state menu mapping.  Normalising before combining prevents mapping
+    entries from being inserted into a set when older or partially migrated
+    role records contain object-shaped list items.
+    """
+    return sorted(
+        _legacy_permission_set(role_permissions)
+        | _legacy_permission_set(user_permissions)
+    )
 
 
 def _normalise_membership(row: dict[str, Any]) -> dict[str, Any]:

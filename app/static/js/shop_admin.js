@@ -56,15 +56,19 @@
     if (!modal) {
       return;
     }
-    modal.addEventListener('click', (event) => {
-      if (event.target === modal || event.target.hasAttribute('data-modal-close')) {
-        closeModal(modal);
+    const requestClose = () => {
+      const form = modal.querySelector('#product-edit-form');
+      if (form && form.dataset.dirty === 'true' && !window.confirm('Discard your unsaved changes?')) {
+        return;
       }
+      if (form) form.dataset.dirty = 'false';
+      closeModal(modal);
+    };
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal || event.target.closest('[data-modal-close]')) requestClose();
     });
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && !modal.hidden) {
-        closeModal(modal);
-      }
+      if (event.key === 'Escape' && !modal.hidden) requestClose();
     });
   }
 
@@ -91,8 +95,7 @@
           field.style.display = 'none';
           const input = field.querySelector('input');
           if (input) {
-            input.value = '';
-            // Remove required attribute when hidden
+            // Remove required attribute when hidden without clearing entered values.
             if (input.hasAttribute('required')) {
               input.removeAttribute('required');
               input.dataset.wasRequired = 'true';
@@ -102,7 +105,11 @@
 
         // Show subscription fields
         subscriptionFields.forEach((field) => {
-          field.style.display = '';
+          const voiceInput = field.querySelector('[name="voice_monitor_calls_per_day"]');
+          const selectedText = subscriptionCategorySelect.options[subscriptionCategorySelect.selectedIndex]?.text || '';
+          const visible = !voiceInput || /voice\s*monitor/i.test(selectedText);
+          field.style.display = visible ? '' : 'none';
+          if (voiceInput) voiceInput.disabled = !visible;
         });
       } else {
         // Show standard price fields
@@ -115,13 +122,11 @@
           }
         });
 
-        // Hide subscription fields and clear their values
+        // Hide conditional fields without clearing them, so expanding again preserves input.
         subscriptionFields.forEach((field) => {
           field.style.display = 'none';
-          const input = field.querySelector('input, select');
-          if (input) {
-            input.value = '';
-          }
+          const voiceInput = field.querySelector('[name="voice_monitor_calls_per_day"]');
+          if (voiceInput) voiceInput.disabled = true;
         });
       }
     };
@@ -445,6 +450,61 @@
       });
     });
 
+    // The compact product and subscription modals each have independent
+    // recommendation pickers, so selections never leak between forms.
+    document.querySelectorAll('[data-create-relation]').forEach((button) => {
+      const prefix = button.dataset.prefix;
+      const relation = button.dataset.createRelation;
+      const manager = createSkuListManager(
+        `${prefix}-${relation}-list`,
+        `${prefix}-${relation}-error`,
+        relation === 'cross-sell' ? 'cross_sell_product_ids' : 'upsell_product_ids',
+      );
+      const input = document.getElementById(`${prefix}-${relation}-sku`);
+      if (!manager || !input) {
+        return;
+      }
+      const add = async () => {
+        if (await manager.addBySku(input.value, null)) {
+          input.value = '';
+        }
+      };
+      button.addEventListener('click', add);
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          add();
+        }
+      });
+    });
+
+    document.querySelectorAll('[data-create-features]').forEach((editor) => {
+      const body = editor.querySelector('tbody');
+      const dataInput = editor.querySelector('[data-create-features-data]');
+      const addButton = editor.querySelector('[data-add-create-feature]');
+      if (!body || !dataInput || !addButton) {
+        return;
+      }
+      const sync = () => {
+        dataInput.value = JSON.stringify(Array.from(body.querySelectorAll('[data-feature-row]')).map((row) => ({
+          name: row.querySelector('[data-feature-name]').value.trim(),
+          value: row.querySelector('[data-feature-value]').value.trim(),
+        })));
+      };
+      addButton.addEventListener('click', () => {
+        const empty = body.querySelector('[data-empty-feature]');
+        if (empty) empty.remove();
+        const row = document.createElement('tr');
+        row.dataset.featureRow = 'true';
+        row.innerHTML = '<td><input class="form-input" data-feature-name required /></td><td><input class="form-input" data-feature-value /></td><td class="table__actions"><button type="button" class="button button--ghost button--small">Remove</button></td>';
+        row.querySelectorAll('input').forEach((input) => input.addEventListener('input', sync));
+        row.querySelector('button').addEventListener('click', () => { row.remove(); sync(); });
+        body.appendChild(row);
+        row.querySelector('input').focus();
+        sync();
+      });
+    });
+
     initialiseSkuTypeahead();
 
     // Initialize field visibility toggle for create form
@@ -453,8 +513,6 @@
       toggleFieldsBySubscriptionCategory(createSubscriptionCategorySelect, 'create');
     }
 
-    const stockFilter = document.getElementById('stock-filter');
-    const categoryFilter = document.getElementById('category-filter');
     const showArchivedCheckbox = document.getElementById('show-archived');
     const productsTable = document.getElementById('admin-products-table');
 
@@ -530,25 +588,6 @@
     });
     // ── End column visibility ─────────────────────────────────────────────────
 
-    function applyFilters() {
-      if (!productsTable) {
-        return;
-      }
-      const rows = productsTable.querySelectorAll('tbody tr');
-      const stockValue = stockFilter ? stockFilter.value : '';
-      const categoryValue = categoryFilter ? categoryFilter.value : '';
-      rows.forEach((row) => {
-        const stock = Number(row.getAttribute('data-stock') || '0');
-        const matchesStock =
-          !stockValue ||
-          (stockValue === 'in' && stock > 0) ||
-          (stockValue === 'out' && stock === 0);
-        const rowCategory = row.getAttribute('data-category') || '';
-        const matchesCategory = !categoryValue || rowCategory === categoryValue;
-        row.style.display = matchesStock && matchesCategory ? '' : 'none';
-      });
-    }
-
     const adminProductSearch = document.querySelector('[data-admin-product-search]');
     let adminProductSearchTimer = null;
 
@@ -585,12 +624,6 @@
       });
     }
 
-    if (stockFilter) {
-      stockFilter.addEventListener('change', applyFilters);
-    }
-    if (categoryFilter) {
-      categoryFilter.addEventListener('change', applyFilters);
-    }
     if (showArchivedCheckbox) {
       showArchivedCheckbox.addEventListener('change', () => {
         const url = new URL(window.location.href);
@@ -603,35 +636,28 @@
         window.location.href = url.toString();
       });
     }
-    applyFilters();
-
     // Restore filter state saved before a save-product redirect
     try {
       const savedState = sessionStorage.getItem(FILTER_STATE_KEY);
       if (savedState) {
         const state = JSON.parse(savedState);
         sessionStorage.removeItem(FILTER_STATE_KEY);
-        if (stockFilter && state.stock != null) {
-          stockFilter.value = state.stock;
-          stockFilter.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-        if (categoryFilter && state.category != null) {
-          categoryFilter.value = state.category;
-          categoryFilter.dispatchEvent(new Event('change', { bubbles: true }));
-        }
         const searchInput = document.querySelector('[data-admin-product-search]');
         if (searchInput && state.search != null) {
           searchInput.value = state.search;
           searchInput.dispatchEvent(new Event('input', { bubbles: true }));
         }
-        applyFilters();
       }
     } catch (e) {
       // ignore sessionStorage errors
     }
 
     const importModal = document.getElementById('import-product-modal');
+    const createProductModal = document.getElementById('create-product-modal');
+    const createSubscriptionModal = document.getElementById('create-subscription-modal');
     const editModal = document.getElementById('product-edit-modal');
+    const subscriptionEditModal = document.getElementById('subscription-edit-modal');
+    const editModalContent = editModal ? editModal.querySelector('.modal__content') : null;
     const visibilityModal = document.getElementById('product-visibility-modal');
     const featuredModal = document.getElementById('product-featured-modal');
     const descriptionEditorModal = document.getElementById('description-editor-modal');
@@ -642,6 +668,10 @@
     const visibilityLoadingStatus = document.getElementById('product-visibility-loading-status');
     const featuredLoadingStatus = document.getElementById('product-featured-loading-status');
     const imageFilenameDisplay = document.getElementById('edit-product-image-filename');
+    const imagePreview = document.getElementById('edit-product-image-preview');
+    const availabilitySelect = document.getElementById('edit-product-availability');
+    const removeImageOption = document.getElementById('edit-product-remove-image-option');
+    const removeImageInput = document.getElementById('edit-product-remove-image');
     const editLoadingStatus = document.getElementById('edit-product-loading-status');
     const editIdField = document.getElementById('edit-product-id');
     const featuresTable = document.getElementById('edit-product-features-table');
@@ -655,6 +685,121 @@
     const descriptionEditorClose = document.getElementById('description-editor-close');
 
     let descriptionSunEditor = null;
+
+    const freightSection = document.getElementById('edit-product-freight-section');
+    const freightItemSizeSelect = document.getElementById('edit-product-item-size');
+    const freightAmountDisplay = document.getElementById('edit-product-freight-amount');
+    const freightDetailDisplay = document.getElementById('edit-product-freight-detail');
+    const freightMeasurementFields = ['weight', 'length', 'width', 'height'];
+    const freightCurrency = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'AUD' });
+    let freightPreviewTimer = null;
+    let freightPreviewController = null;
+
+    function setFreightPreview(amount, detail) {
+      if (freightAmountDisplay) freightAmountDisplay.textContent = amount;
+      if (freightDetailDisplay) freightDetailDisplay.textContent = detail;
+    }
+
+    function setAutomaticItemSizeLabel(sizeLabel) {
+      const autoOption = freightItemSizeSelect ? freightItemSizeSelect.querySelector('option[value=""]') : null;
+      if (!autoOption) return;
+      const baseLabel = autoOption.dataset.autoLabel || 'Automatic (from dimensions)';
+      autoOption.textContent = sizeLabel ? `${baseLabel}: ${sizeLabel}` : baseLabel;
+    }
+
+    function itemSizeLabel(value) {
+      if (!freightItemSizeSelect) return value;
+      const option = freightItemSizeSelect.querySelector(`option[value="${CSS.escape(value || '')}"]`);
+      return option && value ? option.textContent : value;
+    }
+
+    async function refreshFreightPreview() {
+      const productId = Number(editIdField ? editIdField.value : 0);
+      if (!editForm || !freightSection || freightSection.hidden || !productId) return;
+      if (freightPreviewController) freightPreviewController.abort();
+      freightPreviewController = new AbortController();
+      const params = new URLSearchParams();
+      params.set('item_size', freightItemSizeSelect ? freightItemSizeSelect.value : '');
+      freightMeasurementFields.forEach((field) => {
+        const input = editForm.querySelector(`#edit-product-${field}`);
+        params.set(field, input ? input.value : '');
+      });
+      const priceInput = editForm.querySelector('#edit-product-price');
+      if (priceInput && priceInput.value) params.set('price', priceInput.value);
+      setFreightPreview('Calculating…', '');
+      try {
+        const response = await fetch(
+          `/api/admin/shop/products/${productId}/freight-preview?${params.toString()}`,
+          { credentials: 'same-origin', headers: { Accept: 'application/json' }, signal: freightPreviewController.signal },
+        );
+        if (!response.ok) {
+          let message = 'Unable to estimate shipping.';
+          try {
+            const payload = await response.json();
+            if (payload && typeof payload.detail === 'string') message = payload.detail;
+          } catch (error) {
+            // Keep the generic message when the error body is not JSON.
+          }
+          setFreightPreview('—', message);
+          return;
+        }
+        const preview = await response.json();
+        setAutomaticItemSizeLabel(itemSizeLabel(preview.item_size));
+        if (preview.freight_exempt) {
+          setFreightPreview(freightCurrency.format(0), 'Digital delivery items are not charged freight.');
+          return;
+        }
+        if (!preview.active_rule_count) {
+          setFreightPreview(freightCurrency.format(0), 'No active freight rules are configured.');
+          return;
+        }
+        const breakdown = Array.isArray(preview.breakdown) ? preview.breakdown : [];
+        const details = breakdown.map((entry) => {
+          const ruleNames = (entry.applied_rule_names || []).join(', ') || 'no matching rule';
+          return `${entry.dispatch_warehouse}: ${ruleNames} (${freightCurrency.format(Number(entry.amount) || 0)})`;
+        });
+        const sizeText = `Size: ${itemSizeLabel(preview.item_size)}${preview.item_size_is_automatic ? ' (automatic)' : ''}`;
+        setFreightPreview(
+          freightCurrency.format(Number(preview.freight_total) || 0),
+          [sizeText, ...details].join(' · '),
+        );
+      } catch (error) {
+        if (error && error.name === 'AbortError') return;
+        console.error('Unable to estimate shipping', error);
+        setFreightPreview('—', 'Unable to estimate shipping.');
+      }
+    }
+
+    function scheduleFreightPreview() {
+      window.clearTimeout(freightPreviewTimer);
+      freightPreviewTimer = window.setTimeout(refreshFreightPreview, 300);
+    }
+
+    function populateFreightFields(product, isSubscription) {
+      if (!editForm || !freightSection) return;
+      // Subscriptions never ship, so keep their stored values but hide the section.
+      freightSection.hidden = isSubscription;
+      if (freightItemSizeSelect) freightItemSizeSelect.value = product.item_size || '';
+      setAutomaticItemSizeLabel('');
+      freightMeasurementFields.forEach((field) => {
+        const input = editForm.querySelector(`#edit-product-${field}`);
+        if (input) input.value = product[field] != null ? product[field] : '';
+      });
+      setFreightPreview('—', '');
+      if (!isSubscription) refreshFreightPreview();
+    }
+
+    if (editForm && freightSection) {
+      const freightInputs = [
+        freightItemSizeSelect,
+        editForm.querySelector('#edit-product-price'),
+        ...freightMeasurementFields.map((field) => editForm.querySelector(`#edit-product-${field}`)),
+      ].filter(Boolean);
+      freightInputs.forEach((input) => {
+        input.addEventListener('input', scheduleFreightPreview);
+        input.addEventListener('change', scheduleFreightPreview);
+      });
+    }
 
     function sanitizeDescriptionHtml(value) {
       const html = String(value || '');
@@ -859,6 +1004,12 @@
 
       const actionsCell = document.createElement('td');
       actionsCell.className = 'table__actions';
+      const editButton = document.createElement('button');
+      editButton.type = 'button';
+      editButton.className = 'button button--ghost button--small';
+      editButton.textContent = 'Edit';
+      editButton.setAttribute('aria-label', `Edit ${nameValue || 'feature'}`);
+      editButton.addEventListener('click', () => nameInput.focus());
       const removeButton = document.createElement('button');
       removeButton.type = 'button';
       removeButton.className = 'button button--ghost button--small button--danger';
@@ -871,6 +1022,7 @@
         }
         refreshFeatureInput();
       });
+      actionsCell.appendChild(editButton);
       actionsCell.appendChild(removeButton);
 
       row.appendChild(nameCell);
@@ -918,7 +1070,10 @@
     }
 
     bindModalDismissal(importModal);
+    bindModalDismissal(createProductModal);
+    bindModalDismissal(createSubscriptionModal);
     bindModalDismissal(editModal);
+    bindModalDismissal(subscriptionEditModal);
     bindModalDismissal(visibilityModal);
     bindModalDismissal(featuredModal);
     bindModalDismissal(priceHistoryModal);
@@ -935,6 +1090,40 @@
       'edit-upsell-error',
       'upsell_product_ids',
     );
+
+    function renderInboundLinks(products, relation) {
+      const list = document.getElementById(`edit-product-linked-${relation}-list`);
+      const empty = document.getElementById(`edit-linked-${relation}-empty`);
+      if (!list) return;
+      list.innerHTML = '';
+      const items = Array.isArray(products) ? products : [];
+      if (empty) empty.hidden = items.length > 0;
+      items.forEach((product) => {
+        const item = document.createElement('li');
+        item.className = 'tag';
+        const label = document.createElement('span');
+        label.textContent = `${product.name} (${product.sku})${product.archived ? ' — archived' : ''}`;
+        item.appendChild(label);
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'tag__remove';
+        removeButton.setAttribute('aria-label', `Remove link from ${product.name}`);
+        removeButton.textContent = '×';
+        removeButton.addEventListener('click', () => {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = relation === 'cross-sell'
+            ? 'remove_inbound_cross_sell_product_ids'
+            : 'remove_inbound_upsell_product_ids';
+          input.value = String(product.id);
+          editForm.appendChild(input);
+          item.remove();
+          if (empty && !list.children.length) empty.hidden = false;
+        });
+        item.appendChild(removeButton);
+        list.appendChild(item);
+      });
+    }
 
     document.querySelectorAll('[data-sku-add][data-form="edit"]').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -984,6 +1173,21 @@
       });
     }
 
+    [
+      ['[data-create-product-modal-open]', createProductModal],
+      ['[data-create-subscription-modal-open]', createSubscriptionModal],
+    ].forEach(([selector, modal]) => {
+      document.querySelectorAll(selector).forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          closeParentHeaderMenu(button);
+          openModal(modal);
+          const firstInput = modal ? modal.querySelector('input:not([type="hidden"])') : null;
+          if (firstInput) firstInput.focus();
+        });
+      });
+    });
+
     container.querySelectorAll('[data-product-edit]').forEach((button) => {
       button.addEventListener('click', async () => {
         const id = Number(button.getAttribute('data-product-edit'));
@@ -994,8 +1198,6 @@
 
         setLoadingStatus(editLoadingStatus, 'Loading product details…');
         setFormLoadingState(editForm, true);
-        openModal(editModal);
-
         let product;
         try {
           product = await fetchAdminProductDetails(id);
@@ -1012,6 +1214,8 @@
         editForm.querySelector('#edit-product-name').value = product.name || '';
         editForm.querySelector('#edit-product-sku').value = product.sku || '';
         editForm.querySelector('#edit-product-vendor').value = product.vendor_sku || '';
+        const microsoftSkuField = editForm.querySelector('#edit-product-microsoft-sku');
+        if (microsoftSkuField) microsoftSkuField.value = product.microsoft_sku || '';
         editForm.querySelector('#edit-product-description').value = product.description || '';
         const productLinkField = editForm.querySelector('#edit-product-link');
         if (productLinkField) {
@@ -1020,6 +1224,48 @@
         editForm.querySelector('#edit-product-price').value = product.price != null ? product.price : '';
         editForm.querySelector('#edit-product-vip').value = product.vip_price != null ? product.vip_price : '';
         editForm.querySelector('#edit-product-stock').value = product.stock != null ? product.stock : '';
+        const stockLabel = editForm.querySelector('#edit-product-stock-label');
+        const stockHelp = editForm.querySelector('#edit-product-stock-help');
+        const isSubscription = product.subscription_category_id != null;
+        const activeEditModal = isSubscription ? subscriptionEditModal : editModal;
+        if (activeEditModal && editModalContent && editModalContent.parentElement !== activeEditModal) {
+          activeEditModal.appendChild(editModalContent);
+        }
+        openModal(activeEditModal);
+        const editTitle = editModalContent.querySelector('#edit-product-title');
+        const editSubtitle = editModalContent.querySelector('#edit-product-subtitle');
+        const invoiceDescriptionField = editForm.querySelector('#edit-product-invoice-description-field');
+        const invoiceDescriptionInput = editForm.querySelector('#edit-product-invoice-description');
+        if (editTitle) editTitle.textContent = isSubscription ? 'Edit subscription' : 'Edit product';
+        if (editSubtitle) {
+          editSubtitle.textContent = isSubscription
+            ? 'Update this subscription and its billing options.'
+            : 'Update this catalogue product.';
+        }
+        if (invoiceDescriptionField) invoiceDescriptionField.hidden = !isSubscription;
+        if (invoiceDescriptionInput) {
+          invoiceDescriptionInput.disabled = !isSubscription;
+          invoiceDescriptionInput.value = isSubscription ? (product.invoice_description || '') : '';
+        }
+        if (stockLabel) {
+          stockLabel.textContent = isSubscription ? 'Availability' : 'Stock quantity';
+          stockLabel.htmlFor = isSubscription ? 'edit-product-availability' : 'edit-product-stock';
+        }
+        const submitButton = editForm.querySelector('#edit-product-submit');
+        if (submitButton) submitButton.textContent = isSubscription ? 'Save subscription' : 'Save product';
+        if (stockHelp) stockHelp.textContent = 'The number of physical units available.';
+        const stockInput = editForm.querySelector('#edit-product-stock');
+        if (stockInput) {
+          stockInput.hidden = isSubscription;
+          stockInput.disabled = isSubscription;
+          stockInput.max = '';
+        }
+        if (availabilitySelect) {
+          availabilitySelect.hidden = !isSubscription;
+          availabilitySelect.disabled = !isSubscription;
+          availabilitySelect.name = isSubscription ? 'stock' : '';
+          availabilitySelect.value = Number(product.stock) > 0 ? '1' : '0';
+        }
         const categorySelect = editForm.querySelector('#edit-product-category');
         if (categorySelect) {
           categorySelect.value = product.category_id || '';
@@ -1060,21 +1306,45 @@
         if (editUpsellManager) {
           await editUpsellManager.initFromIds(product.upsell_product_ids || [], id);
         }
+        editForm.querySelectorAll('input[name^="remove_inbound_"]').forEach((input) => input.remove());
+        renderInboundLinks(product.linked_from_cross_sell_products, 'cross-sell');
+        renderInboundLinks(product.linked_from_upsell_products, 'upsell');
         currentEditProductId = id;
+        populateFreightFields(product, isSubscription);
+        if (removeImageInput) removeImageInput.checked = false;
+        if (removeImageOption) removeImageOption.hidden = !product.image_url;
         if (imageFilenameDisplay) {
           if (product.image_url) {
             const filename = product.image_url.split('/').pop();
             imageFilenameDisplay.textContent = `Current image: ${filename}`;
             imageFilenameDisplay.hidden = false;
+            if (imagePreview) {
+              imagePreview.querySelector('img').src = product.image_url;
+              imagePreview.hidden = false;
+            }
           } else {
             imageFilenameDisplay.hidden = true;
+            if (imagePreview) imagePreview.hidden = true;
           }
         }
+        editForm.dataset.dirty = 'false';
         renderFeatureRows(product.features || []);
         setLoadingStatus(editLoadingStatus, '');
         setFormLoadingState(editForm, false);
       });
     });
+
+    const requestedEditProductId = Number(
+      new URLSearchParams(window.location.search).get('editProduct')
+    );
+    if (Number.isInteger(requestedEditProductId) && requestedEditProductId > 0) {
+      const requestedEditButton = container.querySelector(
+        `[data-product-edit="${requestedEditProductId}"]`
+      );
+      if (requestedEditButton) {
+        requestedEditButton.click();
+      }
+    }
 
     container.querySelectorAll('[data-product-visibility]').forEach((button) => {
       button.addEventListener('click', async () => {
@@ -1214,8 +1484,31 @@
       });
     }
 
+    const imageInput = document.getElementById('edit-product-image');
+    if (imageInput && imagePreview) {
+      imageInput.addEventListener('change', () => {
+        const file = imageInput.files && imageInput.files[0];
+        if (!file) return;
+        if (removeImageInput) removeImageInput.checked = false;
+        imagePreview.querySelector('img').src = URL.createObjectURL(file);
+        imagePreview.hidden = false;
+        if (imageFilenameDisplay) {
+          imageFilenameDisplay.textContent = `Replacement image: ${file.name}`;
+          imageFilenameDisplay.hidden = false;
+        }
+      });
+    }
+
     if (editForm) {
+      editForm.addEventListener('input', () => { editForm.dataset.dirty = 'true'; });
+      editForm.addEventListener('change', () => { editForm.dataset.dirty = 'true'; });
       editForm.addEventListener('submit', () => {
+        editForm.dataset.dirty = 'false';
+        const submitButton = editForm.querySelector('#edit-product-submit');
+        if (submitButton) {
+          submitButton.disabled = true;
+          submitButton.setAttribute('aria-busy', 'true');
+        }
         refreshFeatureInput();
         // Append current URL params to form action so the server can redirect back to the same filtered view
         try {
@@ -1234,12 +1527,6 @@
         // Save client-side filter state for restoration after redirect
         try {
           const state = {};
-          if (stockFilter) {
-            state.stock = stockFilter.value;
-          }
-          if (categoryFilter) {
-            state.category = categoryFilter.value;
-          }
           const searchInput = document.querySelector('[data-admin-product-search]');
           if (searchInput) {
             state.search = searchInput.value;

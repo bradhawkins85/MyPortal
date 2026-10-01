@@ -16,6 +16,24 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 import aiomysql
 
+from app.security.menu_permissions import MENU_PERMISSION_MAP
+
+
+def _role_contains_admin_only_permissions(role_record: dict[str, Any]) -> bool:
+    """Return True when a role grants permissions reserved for super admins."""
+
+    permissions = (
+        role_record.get("menu_permissions") or role_record.get("permissions") or {}
+    )
+    if not isinstance(permissions, Mapping):
+        return False
+    return any(
+        level != "none"
+        and MENU_PERMISSION_MAP.get(key)
+        and MENU_PERMISSION_MAP[key].admin_only
+        for key, level in permissions.items()
+    )
+
 
 def _main():
     from app import main as main_module
@@ -266,6 +284,7 @@ async def _render_company_edit_page(
 ) -> HTMLResponse:
     from app.repositories import billing_contacts as billing_contacts_repo
     from app.repositories import company_variables as company_variables_repo
+    from app.repositories import company_addresses as company_addresses_repo
     from app.repositories import companies as company_repo
     from app.repositories import pending_staff_access as pending_staff_access_repo
     from app.repositories import company_recurring_invoice_items as recurring_items_repo
@@ -286,6 +305,7 @@ async def _render_company_edit_page(
         )
 
     company_variables = await company_variables_repo.list_for_company(company_id)
+    company_addresses = await company_addresses_repo.list_for_company(company_id)
 
     is_super_admin, managed_companies, _ = await _get_company_management_scope(
         request, user
@@ -575,6 +595,14 @@ async def _render_company_edit_page(
             "payment_method",
             (company_record.get("payment_method") or "invoice_prepay").strip(),
         ),
+        "xero_auto_send_subscription_invoices": _bool_value(
+            "xero_auto_send_subscription_invoices",
+            bool(company_record.get("xero_auto_send_subscription_invoices", 1)),
+        ),
+        "xero_auto_send_product_invoices": _bool_value(
+            "xero_auto_send_product_invoices",
+            bool(company_record.get("xero_auto_send_product_invoices", 1)),
+        ),
         "require_po": _bool_value("require_po", bool(company_record.get("require_po"))),
         "offboarding_email_forwarding_enabled": _bool_value(
             "offboarding_email_forwarding_enabled",
@@ -819,8 +847,12 @@ async def _render_company_edit_page(
 
     # Fetch Microsoft 365 credentials for the company
     m365_credential_view: dict[str, Any] | None = None
+    m365_connection_health: dict[str, Any] | None = None
     if is_super_admin:
         try:
+            from app.repositories import m365_connections as m365_connection_repo
+            from app.services.m365_connection_health import build_connection_health
+
             m365_creds = await m365_service.get_credentials(company_id)
             if m365_creds:
                 expires = m365_creds.get("token_expires_at")
@@ -835,6 +867,12 @@ async def _render_company_edit_page(
                     "client_id": m365_creds.get("client_id"),
                     "token_expires_at": expires_display,
                 }
+            m365_connection_health = build_connection_health(
+                m365_creds,
+                active=await m365_connection_repo.get_active(company_id),
+                pending=await m365_connection_repo.get_pending(company_id),
+                permission_results=await m365_service.get_last_enterprise_app_permissions(company_id),
+            )
         except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
             if "Database pool not initialised" in str(exc):
                 pass
@@ -901,6 +939,7 @@ async def _render_company_edit_page(
         "show_inactive_tasks": show_inactive_tasks,
         "m365_credential": m365_credential_view,
         "m365_has_credentials": m365_credential_view is not None,
+        "m365_connection_health": m365_connection_health,
         "m365_admin_credentials_configured": bool(
             all(await _main()._get_m365_admin_credentials(company_id))
         ),
@@ -908,9 +947,18 @@ async def _render_company_edit_page(
         "staff_custom_field_definitions": staff_custom_field_definitions,
         "tray_tokens": tray_tokens,
         "company_variables": company_variables,
+        "company_addresses": company_addresses,
         "company_sla": await __import__("app.repositories.slas", fromlist=["slas"]).get_for_company(company_id),
         "sla_templates": await __import__("app.repositories.slas", fromlist=["slas"]).list_templates(),
     }
+    from .business_hours_handlers import company_edit_context
+
+    try:
+        extra.update(await company_edit_context(company_id))
+    except Exception as exc:  # pragma: no cover - business hours must not break the page
+        from app.core.logging import log_error
+
+        log_error("Failed to load company business hours", company_id=company_id, error=str(exc))
 
     response = await _main()._render_template(
         "admin/company_edit.html", request, user, extra=extra
@@ -949,7 +997,7 @@ async def admin_sla_templates_page(request: Request):
 
 async def admin_create_sla_template(request: Request):
     from app.repositories import slas as sla_repo
-    user, redirect = await _main()._require_super_admin_page(request)
+    _, redirect = await _main()._require_super_admin_page(request)
     if redirect:
         return redirect
     form = await request.form()
@@ -970,7 +1018,7 @@ async def admin_create_sla_template(request: Request):
             response = int(response_value or 0)
             resolution = int(resolution_value or 0)
         except (TypeError, ValueError):
-            response = resolution = 0
+            return RedirectResponse("/admin/sla-templates?error=invalid", status_code=303)
         if (
             not priority
             or len(priority) > 32
@@ -978,12 +1026,10 @@ async def admin_create_sla_template(request: Request):
             or response < 1
             or resolution < response
         ):
-            from fastapi.responses import RedirectResponse
             return RedirectResponse("/admin/sla-templates?error=invalid", status_code=303)
         seen_priorities.add(priority)
         targets.append((priority, response, resolution))
     if not name or not targets:
-        from fastapi.responses import RedirectResponse
         return RedirectResponse("/admin/sla-templates?error=invalid", status_code=303)
     pause_statuses: list[str] = []
     seen_statuses: set[str] = set()
@@ -998,8 +1044,18 @@ async def admin_create_sla_template(request: Request):
     await sla_repo.create_template(
         name=name, description=description, enabled=form.get("enabled") is not None,
         targets=targets, pause_statuses=pause_statuses,
+        business_hours_only=form.get("businessHoursOnly") is not None,
     )
-    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/admin/sla-templates", status_code=303)
+
+
+async def admin_update_sla_template_business_hours(template_id: int, request: Request):
+    from app.repositories import slas as sla_repo
+    _, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    await sla_repo.set_business_hours_only(template_id, form.get("businessHoursOnly") is not None)
     return RedirectResponse("/admin/sla-templates", status_code=303)
 
 
@@ -1034,6 +1090,44 @@ def _parse_custom_field_options(options_text: str) -> list[dict[str, str]]:
             continue
         options.append({"value": value, "label": label, "m365_upn": m365_upn})
     return options
+
+
+def _custom_field_options_from_form(form: Any) -> list[dict[str, str]]:
+    """Read custom field options from a submitted form.
+
+    The admin editor posts ``options_json`` (a JSON list of
+    ``{value, label, m365_upn}`` objects) so option text can safely contain
+    commas, colons and pipes. The legacy delimited ``options`` string is still
+    accepted for older clients.
+    """
+    raw_json = str(form.get("options_json") or "").strip()
+    if raw_json:
+        try:
+            parsed = json.loads(raw_json)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, list):
+            options: list[dict[str, str]] = []
+            seen: set[str] = set()
+            for entry in parsed:
+                if not isinstance(entry, dict):
+                    continue
+                value = str(entry.get("value") or "").strip()
+                label = str(entry.get("label") or "").strip()
+                if not value:
+                    value = label
+                if not value or value.lower() in seen:
+                    continue
+                seen.add(value.lower())
+                options.append(
+                    {
+                        "value": value,
+                        "label": label or value,
+                        "m365_upn": str(entry.get("m365_upn") or "").strip().lower(),
+                    }
+                )
+            return options
+    return _parse_custom_field_options(str(form.get("options") or ""))
 
 
 def _parse_staff_custom_field_condition(
@@ -1155,6 +1249,55 @@ async def admin_company_edit_page(
         company_id=company_id,
         show_inactive_tasks=show_inactive,
     )
+
+
+async def admin_create_company_address(company_id: int, request: Request):
+    from app.repositories import company_addresses as addresses_repo
+    from app.repositories import companies as company_repo
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    if not await company_repo.get_company_by_id(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    form = await request.form()
+
+    def field(name: str, maximum: int) -> str | None:
+        value = str(form.get(name) or "").strip()
+        return value[:maximum] or None
+
+    values = {
+        "label": field("label", 100),
+        "street": field("street", 255),
+        "city": field("city", 100),
+        "state": field("state", 100),
+        "postcode": field("postcode", 20),
+        "country": field("country", 100),
+    }
+    if not values["label"] or not values["street"]:
+        return _main()._company_edit_redirect(
+            company_id=company_id, error="An address label and street address are required."
+        )
+    try:
+        await addresses_repo.create(company_id, **values)
+    except Exception as exc:
+        if isinstance(exc, aiomysql.IntegrityError) or "UNIQUE constraint" in str(exc):
+            return _main()._company_edit_redirect(
+                company_id=company_id, error="Address labels must be unique for this company."
+            )
+        raise
+    return _main()._company_edit_redirect(company_id=company_id, success="Address added.")
+
+
+async def admin_delete_company_address(company_id: int, address_id: int, request: Request):
+    from app.repositories import company_addresses as addresses_repo
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    if not await addresses_repo.delete(company_id, address_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Address not found")
+    return _main()._company_edit_redirect(company_id=company_id, success="Address removed.")
 
 
 async def admin_create_company_variable(company_id: int, request: Request):
@@ -1563,6 +1706,8 @@ async def admin_update_company(company_id: int, request: Request):
     invoice_prepay_enabled = bool(form.get("invoicePrepay"))
     invoice_postpay_enabled = bool(form.get("invoicePostpay"))
     stripe_enabled = bool(form.get("stripeEnabled"))
+    xero_auto_send_subscription_invoices = bool(form.get("xeroAutoSendSubscriptionInvoices"))
+    xero_auto_send_product_invoices = bool(form.get("xeroAutoSendProductInvoices"))
     require_po = bool(form.get("requirePo"))
     offboarding_email_forwarding_enabled = bool(
         form.get("offboardingEmailForwardingEnabled")
@@ -1633,6 +1778,8 @@ async def admin_update_company(company_id: int, request: Request):
         "phone": phone_raw,
         "is_vip": is_vip,
         "payment_method": payment_method,
+        "xero_auto_send_subscription_invoices": xero_auto_send_subscription_invoices,
+        "xero_auto_send_product_invoices": xero_auto_send_product_invoices,
         "require_po": require_po,
         "offboarding_email_forwarding_enabled": offboarding_email_forwarding_enabled,
         "default_ticket_replies_billable": default_ticket_replies_billable,
@@ -1717,6 +1864,8 @@ async def admin_update_company(company_id: int, request: Request):
         "email_domains": email_domains,
         "phone": phone_raw or None,
         "payment_method": payment_method,
+        "xero_auto_send_subscription_invoices": 1 if xero_auto_send_subscription_invoices else 0,
+        "xero_auto_send_product_invoices": 1 if xero_auto_send_product_invoices else 0,
         "require_po": 1 if require_po else 0,
         "offboarding_email_forwarding_enabled": (
             1 if offboarding_email_forwarding_enabled else 0
@@ -1838,7 +1987,7 @@ async def admin_create_company_staff_custom_field(company_id: int, request: Requ
     visible_to_requester_emails = _normalize_staff_custom_field_visibility(
         form.get("visible_to_requester_emails")
     )
-    options = _parse_custom_field_options(str(form.get("options") or ""))
+    options = _custom_field_options_from_form(form)
     m365_upn = str(form.get("m365_upn") or "").strip().lower() or None
     if not name:
         return _main()._company_edit_redirect(
@@ -1906,7 +2055,7 @@ async def admin_update_company_staff_custom_field(
     visible_to_requester_emails = _normalize_staff_custom_field_visibility(
         form.get("visible_to_requester_emails")
     )
-    options = _parse_custom_field_options(str(form.get("options") or ""))
+    options = _custom_field_options_from_form(form)
     m365_upn = str(form.get("m365_upn") or "").strip().lower() or None
     await staff_custom_fields_repo.update_company_definition(
         definition_id,
@@ -2200,6 +2349,14 @@ async def admin_update_membership_role(company_id: int, user_id: int, request: R
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Role not found"
         )
+    if (
+        not bool(current_user.get("is_super_admin"))
+        and _role_contains_admin_only_permissions(role_record)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super admins can assign roles with global administration permissions",
+        )
 
     updated = await membership_repo.update_membership(
         int(membership_id), role_id=role_id
@@ -2360,19 +2517,13 @@ async def admin_company_m365_provision(
         )
     redirect_uri = _main()._build_m365_redirect_uri(request)
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    verifier_id = await _main()._store_m365_provision_code_verifier(code_verifier)
-    state = _main().oauth_state_serializer.dumps(
-        {
-            "company_id": company_id,
-            "user_id": current_user.get("id"),
-            "tenant_id": tenant_id,
-            "flow": "provision",
-            "return_to": "company_edit",
-            "verifier_id": verifier_id,
-        }
-    )
     oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(
         company_id, redirect_uri=redirect_uri
+    )
+    state = await _main()._new_m365_oauth_state(
+        request, company_id=company_id, tenant_id=tenant_id, flow="provision",
+        return_to="company_edit", code_verifier=code_verifier,
+        client_id=oauth_client_id, redirect_uri=redirect_uri,
     )
     params = {
         "client_id": oauth_client_id,
@@ -2408,13 +2559,14 @@ async def admin_company_m365_discover(company_id: int, request: Request):
 
     state_payload: dict = {
         "company_id": company_id,
-        "user_id": current_user.get("id"),
         "flow": "discover",
         "return_to": "company_edit",
         "code_verifier": code_verifier,
+        "client_id": oauth_client_id,
+        "redirect_uri": redirect_uri,
     }
 
-    state = _main().oauth_state_serializer.dumps(state_payload)
+    state = await _main()._new_m365_oauth_state(request, **state_payload)
     params: dict = {
         "client_id": oauth_client_id,
         "response_type": "code",
@@ -2543,6 +2695,15 @@ async def admin_company_tray_settings_page(
     company_questions = await tq_repo.list_questions(
         scope="company", company_id=company_id, active_only=False
     )
+    global_questions = await tq_repo.list_questions(scope="global", active_only=False)
+    condition_rows = await tq_repo.list_conditions_for_questions(
+        [int(q["id"]) for q in company_questions]
+    )
+    conditions_by_question: dict[int, list[dict[str, Any]]] = {}
+    for row in condition_rows:
+        conditions_by_question.setdefault(int(row["question_id"]), []).append(dict(row))
+    for question in company_questions:
+        question["conditions"] = conditions_by_question.get(int(question["id"]), [])
     portal_url = (
         str(_main().settings.portal_url).rstrip("/")
         if _main().settings.portal_url
@@ -2556,6 +2717,7 @@ async def admin_company_tray_settings_page(
         "now_iso": datetime.now(timezone.utc).isoformat(),
         "portal_url": portal_url,
         "company_questions": company_questions,
+        "global_questions": global_questions,
     }
     return await _main()._render_template(
         "admin/tray/company_settings.html", request, current_user, extra=extra

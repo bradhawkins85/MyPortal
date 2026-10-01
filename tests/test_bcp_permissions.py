@@ -77,7 +77,7 @@ class TestBCPViewPermission:
         
         with patch('app.api.routes.bcp.get_current_session', return_value=session):
             with patch('app.repositories.users.get_user_by_id', new_callable=AsyncMock) as mock_get_user:
-                with patch('app.repositories.company_memberships.user_has_permission', new_callable=AsyncMock) as mock_has_perm:
+                with patch('app.api.routes.bcp.user_has_company_permission', new_callable=AsyncMock) as mock_has_perm:
                     mock_get_user.return_value = {"id": 2, "is_super_admin": False, "name": "User"}
                     mock_has_perm.return_value = True
                     
@@ -85,7 +85,7 @@ class TestBCPViewPermission:
                     
                     assert user["id"] == 2
                     assert company_id == 1
-                    mock_has_perm.assert_called_once_with(2, "bcp:view")
+                    mock_has_perm.assert_called_once_with(2, 1, "bcp:view")
     
     async def test_user_without_permission_denied(self):
         """User without bcp:view permission should be denied."""
@@ -109,7 +109,7 @@ class TestBCPViewPermission:
         
         with patch('app.api.routes.bcp.get_current_session', return_value=session):
             with patch('app.repositories.users.get_user_by_id', new_callable=AsyncMock) as mock_get_user:
-                with patch('app.repositories.company_memberships.user_has_permission', new_callable=AsyncMock) as mock_has_perm:
+                with patch('app.api.routes.bcp.user_has_company_permission', new_callable=AsyncMock) as mock_has_perm:
                     mock_get_user.return_value = {"id": 3, "is_super_admin": False, "name": "User"}
                     mock_has_perm.return_value = False
                     
@@ -166,7 +166,7 @@ class TestBCPEditPermission:
         
         with patch('app.api.routes.bcp.get_current_session', return_value=session):
             with patch('app.repositories.users.get_user_by_id', new_callable=AsyncMock) as mock_get_user:
-                with patch('app.repositories.company_memberships.user_has_permission', new_callable=AsyncMock) as mock_has_perm:
+                with patch('app.api.routes.bcp.user_has_company_permission', new_callable=AsyncMock) as mock_has_perm:
                     mock_get_user.return_value = {"id": 2, "is_super_admin": False, "name": "Editor"}
                     mock_has_perm.return_value = True
                     
@@ -174,7 +174,7 @@ class TestBCPEditPermission:
                     
                     assert user["id"] == 2
                     assert company_id == 1
-                    mock_has_perm.assert_called_once_with(2, "bcp:edit")
+                    mock_has_perm.assert_called_once_with(2, 1, "bcp:edit")
     
     async def test_user_without_edit_permission_denied(self):
         """User without bcp:edit permission should be denied."""
@@ -198,7 +198,7 @@ class TestBCPEditPermission:
         
         with patch('app.api.routes.bcp.get_current_session', return_value=session):
             with patch('app.repositories.users.get_user_by_id', new_callable=AsyncMock) as mock_get_user:
-                with patch('app.repositories.company_memberships.user_has_permission', new_callable=AsyncMock) as mock_has_perm:
+                with patch('app.api.routes.bcp.user_has_company_permission', new_callable=AsyncMock) as mock_has_perm:
                     mock_get_user.return_value = {"id": 3, "is_super_admin": False, "name": "Viewer"}
                     mock_has_perm.return_value = False
                     
@@ -234,7 +234,7 @@ class TestBCPIncidentRunPermission:
         
         with patch('app.api.routes.bcp.get_current_session', return_value=session):
             with patch('app.repositories.users.get_user_by_id', new_callable=AsyncMock) as mock_get_user:
-                with patch('app.repositories.company_memberships.user_has_permission', new_callable=AsyncMock) as mock_has_perm:
+                with patch('app.api.routes.bcp.user_has_company_permission', new_callable=AsyncMock) as mock_has_perm:
                     mock_get_user.return_value = {"id": 2, "is_super_admin": False, "name": "Incident Manager"}
                     mock_has_perm.return_value = True
                     
@@ -242,7 +242,7 @@ class TestBCPIncidentRunPermission:
                     
                     assert user["id"] == 2
                     assert company_id == 1
-                    mock_has_perm.assert_called_once_with(2, "bcp:incident:run")
+                    mock_has_perm.assert_called_once_with(2, 1, "bcp:incident:run")
     
     async def test_user_without_incident_run_permission_denied(self):
         """User without bcp:incident:run permission should be denied."""
@@ -266,7 +266,7 @@ class TestBCPIncidentRunPermission:
         
         with patch('app.api.routes.bcp.get_current_session', return_value=session):
             with patch('app.repositories.users.get_user_by_id', new_callable=AsyncMock) as mock_get_user:
-                with patch('app.repositories.company_memberships.user_has_permission', new_callable=AsyncMock) as mock_has_perm:
+                with patch('app.api.routes.bcp.user_has_company_permission', new_callable=AsyncMock) as mock_has_perm:
                     mock_get_user.return_value = {"id": 3, "is_super_admin": False, "name": "Viewer"}
                     mock_has_perm.return_value = False
                     
@@ -302,7 +302,7 @@ class TestBCPExportPermission:
         
         with patch('app.api.routes.bcp.get_current_session', return_value=session):
             with patch('app.repositories.users.get_user_by_id', new_callable=AsyncMock) as mock_get_user:
-                with patch('app.repositories.company_memberships.user_has_permission', new_callable=AsyncMock) as mock_has_perm:
+                with patch('app.api.routes.bcp.user_has_company_permission', new_callable=AsyncMock) as mock_has_perm:
                     mock_get_user.return_value = {"id": 2, "is_super_admin": False, "name": "Exporter"}
                     mock_has_perm.return_value = True
                     
@@ -310,7 +310,7 @@ class TestBCPExportPermission:
                     
                     assert user["id"] == 2
                     assert company_id == 1
-                    mock_has_perm.assert_called_once_with(2, "bcp:export")
+                    mock_has_perm.assert_called_once_with(2, 1, "bcp:export")
     
     async def test_user_without_export_permission_denied(self):
         """User without bcp:export permission should be denied."""
@@ -334,7 +334,7 @@ class TestBCPExportPermission:
         
         with patch('app.api.routes.bcp.get_current_session', return_value=session):
             with patch('app.repositories.users.get_user_by_id', new_callable=AsyncMock) as mock_get_user:
-                with patch('app.repositories.company_memberships.user_has_permission', new_callable=AsyncMock) as mock_has_perm:
+                with patch('app.api.routes.bcp.user_has_company_permission', new_callable=AsyncMock) as mock_has_perm:
                     mock_get_user.return_value = {"id": 3, "is_super_admin": False, "name": "Viewer"}
                     mock_has_perm.return_value = False
                     
@@ -371,7 +371,7 @@ class TestCompanyIsolation:
         
         with patch('app.api.routes.bcp.get_current_session', return_value=session):
             with patch('app.repositories.users.get_user_by_id', new_callable=AsyncMock) as mock_get_user:
-                with patch('app.repositories.company_memberships.user_has_permission', new_callable=AsyncMock) as mock_has_perm:
+                with patch('app.api.routes.bcp.user_has_company_permission', new_callable=AsyncMock) as mock_has_perm:
                     mock_get_user.return_value = {"id": 2, "is_super_admin": False, "name": "User"}
                     mock_has_perm.return_value = True
                     
@@ -404,13 +404,12 @@ class TestCompanyIsolation:
         
         with patch('app.api.routes.bcp.get_current_session', return_value=session):
             with patch('app.repositories.users.get_user_by_id', new_callable=AsyncMock) as mock_get_user:
-                with patch('app.repositories.company_memberships.user_has_permission', new_callable=AsyncMock) as mock_has_perm:
+                with patch('app.api.routes.bcp.user_has_company_permission', new_callable=AsyncMock) as mock_has_perm:
                     mock_get_user.return_value = {"id": 2, "is_super_admin": False, "name": "User"}
                     mock_has_perm.return_value = True
                     
                     user, company_id = await _require_bcp_view(request, session)
                     
                     assert company_id == 5
-                    # Permission check is based on user_id, not company
-                    # The company isolation is enforced via active_company_id
-                    mock_has_perm.assert_called_once_with(2, "bcp:view")
+                    # Permission is evaluated on the active company's membership
+                    mock_has_perm.assert_called_once_with(2, 5, "bcp:view")

@@ -1,47 +1,45 @@
 {% extends "base.html" %}
 
-{% block header_title %}Subscriptions admin{% endblock %}
+{% block header_title %}
+<div class="page-header-bar">
+    <span class="header__title-text" title="Manage customer subscriptions and renewals">Subscriptions admin</span>
+    <form method="get" action="/admin/subscriptions" class="page-header-toolbar">
+        <label class="visually-hidden" for="subscriptions-filter-status">Status</label>
+        <select id="subscriptions-filter-status" name="status" class="form-input page-header-toolbar__select" onchange="this.form.submit()">
+            <option value="">All statuses</option>
+            <option value="active" {% if filters.status == 'active' %}selected{% endif %}>Active</option>
+            <option value="pending_renewal" {% if filters.status == 'pending_renewal' %}selected{% endif %}>Pending Renewal</option>
+            <option value="expired" {% if filters.status == 'expired' %}selected{% endif %}>Expired</option>
+            <option value="canceled" {% if filters.status == 'canceled' %}selected{% endif %}>Canceled</option>
+        </select>
+        <label class="visually-hidden" for="subscriptions-filter-category">Category</label>
+        <select id="subscriptions-filter-category" name="category" class="form-input page-header-toolbar__select" onchange="this.form.submit()">
+            <option value="">All Categories</option>
+            {% for category in categories %}
+            <option value="{{ category.id }}" {% if filters.category == category.id|string %}selected{% endif %}>
+                {{ category.name }}
+            </option>
+            {% endfor %}
+        </select>
+        <noscript><button type="submit" class="button button--ghost button--compact">Filter</button></noscript>
+    </form>
+</div>
+{% endblock %}
 
 {% block title %}Subscriptions - {{ app_name }}{% endblock %}
 
+{% block header_actions %}
+{% if is_super_admin %}
+<a class="button button--primary" href="/admin/subscriptions/create">Add external subscription</a>
+{% endif %}
+{% endblock %}
+
 {% block content %}
 <div class="admin-page">
-    <div class="admin-header">
-        <h1>Subscriptions</h1>
-        <p class="subtitle">Manage customer subscriptions and renewals</p>
-    </div>
-
-    <div class="filters">
-        <form method="get" action="/admin/subscriptions">
-            <div class="filter-row">
-                <label>
-                    Status:
-                    <select name="status">
-                        <option value="">All</option>
-                        <option value="active" {% if filters.status == 'active' %}selected{% endif %}>Active</option>
-                        <option value="pending_renewal" {% if filters.status == 'pending_renewal' %}selected{% endif %}>Pending Renewal</option>
-                        <option value="expired" {% if filters.status == 'expired' %}selected{% endif %}>Expired</option>
-                        <option value="canceled" {% if filters.status == 'canceled' %}selected{% endif %}>Canceled</option>
-                    </select>
-                </label>
-
-                <label>
-                    Category:
-                    <select name="category">
-                        <option value="">All Categories</option>
-                        {% for category in categories %}
-                        <option value="{{ category.id }}" {% if filters.category == category.id|string %}selected{% endif %}>
-                            {{ category.name }}
-                        </option>
-                        {% endfor %}
-                    </select>
-                </label>
-
-                <button type="submit">Filter</button>
-            </div>
-        </form>
-    </div>
-
+    {% set success_message = request.query_params.get('success') %}
+    {% if success_message %}
+    <div class="alert alert--success" role="status">{{ success_message }}</div>
+    {% endif %}
     <div class="subscriptions-table">
         <table>
             <thead>
@@ -49,6 +47,7 @@
                     <th>ID</th>
                     <th>Product</th>
                     <th>Category</th>
+                    <th>Vendor</th>
                     <th>Customer</th>
                     <th>Quantity</th>
                     <th>Start Date</th>
@@ -66,8 +65,9 @@
                     {% for sub in subscriptions %}
                     <tr>
                         <td><code>{{ sub.id[:8] }}</code></td>
-                        <td>{{ sub.product_name or 'N/A' }}</td>
+                        <td>{{ sub.product_name or sub.external_name or 'N/A' }}{% if sub.external_sku %}<br><small>{{ sub.external_sku }}</small>{% endif %}</td>
                         <td>{{ sub.category_name or 'N/A' }}</td>
+                        <td>{{ sub.vendor or 'MyPortal' }}{% if sub.reminder_only %}<br><span class="badge">Reminder only</span>{% endif %}</td>
                         <td>Company #{{ sub.customer_id }}</td>
                         <td>{{ sub.quantity }}{% if sub.voice_monitor_contract %} monitored number{% if sub.quantity != 1 %}s{% endif %}<br><small>{{ sub.voice_monitor_contract.included_attempts }} calls/month included</small>{% endif %}</td>
                         <td>{{ sub.start_date }}</td>
@@ -109,7 +109,7 @@
                                             type="button"
                                             class="header-title-menu__link"
                                             role="menuitem"
-                                            onclick="editSubscription('{{ sub.id }}', '{{ sub.status }}', {{ 'true' if sub.auto_renew else 'false' }})"
+                                            onclick="editSubscription({{ sub.id | tojson | forceescape }}, {{ sub.status | tojson | forceescape }}, {{ sub.auto_renew | tojson | forceescape }})"
                                         >Edit</button>
                                     </li>
                                     <li class="header-title-menu__item" role="none">
@@ -117,7 +117,7 @@
                                             type="button"
                                             class="header-title-menu__link header-title-menu__link--danger"
                                             role="menuitem"
-                                            onclick="deleteSubscription('{{ sub.id }}')"
+                                            onclick="deleteSubscription({{ sub.id | tojson | forceescape }})"
                                         >Delete</button>
                                     </li>
                                 </ul>
@@ -128,7 +128,7 @@
                     {% endfor %}
                 {% else %}
                     <tr>
-                        <td colspan="{% if is_super_admin %}11{% else %}10{% endif %}" class="text-center text-muted">
+                        <td colspan="{% if is_super_admin %}12{% else %}11{% endif %}" class="text-center text-muted">
                             No subscriptions found
                         </td>
                     </tr>
@@ -442,7 +442,7 @@ code {
 .modal {
     display: none;
     position: fixed;
-    z-index: 1000;
+    z-index: 1300;
     left: 0;
     top: 0;
     width: 100%;

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Network map{% if company %} — {{ company.name }}{% endif %}</title>
+<style>
+  @page { size: {{ page_size }}; margin: 10mm; @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 8pt sans-serif; color: #64748b; } }
+  @page inventory { size: A4 portrait; margin: 14mm; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #0f172a; margin: 0; }
+  .map-page { page-break-after: {{ 'always' if inventory else 'auto' }}; }
+  svg.pdf-map { display: block; width: {{ map_width_mm }}mm; height: auto; margin: 0 auto; }
+  .inventory { page: inventory; }
+  h1 { font-size: 15pt; margin: 0 0 2mm; }
+  .subtitle { color: #475569; font-size: 8.5pt; margin: 0 0 5mm; }
+  table { width: 100%; border-collapse: collapse; font-size: 8pt; }
+  th { text-align: left; background: #f1f5f9; border-bottom: 1px solid #cbd5e1; padding: 1.5mm 2mm; }
+  td { border-bottom: 1px solid #e2e8f0; padding: 1.5mm 2mm; vertical-align: top; }
+  tr { page-break-inside: avoid; }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 7.5pt; }
+  .muted { color: #64748b; }
+  .radio { color: #1d4ed8; }
+  ul { margin: 0; padding-left: 3.5mm; }
+</style>
+</head>
+<body>
+<section class="map-page">{{ svg }}</section>
+{% if inventory %}<section class="inventory">
+  <h1>Device {{ 'inventory' if detail == 'detailed' else 'list' }}</h1>
+  <p class="subtitle">{{ subtitle }}</p>
+  <table>
+    <thead><tr><th>Device</th><th>Type</th><th>Location</th><th>Addresses</th>{% if detail == 'detailed' %}<th>Interfaces</th>{% endif %}<th>Links</th></tr></thead>
+    <tbody>{% for row in inventory %}<tr>
+      <td><strong>{{ row.name }}</strong>{% if detail == 'detailed' %}{% for label, value in row.facts %}<br><span class="muted">{{ label }}: {{ value }}</span>{% endfor %}{% endif %}</td>
+      <td>{{ row.type }}</td>
+      <td>{{ row.site }}{% if row.rack %}<br><span class="muted">{{ row.rack }}</span>{% endif %}</td>
+      <td>{% for ip in row.ips %}<code>{{ ip }}</code>{% if not loop.last %}<br>{% endif %}{% else %}<span class="muted">—</span>{% endfor %}</td>
+      {% if detail == 'detailed' %}<td>{% if row.interfaces %}<ul>{% for interface in row.interfaces %}<li{% if interface.radio %} class="radio"{% endif %}>{{ interface.name }}{% if interface.ip %} · <code>{{ interface.ip }}</code>{% endif %}{% if interface.mac %} · <code>{{ interface.mac }}</code>{% endif %}{% if interface.radio %} · {{ interface.radio }}{% elif interface.speed %} · {{ interface.speed }}{% endif %}{% if interface.vlan %} · VLAN {{ interface.vlan }}{% endif %}</li>{% endfor %}</ul>{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
+      <td>{% if row.links %}<ul>{% for link in row.links %}<li>{% if link.port %}{{ link.port }} → {% endif %}{{ link.peer }}{% if link.peer_port %} · {{ link.peer_port }}{% endif %} <span class="muted">({{ link.medium }}{% if link.details %}, {{ link.details|join(', ') }}{% endif %}{% if link.count > 1 %}, ×{{ link.count }}{% endif %})</span></li>{% endfor %}</ul>{% else %}<span class="muted">—</span>{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table>
+</section>{% endif %}
+</body>
+</html>

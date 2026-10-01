@@ -3,6 +3,11 @@ import pytest
 from app.repositories import slas as slas_repo
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
 class _MockDB:
     def __init__(self):
         self.fetch_all_calls: list[tuple[str, tuple]] = []
@@ -26,6 +31,15 @@ async def test_list_ticket_sla_source_uses_bound_int_params(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_list_ticket_sla_source_short_circuits_empty_ids(monkeypatch):
+    dummy_db = _MockDB()
+    monkeypatch.setattr(slas_repo, "db", dummy_db)
+
+    assert await slas_repo.list_ticket_sla_source([]) == []
+    assert dummy_db.fetch_all_calls == []
+
+
+@pytest.mark.anyio
 async def test_list_pause_periods_uses_bound_int_params(monkeypatch):
     dummy_db = _MockDB()
     monkeypatch.setattr(slas_repo, "db", dummy_db)
@@ -36,6 +50,15 @@ async def test_list_pause_periods_uses_bound_int_params(monkeypatch):
     sql, params = dummy_db.fetch_all_calls[0]
     assert sql.count("IN (%s,%s)") == 2
     assert params == (4, 5, 4, 5)
+
+
+@pytest.mark.anyio
+async def test_list_pause_periods_short_circuits_empty_ids(monkeypatch):
+    dummy_db = _MockDB()
+    monkeypatch.setattr(slas_repo, "db", dummy_db)
+
+    assert await slas_repo.list_pause_periods([]) == []
+    assert dummy_db.fetch_all_calls == []
 
 
 @pytest.mark.anyio

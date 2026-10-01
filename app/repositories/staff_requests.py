@@ -42,6 +42,8 @@ async def create_request(
     request_notes: str | None = None,
     custom_fields: dict[str, Any] | None = None,
     requested_by_user_id: int | None = None,
+    requested_by_name: str | None = None,
+    requested_by_email: str | None = None,
     requested_at: datetime | None = None,
 ) -> dict[str, Any]:
     custom_fields_json = json.dumps(custom_fields) if custom_fields else None
@@ -50,8 +52,9 @@ async def create_request(
         INSERT INTO staff_requests (
             company_id, first_name, last_name, email, mobile_phone,
             date_onboarded, department, enabled, job_title, request_notes,
-            custom_fields_json, status, requested_by_user_id, requested_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s)
+            custom_fields_json, status, requested_by_user_id, requested_by_name,
+            requested_by_email, requested_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -66,6 +69,8 @@ async def create_request(
             request_notes,
             custom_fields_json,
             requested_by_user_id,
+            requested_by_name,
+            requested_by_email,
             _coerce_datetime(requested_at) or _coerce_datetime(datetime.now(timezone.utc)),
         ),
     )
@@ -95,7 +100,7 @@ async def list_requests(
         params.append(str(status).strip())
     where = " AND ".join(conditions)
     rows = await db.fetch_all(
-        f"SELECT * FROM staff_requests WHERE {where} ORDER BY created_at DESC",
+        f"SELECT * FROM staff_requests WHERE {where} ORDER BY created_at DESC",  # nosec B608
         tuple(params),
     )
     return [_map_row(row) for row in rows]

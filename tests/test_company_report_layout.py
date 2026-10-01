@@ -73,3 +73,23 @@ def test_stat_aggregation_filter_and_ordered_threshold_colours():
         {"operator": "gte", "value": 20, "colour": "#14532d"},
         {"operator": "gte", "value": 10, "colour": "#d99b16"},
     ]) == "#d99b16"
+
+
+def test_stat_strip_display_is_preserved_and_builds_semantic_tiles():
+    rows = layout.normalise_layout(
+        [{"columns": [{"slug": "backup", "display": "stat_strip"}]}],
+        {"backup"},
+    )
+    assert rows[0]["columns"][0]["display"] == "stat_strip"
+
+    from app.services.stat_strips import build_items
+    items = build_items({
+        "columns": ["total_jobs", "pass", "fail", "unknown"],
+        "rows": [{"total_jobs": 8, "pass": 6, "fail": 1, "unknown": 1}],
+    })
+    assert [(item["label"], item["variant"]) for item in items] == [
+        ("Total Jobs", "total"),
+        ("Pass", "success"),
+        ("Fail", "danger"),
+        ("Unknown", "warning"),
+    ]

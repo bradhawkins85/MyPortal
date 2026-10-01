@@ -1,10 +1,12 @@
 """Company-scoped Windows Defender UI and tray-agent API."""
+from importlib import import_module
+
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.api.routes.tray import _resolve_tray_device
 from app.repositories import defender as repo
-from app.schemas.defender import (DefenderCommandResult, DefenderDetectionAction,
+from app.schemas.defender import (DefenderCommandResult, DefenderDetectionAction, DefenderDeviceManagementUpdate,
     DefenderDetectionReport, DefenderExclusionCreate, DefenderExclusionListCreate,
     DefenderSettingsUpdate, DefenderStatusReport)
 from app.repositories import companies as companies_repo
@@ -17,22 +19,30 @@ router = APIRouter(tags=["Windows Defender"])
 
 def _main():
     """Import the main module lazily to avoid a router import cycle."""
-    from app import main as main_module
-
-    return main_module
+    return import_module("app.main")
 
 
 async def _portal_context(request: Request, *, write: bool = False):
-    user, redirect = await _main()._require_authenticated_user(request)
+    main_module = _main()
+    user, redirect = await main_module._require_authenticated_user(request)
     if redirect:
         return None, None, None, redirect
+    has_access = (
+        bool(user.get("is_super_admin"))
+        or bool(user.get("is_company_admin"))
+        or main_module._menu_can(user.get("menu_access"), "menu.defender", write=write)
+    )
+    if not has_access:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Read/write Windows Defender access required"
+            if write
+            else "Windows Defender access required",
+        )
     company_id = user.get("company_id")
     if company_id is None:
         raise HTTPException(400, "No active company")
     membership = None
-    can_write = bool(user.get("is_super_admin")) or bool(user.get("is_company_admin"))
-    if write and not can_write:
-        return user, membership, int(company_id), RedirectResponse("/", status_code=303)
     return user, membership, int(company_id), None
 
 @router.get("/defender", response_class=HTMLResponse)
@@ -43,6 +53,7 @@ async def defender_page(request: Request):
     enabled = await repo.company_enabled(company_id)
     devices, exclusions, detections = await repo.dashboard(company_id) if enabled else ([], [], [])
     defender_settings = await repo.settings(company_id) if enabled else {}
+    commands = await repo.recent_commands(company_id) if enabled else []
     is_super_admin = bool(user.get("is_super_admin"))
     exclusion_lists = await repo.exclusion_lists() if enabled and is_super_admin else []
     companies = await companies_repo.list_companies() if enabled and is_super_admin else []
@@ -51,8 +62,18 @@ async def defender_page(request: Request):
         "defender_devices": devices,
         "defender_exclusions": exclusions,
         "defender_detections": detections,
-        "defender_can_write": bool(user.get("is_super_admin")) or bool(user.get("is_company_admin")),
+        "defender_can_write": (bool(user.get("is_super_admin")) or bool(user.get("is_company_admin"))
+                               or _main()._menu_can(user.get("menu_access"), "menu.defender", write=True)),
         "defender_settings": defender_settings,
+        "defender_commands": commands,
+        # Managed endpoints where Tamper Protection stops the agent applying
+        # exclusions; the page flags these rather than letting the policy look
+        # effective.
+        "defender_tamper_locked_devices": [
+            device for device in devices if device.get("defender_managed") and device.get("tamper_locks_exclusions")
+            and (exclusions or any(item.get("status") == "blocked_tamper_protection"
+                                   for item in device.get("policy_issues") or []))
+        ],
     }
     if is_super_admin:
         extra.update(defender_exclusion_lists=exclusion_lists, defender_companies=companies)
@@ -106,10 +127,10 @@ async def create_exclusion(payload: DefenderExclusionCreate, request: Request):
         raise HTTPException(422, "A device is required for device exclusions")
     if payload.tray_device_id and not await repo.device_belongs_to_company(payload.tray_device_id, company_id):
         raise HTTPException(404, "Device not found in the active company")
-    await repo.add_exclusion(payload.scope, company_id, payload.tray_device_id, payload.exclusion_type, payload.value, user["id"])
+    exclusion_id = await repo.add_exclusion(payload.scope, company_id, payload.tray_device_id, payload.exclusion_type, payload.value, user["id"])
     await audit_service.log_action(action="defender.exclusion.created", user_id=user["id"], entity_type="defender_exclusion",
         new_value=payload.model_dump(), metadata={"company_id": company_id}, request=request)
-    return {"status": "created"}
+    return {"id": exclusion_id, "status": "created"}
 
 @router.delete("/api/defender/exclusions/{exclusion_id}")
 async def remove_exclusion(exclusion_id: int, request: Request):
@@ -149,14 +170,32 @@ async def create_defender_command(device_id: int, command_type: str, request: Re
     user, _, company_id, redirect = await _portal_context(request, write=True)
     if redirect:
         raise HTTPException(403, "Read/write Defender access required")
-    if command_type not in {"quick_scan", "full_scan", "signature_update"}:
+    if command_type not in {"quick_scan", "full_scan", "signature_update", "enable_firewall"}:
         raise HTTPException(422, "Unsupported Defender command")
     if not await repo.device_belongs_to_company(device_id, company_id):
         raise HTTPException(404, "Device not found")
+    if not await repo.device_is_managed(device_id, company_id):
+        raise HTTPException(409, "Device is excluded from Defender management")
     command_id = await repo.queue_command(company_id, device_id, command_type, user["id"])
     await audit_service.log_action(action="defender.command.queued", user_id=user["id"], entity_type="defender_command",
         entity_id=command_id, metadata={"company_id": company_id, "device_id": device_id, "command": command_type}, request=request)
     return {"id": command_id, "status": "pending"}
+
+@router.put("/api/defender/devices/{device_id}/management")
+async def update_device_management(device_id: int, payload: DefenderDeviceManagementUpdate, request: Request):
+    """Include or exclude a company device from all Defender processing."""
+    user, _, company_id, redirect = await _portal_context(request, write=True)
+    if redirect:
+        raise HTTPException(403, "Read/write Defender access required")
+    if not await repo.set_device_managed(device_id, company_id, payload.managed):
+        raise HTTPException(404, "Device not found")
+    await audit_service.log_action(
+        action="defender.device.management.updated", user_id=user["id"],
+        entity_type="tray_device", entity_id=device_id,
+        new_value={"defender_managed": payload.managed},
+        metadata={"company_id": company_id}, request=request,
+    )
+    return {"device_id": device_id, "managed": payload.managed}
 
 @router.post("/api/defender/detections/{detection_id}/actions")
 async def detection_action(detection_id: int, payload: DefenderDetectionAction, request: Request):
@@ -167,6 +206,8 @@ async def detection_action(detection_id: int, payload: DefenderDetectionAction, 
     if not row:
         raise HTTPException(404, "Detection not found")
     if payload.action in {"quarantine", "remediate"}:
+        if not await repo.device_is_managed(int(row["tray_device_id"]), company_id):
+            raise HTTPException(409, "Device is excluded from Defender management")
         command_id = await repo.queue_command(company_id, row["tray_device_id"], payload.action, user["id"], detection_id)
         await audit_service.log_action(action=f"defender.detection.{payload.action}.queued", user_id=user["id"],
             entity_type="defender_command", entity_id=command_id, metadata={"company_id": company_id, "detection_id": detection_id}, request=request)
@@ -217,16 +258,20 @@ async def create_device_ticket(device_id: int, request: Request):
         await tickets_repo.replace_ticket_assets(ticket["id"], [row["asset_id"]])
     return {"ticket_id": ticket["id"], "url": f"/tickets/{ticket['id']}"}
 
-async def _tray(request: Request):
+async def _tray(request: Request, *, require_managed: bool = True):
     device = await _resolve_tray_device(type("Payload", (), {"device_uid": None})(), request)
     if not await repo.company_enabled(int(device["company_id"])):
         raise HTTPException(404, "Windows Defender management is not enabled")
+    if require_managed and not await repo.device_is_managed(int(device["id"]), int(device["company_id"])):
+        raise HTTPException(404, "Device is excluded from Windows Defender management")
     return device
 
 @router.get("/api/tray/defender/policy")
 async def tray_policy(request: Request):
-    device = await _tray(request)
+    device = await _tray(request, require_managed=False)
     result = await repo.policy(int(device["id"]), int(device["company_id"]))
+    if not result["enabled"]:
+        return result
     configured = await repo.settings(int(device["company_id"]))
     result["scheduled_scan"] = {
         "type": configured.get("defender_scheduled_scan_type"),

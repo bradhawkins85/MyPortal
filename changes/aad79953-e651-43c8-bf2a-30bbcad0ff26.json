@@ -1,0 +1,7 @@
+{
+  "guid": "aad79953-e651-43c8-bf2a-30bbcad0ff26",
+  "occurred_at": "2026-09-27T13:17Z",
+  "change_type": "Fix",
+  "summary": "Harden page context against malformed integration module slugs",
+  "content_hash": "051e7cdd7e3071bddad0e64553ebb7c2aa5033213d4c276a531e4ab0395d27a1"
+}

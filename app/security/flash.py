@@ -136,6 +136,9 @@ def _safe_redirect_target(url: str, *, fallback: str = "/") -> str:
     candidate = str(url or "").strip()
     if not candidate:
         return fallback
+    # Browsers strip tab/CR/LF from URLs, so "/\t/evil" would become "//evil".
+    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in candidate):
+        return fallback
     candidate = candidate.replace("\\", "/")
     parsed = urlparse(candidate)
     if parsed.scheme or parsed.netloc:

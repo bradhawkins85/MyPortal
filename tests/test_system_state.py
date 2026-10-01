@@ -7,7 +7,10 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 import app.services.system_state as system_state_module
-from app.services.system_state import get_default_upgrade_mode, get_upgrade_status, is_restart_pending
+from app.services.system_state import (
+    get_default_upgrade_mode, get_public_upgrade_state, get_upgrade_status,
+    is_restart_pending, write_upgrade_state,
+)
 
 
 def test_is_restart_pending_flag_absent(tmp_path, monkeypatch):
@@ -76,3 +79,45 @@ def test_get_upgrade_status_reads_flag_and_status_files(tmp_path, monkeypatch):
     assert status["last_status"] == "succeeded"
     assert status["last_mode"] == "restart"
     assert status["last_reason"] == "dependency_manifest_changed"
+
+
+def test_atomic_coordinator_normal_and_maintenance_phases(tmp_path, monkeypatch):
+    state_path = tmp_path / "upgrade-state.json"
+    monkeypatch.setattr(system_state_module, "_UPGRADE_STATE_PATH", state_path)
+    preparing = write_upgrade_state(
+        upgrade_id="up-1", target_revision="abc", phase="preparing",
+        message="Preparing", mode="restart",
+    )
+    assert preparing["maintenance"] is False
+    draining = write_upgrade_state(
+        upgrade_id="up-1", target_revision="abc", phase="draining",
+        message="Draining", mode="restart",
+    )
+    assert draining["maintenance"] is True
+    assert get_public_upgrade_state()["phase"] == "draining"
+    assert not list(tmp_path.glob(".upgrade-state-*"))
+
+
+def test_failed_upgrade_leaves_maintenance(tmp_path, monkeypatch):
+    monkeypatch.setattr(system_state_module, "_UPGRADE_STATE_PATH", tmp_path / "state.json")
+    state = write_upgrade_state(
+        upgrade_id="up-2", target_revision="def", phase="failed",
+        message="Failed safely", mode="restart", outcome="failed",
+    )
+    assert state["maintenance"] is False
+    assert state["finished_at"]
+
+
+def test_stale_active_upgrade_is_recovered(tmp_path, monkeypatch):
+    state_path = tmp_path / "state.json"
+    monkeypatch.setattr(system_state_module, "_UPGRADE_STATE_PATH", state_path)
+    monkeypatch.setenv("UPGRADE_STATE_STALE_SECONDS", "1")
+    state_path.write_text(
+        '{"upgrade_id":"old","target_revision":"abc","phase":"restarting",'
+        '"updated_at":"2020-01-01T00:00:00+00:00","started_at":"2020-01-01T00:00:00+00:00",'
+        '"mode":"restart","maintenance":true}', encoding="utf-8",
+    )
+    recovered = get_public_upgrade_state()
+    assert recovered["phase"] == "interrupted"
+    assert recovered["maintenance"] is False
+    assert recovered["outcome"] == "interrupted"

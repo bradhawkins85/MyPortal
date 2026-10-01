@@ -3,7 +3,7 @@ Repository for BCP (Business Continuity Planning) operations.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.core.database import db
@@ -204,7 +204,7 @@ async def update_plan(
             UPDATE bcp_plan_overview
             SET {', '.join(overview_updates)}
             WHERE id = %s
-        """
+        """  # nosec B608
         overview_values.append(plan_id)
 
     plan_query = None
@@ -213,7 +213,7 @@ async def update_plan(
             UPDATE bcp_plan
             SET {', '.join(plan_updates)}
             WHERE id = %s
-        """
+        """  # nosec B608
         plan_values.append(plan_id)
 
     async with db.connection() as conn:
@@ -527,7 +527,7 @@ async def update_risk(
         UPDATE bcp_risk
         SET {', '.join(updates)}
         WHERE id = %s
-    """
+    """  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -753,7 +753,7 @@ async def update_insurance_policy(
         UPDATE bcp_insurance_policy
         SET {', '.join(updates)}
         WHERE id = %s
-    """
+    """  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -953,7 +953,7 @@ async def update_backup_item(
         UPDATE bcp_backup_item
         SET {', '.join(updates)}
         WHERE id = %s
-    """
+    """  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -1010,7 +1010,7 @@ async def list_critical_activities(plan_id: int, sort_by: str = "importance") ->
         LEFT JOIN bcp_impact i ON i.critical_activity_id = ca.id
         WHERE ca.plan_id = %s
         {order_clause}
-    """
+    """  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -1097,6 +1097,120 @@ async def get_critical_activity_by_id(activity_id: int) -> dict[str, Any] | None
             }
 
 
+async def list_dependency_mappings(
+    plan_id: int,
+    critical_activity_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """List vendor/resource dependencies for a plan."""
+    query = """
+        SELECT dm.id, dm.plan_id, dm.critical_activity_id, dm.dependency_type,
+               dm.dependency_name, dm.owner_name, dm.rto_hours, dm.notes,
+               dm.created_at, dm.updated_at, ca.name
+        FROM bcp_dependency_map dm
+        LEFT JOIN bcp_critical_activity ca ON ca.id = dm.critical_activity_id
+        WHERE dm.plan_id = %s
+    """
+    params: list[Any] = [plan_id]
+    if critical_activity_id is not None:
+        query += " AND dm.critical_activity_id = %s"
+        params.append(critical_activity_id)
+    query += " ORDER BY dm.dependency_type, dm.dependency_name"
+
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, tuple(params))
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "critical_activity_id": row[2],
+                    "dependency_type": row[3],
+                    "dependency_name": row[4],
+                    "owner_name": row[5],
+                    "rto_hours": row[6],
+                    "notes": row[7],
+                    "created_at": row[8],
+                    "updated_at": row[9],
+                    "critical_activity_name": row[10],
+                }
+                for row in rows
+            ]
+
+
+async def get_dependency_mapping_by_id(dependency_id: int) -> dict[str, Any] | None:
+    """Get a dependency mapping by ID."""
+    query = """
+        SELECT id, plan_id, critical_activity_id, dependency_type,
+               dependency_name, owner_name, rto_hours, notes,
+               created_at, updated_at
+        FROM bcp_dependency_map
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (dependency_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "critical_activity_id": row[2],
+                "dependency_type": row[3],
+                "dependency_name": row[4],
+                "owner_name": row[5],
+                "rto_hours": row[6],
+                "notes": row[7],
+                "created_at": row[8],
+                "updated_at": row[9],
+            }
+
+
+async def create_dependency_mapping(
+    plan_id: int,
+    critical_activity_id: int | None,
+    dependency_type: str,
+    dependency_name: str,
+    owner_name: str | None = None,
+    rto_hours: int | None = None,
+    notes: str | None = None,
+) -> dict[str, Any] | None:
+    """Create a dependency mapping."""
+    query = """
+        INSERT INTO bcp_dependency_map
+        (plan_id, critical_activity_id, dependency_type, dependency_name, owner_name, rto_hours, notes)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                query,
+                (
+                    plan_id,
+                    critical_activity_id,
+                    dependency_type,
+                    dependency_name,
+                    owner_name,
+                    rto_hours,
+                    notes,
+                ),
+            )
+            await conn.commit()
+            dependency_id = cursor.lastrowid
+    return await get_dependency_mapping_by_id(dependency_id)
+
+
+async def delete_dependency_mapping(dependency_id: int) -> bool:
+    """Delete a dependency mapping."""
+    query = "DELETE FROM bcp_dependency_map WHERE id = %s"
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (dependency_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+
+
 async def create_critical_activity(
     plan_id: int,
     name: str,
@@ -1165,7 +1279,7 @@ async def update_critical_activity(
         UPDATE bcp_critical_activity
         SET {', '.join(updates)}
         WHERE id = %s
-    """
+    """  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -1268,7 +1382,6 @@ async def create_or_update_impact(
                      fines, legal_liability, rto_hours, losses_comments),
                 )
                 await conn.commit()
-                impact_id = cursor.lastrowid
     
     # Return the updated activity with impact
     return await get_critical_activity_by_id(critical_activity_id)
@@ -1282,7 +1395,9 @@ async def create_or_update_impact(
 async def list_incidents(plan_id: int) -> list[dict[str, Any]]:
     """Get all incidents for a plan."""
     query = """
-        SELECT id, plan_id, started_at, status, source, created_at, updated_at
+        SELECT id, plan_id, started_at, status, source, closed_at,
+               after_action_summary, after_action_improvements, after_action_reviewed_at,
+               created_at, updated_at
         FROM bcp_incident
         WHERE plan_id = %s
         ORDER BY started_at DESC
@@ -1298,8 +1413,12 @@ async def list_incidents(plan_id: int) -> list[dict[str, Any]]:
                     "started_at": row[2],
                     "status": row[3],
                     "source": row[4],
-                    "created_at": row[5],
-                    "updated_at": row[6],
+                    "closed_at": row[5],
+                    "after_action_summary": row[6],
+                    "after_action_improvements": row[7],
+                    "after_action_reviewed_at": row[8],
+                    "created_at": row[9],
+                    "updated_at": row[10],
                 }
                 for row in rows
             ]
@@ -1308,7 +1427,9 @@ async def list_incidents(plan_id: int) -> list[dict[str, Any]]:
 async def get_incident_by_id(incident_id: int) -> dict[str, Any] | None:
     """Get an incident by ID."""
     query = """
-        SELECT id, plan_id, started_at, status, source, created_at, updated_at
+        SELECT id, plan_id, started_at, status, source, closed_at,
+               after_action_summary, after_action_improvements, after_action_reviewed_at,
+               created_at, updated_at
         FROM bcp_incident
         WHERE id = %s
     """
@@ -1324,15 +1445,21 @@ async def get_incident_by_id(incident_id: int) -> dict[str, Any] | None:
                 "started_at": row[2],
                 "status": row[3],
                 "source": row[4],
-                "created_at": row[5],
-                "updated_at": row[6],
+                "closed_at": row[5],
+                "after_action_summary": row[6],
+                "after_action_improvements": row[7],
+                "after_action_reviewed_at": row[8],
+                "created_at": row[9],
+                "updated_at": row[10],
             }
 
 
 async def get_active_incident(plan_id: int) -> dict[str, Any] | None:
     """Get the active incident for a plan, if any."""
     query = """
-        SELECT id, plan_id, started_at, status, source, created_at, updated_at
+        SELECT id, plan_id, started_at, status, source, closed_at,
+               after_action_summary, after_action_improvements, after_action_reviewed_at,
+               created_at, updated_at
         FROM bcp_incident
         WHERE plan_id = %s AND status = 'Active'
         ORDER BY started_at DESC
@@ -1350,8 +1477,12 @@ async def get_active_incident(plan_id: int) -> dict[str, Any] | None:
                 "started_at": row[2],
                 "status": row[3],
                 "source": row[4],
-                "created_at": row[5],
-                "updated_at": row[6],
+                "closed_at": row[5],
+                "after_action_summary": row[6],
+                "after_action_improvements": row[7],
+                "after_action_reviewed_at": row[8],
+                "created_at": row[9],
+                "updated_at": row[10],
             }
 
 
@@ -1378,14 +1509,51 @@ async def close_incident(incident_id: int) -> dict[str, Any] | None:
     """Close an incident."""
     query = """
         UPDATE bcp_incident
-        SET status = 'Closed'
+        SET status = 'Closed', closed_at = %s
         WHERE id = %s
     """
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(query, (incident_id,))
+            await cursor.execute(query, (datetime.now(timezone.utc), incident_id))
             await conn.commit()
     
+    return await get_incident_by_id(incident_id)
+
+
+async def update_incident_after_action(
+    incident_id: int,
+    after_action_summary: str | None = None,
+    after_action_improvements: str | None = None,
+    after_action_reviewed_at: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Update after-action review details for an incident."""
+    updates = []
+    values = []
+
+    if after_action_summary is not None:
+        updates.append("after_action_summary = %s")
+        values.append(after_action_summary)
+    if after_action_improvements is not None:
+        updates.append("after_action_improvements = %s")
+        values.append(after_action_improvements)
+    if after_action_reviewed_at is not None:
+        updates.append("after_action_reviewed_at = %s")
+        values.append(after_action_reviewed_at)
+
+    if not updates:
+        return await get_incident_by_id(incident_id)
+
+    values.append(incident_id)
+    query = f"""
+        UPDATE bcp_incident
+        SET {', '.join(updates)}
+        WHERE id = %s
+    """  # nosec B608
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, tuple(values))
+            await conn.commit()
+
     return await get_incident_by_id(incident_id)
 
 
@@ -1742,7 +1910,7 @@ async def update_contact(
         UPDATE bcp_contact
         SET {', '.join(updates)}
         WHERE id = %s
-    """
+    """  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -1957,7 +2125,7 @@ async def update_role(
         return await get_role_by_id(role_id)
     
     params.append(role_id)
-    query = f"UPDATE bcp_role SET {', '.join(updates)} WHERE id = %s"
+    query = f"UPDATE bcp_role SET {', '.join(updates)} WHERE id = %s"  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -1980,7 +2148,7 @@ async def delete_role(role_id: int) -> bool:
 async def list_role_assignments(role_id: int) -> list[dict[str, Any]]:
     """List all assignments for a role."""
     query = """
-        SELECT id, role_id, user_id, is_alternate, contact_info, created_at, updated_at
+        SELECT id, role_id, user_id, collaborator_role, is_alternate, contact_info, created_at, updated_at
         FROM bcp_role_assignment
         WHERE role_id = %s
         ORDER BY is_alternate, id
@@ -1994,10 +2162,11 @@ async def list_role_assignments(role_id: int) -> list[dict[str, Any]]:
                     "id": row[0],
                     "role_id": row[1],
                     "user_id": row[2],
-                    "is_alternate": bool(row[3]),
-                    "contact_info": row[4],
-                    "created_at": row[5],
-                    "updated_at": row[6],
+                    "collaborator_role": row[3],
+                    "is_alternate": bool(row[4]),
+                    "contact_info": row[5],
+                    "created_at": row[6],
+                    "updated_at": row[7],
                 }
                 for row in rows
             ]
@@ -2006,7 +2175,7 @@ async def list_role_assignments(role_id: int) -> list[dict[str, Any]]:
 async def get_role_assignment_by_id(assignment_id: int) -> dict[str, Any] | None:
     """Get a role assignment by ID."""
     query = """
-        SELECT id, role_id, user_id, is_alternate, contact_info, created_at, updated_at
+        SELECT id, role_id, user_id, collaborator_role, is_alternate, contact_info, created_at, updated_at
         FROM bcp_role_assignment
         WHERE id = %s
     """
@@ -2020,27 +2189,29 @@ async def get_role_assignment_by_id(assignment_id: int) -> dict[str, Any] | None
                 "id": row[0],
                 "role_id": row[1],
                 "user_id": row[2],
-                "is_alternate": bool(row[3]),
-                "contact_info": row[4],
-                "created_at": row[5],
-                "updated_at": row[6],
+                "collaborator_role": row[3],
+                "is_alternate": bool(row[4]),
+                "contact_info": row[5],
+                "created_at": row[6],
+                "updated_at": row[7],
             }
 
 
 async def create_role_assignment(
     role_id: int,
     user_id: int,
+    collaborator_role: str = "Executor",
     is_alternate: bool = False,
     contact_info: str | None = None,
 ) -> dict[str, Any]:
     """Create a new role assignment."""
     query = """
-        INSERT INTO bcp_role_assignment (role_id, user_id, is_alternate, contact_info)
-        VALUES (%s, %s, %s, %s)
+        INSERT INTO bcp_role_assignment (role_id, user_id, collaborator_role, is_alternate, contact_info)
+        VALUES (%s, %s, %s, %s, %s)
     """
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(query, (role_id, user_id, is_alternate, contact_info))
+            await cursor.execute(query, (role_id, user_id, collaborator_role, is_alternate, contact_info))
             await conn.commit()
             assignment_id = cursor.lastrowid
     
@@ -2050,6 +2221,7 @@ async def create_role_assignment(
 async def update_role_assignment(
     assignment_id: int,
     user_id: int | None = None,
+    collaborator_role: str | None = None,
     is_alternate: bool | None = None,
     contact_info: str | None = None,
 ) -> dict[str, Any] | None:
@@ -2060,6 +2232,10 @@ async def update_role_assignment(
     if user_id is not None:
         updates.append("user_id = %s")
         params.append(user_id)
+
+    if collaborator_role is not None:
+        updates.append("collaborator_role = %s")
+        params.append(collaborator_role)
     
     if is_alternate is not None:
         updates.append("is_alternate = %s")
@@ -2073,7 +2249,7 @@ async def update_role_assignment(
         return await get_role_assignment_by_id(assignment_id)
     
     params.append(assignment_id)
-    query = f"UPDATE bcp_role_assignment SET {', '.join(updates)} WHERE id = %s"
+    query = f"UPDATE bcp_role_assignment SET {', '.join(updates)} WHERE id = %s"  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -2225,7 +2401,7 @@ async def update_evacuation_plan(
         UPDATE bcp_evacuation_plan
         SET {', '.join(updates)}
         WHERE id = %s
-    """
+    """  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -2367,7 +2543,7 @@ async def update_emergency_kit_item(
         UPDATE bcp_emergency_kit_item
         SET {', '.join(updates)}
         WHERE id = %s
-    """
+    """  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -2443,6 +2619,140 @@ async def seed_default_emergency_kit_items(plan_id: int) -> None:
 # Recovery Action Management
 # ============================================================================
 
+_ASSET_LINK_COMPONENT_TABLES = {
+    "critical_activity": "bcp_critical_activity",
+    "recovery_action": "bcp_recovery_action",
+    "risk": "bcp_risk",
+}
+
+
+async def list_component_asset_links(
+    plan_id: int,
+    component_type: str | None = None,
+    component_id: int | None = None,
+    *,
+    include_unlinked: bool = False,
+) -> list[dict[str, Any]]:
+    """Return canonical assets linked to BCP components.
+
+    Live asset fields are returned for active links. The small identifier
+    snapshot remains available for historical/approved-plan presentation and
+    intentionally excludes operational notes, custom fields, and credentials.
+    """
+    conditions = ["link.plan_id = %s"]
+    params: list[Any] = [plan_id]
+    if component_type is not None:
+        if component_type not in _ASSET_LINK_COMPONENT_TABLES:
+            raise ValueError("Unsupported BCP component type")
+        conditions.append("link.component_type = %s")
+        params.append(component_type)
+    if component_id is not None:
+        conditions.append("link.component_id = %s")
+        params.append(component_id)
+    if not include_unlinked:
+        conditions.append("link.unlinked_at IS NULL")
+    return list(await db.fetch_all(
+        """SELECT link.id, link.company_id, link.plan_id, link.component_type,
+                  link.component_id, link.asset_id, link.asset_name_snapshot,
+                  link.asset_type_snapshot, link.asset_serial_snapshot,
+                  link.linked_at, link.unlinked_at,
+                  asset.name, asset.type, asset.serial_number, asset.archived_at
+           FROM bcp_component_asset_links link
+           LEFT JOIN assets asset ON asset.id = link.asset_id
+                                AND asset.company_id = link.company_id
+           WHERE """ + " AND ".join(conditions) +
+        " ORDER BY link.component_type, link.component_id, link.linked_at, link.id",
+        tuple(params),
+    ) or [])
+
+
+async def link_asset_to_component(
+    *, plan_id: int, company_id: int, component_type: str, component_id: int,
+    asset_id: int, linked_by_user_id: int,
+) -> dict[str, Any]:
+    """Link an existing same-company asset after validating both link ends."""
+    table = _ASSET_LINK_COMPONENT_TABLES.get(component_type)
+    if table is None:
+        raise ValueError("Unsupported BCP component type")
+    component = await db.fetch_one(
+        "SELECT component.id FROM " + table + " component "
+        "INNER JOIN bcp_plan plan ON plan.id = component.plan_id "
+        "WHERE component.id = %s AND component.plan_id = %s AND plan.company_id = %s",
+        (component_id, plan_id, company_id),
+    )
+    asset = await db.fetch_one(
+        """SELECT id, name, type, serial_number FROM assets
+           WHERE id = %s AND company_id = %s""",
+        (asset_id, company_id),
+    )
+    if not component or not asset:
+        raise ValueError("Component or asset is not available for this company")
+    existing = await db.fetch_one(
+        """SELECT id FROM bcp_component_asset_links
+           WHERE company_id = %s AND plan_id = %s AND component_type = %s
+             AND component_id = %s AND asset_id = %s AND unlinked_at IS NULL""",
+        (company_id, plan_id, component_type, component_id, asset_id),
+    )
+    if existing:
+        links = await list_component_asset_links(plan_id, component_type, component_id)
+        return next(link for link in links if int(link["id"]) == int(existing["id"]))
+    link_id = await db.execute_returning_lastrowid(
+        """INSERT INTO bcp_component_asset_links
+           (company_id, plan_id, component_type, component_id, asset_id,
+            asset_name_snapshot, asset_type_snapshot, asset_serial_snapshot,
+            linked_by_user_id)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+        (company_id, plan_id, component_type, component_id, asset_id,
+         asset["name"], asset.get("type"), asset.get("serial_number"), linked_by_user_id),
+    )
+    links = await list_component_asset_links(plan_id, component_type, component_id)
+    return next(link for link in links if int(link["id"]) == int(link_id))
+
+
+async def unlink_asset_from_component(
+    *, link_id: int, plan_id: int, company_id: int, unlinked_by_user_id: int,
+) -> dict[str, Any] | None:
+    """Soft-unlink an asset, preserving approved-plan history."""
+    before = await db.fetch_one(
+        """SELECT * FROM bcp_component_asset_links
+           WHERE id = %s AND plan_id = %s AND company_id = %s AND unlinked_at IS NULL""",
+        (link_id, plan_id, company_id),
+    )
+    if not before:
+        return None
+    await db.execute(
+        """UPDATE bcp_component_asset_links
+           SET unlinked_at = CURRENT_TIMESTAMP, unlinked_by_user_id = %s
+           WHERE id = %s AND plan_id = %s AND company_id = %s AND unlinked_at IS NULL""",
+        (unlinked_by_user_id, link_id, plan_id, company_id),
+    )
+    return dict(before)
+
+
+async def list_bcp_context_for_asset(company_id: int, asset_id: int) -> list[dict[str, Any]]:
+    """List active and historical BCP contexts for an authorised asset page."""
+    return list(await db.fetch_all(
+        """SELECT link.id, link.plan_id, link.component_type, link.component_id,
+                  link.asset_name_snapshot, link.linked_at, link.unlinked_at,
+                  plan.title, plan.version,
+                  CASE
+                    WHEN link.component_type = 'recovery_action' THEN recovery.action
+                    WHEN link.component_type = 'critical_activity' THEN activity.name
+                    WHEN link.component_type = 'risk' THEN risk.description
+                  END AS component_label
+           FROM bcp_component_asset_links link
+           INNER JOIN bcp_plan plan ON plan.id = link.plan_id AND plan.company_id = link.company_id
+           LEFT JOIN bcp_recovery_action recovery
+                  ON link.component_type = 'recovery_action' AND recovery.id = link.component_id
+           LEFT JOIN bcp_critical_activity activity
+                  ON link.component_type = 'critical_activity' AND activity.id = link.component_id
+           LEFT JOIN bcp_risk risk
+                  ON link.component_type = 'risk' AND risk.id = link.component_id
+           WHERE link.company_id = %s AND link.asset_id = %s
+           ORDER BY link.unlinked_at IS NOT NULL, plan.title, link.linked_at""",
+        (company_id, asset_id),
+    ) or [])
+
 
 async def list_recovery_actions(
     plan_id: int,
@@ -2482,7 +2792,7 @@ async def list_recovery_actions(
         from datetime import datetime
         conditions.append("ra.due_date < %s")
         conditions.append("ra.completed_at IS NULL")
-        params.append(datetime.utcnow())
+        params.append(datetime.now(timezone.utc))
     
     where_clause = " AND ".join(conditions)
     
@@ -2496,7 +2806,7 @@ async def list_recovery_actions(
         LEFT JOIN bcp_critical_activity ca ON ca.id = ra.critical_activity_id
         WHERE {where_clause}
         ORDER BY ra.due_date IS NULL, ra.due_date ASC, ra.id
-    """
+    """  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -2627,7 +2937,7 @@ async def update_recovery_action(
         UPDATE bcp_recovery_action
         SET {', '.join(updates)}
         WHERE id = %s
-    """
+    """  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -2802,7 +3112,7 @@ async def update_recovery_contact(
         UPDATE bcp_recovery_contact
         SET {', '.join(updates)}
         WHERE id = %s
-    """
+    """  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -2935,7 +3245,7 @@ async def update_insurance_claim(
         UPDATE bcp_insurance_claim
         SET {', '.join(updates)}
         WHERE id = %s
-    """
+    """  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -3061,7 +3371,7 @@ async def update_market_change(
         UPDATE bcp_market_change
         SET {', '.join(updates)}
         WHERE id = %s
-    """
+    """  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -3089,7 +3399,8 @@ async def delete_market_change(change_id: int) -> bool:
 async def list_training_items(plan_id: int) -> list[dict[str, Any]]:
     """Get all training items for a plan."""
     query = """
-        SELECT id, plan_id, training_date, training_type, comments,
+        SELECT id, plan_id, training_date, training_type, status, participants_count,
+               score_percent, comments, lessons_learned, follow_up_actions,
                created_at, updated_at
         FROM bcp_training_item
         WHERE plan_id = %s
@@ -3105,9 +3416,14 @@ async def list_training_items(plan_id: int) -> list[dict[str, Any]]:
                     "plan_id": row[1],
                     "training_date": row[2],
                     "training_type": row[3],
-                    "comments": row[4],
-                    "created_at": row[5],
-                    "updated_at": row[6],
+                    "status": row[4],
+                    "participants_count": row[5],
+                    "score_percent": row[6],
+                    "comments": row[7],
+                    "lessons_learned": row[8],
+                    "follow_up_actions": row[9],
+                    "created_at": row[10],
+                    "updated_at": row[11],
                 }
                 for row in rows
             ]
@@ -3116,7 +3432,8 @@ async def list_training_items(plan_id: int) -> list[dict[str, Any]]:
 async def get_training_item_by_id(training_id: int) -> dict[str, Any] | None:
     """Get a training item by ID."""
     query = """
-        SELECT id, plan_id, training_date, training_type, comments,
+        SELECT id, plan_id, training_date, training_type, status, participants_count,
+               score_percent, comments, lessons_learned, follow_up_actions,
                created_at, updated_at
         FROM bcp_training_item
         WHERE id = %s
@@ -3132,9 +3449,14 @@ async def get_training_item_by_id(training_id: int) -> dict[str, Any] | None:
                 "plan_id": row[1],
                 "training_date": row[2],
                 "training_type": row[3],
-                "comments": row[4],
-                "created_at": row[5],
-                "updated_at": row[6],
+                "status": row[4],
+                "participants_count": row[5],
+                "score_percent": row[6],
+                "comments": row[7],
+                "lessons_learned": row[8],
+                "follow_up_actions": row[9],
+                "created_at": row[10],
+                "updated_at": row[11],
             }
 
 
@@ -3142,17 +3464,35 @@ async def create_training_item(
     plan_id: int,
     training_date: datetime,
     training_type: str | None = None,
+    status: str = "Scheduled",
+    participants_count: int | None = None,
+    score_percent: int | None = None,
     comments: str | None = None,
+    lessons_learned: str | None = None,
+    follow_up_actions: str | None = None,
 ) -> dict[str, Any]:
     """Create a new training item."""
     query = """
         INSERT INTO bcp_training_item
-        (plan_id, training_date, training_type, comments)
-        VALUES (%s, %s, %s, %s)
+        (plan_id, training_date, training_type, status, participants_count, score_percent, comments, lessons_learned, follow_up_actions)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(query, (plan_id, training_date, training_type, comments))
+            await cursor.execute(
+                query,
+                (
+                    plan_id,
+                    training_date,
+                    training_type,
+                    status,
+                    participants_count,
+                    score_percent,
+                    comments,
+                    lessons_learned,
+                    follow_up_actions,
+                ),
+            )
             await conn.commit()
             training_id = cursor.lastrowid
     
@@ -3163,7 +3503,12 @@ async def update_training_item(
     training_id: int,
     training_date: datetime | None = None,
     training_type: str | None = None,
+    status: str | None = None,
+    participants_count: int | None = None,
+    score_percent: int | None = None,
     comments: str | None = None,
+    lessons_learned: str | None = None,
+    follow_up_actions: str | None = None,
 ) -> dict[str, Any] | None:
     """Update a training item."""
     updates = []
@@ -3175,9 +3520,24 @@ async def update_training_item(
     if training_type is not None:
         updates.append("training_type = %s")
         values.append(training_type)
+    if status is not None:
+        updates.append("status = %s")
+        values.append(status)
+    if participants_count is not None:
+        updates.append("participants_count = %s")
+        values.append(participants_count)
+    if score_percent is not None:
+        updates.append("score_percent = %s")
+        values.append(score_percent)
     if comments is not None:
         updates.append("comments = %s")
         values.append(comments)
+    if lessons_learned is not None:
+        updates.append("lessons_learned = %s")
+        values.append(lessons_learned)
+    if follow_up_actions is not None:
+        updates.append("follow_up_actions = %s")
+        values.append(follow_up_actions)
     
     if not updates:
         return await get_training_item_by_id(training_id)
@@ -3187,7 +3547,7 @@ async def update_training_item(
         UPDATE bcp_training_item
         SET {', '.join(updates)}
         WHERE id = %s
-    """
+    """  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -3210,9 +3570,9 @@ async def delete_training_item(training_id: int) -> bool:
 async def get_upcoming_training_items(days_ahead: int = 7) -> list[dict[str, Any]]:
     """Get upcoming training items across all plans within the specified days."""
     query = """
-        SELECT t.id, t.plan_id, t.training_date, t.training_type, t.comments,
-               t.created_at, t.updated_at,
-               p.id as plan_id, p.company_id, p.title as plan_title
+        SELECT t.id, t.plan_id, t.training_date, t.training_type, t.status, t.participants_count,
+               t.score_percent, t.comments, t.lessons_learned, t.follow_up_actions,
+               t.created_at, t.updated_at, p.id as plan_id, p.company_id, p.title as plan_title
         FROM bcp_training_item t
         JOIN bcp_plan p ON t.plan_id = p.id
         WHERE t.training_date >= NOW()
@@ -3229,13 +3589,18 @@ async def get_upcoming_training_items(days_ahead: int = 7) -> list[dict[str, Any
                     "plan_id": row[1],
                     "training_date": row[2],
                     "training_type": row[3],
-                    "comments": row[4],
-                    "created_at": row[5],
-                    "updated_at": row[6],
+                    "status": row[4],
+                    "participants_count": row[5],
+                    "score_percent": row[6],
+                    "comments": row[7],
+                    "lessons_learned": row[8],
+                    "follow_up_actions": row[9],
+                    "created_at": row[10],
+                    "updated_at": row[11],
                     "plan": {
-                        "id": row[7],
-                        "company_id": row[8],
-                        "title": row[9],
+                        "id": row[12],
+                        "company_id": row[13],
+                        "title": row[14],
                     }
                 }
                 for row in rows
@@ -3250,8 +3615,9 @@ async def get_upcoming_training_items(days_ahead: int = 7) -> list[dict[str, Any
 async def list_review_items(plan_id: int) -> list[dict[str, Any]]:
     """Get all review items for a plan."""
     query = """
-        SELECT id, plan_id, review_date, reason, changes_made,
-               created_at, updated_at
+        SELECT id, plan_id, review_date, version_label, approval_status,
+               reviewed_by_user_id, approved_by_user_id, reason, changes_made,
+               approval_snapshot, created_at, updated_at
         FROM bcp_review_item
         WHERE plan_id = %s
         ORDER BY review_date DESC
@@ -3265,10 +3631,15 @@ async def list_review_items(plan_id: int) -> list[dict[str, Any]]:
                     "id": row[0],
                     "plan_id": row[1],
                     "review_date": row[2],
-                    "reason": row[3],
-                    "changes_made": row[4],
-                    "created_at": row[5],
-                    "updated_at": row[6],
+                    "version_label": row[3],
+                    "approval_status": row[4],
+                    "reviewed_by_user_id": row[5],
+                    "approved_by_user_id": row[6],
+                    "reason": row[7],
+                    "changes_made": row[8],
+                    "approval_snapshot": row[9],
+                    "created_at": row[10],
+                    "updated_at": row[11],
                 }
                 for row in rows
             ]
@@ -3277,8 +3648,9 @@ async def list_review_items(plan_id: int) -> list[dict[str, Any]]:
 async def get_review_item_by_id(review_id: int) -> dict[str, Any] | None:
     """Get a review item by ID."""
     query = """
-        SELECT id, plan_id, review_date, reason, changes_made,
-               created_at, updated_at
+        SELECT id, plan_id, review_date, version_label, approval_status,
+               reviewed_by_user_id, approved_by_user_id, reason, changes_made,
+               approval_snapshot, created_at, updated_at
         FROM bcp_review_item
         WHERE id = %s
     """
@@ -3292,28 +3664,51 @@ async def get_review_item_by_id(review_id: int) -> dict[str, Any] | None:
                 "id": row[0],
                 "plan_id": row[1],
                 "review_date": row[2],
-                "reason": row[3],
-                "changes_made": row[4],
-                "created_at": row[5],
-                "updated_at": row[6],
+                "version_label": row[3],
+                "approval_status": row[4],
+                "reviewed_by_user_id": row[5],
+                "approved_by_user_id": row[6],
+                "reason": row[7],
+                "changes_made": row[8],
+                "approval_snapshot": row[9],
+                "created_at": row[10],
+                "updated_at": row[11],
             }
 
 
 async def create_review_item(
     plan_id: int,
     review_date: datetime,
+    version_label: str | None = None,
+    approval_status: str = "Draft",
+    reviewed_by_user_id: int | None = None,
+    approved_by_user_id: int | None = None,
     reason: str | None = None,
     changes_made: str | None = None,
+    approval_snapshot: str | None = None,
 ) -> dict[str, Any]:
     """Create a new review item."""
     query = """
         INSERT INTO bcp_review_item
-        (plan_id, review_date, reason, changes_made)
-        VALUES (%s, %s, %s, %s)
+        (plan_id, review_date, version_label, approval_status, reviewed_by_user_id, approved_by_user_id, reason, changes_made, approval_snapshot)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(query, (plan_id, review_date, reason, changes_made))
+            await cursor.execute(
+                query,
+                (
+                    plan_id,
+                    review_date,
+                    version_label,
+                    approval_status,
+                    reviewed_by_user_id,
+                    approved_by_user_id,
+                    reason,
+                    changes_made,
+                    approval_snapshot,
+                ),
+            )
             await conn.commit()
             review_id = cursor.lastrowid
     
@@ -3323,8 +3718,13 @@ async def create_review_item(
 async def update_review_item(
     review_id: int,
     review_date: datetime | None = None,
+    version_label: str | None = None,
+    approval_status: str | None = None,
+    reviewed_by_user_id: int | None = None,
+    approved_by_user_id: int | None = None,
     reason: str | None = None,
     changes_made: str | None = None,
+    approval_snapshot: str | None = None,
 ) -> dict[str, Any] | None:
     """Update a review item."""
     updates = []
@@ -3333,12 +3733,27 @@ async def update_review_item(
     if review_date is not None:
         updates.append("review_date = %s")
         values.append(review_date)
+    if version_label is not None:
+        updates.append("version_label = %s")
+        values.append(version_label)
+    if approval_status is not None:
+        updates.append("approval_status = %s")
+        values.append(approval_status)
+    if reviewed_by_user_id is not None:
+        updates.append("reviewed_by_user_id = %s")
+        values.append(reviewed_by_user_id)
+    if approved_by_user_id is not None:
+        updates.append("approved_by_user_id = %s")
+        values.append(approved_by_user_id)
     if reason is not None:
         updates.append("reason = %s")
         values.append(reason)
     if changes_made is not None:
         updates.append("changes_made = %s")
         values.append(changes_made)
+    if approval_snapshot is not None:
+        updates.append("approval_snapshot = %s")
+        values.append(approval_snapshot)
     
     if not updates:
         return await get_review_item_by_id(review_id)
@@ -3348,7 +3763,7 @@ async def update_review_item(
         UPDATE bcp_review_item
         SET {', '.join(updates)}
         WHERE id = %s
-    """
+    """  # nosec B608
     
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
@@ -3401,3 +3816,147 @@ async def get_upcoming_review_items(days_ahead: int = 7) -> list[dict[str, Any]]
                 }
                 for row in rows
             ]
+
+# ============================================================================
+# Global assessment library
+# ============================================================================
+
+async def list_global_risks(company_id: int | None = None) -> list[dict[str, Any]]:
+    """List reusable risks, including assignment state for an optional customer."""
+    query = """
+        SELECT g.id, g.description, g.likelihood, g.impact,
+               g.preventative_actions, g.contingency_plans,
+               CASE WHEN a.company_id IS NULL THEN 0 ELSE 1 END AS assigned
+        FROM bcp_global_risk g
+        LEFT JOIN bcp_global_risk_assignment a
+          ON a.global_risk_id = g.id AND a.company_id = %s
+        ORDER BY g.description
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (company_id,))
+            rows = await cursor.fetchall()
+    return [{"id": r[0], "description": r[1], "likelihood": r[2], "impact": r[3],
+             "preventative_actions": r[4], "contingency_plans": r[5], "assigned": bool(r[6])}
+            for r in rows]
+
+
+async def create_global_risk(description: str, likelihood: int, impact: int,
+                             preventative_actions: str | None = None,
+                             contingency_plans: str | None = None) -> int:
+    query = """INSERT INTO bcp_global_risk
+        (description, likelihood, impact, preventative_actions, contingency_plans)
+        VALUES (%s, %s, %s, %s, %s)"""
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (description, likelihood, impact, preventative_actions, contingency_plans))
+            await conn.commit()
+            return cursor.lastrowid
+
+
+async def list_global_bia_assessments(company_id: int | None = None) -> list[dict[str, Any]]:
+    """List reusable BIA assessments, including assignment state."""
+    query = """
+        SELECT g.id, g.name, g.description, g.priority, g.supplier_dependency,
+               g.importance, g.notes, g.losses_financial, g.losses_increased_costs,
+               g.losses_staffing, g.losses_product_service, g.losses_reputation,
+               g.fines, g.legal_liability, g.rto_hours, g.losses_comments,
+               CASE WHEN a.company_id IS NULL THEN 0 ELSE 1 END AS assigned
+        FROM bcp_global_bia g
+        LEFT JOIN bcp_global_bia_assignment a
+          ON a.global_bia_id = g.id AND a.company_id = %s
+        ORDER BY g.name
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (company_id,))
+            rows = await cursor.fetchall()
+    keys = ("id", "name", "description", "priority", "supplier_dependency", "importance", "notes",
+            "losses_financial", "losses_increased_costs", "losses_staffing", "losses_product_service",
+            "losses_reputation", "fines", "legal_liability", "rto_hours", "losses_comments", "assigned")
+    return [{**dict(zip(keys, row)), "assigned": bool(row[16])} for row in rows]
+
+
+async def create_global_bia(**values: Any) -> int:
+    columns = ("name", "description", "priority", "supplier_dependency", "importance", "notes",
+               "losses_financial", "losses_increased_costs", "losses_staffing", "losses_product_service",
+               "losses_reputation", "fines", "legal_liability", "rto_hours", "losses_comments")
+    query = """INSERT INTO bcp_global_bia
+        (name, description, priority, supplier_dependency, importance, notes,
+         losses_financial, losses_increased_costs, losses_staffing, losses_product_service,
+         losses_reputation, fines, legal_liability, rto_hours, losses_comments)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, tuple(values.get(column) for column in columns))
+            await conn.commit()
+            return cursor.lastrowid
+
+
+async def assign_global_risk(global_risk_id: int, company_id: int) -> bool:
+    """Copy a library risk into a customer's plan; assignment is idempotent."""
+    plan = await get_plan_by_company(company_id)
+    if not plan:
+        plan = await create_plan(company_id)
+    query = """SELECT description, likelihood, impact, preventative_actions, contingency_plans
+               FROM bcp_global_risk WHERE id = %s"""
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT 1 FROM bcp_global_risk_assignment WHERE global_risk_id = %s AND company_id = %s",
+                                 (global_risk_id, company_id))
+            if await cursor.fetchone():
+                return False
+            await cursor.execute(query, (global_risk_id,))
+            row = await cursor.fetchone()
+    if not row:
+        return False
+    from app.services.risk_calculator import calculate_risk
+    rating, severity = calculate_risk(row[1], row[2])
+    risk = await create_risk(plan["id"], row[0], row[1], row[2], rating, severity, row[3], row[4])
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""INSERT INTO bcp_global_risk_assignment
+                (global_risk_id, company_id, risk_id) VALUES (%s, %s, %s)""",
+                (global_risk_id, company_id, risk["id"]))
+            await conn.commit()
+    return True
+
+
+async def assign_global_bia(global_bia_id: int, company_id: int) -> bool:
+    """Copy a library BIA assessment and its impact details into a customer plan."""
+    existing = await list_global_bia_assessments(company_id)
+    template = next((item for item in existing if item["id"] == global_bia_id), None)
+    if not template or template["assigned"]:
+        return False
+    plan = await get_plan_by_company(company_id)
+    if not plan:
+        plan = await create_plan(company_id)
+    activity = await create_critical_activity(
+        plan["id"], template["name"], template["description"], template["priority"],
+        template["supplier_dependency"], template["importance"], template["notes"])
+    impact_keys = ("losses_financial", "losses_increased_costs", "losses_staffing",
+                   "losses_product_service", "losses_reputation", "fines", "legal_liability",
+                   "rto_hours", "losses_comments")
+    if any(template[key] is not None for key in impact_keys):
+        await create_or_update_impact(activity["id"], *(template[key] for key in impact_keys))
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""INSERT INTO bcp_global_bia_assignment
+                (global_bia_id, company_id, critical_activity_id) VALUES (%s, %s, %s)""",
+                (global_bia_id, company_id, activity["id"]))
+            await conn.commit()
+    return True
+
+
+async def delete_global_assessment(kind: str, assessment_id: int) -> bool:
+    if kind == "risk":
+        query = "DELETE FROM bcp_global_risk WHERE id = %s"
+    elif kind == "bia":
+        query = "DELETE FROM bcp_global_bia WHERE id = %s"
+    else:
+        return False
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (assessment_id,))
+            await conn.commit()
+            return cursor.rowcount > 0

@@ -18,9 +18,11 @@ from app.repositories import tray as tray_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import site_settings as site_settings_repo
 from app.repositories import users as user_repo
-from app.security.encryption import decrypt_secret, encrypt_secret
+from app.security.encryption import encrypt_secret
 from app.security.session import SessionData
+from app.services import chat_access
 from app.services import matrix as matrix_service
+from app.services import role_switching
 from app.services import tray as tray_service
 from app.services import matrix_ai_waiting_assistant
 from app.core.logging import log_error, log_info
@@ -62,6 +64,9 @@ async def chat_index(
     current_user = await user_repo.get_user_by_id(session.user_id)
     if not current_user:
         return RedirectResponse("/login", status_code=303)
+    current_user = await role_switching.apply_selected_role(request, current_user, session)
+    if current_user.get("company_id") is None and session.active_company_id is not None:
+        current_user["company_id"] = session.active_company_id
 
     is_super_admin = bool(current_user.get("is_super_admin"))
     is_helpdesk = bool(current_user.get("is_helpdesk_technician"))
@@ -69,7 +74,10 @@ async def chat_index(
     if not is_super_admin and not is_helpdesk:
         membership = None
         if company_id is not None:
-            membership = await user_company_repo.get_user_company(current_user["id"], int(company_id))
+            membership = role_switching.effective_membership(
+                request,
+                await user_company_repo.get_user_company(current_user["id"], int(company_id)),
+            )
         can_access = bool(membership and membership.get("can_access_chat"))
         company = None
         if can_access and company_id is not None:
@@ -127,7 +135,7 @@ async def chat_room_page(
         return RedirectResponse("/login", status_code=303)
 
     room = await chat_repo.get_room(room_id)
-    if not room:
+    if not room or not await chat_access.can_access_room(room, current_user):
         raise HTTPException(status_code=404, detail="Chat room not found")
 
     messages = await chat_repo.get_messages(room_id, limit=50)
@@ -281,7 +289,9 @@ async def tray_chat_popup(
     chat_room: dict[str, Any] | None = None
     if resolved_room_id:
         chat_room = await chat_repo.get_room(int(resolved_room_id))
-        if not chat_room:
+        from app.api.routes.tray import room_accessible_to_device
+
+        if not chat_room or not room_accessible_to_device(chat_room, device):
             raise HTTPException(status_code=404, detail="Chat room not found")
         if chat_room.get("status") != "open":
             raise HTTPException(status_code=409, detail="Chat room is closed")
@@ -319,8 +329,13 @@ async def tray_chat_popup(
         try:
             from app.api.routes.tray import _attach_room_to_device as _attach
             await _attach(room_id_new, device_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_error(
+                "tray_chat_popup: failed to attach room to device",
+                room_id=room_id_new,
+                device_id=device_id,
+                error=str(exc),
+            )
 
         # Apply auto-assign rules.
         try:
@@ -407,9 +422,6 @@ def _render_popup(
     branding_display_name: str | None = None,
 ) -> str:
     """Render the standalone popup HTML using the Jinja2 template."""
-    from jinja2 import Environment, PackageLoader, select_autoescape
-    from app.core.config import get_settings
-
     # Lazy-load the template from the app's templates directory.
     import os
 

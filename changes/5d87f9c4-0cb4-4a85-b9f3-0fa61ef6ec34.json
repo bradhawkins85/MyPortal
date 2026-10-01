@@ -1,0 +1,7 @@
+{
+  "guid": "5d87f9c4-0cb4-4a85-b9f3-0fa61ef6ec34",
+  "occurred_at": "2026-09-26T00:00Z",
+  "change_type": "Feature",
+  "summary": "Added credential lifecycle metadata and secure maintenance actions.",
+  "content_hash": "039d41b7eb60e1402f6732ec9326db1839de6fa32e5e003415d34aa8ebc12d11"
+}

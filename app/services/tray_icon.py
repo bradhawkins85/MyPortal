@@ -157,7 +157,7 @@ def _extract_png_from_ico(data: bytes) -> Optional[bytes]:
         if img_data[:8] == _PNG_MAGIC:
             return img_data
     except struct.error:
-        pass
+        return None
     return None
 
 
@@ -191,7 +191,7 @@ async def get_tray_icon_bytes(uploads_root: Path) -> bytes:
                 if is_valid_ico(data):
                     return data
         except OSError:
-            pass
+            return build_default_icon_bytes()
     return build_default_icon_bytes()
 
 
@@ -222,7 +222,7 @@ async def get_tray_icon_png_bytes(uploads_root: Path) -> bytes:
                     if png is not None:
                         return png
         except OSError:
-            pass
+            return build_default_png_bytes()
     return build_default_png_bytes()
 
 

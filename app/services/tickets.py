@@ -8,7 +8,9 @@ from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping as MappingABC, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from importlib import import_module
 from typing import Any, Iterable, Sequence
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from app.core.config import get_settings
 from app.core.database import db
@@ -19,14 +21,50 @@ from app.repositories import company_memberships as membership_repo
 from app.repositories import ticket_statuses as ticket_status_repo
 from app.repositories import staff as staff_repo
 from app.repositories.tickets import TicketRecord
-from app.services import automations as automations_service
+from app.services import automation_dispatch as automations_service
+from app.services import module_dispatch as modules_service
+from app.services.ai_prompt_security import UntrustedRecord, build_prompt
 from app.repositories import users as user_repo
-from app.services import modules as modules_service
 from app.services.tagging import filter_helpful_slugs, get_all_excluded_tags, is_helpful_slug, slugify_tag
 from app.services.sanitization import sanitize_rich_text
 from app.services.realtime import RefreshNotifier, refresh_notifier
 
 HELPDESK_PERMISSION_KEY = "helpdesk.technician"
+# Ticket assignment is more restrictive than general ticket access.  The
+# Technician Yes/No role setting maps to this legacy permission.
+TICKET_ASSIGNEE_PERMISSION_KEY = "company.switch_all"
+
+
+def parse_company_id(value: object) -> int | None:
+    """Return a positive company ID, or ``None`` for an invalid selection.
+
+    Callers must treat ``None`` as no active selection and still apply their
+    accessible-company checks rather than granting access.
+    """
+    try:
+        company_id = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return company_id if company_id > 0 else None
+
+
+def reply_assignment_error(ticket: Mapping[str, Any], *, is_internal: bool) -> str | None:
+    """Return the assignment validation error that prevents a ticket reply."""
+    has_company = ticket.get("company_id") is not None
+    # Staff requesters do not necessarily have a portal user account, so their
+    # assignment is stored in requester_staff_id rather than requester_id.
+    has_requester = (
+        ticket.get("requester_id") is not None
+        or ticket.get("requester_staff_id") is not None
+    )
+    if not has_company and not is_internal and not has_requester:
+        return "Set a Company and Requester before sending a public reply."
+    if not has_company:
+        action = "adding an internal note" if is_internal else "sending a public reply"
+        return f"Set a Company before {action}."
+    if not is_internal and not has_requester:
+        return "Set a Requester before sending a public reply."
+    return None
 
 _REPLY_ABOVE_PATTERN = re.compile(
     r"^-{3,}\s*reply\s+above\s+this\s+line\s+to\s+add\s+a\s+comment\s*-{0,}\s*$",
@@ -79,6 +117,14 @@ _TAGS_PROMPT_HEADER = (
     "Tags must describe the customer-reported issues, affected systems, impacted users, and requested actions. "
     "Do not use technician replies, internal notes, automated assistant replies, or support-side troubleshooting steps as tag evidence. "
     "Respond ONLY with JSON shaped as {\"tags\": [\"tag-one\", \"tag-two\", ...]} using lowercase kebab-case tags."
+)
+
+_RESOLUTION_PROMPT_HEADER = (
+    "You create concise, reusable resolution outlines for completed helpdesk tickets. "
+    "Return only JSON shaped as {\"resolution_steps\": \"<ul><li>...</li></ul>\"}. "
+    "Use a short ordered or unordered list of the actions that actually produced the final resolution. "
+    "Entries explicitly marked as resolution steps are high-value evidence, but consider all ticket context. "
+    "Do not invent actions, credentials, or results."
 )
 
 _DEFAULT_TAG_FILL = [
@@ -361,6 +407,80 @@ def format_reply_time_summary(
     return summary
 
 
+def build_booking_link_url(
+    base_url: str | None,
+    *,
+    ticket_id: int | str | None,
+    ticket_number: str | int | None = None,
+    ticket_subject: str | None = None,
+    user_name: str | None = None,
+    user_email: str | None = None,
+    user_phone: str | None = None,
+    ticket_url: str | None = None,
+) -> str | None:
+    """Return a provider-aware booking URL with safe prefills when supported."""
+
+    candidate = str(base_url or "").strip()
+    if not candidate:
+        return None
+
+    parsed = urlsplit(candidate)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return candidate
+
+    host = (parsed.hostname or "").lower()
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+
+    identifier = str(ticket_number or ticket_id or "").strip()
+    subject = str(ticket_subject or "").strip()
+    name = str(user_name or "").strip()
+    email = str(user_email or "").strip()
+    phone = str(user_phone or "").strip()
+    ticket_url_value = str(ticket_url or "").strip()
+
+    note_parts: list[str] = []
+    if identifier and subject:
+        note_parts.append(f"Ticket #{identifier} - {subject}")
+    elif identifier:
+        note_parts.append(f"Ticket #{identifier}")
+    if ticket_url_value:
+        note_parts.append(f"Ticket URL: {ticket_url_value}")
+    notes = "\n\n".join(note_parts)
+
+    def _set_if_value(key: str, value: str) -> None:
+        if value:
+            query[key] = value
+
+    if host in {"cal.com", "app.cal.com"}:
+        _set_if_value("name", name)
+        _set_if_value("email", email)
+        _set_if_value("phone", phone)
+        _set_if_value("TicketNumber", identifier)
+        _set_if_value(
+            "title",
+            f"{identifier} - {subject}" if identifier and subject else identifier,
+        )
+        _set_if_value("TicketURL", ticket_url_value)
+        _set_if_value("notes", notes)
+    elif host == "calendly.com" or host.endswith(".calendly.com"):
+        _set_if_value("name", name)
+        _set_if_value("email", email)
+        _set_if_value(
+            "a1",
+            f"Ticket #{identifier} - {subject}" if identifier and subject else identifier,
+        )
+        _set_if_value("a2", ticket_url_value)
+    elif (
+        host in {"book.ms", "bookings.microsoft.com"}
+        or host.endswith(".bookings.microsoft.com")
+        or host == "outlook.office.com"
+        or host.endswith(".outlook.office.com")
+    ):
+        _set_if_value("name", name)
+        _set_if_value("email", email)
+    return parsed._replace(query=urlencode(query, doseq=True)).geturl()
+
+
 async def update_ticket_description(
     ticket_id: int, description: str | None
 ) -> TicketRecord | None:
@@ -570,6 +690,7 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
             replies = [record for record in fetched_replies if isinstance(record, Mapping)]
 
     latest_reply: dict[str, Any] | None = None
+    latest_customer_reply: dict[str, Any] | None = None
     initial_body: str | None = None
     if replies:
         for reply_record in replies:
@@ -582,20 +703,45 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
             break
         requester_id = enriched.get("requester_id")
         assigned_user_id = enriched.get("assigned_user_id")
+        customer_author_ids = {
+            value
+            for value in [requester_id, *(watcher.get("user_id") for watcher in watcher_entries)]
+            if value is not None
+        }
+        customer_author_emails = {
+            str(value).strip().casefold()
+            for value in [enriched.get("requester_email"), *watcher_emails]
+            if value and str(value).strip()
+        }
         technician_reply: Mapping[str, Any] | None = None
         technician_author: Mapping[str, Any] | None = None
+        customer_reply: Mapping[str, Any] | None = None
+        customer_author: Mapping[str, Any] | None = None
         for reply_record in reversed(replies):
             if bool(reply_record.get("is_internal")):
                 continue
             author_id = reply_record.get("author_id")
-            if author_id is None or author_id == requester_id:
-                continue
             author_value = (
                 reply_record.get("author")
                 if isinstance(reply_record.get("author"), Mapping)
                 else None
             )
             author_user = await _resolve_user_snapshot(author_value, author_id)
+            author_email = (
+                author_user.get("email") if author_user else reply_record.get("author_email")
+            )
+            normalised_author_email = (
+                str(author_email).strip().casefold() if author_email else None
+            )
+            if customer_reply is None and (
+                author_id in customer_author_ids
+                or normalised_author_email in customer_author_emails
+            ):
+                customer_reply = reply_record
+                customer_author = author_user
+
+            if technician_reply is not None or author_id is None or author_id == requester_id:
+                continue
             permissions = author_user.get("permissions") if author_user else []
             if isinstance(permissions, str):
                 permissions = [permissions]
@@ -607,6 +753,7 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
             if is_technician:
                 technician_reply = reply_record
                 technician_author = author_user
+            if technician_reply is not None and customer_reply is not None:
                 break
         if technician_reply is not None:
             reply = dict(technician_reply)
@@ -617,7 +764,17 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
             reply["author_email"] = snapshot_email or reply.get("author_email")
             reply["author_display_name"] = snapshot_display or reply.get("author_display_name")
             latest_reply = reply
+        if customer_reply is not None:
+            reply = dict(customer_reply)
+            author_snapshot = _build_user_snapshot(customer_author)
+            reply["author"] = author_snapshot
+            snapshot_email = author_snapshot.get("email") if author_snapshot else None
+            snapshot_display = author_snapshot.get("display_name") if author_snapshot else None
+            reply["author_email"] = snapshot_email or reply.get("author_email")
+            reply["author_display_name"] = snapshot_display or reply.get("author_display_name")
+            latest_customer_reply = reply
     enriched["latest_reply"] = latest_reply
+    enriched["latest_customer_reply"] = latest_customer_reply
     if initial_body is None and enriched.get("description") is not None:
         initial_body = str(enriched.get("description"))
     enriched["initial_body"] = initial_body or ""
@@ -1124,6 +1281,95 @@ async def refresh_ticket_ai_summary(ticket_id: int) -> None:
         await emit_ticket_updated_event(ticket_id, actor_type="system")
 
 
+def _extract_resolution_steps(payload: Any) -> str | None:
+    """Extract and sanitise resolution HTML from an LLM response."""
+    value: Any = _extract_chat_completion_content(payload)
+    if isinstance(value, str):
+        candidate = value.strip().removeprefix("```json").removesuffix("```").strip()
+        try:
+            value = json.loads(candidate)
+        except (TypeError, ValueError):
+            value = candidate
+    if isinstance(value, Mapping):
+        value = value.get("resolution_steps") or value.get("resolution")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    sanitized = sanitize_rich_text(value)
+    return sanitized.html if sanitized.has_rich_content else None
+
+
+def _render_resolution_prompt(
+    ticket: Mapping[str, Any], replies: list[Mapping[str, Any]]
+) -> str:
+    ticket_id = str(ticket.get("id") or "unknown")
+    records = [UntrustedRecord(
+        f"ticket:{ticket_id}", "resolved helpdesk ticket",
+        {"subject": str(ticket.get("subject") or ""),
+         "description": _prepare_prompt_text(ticket.get("description")),
+         "status": str(ticket.get("status") or "")},
+        "Use as overall issue context",
+    )]
+    # Preserve every explicitly selected entry, then add recent context without duplicates.
+    included_replies = [reply for reply in replies if not reply.get("is_not_resolution_step")]
+    selected = [reply for reply in included_replies if reply.get("is_resolution_step")]
+    selected_ids = {reply.get("id") for reply in selected}
+    context = selected + [reply for reply in included_replies[-16:] if reply.get("id") not in selected_ids]
+    for reply in context:
+        reply_id = str(reply.get("id") or "unknown")
+        records.append(UntrustedRecord(
+            f"ticket-reply:{reply_id}",
+            "FLAGGED RESOLUTION STEP" if reply.get("is_resolution_step") else "conversation entry",
+            {"body": _prepare_prompt_text(reply.get("body")),
+             "internal": bool(reply.get("is_internal"))},
+            "Treat as high-value resolution evidence" if reply.get("is_resolution_step") else "Use when relevant",
+        ))
+    return _limit_ai_prompt(build_prompt(
+        _RESOLUTION_PROMPT_HEADER, records,
+        task="Identify the final successful actions and return exactly the requested JSON.",
+    ))
+
+
+async def refresh_ticket_resolution_steps(ticket_id: int) -> None:
+    """Generate resolution steps without allowing provider failures to affect resolution."""
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket or str(ticket.get("status") or "").casefold() not in {"resolved", "closed"}:
+        return
+    replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
+    now = datetime.now(timezone.utc)
+    await tickets_repo.update_ticket(
+        ticket_id, resolution_steps_status="queued", resolution_steps_updated_at=now
+    )
+
+    async def _apply_result(result: Mapping[str, Any]) -> None:
+        status_value = str(result.get("status") or result.get("event_status") or "unknown")
+        steps = _extract_resolution_steps(result.get("response")) if status_value == "succeeded" else None
+        fields: dict[str, Any] = {
+            "resolution_steps_status": "succeeded" if steps else ("error" if status_value == "succeeded" else status_value),
+            "resolution_steps_model": str(result.get("model") or "") or None,
+            "resolution_steps_updated_at": datetime.now(timezone.utc),
+        }
+        if steps:
+            fields.update(resolution_steps=steps, resolution_steps_source="ai_generated")
+        await tickets_repo.update_ticket(ticket_id, **fields)
+        from app.services import rag_outbox
+        await rag_outbox.enqueue("tickets", ticket_id)
+        await emit_ticket_updated_event(ticket_id, actor_type="system")
+
+    try:
+        response = await modules_service.trigger_module(
+            "ollama", {"prompt": _render_resolution_prompt(ticket, replies)}, on_complete=_apply_result
+        )
+        if str(response.get("status") or "") == "skipped":
+            await tickets_repo.update_ticket(
+                ticket_id, resolution_steps_status="skipped", resolution_steps_updated_at=now
+            )
+    except Exception as exc:  # pragma: no cover - provider/network failure
+        log_error("Ticket resolution generation failed", ticket_id=ticket_id, error=str(exc))
+        await tickets_repo.update_ticket(
+            ticket_id, resolution_steps_status="error", resolution_steps_updated_at=now
+        )
+
+
 async def refresh_ticket_ai_tags(ticket_id: int) -> None:
     """Refresh the Ollama-generated tags for a ticket if the module is configured."""
 
@@ -1235,6 +1481,8 @@ async def _send_ticket_creation_email(
     preventing the platform notification service or fallback email sender from
     producing default messages such as ``MyPortal notification: Your ticket``.
     """
+    _ = enriched_ticket
+    _ = requester_email_fallback
     return None
 
 
@@ -1263,6 +1511,7 @@ async def create_ticket(
 ) -> TicketRecord:
     """Create a ticket and emit the corresponding automation event."""
 
+    _ = send_creation_notification
     status_slug = await resolve_status_or_default(status)
 
     original_description: str | None = None
@@ -1373,18 +1622,13 @@ def _render_prompt(
     status_value = str(ticket.get("status") or "open")
     priority_value = str(ticket.get("priority") or "normal")
 
-    lines: list[str] = [_PROMPT_HEADER, "", f"Ticket subject: {subject}"]
-    lines.append(f"Ticket status: {status_value}")
-    lines.append(f"Ticket priority: {priority_value}")
-    lines.append("Ticket description:")
-    lines.append(description)
-    lines.append("")
-    lines.append("Conversation history (newest first):")
+    ticket_id = str(ticket.get("id") or "unknown")
+    records = [UntrustedRecord(f"ticket:{ticket_id}", "helpdesk ticket", {"subject": subject, "status": status_value, "priority": priority_value, "description": description}, "Use only to summarize the reported issue and resolution state")]
 
     trimmed = list(replies[-12:])
     trimmed.reverse()
     if not trimmed:
-        lines.append("- No replies have been posted yet.")
+        pass
     else:
         for reply in trimmed:
             created_at = reply.get("created_at")
@@ -1397,13 +1641,9 @@ def _render_prompt(
             author_label = str(author_record.get("email") or author_record.get("first_name") or "User") if author_record else "User"
             visibility = "internal note" if reply.get("is_internal") else "public reply"
             body_text = _prepare_prompt_text(reply.get("body"))
-            lines.append(f"- {timestamp} • {author_label} ({visibility}): {body_text}")
-
-    lines.append("")
-    lines.append(
-        "Respond with JSON like {\"summary\": \"concise summary\", \"resolution\": \"Likely In Progress\"}."
-    )
-    return _limit_ai_prompt("\n".join(lines))
+            reply_id = str(reply.get("id") or f"{ticket_id}-{timestamp}")
+            records.append(UntrustedRecord(f"ticket-reply:{reply_id}", f"helpdesk {visibility} by {author_label}", {"created_at": timestamp, "body": body_text}, "Use only as chronological evidence about the ticket and whether it was resolved"))
+    return _limit_ai_prompt(build_prompt(_PROMPT_HEADER, records, task="Return exactly a JSON object with summary and resolution."))
 
 
 def _is_customer_tag_reply(
@@ -1451,21 +1691,14 @@ def _render_tags_prompt(
     category_value = str(ticket.get("category") or "uncategorised")
     module_value = str(ticket.get("module_slug") or "general")
 
-    lines: list[str] = [_TAGS_PROMPT_HEADER, "", f"Ticket subject: {subject}"]
-    lines.append(f"Ticket status: {status_value}")
-    lines.append(f"Ticket priority: {priority_value}")
-    lines.append(f"Ticket category: {category_value}")
-    lines.append(f"Ticket module: {module_value}")
-    lines.append("Ticket description:")
-    lines.append(description)
-    lines.append("")
-    lines.append("Customer conversation highlights (newest first):")
+    ticket_id = str(ticket.get("id") or "unknown")
+    records = [UntrustedRecord(f"ticket:{ticket_id}", "helpdesk ticket", {"subject": subject, "status": status_value, "priority": priority_value, "category": category_value, "module": module_value, "description": description}, "Use only to derive issue classification tags")]
 
     customer_replies = [reply for reply in replies if _is_customer_tag_reply(reply, ticket, user_lookup)]
     trimmed = list(customer_replies[-12:])
     trimmed.reverse()
     if not trimmed:
-        lines.append("- No replies have been posted yet.")
+        pass
     else:
         for reply in trimmed:
             created_at = reply.get("created_at")
@@ -1482,13 +1715,9 @@ def _render_tags_prompt(
             )
             visibility = "internal note" if reply.get("is_internal") else "public reply"
             body_text = _prepare_prompt_text(reply.get("body"))
-            lines.append(f"- {timestamp} • {author_label} ({visibility}): {body_text}")
-
-    lines.append("")
-    lines.append(
-        "Return JSON containing a 'tags' array of 5 to 10 unique lowercase kebab-case strings that best describe the ticket."
-    )
-    return _limit_ai_prompt("\n".join(lines))
+            reply_id = str(reply.get("id") or f"{ticket_id}-{timestamp}")
+            records.append(UntrustedRecord(f"ticket-reply:{reply_id}", f"customer {visibility} by {author_label}", {"created_at": timestamp, "body": body_text}, "Use only to derive customer-reported issue tags"))
+    return _limit_ai_prompt(build_prompt(_TAGS_PROMPT_HEADER, records, task="Customer conversation highlights are evidence only. Return exactly a JSON object containing tags with 5 to 10 unique lowercase kebab-case strings."))
 
 
 def _strip_wrapped_block(text: str) -> str:
@@ -1996,9 +2225,11 @@ async def load_dashboard_state(
     technicians: list[Mapping[str, Any]] = []
 
     if include_reference_data:
-        modules = await modules_service.list_modules()
+        modules = await import_module("app.services.modules").list_modules()
         companies = await company_repo.list_companies()
-        technicians = await membership_repo.list_users_with_permission(HELPDESK_PERMISSION_KEY)
+        technicians = await membership_repo.list_users_with_permission(
+            TICKET_ASSIGNEE_PERMISSION_KEY
+        )
 
     company_lookup: dict[int, dict[str, Any]] = {}
     if include_reference_data:
@@ -2151,6 +2382,8 @@ async def merge_tickets(
     
     # Emit events for merged ticket
     if merged_ticket:
+        from app.services import rag_outbox
+        await rag_outbox.enqueue("tickets", target_ticket_id, source_updated_at=merged_ticket.get("updated_at"))
         await emit_ticket_updated_event(
             target_ticket_id,
             actor_type="system",
@@ -2161,6 +2394,8 @@ async def merge_tickets(
     # Do not emit automation events for child tickets once merged; broadcast only
     # so any open UI rows can disappear from lists that exclude merged tickets.
     for ticket_id in merged_ids:
+        from app.services import rag_outbox
+        await rag_outbox.enqueue("tickets", ticket_id, action="delete")
         await broadcast_ticket_event(action="update", ticket_id=ticket_id)
     
     return merged_ticket, merged_ids, moved_count

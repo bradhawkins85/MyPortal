@@ -4,18 +4,22 @@
 
   const grid = app.querySelector('[data-dashboard-grid]');
   const source = app.querySelector('[data-dashboard-source]');
-  const toolbar = app.querySelector('[data-dashboard-toolbar]');
   const dialog = document.querySelector('[data-dashboard-builder]');
   const builderForm = dialog?.querySelector('form');
   const file = document.querySelector('[data-dashboard-file]');
   let state;
   let catalog;
   let editable = false;
+  let canEdit = false;
   let canAssign = false;
   let dragged;
   let editingId = null;
   let dirty = false;
-  const saveButton = app.querySelector('[data-dashboard-save]');
+  const editButton = document.querySelector('[data-dashboard-edit-layout]');
+  const assignButton = document.querySelector('[data-dashboard-assign]');
+  const editActions = Array.from(document.querySelectorAll('[data-dashboard-add], [data-dashboard-import], [data-dashboard-save]'));
+  const saveButton = document.querySelector('[data-dashboard-save]');
+  const exportButton = document.querySelector('[data-dashboard-export]');
 
   const esc = value => String(value ?? '').replace(/[&<>"']/g, character => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -72,9 +76,23 @@
     return `<div class="dashboard-chart-wrap"><svg class="dashboard-chart" viewBox="0 0 100 85" role="img" aria-label="${esc(panel.title)} ${esc(panel.chart)} graph">${marks}</svg><div class="dashboard-chart__legend" aria-label="Graph legend">${legend}</div></div>`;
   }
 
+  function setToolbarVisibility() {
+    if (editButton) {
+      editButton.hidden = !canEdit;
+      editButton.textContent = editable ? 'Finish Editing' : 'Edit Layout';
+      editButton.setAttribute('aria-pressed', String(editable));
+    }
+    editActions.forEach(button => {
+      button.hidden = !editable;
+      button.disabled = !editable || (button === saveButton && !dirty);
+    });
+    if (exportButton) exportButton.hidden = !canEdit;
+    if (assignButton) assignButton.hidden = !canAssign;
+  }
+
   function setDirty(value = true) {
     dirty = value;
-    if (saveButton) saveButton.disabled = !editable || !dirty;
+    setToolbarVisibility();
   }
 
   const automaticHeights = new Map();
@@ -120,6 +138,12 @@
     return `<div class="dashboard-panel__table-wrap"><table class="dashboard-panel__table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
+  function statStrip(panel) {
+    const items = panel.stat_strip_data || [];
+    if (!items.length) return '<p>No stat strip data.</p>';
+    return `<div class="stat-strip dashboard-panel__stat-strip">${items.map(item => `<div class="stat-strip__stat stat-strip__stat--${esc(item.variant || 'neutral')}"><span class="stat-strip__stat-label">${esc(item.label)}</span><span class="stat-strip__stat-value">${esc(item.value)}</span></div>`).join('')}</div>`;
+  }
+
   function render() {
     grid.innerHTML = '';
     state.panels.forEach(panel => {
@@ -139,6 +163,7 @@
       if (panel.error) body = `<p class="error">${esc(panel.error)}</p>`;
       else if (panel.type === 'link') body = `<a class="dashboard-panel__link" href="${esc(panel.url)}"><span class="button">${esc(panel.label)}</span></a>`;
       else if (panel.type === 'graph') body = chart(panel);
+      else if (panel.type === 'stat_strip') body = statStrip(panel);
       else if (panel.table_data) body = table(panel);
       else if (Array.isArray(panel.value)) body = `<ul class="dashboard-panel__list">${panel.value.map(value => `<li>${esc(value)}</li>`).join('')}</ul>`;
       else body = `<div class="dashboard-panel__value">${esc(panel.value)}</div>`;
@@ -212,7 +237,7 @@
   function updateBuilderVisibility() {
     const type = builderForm.elements.type.value;
     const func = builderForm.elements.function.value;
-    dialog.querySelector('[data-panel-report]').hidden = !['stat', 'graph'].includes(type);
+    dialog.querySelector('[data-panel-report]').hidden = !['stat', 'stat_strip', 'graph'].includes(type);
     dialog.querySelector('[data-panel-function]').hidden = type !== 'stat';
     dialog.querySelector('[data-panel-detail-report]').hidden = type !== 'stat';
     dialog.querySelector('[data-panel-count-colours]').hidden = type !== 'stat' || func !== 'count';
@@ -248,24 +273,13 @@
     try {
       const data = await api('/api/dashboard');
       state = data.layout;
-      editable = data.editable;
+      canEdit = data.editable;
+      editable = false;
       canAssign = data.can_assign_company;
-      toolbar.hidden = !editable;
-      if (canAssign && !toolbar.querySelector('[data-dashboard-assign]')) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'button button--secondary';
-        button.dataset.dashboardAssign = '';
-        button.textContent = 'Assign to company';
-        button.addEventListener('click', async () => {
-          const id = prompt('Company ID to receive this layout');
-          if (id) await api(`/api/dashboard/companies/${encodeURIComponent(id)}`, {method: 'PUT', body: JSON.stringify(state)});
-        });
-        toolbar.prepend(button);
-      }
+      setToolbarVisibility();
       source.textContent = `${state.title} · ${data.source} layout`;
       // Populate the builder before exposing edit controls for existing panels.
-      if (editable) catalog = await api('/api/dashboard/catalog');
+      if (canEdit) catalog = await api('/api/dashboard/catalog');
       render();
       setDirty(false);
     } catch (error) {
@@ -278,19 +292,28 @@
     state = data.layout;
   }
 
-  app.querySelector('[data-dashboard-save]')?.addEventListener('click', async () => {
+  editButton?.addEventListener('click', () => {
+    editable = !editable;
+    setToolbarVisibility();
+    render();
+  });
+  assignButton?.addEventListener('click', async () => {
+    const id = prompt('Company ID to receive this layout');
+    if (id) await api(`/api/dashboard/companies/${encodeURIComponent(id)}`, {method: 'PUT', body: JSON.stringify(state)});
+  });
+  saveButton?.addEventListener('click', async () => {
     await api('/api/dashboard', {method: 'PUT', body: JSON.stringify(state)});
     source.textContent = `${state.title} · personal layout saved`;
     setDirty(false);
   });
-  app.querySelector('[data-dashboard-export]')?.addEventListener('click', () => {
+  exportButton?.addEventListener('click', () => {
     const anchor = document.createElement('a');
     anchor.href = URL.createObjectURL(new Blob([JSON.stringify(state, null, 2)], {type: 'application/json'}));
     anchor.download = 'myportal-dashboard.json';
     anchor.click();
     URL.revokeObjectURL(anchor.href);
   });
-  app.querySelector('[data-dashboard-import]')?.addEventListener('click', () => file.click());
+  document.querySelector('[data-dashboard-import]')?.addEventListener('click', () => file.click());
   file?.addEventListener('change', async () => {
     try {
       state = JSON.parse(await file.files[0].text());
@@ -301,7 +324,7 @@
       alert(`Invalid dashboard JSON: ${error.message}`);
     }
   });
-  app.querySelector('[data-dashboard-add]')?.addEventListener('click', () => openBuilder());
+  document.querySelector('[data-dashboard-add]')?.addEventListener('click', () => openBuilder());
   builderForm?.elements.type.addEventListener('change', updateBuilderVisibility);
   builderForm?.elements.function.addEventListener('change', updateBuilderVisibility);
   dialog?.querySelector('[data-panel-confirm]').addEventListener('click', async event => {
@@ -327,6 +350,7 @@
       compare_value: Number(form.get('compare_value')), less_colour: form.get('less_colour'),
       equal_colour: form.get('equal_colour'), greater_colour: form.get('greater_colour')
     });
+    if (type === 'stat_strip') panel.report = form.get('report');
     if (type === 'graph') Object.assign(panel, {report: form.get('report'), chart: form.get('chart')});
     if (previous) state.panels[state.panels.indexOf(previous)] = panel;
     else state.panels.push(panel);

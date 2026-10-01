@@ -19,10 +19,21 @@ def _make_aware(value: Any) -> datetime | None:
 
 def _normalise_account(row: dict[str, Any]) -> dict[str, Any]:
     account = dict(row)
-    for key in ("id", "company_id", "scheduled_task_id", "priority"):
+    for key in (
+        "id", "company_id", "auth_company_id", "auth_connection_id",
+        "scheduled_task_id", "priority",
+    ):
         if key in account and account[key] is not None:
             account[key] = int(account[key])
-    for key in ("process_unread_only", "mark_as_read", "sync_known_only", "active"):
+    for key in (
+        "process_unread_only",
+        "mark_as_read",
+        "delete_after_import",
+        "sync_known_only",
+        "active",
+        "app_fallback_enabled",
+        "mailbox_app_authorized",
+    ):
         if key in account:
             account[key] = bool(int(account[key]))
     for key in ("last_synced_at", "token_expires_at", "created_at", "updated_at"):
@@ -60,15 +71,37 @@ async def get_account(account_id: int) -> dict[str, Any] | None:
     return _normalise_account(row) if row else None
 
 
-async def get_dmarc_account(*, exclude_account_id: int | None = None) -> dict[str, Any] | None:
+async def get_dmarc_account(
+    *, company_id: int | None = None, exclude_account_id: int | None = None
+) -> dict[str, Any] | None:
     sql = "SELECT * FROM m365_mail_accounts WHERE import_purpose = 'dmarc'"
-    params: tuple[Any, ...] = ()
+    params: list[Any] = []
+    if company_id is not None:
+        sql += " AND company_id = %s"
+        params.append(company_id)
     if exclude_account_id is not None:
         sql += " AND id <> %s"
-        params = (exclude_account_id,)
+        params.append(exclude_account_id)
     sql += " ORDER BY active DESC, id ASC LIMIT 1"
-    row = await db.fetch_one(sql, params)
+    row = await db.fetch_one(sql, tuple(params))
     return _normalise_account(row) if row else None
+
+
+async def list_dmarc_accounts(*, company_id: int | None = None) -> list[dict[str, Any]]:
+    """Return DMARC mailboxes, including global accounts when company scoped."""
+    sql = """
+        SELECT * FROM m365_mail_accounts
+        WHERE import_purpose = 'dmarc'
+    """
+    params: tuple[Any, ...]
+    if company_id is None:
+        params = ()
+    else:
+        sql += " AND (company_id = %s OR company_id IS NULL)"
+        params = (company_id,)
+    sql += " ORDER BY active DESC, priority ASC, name ASC, id ASC"
+    rows = await db.fetch_all(sql, params)
+    return [_normalise_account(row) for row in rows]
 
 
 async def create_account(
@@ -82,6 +115,7 @@ async def create_account(
     filter_query: str | None,
     process_unread_only: bool,
     mark_as_read: bool,
+    delete_after_import: bool,
     sync_known_only: bool,
     active: bool,
     scheduled_task_id: int | None = None,
@@ -98,6 +132,7 @@ async def create_account(
             folder,
             process_unread_only,
             mark_as_read,
+            delete_after_import,
             sync_known_only,
             schedule_cron,
             filter_query,
@@ -105,7 +140,7 @@ async def create_account(
             scheduled_task_id,
             priority,
             import_purpose
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -115,6 +150,7 @@ async def create_account(
             folder,
             1 if process_unread_only else 0,
             1 if mark_as_read else 0,
+            1 if delete_after_import else 0,
             1 if sync_known_only else 0,
             schedule_cron,
             filter_query,
@@ -133,30 +169,51 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
         return await get_account(account_id)
     assignments: list[str] = []
     params: list[Any] = []
+    allowed = {
+        "name",
+        "company_id",
+        "tenant_id",
+        "auth_company_id",
+        "auth_connection_id",
+        "auth_tenant_id",
+        "auth_binding_status",
+        "app_fallback_enabled",
+        "mailbox_app_authorized",
+        "user_principal_name",
+        "mailbox_type",
+        "folder",
+        "schedule_cron",
+        "filter_query",
+        "process_unread_only",
+        "mark_as_read",
+        "delete_after_import",
+        "sync_known_only",
+        "active",
+        "scheduled_task_id",
+        "last_synced_at",
+        "priority",
+        "import_purpose",
+        "refresh_token",
+        "access_token",
+        "token_expires_at",
+        "oauth_client_id", "oauth_authority", "oauth_account_id", "oauth_scopes",
+        "oauth_connection_version",
+    }
+    unknown = set(fields) - allowed
+    if unknown:
+        raise ValueError(
+            f"Unsupported Microsoft 365 mail account fields: {', '.join(sorted(unknown))}"
+        )
     for key, value in fields.items():
-        if key not in {
-            "name",
-            "company_id",
-            "tenant_id",
-            "user_principal_name",
-            "mailbox_type",
-            "folder",
-            "schedule_cron",
-            "filter_query",
+        if key in {
             "process_unread_only",
             "mark_as_read",
+            "delete_after_import",
             "sync_known_only",
             "active",
-            "scheduled_task_id",
-            "last_synced_at",
-            "priority",
-            "import_purpose",
-            "refresh_token",
-            "access_token",
-            "token_expires_at",
+            "app_fallback_enabled",
+            "mailbox_app_authorized",
         }:
-            continue
-        if key in {"process_unread_only", "mark_as_read", "sync_known_only", "active"}:
             assignments.append(f"{key} = %s")
             params.append(1 if value else 0)
         elif key in ("last_synced_at", "token_expires_at"):
@@ -175,11 +232,30 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
         return await get_account(account_id)
     assignments.append("updated_at = UTC_TIMESTAMP(6)")
     params.append(account_id)
-    await db.execute(
-        f"UPDATE m365_mail_accounts SET {', '.join(assignments)} WHERE id = %s",
+    await db.execute(  # nosec B608
+        f"UPDATE m365_mail_accounts SET {', '.join(assignments)} WHERE id = %s",  # nosec B608
         tuple(params),
     )
     return await get_account(account_id)
+
+
+async def get_verified_auth_connection(account: dict[str, Any]) -> dict[str, Any] | None:
+    """Return only the explicitly bound, active and tenant-verified connection.
+
+    This deliberately performs no discovery by mailbox name or tenant probing.
+    """
+    connection_id = account.get("auth_connection_id")
+    tenant_id = str(account.get("auth_tenant_id") or account.get("tenant_id") or "").strip()
+    if not connection_id or not tenant_id:
+        return None
+    row = await db.fetch_one(
+        """SELECT id, company_id, tenant_id, version, state
+           FROM m365_connections
+           WHERE id = %s AND state = 'active' AND verification_tenant = 1
+             AND verified_at IS NOT NULL AND tenant_id = %s""",
+        (int(connection_id), tenant_id),
+    )
+    return dict(row) if row else None
 
 
 async def update_account_tokens(
@@ -189,22 +265,42 @@ async def update_account_tokens(
     refresh_token: str | None,
     access_token: str | None,
     token_expires_at: datetime | None,
+    oauth_client_id: str | None = None,
+    oauth_authority: str | None = None,
+    oauth_account_id: str | None = None,
+    oauth_scopes: str | None = None,
+    oauth_connection_version: int | None = None,
+    expected_revision: int | None = None,
 ) -> dict[str, Any] | None:
     """Update only the OAuth token columns for a mail account."""
     expires_value = None
     if isinstance(token_expires_at, datetime):
         expires_value = token_expires_at.replace(tzinfo=None)
+    revision_clause = "" if expected_revision is None else " AND token_revision = %s"
+    params: list[Any] = [tenant_id, tenant_id, refresh_token, access_token, expires_value,
+                         oauth_client_id, oauth_authority, oauth_account_id,
+                         oauth_scopes, oauth_connection_version, account_id]
+    if expected_revision is not None:
+        params.append(expected_revision)
     await db.execute(
         """
         UPDATE m365_mail_accounts
         SET tenant_id = %s,
+            auth_tenant_id = %s,
+            auth_binding_status = 'verified',
             refresh_token = %s,
             access_token = %s,
             token_expires_at = %s,
+            oauth_client_id = COALESCE(%s, oauth_client_id),
+            oauth_authority = COALESCE(%s, oauth_authority),
+            oauth_account_id = COALESCE(%s, oauth_account_id),
+            oauth_scopes = COALESCE(%s, oauth_scopes),
+            oauth_connection_version = COALESCE(%s, oauth_connection_version),
+            token_revision = token_revision + 1,
             updated_at = UTC_TIMESTAMP(6)
         WHERE id = %s
-        """,
-        (tenant_id, refresh_token, access_token, expires_value, account_id),
+        """ + revision_clause,
+        tuple(params),
     )
     return await get_account(account_id)
 

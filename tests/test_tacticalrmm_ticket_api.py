@@ -222,3 +222,37 @@ async def _test_tacticalrmm_resolved_webhook_resolves_matching_ticket(monkeypatc
 
     assert result["status"] == "resolved"
     set_status.assert_awaited_once_with(91, "resolved")
+
+
+@pytest.mark.parametrize(
+    "path", ["/api/tickets/tacticalrmm", "/api/tickets/tacticalrmm/resolved"]
+)
+def test_tacticalrmm_routes_use_integration_actor(path):
+    route = next(
+        r for r in tickets_routes.router.routes if getattr(r, "path", None) == path
+    )
+    calls = {dep.call for dep in route.dependant.dependencies}
+    assert tickets_routes._resolve_integration_ticket_actor in calls
+
+
+def test_integration_actor_rejects_non_technician_session_user(monkeypatch):
+    monkeypatch.setattr(
+        tickets_routes, "_has_helpdesk_permission", AsyncMock(return_value=False)
+    )
+    with pytest.raises(tickets_routes.HTTPException) as exc:
+        asyncio.run(
+            tickets_routes._resolve_integration_ticket_actor(
+                {"user": {"id": 5}, "api_key": None}
+            )
+        )
+    assert exc.value.status_code == 403
+
+
+def test_integration_actor_allows_api_key_and_technician(monkeypatch):
+    api_actor = {"user": None, "api_key": {"id": 3}}
+    assert asyncio.run(tickets_routes._resolve_integration_ticket_actor(api_actor)) is api_actor
+    monkeypatch.setattr(
+        tickets_routes, "_has_helpdesk_permission", AsyncMock(return_value=True)
+    )
+    tech_actor = {"user": {"id": 5}, "api_key": None}
+    assert asyncio.run(tickets_routes._resolve_integration_ticket_actor(tech_actor)) is tech_actor

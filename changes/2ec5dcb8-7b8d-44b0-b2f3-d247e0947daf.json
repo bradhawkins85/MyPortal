@@ -1,0 +1,7 @@
+{
+  "guid": "2ec5dcb8-7b8d-44b0-b2f3-d247e0947daf",
+  "occurred_at": "2026-09-24T00:00Z",
+  "change_type": "Fixed",
+  "summary": "Preserve mailbox data when Microsoft 365 source reads are incomplete",
+  "content_hash": "24931f15a21056fd34188f7ba9d3191bcc88c42e1e2e31be1df3a4dd2b8466d7"
+}

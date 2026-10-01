@@ -40,6 +40,15 @@ def test_menu_has_access_enforces_read_vs_write():
     assert menu_has_access(menu_access, "menu.m365.user_mailboxes", write=True) is False
 
 
+def test_network_devices_permission_has_independent_read_and_write_levels():
+    read_access = normalize_menu_permissions({"menu.network_devices": "Read Only"})
+    write_access = normalize_menu_permissions({"menu.network_devices": "Read/Write"})
+
+    assert menu_has_access(read_access, "menu.network_devices") is True
+    assert menu_has_access(read_access, "menu.network_devices", write=True) is False
+    assert menu_has_access(write_access, "menu.network_devices", write=True) is True
+
+
 def test_menu_permissions_to_legacy_keeps_backward_compatibility():
     legacy = menu_permissions_to_legacy({"menu.m365.user_mailboxes": "read", "menu.assets": "write"})
 
@@ -92,3 +101,41 @@ def test_technician_permission_catalogue_exposes_yes_no_levels():
     )
 
     assert technician_permission["levels"] == ["none", "write"]
+
+
+def test_sparse_legacy_roles_inherit_only_previously_owned_feature_access():
+    permissions = normalize_menu_permissions({
+        "menu.assets": "read",
+        "menu.network_devices": "write",
+        "menu.continuity": "read",
+        "menu.admin.company": "none",
+    })
+    assert permissions["menu.processes"] == "read"
+    assert permissions["menu.asset_photos"] == "read"
+    assert permissions["menu.ipam"] == "write"
+    assert permissions["menu.racks"] == "write"
+    assert permissions["menu.network_map"] == "write"
+    assert permissions["menu.bcp_asset_links"] == "read"
+    assert permissions["menu.credentials"] == "none"
+
+
+def test_explicit_feature_denial_overrides_compatibility_mapping():
+    permissions = normalize_menu_permissions({
+        "menu.assets": "write",
+        "menu.processes": "none",
+        "menu.asset_photos": "read",
+    })
+    assert permissions["menu.processes"] == "none"
+    assert permissions["menu.asset_photos"] == "read"
+    assert permissions["menu.asset_relationships"] == "write"
+
+
+def test_new_feature_permissions_default_to_no_access():
+    permissions = normalize_menu_permissions(None)
+    for key in (
+        "menu.documentation_search", "menu.processes", "menu.ipam", "menu.racks", "menu.network_map",
+        "menu.expirations", "menu.websites", "menu.applications", "menu.asset_photos",
+        "menu.asset_relationships", "menu.bcp_asset_links", "menu.credentials",
+        "menu.credential_sharing",
+    ):
+        assert permissions[key] == "none"

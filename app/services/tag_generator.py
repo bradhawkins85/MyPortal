@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Mapping
 
 from app.core.logging import log_error
 from app.services import modules as modules_service
@@ -52,8 +52,7 @@ Tags:"""
         return []
     
     # Check if the module was successful
-    status = response.get("status")
-    if status not in ("completed", "success"):
+    if not modules_service.module_result_succeeded(response):
         return []
     
     # Extract the response text

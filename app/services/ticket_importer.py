@@ -1194,7 +1194,7 @@ def _extract_numeric_ticket_id(ticket: dict[str, Any]) -> int | None:
                 try:
                     return int(digits)
                 except (ValueError, TypeError):
-                    pass
+                    return None
 
     # Fall back to the Syncro ID if number parsing fails
     syncro_id = ticket.get("id")
@@ -1202,7 +1202,7 @@ def _extract_numeric_ticket_id(ticket: dict[str, Any]) -> int | None:
         try:
             return int(syncro_id)
         except (ValueError, TypeError):
-            pass
+            return None
 
     return None
 
@@ -2179,6 +2179,7 @@ async def import_from_request(
         except (TypeError, ValueError):  # pragma: no cover - defensive casting
             return None
 
+    event: dict[str, Any] | None = None
     try:
         event = await webhook_monitor.create_manual_event(
             name="syncro.ticket.import",
@@ -2193,7 +2194,6 @@ async def import_from_request(
             mode=mode_lower,
             error=str(exc),
         )
-        event = None
     else:
         event_id = _coerce_event_id(event.get("id")) if event else None
         using_monitor = event_id is not None
@@ -2205,6 +2205,7 @@ async def import_from_request(
         )
 
     if event_id is None:
+        fallback_event: dict[str, Any] | None = None
         try:
             fallback_event = await webhook_events_repo.create_event(
                 name="syncro.ticket.import",
@@ -2219,7 +2220,6 @@ async def import_from_request(
                 mode=mode_lower,
                 error=str(fallback_exc),
             )
-            fallback_event = None
         else:
             fallback_raw_id = fallback_event.get("id") if fallback_event else None
             event_id = _coerce_event_id(fallback_raw_id)

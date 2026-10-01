@@ -20,6 +20,22 @@ from app.services import notification_event_settings as event_settings_service
 
 router = APIRouter(tags=["Notifications"])
 
+_NOTIFICATION_READ_OPTIONS = [
+    ("all", "All notifications"),
+    ("unread", "Unread"),
+    ("read", "Read"),
+]
+_NOTIFICATION_SORT_CHOICES = [
+    ("created_at", "Created"),
+    ("event_type", "Event type"),
+    ("read_at", "Read at"),
+]
+_NOTIFICATION_ORDER_CHOICES = [
+    ("desc", "Newest first"),
+    ("asc", "Oldest first"),
+]
+_NOTIFICATION_PAGE_SIZES = (10, 25, 50, 100)
+
 
 def _main():
     from app import main as main_module
@@ -37,12 +53,12 @@ async def notifications_dashboard(request: Request):
     params = request.query_params
     search_term = (params.get("q") or "").strip()
     read_state = (params.get("read_state") or "all").lower()
-    valid_read_states = {option[0] for option in main_module._NOTIFICATION_READ_OPTIONS}
+    valid_read_states = {option[0] for option in _NOTIFICATION_READ_OPTIONS}
     if read_state not in valid_read_states:
         read_state = "all"
 
     sort_by = (params.get("sort_by") or "created_at").lower()
-    valid_sort_columns = {option[0] for option in main_module._NOTIFICATION_SORT_CHOICES}
+    valid_sort_columns = {option[0] for option in _NOTIFICATION_SORT_CHOICES}
     if sort_by not in valid_sort_columns:
         sort_by = "created_at"
 
@@ -57,9 +73,9 @@ async def notifications_dashboard(request: Request):
     page_size = main_module._parse_int_in_range(
         params.get("page_size"), default=25, minimum=5, maximum=100
     )
-    if main_module._NOTIFICATION_PAGE_SIZES:
+    if _NOTIFICATION_PAGE_SIZES:
         page_size = min(
-            main_module._NOTIFICATION_PAGE_SIZES,
+            _NOTIFICATION_PAGE_SIZES,
             key=lambda size: abs(size - page_size),
         )
     page = main_module._parse_int_in_range(
@@ -220,14 +236,14 @@ async def notifications_dashboard(request: Request):
         "notifications": prepared_notifications,
         "filters": filters,
         "filters_active": active_filters,
-        "sort_options": main_module._NOTIFICATION_SORT_CHOICES,
-        "order_options": main_module._NOTIFICATION_ORDER_CHOICES,
-        "read_options": main_module._NOTIFICATION_READ_OPTIONS,
+        "sort_options": _NOTIFICATION_SORT_CHOICES,
+        "order_options": _NOTIFICATION_ORDER_CHOICES,
+        "read_options": _NOTIFICATION_READ_OPTIONS,
         "event_type_options": event_type_options,
         "pagination": pagination,
         "total_count": total_count,
         "filtered_unread_count": filtered_unread_count,
-        "page_size_options": main_module._NOTIFICATION_PAGE_SIZES,
+        "page_size_options": _NOTIFICATION_PAGE_SIZES,
         "notification_unread_count": global_unread_count,
     }
 

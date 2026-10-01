@@ -152,3 +152,40 @@ async def test_persist_inline_images_for_ticket_body_saves_data_uri(monkeypatch,
     assert created[0]["access_level"] == "closed"
     assert created[0]["uploaded_by_user_id"] == 7
     assert (tmp_path / created[0]["filename"]).read_bytes() == png_bytes
+
+
+def test_sanitize_rich_text_strips_iframes_by_default():
+    result = sanitize_rich_text('<p>Hi</p><iframe src="https://evil.example/login"></iframe>')
+
+    assert "iframe" not in result.html
+    assert "evil.example" not in result.html
+
+
+def test_sanitize_rich_text_allows_iframes_when_embeds_enabled():
+    result = sanitize_rich_text(
+        '<iframe src="https://www.youtube.com/embed/x" allowfullscreen></iframe>',
+        allow_embeds=True,
+    )
+
+    assert "<iframe" in result.html
+
+
+def test_sanitize_rich_text_keeps_data_urls_only_for_inline_images():
+    result = sanitize_rich_text(
+        '<a href="data:text/html,<script>alert(1)</script>">x</a>'
+        '<img src="data:image/png;base64,AAAA" alt="shot">'
+        '<img src="data:image/svg+xml;base64,AAAA" alt="svg">'
+    )
+
+    assert "data:text/html" not in result.html
+    assert "data:image/svg" not in result.html
+    assert 'src="data:image/png;base64,AAAA"' in result.html
+
+
+def test_sanitize_rich_text_drops_data_url_iframes_even_with_embeds():
+    result = sanitize_rich_text(
+        '<iframe src="data:text/html,<script>alert(1)</script>"></iframe>',
+        allow_embeds=True,
+    )
+
+    assert "data:" not in result.html

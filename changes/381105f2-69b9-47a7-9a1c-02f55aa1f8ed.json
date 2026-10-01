@@ -1,0 +1,7 @@
+{
+  "guid": "381105f2-69b9-47a7-9a1c-02f55aa1f8ed",
+  "occurred_at": "2026-09-21T00:00Z",
+  "change_type": "Fix",
+  "summary": "Use bounded linear comparison parsing to prevent polynomial regular-expression backtracking.",
+  "content_hash": "f651e7186e4786693e2a0d4545b1f874847c1f52b7a82ab0dc85c7383b69ed89"
+}

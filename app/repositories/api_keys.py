@@ -4,11 +4,11 @@ from collections.abc import Iterable, Sequence
 from datetime import date, datetime, timezone
 from typing import Any
 
-PermissionMapping = Sequence[dict[str, Any]]
-
 from app.core.database import db
 from app.core.logging import log_info
 from app.security.api_keys import GeneratedApiKey, generate_api_key, hash_api_key
+
+PermissionMapping = Sequence[dict[str, Any]]
 
 
 def _to_utc(dt: datetime | str | None) -> datetime | None:
@@ -41,6 +41,7 @@ async def create_api_key(
     expiry_date: date | None,
     permissions: PermissionMapping | None = None,
     ip_restrictions: Sequence[str] | None = None,
+    allowed_company_ids: Sequence[int] | None = None,
     is_enabled: bool = True,
 ) -> tuple[str, dict[str, Any]]:
     log_info("Creating API key", description=description, is_enabled=is_enabled)
@@ -74,6 +75,9 @@ async def create_api_key(
     )
     row["permissions"] = stored_permissions
     row["ip_restrictions"] = stored_ip_restrictions
+    row["allowed_company_ids"] = await _replace_api_key_companies(
+        row["id"], allowed_company_ids or []
+    )
     log_info("API key created successfully", api_key_id=row["id"], prefix=generated.prefix)
     return generated.value, row
 
@@ -129,12 +133,13 @@ async def list_api_keys_with_usage(
             ak.key_prefix,
             ak.is_enabled
         ORDER BY {column} {direction}, ak.id ASC
-    """
+    """  # nosec B608
     rows = await db.fetch_all(sql, tuple(params))
     key_ids = [row["id"] for row in rows]
     usage_map = await _fetch_usage_by_key(key_ids)
     permission_map = await _fetch_permissions_by_key(key_ids)
     ip_restriction_map = await _fetch_ip_restrictions_by_key(key_ids)
+    company_map = await _fetch_companies_by_key(key_ids)
     normalised: list[dict[str, Any]] = []
     for row in rows:
         info = dict(row)
@@ -148,6 +153,7 @@ async def list_api_keys_with_usage(
         info["usage"] = usage_map.get(row["id"], [])
         info["permissions"] = permission_map.get(row["id"], [])
         info["ip_restrictions"] = ip_restriction_map.get(row["id"], [])
+        info["allowed_company_ids"] = company_map.get(row["id"], [])
         normalised.append(info)
     return normalised
 
@@ -186,6 +192,7 @@ async def get_api_key_with_usage(api_key_id: int) -> dict[str, Any] | None:
     usage_map = await _fetch_usage_by_key([api_key_id])
     permission_map = await _fetch_permissions_by_key([api_key_id])
     ip_restriction_map = await _fetch_ip_restrictions_by_key([api_key_id])
+    company_map = await _fetch_companies_by_key([api_key_id])
     info = dict(row)
     usage_count = info.get("usage_count")
     info["usage_count"] = int(usage_count or 0)
@@ -196,6 +203,7 @@ async def get_api_key_with_usage(api_key_id: int) -> dict[str, Any] | None:
     info["usage"] = usage_map.get(api_key_id, [])
     info["permissions"] = permission_map.get(api_key_id, [])
     info["ip_restrictions"] = ip_restriction_map.get(api_key_id, [])
+    info["allowed_company_ids"] = company_map.get(api_key_id, [])
     return info
 
 
@@ -219,6 +227,7 @@ async def update_api_key(
     expiry_date: date | None,
     permissions: PermissionMapping | None = None,
     is_enabled: bool | None = None,
+    allowed_company_ids: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     if is_enabled is not None:
         await db.execute(
@@ -232,6 +241,8 @@ async def update_api_key(
         )
     if permissions is not None:
         await _replace_api_key_permissions(api_key_id, permissions)
+    if allowed_company_ids is not None:
+        await _replace_api_key_companies(api_key_id, allowed_company_ids)
     updated = await get_api_key_with_usage(api_key_id)
     if not updated:
         raise RuntimeError(f"Failed to load API key {api_key_id} after update")
@@ -259,7 +270,52 @@ async def get_api_key_record(api_key_value: str) -> dict[str, Any] | None:
     row["permissions"] = permission_map.get(row["id"], [])
     ip_restriction_map = await _fetch_ip_restrictions_by_key([row["id"]])
     row["ip_restrictions"] = ip_restriction_map.get(row["id"], [])
+    company_map = await _fetch_companies_by_key([row["id"]])
+    row["allowed_company_ids"] = company_map.get(row["id"], [])
     return row
+
+
+async def _fetch_companies_by_key(key_ids: Iterable[int]) -> dict[int, list[int]]:
+    ids = list(key_ids)
+    if not ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(ids))
+    rows = await db.fetch_all(
+        f"""
+        SELECT api_key_id, company_id
+        FROM api_key_company_permissions
+        WHERE api_key_id IN ({placeholders})
+        ORDER BY company_id ASC
+        """,
+        tuple(ids),
+    )
+    companies: dict[int, list[int]] = {}
+    for row in rows:
+        companies.setdefault(int(row["api_key_id"]), []).append(int(row["company_id"]))
+    return companies
+
+
+async def _replace_api_key_companies(
+    api_key_id: int, company_ids: Sequence[int]
+) -> list[int]:
+    unique_ids = sorted(
+        {int(company_id) for company_id in company_ids if int(company_id) > 0}
+    )
+    async with db.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                "DELETE FROM api_key_company_permissions WHERE api_key_id = %s",
+                (api_key_id,),
+            )
+            if unique_ids:
+                await cursor.executemany(
+                    """
+                    INSERT INTO api_key_company_permissions (api_key_id, company_id)
+                    VALUES (%s, %s)
+                    """,
+                    [(api_key_id, company_id) for company_id in unique_ids],
+                )
+    return unique_ids
 
 
 async def record_api_key_usage(api_key_id: int, ip_address: str) -> None:
@@ -284,7 +340,7 @@ async def _fetch_usage_by_key(key_ids: Iterable[int]) -> dict[int, list[dict[str
         return {}
     placeholders = ", ".join(["%s"] * len(ids))
     query = (
-        "SELECT api_key_id, ip_address, usage_count, last_used_at"
+        "SELECT api_key_id, ip_address, usage_count, last_used_at"  # nosec B608
         " FROM api_key_usage"
         " WHERE api_key_id IN ("
         + placeholders  # contains only %s parameter markers, not user data
@@ -315,7 +371,7 @@ async def _fetch_permissions_by_key(key_ids: Iterable[int]) -> dict[int, list[di
         FROM api_key_endpoint_permissions
         WHERE api_key_id IN ({placeholders})
         ORDER BY route ASC, method ASC
-        """,
+        """,  # nosec B608
         tuple(ids),
     )
     permissions: dict[int, dict[str, set[str]]] = {}
@@ -373,7 +429,7 @@ async def _fetch_ip_restrictions_by_key(key_ids: Iterable[int]) -> dict[int, lis
         FROM api_key_ip_restrictions
         WHERE api_key_id IN ({placeholders})
         ORDER BY cidr ASC
-        """,
+        """,  # nosec B608
         tuple(ids),
     )
     restrictions: dict[int, list[dict[str, Any]]] = {}

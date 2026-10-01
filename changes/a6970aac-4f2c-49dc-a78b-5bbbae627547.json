@@ -1,0 +1,7 @@
+{
+  "guid": "a6970aac-4f2c-49dc-a78b-5bbbae627547",
+  "occurred_at": "2026-09-30T07:00Z",
+  "change_type": "Feature",
+  "summary": "Replace the JSON Payload box on Create scheduled ticket tasks with subject, description, priority, status and category fields, keeping the JSON under Advanced",
+  "content_hash": "bd3c4445337623e4497131b9d654522d8fcb332b43b86358bdd6cafece64c923"
+}

@@ -2,7 +2,9 @@ package defender
 
 import (
 	"errors"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestCommandScripts(t *testing.T) {
@@ -16,6 +18,27 @@ func TestCommandScripts(t *testing.T) {
 		if err != nil || got != want {
 			t.Errorf("commandScript(%q) = %q, %v; want %q", command, got, err, want)
 		}
+	}
+}
+
+func TestEnableFirewallVerifiesTheActiveProfiles(t *testing.T) {
+	got, err := commandScript("enable_firewall", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True", "-PolicyStore ActiveStore", "throw $message"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("enable_firewall script is missing %q", want)
+		}
+	}
+}
+
+func TestFullScanTimeoutOutlastsQuickScan(t *testing.T) {
+	if CommandTimeout("full_scan") <= CommandTimeout("quick_scan") || CommandTimeout("full_scan") >= 24*time.Hour {
+		t.Fatal("full scans need longer than quick scans but must finish before the portal expires the command")
+	}
+	if !IsScan("full_scan") || IsScan("signature_update") {
+		t.Fatal("unexpected scan classification")
 	}
 }
 

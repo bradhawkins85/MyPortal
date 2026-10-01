@@ -1,0 +1,7 @@
+{
+  "guid": "9ba600c8-10b7-4e15-8b2a-8db15963f863",
+  "occurred_at": "2026-08-31T00:00Z",
+  "change_type": "Feature",
+  "summary": "Added a global BCP risk and BIA assessment library with individual, bulk, and per-customer assignment workflows.",
+  "content_hash": "61e3298db2c7e0bdcb33556684d84a2f23ca224256153fd3d335c9091f61b2dd"
+}

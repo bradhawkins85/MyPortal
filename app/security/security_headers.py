@@ -5,6 +5,7 @@ common web vulnerabilities including XSS, clickjacking, and MIME-sniffing attack
 """
 from __future__ import annotations
 
+from contextlib import suppress
 import re
 from typing import Awaitable, Callable, Iterable
 from urllib.parse import urlparse
@@ -65,28 +66,27 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         script_sources = [
             "'self'",
             "'unsafe-inline'",
-            "https://unpkg.com",
             "https://cal.com",
             "https://app.cal.com",
             "https://static.cloudflareinsights.com",
+            "https://www.google.com",
+            "https://www.gstatic.com",
         ]
 
         # Add extra script sources (e.g., Plausible analytics)
         if self._get_extra_script_sources:
-            try:
+            with suppress(Exception):
                 extra_sources = await self._get_extra_script_sources()
                 for source in extra_sources:
                     if source and self._is_valid_csp_source(source):
                         script_sources.append(source)
-            except Exception:
-                # If we fail to get extra sources, continue with defaults
-                # This ensures CSP is always present even if source lookup fails
-                pass
 
         # Build connect-src directive
         connect_sources = ["'self'", "https://cal.com", "https://app.cal.com"]
 
-        frame_sources = ["'self'", "https://cal.com", "https://app.cal.com"]
+        frame_sources = [
+            "'self'", "https://cal.com", "https://app.cal.com", "https://www.google.com"
+        ]
 
         # Add portal URL to connect-src to support fetch() API calls from JavaScript
         # This is needed because forms on pages like cart.html use fetch() instead of
@@ -96,14 +96,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Add extra connect sources (e.g., analytics APIs)
         if self._get_extra_connect_sources:
-            try:
+            with suppress(Exception):
                 extra_sources = await self._get_extra_connect_sources()
                 for source in extra_sources:
                     if source and self._is_valid_csp_source(source):
                         connect_sources.append(source)
-            except Exception:
-                # If we fail to get extra sources, continue with defaults
-                pass
         
         form_action_sources = ["'self'"]
         if validated_portal_url:
@@ -111,9 +108,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         
         # Content-Security-Policy: Restrict resource loading to same origin
         # Allow 'unsafe-inline' for styles and scripts that are inline in templates
-        # Allow 'unsafe-eval' for some JavaScript libraries that use eval
-        # Allow unpkg.com for loading htmx library from CDN
-        # In production, these should be replaced with nonces or hashes
+        # htmx and the portal's other core dependencies are served from this
+        # application's static assets and are covered by 'self'. External
+        # sources below support optional integrations and analytics only.
         csp_directives = [
             "default-src 'self'",
             f"script-src {' '.join(script_sources)}",

@@ -239,6 +239,84 @@ def _join_list(value: Any, separator: str = ", ") -> str | None:
     return str(value).strip() or None
 
 
+def _extract_motherboard_serial(hardware: Mapping[str, Any]) -> str | None:
+    """Extract the baseboard serial from Tactical RMM's WMI hardware details."""
+    for key, value in hardware.items():
+        normalised_key = re.sub(r"[^a-z]", "", str(key).lower())
+        if normalised_key in {"motherboardserialnumber", "baseboardserialnumber"}:
+            serial = _clean_text(value)
+            if serial:
+                return serial
+
+        board_keys = {"motherboard", "motherboards", "baseboard", "baseboards"}
+        if normalised_key not in board_keys:
+            continue
+
+        boards = value if isinstance(value, (list, tuple)) else (value,)
+        for board in boards:
+            # Some WMI values are wrapped in an additional list.
+            entries = board if isinstance(board, (list, tuple)) else (board,)
+            for entry in entries:
+                if not isinstance(entry, Mapping):
+                    continue
+                for entry_key, entry_value in entry.items():
+                    normalised_entry_key = re.sub(
+                        r"[^a-z]", "", str(entry_key).lower()
+                    )
+                    if normalised_entry_key in {"serial", "serialnumber"}:
+                        serial = _clean_text(entry_value)
+                        if serial:
+                            return serial
+    return None
+
+
+def _extract_physicaldrive0_serial(hardware: Mapping[str, Any]) -> str | None:
+    """Extract the disk serial associated with Windows PHYSICALDRIVE0."""
+    disk_keys = {"disk", "disks", "drive", "drives", "physicaldisk", "physicaldisks"}
+
+    def properties(value: Any) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        entries = value if isinstance(value, (list, tuple)) else (value,)
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                continue
+            for entry_key, entry_value in entry.items():
+                result[re.sub(r"[^a-z]", "", str(entry_key).lower())] = entry_value
+        return result
+
+    for key, value in hardware.items():
+        if re.sub(r"[^a-z]", "", str(key).lower()) not in disk_keys:
+            continue
+        disks = value if isinstance(value, (list, tuple)) else (value,)
+        for disk in disks:
+            disk_properties = properties(disk)
+            device_id = _clean_text(
+                disk_properties.get("deviceid")
+                or disk_properties.get("device")
+                or disk_properties.get("name")
+            )
+            if not device_id or "physicaldrive0" not in re.sub(
+                r"[^a-z0-9]", "", device_id.lower()
+            ):
+                continue
+            serial = _clean_text(
+                disk_properties.get("serialnumber") or disk_properties.get("serial")
+            )
+            if serial:
+                return serial
+    return None
+
+
+def _device_serial(primary_serial: Any, hardware: Mapping[str, Any]) -> str | None:
+    serial = _clean_text(primary_serial)
+    if serial is None or serial.casefold() == "to be filled by o.e.m.":
+        return (
+            _extract_motherboard_serial(hardware)
+            or _extract_physicaldrive0_serial(hardware)
+        )
+    return serial
+
+
 def _extract_mac_addresses(*sources: Any) -> str | None:
     """Return every unique hardware MAC address in TRMM's agent payload."""
     addresses: list[str] = []
@@ -398,9 +476,10 @@ def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
                 hardware, "model", "manufacturer", "system_model", "system_manufacturer"
             ),
         ),
-        "serial_number": _clean_text(
+        "serial_number": _device_serial(
             _lookup(agent, "serial_number", "serial", "bios_serial")
-            or _lookup(hardware, "serial", "serial_number")
+            or _lookup(hardware, "serial", "serial_number"),
+            hardware,
         ),
         "status": _clean_text(
             _lookup(agent, "status", "agent_status", "monitoring_status")
@@ -433,6 +512,12 @@ def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
             "checkin_time",
             "last_sync",
             "last_agent_checkin",
+        ),
+        "boot_time": _lookup(
+            agent,
+            "boot_time",
+            "last_boot_time",
+            "booted_at",
         ),
         "motherboard_manufacturer": _clean_text(
             _lookup(hardware, "motherboard_manufacturer", "board_manufacturer")

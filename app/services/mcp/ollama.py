@@ -109,17 +109,6 @@ class OllamaMCPError(Exception):
 # Audit log serialisation
 # ---------------------------------------------------------------------------
 
-# Fields that must never appear in audit-log MCP responses even when present
-# in the raw database row.
-_AUDIT_LOG_SENSITIVE: frozenset[str] = frozenset(
-    {
-        "api_key",
-        "previous_value",
-        "new_value",
-        "metadata",
-    }
-)
-
 # Log line format emitted by configure_logging():
 # YYYY-MM-DDTHH:mm:ss.SSSZ | LEVEL | request_id | user_id | message
 _LOG_LINE_RE = re.compile(
@@ -936,6 +925,8 @@ async def _get_application_logs(
                     if entry_ts < since_filter:
                         continue
                 except ValueError:
+                    # Preserve the historical behaviour for malformed log lines:
+                    # keep the entry rather than silently dropping it.
                     pass
             parsed.append(
                 {

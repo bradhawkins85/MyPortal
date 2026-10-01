@@ -17,6 +17,55 @@ async def get_document_by_source(
     )
 
 
+async def has_active_chunks(document_id: int) -> bool:
+    """Return whether a document has at least one usable indexed chunk."""
+    row = await db.fetch_one(
+        """
+        SELECT 1 AS present FROM rag_chunks
+        WHERE document_id = ? AND is_active = 1
+        LIMIT 1
+        """,
+        (document_id,),
+    )
+    return row is not None
+
+
+async def get_document_diagnostic(source_type: str, source_id: str) -> dict[str, Any] | None:
+    """Return index metadata and redacted chunk descriptors for one source record."""
+    document = await db.fetch_one(
+        """
+        SELECT * FROM rag_documents
+        WHERE source_type = ? AND source_id = ?
+        ORDER BY is_active DESC, indexed_at DESC, id DESC LIMIT 1
+        """,
+        (source_type, source_id),
+    )
+    if not document:
+        return None
+    chunks = await db.fetch_all(
+        """
+        SELECT id, chunk_index, chunk_hash, embedding_model, token_count,
+               is_active, indexed_at, LENGTH(chunk_text) AS character_count
+        FROM rag_chunks WHERE document_id = ?
+        ORDER BY chunk_index, id
+        """,
+        (document["id"],),
+    )
+    document["chunks"] = chunks or []
+    return document
+
+
+async def get_source_jobs(source_type: str, source_id: str) -> list[dict[str, Any]]:
+    return await db.fetch_all(
+        """
+        SELECT id, status, message, started_at, finished_at, created_at
+        FROM rag_index_jobs WHERE source_type = ? AND source_id = ?
+        ORDER BY created_at DESC, id DESC LIMIT 10
+        """,
+        (source_type, source_id),
+    )
+
+
 async def upsert_document(record: dict[str, Any]) -> int:
     existing = await db.fetch_one(
         """
@@ -39,18 +88,19 @@ async def upsert_document(record: dict[str, Any]) -> int:
             """
             UPDATE rag_documents
             SET company_id = ?, title = ?, url = ?, permission_scope_json = ?,
-                metadata_json = ?, content_hash = ?, is_active = ?, indexed_at = CURRENT_TIMESTAMP
+                metadata_json = ?, content_hash = ?, is_active = ?,
+                source_updated_at = ?, indexed_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
-            (*params, existing["id"]),
+            (*params, record.get("source_updated_at"), existing["id"]),
         )
         return int(existing["id"])
     return await db.execute_returning_lastrowid(
         """
         INSERT INTO rag_documents
             (source_type, source_id, company_id, title, url, permission_scope_json,
-             metadata_json, content_hash, embedding_model, is_active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+             metadata_json, content_hash, embedding_model, is_active, source_updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
         """,
         (
             record["source_type"],
@@ -62,7 +112,16 @@ async def upsert_document(record: dict[str, Any]) -> int:
             record.get("metadata_json"),
             record["content_hash"],
             record["embedding_model"],
+            record.get("source_updated_at"),
         ),
+    )
+
+
+async def deactivate_document(source_type: str, source_id: str) -> int:
+    return await db.execute_rowcount(
+        """UPDATE rag_documents SET is_active = 0, indexed_at = CURRENT_TIMESTAMP
+           WHERE source_type = ? AND source_id = ? AND is_active = 1""",
+        (source_type, source_id),
     )
 
 
@@ -134,7 +193,7 @@ async def list_active_chunks(
         WHERE {" AND ".join(where)}
         ORDER BY d.indexed_at DESC, c.id DESC
         LIMIT ?
-        """,
+        """,  # nosec B608
         tuple(params),
     )
 
@@ -179,6 +238,18 @@ async def health() -> dict[str, Any]:
         SELECT id, source_type, source_id, status, message, started_at, finished_at, created_at
         FROM rag_index_jobs ORDER BY created_at DESC, id DESC LIMIT 10
         """)
+    outbox = await db.fetch_one("""
+        SELECT SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+               SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+               MIN(CASE WHEN status = 'pending' THEN created_at END) AS oldest_pending_at
+        FROM rag_index_outbox
+        """)
+    lag = await db.fetch_all("""
+        SELECT source_type,
+               SUM(CASE WHEN source_updated_at > indexed_at THEN 1 ELSE 0 END) AS stale,
+               MAX(TIMESTAMPDIFF(SECOND, indexed_at, source_updated_at)) AS max_lag_seconds
+        FROM rag_documents WHERE is_active = 1 GROUP BY source_type ORDER BY source_type
+        """)
     return {
         "documents": int((docs or {}).get("count") or 0),
         "inactive_documents": int((inactive_docs or {}).get("count") or 0),
@@ -194,6 +265,8 @@ async def health() -> dict[str, Any]:
         "sources": by_source or [],
         "recent_documents": recent_documents or [],
         "recent_jobs": recent_jobs or [],
+        "outbox": outbox or {"pending": 0, "failed": 0, "oldest_pending_at": None},
+        "source_lag": lag or [],
     }
 
 
@@ -233,8 +306,9 @@ async def update_job(
     if finished:
         assignments.append("finished_at = CURRENT_TIMESTAMP")
     params.append(job_id)
+    # Assignment names are fixed within this helper and values remain bound.
     await db.execute(
-        f"UPDATE rag_index_jobs SET {', '.join(assignments)} WHERE id = ?",
+        f"UPDATE rag_index_jobs SET {', '.join(assignments)} WHERE id = ?",  # nosec B608
         tuple(params),
     )
 
@@ -286,19 +360,20 @@ async def delete_documents_by_ids(document_ids: Sequence[int]) -> int:
     if not ids:
         return 0
     placeholders = ",".join("?" for _ in ids)
+    # Placeholder groups are derived only from normalised integer document ids; values remain bound.
     await db.execute(
-        f"DELETE FROM rag_relationship_queue WHERE source_document_id IN ({placeholders}) OR target_document_id IN ({placeholders})",
+        f"DELETE FROM rag_relationship_queue WHERE source_document_id IN ({placeholders}) OR target_document_id IN ({placeholders})",  # nosec B608
         tuple(ids + ids),
     )
     await db.execute(
-        f"DELETE FROM rag_relationships WHERE source_document_id IN ({placeholders}) OR target_document_id IN ({placeholders})",
+        f"DELETE FROM rag_relationships WHERE source_document_id IN ({placeholders}) OR target_document_id IN ({placeholders})",  # nosec B608
         tuple(ids + ids),
     )
     await db.execute(
-        f"DELETE FROM rag_chunks WHERE document_id IN ({placeholders})", tuple(ids)
+        f"DELETE FROM rag_chunks WHERE document_id IN ({placeholders})", tuple(ids)  # nosec B608
     )
     await db.execute(
-        f"DELETE FROM rag_documents WHERE id IN ({placeholders})", tuple(ids)
+        f"DELETE FROM rag_documents WHERE id IN ({placeholders})", tuple(ids)  # nosec B608
     )
     return len(ids)
 

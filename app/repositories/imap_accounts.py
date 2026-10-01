@@ -125,26 +125,28 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
         return await get_account(account_id)
     assignments: list[str] = []
     params: list[Any] = []
+    allowed = {
+        "name",
+        "host",
+        "port",
+        "username",
+        "password_encrypted",
+        "folder",
+        "schedule_cron",
+        "filter_query",
+        "process_unread_only",
+        "mark_as_read",
+        "sync_known_only",
+        "active",
+        "company_id",
+        "scheduled_task_id",
+        "last_synced_at",
+        "priority",
+    }
+    unknown = set(fields) - allowed
+    if unknown:
+        raise ValueError(f"Unsupported IMAP account fields: {', '.join(sorted(unknown))}")
     for key, value in fields.items():
-        if key not in {
-            "name",
-            "host",
-            "port",
-            "username",
-            "password_encrypted",
-            "folder",
-            "schedule_cron",
-            "filter_query",
-            "process_unread_only",
-            "mark_as_read",
-            "sync_known_only",
-            "active",
-            "company_id",
-            "scheduled_task_id",
-            "last_synced_at",
-            "priority",
-        }:
-            continue
         if key in {"process_unread_only", "mark_as_read", "sync_known_only", "active"}:
             assignments.append(f"{key} = %s")
             params.append(1 if value else 0)
@@ -164,8 +166,8 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
         return await get_account(account_id)
     assignments.append("updated_at = UTC_TIMESTAMP(6)")
     params.append(account_id)
-    await db.execute(
-        f"UPDATE imap_accounts SET {', '.join(assignments)} WHERE id = %s",
+    await db.execute(  # nosec B608
+        f"UPDATE imap_accounts SET {', '.join(assignments)} WHERE id = %s",  # nosec B608
         tuple(params),
     )
     return await get_account(account_id)

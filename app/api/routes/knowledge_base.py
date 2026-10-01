@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from uuid import uuid4
+
+import aiofiles
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.api.dependencies.auth import get_current_session, get_current_user, get_optional_user, require_super_admin
@@ -22,12 +27,65 @@ from app.services import audit as audit_service
 from app.services import knowledge_base as kb_service
 from app.services import file_storage
 from app.services import tickets as tickets_service
+from app.repositories import resolution_step_reviews as resolution_review_repo
+from app.services import resolution_step_reviews as resolution_review_service
 
 router = APIRouter(prefix="/api/knowledge-base", tags=["Knowledge Base"])
+
+
+class ResolutionReviewUpdate(BaseModel):
+    ignored: bool
+
+
+@router.get("/resolution-steps", summary="List resolution steps awaiting knowledge-base review")
+async def list_resolution_step_reviews(
+    include_ignored: bool = Query(False),
+    current_user: dict = Depends(require_super_admin),
+) -> list[dict]:
+    return await resolution_review_repo.list_entries(include_ignored=include_ignored)
+
+
+@router.patch("/resolution-steps/{ticket_id}", summary="Ignore or restore a resolution-step entry")
+async def update_resolution_step_review(
+    ticket_id: int,
+    payload: ResolutionReviewUpdate,
+    request: Request,
+    current_user: dict = Depends(require_super_admin),
+) -> dict[str, str]:
+    if not await resolution_review_repo.get_entry(ticket_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resolution Step entry not found")
+    await resolution_review_repo.set_ignored(ticket_id, payload.ignored, int(current_user["id"]))
+    action = "ignore" if payload.ignored else "restore"
+    await audit_service.record(
+        action=f"knowledge_base.resolution_step.{action}", request=request,
+        user_id=int(current_user["id"]), entity_type="ticket", entity_id=ticket_id,
+        before=None, after={"ignored": payload.ignored},
+    )
+    return {"status": "updated", "message": "Entry ignored." if payload.ignored else "Entry restored."}
+
+
+@router.post("/resolution-steps/{ticket_id}/generate", status_code=status.HTTP_201_CREATED, summary="Generate a draft article")
+async def generate_resolution_step_article(
+    ticket_id: int,
+    request: Request,
+    current_user: dict = Depends(require_super_admin),
+) -> dict[str, object]:
+    try:
+        article = await resolution_review_service.generate_article(ticket_id, author_id=int(current_user["id"]))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await audit_service.record(
+        action="knowledge_base.resolution_step.generate", request=request,
+        user_id=int(current_user["id"]), entity_type="knowledge_base_article", entity_id=int(article["id"]),
+        before=None, after={"ticket_id": ticket_id, "is_published": False},
+    )
+    return {"status": "created", "message": "Draft knowledge-base article created.", "article_id": article["id"], "slug": article["slug"]}
 
 # Define uploads path at module level
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _PRIVATE_UPLOADS_PATH = _PROJECT_ROOT / "private_uploads"
+_KB_ATTACHMENTS_ROOT = _PRIVATE_UPLOADS_PATH / "knowledge-base" / "attachments"
+_SAFE_PATH_COMPONENT_RE = re.compile(r"^[A-Za-z0-9._-]{1,255}$")
 
 
 # Knowledge base articles can contain very long HTML bodies; capturing only
@@ -45,7 +103,39 @@ _AUDIT_ARTICLE_FIELDS: tuple[str, ...] = (
     "allowed_user_ids",
     "allowed_company_ids",
     "company_admin_ids",
+    "owner_id",
+    "lifecycle_status",
+    "review_due_at",
+    "asset_ids",
 )
+
+
+def _article_response(article: dict) -> KnowledgeBaseArticleResponse:
+    return KnowledgeBaseArticleResponse(
+        id=article["id"],
+        slug=article["slug"],
+        title=article["title"],
+        summary=article.get("summary"),
+        content=article.get("content", ""),
+        sections=article.get("sections", []),
+        permission_scope=article["permission_scope"],
+        is_published=article["is_published"],
+        ai_tags=article.get("ai_tags", []),
+        excluded_ai_tags=article.get("excluded_ai_tags", []),
+        manual_ai_tags=article.get("manual_ai_tags", []),
+        allowed_user_ids=article.get("allowed_user_ids", []),
+        allowed_company_ids=article.get("allowed_company_ids", []),
+        company_admin_ids=article.get("company_admin_ids", []),
+        conditional_companies=article.get("conditional_companies", []),
+        created_by=article.get("created_by"),
+        created_at=article.get("created_at"),
+        updated_at=article.get("updated_at"),
+        published_at=article.get("published_at"),
+        owner_id=article.get("owner_id"), lifecycle_status=article.get("lifecycle_status", "draft"),
+        review_due_at=article.get("review_due_at"), asset_ids=article.get("asset_ids", []),
+        assets=article.get("assets", []),
+        attachments=article.get("attachments", []),
+    )
 
 
 def _audit_article_summary(article: dict | None) -> dict | None:
@@ -100,6 +190,9 @@ async def list_articles(
                 updated_at=article.get("updated_at"),
                 updated_at_iso=article.get("updated_at_iso"),
                 published_at_iso=article.get("published_at_iso"),
+                owner_id=article.get("owner_id"),
+                lifecycle_status=article.get("lifecycle_status", "draft"),
+                review_due_at_iso=article.get("review_due_at_iso"),
             )
         )
     return items
@@ -125,27 +218,30 @@ async def get_article(
     )
     if not article:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
-    return KnowledgeBaseArticleResponse(
-        id=article["id"],
-        slug=article["slug"],
-        title=article["title"],
-        summary=article.get("summary"),
-        content=article.get("content", ""),
-        sections=article.get("sections", []),
-        permission_scope=article["permission_scope"],
-        is_published=article["is_published"],
-        ai_tags=article.get("ai_tags", []),
-        excluded_ai_tags=article.get("excluded_ai_tags", []),
-        manual_ai_tags=article.get("manual_ai_tags", []),
-        allowed_user_ids=article.get("allowed_user_ids", []),
-        allowed_company_ids=article.get("allowed_company_ids", []),
-        company_admin_ids=article.get("company_admin_ids", []),
-        conditional_companies=article.get("conditional_companies", []),
-        created_by=article.get("created_by"),
-        created_at=article.get("created_at"),
-        updated_at=article.get("updated_at"),
-        published_at=article.get("published_at"),
+    return _article_response(article)
+
+
+@router.get("/articles/{slug}/customer-preview")
+async def preview_article_for_customer(
+    slug: str,
+    company_id: int | None = Query(None, ge=1),
+    current_user: dict = Depends(require_super_admin),
+) -> dict:
+    """Render the customer-safe representation without granting admin visibility.
+
+    This deliberately uses a non-admin access context, so restricted sections and
+    legacy conditional blocks are filtered exactly as they are for a customer.
+    """
+    memberships = ({company_id: {"company_id": company_id}} if company_id else {})
+    preview_context = kb_service.ArticleAccessContext(
+        user={"id": 0}, user_id=0, is_super_admin=False, memberships=memberships
     )
+    article = await kb_service.get_article_by_slug_for_context(
+        slug, preview_context, include_unpublished=False, include_permissions=False
+    )
+    if not article:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+    return article
 
 
 @router.post("/articles", response_model=KnowledgeBaseArticleResponse, status_code=status.HTTP_201_CREATED)
@@ -181,27 +277,7 @@ async def create_article(
         before=None,
         after=_audit_article_summary(article),
     )
-    return KnowledgeBaseArticleResponse(
-        id=article["id"],
-        slug=article["slug"],
-        title=article["title"],
-        summary=article.get("summary"),
-        content=article.get("content", ""),
-        sections=article.get("sections", []),
-        permission_scope=article["permission_scope"],
-        is_published=article["is_published"],
-        ai_tags=article.get("ai_tags", []),
-        excluded_ai_tags=article.get("excluded_ai_tags", []),
-        manual_ai_tags=article.get("manual_ai_tags", []),
-        allowed_user_ids=article.get("allowed_user_ids", []),
-        allowed_company_ids=article.get("allowed_company_ids", []),
-        company_admin_ids=article.get("company_admin_ids", []),
-        conditional_companies=article.get("conditional_companies", []),
-        created_by=article.get("created_by"),
-        created_at=article.get("created_at"),
-        updated_at=article.get("updated_at"),
-        published_at=article.get("published_at"),
-    )
+    return _article_response(article)
 
 
 @router.put("/articles/{article_id}", response_model=KnowledgeBaseArticleResponse)
@@ -213,7 +289,9 @@ async def update_article(
 ) -> KnowledgeBaseArticleResponse:
     existing_article = await kb_repo.get_article_by_id(article_id)
     try:
-        updated = await kb_service.update_article(article_id, payload.dict(exclude_unset=True))
+        updated = await kb_service.update_article(
+            article_id, payload.dict(exclude_unset=True), editor_id=int(current_user["id"])
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     context = await kb_service.build_access_context(current_user)
@@ -234,27 +312,172 @@ async def update_article(
         before=_audit_article_summary(existing_article),
         after=_audit_article_summary(article),
     )
-    return KnowledgeBaseArticleResponse(
-        id=article["id"],
-        slug=article["slug"],
-        title=article["title"],
-        summary=article.get("summary"),
-        content=article.get("content", ""),
-        sections=article.get("sections", []),
-        permission_scope=article["permission_scope"],
-        is_published=article["is_published"],
-        ai_tags=article.get("ai_tags", []),
-        excluded_ai_tags=article.get("excluded_ai_tags", []),
-        manual_ai_tags=article.get("manual_ai_tags", []),
-        allowed_user_ids=article.get("allowed_user_ids", []),
-        allowed_company_ids=article.get("allowed_company_ids", []),
-        company_admin_ids=article.get("company_admin_ids", []),
-        conditional_companies=article.get("conditional_companies", []),
-        created_by=article.get("created_by"),
-        created_at=article.get("created_at"),
-        updated_at=article.get("updated_at"),
-        published_at=article.get("published_at"),
+    return _article_response(article)
+
+
+@router.get("/articles/{article_id}/versions")
+async def list_article_versions(
+    article_id: int, current_user: dict = Depends(require_super_admin)
+) -> list[dict]:
+    """List immutable revisions; version history is never exposed to customers."""
+    if not await kb_repo.get_article_by_id(article_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+    return await kb_repo.list_article_versions(article_id)
+
+
+@router.get("/articles/{article_id}/versions/{version_number}")
+async def get_article_version(
+    article_id: int,
+    version_number: int,
+    current_user: dict = Depends(require_super_admin),
+) -> dict:
+    version = await kb_repo.get_article_version(article_id, version_number)
+    if not version:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article version not found")
+    return version
+
+
+_BLOCKED_ATTACHMENT_SUFFIXES = {".exe", ".bat", ".cmd", ".com", ".js", ".mjs", ".html", ".htm", ".svg", ".xml"}
+
+
+def _validate_attachment_path_component(value: str, *, field_name: str) -> str:
+    component = str(value or "").strip()
+    if not component or component in {".", ".."} or "/" in component or "\\" in component:
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name}")
+    if not _SAFE_PATH_COMPONENT_RE.fullmatch(component):
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name}")
+    return component
+
+
+def _validate_article_id_component(article_id: int) -> str:
+    article_component = _validate_attachment_path_component(str(article_id), field_name="article identifier")
+    if not article_component.isdigit() or int(article_component) <= 0:
+        raise HTTPException(status_code=400, detail="Invalid article identifier")
+    return article_component
+
+
+def _ensure_relative_to(path: Path, root: Path) -> None:
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid attachment path") from exc
+
+
+def _resolve_article_attachment_directory(article_id: int, *, create: bool = False) -> Path:
+    article_component = _validate_article_id_component(article_id)
+    private_root = _PRIVATE_UPLOADS_PATH.resolve()
+    attachments_root = _KB_ATTACHMENTS_ROOT.resolve()
+    _ensure_relative_to(attachments_root, private_root)
+    article_directory = (attachments_root / article_component).resolve()
+    _ensure_relative_to(article_directory, attachments_root)
+    if create:
+        article_directory.mkdir(parents=True, exist_ok=True)
+        article_directory = article_directory.resolve()
+        _ensure_relative_to(article_directory, attachments_root)
+    return article_directory
+
+
+def _resolve_attachment_record_path(article_id: int, storage_path: str | None) -> Path | None:
+    article_component = _validate_article_id_component(article_id)
+    normalized = str(storage_path or "").replace("\\", "/").strip().lstrip("/")
+    if not normalized:
+        return None
+    parts = tuple(part for part in normalized.split("/") if part not in {"", "."})
+    expected_prefix = ("private_uploads", "knowledge-base", "attachments", article_component)
+    if len(parts) != 5 or parts[:4] != expected_prefix:
+        return None
+    filename = parts[-1]
+    if filename in {".", ".."} or not _SAFE_PATH_COMPONENT_RE.fullmatch(filename):
+        return None
+
+    private_root = _PRIVATE_UPLOADS_PATH.resolve()
+    try:
+        article_directory = _resolve_article_attachment_directory(article_id, create=False)
+    except HTTPException:
+        return None
+    candidate = (_PROJECT_ROOT / Path(*parts)).resolve()
+    try:
+        candidate.relative_to(private_root)
+        candidate.relative_to(article_directory)
+    except ValueError:
+        return None
+    return candidate
+
+
+@router.post("/articles/{article_id}/attachments", status_code=status.HTTP_201_CREATED)
+async def upload_article_attachment(
+    article_id: int, file: UploadFile = File(...), current_user: dict = Depends(require_super_admin)
+) -> dict:
+    if not await kb_repo.get_article_by_id(article_id):
+        raise HTTPException(status_code=404, detail="Article not found")
+    file_name = file_storage.sanitize_filename(file.filename or "attachment")
+    suffix = Path(file_name).suffix.lower()
+    content_type = (file.content_type or "").split(";", 1)[0].lower()
+    if suffix in _BLOCKED_ATTACHMENT_SUFFIXES or content_type in {
+        "text/html", "application/xhtml+xml", "image/svg+xml", "application/xml",
+        "text/xml", "application/javascript", "text/javascript",
+    }:
+        await file.close()
+        raise HTTPException(status_code=400, detail="Unsupported attachment type")
+    directory = _resolve_article_attachment_directory(article_id, create=True)
+    destination_name = _validate_attachment_path_component(
+        f"{uuid4().hex}{suffix}",
+        field_name="attachment filename",
     )
+    destination = (directory / destination_name).resolve()
+    _ensure_relative_to(destination, directory)
+    size = 0
+    try:
+        async with aiofiles.open(destination, "wb") as target:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > 15 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="Attachment exceeds the 15 MB limit")
+                await target.write(chunk)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
+    return await kb_repo.create_attachment(
+        article_id, file_name=file_name, content_type=file.content_type,
+        storage_path=str(destination.relative_to(_PROJECT_ROOT)), file_size=size,
+        uploaded_by=int(current_user["id"]),
+    )
+
+
+@router.get("/articles/{article_id}/attachments/{attachment_id}")
+async def download_article_attachment(
+    article_id: int, attachment_id: int, current_user: dict | None = Depends(get_optional_user)
+) -> FileResponse:
+    source_article = await kb_repo.get_article_by_id(article_id)
+    context = await kb_service.build_access_context(current_user)
+    visible_article = (
+        await kb_service.get_article_by_slug_for_context(str(source_article["slug"]), context)
+        if source_article else None
+    )
+    if not visible_article:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    attachment = await kb_repo.get_attachment(attachment_id)
+    if not attachment or int(attachment["article_id"]) != article_id:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    path = _resolve_attachment_record_path(article_id, attachment.get("storage_path"))
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="Attachment file not found")
+    return FileResponse(path, filename=attachment["file_name"], media_type="application/octet-stream")
+
+
+@router.delete("/articles/{article_id}/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_article_attachment(
+    article_id: int, attachment_id: int, current_user: dict = Depends(require_super_admin)
+) -> None:
+    attachment = await kb_repo.get_attachment(attachment_id)
+    if not attachment or int(attachment["article_id"]) != article_id:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    if _resolve_attachment_record_path(article_id, attachment.get("storage_path")) is None:
+        raise HTTPException(status_code=404, detail="Attachment file not found")
+    file_storage.delete_stored_file(attachment["storage_path"], _PRIVATE_UPLOADS_PATH)
+    await kb_repo.delete_attachment(attachment_id)
 
 
 @router.delete("/articles/{article_id}", status_code=status.HTTP_204_NO_CONTENT)

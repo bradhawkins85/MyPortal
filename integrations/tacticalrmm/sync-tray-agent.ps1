@@ -30,7 +30,13 @@ if (-not $trayAgentID) {
     throw "Tray Agent did not enrol within $WaitSeconds seconds ($statePath not ready)."
 }
 
-$body = @{ agent_id = $AgentID; tray_agent_id = $trayAgentID } | ConvertTo-Json
+$body = @{
+    agent_id = $AgentID
+    tray_agent_id = $trayAgentID
+    # Ask MyPortal to fetch this single agent from TRMM and create the asset
+    # immediately when the scheduled asset import has not seen it yet.
+    create_asset_if_missing = $true
+} | ConvertTo-Json
 try {
     $result = Invoke-RestMethod -Method Post `
         -Uri "$($PortalURL.TrimEnd('/'))/api/tray/trmm-sync" `

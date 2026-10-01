@@ -1,8 +1,30 @@
 {% extends "base.html" %}
 
 {% block header_title %}
-  <div class="header-title-menu">
-    <span class="header-title-menu__label">Call Recordings</span>
+  <div class="header-title-menu page-header-bar">
+    <span class="header__title-text">Call Recordings</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="recording-search">Search recordings</label>
+      <input
+        type="search"
+        id="recording-search"
+        class="form-input page-header-toolbar__search"
+        placeholder="Search recordings"
+      />
+      <label class="visually-hidden" for="status-filter">Status</label>
+      <select id="status-filter" class="form-input page-header-toolbar__select">
+        <option value="">All Statuses</option>
+        <option value="pending">Pending Transcription</option>
+        <option value="processing">Processing</option>
+        <option value="completed">Completed</option>
+        <option value="failed">Failed</option>
+      </select>
+      <label class="visually-hidden" for="linked-filter">Linked tickets</label>
+      <select id="linked-filter" class="form-input page-header-toolbar__select">
+        <option value="">All Recordings</option>
+        <option value="0">Unlinked Only</option>
+      </select>
+    </div>
     <details class="header-title-menu__dropdown" data-header-menu>
       <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
         Settings
@@ -72,36 +94,6 @@
           </div>
         </div>
 
-        <!-- Filters -->
-        <div class="filters-bar">
-          <label class="form-label">
-            Status
-            <select id="status-filter" class="form-input">
-              <option value="">All Statuses</option>
-              <option value="pending">Pending Transcription</option>
-              <option value="processing">Processing</option>
-              <option value="completed">Completed</option>
-              <option value="failed">Failed</option>
-            </select>
-          </label>
-          <label class="form-label">
-            Linked Tickets
-            <select id="linked-filter" class="form-input">
-              <option value="">All Recordings</option>
-              <option value="0">Unlinked Only</option>
-            </select>
-          </label>
-          <label class="form-label">
-            Search
-            <input
-              type="search"
-              id="recording-search"
-              class="form-input search-box__input"
-              placeholder="Search recordings..."
-              aria-label="Search recordings"
-            />
-          </label>
-        </div>
 
         <!-- Recordings Table -->
         <div class="data-table-wrapper">

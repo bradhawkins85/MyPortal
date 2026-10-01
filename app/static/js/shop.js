@@ -1,5 +1,47 @@
 (function () {
   const SHOP_SEARCH_REFOCUS_KEY = 'shop.search.refocus';
+  const SHOP_VIEW_STORAGE_KEY = 'myportal:shop:view';
+
+  function bindShopViewToggle(container) {
+    const grid = container.querySelector('.shop-card-grid:not(.shop-card-grid--categories)');
+    const toggle = container.querySelector('[data-shop-view-toggle]');
+    if (!grid || !toggle) {
+      return;
+    }
+
+    const buttons = Array.from(toggle.querySelectorAll('[data-shop-view]'));
+    const validViews = ['card', 'row'];
+
+    function applyView(view, persist) {
+      const selectedView = validViews.includes(view) ? view : 'card';
+      grid.classList.toggle('shop-card-grid--rows', selectedView === 'row');
+      updateProductTitlesForView(grid, selectedView);
+      buttons.forEach((button) => {
+        const active = button.getAttribute('data-shop-view') === selectedView;
+        button.setAttribute('aria-pressed', String(active));
+      });
+
+      if (persist) {
+        try {
+          localStorage.setItem(SHOP_VIEW_STORAGE_KEY, selectedView);
+        } catch (_error) {
+        }
+      }
+    }
+
+    let initialView = 'card';
+    try {
+      initialView = localStorage.getItem(SHOP_VIEW_STORAGE_KEY) || initialView;
+    } catch (_error) {
+    }
+    applyView(initialView, false);
+
+    buttons.forEach((button) => {
+      button.addEventListener('click', () => {
+        applyView(button.getAttribute('data-shop-view'), true);
+      });
+    });
+  }
 
   function submitOnChange(container) {
     container.querySelectorAll('[data-submit-on-change]').forEach((input) => {
@@ -161,7 +203,14 @@
   }
 
   function buildModalAddToCart(product) {
-    const stock = Number(product && product.stock);
+    if (product && product.active_subscription_id) {
+      const manage = document.createElement('a');
+      manage.className = 'button button--primary';
+      manage.href = `/subscriptions#subscription-${encodeURIComponent(product.active_subscription_id)}`;
+      manage.textContent = 'Manage';
+      return manage;
+    }
+    const stock = Number(product?.stock);
     const modal = document.getElementById('product-details-modal');
     const cartAllowed = modal && modal.getAttribute('data-cart-allowed') === 'true';
     if (!cartAllowed || !Number.isFinite(stock) || stock <= 0) {
@@ -323,8 +372,26 @@
     title.className = 'modal__title product-details-modal__title';
     title.textContent = product.name || 'Product details';
     summary.appendChild(title);
-    summary.appendChild(createDetailRow('Price', formatPrice(product.price)));
-    summary.appendChild(createDetailRow('Availability', describeStockStatus(product.stock)));
+    const subscriptionPrices = Array.isArray(product.subscription_price_options)
+      ? product.subscription_price_options
+      : [];
+    if (subscriptionPrices.length > 0) {
+      const pricingTitle = document.createElement('strong');
+      pricingTitle.textContent = subscriptionPrices.length === 1 ? 'Price' : 'Pricing options';
+      summary.appendChild(pricingTitle);
+      const pricingList = document.createElement('ul');
+      pricingList.className = 'shop-subscription-prices';
+      subscriptionPrices.forEach((option) => {
+        const item = document.createElement('li');
+        item.textContent = `${option.label}: ${formatPrice(option.price)}${option.suffix}`;
+        pricingList.appendChild(item);
+      });
+      summary.appendChild(pricingList);
+      summary.appendChild(createDetailRow('Availability', 'Available'));
+    } else {
+      summary.appendChild(createDetailRow('Price', formatPrice(product.price)));
+      summary.appendChild(createDetailRow('Availability', describeStockStatus(product.stock)));
+    }
     const actions = document.createElement('div');
     actions.className = 'product-details-modal__actions';
     if (product.product_link) {
@@ -423,6 +490,18 @@
     });
   }
 
+  function updateProductTitlesForView(container, view) {
+    if (view !== 'row') {
+      truncateSafeProductTitles(container);
+      return;
+    }
+
+    container.querySelectorAll('[data-shop-safe-title]').forEach((title) => {
+      const fullTitle = title.getAttribute('title') || title.textContent || '';
+      title.textContent = fullTitle.trim();
+    });
+  }
+
   function restoreShopSearchFocus(container) {
     const searchInput = container.querySelector('[data-shop-search]');
     if (!searchInput) {
@@ -457,16 +536,29 @@
     bindShopSearch(container);
     restoreShopSearchFocus(container);
     truncateSafeProductTitles(container);
+    bindShopViewToggle(container);
 
 
     const detailsModal = document.getElementById('product-details-modal');
     const refreshForm = detailsModal
       ? detailsModal.querySelector('[data-product-refresh-form]')
       : null;
+    const editLink = detailsModal
+      ? detailsModal.querySelector('[data-product-edit-link]')
+      : null;
 
     bindModalDismissal(detailsModal);
 
     async function openProductDetails(id) {
+      if (editLink) {
+        if (Number.isFinite(id) && id > 0) {
+          editLink.href = `/admin/shop?editProduct=${encodeURIComponent(String(id))}`;
+          editLink.hidden = false;
+        } else {
+          editLink.href = '/admin/shop';
+          editLink.hidden = true;
+        }
+      }
       if (refreshForm) {
         if (Number.isFinite(id) && id > 0) {
           refreshForm.action = `/shop/admin/product/${id}/refresh-description`;
@@ -498,5 +590,10 @@
       event.preventDefault();
       openProductDetails(Number(button.getAttribute('data-product-details')));
     });
+
+    const requestedProductId = Number(new URLSearchParams(window.location.search).get('product'));
+    if (Number.isFinite(requestedProductId) && requestedProductId > 0) {
+      openProductDetails(requestedProductId);
+    }
   });
 })();

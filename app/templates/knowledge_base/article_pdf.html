@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ kb_article.title }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm;
+      @bottom-center {
+        content: "Page " counter(page) " of " counter(pages);
+        color: #64748b;
+        font: 9pt sans-serif;
+      }
+    }
+    body { color: #1e293b; font: 10.5pt/1.55 sans-serif; }
+    h1 { color: #0f172a; font-size: 24pt; line-height: 1.2; margin: 0 0 5mm; }
+    h2 { color: #0f172a; font-size: 16pt; margin: 8mm 0 3mm; page-break-after: avoid; }
+    h3, h4 { color: #0f172a; page-break-after: avoid; }
+    .summary { color: #475569; font-size: 12pt; margin-bottom: 8mm; }
+    .meta { border-bottom: 1px solid #cbd5e1; color: #64748b; font-size: 9pt; margin-bottom: 8mm; padding-bottom: 4mm; }
+    section, table, pre, img { page-break-inside: avoid; }
+    img { height: auto; max-width: 100%; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #cbd5e1; padding: 2mm; text-align: left; }
+    th { background: #f1f5f9; }
+    pre { background: #f1f5f9; padding: 3mm; white-space: pre-wrap; }
+    code { overflow-wrap: anywhere; }
+    a { color: #1d4ed8; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>{{ kb_article.title }}</h1>
+    {% if kb_article.summary %}<p class="summary">{{ kb_article.summary }}</p>{% endif %}
+    <p class="meta">Exported {{ generated_at.strftime('%d %B %Y at %H:%M UTC') }}</p>
+    {% if kb_article.sections %}
+      {% for section in kb_article.sections %}
+        <section>
+          {% if section.heading %}<h2>{{ section.heading }}</h2>{% endif %}
+          {{ section.content | safe }}
+        </section>
+      {% endfor %}
+    {% else %}
+      {{ kb_article.content | safe }}
+    {% endif %}
+  </main>
+</body>
+</html>

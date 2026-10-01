@@ -258,16 +258,12 @@ jobs:
           done
       - name: Stage installers
         run: |
-          if [ -f artifacts/tray-windows-msi/myportal-tray.msi ]; then
-            cp artifacts/tray-windows-msi/myportal-tray.msi .
-          else
-            echo "Warning: myportal-tray.msi artifact not found; MSI will be omitted from release." >&2
-          fi
-          if [ -f artifacts/tray-darwin-pkg/myportal-tray.pkg ]; then
-            cp artifacts/tray-darwin-pkg/myportal-tray.pkg .
-          else
-            echo "Warning: myportal-tray.pkg artifact not found; .pkg will be omitted from release." >&2
-          fi
+          test -s artifacts/tray-windows-msi/myportal-tray.msi
+          test -s artifacts/tray-darwin-pkg/myportal-tray.pkg
+          cp artifacts/tray-windows-msi/myportal-tray.msi .
+          cp artifacts/tray-darwin-pkg/myportal-tray.pkg .
+          printf '%s\n' "$GITHUB_SHA" > REVISION
+          sha256sum myportal-tray.msi myportal-tray.pkg REVISION > SHA256SUMS
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -275,4 +271,6 @@ jobs:
             *.zip
             myportal-tray.msi
             myportal-tray.pkg
+            REVISION
+            SHA256SUMS
           generate_release_notes: true

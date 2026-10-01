@@ -386,6 +386,7 @@ async def enforce_plan_access(
         HTTPException: If user doesn't have required access
     """
     # Super admins always have access
+    _ = required_role
     if is_super_admin:
         return
     

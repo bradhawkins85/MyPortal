@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Email preferences</title>
+  <link rel="stylesheet" href="{{ static_url('/static/css/app.css') }}" />
+  <style>
+    .unsubscribe-shell { max-width: 560px; margin: 0 auto; padding: 3rem 1rem; }
+  </style>
+</head>
+<body>
+  <main class="unsubscribe-shell">
+    <section class="card card--panel">
+      <header class="card__header card__header--stacked">
+        <div><h1 class="card__title">Email preferences</h1></div>
+      </header>
+      {% if not recipient %}
+        <p>This unsubscribe link is not valid. It may have been copied incorrectly.</p>
+      {% elif unsubscribed %}
+        <p>{{ recipient.email }} will no longer receive sales emails from us. You will still receive important updates about your products and services.</p>
+      {% else %}
+        <p>Stop sending sales emails to <strong>{{ recipient.email }}</strong>? You will still receive important updates about your products and services.</p>
+        <form method="post" action="/marketing/unsubscribe/{{ recipient.token }}">
+          <button type="submit" class="button button--primary">Unsubscribe from sales emails</button>
+        </form>
+      {% endif %}
+    </section>
+  </main>
+</body>
+</html>

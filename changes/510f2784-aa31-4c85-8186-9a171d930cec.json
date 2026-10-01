@@ -1,0 +1,7 @@
+{
+  "guid": "510f2784-aa31-4c85-8186-9a171d930cec",
+  "occurred_at": "2026-09-21T12:00Z",
+  "change_type": "fixed",
+  "summary": "Validate persistent upload storage before starting blue-green application workers",
+  "content_hash": "bc38838a7a2aa7b0741faa1dc609c35adb65c74aaaa3e9c579aaf2614cc80502"
+}

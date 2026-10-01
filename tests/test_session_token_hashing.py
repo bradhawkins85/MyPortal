@@ -64,7 +64,7 @@ async def test_create_session_returns_raw_cookie_token(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_get_session_by_token_accepts_raw_hash_fallback(monkeypatch):
+async def test_get_session_by_token_matches_only_the_digest(monkeypatch):
     calls = []
 
     async def fake_fetch_one(sql, params):
@@ -77,5 +77,6 @@ async def test_get_session_by_token_accepts_raw_hash_fallback(monkeypatch):
 
     assert row == {"id": 1}
     sql, params = calls[0]
-    assert "session_token = %s OR session_token = %s" in sql
-    assert params == (auth_repo._hash_session_token("cookie-token"), "cookie-token")
+    # The stored digest must never be accepted as a cookie value.
+    assert "OR session_token" not in sql
+    assert params == (auth_repo._hash_session_token("cookie-token"),)

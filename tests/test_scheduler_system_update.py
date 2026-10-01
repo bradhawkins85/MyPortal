@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import json
 from pathlib import Path
 
 from app.services.scheduler import SchedulerService
@@ -32,6 +33,117 @@ def test_run_now_forces_restart_flag(monkeypatch):
     assert recorded["force_restart"] is True
 
 
+def test_system_update_run_is_skipped_when_no_update_is_available(monkeypatch):
+    scheduler = SchedulerService()
+
+    async def fake_record_task_run(*args, **kwargs):
+        recorded.update(kwargs)
+
+    monkeypatch.setattr(
+        scheduled_tasks_repo,
+        "record_task_run",
+        fake_record_task_run,
+    )
+    monkeypatch.setattr(
+        SchedulerService,
+        "run_system_update",
+        lambda self, *, force_restart=False: _async_result(
+            "No GitHub update available; upgrade was not scheduled."
+        ),
+    )
+
+    recorded = {}
+    asyncio.run(
+        scheduler._run_task({"id": 8, "command": "system_update"}, force_restart=True)
+    )
+
+    assert recorded["status"] == "skipped"
+    assert recorded["details"] == (
+        "No GitHub update available; upgrade was not scheduled."
+    )
+
+
+def test_system_update_run_succeeds_when_update_is_scheduled(monkeypatch):
+    scheduler = SchedulerService()
+
+    async def fake_record_task_run(*args, **kwargs):
+        recorded.update(kwargs)
+
+    monkeypatch.setattr(
+        scheduled_tasks_repo,
+        "record_task_run",
+        fake_record_task_run,
+    )
+    monkeypatch.setattr(
+        SchedulerService,
+        "run_system_update",
+        lambda self, *, force_restart=False: _async_result(
+            "Update scheduled via system_update.flag using restart mode."
+        ),
+    )
+
+    recorded = {}
+    asyncio.run(
+        scheduler._run_task({"id": 9, "command": "system_update"}, force_restart=True)
+    )
+
+    assert recorded["status"] == "succeeded"
+    assert recorded["details"] == (
+        "Update scheduled via system_update.flag using restart mode."
+    )
+
+
+def test_scheduled_system_update_requests_rolling_workflow(monkeypatch):
+    scheduler = SchedulerService()
+    captured = {}
+
+    async def fake_update(self, *, force_restart=False, scheduled=False):
+        captured.update(force_restart=force_restart, scheduled=scheduled)
+        return "queued"
+
+    async def fake_record(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(SchedulerService, "run_system_update", fake_update)
+    monkeypatch.setattr(scheduled_tasks_repo, "record_task_run", fake_record)
+    asyncio.run(scheduler._run_task({"id": 19, "command": "system_update"}))
+    assert captured == {"force_restart": False, "scheduled": True}
+
+
+def test_scheduled_system_update_does_not_use_feature_pack_hot_reload(
+    monkeypatch, tmp_path
+):
+    scheduler = SchedulerService()
+    flag_path = tmp_path / "system_update.flag"
+
+    async def ref(*args):
+        return "local" if len(args) > 1 else "remote"
+
+    async def changed(*args):
+        return ["app/features/example/routes.py"]
+
+    async def legacy_hot_reload(*args, **kwargs):
+        raise AssertionError("legacy hot reload path was invoked")
+
+    monkeypatch.setattr(SchedulerService, "_get_git_ref", ref)
+    monkeypatch.setattr(SchedulerService, "_get_remote_main_ref", ref)
+    monkeypatch.setattr(SchedulerService, "_fetch_remote_main_ref", ref)
+    monkeypatch.setattr(SchedulerService, "_list_changed_files", changed)
+    monkeypatch.setattr(SchedulerService, "_try_feature_pack_hot_reload", legacy_hot_reload)
+    monkeypatch.setattr("app.services.scheduler._SYSTEM_UPDATE_FLAG_PATH", flag_path)
+    monkeypatch.setattr(
+        "app.services.scheduler.system_update_history.create_pending",
+        lambda **kwargs: {"id": "12345678-1234-1234-1234-123456789abc"},
+    )
+    output = asyncio.run(scheduler._run_system_update(scheduled=True))
+    assert "rolling mode" in output
+    assert "requested_mode=rolling" in flag_path.read_text()
+
+
+async def _async_result(value: str) -> str:
+    return value
+
+
 def test_system_update_schedules_flag_when_remote_ahead(monkeypatch, tmp_path: Path):
     scheduler = SchedulerService()
     flag_path = tmp_path / "var" / "state" / "system_update.flag"
@@ -49,9 +161,15 @@ def test_system_update_schedules_flag_when_remote_ahead(monkeypatch, tmp_path: P
         return ["app/main.py"]
 
     monkeypatch.setattr(SchedulerService, "_get_git_ref", fake_get_git_ref)
-    monkeypatch.setattr(SchedulerService, "_get_remote_main_ref", fake_get_remote_main_ref)
-    monkeypatch.setattr(SchedulerService, "_fetch_remote_main_ref", fake_get_remote_main_ref)
-    monkeypatch.setattr(SchedulerService, "_list_changed_files", fake_list_changed_files)
+    monkeypatch.setattr(
+        SchedulerService, "_get_remote_main_ref", fake_get_remote_main_ref
+    )
+    monkeypatch.setattr(
+        SchedulerService, "_fetch_remote_main_ref", fake_get_remote_main_ref
+    )
+    monkeypatch.setattr(
+        SchedulerService, "_list_changed_files", fake_list_changed_files
+    )
     monkeypatch.setattr("app.services.scheduler._SYSTEM_UPDATE_FLAG_PATH", flag_path)
 
     output = asyncio.run(scheduler._run_system_update(force_restart=True))
@@ -79,7 +197,9 @@ def test_system_update_skips_when_already_current(monkeypatch, tmp_path: Path):
         return "same"
 
     monkeypatch.setattr(SchedulerService, "_get_git_ref", fake_get_git_ref)
-    monkeypatch.setattr(SchedulerService, "_get_remote_main_ref", fake_get_remote_main_ref)
+    monkeypatch.setattr(
+        SchedulerService, "_get_remote_main_ref", fake_get_remote_main_ref
+    )
     monkeypatch.setattr("app.services.scheduler._SYSTEM_UPDATE_FLAG_PATH", flag_path)
 
     output = asyncio.run(scheduler._run_system_update())
@@ -95,7 +215,9 @@ class _FakeRegistry:
         self.reload_should_raise: dict[str, Exception] = {}
 
     def list(self):
-        return [{"slug": slug, "version": version} for slug, version in self._packs.items()]
+        return [
+            {"slug": slug, "version": version} for slug, version in self._packs.items()
+        ]
 
     async def reload(self, slug: str):
         if slug in self.reload_should_raise:
@@ -106,6 +228,12 @@ class _FakeRegistry:
             last_error = None
 
         return _State()
+
+    async def reload_many_from_release(self, slugs, release_root, *, revision):
+        states = {}
+        for slug in slugs:
+            states[slug] = await self.reload(slug)
+        return states
 
 
 def _install_hot_reload_stubs(
@@ -144,7 +272,9 @@ def _install_hot_reload_stubs(
 
     monkeypatch.setattr(SchedulerService, "_fetch_remote_main_ref", fake_fetch)
     monkeypatch.setattr(SchedulerService, "_list_changed_files", fake_diff)
-    monkeypatch.setattr(SchedulerService, "_read_pack_version_at_ref", fake_read_version)
+    monkeypatch.setattr(
+        SchedulerService, "_read_pack_version_at_ref", fake_read_version
+    )
     monkeypatch.setattr(SchedulerService, "_run_git", fake_run_git)
 
     return merge_calls
@@ -159,7 +289,9 @@ def _install_head_stubs(monkeypatch):
         return "remotesha"
 
     monkeypatch.setattr(SchedulerService, "_get_git_ref", fake_get_git_ref)
-    monkeypatch.setattr(SchedulerService, "_get_remote_main_ref", fake_get_remote_main_ref)
+    monkeypatch.setattr(
+        SchedulerService, "_get_remote_main_ref", fake_get_remote_main_ref
+    )
 
 
 def test_system_update_hot_reloads_feature_pack_when_version_bumped(
@@ -168,6 +300,9 @@ def test_system_update_hot_reloads_feature_pack_when_version_bumped(
     scheduler = SchedulerService()
     flag_path = tmp_path / "var" / "state" / "system_update.flag"
     monkeypatch.setattr("app.services.scheduler._SYSTEM_UPDATE_FLAG_PATH", flag_path)
+    release_root = tmp_path / "releases"
+    (release_root / "remotesha").mkdir(parents=True)
+    monkeypatch.setenv("MYPORTAL_RELEASE_ROOT", str(release_root))
 
     _install_head_stubs(monkeypatch)
 
@@ -189,7 +324,7 @@ def test_system_update_hot_reloads_feature_pack_when_version_bumped(
     assert "tickets@1.0.1" in output
     assert registry.reloaded == ["tickets"]
     assert not flag_path.exists()
-    assert any(call[:2] == ("merge", "--ff-only") for call in merge_calls)
+    assert not any(call[:2] == ("merge", "--ff-only") for call in merge_calls)
 
 
 def test_system_update_hot_reloads_even_when_version_not_bumped(
@@ -205,6 +340,9 @@ def test_system_update_hot_reloads_even_when_version_not_bumped(
     scheduler = SchedulerService()
     flag_path = tmp_path / "var" / "state" / "system_update.flag"
     monkeypatch.setattr("app.services.scheduler._SYSTEM_UPDATE_FLAG_PATH", flag_path)
+    release_root = tmp_path / "releases"
+    (release_root / "remotesha").mkdir(parents=True)
+    monkeypatch.setenv("MYPORTAL_RELEASE_ROOT", str(release_root))
 
     _install_head_stubs(monkeypatch)
 
@@ -223,7 +361,7 @@ def test_system_update_hot_reloads_even_when_version_not_bumped(
     assert "tickets@1.0.0" in output
     assert registry.reloaded == ["tickets"]
     assert not flag_path.exists()
-    assert any(call[:2] == ("merge", "--ff-only") for call in merge_calls)
+    assert not any(call[:2] == ("merge", "--ff-only") for call in merge_calls)
 
 
 def test_system_update_falls_back_to_restart_when_changes_outside_packs(
@@ -253,7 +391,8 @@ def test_system_update_falls_back_to_restart_when_changes_outside_packs(
     assert flag_path.exists()
     contents = flag_path.read_text(encoding="utf-8")
     assert "requested_mode=graceful" in contents
-    assert "requested_reason=shared_app_code_changed" in contents
+    assert "requested_reason=configuration_or_backend_changed" in contents
+    assert '"action":"staged-cutover"' in contents
     assert registry.reloaded == []
     assert not any(call[:2] == ("merge", "--ff-only") for call in merge_calls)
 
@@ -376,9 +515,15 @@ def test_system_update_schedules_with_env_mode(monkeypatch, tmp_path: Path):
 
     monkeypatch.setenv("APP_UPGRADE_MODE", "rolling")
     monkeypatch.setattr(SchedulerService, "_get_git_ref", fake_get_git_ref)
-    monkeypatch.setattr(SchedulerService, "_get_remote_main_ref", fake_get_remote_main_ref)
-    monkeypatch.setattr(SchedulerService, "_fetch_remote_main_ref", fake_get_remote_main_ref)
-    monkeypatch.setattr(SchedulerService, "_list_changed_files", fake_list_changed_files)
+    monkeypatch.setattr(
+        SchedulerService, "_get_remote_main_ref", fake_get_remote_main_ref
+    )
+    monkeypatch.setattr(
+        SchedulerService, "_fetch_remote_main_ref", fake_get_remote_main_ref
+    )
+    monkeypatch.setattr(
+        SchedulerService, "_list_changed_files", fake_list_changed_files
+    )
     monkeypatch.setattr("app.services.scheduler._SYSTEM_UPDATE_FLAG_PATH", flag_path)
     monkeypatch.setattr(
         SchedulerService,
@@ -391,20 +536,26 @@ def test_system_update_schedules_with_env_mode(monkeypatch, tmp_path: Path):
     assert "rolling mode" in output
     contents = flag_path.read_text(encoding="utf-8")
     assert "requested_mode=rolling" in contents
-    assert "requested_reason=deployment_topology_changed" in contents
+    assert "requested_reason=configuration_or_backend_changed" in contents
+    assert '"action":"staged-cutover"' in contents
 
 
 def test_classify_full_upgrade_reason():
     cls = SchedulerService._classify_full_upgrade_reason
 
-    assert cls(["pyproject.toml"]) == "dependency_manifest_changed"
-    assert cls(["migrations/20260602_add_table.sql"]) == "migrations_changed"
-    assert cls(["deploy/nginx/myportal.conf"]) == "deployment_topology_changed"
-    assert cls(["scripts/upgrade.sh"]) == "upgrade_runtime_changed"
-    assert cls(["app/main.py"]) == "shared_app_code_changed"
+    assert cls(["pyproject.toml"]) == "dependency_changed"
+    assert (
+        cls(["migrations/20260602_add_table.sql"])
+        == "migration_with_reload_free_assets"
+    )
+    assert cls(["deploy/nginx/myportal.conf"]) == "configuration_or_backend_changed"
+    assert cls(["scripts/upgrade.sh"]) == "unknown_or_planner_change"
+    assert cls(["app/main.py"]) == "configuration_or_backend_changed"
 
 
-def test_consume_feature_pack_reload_flag_reloads_and_deletes(monkeypatch, tmp_path: Path):
+def test_consume_feature_pack_reload_flag_reloads_and_deletes(
+    monkeypatch, tmp_path: Path
+):
     """Listed slugs are reloaded in-process and the flag file is removed."""
 
     scheduler = SchedulerService()
@@ -426,7 +577,9 @@ def test_consume_feature_pack_reload_flag_reloads_and_deletes(monkeypatch, tmp_p
     assert not flag_path.exists()
 
 
-def test_consume_feature_pack_reload_flag_noop_when_missing(monkeypatch, tmp_path: Path):
+def test_consume_feature_pack_reload_flag_noop_when_missing(
+    monkeypatch, tmp_path: Path
+):
     """Missing flag file is a silent no-op (the common case)."""
 
     scheduler = SchedulerService()
@@ -447,7 +600,9 @@ def test_consume_feature_pack_reload_flag_noop_when_missing(monkeypatch, tmp_pat
     assert not flag_path.exists()
 
 
-def test_consume_feature_pack_reload_flag_keeps_failed_slugs(monkeypatch, tmp_path: Path):
+def test_consume_feature_pack_reload_flag_keeps_failed_slugs(
+    monkeypatch, tmp_path: Path
+):
     """When some slugs fail to reload the flag retains them for retry."""
 
     scheduler = SchedulerService()
@@ -468,11 +623,15 @@ def test_consume_feature_pack_reload_flag_keeps_failed_slugs(monkeypatch, tmp_pa
 
     assert registry.reloaded == ["tickets"]
     assert flag_path.exists()
-    remaining = [line.strip() for line in flag_path.read_text().splitlines() if line.strip()]
+    remaining = [
+        line.strip() for line in flag_path.read_text().splitlines() if line.strip()
+    ]
     assert remaining == ["broken"]
 
 
-def test_consume_feature_pack_reload_flag_skips_unloaded_pack(monkeypatch, tmp_path: Path):
+def test_consume_feature_pack_reload_flag_skips_unloaded_pack(
+    monkeypatch, tmp_path: Path
+):
     """Slugs not currently loaded are recorded as failed (keep retrying)."""
 
     scheduler = SchedulerService()
@@ -492,5 +651,101 @@ def test_consume_feature_pack_reload_flag_skips_unloaded_pack(monkeypatch, tmp_p
 
     assert registry.reloaded == []
     assert flag_path.exists()
-    remaining = [line.strip() for line in flag_path.read_text().splitlines() if line.strip()]
+    remaining = [
+        line.strip() for line in flag_path.read_text().splitlines() if line.strip()
+    ]
     assert remaining == ["brand_new"]
+
+
+def test_consume_transactional_reload_writes_revision_ack_and_is_idempotent(
+    monkeypatch, tmp_path: Path
+):
+    scheduler = SchedulerService()
+    state_dir = tmp_path / "state"
+    flag_path = state_dir / "feature_pack_reload.flag"
+    release_root = tmp_path / "releases"
+    revision = "a" * 40
+    release_path = release_root / revision
+    release_path.mkdir(parents=True)
+    state_dir.mkdir()
+    payload = {
+        "request_id": f"{revision}-123-456",
+        "revision": revision,
+        "release_path": str(release_path),
+        "packs": ["tickets", "service_status"],
+    }
+    flag_path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("MYPORTAL_RELEASE_ROOT", str(release_root))
+    monkeypatch.setattr(
+        "app.services.scheduler._FEATURE_PACK_RELOAD_FLAG_PATH", flag_path
+    )
+
+    import app.core.features as features_module
+
+    registry = _FakeRegistry({"tickets": "1.0.0", "service_status": "1.0.0"})
+    monkeypatch.setattr(features_module, "get_registry", lambda: registry)
+
+    asyncio.run(scheduler._consume_feature_pack_reload_flag())
+
+    result_path = state_dir / f"feature_pack_reload.{payload['request_id']}.result"
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    assert result == {
+        "failed": [],
+        "loaded": {"service_status": revision, "tickets": revision},
+        "request_id": payload["request_id"],
+        "revision": revision,
+        "status": "succeeded",
+    }
+    assert registry.reloaded == ["tickets", "service_status"]
+    assert not flag_path.exists()
+
+    flag_path.write_text(json.dumps(payload), encoding="utf-8")
+    asyncio.run(scheduler._consume_feature_pack_reload_flag())
+    assert registry.reloaded == ["tickets", "service_status"]
+    assert not flag_path.exists()
+
+
+def test_immutable_release_reports_its_recorded_revision(monkeypatch, tmp_path):
+    from app.services import scheduler as scheduler_module
+
+    revision = "a" * 40
+    release = tmp_path / "releases" / revision
+    release.mkdir(parents=True)
+    (release / "version.txt").write_text(f"{revision}\n", encoding="utf-8")
+    control = tmp_path / "control"
+    (control / ".git").mkdir(parents=True)
+    monkeypatch.setattr(scheduler_module, "_PROJECT_ROOT", release)
+    monkeypatch.setenv("MYPORTAL_CONTROL_CHECKOUT", str(control))
+
+    assert scheduler_module._release_revision() == revision
+    assert asyncio.run(SchedulerService()._get_git_ref("HEAD")) == revision
+    assert scheduler_module._git_context() == (
+        control,
+        ["-c", f"safe.directory={control}"],
+    )
+
+
+def test_development_checkout_queries_git_directly(monkeypatch, tmp_path):
+    from app.services import scheduler as scheduler_module
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "version.txt").write_text("b" * 40, encoding="utf-8")
+    monkeypatch.setattr(scheduler_module, "_PROJECT_ROOT", tmp_path)
+    monkeypatch.setenv("MYPORTAL_CONTROL_CHECKOUT", "/somewhere/else")
+
+    assert scheduler_module._release_revision() is None
+    assert scheduler_module._git_context() == (tmp_path, [])
+
+
+def test_docker_deployment_defers_updates_to_release_script(monkeypatch):
+    from app.services import scheduler as scheduler_module
+
+    async def fail(*_args, **_kwargs):  # pragma: no cover - must not run
+        raise AssertionError("Git must not be queried inside a container")
+
+    monkeypatch.setenv("MYPORTAL_DEPLOYMENT", "docker")
+    monkeypatch.setattr(SchedulerService, "_get_git_ref", fail)
+
+    message = asyncio.run(SchedulerService().run_system_update(force_restart=True))
+
+    assert message == scheduler_module._DOCKER_SYSTEM_UPDATE_MESSAGE

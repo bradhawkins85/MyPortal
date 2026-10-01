@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
-from app.security.csrf import CSRFMiddleware
+from app.security.csrf import CSRFMiddleware, MAX_CSRF_FORM_PART_SIZE
 
 
 @dataclass
@@ -39,6 +39,14 @@ async def upload_endpoint(
     return JSONResponse({"name": name, "size": len(content)})
 
 
+@app.post("/large-upload")
+async def large_upload_endpoint(request: Request) -> JSONResponse:
+    form = await request.form(max_part_size=MAX_CSRF_FORM_PART_SIZE)
+    uploaded_file = form["file"]
+    content = await uploaded_file.read()
+    return JSONResponse({"name_size": len(str(form["name"])), "size": len(content)})
+
+
 client = TestClient(app)
 
 
@@ -62,6 +70,20 @@ def test_multipart_post_with_form_csrf_is_accepted():
 
     assert response.status_code == 200
     assert response.json() == {"name": "Example", "size": 4}
+
+
+def test_multipart_post_with_large_rich_text_field_and_form_csrf_is_accepted():
+    """Pasted inline images must not prevent the middleware finding the token."""
+    inline_image_body = "data:image/png;base64," + ("A" * (2 * 1024 * 1024))
+
+    response = client.post(
+        "/large-upload",
+        data={"name": inline_image_body, "_csrf": "test-token"},
+        files={"file": ("sample.txt", b"data", "text/plain")},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"name_size": len(inline_image_body), "size": 4}
 
 
 def test_exempt_path_allows_post_without_csrf():

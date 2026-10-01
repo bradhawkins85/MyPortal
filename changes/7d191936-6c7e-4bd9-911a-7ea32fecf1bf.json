@@ -1,0 +1,7 @@
+{
+  "guid": "7d191936-6c7e-4bd9-911a-7ea32fecf1bf",
+  "occurred_at": "2026-09-25T02:00Z",
+  "change_type": "Fix",
+  "summary": "Skip unavailable Microsoft Graph staff lifecycle roles during app provisioning instead of repeatedly submitting invalid assignments.",
+  "content_hash": "85231a3f88ba8c03f66bdb1ebc94067626644df5ab0c1ab1b75258cc1efe8e0d"
+}

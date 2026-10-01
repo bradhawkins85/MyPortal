@@ -1,15 +1,17 @@
-"""Defensive DMARC aggregate report ingestion (RFC 7489)."""
+"""Defensive DMARC aggregate (RUA) and forensic (RUF) report ingestion."""
 from __future__ import annotations
 
-import gzip
 import hashlib
 import io
 import re
 import secrets
 import zipfile
+import zlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.message import Message
+from email import policy
+from email.parser import BytesParser
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -51,21 +53,79 @@ def routing_code(recipient: str) -> str | None:
 
 
 async def company_reporting_address(company_id: int) -> str | None:
-    """Return the address derived from the selected active M365 DMARC mailbox."""
-    from app.repositories import dmarc as repo
+    """Return the first active M365 DMARC address (legacy helper)."""
+    addresses = await company_reporting_addresses(company_id)
+    return addresses[0] if addresses else None
+
+
+async def company_reporting_addresses(company_id: int) -> list[str]:
+    """Return every distinct active DMARC mailbox assigned to a company."""
     from app.repositories import m365_mail_accounts as mailbox_repo
-    code = await repo.company_code(company_id)
-    mailbox = await mailbox_repo.get_dmarc_account()
-    if not code or not mailbox or not mailbox.get("active"):
-        return None
-    domain = str(mailbox.get("user_principal_name") or "").partition("@")[2]
-    return reporting_address(code, domain) if domain else None
+    mailboxes = await mailbox_repo.list_dmarc_accounts(company_id=company_id)
+    addresses: list[str] = []
+    seen: set[str] = set()
+    for mailbox in mailboxes:
+        address = str(mailbox.get("user_principal_name") or "").strip()
+        key = address.casefold()
+        if mailbox.get("active") and address and key not in seen:
+            addresses.append(address)
+            seen.add(key)
+    return addresses
+
+
+def _policy_domain_candidates(domain: str | None) -> list[str]:
+    candidate = str(domain or "").strip().lower().rstrip(".")
+    if not candidate or "@" in candidate:
+        return []
+    labels = [label for label in candidate.split(".") if label]
+    if len(labels) < 2:
+        return []
+    return [".".join(labels[index:]) for index in range(0, len(labels) - 1)]
+
+
+async def _resolve_company_id_from_domain(domain: str | None) -> int | None:
+    from app.repositories import companies as company_repo
+    for candidate in _policy_domain_candidates(domain):
+        company = await company_repo.get_company_by_email_domain(candidate)
+        if company and company.get("id") is not None:
+            return int(company["id"])
+    return None
+
+
+def _select_target_company_id(
+    *,
+    resolved_company_id: int | None,
+    routed_company_id: int | None,
+    mailbox_company_id: int | None,
+) -> int | None:
+    return resolved_company_id or routed_company_id or mailbox_company_id
 
 
 def _safe_xml(data: bytes, limits: IngestionLimits) -> bytes:
     if len(data) > limits.expanded_bytes:
         raise DmarcInputError("Expanded attachment exceeds limit")
     return data
+
+
+def _bounded_gunzip(payload: bytes, limit: int) -> bytes:
+    """Decompress gzip ``payload`` without ever producing more than ``limit`` bytes."""
+
+    output = bytearray()
+    remaining = payload
+    while remaining:
+        decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        try:
+            chunk = decompressor.decompress(remaining, limit - len(output) + 1)
+        except zlib.error as exc:
+            raise DmarcInputError("Invalid gzip attachment") from exc
+        output.extend(chunk)
+        if len(output) > limit or decompressor.unconsumed_tail:
+            raise DmarcInputError("Expanded attachment exceeds limit")
+        if not decompressor.eof:
+            raise DmarcInputError("Invalid gzip attachment")
+        # Concatenated gzip members are valid; trailing zero padding is ignored.
+        remaining = decompressor.unused_data.lstrip(b"\x00")
+    return bytes(output)
 
 
 def unpack_attachment(filename: str, payload: bytes, limits: IngestionLimits | None = None) -> list[tuple[str, bytes]]:
@@ -76,13 +136,7 @@ def unpack_attachment(filename: str, payload: bytes, limits: IngestionLimits | N
     if lower.endswith(".xml"):
         return [(filename, _safe_xml(payload, limits))]
     if lower.endswith((".gz", ".gzip")):
-        try:
-            with gzip.GzipFile(fileobj=io.BytesIO(payload)) as archive:
-                data = archive.read(limits.expanded_bytes + 1)
-        except (OSError, EOFError) as exc:
-            raise DmarcInputError("Invalid gzip attachment") from exc
-        if len(data) > limits.expanded_bytes:
-            raise DmarcInputError("Expanded attachment exceeds limit")
+        data = _bounded_gunzip(payload, limits.expanded_bytes)
         if data.startswith((b"PK\x03\x04", b"\x1f\x8b")):
             raise DmarcInputError("Nested archives are not accepted")
         return [(filename.rsplit(".", 1)[0], _safe_xml(data, limits))]
@@ -146,6 +200,7 @@ def parse_aggregate_xml(data: bytes, limits: IngestionLimits | None = None) -> d
         "adkim": _text(root, "policy_published/adkim"), "aspf": _text(root, "policy_published/aspf"),
         "policy": _text(root, "policy_published/p", required=True),
         "subdomain_policy": _text(root, "policy_published/sp"),
+        "nonexistent_policy": _text(root, "policy_published/np"),
         "percentage": int(_text(root, "policy_published/pct") or 100), "records": [],
         "content_sha256": hashlib.sha256(data).hexdigest(),
     }
@@ -173,6 +228,72 @@ def parse_aggregate_xml(data: bytes, limits: IngestionLimits | None = None) -> d
     return parsed
 
 
+def parse_forensic_report(data: bytes, limits: IngestionLimits | None = None) -> dict[str, Any]:
+    """Parse an RFC 6591/5965 ARF report without retaining message content."""
+    limits = limits or IngestionLimits()
+    _safe_xml(data, limits)
+    try:
+        message = BytesParser(policy=policy.default).parsebytes(data)
+    except Exception as exc:
+        raise DmarcInputError("Malformed forensic report") from exc
+
+    feedback = message
+    if message.is_multipart():
+        feedback = next(
+            (part for part in message.walk() if part.get_content_type() == "message/feedback-report"),
+            None,
+        )
+        if feedback is None:
+            raise DmarcInputError("Forensic report has no feedback section")
+        payload = feedback.get_payload()
+        if isinstance(payload, list) and payload:
+            feedback = payload[0]
+        else:
+            raw = feedback.get_payload(decode=True)
+            feedback = BytesParser(policy=policy.default).parsebytes(raw or b"")
+
+    feedback_type = str(feedback.get("Feedback-Type") or "").lower()
+    if feedback_type != "auth-failure":
+        raise DmarcInputError("Forensic report is not an authentication failure")
+
+    def field(name: str) -> str | None:
+        value = feedback.get(name)
+        return str(value).strip()[:1000] if value else None
+
+    arrival = field("Arrival-Date")
+    arrival_at: datetime | None = None
+    if arrival:
+        from email.utils import parsedate_to_datetime
+        try:
+            arrival_at = parsedate_to_datetime(arrival)
+            if arrival_at.tzinfo is None:
+                arrival_at = arrival_at.replace(tzinfo=timezone.utc)
+            arrival_at = arrival_at.astimezone(timezone.utc)
+        except (TypeError, ValueError, OverflowError):
+            arrival_at = None
+    source_ip = field("Source-IP")
+    reported_domain = field("Reported-Domain")
+    if not source_ip and not reported_domain:
+        raise DmarcInputError("Forensic report has no source IP or reported domain")
+    return {
+        "feedback_type": feedback_type,
+        "user_agent": field("User-Agent"),
+        "version": field("Version"),
+        "arrival_at": arrival_at,
+        "source_ip": source_ip,
+        "reported_domain": reported_domain,
+        "delivery_result": field("Delivery-Result"),
+        "auth_failure": field("Auth-Failure"),
+        "authentication_results": field("Authentication-Results"),
+        "original_mail_from": field("Original-Mail-From"),
+        "original_rcpt_to": field("Original-Rcpt-To"),
+        "dkim_domain": field("DKIM-Domain"),
+        "dkim_selector": field("DKIM-Selector"),
+        "identity_alignment": field("Identity-Alignment"),
+        "content_sha256": hashlib.sha256(data).hexdigest(),
+    }
+
+
 def attachments_from_message(message: Message, limits: IngestionLimits | None = None) -> list[tuple[str, bytes]]:
     limits = limits or IngestionLimits()
     parts = [part for part in message.walk() if part.get_filename()]
@@ -186,30 +307,76 @@ def attachments_from_message(message: Message, limits: IngestionLimits | None = 
 
 async def ingest_attachment(*, recipient: str, message_id: str, filename: str, payload: bytes,
                             received_at: datetime, metadata: str | None = None,
-                            limits: IngestionLimits | None = None) -> list[int]:
+                            limits: IngestionLimits | None = None,
+                            company_id: int | None = None) -> list[int]:
     """Persist then process one delivery; unresolved/malformed input is quarantined.
 
-    The recipient is only a routing hint. Once resolved, every repository call
-    carries the authoritative company primary key.
+    Company assignment prefers DMARC report domains matched against configured
+    company email domains. Recipient routing hints or mailbox-level company
+    values are used only as fallback identifiers.
     """
     from app.repositories import dmarc as repo
     limits = limits or IngestionLimits()
     attachment_hash = hashlib.sha256(payload).hexdigest()
     code = routing_code(recipient)
+    routed_company_id: int | None = None
     company = await repo.company_by_code(code) if code else None
-    company_id = int(company["id"]) if company else None
-    import_id = await repo.create_import(company_id=company_id, message_id=message_id,
+    if company and company.get("id") is not None:
+        routed_company_id = int(company["id"])
+    mailbox_company_id = int(company_id) if company_id is not None else None
+    import_id = await repo.create_import(company_id=mailbox_company_id, message_id=message_id,
         attachment_hash=attachment_hash, filename=filename, received_at=received_at.astimezone(timezone.utc), metadata=metadata)
-    if company_id is None:
-        await repo.mark_import(import_id, "quarantined", "Recipient could not be assigned")
-        return []
     created: list[int] = []
+    assigned_company_ids: set[int] = set()
     try:
-        for _, xml in unpack_attachment(filename, payload, limits):
-            report = parse_aggregate_xml(xml, limits)
-            created.append(await repo.save_report(company_id, import_id, report, attachment_hash))
-        await repo.mark_import(import_id, "processed", content_hash=hashlib.sha256(payload).hexdigest())
+        lower = filename.lower()
+        # Graph does not reliably preserve an ARF extension, so also detect the
+        # standard feedback header in either a raw report or MIME container.
+        forensic_payload = re.search(br"(?im)^Feedback-Type:\s*auth-failure\s*$", payload[:65536])
+        if lower.endswith((".eml", ".arf")) or forensic_payload:
+            report = parse_forensic_report(payload, limits)
+            resolved_company_id = await _resolve_company_id_from_domain(
+                report.get("reported_domain")
+            )
+            target_company_id = _select_target_company_id(
+                resolved_company_id=resolved_company_id,
+                routed_company_id=routed_company_id,
+                mailbox_company_id=mailbox_company_id,
+            )
+            if target_company_id is None:
+                raise DmarcInputError("Forensic report could not be assigned")
+            assigned_company_ids.add(target_company_id)
+            created.append(
+                await repo.save_forensic_report(
+                    target_company_id, import_id, report, attachment_hash
+                )
+            )
+        else:
+            for _, xml in unpack_attachment(filename, payload, limits):
+                report = parse_aggregate_xml(xml, limits)
+                resolved_company_id = await _resolve_company_id_from_domain(
+                    report.get("domain")
+                )
+                target_company_id = _select_target_company_id(
+                    resolved_company_id=resolved_company_id,
+                    routed_company_id=routed_company_id,
+                    mailbox_company_id=mailbox_company_id,
+                )
+                if target_company_id is None:
+                    raise DmarcInputError("Policy domain could not be assigned")
+                assigned_company_ids.add(target_company_id)
+                created.append(
+                    await repo.save_report(
+                        target_company_id, import_id, report, attachment_hash
+                    )
+                )
+        if len(assigned_company_ids) == 1:
+            await repo.set_import_company(import_id, next(iter(assigned_company_ids)))
+        elif len(assigned_company_ids) > 1:
+            await repo.set_import_company(import_id, None)
+        await repo.mark_import(import_id, "processed", content_hash=attachment_hash)
     except DmarcInputError as exc:
+        await repo.set_import_company(import_id, None)
         await repo.mark_import(import_id, "quarantined", str(exc)[:1000])
     except Exception:
         # Recoverable infrastructure failures retain the persisted import. Do

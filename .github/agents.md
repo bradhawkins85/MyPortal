@@ -29,6 +29,16 @@ The authoritative dependency list lives in `pyproject.toml`; update it there and
 - Always test code changes to prevent Internal Server Error occurrences
 - Use existing test patterns (pytest-asyncio, fixtures in conftest.py)
 - SQL Migrations should be idempotent
+- Prefer the smallest relevant test target for the changed behavior; avoid broad suite runs when a focused check is enough to validate the fix
+- Add or update regression tests for bug fixes and new features
+
+### Scope Control and Change Hygiene
+
+- Start with one targeted search and read only the exact files required to confirm the root cause
+- Keep changes surgical: do not refactor unrelated code, broaden API contracts, or clean up adjacent modules without a direct need for the task
+- If a task spans multiple concerns, split it into smaller, independently verifiable steps instead of bundling unrelated edits
+- Do not make speculative fixes based on guesswork; confirm the root cause before coding
+- Avoid editing generated, vendored, or minified files unless the task explicitly requires it
 
 ### Building and Deployment
 
@@ -47,6 +57,8 @@ The authoritative dependency list lives in `pyproject.toml`; update it there and
 - All code should be based on Python
 - Use async/await patterns consistently with FastAPI
 - Follow existing code structure in `app/` directory
+- If the requirement is ambiguous, missing, or conflicts with existing repository conventions, ask for clarification before implementing a broad or speculative fix
+- Prefer small, readable, composable functions over clever abstractions that hide state or side effects
 
 ### Database and Migrations
 
@@ -125,10 +137,119 @@ Rules:
 
 ## UI and Frontend Guidelines
 
-The canonical layout, table, form, and theming rules live in
-[`docs/ui_layout_standards.md`](../docs/ui_layout_standards.md). All new pages
+The canonical layout, table, form, modal and theming rules live in
+[`docs/wiki/developer/Design Guidelines.md`](../docs/wiki/developer/Design%20Guidelines.md). All new pages
 and components must follow that document; the bullets below are a quick
 reference and must stay consistent with it.
+
+### Gold-Standard Reference Pages
+
+Two pages set the design bar for all new UI work and for any redesign of an
+existing page. Study them before building a page, and match their principles
+rather than older inline-edit tables or raw form dumps elsewhere in the app:
+
+- **Rack management** — `app/templates/infrastructure/racks.html`,
+  `app/templates/infrastructure/_rack_macros.html`,
+  `app/static/css/infrastructure.css`, `app/static/js/racks.js`
+- **Company staff custom fields** (Edit company → *Staff custom fields*) —
+  the list and `#staff-custom-field-modal` editor in
+  `app/templates/admin/company_edit.html`, the `.scf-*` rules in
+  `app/static/css/app.css`, and `app/static/js/staff_custom_fields_admin.js`
+
+When a request says "make it look like the racks page" or "like the custom
+fields editor", these are the files meant. Follow these principles:
+
+#### Show the thing, not the storage format
+
+- Present data as the user thinks about it: the rack is drawn as an elevation
+  with front and rear faces; a custom field is shown as a card with its label,
+  key, help text and summary chips. Avoid wide tables of editable inputs
+  (compare the older *Staff intake fields* table with the *Staff custom
+  fields* list).
+- Summarise each record with short chips/pills (type, option count,
+  "Shown when …", "Restricted visibility", "M365 synced") so its state is
+  readable without opening it.
+- Use at-a-glance summaries where they help: stat lists (`<dl>` of counts),
+  capacity donuts/meters, legends that explain every colour used.
+
+#### List first, edit in a focused modal
+
+- The page shows a scannable, grouped, searchable list; creating or editing
+  happens in a `<div class="modal" role="dialog" … hidden>` modal (never a
+  `<dialog>`; see *Modals* in the Design Guidelines) opened from a primary
+  "+ Add …" button or the item itself.
+- Group related items under headings (custom fields by group, racks under
+  *Cabinets*) and give lists a client-side search with a "No results"
+  message.
+- Offer *Duplicate* alongside *Edit* when records are commonly similar.
+
+#### Modal/editor anatomy
+
+- **Header**: optional small eyebrow line, the title, and a one-line
+  subtitle or context (e.g. the selected rack position). Close button
+  top-right.
+- **Body**: split into a main form column and an aside with a **live
+  preview** (the rendered field, the placement on a mini rack) plus a
+  plain-English summary of the rules ("Shown when Department is Sales").
+  The preview updates as the user types.
+- **Tabs** (`role="tablist"`/`tab`/`tabpanel`, arrow-key friendly) when an
+  editor has several concerns, with plain-language names ("Show when",
+  "Who sees it") and a dot or count indicating tabs that hold settings.
+- **Footer**: destructive action (*Delete*/*Remove*) on the left, a spacer,
+  then *Cancel* and the primary *Save* on the right.
+- Guard against losing unsaved changes, validate inline next to the
+  relevant section (`[data-…-error]` messages), and keep the modal usable on
+  small screens.
+
+#### Friendly, structured inputs — never raw strings or JSON
+
+- Use visual choice cards (radio inputs styled as cards with icon, label and
+  one-line help) for types and kinds; segmented controls for small
+  enumerations (Front/Rear, Half/Full, ⅓/⅔/Full).
+- Build lists row by row (option builder with reorder, Enter-to-add) and add
+  a "Paste a list" bulk import instead of `value:Label, …` strings.
+- Use tag inputs for multi-value text (job titles, emails, mailboxes).
+- Express conditions as a sentence builder ("Show when [field] [operator]
+  [value]") with operators filtered by the chosen field's type.
+- Mark fields as `optional` in a small muted label rather than asterisks
+  everywhere; give each input short help text explaining its effect;
+  generate derived values (keys from labels) automatically.
+- Serialise complex editor state into hidden inputs (e.g. `options_json`) so
+  the server gets structured data; keep accepting any legacy format.
+
+#### Helpful empty states and copy
+
+- Empty states say what the feature is for and offer the primary action
+  ("No custom fields yet … + Add your first field").
+- Write instructions in plain English addressed to the user; explain what
+  will happen, not how it is stored.
+
+#### Accessibility and progressive enhancement
+
+- Use semantic landmarks and labelling: `aria-labelledby` on sections,
+  `<caption>` on tables, `aria-current="page"` on active nav, `aria-pressed`
+  on toggles, `aria-haspopup="dialog"`/`aria-controls` on dialog triggers,
+  `role="status" aria-live="polite"` for changing status text, and
+  `sr-only`/`visually-hidden` labels for icon-only controls.
+- Pages must work before JavaScript runs (`<noscript>` fallbacks, real
+  `<form method="post">` actions with CSRF) and JS enhances them.
+- Pass server data to scripts via `<script type="application/json">` blocks
+  and `data-*` hooks, not inline JS or globals; keep page JS in its own file
+  under `app/static/js/`.
+- Remember per-viewer UI preferences (collapsed panels, toggles) in
+  `localStorage` wrapped in `try/catch`, and render correctly without it.
+- Respect `prefers-reduced-motion`, and add responsive breakpoints so
+  multi-column workspaces collapse cleanly on tablets and phones.
+
+#### Styling
+
+- Namespace page-specific CSS with a short BEM-style prefix (`.rack-…`,
+  `.scf-…`) and build on shared tokens (`var(--space-…)`, `var(--radius-…)`,
+  `var(--font-size-…)`, `var(--color-…)`). If a workspace needs its own
+  palette, define it once as scoped custom properties on the root element
+  (as `.rack-workspace` does with `--rack-*`) — never scatter literal colours.
+- Keep reusable drawing pieces (icons, donuts, faces) in a macros file next
+  to the template, as `_rack_macros.html` does.
 
 ### Layout and Design
 

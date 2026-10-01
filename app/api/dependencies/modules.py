@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import HTTPException, status
 
 from app.services import modules as modules_service
+from app.services.component_availability import get_component_availability
 
 
 def require_module_enabled(
@@ -28,6 +29,8 @@ def require_module_enabled(
     """
 
     async def dependency() -> dict[str, Any]:
+        if not get_component_availability().module_available(slug):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
         module = await modules_service.get_module(slug, redact=False)
         if not module or not module.get("enabled"):
             raise HTTPException(

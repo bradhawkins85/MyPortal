@@ -29,6 +29,7 @@ class SessionData:
     impersonator_user_id: int | None = None
     impersonator_session_id: int | None = None
     impersonation_started_at: datetime | None = None
+    selected_role_id: int | None = None
 
 
 class SessionManager:
@@ -37,6 +38,11 @@ class SessionManager:
         self.session_cookie_name = self._settings.session_cookie_name
         self.csrf_cookie_name = f"{self.session_cookie_name}_csrf"
         self.session_ttl = timedelta(hours=12)
+        # Sliding the idle expiry on every request would otherwise keep a
+        # session (or a stolen cookie) alive forever, so cap it from creation.
+        self.session_absolute_ttl = timedelta(
+            hours=int(getattr(self._settings, "session_absolute_ttl_hours", 168) or 168)
+        )
 
     def _is_secure(self) -> bool:
         return self._settings.environment.lower() == "production"
@@ -104,13 +110,24 @@ class SessionManager:
         if expires_at and expires_at < now:
             await auth_repo.update_session(record["id"], is_active=False)
             return None
+        absolute_expiry: datetime | None = None
+        if record.get("created_at"):
+            absolute_expiry = ensure_datetime(record.get("created_at")) + self.session_absolute_ttl
+            if absolute_expiry.tzinfo is not None:
+                absolute_expiry = absolute_expiry.replace(tzinfo=None)
+            if absolute_expiry <= now:
+                await auth_repo.update_session(record["id"], is_active=False)
+                return None
         session = self._map_session(record)
+        new_expires_at = now + self.session_ttl
+        if absolute_expiry is not None and absolute_expiry < new_expires_at:
+            new_expires_at = absolute_expiry
         await auth_repo.update_session(
             session.id,
             last_seen_at=now,
-            expires_at=now + self.session_ttl,
+            expires_at=new_expires_at,
         )
-        session.expires_at = now + self.session_ttl
+        session.expires_at = new_expires_at
         session.last_seen_at = now
         request.state.session = session
         request.state.active_company_id = session.active_company_id
@@ -124,6 +141,18 @@ class SessionManager:
         new_token = secrets_token()
         await auth_repo.update_session(session.id, csrf_token=new_token)
         session.csrf_token = new_token
+        return session
+
+    async def rotate_session_token(self, session: SessionData) -> SessionData:
+        """Issue a new raw token for an existing session.
+
+        Only the digest of a session token is stored, so a session restored
+        from its database record has no usable raw token. Rotating gives the
+        browser a fresh token while keeping the session's state.
+        """
+        new_token = secrets_token()
+        await auth_repo.rotate_session_token(session.id, new_token)
+        session.session_token = new_token
         return session
 
     async def store_pending_totp_secret(self, session: SessionData, secret: str) -> None:
@@ -142,6 +171,10 @@ class SessionManager:
         await auth_repo.update_session(session.id, active_company_id=company_id)
         session.active_company_id = company_id
 
+    async def set_selected_role(self, session: SessionData, role_id: int | None) -> None:
+        await auth_repo.update_session(session.id, selected_role_id=role_id)
+        session.selected_role_id = role_id
+
     def hydrate_session(self, record: dict[str, Any]) -> SessionData:
         """Create session data from a database record without mutating state."""
         return self._map_session(record)
@@ -158,7 +191,7 @@ class SessionManager:
                 if scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https":
                     secure = True
             except Exception:  # pragma: no cover - defensive
-                pass
+                secure = self._is_secure()
         response.set_cookie(
             self.session_cookie_name,
             session.session_token,
@@ -246,6 +279,11 @@ class SessionManager:
                 if record.get("impersonation_started_at")
                 else None
             ),
+            selected_role_id=(
+                int(record["selected_role_id"])
+                if record.get("selected_role_id") is not None
+                else None
+            ),
         )
 
 
@@ -254,12 +292,12 @@ def ensure_datetime(value: Any) -> datetime:
         return value
     if value is None:
         return datetime.utcnow()
-    if isinstance(value, str):
-        try:
-            return datetime.fromisoformat(value)
-        except ValueError:
-            pass
-    return datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S")
+    if not isinstance(value, str):
+        return datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S")
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
 
 
 def secrets_token() -> str:

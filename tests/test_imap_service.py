@@ -725,12 +725,19 @@ async def test_sync_account_skips_filtered_message(monkeypatch):
     assert fetch_commands and fetch_commands[0][1][1] == "(BODY.PEEK[] FLAGS)"
 
 
-async def test_sync_account_skips_when_restart_pending(monkeypatch):
+async def test_sync_account_checks_mailbox_when_restart_pending(monkeypatch):
+    """A pending application upgrade must not pause inbound email imports."""
     monkeypatch.setattr(imap.system_state, "is_restart_pending", lambda: True)
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        assert slug == "imap"
+        return {"enabled": False}
+
+    monkeypatch.setattr(imap.modules_service, "get_module", fake_get_module)
 
     result = await imap.sync_account(9)
 
-    assert result == {"status": "skipped", "reason": "pending_restart"}
+    assert result == {"status": "skipped", "reason": "Module disabled"}
 
 
 async def test_clone_account_creates_unique_copy(monkeypatch):

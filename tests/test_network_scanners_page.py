@@ -130,6 +130,32 @@ async def test_devices_page_separates_enabled_and_available_scanners(monkeypatch
 
 
 @pytest.mark.anyio
+async def test_read_only_devices_page_excludes_subnet_scanners(monkeypatch):
+    membership = {"menu_permissions": {"menu.network_devices": "read"}}
+    monkeypatch.setattr(
+        assets_routes,
+        "_load_asset_context",
+        AsyncMock(return_value=({"id": 7, "is_super_admin": False}, membership, {"id": 42}, 42, None)),
+    )
+    list_scanners = AsyncMock(return_value=[{"id": 10}])
+    monkeypatch.setattr(assets_routes.network_devices_repo, "list_scanners", list_scanners)
+    monkeypatch.setattr(assets_routes.network_devices_repo, "list_for_company", AsyncMock(return_value=[]))
+    monkeypatch.setattr(assets_routes.network_devices_repo, "list_device_types", AsyncMock(return_value=[]))
+
+    async def render(template, request, user, *, extra=None):
+        assert extra["can_configure"] is False
+        assert extra["scanners"] == []
+        assert extra["available_scanners"] == []
+        return HTMLResponse("devices")
+
+    monkeypatch.setattr(main_module, "_render_template", render)
+    response = await assets_routes.network_devices_page(_request())
+
+    assert response.status_code == 200
+    list_scanners.assert_not_awaited()
+
+
+@pytest.mark.anyio
 async def test_add_scanner_enables_selected_asset(monkeypatch):
     request = _request("/devices/scanners", "POST")
     request._form = {"device_id": "20", "interval_minutes": "45"}

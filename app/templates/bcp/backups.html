@@ -94,7 +94,8 @@
                   <button 
                     type="button" 
                     class="btn btn-sm btn-secondary" 
-                    onclick='openEditModal({{ backup.id }}, {{ backup.data_scope | tojson }}, {{ (backup.frequency or "") | tojson }}, {{ (backup.medium or "") | tojson }}, {{ (backup.owner or "") | tojson }}, {{ (backup.steps or "") | tojson }}, {{ "true" if backup.backup_job_id else "false" }})'
+                    data-bcp-action="edit-backup"
+                    data-bcp-payload='{{ {"id": backup.id, "data_scope": backup.data_scope, "frequency": backup.frequency or "", "medium": backup.medium or "", "owner": backup.owner or "", "steps": backup.steps or "", "is_job_linked": backup.backup_job_id is not none} | tojson | e }}'
                   >
                     Edit
                   </button>
@@ -213,7 +214,7 @@
 {% endif %}
 <script>
 function openEditModal(id, dataScope, frequency, medium, owner, steps, isJobLinked) {
-  document.getElementById('editBackupForm').action = '/bcp/backups/' + id + '/update';
+  document.getElementById('editBackupForm').action = '/bcp/backups/' + encodeURIComponent(String(id)) + '/update';
   document.getElementById('edit_data_scope').value = dataScope;
   document.getElementById('edit_data_scope').readOnly = isJobLinked;
   document.getElementById('edit_frequency').value = frequency;

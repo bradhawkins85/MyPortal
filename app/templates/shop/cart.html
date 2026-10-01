@@ -1,7 +1,17 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}Cart{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Cart</span>
+    {% if cart_items %}
+      <div class="page-header-toolbar">
+        <label class="visually-hidden" for="cart-filter">Filter cart items</label>
+        <input id="cart-filter" type="search" class="form-input page-header-toolbar__search" placeholder="Filter cart" data-table-filter="cart-table" />
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}
 {% import "partials/stock_status.html" as stock_helpers %}
 
 {% block header_actions %}
@@ -13,21 +23,7 @@
 {% block content %}
 <section class="card card--panel cart-card">
   <header class="card__header card__header--stacked">
-    <div>
-      <h2 class="card__title">Cart</h2>
-      <p class="card__subtitle">Review and adjust quantities, then submit a purchase order.</p>
-    </div>
-    {% if cart_items %}
-    <div class="card__controls">
-      <input
-        type="search"
-        class="form-input card__control"
-        placeholder="Filter cart"
-        aria-label="Filter cart items"
-        data-table-filter="cart-table"
-      />
-    </div>
-    {% endif %}
+    <p class="card__subtitle">Review and adjust quantities, then submit a purchase order.</p>
   </header>
 
   {% if cart_items %}
@@ -37,7 +33,6 @@
         <table class="table" id="cart-table" data-table data-table-id="cart">
           <thead>
             <tr>
-              <th scope="col" data-mobile-priority="supporting">Remove</th>
               <th scope="col" data-mobile-priority="supporting">Image</th>
               <th scope="col" data-sort="string" data-mobile-priority="essential">Name</th>
               <th scope="col" data-sort="string" data-mobile-priority="supporting">SKU</th>
@@ -49,12 +44,6 @@
           <tbody>
             {% for item in cart_items %}
               <tr>
-                <td data-label="Remove">
-                  <label class="checkbox checkbox--table">
-                    <input type="checkbox" name="remove" value="{{ item.product_id }}" />
-                    <span class="visually-hidden">Remove {{ item.product_name }}</span>
-                  </label>
-                </td>
                 <td data-label="Image" class="cart-table__image">
                   {% if item.product_image_url %}
                     <img src="{{ item.product_image_url }}" alt="" class="product-thumb" loading="lazy" />
@@ -73,12 +62,20 @@
                   </button>
                 </td>
                 <td data-label="SKU">{{ item.product_sku }}</td>
-                <td data-label="Unit price" data-value="{{ item.unit_price }}">${{ '%.2f'|format(item.unit_price) }}</td>
+                <td data-label="Unit price" data-value="{{ item.effective_unit_price }}">
+                  ${{ '%.2f'|format(item.effective_unit_price) }}
+                  {% if item.coterm_enabled and item.coterm_price is not none %}
+                    <div class="text-muted text-small">Co-termed from ${{ '%.2f'|format(item.full_term_unit_price) }}</div>
+                  {% endif %}
+                </td>
                 <td data-label="Quantity" data-value="{{ item.quantity }}">
                   {% set available = item.available_stock | default(0) | int %}
+                  {% set is_subscription = item.subscription_category_id is defined and item.subscription_category_id is not none %}
                   {% set max_allowed = 9999 %}
                   <div class="cart-quantity">
-                    {{ stock_helpers.stock_status_badge(available, low_stock_threshold) }}
+                    {% if not is_subscription %}
+                      {{ stock_helpers.stock_status_badge(available, low_stock_threshold) }}
+                    {% endif %}
                     <input
                       class="form-input form-input--sm"
                       type="number"
@@ -87,17 +84,48 @@
                       step="1"
                       name="quantity_{{ item.product_id }}"
                       value="{{ item.quantity }}"
+                      data-cart-quantity
                       aria-label="Quantity for {{ item.product_name }}"
+                      aria-describedby="cart-quantity-status"
                       required
                     />
                   </div>
+                  {% if item.coterm_available %}
+                    <div class="cart-coterm">
+                      <label>
+                        <input
+                          type="checkbox"
+                          name="coterm_{{ item.product_id }}"
+                          value="1"
+                          {% if item.coterm_enabled %}checked{% endif %}
+                          data-cart-coterm
+                          data-product-id="{{ item.product_id }}"
+                          aria-label="Co-term {{ item.product_name }}"
+                        />
+                        Co-term to {{ item.coterm_category_name or 'existing renewal' }} on {{ item.coterm_end_date }}
+                      </label>
+                      <div class="text-muted text-small">
+                        {% if item.coterm_enabled %}
+                          Prorated to ${{ '%.2f'|format(item.coterm_price) }} per license for the remaining term.
+                        {% else %}
+                          Enable co-term to use the prorated price of ${{ '%.2f'|format(item.coterm_price) }} per license.
+                        {% endif %}
+                      </div>
+                    </div>
+                  {% endif %}
                 </td>
-                <td data-label="Line total" data-value="{{ item.line_total }}">${{ '%.2f'|format(item.line_total) }}</td>
+                <td data-label="Line total" data-value="{{ item.line_total }}">
+                  ${{ '%.2f'|format(item.line_total) }}
+                  {% if item.coterm_enabled and item.coterm_price is not none %}
+                    <div class="text-muted text-small">Prorated renewal alignment applied</div>
+                  {% endif %}
+                </td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
+      <p id="cart-quantity-status" class="visually-hidden" role="status" aria-live="polite"></p>
     </form>
 
     {% set payment_methods = payment_method.split(',') %}
@@ -141,24 +169,21 @@
         </div>
         <fieldset class="form__fieldset" id="shipping-option-fieldset">
           <legend class="form-label">Shipping</legend>
+          {% for address in company_addresses %}
           <div class="form-field form-field--radio">
             <label class="radio-label">
-              <input
-                type="radio"
-                name="shippingOption"
-                value="address_on_file"
-                checked
-                data-shipping-option
-              />
-              Ship to address on file{% if company_address %}: <span class="text-muted">{{ company_address }}</span>{% else %} <span class="text-muted">(no address on file)</span>{% endif %}
+              <input type="radio" name="shippingOption" value="saved_address_{{ address.id }}" data-shipping-option {% if loop.first %}checked{% endif %} />
+              Ship to {{ address.label }}: <span class="text-muted">{{ [address.street, address.city, address.state, address.postcode, address.country]|select|join(', ') }}</span>
             </label>
           </div>
+          {% endfor %}
           <div class="form-field form-field--radio">
             <label class="radio-label">
               <input
                 type="radio"
                 name="shippingOption"
                 value="specific_address"
+                {% if not company_addresses %}checked{% endif %}
                 data-shipping-option
               />
               Ship to a specific address

@@ -4,6 +4,8 @@ import ipaddress
 import re
 
 import httpx
+
+from app.services.monitored_http import monitored_client
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
@@ -14,6 +16,31 @@ from app.repositories import click_to_call as click_to_call_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 
 router = APIRouter(prefix="/api/click-to-call", tags=["Users"])
+
+
+# Desk phones live on the customer LAN.  The phone IP is configured by each
+# user on their own profile, so it is untrusted input: restrict it to private
+# (RFC1918 / IPv6 unique-local) addresses so the server cannot be pointed at
+# public hosts, loopback services, or link-local cloud metadata endpoints.
+_ALLOWED_PHONE_NETWORKS = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("fc00::/7"),
+)
+
+
+def _is_allowed_phone_ip(value: str | None) -> bool:
+    try:
+        address = ipaddress.ip_address(str(value or "").strip())
+    except ValueError:
+        return False
+    return any(address.version == net.version and address in net for net in _ALLOWED_PHONE_NETWORKS)
+
+
+def _phone_host(value: str) -> str:
+    address = ipaddress.ip_address(value.strip())
+    return f"[{address}]" if address.version == 6 else str(address)
 
 
 class ClickToCallSettingsUpdate(BaseModel):
@@ -32,8 +59,8 @@ class ClickToCallSettingsUpdate(BaseModel):
             address = ipaddress.ip_address(value)
         except ValueError as exc:
             raise ValueError("Enter a valid phone IP address") from exc
-        if address.is_loopback or address.is_link_local or address.is_multicast or address.is_unspecified:
-            raise ValueError("This phone IP address is not allowed")
+        if not _is_allowed_phone_ip(str(address)):
+            raise ValueError("The phone IP address must be a private (LAN) address")
         return value
 
     @field_validator("login_username", "password")
@@ -106,11 +133,24 @@ async def make_call(
     settings = await click_to_call_repo.get_settings(int(current_user["id"]))
     if not settings or not settings.get("enabled"):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Click to call is not enabled")
+    unreachable = HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY, detail="The Grandstream phone could not be reached"
+    )
+    # Re-check at call time: values saved before this rule existed must not be
+    # used to reach public, loopback or link-local addresses.
+    if not _is_allowed_phone_ip(settings.get("phone_ip")):
+        raise unreachable
     try:
         password = decrypt_secret(str(settings.get("password_encrypted") or ""))
-        async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+        # verify=False is deliberate: Grandstream desk phones ship with
+        # self-signed certificates and are only reachable on private LAN
+        # addresses (enforced above).  Redirects are never followed, the path is
+        # fixed, and the caller only learns success or a generic failure.
+        async with monitored_client(
+            httpx.AsyncClient, verify=False, timeout=10.0, follow_redirects=False
+        ) as client:
             response = await client.get(
-                f"https://{settings['phone_ip']}/cgi-bin/api-make_call",
+                f"https://{_phone_host(str(settings['phone_ip']))}/cgi-bin/api-make_call",
                 params={
                     "phonenumber": number,
                     "account": 0,
@@ -118,7 +158,8 @@ async def make_call(
                     "password": password,
                 },
             )
-        response.raise_for_status()
+        if not 200 <= response.status_code < 300:
+            raise unreachable
     except (httpx.HTTPError, ValueError, KeyError):
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="The Grandstream phone could not be reached")
+        raise unreachable from None
     return {"ok": True, "phone_number": number}

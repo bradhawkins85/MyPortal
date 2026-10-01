@@ -1,8 +1,55 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
+
 import pytest
 
 from app.services import message_templates as service
+
+
+class _FakeRedis:
+    def __init__(self):
+        self.value = None
+
+    async def set(self, key, value):
+        assert key == "message-templates:records"
+        self.value = value
+
+    async def get(self, key):
+        assert key == "message-templates:records"
+        return self.value
+
+
+@pytest.mark.asyncio
+async def test_redis_cache_round_trips_template_datetimes(monkeypatch):
+    redis = _FakeRedis()
+    created_at = datetime(2026, 9, 29, 14, 28, 57, tzinfo=timezone.utc)
+    updated_at = datetime(2026, 9, 29, 14, 29, 1, tzinfo=timezone.utc)
+    template = service.MessageTemplate(
+        id=7,
+        slug="welcome.email",
+        name="Welcome Email",
+        description=None,
+        content_type="text/html",
+        content="<p>Welcome</p>",
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+    monkeypatch.setattr(service, "get_redis_client", lambda: redis)
+
+    await service._persist_cache_to_redis([template])
+
+    persisted = json.loads(redis.value)
+    assert persisted[0]["created_at"] == "2026-09-29T14:28:57+00:00"
+    assert persisted[0]["updated_at"] == "2026-09-29T14:29:01+00:00"
+
+    service._set_cache([])
+    assert await service._load_cache_from_redis() is True
+    cached = service.get_template_from_cache("welcome.email")
+    assert cached is not None
+    assert cached["created_at"] == created_at
+    assert cached["updated_at"] == updated_at
 
 
 @pytest.mark.asyncio

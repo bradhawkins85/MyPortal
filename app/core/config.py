@@ -8,6 +8,7 @@ from pydantic import (
     AnyHttpUrl,
     AliasChoices,
     BaseModel,
+    EmailStr,
     Field,
     TypeAdapter,
     ValidationError,
@@ -15,6 +16,7 @@ from pydantic import (
     model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from loguru import logger
 
 from app.core.features import discover_builtin_feature_pack_slugs
 
@@ -32,11 +34,31 @@ _PLACEHOLDER_SECRETS: frozenset[str] = frozenset(
     }
 )
 
+# Environments that may run with weak secrets, but only when ENVIRONMENT is
+# set explicitly (the implicit ``development`` default does not count).
+_SECRET_CHECK_EXEMPT_ENVIRONMENTS: frozenset[str] = frozenset(
+    {"development", "dev", "test", "testing"}
+)
+
 # Minimum byte length required for cryptographic secrets used in production.
 _MIN_PRODUCTION_SECRET_LENGTH: int = 32
 _MARKETING_ELEMENT_PLACEHOLDER_SAMPLE: str = "element"
-_DEFAULT_FEATURE_PACK_SLUGS: tuple[str, ...] = tuple(discover_builtin_feature_pack_slugs())
+_DEFAULT_FEATURE_PACK_SLUGS: tuple[str, ...] = tuple(
+    discover_builtin_feature_pack_slugs()
+)
 _DEFAULT_FEATURE_PACKS: str = ",".join(_DEFAULT_FEATURE_PACK_SLUGS)
+
+
+def parse_slug_list(value: object) -> tuple[str, ...]:
+    """Parse a comma-separated slug list, trimming and de-duplicating it."""
+
+    if isinstance(value, (tuple, list, set, frozenset)):
+        parts = value
+    else:
+        parts = str(value or "").split(",")
+    return tuple(
+        dict.fromkeys(str(part).strip() for part in parts if str(part).strip())
+    )
 
 
 def _normalize_feature_packs(value: Any) -> str:
@@ -80,21 +102,54 @@ class Settings(BaseSettings):
 
     app_name: str = "MyPortal"
     environment: str = "development"
+    app_instance_id: str = Field(default="", validation_alias="APP_INSTANCE_ID")
     secret_key: str = Field(
         validation_alias=AliasChoices("SESSION_SECRET", "SECRET_KEY")
     )
     totp_encryption_key: str = Field(validation_alias="TOTP_ENCRYPTION_KEY")
+    vault_keys: str = Field(default="", validation_alias="VAULT_KEYS")
+    vault_active_key_id: str = Field(default="", validation_alias="VAULT_ACTIVE_KEY_ID")
     database_host: str | None = Field(default=None, validation_alias="DB_HOST")
+    database_port: int = Field(default=3306, validation_alias="DB_PORT", ge=1, le=65535)
     database_user: str | None = Field(default=None, validation_alias="DB_USER")
     database_password: str | None = Field(default=None, validation_alias="DB_PASSWORD")
     database_name: str | None = Field(default=None, validation_alias="DB_NAME")
     migration_lock_timeout: int = Field(
         default=60, validation_alias="MIGRATION_LOCK_TIMEOUT"
     )
+    migration_bootstrap_on_start: bool = Field(
+        default=False,
+        description="Run migrations during application startup (development/test only).",
+    )
     redis_url: str | None = Field(default=None, validation_alias="REDIS_URL")
+    website_check_interval_seconds: int = Field(default=86400, ge=60, le=2592000)
+    website_check_poll_seconds: int = Field(default=30, ge=5, le=3600)
+    website_check_lease_seconds: int = Field(default=120, ge=30, le=3600)
+    website_check_batch_size: int = Field(default=20, ge=1, le=100)
+    website_check_company_concurrency: int = Field(default=2, ge=1, le=20)
+    m365_it_external_email_address: str = Field(
+        default="", validation_alias="M365_IT_EXTERNAL_EMAIL_ADDRESS"
+    )
+    m365_it_support_external_email_address: str = Field(
+        default="", validation_alias="M365_IT_SUPPORT_EXTERNAL_EMAIL_ADDRESS"
+    )
+    m365_it_recipient_address_contains_words: str = Field(
+        default="", validation_alias="M365_IT_RECIPIENT_ADDRESS_CONTAINS_WORDS"
+    )
     session_cookie_name: str = Field(
         default="myportal_session",
         validation_alias=AliasChoices("SESSION_COOKIE_NAME", "SESSION_COOKIE"),
+    )
+    session_absolute_ttl_hours: int = Field(
+        default=168,
+        ge=1,
+        le=8760,
+        validation_alias="SESSION_ABSOLUTE_TTL_HOURS",
+        description=(
+            "Maximum lifetime of a sign-in session in hours, measured from when "
+            "it was created. Activity extends the idle timeout but never past "
+            "this cap."
+        ),
     )
     allowed_origins: str = Field(
         default="",
@@ -112,14 +167,34 @@ class Settings(BaseSettings):
     smtp_port: int = Field(default=587, validation_alias="SMTP_PORT")
     smtp_user: str | None = Field(default=None, validation_alias="SMTP_USER")
     smtp_from: str | None = Field(default=None, validation_alias="SMTP_FROM")
+    outbound_audit_bcc: EmailStr | None = Field(
+        default=None,
+        validation_alias="OUTBOUND_AUDIT_BCC",
+        description=(
+            "Environment-only shared mailbox that receives a blind copy of every "
+            "outbound email. This value is intentionally not stored in module settings."
+        ),
+    )
     smtp_password: str | None = Field(default=None, validation_alias="SMTP_PASS")
     smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_SECURE")
-    dmarc_max_compressed_bytes: int = Field(default=5 * 1024 * 1024, validation_alias="DMARC_MAX_COMPRESSED_BYTES", ge=1024)
-    dmarc_max_expanded_bytes: int = Field(default=25 * 1024 * 1024, validation_alias="DMARC_MAX_EXPANDED_BYTES", ge=1024)
-    dmarc_max_attachments: int = Field(default=10, validation_alias="DMARC_MAX_ATTACHMENTS", ge=1, le=100)
-    dmarc_max_xml_depth: int = Field(default=32, validation_alias="DMARC_MAX_XML_DEPTH", ge=4, le=128)
-    dmarc_max_records: int = Field(default=100000, validation_alias="DMARC_MAX_RECORDS", ge=1)
-    dmarc_retention_days: int = Field(default=365, validation_alias="DMARC_RETENTION_DAYS", ge=1)
+    dmarc_max_compressed_bytes: int = Field(
+        default=5 * 1024 * 1024, validation_alias="DMARC_MAX_COMPRESSED_BYTES", ge=1024
+    )
+    dmarc_max_expanded_bytes: int = Field(
+        default=25 * 1024 * 1024, validation_alias="DMARC_MAX_EXPANDED_BYTES", ge=1024
+    )
+    dmarc_max_attachments: int = Field(
+        default=10, validation_alias="DMARC_MAX_ATTACHMENTS", ge=1, le=100
+    )
+    dmarc_max_xml_depth: int = Field(
+        default=32, validation_alias="DMARC_MAX_XML_DEPTH", ge=4, le=128
+    )
+    dmarc_max_records: int = Field(
+        default=100000, validation_alias="DMARC_MAX_RECORDS", ge=1
+    )
+    dmarc_retention_days: int = Field(
+        default=365, validation_alias="DMARC_RETENTION_DAYS", ge=1
+    )
     stock_feed_url: AnyHttpUrl | None = Field(
         default=None, validation_alias="STOCK_FEED_URL"
     )
@@ -136,6 +211,11 @@ class Settings(BaseSettings):
     )
     sms_auth: str | None = Field(default=None, validation_alias="SMS_AUTH")
     portal_url: AnyHttpUrl | None = Field(default=None, validation_alias="PORTAL_URL")
+    passkey_rp_id: str = Field(default="", validation_alias="PASSKEY_RP_ID")
+    passkey_rp_name: str = Field(default="", validation_alias="PASSKEY_RP_NAME")
+    passkey_allowed_origins: str = Field(
+        default="", validation_alias="PASSKEY_ALLOWED_ORIGINS"
+    )
     azure_client_id: str | None = Field(
         default=None, validation_alias="AZURE_CLIENT_ID"
     )
@@ -185,7 +265,13 @@ class Settings(BaseSettings):
         default=730, validation_alias="M365_CLIENT_SECRET_LIFETIME_DAYS", ge=1
     )
     m365_client_secret_renewal_days: int = Field(
-        default=14, validation_alias="M365_CLIENT_SECRET_RENEWAL_DAYS", ge=1
+        default=30, validation_alias="M365_CLIENT_SECRET_RENEWAL_DAYS", ge=1
+    )
+    m365_client_secret_overlap_days: int = Field(
+        default=7, validation_alias="M365_CLIENT_SECRET_OVERLAP_DAYS", ge=1
+    )
+    integration_credential_warning_days: int = Field(
+        default=30, validation_alias="INTEGRATION_CREDENTIAL_WARNING_DAYS", ge=1
     )
     m365_onedrive_export_destination_parent_item_id: str = Field(
         default="root",
@@ -216,12 +302,59 @@ class Settings(BaseSettings):
             "merged with the built-in set and cannot disable bundled packs."
         ),
     )
+    disabled_feature_packs: str = Field(
+        default="", validation_alias="DISABLED_FEATURE_PACKS"
+    )
+    disabled_modules: str = Field(default="", validation_alias="DISABLED_MODULES")
+
+    @field_validator("disabled_feature_packs", "disabled_modules", mode="before")
+    @classmethod
+    def normalise_disabled_components(cls, value: Any) -> str:
+        return ",".join(parse_slug_list(value))
+
+    @field_validator("disabled_feature_packs")
+    @classmethod
+    def validate_disabled_feature_packs(cls, value: str) -> str:
+        from app.core.core_components import CORE_COMPONENT_SLUGS
+
+        unknown = sorted(
+            set(parse_slug_list(value))
+            - set(_DEFAULT_FEATURE_PACK_SLUGS)
+            - set(CORE_COMPONENT_SLUGS)
+        )
+        if not unknown:
+            return value
+        # A typo must not stop the portal from starting: ignore the unknown
+        # slug(s) and keep disabling the valid ones.
+        logger.warning(
+            "DISABLED_FEATURE_PACKS contains unknown slug(s); ignoring them",
+            unknown=unknown,
+        )
+        return ",".join(slug for slug in parse_slug_list(value) if slug not in unknown)
 
     @field_validator("feature_packs", mode="before")
     @classmethod
     def ensure_builtin_feature_packs_present(cls, value: Any) -> str:
         """Merge legacy FEATURE_PACKS values with bundled feature packs."""
         return _normalize_feature_packs(value)
+
+    @model_validator(mode="after")
+    def exclude_disabled_feature_packs(self) -> "Settings":
+        """Keep deployment-disabled packs out of the effective startup manifest."""
+
+        disabled = set(parse_slug_list(self.disabled_feature_packs))
+        self.feature_packs = ",".join(
+            slug for slug in parse_slug_list(self.feature_packs) if slug not in disabled
+        )
+        return self
+
+    @field_validator("outbound_audit_bcc", mode="before")
+    @classmethod
+    def normalise_optional_audit_mailbox(cls, value: Any) -> Any:
+        """Treat a blank env value as disabled; otherwise validate as an email."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     feature_pack_watch: bool = Field(
         default=False,
@@ -245,18 +378,31 @@ class Settings(BaseSettings):
     enable_auto_refresh: bool = Field(
         default=False, validation_alias="ENABLE_AUTO_REFRESH"
     )
+    # How the asset type picker behaves: "auto" offers only the built-in IT
+    # catalogue, "custom" also accepts typed-in types, and "manual" drops the
+    # catalogue entirely for deployments that do not track IT equipment.
+    asset_type_mode: str = Field(default="auto", validation_alias="ASSET_TYPE_MODE")
     force_env_module_settings: bool = Field(
         default=False, validation_alias="FORCE_ENV_MODULE_SETTINGS"
     )
     disable_caching: bool = Field(default=True, validation_alias="DISABLE_CACHING")
     rag_embedding_model: str = Field(
-        default="myportal-hash-embedding-v2",
+        default="myportal-lexical-v3",
         validation_alias="RAG_EMBEDDING_MODEL",
         description=(
             "Embedding model/version identifier stored with RAG chunks. Change this "
             "when switching embedding providers or dimensions so new vectors are "
             "indexed separately from old vectors."
         ),
+    )
+    rag_embedding_provider: str = Field(
+        default="lexical", validation_alias="RAG_EMBEDDING_PROVIDER"
+    )
+    rag_embedding_base_url: str = Field(
+        default="http://127.0.0.1:11434", validation_alias="RAG_EMBEDDING_BASE_URL"
+    )
+    rag_embedding_api_key: str | None = Field(
+        default=None, validation_alias="RAG_EMBEDDING_API_KEY"
     )
     rag_embedding_dimensions: int = Field(
         default=256, validation_alias="RAG_EMBEDDING_DIMENSIONS", ge=16, le=4096
@@ -307,6 +453,10 @@ class Settings(BaseSettings):
         default=0.10, validation_alias="RAG_METADATA_WEIGHT", ge=0.0, le=1.0
     )
     rag_rerank_enabled: bool = Field(default=False, validation_alias="RERANK_ENABLED")
+    rag_rerank_model: str = Field(default="", validation_alias="RAG_RERANK_MODEL")
+    rag_rerank_top_n: int = Field(
+        default=12, validation_alias="RAG_RERANK_TOP_N", ge=1, le=50
+    )
     rag_query_expansion: bool = Field(default=True, validation_alias="QUERY_EXPANSION")
     rag_entity_extraction: bool = Field(
         default=True, validation_alias="ENTITY_EXTRACTION"
@@ -314,14 +464,55 @@ class Settings(BaseSettings):
     rag_max_context_tokens: int = Field(
         default=2500, validation_alias="RAG_MAX_CONTEXT_TOKENS", ge=500, le=20000
     )
+
+    @model_validator(mode="after")
+    def _validate_rag_configuration(self) -> "Settings":
+        provider = self.rag_embedding_provider.strip().lower()
+        if provider not in {"lexical", "ollama", "openai_compatible"}:
+            raise ValueError(
+                "RAG_EMBEDDING_PROVIDER must be lexical, ollama, or openai_compatible"
+            )
+        if (
+            abs(
+                self.rag_vector_weight
+                + self.rag_bm25_weight
+                + self.rag_metadata_weight
+                - 1.0
+            )
+            > 1e-6
+        ):
+            raise ValueError("RAG vector, BM25, and metadata weights must sum to 1.0")
+        if self.rag_rerank_enabled and not self.rag_rerank_model.strip():
+            raise ValueError("RAG_RERANK_MODEL is required when RERANK_ENABLED=true")
+        return self
+
     enable_background_relationships: bool = Field(
         default=True, validation_alias="ENABLE_BACKGROUND_RELATIONSHIPS"
     )
     enable_ticket_relationships: bool = Field(
-        default=False, validation_alias="ENABLE_TICKET_RELATIONSHIPS"
+        default=False,
+        validation_alias="ENABLE_TICKET_RELATIONSHIPS",
+        description=(
+            "Admin-controlled opt-in for ticket-to-ticket relationship evaluation. "
+            "Ticket-to-KB and ticket-to-asset candidates are unaffected."
+        ),
+    )
+    rag_relationship_candidate_limit: int = Field(
+        default=24,
+        validation_alias="RAG_RELATIONSHIP_CANDIDATE_LIMIT",
+        ge=1,
+        le=100,
+        description="Hard maximum candidate evaluations queued per changed document.",
+    )
+    rag_relationship_ticket_candidate_limit: int = Field(
+        default=5,
+        validation_alias="RAG_RELATIONSHIP_TICKET_CANDIDATE_LIMIT",
+        ge=1,
+        le=20,
+        description="Additional per-source safety cap for ticket targets.",
     )
     rag_relationship_model: str = Field(
-        default="gemma4:e2b", validation_alias="RAG_RELATIONSHIP_MODEL"
+        default="", validation_alias="RAG_RELATIONSHIP_MODEL"
     )
     rag_relationship_workers: int = Field(
         default=2, validation_alias="RAG_RELATIONSHIP_WORKERS", ge=0, le=16
@@ -332,11 +523,28 @@ class Settings(BaseSettings):
     rag_relationship_batch_size: int = Field(
         default=20, validation_alias="RAG_RELATIONSHIP_BATCH_SIZE", ge=1, le=200
     )
+    rag_relationship_max_context_tokens: int = Field(
+        default=2500,
+        validation_alias="RAG_RELATIONSHIP_MAX_CONTEXT_TOKENS",
+        ge=500,
+        le=20000,
+        description="Maximum input tokens sent to the relationship evaluator.",
+    )
     rag_relationship_min_score: float = Field(
         default=0.55, validation_alias="RAG_RELATIONSHIP_MIN_SCORE", ge=0.0, le=1.0
     )
     rag_relationship_idle_delay_ms: int = Field(
-        default=5000, validation_alias="RAG_RELATIONSHIP_IDLE_DELAY_MS", ge=100, le=60000
+        default=5000,
+        validation_alias="RAG_RELATIONSHIP_IDLE_DELAY_MS",
+        ge=100,
+        le=60000,
+    )
+    rag_relationship_lease_seconds: int = Field(
+        default=300,
+        validation_alias="RAG_RELATIONSHIP_LEASE_SECONDS",
+        ge=30,
+        le=3600,
+        description="Seconds a relationship queue claim remains valid without a heartbeat.",
     )
     swagger_ui_url: str = Field(default="/docs", validation_alias="SWAGGER_UI_URL")
     public_base_url: str | None = Field(
@@ -349,6 +557,10 @@ class Settings(BaseSettings):
             "'X-Forwarded-Host' headers. If unset, the URL is inferred from the incoming "
             "request, defaulting to https:// when a proxy is detected."
         ),
+    )
+    recaptcha_site_key: str = Field(default="", validation_alias="RECAPTCHA_SITE_KEY")
+    recaptcha_secret_key: str = Field(
+        default="", validation_alias="RECAPTCHA_SECRET_KEY", repr=False
     )
     opnform_base_url: AnyHttpUrl | None = Field(
         default=None,
@@ -580,6 +792,15 @@ class Settings(BaseSettings):
     matrixbot_ai_queue_timeout_minutes: int = Field(
         default=60, validation_alias="MATRIXBOT_AI_QUEUE_TIMEOUT_MINUTES", ge=1
     )
+    matrixbot_ai_concurrency_limit: int = Field(
+        default=4, validation_alias="MATRIXBOT_AI_CONCURRENCY_LIMIT", ge=1, le=25
+    )
+    matrixbot_ai_provider_concurrency_limit: int = Field(
+        default=2,
+        validation_alias="MATRIXBOT_AI_PROVIDER_CONCURRENCY_LIMIT",
+        ge=1,
+        le=25,
+    )
     matrixbot_ai_show_match_tags: bool = Field(
         default=True, validation_alias="MATRIXBOT_AI_SHOW_MATCH_TAGS"
     )
@@ -665,16 +886,20 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _enforce_production_secret_strength(self) -> "Settings":
-        """Refuse to boot in production with weak or placeholder secrets.
+        """Refuse to boot with weak or placeholder secrets.
 
-        In non-production environments (``development``, ``test``) these checks
-        are skipped so tests and local work are not disrupted. The same
+        The checks apply in every environment (including an unset
+        ``ENVIRONMENT``, ``staging`` and so on) and are skipped only when
+        ``ENVIRONMENT`` is *explicitly* set to ``development`` or ``test`` so
+        local work and the test suite are not disrupted. Relying on the
+        ``development`` default no longer bypasses the check. The same
         validation is applied to ``SESSION_SECRET`` and ``TOTP_ENCRYPTION_KEY``
         because both are used for authenticated encryption / signing.
         """
 
         environment = (self.environment or "").strip().lower()
-        if environment != "production":
+        explicitly_set = "environment" in self.model_fields_set
+        if explicitly_set and environment in _SECRET_CHECK_EXEMPT_ENVIRONMENTS:
             return self
 
         errors: list[str] = []
@@ -694,7 +919,7 @@ class Settings(BaseSettings):
 
         if errors:
             raise ValueError(
-                "Refusing to start in production with weak secrets: "
+                f"Refusing to start (ENVIRONMENT={environment or 'unset'}) with weak secrets: "
                 + "; ".join(errors)
                 + ". Generate strong values with "
                 + '`python -c "import secrets; print(secrets.token_urlsafe(48))"` '
@@ -736,6 +961,16 @@ class Settings(BaseSettings):
             # Split on '#' and take the first part, then strip whitespace
             value = value.split("#")[0].strip()
         return value
+
+    @field_validator("asset_type_mode", mode="before")
+    @classmethod
+    def _normalize_asset_type_mode(cls, value: str | None) -> str:
+        """Validate ASSET_TYPE_MODE, treating an empty value as "auto"."""
+
+        normalized = str(value or "").split("#")[0].strip().lower() or "auto"
+        if normalized not in {"auto", "custom", "manual"}:
+            raise ValueError("ASSET_TYPE_MODE must be one of: auto, custom, manual")
+        return normalized
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -780,6 +1015,7 @@ class Settings(BaseSettings):
         "sms_endpoint",
         "opnform_base_url",
         "stock_feed_url",
+        "wan_ip_source_url",
         mode="before",
     )
     @classmethod
@@ -790,10 +1026,10 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("allowed_origins")
+    @field_validator("allowed_origins", "passkey_allowed_origins")
     @classmethod
     def _validate_allowed_origins(cls, value: str) -> str:
-        """Validate comma-separated CORS origins and reject wildcard origins."""
+        """Validate comma-separated origins and reject wildcard origins."""
 
         if not value.strip():
             return value
@@ -814,6 +1050,22 @@ class Settings(BaseSettings):
                 ) from exc
 
         return value
+
+    def passkey_allowed_origin_list(self) -> list[str]:
+        origins = [
+            origin.strip()
+            for origin in self.passkey_allowed_origins.split(",")
+            if origin.strip()
+        ]
+        if origins:
+            return origins
+        if self.portal_url:
+            from urllib.parse import urlsplit
+
+            parts = urlsplit(self.portal_url.unicode_string())
+            if parts.scheme and parts.netloc:
+                return [f"{parts.scheme}://{parts.netloc}"]
+        return ["http://localhost:8000"]
 
     @field_validator(
         "essential8_compliance_marketing_url",

@@ -12,6 +12,7 @@ from app.features.knowledge_base import PACK
 EXPECTED = {
     ("GET", "/knowledge-base"),
     ("GET", "/knowledge-base/articles/{slug}"),
+    ("GET", "/knowledge-base/articles/{slug}/export.pdf"),
     ("GET", "/admin/knowledge-base"),
     ("GET", "/admin/knowledge-base/new"),
     ("GET", "/admin/knowledge-base/articles/{slug}"),

@@ -1,0 +1,7 @@
+{
+  "guid": "3dfe86b0-e8e5-49a1-9d73-b424bac6a94f",
+  "occurred_at": "2026-08-29T00:00Z",
+  "change_type": "Feature",
+  "summary": "Allow M365 mail imports to delete successfully processed messages as an alternative to marking them read.",
+  "content_hash": "e5046d590c4f57c176c281d060a97dea9ca53203a917911f4a75f6ca17b2420b"
+}

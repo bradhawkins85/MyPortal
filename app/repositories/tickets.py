@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import date, datetime, timezone
+from importlib import import_module
 from typing import Any, Iterable, Sequence
 
 from app.core.database import db
@@ -14,6 +15,19 @@ TicketRecord = dict[str, Any]
 _UNSET = object()
 _FULLTEXT_MIN_SEARCH_LENGTH = 3
 _SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SQL_UPDATE_TICKET_REPLIES = "UPDATE ticket_replies SET "
+_SQL_INSERT_TICKET_WATCHERS = "INSERT INTO ticket_watchers (ticket_id, user_id) VALUES "
+_SQL_MERGE_TICKETS = (
+    "UPDATE tickets SET merged_into_ticket_id = %s, status = 'closed', closed_at = NOW() WHERE id IN "
+)
+
+
+def _rag_outbox_service():
+    return import_module("app.services.rag_outbox")
+
+
+def _chat_ticket_sync_service():
+    return import_module("app.services.chat_ticket_sync")
 
 
 async def _get_default_labour_type_id() -> int | None:
@@ -85,15 +99,23 @@ def _append_ticket_search_filter(
     prefixed_subject = f"{column_prefix}subject"
     prefixed_description = f"{column_prefix}description"
     prefixed_external_reference = f"{column_prefix}external_reference"
+    prefixed_ticket_id = f"{column_prefix}id"
 
     if mode == "fulltext":
         searchable_columns = [prefixed_subject, prefixed_description]
         if include_external_reference:
             searchable_columns.append(prefixed_external_reference)
         where.append(
+            "("
             f"MATCH ({', '.join(searchable_columns)}) AGAINST (%s IN BOOLEAN MODE)"
+            " OR EXISTS ("
+            "SELECT 1 FROM ticket_replies AS tr_search "
+            f"WHERE tr_search.ticket_id = {prefixed_ticket_id} "
+            "AND MATCH (tr_search.body) AGAINST (%s IN BOOLEAN MODE)"
+            ")"
+            ")"
         )
-        params.append(value)
+        params.extend([value, value])
         return
 
     like_clause = [
@@ -106,6 +128,14 @@ def _append_ticket_search_filter(
             f"LOWER(COALESCE({prefixed_external_reference}, '')) LIKE LOWER(%s)"
         )
         like_params.append(value)
+    like_clause.append(
+        "EXISTS ("
+        "SELECT 1 FROM ticket_replies AS tr_search "
+        f"WHERE tr_search.ticket_id = {prefixed_ticket_id} "
+        "AND LOWER(COALESCE(tr_search.body, '')) LIKE LOWER(%s)"
+        ")"
+    )
+    like_params.append(value)
     where.append(f"({' OR '.join(like_clause)})")
     params.extend(like_params)
 
@@ -239,6 +269,7 @@ def _normalise_ticket(row: dict[str, Any]) -> TicketRecord:
         "closed_at",
         "status_changed_at",
         "ai_summary_updated_at",
+        "resolution_steps_updated_at",
         "syncro_updated_at",
     ):
         if key in record:
@@ -264,6 +295,8 @@ def _normalise_reply(row: dict[str, Any]) -> TicketRecord:
         record[key] = _make_aware(record.get(key))
     if "is_billable" in record:
         record["is_billable"] = bool(record.get("is_billable"))
+    record["is_resolution_step"] = bool(record.get("is_resolution_step"))
+    record["is_not_resolution_step"] = bool(record.get("is_not_resolution_step"))
     if not record.get("kind"):
         record["kind"] = (
             "internal_note" if bool(record.get("is_internal")) else "message"
@@ -408,7 +441,9 @@ async def create_ticket(
         log_info("Ticket created successfully", ticket_id=ticket_id)
         row = await db.fetch_one("SELECT * FROM tickets WHERE id = %s", (ticket_id,))
         if row:
-            return _normalise_ticket(row)
+            created = _normalise_ticket(row)
+            await _rag_outbox_service().enqueue("tickets", ticket_id, source_updated_at=created.get("updated_at"))
+            return created
     fallback_row: dict[str, Any] = {
         "id": ticket_id,
         "company_id": company_id,
@@ -438,7 +473,9 @@ async def create_ticket(
         "syncro_updated_at": None,
         "closed_at": None,
     }
-    return _normalise_ticket(fallback_row)
+    created = _normalise_ticket(fallback_row)
+    await _rag_outbox_service().enqueue("tickets", ticket_id, source_updated_at=created.get("updated_at"))
+    return created
 
 
 async def list_tickets(
@@ -581,7 +618,7 @@ async def mark_replies_non_billable(reply_ids: Sequence[int]) -> int:
         return 0
     placeholders = ", ".join(["%s"] * len(clean_ids))
     return await db.execute_rowcount(
-        f"UPDATE ticket_replies SET is_billable = 0 WHERE is_billable = 1 AND id IN ({placeholders})",
+        f"UPDATE ticket_replies SET is_billable = 0 WHERE is_billable = 1 AND id IN ({placeholders})",  # nosec B608
         tuple(clean_ids),
     )
 
@@ -781,7 +818,7 @@ async def list_tickets_in_companies(
         WHERE {' AND '.join(where_clauses)}
         ORDER BY t.updated_at DESC, t.id DESC
         LIMIT %s OFFSET %s
-    """
+    """  # nosec B608
     params: list[Any] = [
         *search_params,
         *status_filters,
@@ -824,7 +861,7 @@ async def count_tickets_in_companies(
         SELECT COUNT(*) AS count
         FROM tickets AS t
         WHERE {' AND '.join(where_clauses)}
-    """
+    """  # nosec B608
     params: list[Any] = [
         *search_params,
         *status_filters,
@@ -879,7 +916,7 @@ async def count_tickets_for_user(
         ) AS scoped
         INNER JOIN tickets AS t ON t.id = scoped.id
         WHERE {' AND '.join(where_clauses)}
-    """
+    """  # nosec B608
 
     params: list[Any] = [
         user_id,
@@ -932,7 +969,7 @@ async def count_tickets(
     _append_ticket_search_filter(where, params, search=search)
     where_clause = " WHERE " + " AND ".join(where) if where else ""
     row = await db.fetch_one(
-        f"SELECT COUNT(*) AS count FROM tickets{where_clause}",
+        f"SELECT COUNT(*) AS count FROM tickets{where_clause}",  # nosec B608
         tuple(params) if params else None,
     )
     return int(row["count"]) if row else 0
@@ -991,6 +1028,23 @@ async def get_ticket_by_external_reference(
         (external_reference,),
     )
     return _normalise_ticket(row) if row else None
+
+
+async def get_reply_by_external_reference(
+    ticket_id: int,
+    external_reference: str,
+) -> TicketRecord | None:
+    row = await db.fetch_one(
+        """
+        SELECT tr.*, lt.name AS labour_type_name, lt.code AS labour_type_code
+        FROM ticket_replies tr
+        LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id
+        WHERE tr.ticket_id = %s AND tr.external_reference = %s
+        LIMIT 1
+        """,
+        (ticket_id, external_reference),
+    )
+    return _normalise_reply(row) if row else None
 
 
 async def find_open_ticket_by_external_reference(
@@ -1203,8 +1257,9 @@ async def replace_ticket_assets(
     if to_remove:
         placeholders = ", ".join(["%s"] * len(to_remove))
         params: list[Any] = [ticket_id, *sorted(to_remove)]
+        # The IN placeholders are derived only from normalised integer asset ids; values remain bound.
         await db.execute(
-            f"DELETE FROM ticket_assets WHERE ticket_id = %s AND asset_id IN ({placeholders})",
+            f"DELETE FROM ticket_assets WHERE ticket_id = %s AND asset_id IN ({placeholders})",  # nosec B608
             tuple(params),
         )
 
@@ -1256,7 +1311,7 @@ async def clear_ticket_billing_fields(ticket_ids: list[int]) -> int:
             billed_at = NULL,
             updated_at = %s
         WHERE id IN ({placeholders})
-        """,
+        """,  # nosec B608
         (datetime.now(timezone.utc), *clean_ids),
     )
 
@@ -1303,7 +1358,7 @@ async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
         params.append(override_updated_at)
     else:
         assignments.append("updated_at = UTC_TIMESTAMP(6)")
-    query = f"UPDATE tickets SET {', '.join(assignments)} WHERE id = %s"
+    query = f"UPDATE tickets SET {', '.join(assignments)} WHERE id = %s"  # nosec B608
     params.append(ticket_id)
     await db.execute(query, tuple(params))
     if (
@@ -1322,7 +1377,9 @@ async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
     ):
         await _disable_shipment_watch(ticket_id)
     log_info("Ticket updated successfully", ticket_id=ticket_id)
-    return await get_ticket(ticket_id)
+    updated = await get_ticket(ticket_id)
+    await _rag_outbox_service().enqueue("tickets", ticket_id, source_updated_at=(updated or {}).get("updated_at"))
+    return updated
 
 
 async def rename_xero_invoice_number(
@@ -1381,9 +1438,12 @@ async def set_tickets_status(
         return 0
 
     placeholders = ", ".join(["%s"] * len(normalised_ids))
+    query = (
+        "SELECT id,status,COALESCE(status_changed_at,created_at) AS started_at "  # nosec B608
+        f"FROM tickets WHERE id IN ({placeholders}) AND LOWER(status) <> LOWER(%s)"
+    )
     previous_rows = await db.fetch_all(
-        f"""SELECT id,status,COALESCE(status_changed_at,created_at) AS started_at
-            FROM tickets WHERE id IN ({placeholders}) AND LOWER(status) <> LOWER(%s)""",
+        query,
         (*normalised_ids, status),
     )
     params: list[Any] = [status, status]
@@ -1404,7 +1464,7 @@ async def set_tickets_status(
             {closed_clause}
             updated_at = UTC_TIMESTAMP(6)
         WHERE id IN ({placeholders})
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     ended_at = datetime.now(timezone.utc)
@@ -1415,8 +1475,9 @@ async def set_tickets_status(
             (previous["id"], previous["status"], previous["started_at"], ended_at),
         )
     if status.casefold() == "closed" or closed_at is not None:
+        # The IN placeholders are derived only from normalised integer ticket ids; values remain bound.
         await db.execute(
-            f"UPDATE ticket_shipment_watches SET active = 0 WHERE ticket_id IN ({placeholders})",
+            f"UPDATE ticket_shipment_watches SET active = 0 WHERE ticket_id IN ({placeholders})",  # nosec B608
             tuple(normalised_ids),
         )
     return affected
@@ -1425,6 +1486,7 @@ async def set_tickets_status(
 async def delete_ticket(ticket_id: int) -> None:
     log_info("Deleting ticket", ticket_id=ticket_id)
     await db.execute("DELETE FROM tickets WHERE id = %s", (ticket_id,))
+    await _rag_outbox_service().enqueue("tickets", ticket_id, action="delete")
     log_info("Ticket deleted successfully", ticket_id=ticket_id)
 
 
@@ -1454,13 +1516,16 @@ async def delete_tickets(ticket_ids: Iterable[int]) -> int:
     params = tuple(normalised_ids)
 
     existing = await db.fetch_one(
-        f"SELECT COUNT(*) AS total FROM tickets WHERE id IN ({placeholders})",
+        f"SELECT COUNT(*) AS total FROM tickets WHERE id IN ({placeholders})",  # nosec B608
         params,
     )
+    # The IN placeholders are derived only from normalised integer ticket ids; values remain bound.
     await db.execute(
-        f"DELETE FROM tickets WHERE id IN ({placeholders})",
+        f"DELETE FROM tickets WHERE id IN ({placeholders})",  # nosec B608
         params,
     )
+    for ticket_id in normalised_ids:
+        await _rag_outbox_service().enqueue("tickets", ticket_id, action="delete")
     if not existing:
         return 0
     try:
@@ -1482,6 +1547,8 @@ async def create_reply(
     labour_type_id: int | None = None,
     author_email: str | None = None,
     author_display_name: str | None = None,
+    is_resolution_step: bool = False,
+    is_not_resolution_step: bool = False,
 ) -> TicketRecord:
     labour_type_id = await _default_labour_type_for_time_entry(
         minutes_spent, labour_type_id
@@ -1495,13 +1562,15 @@ async def create_reply(
         minutes_spent=minutes_spent,
         is_billable=is_billable,
     )
-    columns = ["ticket_id", "author_id", "body", "is_internal", "is_billable"]
+    columns = ["ticket_id", "author_id", "body", "is_internal", "is_billable", "is_resolution_step", "is_not_resolution_step"]
     params: list[Any] = [
         ticket_id,
         author_id,
         body,
         1 if is_internal else 0,
         1 if is_billable else 0,
+        1 if is_resolution_step else 0,
+        1 if is_not_resolution_step else 0,
     ]
     clean_author_email = str(author_email or "").strip() or None
     clean_author_display_name = str(author_display_name or "").strip() or None
@@ -1528,7 +1597,7 @@ async def create_reply(
         f"""
         INSERT INTO ticket_replies ({', '.join(columns)})
         VALUES ({placeholders})
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     if reply_id:
@@ -1551,9 +1620,8 @@ async def create_reply(
                 "chat:"
             ):
                 try:
-                    from app.services import chat_ticket_sync
 
-                    await chat_ticket_sync.sync_ticket_reply_to_chat(
+                    await _chat_ticket_sync_service().sync_ticket_reply_to_chat(
                         ticket_id=ticket_id,
                         reply=normalised,
                     )
@@ -1564,6 +1632,7 @@ async def create_reply(
                         reply_id=normalised.get("id"),
                         error=str(exc),
                     )
+            await _rag_outbox_service().enqueue("tickets", ticket_id)
             return normalised
     fallback_row: dict[str, Any] = {
         "id": reply_id,
@@ -1573,13 +1642,30 @@ async def create_reply(
         "is_internal": 1 if is_internal else 0,
         "minutes_spent": minutes_spent,
         "is_billable": 1 if is_billable else 0,
+        "is_resolution_step": 1 if is_resolution_step else 0,
+        "is_not_resolution_step": 1 if is_not_resolution_step else 0,
         "external_reference": external_reference,
         "created_at": created_at,
         "labour_type_id": labour_type_id,
         "author_email": clean_author_email,
         "author_display_name": clean_author_display_name,
     }
+    await _rag_outbox_service().enqueue("tickets", ticket_id)
     return _normalise_reply(fallback_row)
+
+
+async def set_reply_resolution_step(
+    reply_id: int, ticket_id: int, flagged: bool, excluded: bool = False
+) -> bool:
+    """Set a reply's mutually exclusive resolution classification."""
+    affected = await db.execute_rowcount(
+        "UPDATE ticket_replies SET is_resolution_step = %s, is_not_resolution_step = %s "
+        "WHERE id = %s AND ticket_id = %s",
+        (1 if flagged else 0, 1 if excluded else 0, reply_id, ticket_id),
+    )
+    if affected:
+        await _rag_outbox_service().enqueue("tickets", ticket_id)
+    return bool(affected)
 
 
 async def list_replies(
@@ -1596,7 +1682,7 @@ async def list_replies(
         LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id
         WHERE {where}
         ORDER BY tr.created_at ASC
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return [_normalise_reply(row) for row in rows]
@@ -1631,7 +1717,7 @@ async def get_time_totals_by_ticket_ids(
         FROM ticket_replies
         WHERE ticket_id IN ({placeholders}) AND minutes_spent IS NOT NULL AND minutes_spent > 0
         GROUP BY ticket_id
-        """,
+        """,  # nosec B608
         tuple(ticket_ids),
     )
     result: dict[int, dict[str, int]] = {}
@@ -1762,7 +1848,7 @@ async def get_automation_filter_context_by_ticket_ids(
         FROM ticket_replies
         WHERE ticket_id IN ({placeholders}) AND minutes_spent IS NOT NULL AND minutes_spent > 0
         GROUP BY ticket_id
-        """,
+        """,  # nosec B608
         tuple(unique_ids),
     )
     for row in time_rows:
@@ -1778,7 +1864,7 @@ async def get_automation_filter_context_by_ticket_ids(
         FROM ticket_attachments
         WHERE ticket_id IN ({placeholders})
         GROUP BY ticket_id
-        """,
+        """,  # nosec B608
         tuple(unique_ids),
     )
     for row in attachment_rows:
@@ -1812,7 +1898,7 @@ async def get_automation_filter_context_by_ticket_ids(
         FROM ticket_tasks
         WHERE ticket_id IN ({placeholders})
         GROUP BY ticket_id
-        """,
+        """,  # nosec B608
         tuple(unique_ids),
     )
     for row in task_rows:
@@ -1830,7 +1916,7 @@ async def get_automation_filter_context_by_ticket_ids(
         FROM ticket_assets
         WHERE ticket_id IN ({placeholders})
         GROUP BY ticket_id
-        """,
+        """,  # nosec B608
         tuple(unique_ids),
     )
     for row in linked_asset_rows:
@@ -1845,7 +1931,7 @@ async def get_automation_filter_context_by_ticket_ids(
         FROM ticket_suggested_assets
         WHERE ticket_id IN ({placeholders})
         GROUP BY ticket_id
-        """,
+        """,  # nosec B608
         tuple(unique_ids),
     )
     for row in suggested_asset_rows:
@@ -1874,7 +1960,7 @@ async def get_automation_filter_context_by_ticket_ids(
             WHERE ticket_id IN ({placeholders})
             GROUP BY ticket_id
         ) AS latest ON latest.latest_reply_id = tr.id
-        """,
+        """,  # nosec B608
         tuple(unique_ids),
     )
     for row in latest_reply_rows:
@@ -1918,7 +2004,7 @@ async def get_automation_filter_context_by_ticket_ids(
               )
             GROUP BY ticket_id
         ) AS latest_public ON latest_public.latest_reply_id = tr.id
-        """,
+        """,  # nosec B608
         tuple(unique_ids),
     )
     for row in latest_public_reply_rows:
@@ -1946,7 +2032,7 @@ async def validate_replies_belong_to_ticket(
         SELECT id, ticket_id
         FROM ticket_replies
         WHERE id IN ({placeholders})
-        """,
+        """,  # nosec B608
         tuple(reply_ids),
     )
 
@@ -2032,12 +2118,9 @@ async def update_reply(
             elif labour_type_id is None:
                 updates.append("labour_type_id = NULL")
         params.append(reply_id)
+        # The SET fragment is assembled only from fixed reply-field branches above; values remain bound.
         await db.execute(
-            f"""
-            UPDATE ticket_replies
-            SET {', '.join(updates)}
-            WHERE id = %s
-            """,
+            _SQL_UPDATE_TICKET_REPLIES + ", ".join(updates) + " WHERE id = %s",
             tuple(params),
         )
     return await get_reply_by_id(reply_id)
@@ -2125,12 +2208,11 @@ async def bulk_add_watchers(ticket_id: int, user_ids: Iterable[int]) -> None:
     flat_params: list[Any] = []
     for pair in values:
         flat_params.extend(pair)
+    # VALUES placeholders are derived only from the normalised watcher pair count; values remain bound.
     await db.execute(
-        f"""
-        INSERT INTO ticket_watchers (ticket_id, user_id)
-        VALUES {placeholders}
-        ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)
-        """,
+        _SQL_INSERT_TICKET_WATCHERS
+        + placeholders
+        + " ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)",
         tuple(flat_params),
     )
 
@@ -2157,12 +2239,12 @@ async def move_replies_to_ticket(
     if not reply_list:
         return 0
     placeholders = ", ".join(["%s"] * len(reply_list))
-    return await db.execute_rowcount(
+    return await db.execute_rowcount(  # nosec B608
         f"""
         UPDATE ticket_replies
         SET ticket_id = %s
         WHERE id IN ({placeholders})
-        """,
+        """,  # nosec B608
         (target_ticket_id, *reply_list),
     )
 
@@ -2315,14 +2397,9 @@ async def merge_tickets(
 
     # Mark source tickets as merged into target
     placeholders = ", ".join(["%s"] * len(source_ticket_ids))
+    # The IN placeholders are derived only from the supplied source ticket id count; values remain bound.
     await db.execute(
-        f"""
-        UPDATE tickets
-        SET merged_into_ticket_id = %s,
-            status = 'closed',
-            closed_at = NOW()
-        WHERE id IN ({placeholders})
-        """,
+        _SQL_MERGE_TICKETS + "(" + placeholders + ")",
         (target_ticket_id, *source_ticket_ids),
     )
 

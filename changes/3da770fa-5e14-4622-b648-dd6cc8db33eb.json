@@ -1,0 +1,7 @@
+{
+  "guid": "3da770fa-5e14-4622-b648-dd6cc8db33eb",
+  "occurred_at": "2026-09-16T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed Microsoft 365 spam compliance searches to use the tenant's Purview organization domain and added audited retries for failed searches.",
+  "content_hash": "6385acf034cf68cc9be0f7966d50e0933a7844a8af9969d79088b493d73ad3a5"
+}

@@ -8,8 +8,8 @@ TEMPLATE = Path("app/templates/admin/company_edit.html")
 
 def _section(template: str, key: str) -> str:
     start = template.index(f'data-company-edit-section="{key}"')
-    end = template.index("</details>", start)
-    return template[start:end]
+    end = template.find('<section class="card card--panel ce-section"', start)
+    return template[start:end if end != -1 else len(template)]
 
 
 def test_external_ids_are_grouped_in_their_own_section():
@@ -17,7 +17,7 @@ def test_external_ids_are_grouped_in_their_own_section():
     section = _section(template, "external-ids")
     general_section = _section(template, "general")
 
-    assert '<h2 class="card__title">External IDs</h2>' in section
+    assert '<h2 class="card__title" id="ce-external-ids-title">External IDs</h2>' in section
     for field_name in (
         "tacticalClientId",
         "xeroId",

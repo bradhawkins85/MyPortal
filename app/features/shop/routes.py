@@ -48,6 +48,12 @@ _add(
     response_class=JSONResponse,
 )
 _add(
+    "/api/admin/shop/products/{product_id}/freight-preview",
+    handlers.admin_shop_product_freight_preview_api,
+    ["GET"],
+    response_class=JSONResponse,
+)
+_add(
     "/api/admin/shop/products/{product_id}/price-history",
     handlers.admin_shop_product_price_history_api,
     ["GET"],

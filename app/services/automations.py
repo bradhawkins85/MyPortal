@@ -4,20 +4,26 @@ import asyncio
 import json
 from collections.abc import Awaitable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone
+from importlib import import_module
 import re
 from functools import lru_cache
 from time import monotonic
 from typing import Any
 
-from croniter import croniter
+from croniter import CroniterBadDateError, croniter
 
 from loguru import logger
 
 from app.core.database import db
 from app.repositories import automations as automation_repo
 from app.repositories import tickets as tickets_repo
-from app.services import modules as modules_service
+from app.repositories import business_hours as business_hours_repo
+from app.services import automation_dispatch
+from app.services import business_hours as business_hours_service
+from app.services import module_dispatch
+from app.services import tickets as tickets_service
 from app.services import value_templates
+from app.services.cron_expression import for_croniter
 
 SCHEDULED_TICKET_SCAN_BATCH_SIZE = 1000
 SCHEDULED_TICKET_SCAN_MAX_CANDIDATES = 50000
@@ -33,6 +39,10 @@ TRIGGER_EVENTS: list[dict[str, str]] = [
     {"value": "tickets.sla_response_breached", "label": "Ticket response SLA breached"},
     {"value": "tickets.sla_resolution_breached", "label": "Ticket resolution SLA breached"},
     {"value": "webhook.delivered", "label": "Webhook delivered"},
+    {"value": "smtp2go.opened", "label": "SMTP2Go email opened"},
+    {"value": "smtp2go.clicked", "label": "SMTP2Go email clicked"},
+    {"value": "smtp2go.not_engaged", "label": "SMTP2Go email not engaged"},
+    {"value": "expirations.reminder", "label": "Expiration reminder requested"},
 ]
 
 _EVENT_ALIASES: dict[str, tuple[str, ...]] = {
@@ -640,6 +650,102 @@ def _attach_ticket_age_context(
     return enriched
 
 
+def _references_business_hours(automation: Mapping[str, Any]) -> bool:
+    haystack = json.dumps(
+        [automation.get("trigger_filters"), automation.get("action_payload")], default=str
+    )
+    return "business_hours" in haystack
+
+
+async def _attach_business_hours_context(
+    context: Mapping[str, Any] | None,
+) -> Mapping[str, Any] | None:
+    """Expose ``business_hours.company_open``/``global_open`` to filters and templates."""
+
+    if not isinstance(context, Mapping) or "business_hours" in context:
+        return context
+    try:
+        business_hours = await business_hours_service.business_hours_context(context)
+    except Exception as exc:  # pragma: no cover - business hours must not block automations
+        logger.warning("Failed to build business hours context", error=str(exc))
+        return context
+    enriched = dict(context)
+    enriched["business_hours"] = business_hours
+    return enriched
+
+
+async def _apply_business_hours_gate(
+    automation: Mapping[str, Any],
+    context: Mapping[str, Any] | None,
+    *,
+    event_name: str | None,
+    allow_pause: bool,
+) -> dict[str, Any] | None:
+    """Skip or defer an automation outside business hours.
+
+    Returns ``None`` when the automation may run now, otherwise a result entry
+    describing why it did not run.
+    """
+
+    gate = await business_hours_service.automation_gate(automation, context)
+    if gate is None:
+        return None
+    automation_id = int(automation.get("id"))
+    run_after = gate.get("run_after")
+    if gate.get("action") == "pause" and allow_pause and isinstance(run_after, datetime):
+        try:
+            await business_hours_repo.create_deferred_run(
+                automation_id=automation_id,
+                event_name=event_name,
+                company_id=gate.get("company_id"),
+                ticket_id=business_hours_service.ticket_id_from_context(context),
+                context=context,
+                run_after=run_after,
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to defer automation until business hours",
+                automation_id=automation_id,
+                error=str(exc),
+            )
+            return {
+                "automation_id": automation_id,
+                "status": "failed",
+                "reason": "business_hours_defer_failed",
+            }
+        entry = {
+            "automation_id": automation_id,
+            "status": "deferred",
+            "reason": "outside_business_hours",
+            "run_after": run_after.isoformat(),
+        }
+        await _record_action_history(
+            automation,
+            action_name="Paused until business hours",
+            action_module=None,
+            status="deferred",
+            result=entry,
+            error_message=None,
+            context=context,
+        )
+        return entry
+    entry = {
+        "automation_id": automation_id,
+        "status": "skipped",
+        "reason": "outside_business_hours",
+    }
+    await _record_action_history(
+        automation,
+        action_name="Skipped outside business hours",
+        action_module=None,
+        status="skipped",
+        result=entry,
+        error_message=None,
+        context=context,
+    )
+    return entry
+
+
 def _is_ticket_scoped_scheduled_automation(automation: Mapping[str, Any]) -> bool:
     if str(automation.get("kind") or "").strip().lower() != "scheduled":
         return False
@@ -685,10 +791,10 @@ def calculate_next_run(
     cron_expression = str(automation.get("cron_expression") or "").strip()
     if cron_expression:
         try:
-            iterator = croniter(cron_expression, reference_time)
+            iterator = croniter(for_croniter(cron_expression), reference_time)
             next_time = iterator.get_next(datetime)
             return next_time.astimezone(timezone.utc)
-        except (ValueError, KeyError) as exc:
+        except (CroniterBadDateError, ValueError, KeyError) as exc:
             logger.warning(
                 "Invalid cron expression on automation",
                 automation_id=automation.get("id"),
@@ -782,7 +888,7 @@ async def _invoke_automation_actions_for_context(
             if context:
                 module_payload.setdefault("context", context)
             try:
-                action_result = await modules_service.trigger_module(
+                action_result = await module_dispatch.trigger_module(
                     module_slug,
                     module_payload,
                     background=False,
@@ -840,6 +946,7 @@ async def _invoke_automation_actions_for_context(
                 "failed"
                 if action_status in {"failed", "error"}
                 or (action_status == "unknown" and action_error)
+                else "skipped" if action_status == "skipped"
                 else "succeeded"
             )
             await _record_action_history(
@@ -867,7 +974,7 @@ async def _invoke_automation_actions_for_context(
         )
         if context:
             module_payload.setdefault("context", context)
-        result = await modules_service.trigger_module(
+        result = await module_dispatch.trigger_module(
             str(module_slug), module_payload, background=False
         )
         history_error = None
@@ -879,6 +986,8 @@ async def _invoke_automation_actions_for_context(
                 .lower()
             )
             result_error = result.get("error") or result.get("last_error") or None
+            if result_status == "skipped":
+                history_status = "skipped"
             if result_status in {"failed", "error"} or result_error:
                 history_status = "failed"
                 history_error = str(result_error or "Module action failed")
@@ -956,8 +1065,6 @@ async def _scan_tickets_for_automation(
     scanned = await _list_ticket_automation_scan_candidates(limit=scan_limit)
     matches: list[dict[str, Any]] = []
 
-    from app.services import tickets as tickets_service
-
     for ticket in scanned:
         ticket_context = _attach_ticket_age_context(ticket, now=now)
         try:
@@ -981,6 +1088,8 @@ async def _scan_tickets_for_automation(
                 "preview": preview,
             },
         }
+        if _references_business_hours(automation):
+            context = await _attach_business_hours_context(context)
         if not _filters_match(filters, context):
             continue
         match = dict(enriched_ticket)
@@ -1016,12 +1125,10 @@ async def _build_ticket_test_context(
     checked_at = now or datetime.now(timezone.utc)
     ticket_context = _attach_ticket_age_context(ticket, now=checked_at)
     try:
-        from app.services import tickets as tickets_service
-
         enriched_ticket = await tickets_service._enrich_ticket_context(ticket_context)
     except Exception:  # pragma: no cover - defensive fallback for test action
         enriched_ticket = ticket_context
-    return {
+    context = {
         "ticket": _attach_ticket_age_context(enriched_ticket, now=checked_at),
         "ticket_update": {
             "actor_type": "automation_test",
@@ -1036,6 +1143,9 @@ async def _build_ticket_test_context(
             "test": True,
         },
     }
+    if _references_business_hours(automation):
+        return dict(await _attach_business_hours_context(context) or context)
+    return context
 
 
 async def test_ticket_automation_by_id(
@@ -1076,8 +1186,6 @@ async def test_ticket_automation_by_id(
         result["reason"] = "Automation filters did not match the ticket."
         return result
     if apply:
-        from app.services import tickets as tickets_service
-
         await tickets_service._remove_assigned_user_from_watchers(ticket)
         action_result, action_error = await _invoke_automation_actions_for_context(
             automation,
@@ -1229,10 +1337,6 @@ async def _execute_scheduled_ticket_automation(
     skipped = 0
     results: list[dict[str, Any]] = []
 
-    # Local import avoids a circular import during application startup because
-    # the ticket service emits automation events.
-    from app.services import tickets as tickets_service
-
     for ticket in scanned:
         await tickets_service._remove_assigned_user_from_watchers(ticket)
         ticket_context = _attach_ticket_age_context(ticket, now=now)
@@ -1255,9 +1359,18 @@ async def _execute_scheduled_ticket_automation(
                 "checked_at": now.isoformat(),
             },
         }
+        if _references_business_hours(automation):
+            context = await _attach_business_hours_context(context)
         if not _filters_match(filters, context):
             continue
         matched += 1
+        gated = await _apply_business_hours_gate(
+            automation, context, event_name=None, allow_pause=False
+        )
+        if gated is not None:
+            skipped += 1
+            results.append({"ticket_id": ticket.get("id"), **gated})
+            continue
         action_result, action_error = await _invoke_automation_actions_for_context(
             automation,
             context=context,
@@ -1322,7 +1435,19 @@ async def _execute_automation(
             else []
         )
         try:
-            if context is None and _is_ticket_scoped_scheduled_automation(automation):
+            gated = (
+                await _apply_business_hours_gate(
+                    automation, None, event_name=None, allow_pause=False
+                )
+                if context is None
+                and not _is_ticket_scoped_scheduled_automation(automation)
+                else None
+            )
+            if gated is not None:
+                status = "skipped"
+                result_payload = gated
+                error_message = "Outside business hours"
+            elif context is None and _is_ticket_scoped_scheduled_automation(automation):
                 result_payload = await _execute_scheduled_ticket_automation(automation)
                 failed_count = (
                     int(result_payload.get("failed", 0))
@@ -1348,7 +1473,7 @@ async def _execute_automation(
                     if context:
                         module_payload.setdefault("context", context)
                     try:
-                        action_result = await modules_service.trigger_module(
+                        action_result = await module_dispatch.trigger_module(
                             module_slug,
                             module_payload,
                             background=False,
@@ -1414,6 +1539,7 @@ async def _execute_automation(
                         "failed"
                         if action_status in {"failed", "error"}
                         or (action_status == "unknown" and action_error)
+                        else "skipped" if action_status == "skipped"
                         else "succeeded"
                     )
                     await _record_action_history(
@@ -1445,7 +1571,7 @@ async def _execute_automation(
                     )
                     if context:
                         module_payload.setdefault("context", context)
-                    result_payload = await modules_service.trigger_module(
+                    result_payload = await module_dispatch.trigger_module(
                         str(module_slug), module_payload, background=False
                     )
                     action_status = "succeeded"
@@ -1469,6 +1595,10 @@ async def _execute_automation(
                             action_status = "failed"
                             status = "failed"
                             error_message = str(action_error or "Module action failed")
+                        elif raw_status == "skipped":
+                            action_status = "skipped"
+                            status = "skipped"
+                            error_message = str(result_payload.get("reason") or "Action skipped")
                     await _record_action_history(
                         automation,
                         action_name=str(module_slug),
@@ -1521,9 +1651,69 @@ async def _execute_automation(
         }
 
 
+async def process_deferred_runs(limit: int = 50) -> int:
+    """Run event automations that were paused until business hours opened."""
+
+    now = datetime.now(timezone.utc)
+    try:
+        due_runs = await business_hours_repo.list_due_deferred_runs(now, limit=limit)
+    except Exception as exc:
+        logger.warning("Failed to load deferred automation runs", error=str(exc))
+        return 0
+    processed = 0
+    for run in due_runs:
+        run_id = int(run["id"])
+        if not await business_hours_repo.claim_deferred_run(run_id):
+            continue
+        automation = await automation_repo.get_automation(int(run["automation_id"]))
+        if not automation or str(automation.get("status") or "") != "active":
+            await business_hours_repo.finish_deferred_run(
+                run_id, status="cancelled", error_message="Automation is inactive or deleted"
+            )
+            continue
+        raw_context = run.get("context")
+        context = raw_context if isinstance(raw_context, Mapping) else None
+        gate = await business_hours_service.automation_gate(automation, context, at=now)
+        if gate is not None:
+            run_after = gate.get("run_after")
+            if gate.get("action") == "pause" and isinstance(run_after, datetime):
+                # Hours changed since the run was deferred; wait for the new opening.
+                await business_hours_repo.reschedule_deferred_run(run_id, run_after)
+            else:
+                await business_hours_repo.finish_deferred_run(
+                    run_id, status="skipped", error_message="Outside business hours"
+                )
+            continue
+        if isinstance(context, Mapping) and "business_hours" in context:
+            context = dict(context)
+            context.pop("business_hours", None)
+            context = await _attach_business_hours_context(context)
+        try:
+            result = await _execute_automation(automation, context=context)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            await business_hours_repo.finish_deferred_run(
+                run_id, status="failed", error_message=str(exc)
+            )
+            continue
+        if result.get("reason") == "Already running on another worker":
+            await business_hours_repo.reschedule_deferred_run(
+                run_id, now + timedelta(minutes=1)
+            )
+            continue
+        failed = result.get("status") == "failed"
+        await business_hours_repo.finish_deferred_run(
+            run_id,
+            status="failed" if failed else "completed",
+            error_message=str(result.get("error")) if failed and result.get("error") else None,
+        )
+        processed += 1
+    return processed
+
+
 async def process_due_automations(limit: int = 20) -> None:
-    from app.services import slas as sla_service
+    sla_service = import_module("app.services.slas")
     await sla_service.emit_due_events()
+    await process_deferred_runs()
     due = await automation_repo.list_due_automations(limit=limit)
     for automation in due:
         await _execute_automation(automation)
@@ -1600,6 +1790,8 @@ async def handle_event(
         return []
 
     matched: list[dict[str, Any]] = []
+    if any(_references_business_hours(automation) for automation in automations):
+        context = await _attach_business_hours_context(context)
     for automation in automations:
         filters = automation.get("trigger_filters")
         filters_mapping = filters if isinstance(filters, Mapping) else None
@@ -1615,6 +1807,12 @@ async def handle_event(
                 }
             )
             continue
+        gated = await _apply_business_hours_gate(
+            automation, context, event_name=event_key, allow_pause=True
+        )
+        if gated is not None:
+            matched.append(gated)
+            continue
         _schedule_background_execution(
             _execute_automation(automation, context=context),
             automation_id=automation_id,
@@ -1626,3 +1824,6 @@ async def handle_event(
             }
         )
     return matched
+
+
+automation_dispatch.register_event_handler(handle_event)

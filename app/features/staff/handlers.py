@@ -14,6 +14,13 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import ValidationError
 
 from app import main as main_module
+from app.repositories import staff_custom_fields as staff_custom_fields_repo
+from app.repositories import staff_onboarding_workflows as staff_workflow_repo
+from app.repositories import staff_requests as staff_requests_repo
+from app.schemas.staff_onboarding_workflows import (
+    CompanyWorkflowPolicyUpsertSchema,
+    WorkflowConfigSchema,
+)
 from app.services import notifications as notifications_service
 
 from .helpers import (
@@ -24,8 +31,6 @@ from .helpers import (
     _staff_member_matches_company_email_domains,
 )
 
-CompanyWorkflowPolicyUpsertSchema = main_module.CompanyWorkflowPolicyUpsertSchema
-WorkflowConfigSchema = main_module.WorkflowConfigSchema
 _parse_input_datetime = main_module._parse_input_datetime
 _parse_local_datetime_to_utc = main_module._parse_local_datetime_to_utc
 _raw_value_includes_time = main_module._raw_value_includes_time
@@ -44,12 +49,9 @@ message_templates_service = main_module.message_templates_service
 modules_service = main_module.modules_service
 settings = main_module.settings
 staff_access_service = main_module.staff_access_service
-staff_custom_fields_repo = main_module.staff_custom_fields_repo
 staff_field_config_service = main_module.staff_field_config_service
 staff_onboarding_workflow_service = main_module.staff_onboarding_workflow_service
 staff_repo = main_module.staff_repo
-staff_requests_repo = main_module.staff_requests_repo
-staff_workflow_repo = main_module.staff_workflow_repo
 tickets_service = main_module.tickets_service
 user_company_repo = main_module.user_company_repo
 user_repo = main_module.user_repo
@@ -742,8 +744,29 @@ async def staff_page(
         "manual_onedrive_export_enabled": bool(
             str((company_record or {}).get("onedrive_export_drive_id") or "").strip()
         ),
+        "open_add_staff_modal": bool(
+            can_edit_staff
+            and getattr(getattr(request, "state", None), "open_add_staff_modal", False)
+        ),
     }
     return await _render_template("staff/index.html", request, user, extra=extra)
+
+
+async def staff_add_page(
+    request: Request,
+    enabled: str = "",
+    department: str = "",
+    show_ex_staff: str = "",
+):
+    """Render the staff page with the add staff member modal opened on load."""
+
+    request.state.open_add_staff_modal = True
+    return await staff_page(
+        request,
+        enabled=enabled,
+        department=department,
+        show_ex_staff=show_ex_staff,
+    )
 
 
 async def staff_member_tickets(staff_id: int, request: Request) -> JSONResponse:
@@ -959,6 +982,16 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "description": "Creates an asset password entry in Hudu under the company linked to this workflow for secure credential storage.",
     },
     {
+        "type": "create_myportal_credential",
+        "name": "Create MyPortal credential",
+        "description": "Stores an approved prior-step secret in this company's vault and exposes only its credential ID/version.",
+    },
+    {
+        "type": "share_myportal_credential",
+        "name": "Share MyPortal credential",
+        "description": "Grants verified, least-privilege vault access and exposes a link (never plaintext) to later steps.",
+    },
+    {
         "type": "delete_staff_record",
         "name": "Delete staff record",
         "description": (
@@ -1085,6 +1118,16 @@ _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "type": "hudu_push_password",
         "name": "Push password to Hudu",
         "description": "Creates an asset password entry in Hudu under the company linked to this workflow for secure credential storage.",
+    },
+    {
+        "type": "create_myportal_credential",
+        "name": "Create MyPortal credential",
+        "description": "Stores a newly rotated, organisation-controlled prior-step secret in this company's vault; never collect an employee's private password.",
+    },
+    {
+        "type": "share_myportal_credential",
+        "name": "Share MyPortal credential",
+        "description": "Grants verified, least-privilege vault access and exposes a link (never plaintext) to later steps.",
     },
     {
         "type": "delete_staff_record",
@@ -1700,11 +1743,25 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 ),
             },
             {
-                "name": "mark_source_read_only",
-                "label": "Mark source OneDrive read-only",
+                "name": "source_protection_operation",
+                "label": "Source protection operation",
+                "type": "select",
+                "default": "none",
+                "description": (
+                    "Explicitly disable the Entra account to prevent owner writes, or report that source protection was not requested. "
+                    "A read sharing invitation does not remove an owner's write access."
+                ),
+                "options": [
+                    {"value": "none", "label": "None (report not applied)"},
+                    {"value": "disable_account", "label": "Disable Entra account"},
+                ],
+            },
+            {
+                "name": "require_source_protection",
+                "label": "Require source protection",
                 "type": "checkbox",
-                "default": True,
-                "description": "Attempts to remove inherited permissions and grant the user read access after export.",
+                "default": False,
+                "description": "Pause the workflow unless the selected protection operation succeeds.",
             },
             {
                 "name": "wait_for_completion",
@@ -1728,7 +1785,6 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "options": [
                     {"value": "fail", "label": "Fail (safest)"},
                     {"value": "rename", "label": "Rename new export"},
-                    {"value": "replace", "label": "Replace existing"},
                 ],
             },
         ],
@@ -2039,6 +2095,34 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "default": "",
                 "description": "Optional description for this credential entry.",
             },
+        ],
+    },
+    "create_myportal_credential": {
+        "fields": [
+            {"name": "credential_name", "label": "Credential name", "type": "text", "default": "${vars.staff.full_name} - Account", "required": True, "description": "Supports workflow variable templates."},
+            {"name": "username", "label": "Username", "type": "text", "default": "${vars.staff.email}"},
+            {"name": "credential_class", "label": "Class", "type": "select", "default": "user", "options": ["user", "shared", "service", "device", "other"]},
+            {"name": "secret_source", "label": "Secret source", "type": "text", "default": "${vars.generated_password}", "required": True, "description": "Must be a protected output from an earlier step. Literal passwords cannot be saved."},
+            {"name": "owner", "label": "Owner", "type": "text", "default": "${vars.staff.full_name}"},
+            {"name": "asset_id", "label": "Linked asset ID (optional)", "type": "number", "required": False},
+            {"name": "ticket_id", "label": "Linked ticket ID (optional)", "type": "number", "required": False},
+            {"name": "expires_on", "label": "Expiry date (optional)", "type": "date", "required": False},
+            {"name": "review_on", "label": "Review date (optional)", "type": "date", "required": False},
+            {"name": "credential_output_var", "label": "Store credential ID as variable", "type": "text", "default": "credential_id", "description": "Only the non-secret credential ID is made available to later steps."},
+        ],
+    },
+    "share_myportal_credential": {
+        "fields": [
+            {"name": "credential_id", "label": "Credential ID", "type": "text", "default": "${vars.credential_id}", "required": True, "description": "ID from Create MyPortal credential or a same-company credential."},
+            {"name": "selector_type", "label": "Recipient selector", "type": "select", "options": ["staff", "job_title", "external"], "required": True},
+            {"name": "staff_id", "label": "Staff ID", "type": "text", "required": False},
+            {"name": "job_title", "label": "Job title", "type": "text", "required": False},
+            {"name": "recipient_email", "label": "External recipient email", "type": "text", "required": False},
+            {"name": "permissions", "label": "Permissions", "type": "text", "default": "reveal", "required": True, "description": "Comma-separated: enumerate, reveal, share, administer."},
+            {"name": "reason", "label": "Reason", "type": "textarea", "required": True},
+            {"name": "expires_at", "label": "Expiry (UTC, required for external)", "type": "text", "required": False},
+            {"name": "verification_code", "label": "Independent verification code", "type": "text", "required": False, "description": "Required for external one-time shares; deliver separately."},
+            {"name": "output_var", "label": "Output object variable", "type": "text", "default": "credential_share", "required": True},
         ],
     },
 }
@@ -3060,6 +3144,9 @@ async def create_staff_member(request: Request):
             custom_values[key] = str(raw_value or "").strip() or None
 
     requester_id = int(user["id"]) if user.get("id") is not None else None
+    requested_by_name, requested_by_email = (
+        staff_onboarding_workflow_service.requested_by_details(user)
+    )
 
     created = await staff_requests_repo.create_request(
         company_id=company_id,
@@ -3073,6 +3160,8 @@ async def create_staff_member(request: Request):
         request_notes=None,
         custom_fields=custom_values or None,
         requested_by_user_id=requester_id,
+        requested_by_name=requested_by_name,
+        requested_by_email=requested_by_email,
         requested_at=datetime.now(tz=timezone.utc),
     )
 
@@ -3506,6 +3595,9 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         if not notes
         else f"Type: {offboarding_type}\n\nNotes: {notes}"
     )
+    requested_by_name, requested_by_email = (
+        staff_onboarding_workflow_service.requested_by_details(user)
+    )
 
     updated = await staff_repo.update_staff(
         staff_id,
@@ -3534,6 +3626,8 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         onboarding_completed_at=existing.get("onboarding_completed_at"),
         approval_status="pending",
         requested_by_user_id=int(user["id"]) if user.get("id") is not None else None,
+        requested_by_name=requested_by_name,
+        requested_by_email=requested_by_email,
         requested_at=datetime.now(tz=timezone.utc),
         approved_by_user_id=None,
         approved_at=None,

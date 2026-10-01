@@ -53,6 +53,21 @@ async def get_for_company(device_id: int, company_id: int) -> dict[str, Any] | N
     )
 
 
+async def get_many_for_company(device_ids: list[int], company_id: int) -> list[dict[str, Any]]:
+    """Return only selected devices owned by the active company."""
+    if not device_ids:
+        return []
+    normalized = [int(device_id) for device_id in device_ids]
+    placeholders = ",".join("%s" for _ in normalized)
+    return list(await db.fetch_all(
+        """SELECT nd.*, a.name AS matched_asset_name
+           FROM network_devices nd
+           LEFT JOIN assets a ON a.id=nd.matched_asset_id
+           WHERE nd.company_id=%s AND nd.id IN (""" + placeholders + ")",
+        (company_id, *normalized),
+    ) or [])
+
+
 async def list_device_types() -> list[dict[str, Any]]:
     return list(
         await db.fetch_all(
@@ -185,8 +200,9 @@ async def bulk_update_devices(
 
     normalized_device_ids = [int(device_id) for device_id in device_ids]
     placeholders = ",".join("%s" for _ in normalized_device_ids)
+    # Assignments come from fixed local branches and the id list is normalised to integers; values remain bound.
     await db.execute(
-        f"UPDATE network_devices SET {', '.join(assignments)} "
+        f"UPDATE network_devices SET {', '.join(assignments)} "  # nosec B608
         f"WHERE company_id=%s AND id IN ({placeholders})",
         tuple(values + [company_id, *normalized_device_ids]),
     )
@@ -224,8 +240,9 @@ async def purge_out_of_scope(company_id: int) -> int:
 
     if purge_ids:
         placeholders = ",".join("%s" for _ in purge_ids)
+        # The IN placeholders are derived only from discovered integer device ids; values remain bound.
         await db.execute(
-            f"DELETE FROM network_devices WHERE company_id=%s AND id IN ({placeholders})",
+            f"DELETE FROM network_devices WHERE company_id=%s AND id IN ({placeholders})",  # nosec B608
             (company_id, *purge_ids),
         )
     return len(purge_ids)
@@ -336,7 +353,7 @@ async def upsert_scan(
         # include the WAN address so identical private IPs on different networks
         # do not overwrite each other.
         existing = await db.fetch_one(
-            "SELECT id FROM network_devices WHERE company_id=%s AND "
+            "SELECT id FROM network_devices WHERE company_id=%s AND "  # nosec B608
             + (
                 "mac_address=%s"
                 if mac

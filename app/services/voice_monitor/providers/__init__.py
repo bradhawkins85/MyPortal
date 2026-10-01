@@ -40,8 +40,17 @@ class VoiceMonitorProvider(Protocol):
     environment. Credentials and raw callback bodies must never be returned.
     """
 
-    async def originate(self, destination: str, *, idempotency_key: str) -> OriginatedCall: ...
-    def map_callback(self, payload: Mapping[str, object]) -> CallState: ...
-    async def status(self, call_id: str) -> CallState: ...
-    async def hangup(self, call_id: str) -> None: ...
-    async def retrieve_media(self, call_id: str) -> MediaArtifact | None: ...
+    async def originate(self, destination: str, *, idempotency_key: str) -> OriginatedCall:
+        pass
+
+    def map_callback(self, payload: Mapping[str, object]) -> CallState:
+        pass
+
+    async def status(self, call_id: str) -> CallState:
+        pass
+
+    async def hangup(self, call_id: str) -> None:
+        pass
+
+    async def retrieve_media(self, call_id: str) -> MediaArtifact | None:
+        pass

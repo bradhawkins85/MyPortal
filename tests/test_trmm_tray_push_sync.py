@@ -93,12 +93,58 @@ def test_trmm_sync_endpoint_links_enrolled_device(monkeypatch):
         monkeypatch.setattr(tray_routes.asset_importer, "sync_tactical_agent", sync)
 
         response = await tray_routes.sync_trmm_agent(
-            TrayTRMMSyncRequest(agent_id=" agent-1 ", tray_agent_id=" tray-1 "),
+            TrayTRMMSyncRequest(
+                agent_id=" agent-1 ",
+                tray_agent_id=" tray-1 ",
+                create_asset_if_missing=True,
+            ),
             {"id": 3},
         )
 
         assert response.status == "linked"
         assert response.asset_id == 42
-        sync.assert_awaited_once_with(7, agent_id="agent-1", tray_device_uid="tray-1")
+        sync.assert_awaited_once_with(
+            7,
+            agent_id="agent-1",
+            tray_device_uid="tray-1",
+            create_asset_if_missing=True,
+        )
+
+    asyncio.run(run())
+
+
+def test_sync_tactical_agent_can_require_an_existing_asset(monkeypatch):
+    async def run():
+        monkeypatch.setattr(
+            asset_importer.company_repo,
+            "get_company_by_id",
+            AsyncMock(return_value={"id": 7, "tacticalrmm_client_id": "client-7"}),
+        )
+        monkeypatch.setattr(
+            asset_importer.tray_repo,
+            "get_device_by_uid",
+            AsyncMock(return_value={"id": 9, "company_id": 7}),
+        )
+        monkeypatch.setattr(
+            asset_importer.assets_repo,
+            "get_asset_by_tactical_id",
+            AsyncMock(return_value=None),
+        )
+        fetch_agent = AsyncMock()
+        monkeypatch.setattr(tacticalrmm, "fetch_agent", fetch_agent)
+
+        try:
+            await asset_importer.sync_tactical_agent(
+                7,
+                agent_id="agent-1",
+                tray_device_uid="tray-1",
+                create_asset_if_missing=False,
+            )
+        except ValueError as exc:
+            assert str(exc) == "Tactical RMM asset has not been imported into MyPortal"
+        else:
+            raise AssertionError("Expected a missing asset to be rejected")
+
+        fetch_agent.assert_not_awaited()
 
     asyncio.run(run())

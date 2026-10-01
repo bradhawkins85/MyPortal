@@ -1,7 +1,31 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}Compliance Checks{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Compliance Checks</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="text-filter">Search checks</label>
+      <input type="search" id="text-filter" class="form-input page-header-toolbar__search" placeholder="Search checks" />
+      <label class="visually-hidden" for="category-filter">Filter by category</label>
+      <select id="category-filter" class="form-input page-header-toolbar__select">
+        <option value="">All categories</option>
+        {% for cat in categories %}
+        <option value="{{ cat.code }}">{{ cat.name }}</option>
+        {% endfor %}
+      </select>
+      <label class="visually-hidden" for="status-filter">Filter by status</label>
+      <select id="status-filter" class="form-input page-header-toolbar__select">
+        <option value="">All statuses</option>
+        <option value="not_started">Not started</option>
+        <option value="in_progress">In progress</option>
+        <option value="compliant">Compliant</option>
+        <option value="non_compliant">Non-compliant</option>
+        <option value="not_applicable">Not applicable</option>
+      </select>
+    </div>
+  </div>
+{% endblock %}
 {% block title %}Compliance Checks{% endblock %}
 
 {% block header_actions %}
@@ -47,31 +71,6 @@
 
     {# Assignments table #}
     <div class="card card--panel">
-      <header class="card__header">
-        <div class="card__controls">
-          <select id="category-filter" class="form-input form-input--sm" aria-label="Filter by category">
-            <option value="">All categories</option>
-            {% for cat in categories %}
-            <option value="{{ cat.code }}">{{ cat.name }}</option>
-            {% endfor %}
-          </select>
-          <select id="status-filter" class="form-input form-input--sm" aria-label="Filter by status">
-            <option value="">All statuses</option>
-            <option value="not_started">Not started</option>
-            <option value="in_progress">In progress</option>
-            <option value="compliant">Compliant</option>
-            <option value="non_compliant">Non-compliant</option>
-            <option value="not_applicable">Not applicable</option>
-          </select>
-          <input
-            type="search"
-            id="text-filter"
-            class="form-input form-input--sm"
-            placeholder="Search checks…"
-            aria-label="Search checks"
-          />
-        </div>
-      </header>
       <div class="table-wrapper">
         <table class="table compliance-checks-table" id="checks-table">
           <thead>

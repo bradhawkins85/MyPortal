@@ -106,3 +106,43 @@ def test_calculate_next_run_returns_none_for_invalid_cron():
         {"cron": "not a cron"},
         reference=datetime(2026, 7, 7, tzinfo=timezone.utc),
     ) is None
+
+
+def test_five_fields_and_explicit_wildcard_year_are_equivalent():
+    reference = datetime(2026, 12, 31, 10, tzinfo=timezone.utc)
+    five_fields = calculate_next_run({"cron": "0 9 1 1 *"}, reference=reference)
+    six_fields = calculate_next_run({"cron": "0 9 1 1 * *"}, reference=reference)
+
+    assert five_fields == six_fields == datetime(2027, 1, 1, 9, tzinfo=timezone.utc)
+
+
+def test_specific_year_runs_once_then_has_no_future_occurrence():
+    expression = {"cron": "0 9 1 1 * 2027"}
+    assert calculate_next_run(
+        expression, reference=datetime(2026, 1, 1, tzinfo=timezone.utc)
+    ) == datetime(2027, 1, 1, 9, tzinfo=timezone.utc)
+    assert calculate_next_run(
+        expression, reference=datetime(2027, 1, 1, 9, tzinfo=timezone.utc)
+    ) is None
+
+
+def test_year_range_and_list_skip_excluded_years():
+    ranged = {"cron": "0 9 1 1 * 2027-2029"}
+    combined = {"cron": "0 9 1 1 * 2027,2029-2031"}
+
+    assert calculate_next_run(
+        ranged, reference=datetime(2027, 1, 2, tzinfo=timezone.utc)
+    ) == datetime(2028, 1, 1, 9, tzinfo=timezone.utc)
+    assert calculate_next_run(
+        combined, reference=datetime(2027, 1, 2, tzinfo=timezone.utc)
+    ) == datetime(2029, 1, 1, 9, tzinfo=timezone.utc)
+
+
+def test_last_day_in_leap_year_includes_february_29():
+    events = build_calendar_events(
+        [{"id": 8, "name": "Month end", "cron": "0 9 L * * 2028", "active": True}],
+        start=datetime(2028, 2, 1, tzinfo=timezone.utc),
+        end=datetime(2028, 3, 1, tzinfo=timezone.utc),
+    )
+
+    assert [event["start"] for event in events] == ["2028-02-29T09:00:00+00:00"]

@@ -22,6 +22,7 @@ from typing import Any, Iterable, Mapping
 
 from loguru import logger
 
+from app.core.config import get_settings
 from app.core.database import db
 
 
@@ -62,6 +63,17 @@ def _normalise_role(value: Any) -> str:
         return "to"
     text = str(value).strip().lower()
     return text if text in _VALID_ROLES else "to"
+
+
+def is_outbound_audit_recipient(value: Any) -> bool:
+    """Return whether *value* is the environment-configured audit BCC.
+
+    Audit mailbox activity is operational oversight, not recipient engagement,
+    and must never contribute to the status shown on a ticket reply.
+    """
+    email = _normalise_email(value)
+    audit_email = _normalise_email(get_settings().outbound_audit_bcc)
+    return bool(email and audit_email and email == audit_email)
 
 
 async def record_recipients(
@@ -109,7 +121,7 @@ async def record_recipients(
             return out
         for raw in addresses:
             email = _normalise_email(raw)
-            if not email:
+            if not email or is_outbound_audit_recipient(email):
                 continue
             key = (email, role)
             if key in seen:
@@ -167,8 +179,9 @@ async def record_recipients(
                 set_clauses = ", ".join(f"{col} = :{col}" for col in updates)
                 params = {**updates, "id": existing["id"]}
                 try:
-                    await db.execute(
-                        f"UPDATE ticket_reply_email_recipients SET {set_clauses} WHERE id = :id",
+                    # Updated columns come only from the fixed backfill keys above; values remain bound.
+                    await db.execute(  # nosec B608
+                        f"UPDATE ticket_reply_email_recipients SET {set_clauses} WHERE id = :id",  # nosec B608
                         params,
                     )
                 except Exception as exc:  # pragma: no cover - defensive
@@ -231,6 +244,7 @@ async def get_recipients_for_reply(reply_id: int) -> list[dict[str, Any]]:
             """
             SELECT id, ticket_reply_id, recipient_email, recipient_role, recipient_name,
                    tracking_id, smtp2go_message_id, m365_message_id, m365_company_id,
+                   m365_operation, m365_state, m365_read_state,
                    email_sent_at, email_processed_at, email_delivered_at,
                    email_opened_at, email_open_count,
                    email_bounced_at, email_rejected_at, email_spam_at,
@@ -250,13 +264,29 @@ async def get_recipients_for_reply(reply_id: int) -> list[dict[str, Any]]:
         )
         return []
 
-    return [dict(row) for row in rows]
+    return [dict(row) for row in rows if not is_outbound_audit_recipient(row.get("recipient_email"))]
 
 
-async def record_m365_delivery(
-    *, reply_id: int, recipient_email: str, company_id: int, message_id: str
+async def get_m365_terminal_operation(*, reply_id: int, recipient_email: str) -> dict[str, Any] | None:
+    """Return a completed operation so a caller retry cannot duplicate it."""
+    row = await db.fetch_one(
+        """SELECT m365_operation, m365_state, m365_message_id
+             FROM ticket_reply_email_recipients
+            WHERE ticket_reply_id = :reply_id AND recipient_email = :email
+              AND m365_state IN ('created', 'submitted', 'unknown') LIMIT 1""",
+        {"reply_id": int(reply_id), "email": _normalise_email(recipient_email)},
+    )
+    if not row:
+        return None
+    return {"operation": row["m365_operation"], "state": row["m365_state"],
+            "message_id": row["m365_message_id"]}
+
+
+async def record_m365_operation(
+    *, reply_id: int, recipient_email: str, company_id: int,
+    message_id: str | None, operation: str, state: str,
 ) -> None:
-    """Record a successful direct Inbox deposit for later read-status checks."""
+    """Record what Graph verified; created/submitted are not delivered."""
     now = datetime.now(timezone.utc)
     await record_recipients(
         reply_id=reply_id, tracking_id=None, smtp2go_message_id=None,
@@ -265,29 +295,34 @@ async def record_m365_delivery(
     await db.execute(
         """UPDATE ticket_reply_email_recipients
               SET m365_message_id = :message_id, m365_company_id = :company_id,
-                  email_delivered_at = COALESCE(email_delivered_at, :now),
-                  last_event_at = :now, last_event_type = 'delivered', updated_at = :now
+                  m365_operation = :operation, m365_state = :state,
+                  email_sent_at = CASE WHEN :state = 'submitted' THEN COALESCE(email_sent_at, :now) ELSE NULL END,
+                  last_event_at = :now, last_event_type = :state, updated_at = :now
             WHERE ticket_reply_id = :reply_id AND recipient_email = :email""",
-        {"message_id": message_id, "company_id": company_id, "now": now,
+        {"message_id": message_id, "company_id": company_id, "operation": operation,
+         "state": state, "now": now,
          "reply_id": int(reply_id), "email": _normalise_email(recipient_email)},
     )
 
 
+async def record_m365_delivery(*, reply_id: int, recipient_email: str,
+                               company_id: int, message_id: str) -> None:
+    """Compatibility wrapper: historical 'delivery' was an Inbox item create."""
+    await record_m365_operation(reply_id=reply_id, recipient_email=recipient_email,
+                                company_id=company_id, message_id=message_id,
+                                operation="inbox_item", state="created")
+
+
 async def refresh_m365_read_status(reply_id: int) -> None:
     """Refresh unread direct-delivery rows from Graph on demand."""
-    module_row = await db.fetch_one(
-        """SELECT enabled, settings
-             FROM modules
-            WHERE slug = :slug
-            LIMIT 1""",
-        {"slug": "m365-direct-delivery"},
-    )
-    if not module_row:
+    from app.repositories import integration_modules as modules_repo
+
+    module = await modules_repo.get_module("m365-direct-delivery")
+    if not module or not module.get("enabled"):
         return
-    module_enabled = bool(module_row["enabled"])
-    module_settings = module_row["settings"] or {}
-    if not module_enabled:
-        return
+    module_settings = module.get("settings")
+    if not isinstance(module_settings, dict):
+        module_settings = {}
     if not module_settings.get("track_read_status", True):
         return
     rows = await db.fetch_all(
@@ -309,11 +344,27 @@ async def refresh_m365_read_status(reply_id: int) -> None:
                 await db.execute(
                     """UPDATE ticket_reply_email_recipients
                           SET email_opened_at = :now, email_open_count = 1,
+                              m365_read_state = 'read',
                               last_event_at = :now, last_event_type = 'open', updated_at = :now
                         WHERE id = :id AND email_opened_at IS NULL""",
                     {"now": now, "id": row["id"]},
                 )
-        except Exception as exc:  # a deleted message must not break the status popup
+            else:
+                await db.execute(
+                    """UPDATE ticket_reply_email_recipients
+                          SET m365_read_state = 'unread', updated_at = :now
+                        WHERE id = :id AND email_opened_at IS NULL""",
+                    {"now": datetime.now(timezone.utc), "id": row["id"]},
+                )
+        except Exception as exc:  # moved/deleted/unavailable means unknown, not unread
+            now = datetime.now(timezone.utc)
+            await db.execute(
+                """UPDATE ticket_reply_email_recipients
+                      SET m365_read_state = 'unknown', last_event_at = :now,
+                          last_event_type = 'read_unknown', updated_at = :now
+                    WHERE id = :id AND email_opened_at IS NULL""",
+                {"now": now, "id": row["id"]},
+            )
             logger.debug("Unable to refresh M365 message read status", recipient_id=row["id"], error=str(exc))
 
 
@@ -338,16 +389,22 @@ async def get_recipient_count_map(reply_ids: Iterable[int]) -> dict[int, int]:
     # generated locally (no caller input flows into the query string), so
     # this is safe from SQL injection.
     placeholders = []
-    params: dict[str, int] = {}
+    params: dict[str, Any] = {}
     for index, reply_id in enumerate(unique_ids):
         key = f"rid_{index}"
         placeholders.append(f":{key}")
         params[key] = reply_id
+    audit_email = _normalise_email(get_settings().outbound_audit_bcc)
+    audit_filter = ""
+    if audit_email:
+        audit_filter = "AND LOWER(recipient_email) <> :audit_email "
+        params["audit_email"] = audit_email
     query = (
-        "SELECT ticket_reply_id, COUNT(*) AS recipient_count "
+        "SELECT ticket_reply_id, COUNT(*) AS recipient_count "  # nosec B608
         "FROM ticket_reply_email_recipients "
         f"WHERE ticket_reply_id IN ({', '.join(placeholders)}) "
-        "GROUP BY ticket_reply_id"
+        + audit_filter
+        + "GROUP BY ticket_reply_id"
     )
     try:
         rows = await db.fetch_all(query, params)
@@ -424,7 +481,7 @@ async def update_recipient_event(
     the recipient address and no fallback ``ticket_reply_id``).
     """
     normalised_email = _normalise_email(recipient_email)
-    if not normalised_email:
+    if not normalised_email or is_outbound_audit_recipient(normalised_email):
         # Without a recipient address we cannot meaningfully update a single
         # row; skip rather than mutating every recipient on the message.
         return None
@@ -518,7 +575,7 @@ async def update_recipient_event(
         set_clauses.append("last_event_detail = :detail")
         params["detail"] = str(detail)[:65000]
 
-    sql = f"UPDATE ticket_reply_email_recipients SET {', '.join(set_clauses)} WHERE id = :id"
+    sql = f"UPDATE ticket_reply_email_recipients SET {', '.join(set_clauses)} WHERE id = :id"  # nosec B608
     try:
         await db.execute(sql, params)
     except Exception as exc:  # pragma: no cover - defensive
@@ -551,6 +608,8 @@ def compute_status(row: Mapping[str, Any]) -> str:
         return "delivered"
     if row.get("email_processed_at"):
         return "processed"
+    if row.get("m365_state") in {"created", "submitted", "failed", "unknown"}:
+        return str(row["m365_state"])
     if row.get("email_sent_at"):
         return "sent"
     return "pending"

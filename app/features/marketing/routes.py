@@ -10,15 +10,20 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.core.logging import log_error
+from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import essential8 as essential8_repo
 from app.repositories import marketing as marketing_repo
+from app.repositories import smb1001 as smb1001_repo
+from app.repositories import user_permissions as user_permissions_repo
 from app.security.flash import flash_redirect
+from app.services import audit as audit_service
 from app.services import tickets as tickets_service
 
 router = APIRouter(tags=["Marketing"])
 
 _MARKETING_PERMISSION = "marketing.access"
+_SWITCH_ALL_PERMISSION = "company.switch_all"
 _MARKETING_TAG = "marketing"
 _MAIN_MODULE = None
 
@@ -62,6 +67,64 @@ async def _require_marketing_access(
     return user, None
 
 
+async def _marketing_company_ids(user: Mapping[str, Any]) -> set[int] | None:
+    """Return the companies whose contacts the user may use for marketing.
+
+    ``None`` means every company (Super Admins). Everyone else is limited to
+    the companies where an active membership's role, or a direct grant for
+    that company, includes ``marketing.access``. A technician role that also
+    carries ``company.switch_all`` extends that to every active company.
+    """
+
+    if bool(user.get("is_super_admin")):
+        return None
+    from app.services.role_switching import effective_role_has_permission
+
+    simulated = effective_role_has_permission(_MARKETING_PERMISSION)
+    if simulated is not None:
+        membership = user.get("simulated_membership") or {}
+        try:
+            company_id = int(membership.get("company_id") or 0)
+        except (TypeError, ValueError):
+            company_id = 0
+        return {company_id} if simulated and company_id > 0 else set()
+    try:
+        user_id = int(user.get("id"))
+    except (TypeError, ValueError):
+        return set()
+
+    allowed: set[int] = set()
+    for membership in await membership_repo.list_memberships_for_user(user_id, status="active"):
+        try:
+            company_id = int(membership.get("company_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if company_id <= 0:
+            continue
+        role_permissions = set(membership.get("legacy_permissions") or [])
+        if _MARKETING_PERMISSION in role_permissions:
+            if _SWITCH_ALL_PERMISSION in role_permissions:
+                return {int(company["id"]) for company in await company_repo.list_companies()}
+            allowed.add(company_id)
+        elif _MARKETING_PERMISSION in await user_permissions_repo.list_user_permissions(user_id, company_id):
+            allowed.add(company_id)
+    return allowed
+
+
+async def _require_marketing_scope(
+    request: Request,
+) -> tuple[dict[str, Any] | None, set[int] | None, RedirectResponse | None]:
+    """Like :func:`_require_marketing_access`, plus the user's marketing companies."""
+
+    user, redirect = await _require_marketing_access(request)
+    if redirect or not user:
+        return None, None, redirect
+    company_ids = await _marketing_company_ids(user)
+    if company_ids is not None and not company_ids:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Marketing access required")
+    return user, company_ids, None
+
+
 def _coerce_slug(raw_slug: str) -> str:
     normalised = marketing_repo.slugify(raw_slug)
     if not normalised:
@@ -94,6 +157,8 @@ async def _build_essential8_help_mapping_controls() -> list[dict[str, Any]]:
         row["selected_marketing_page_id"] = (
             mapping["marketing_page_id"] if mapping else None
         )
+        row["recommendation_name"] = mapping.get("recommendation_name", "") if mapping else ""
+        row["external_url"] = mapping.get("external_url", "") if mapping else ""
         requirements_by_control.setdefault(requirement["control_id"], []).append(row)
     return [
         {
@@ -102,6 +167,21 @@ async def _build_essential8_help_mapping_controls() -> list[dict[str, Any]]:
         }
         for control in controls
     ]
+
+
+async def _build_smb1001_help_mapping_tiers() -> list[dict[str, Any]]:
+    tiers = await smb1001_repo.list_tiers()
+    controls = await smb1001_repo.list_controls()
+    links = await smb1001_repo.list_help_links()
+    controls_by_tier: dict[int, list[dict[str, Any]]] = {}
+    for control in controls:
+        row = dict(control)
+        link = links.get(int(control["id"])) or {}
+        row["selected_marketing_page_id"] = link.get("marketing_page_id")
+        row["recommendation_name"] = link.get("recommendation_name", "")
+        row["external_url"] = link.get("external_url", "")
+        controls_by_tier.setdefault(int(control["tier_level"]), []).append(row)
+    return [{**tier, "controls": controls_by_tier.get(int(tier["tier_level"]), [])} for tier in tiers]
 
 
 @router.get("/marketing/{slug}", response_class=HTMLResponse)
@@ -249,6 +329,25 @@ async def admin_marketing_essential8_help_links(request: Request):
     )
 
 
+@router.get("/admin/marketing/smb1001-help-links", response_class=HTMLResponse)
+async def admin_marketing_smb1001_help_links(request: Request):
+    current_user, redirect = await _require_marketing_access(request)
+    if redirect:
+        return redirect
+    if not bool(current_user.get("is_super_admin")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+    return await _main()._render_template(
+        "admin/marketing_smb1001_help_links.html",
+        request,
+        current_user,
+        extra={
+            "title": "SMB1001 help links",
+            "marketing_pages": await marketing_repo.list_pages(),
+            "smb1001_help_tiers": await _build_smb1001_help_mapping_tiers(),
+        },
+    )
+
+
 @router.get("/admin/marketing/pages/{page_id}/edit", response_class=HTMLResponse)
 async def admin_marketing_edit_page(page_id: int, request: Request):
     current_user, redirect = await _require_marketing_access(request)
@@ -351,31 +450,83 @@ async def admin_marketing_update_essential8_help_links(request: Request):
     pages = await marketing_repo.list_pages()
     requirements = await essential8_repo.list_essential8_requirements()
     valid_page_ids = {page["id"] for page in pages}
-    mappings: dict[int, int | None] = {}
+    mappings: dict[int, dict[str, Any]] = {}
     form = await request.form()
     for requirement in requirements:
         field_name = f"requirement_{requirement['id']}"
         raw_value = str(form.get(field_name) or "").strip()
-        if not raw_value:
-            mappings[requirement["id"]] = None
-            continue
-        try:
-            page_id = int(raw_value)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid marketing page selection for requirement {requirement['id']}",
-            ) from exc
-        if page_id not in valid_page_ids:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unknown marketing page selection for requirement {requirement['id']}",
-            )
-        mappings[requirement["id"]] = page_id
-    await essential8_repo.replace_requirement_marketing_page_links(mappings)
+        page_id = None
+        if raw_value:
+            try:
+                page_id = int(raw_value)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Invalid marketing page selection") from exc
+            if page_id not in valid_page_ids:
+                raise HTTPException(status_code=400, detail="Unknown marketing page selection")
+        name = str(form.get(f"recommendation_name_{requirement['id']}") or "").strip()[:255]
+        external_url = str(form.get(f"external_url_{requirement['id']}") or "").strip()
+        if external_url and not external_url.lower().startswith(("https://", "http://")):
+            raise HTTPException(status_code=400, detail="External recommendation links must use HTTP or HTTPS")
+        if len(external_url) > 2048:
+            raise HTTPException(status_code=400, detail="External recommendation link is too long")
+        mappings[requirement["id"]] = {
+            "marketing_page_id": page_id,
+            "recommendation_name": name,
+            "external_url": external_url,
+        }
+    await essential8_repo.replace_requirement_recommendations(mappings)
     return flash_redirect(
         "/admin/marketing/essential8-help-links",
         "Essential 8 help links updated.",
+        "success",
+    )
+
+
+@router.post("/admin/marketing/smb1001-help-links", response_class=HTMLResponse)
+async def admin_marketing_update_smb1001_help_links(request: Request):
+    current_user, redirect = await _require_marketing_access(request)
+    if redirect:
+        return redirect
+    if not bool(current_user.get("is_super_admin")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+
+    valid_page_ids = {page["id"] for page in await marketing_repo.list_pages()}
+    controls = await smb1001_repo.list_controls()
+    form = await request.form()
+    links: dict[int, dict[str, Any]] = {}
+    for control in controls:
+        control_id = int(control["id"])
+        raw_page = str(form.get(f"control_{control_id}") or "").strip()
+        page_id = None
+        if raw_page:
+            try:
+                page_id = int(raw_page)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Invalid marketing page selection") from exc
+            if page_id not in valid_page_ids:
+                raise HTTPException(status_code=400, detail="Unknown marketing page selection")
+        name = str(form.get(f"recommendation_name_{control_id}") or "").strip()[:255]
+        external_url = str(form.get(f"external_url_{control_id}") or "").strip()
+        if external_url and not external_url.lower().startswith(("https://", "http://")):
+            raise HTTPException(status_code=400, detail="External recommendation links must use HTTP or HTTPS")
+        if len(external_url) > 2048:
+            raise HTTPException(status_code=400, detail="External recommendation link is too long")
+        links[control_id] = {
+            "marketing_page_id": page_id,
+            "recommendation_name": name,
+            "external_url": external_url,
+        }
+    await smb1001_repo.replace_help_links(links)
+    await audit_service.record(
+        action="smb1001.help_links.update",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="smb1001_help_links",
+        metadata={"configured_controls": sum(1 for link in links.values() if any(link.values()))},
+    )
+    return flash_redirect(
+        "/admin/marketing/smb1001-help-links",
+        "SMB1001 help links updated.",
         "success",
     )
 

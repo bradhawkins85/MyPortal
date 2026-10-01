@@ -12,6 +12,7 @@ from app.services import company_id_lookup, syncro, tacticalrmm
 
 
 TRMM_TRAY_AGENT_ID_FIELD = "TrayAgentID"
+TRMM_ARCHIVE_ASSET_FIELD = "Archive Asset"
 
 
 def _clean_string(value: Any, *, max_length: int | None = None) -> str | None:
@@ -85,6 +86,9 @@ async def import_assets_for_company(
             warranty_status=warranty_status,
             warranty_end_date=warranty_end,
             syncro_asset_id=syncro_asset_id,
+            source="syncro",
+            source_external_id=syncro_asset_id,
+            source_fields=list(details.keys()),
         )
         processed += 1
 
@@ -134,6 +138,11 @@ async def _sync_tactical_asset_custom_fields(
         field_name: str = field_def["name"]
         field_type: str = field_def["field_type"]
         field_def_id: int = field_def["id"]
+
+        # This field reflects whether the agent exists in the complete TRMM
+        # response and is reconciled only after every agent has been imported.
+        if field_name.strip().casefold() == TRMM_ARCHIVE_ASSET_FIELD.casefold():
+            continue
 
         trmm_field = trmm_fields.get(field_name) or trmm_fields_lower.get(
             field_name.lower()
@@ -248,7 +257,11 @@ async def _sync_tactical_tray_device_link(
 
 
 async def sync_tactical_agent(
-    company_id: int, *, agent_id: str, tray_device_uid: str
+    company_id: int,
+    *,
+    agent_id: str,
+    tray_device_uid: str,
+    create_asset_if_missing: bool = True,
 ) -> int:
     """Import and link one TRMM agent immediately after tray installation."""
 
@@ -268,6 +281,9 @@ async def sync_tactical_agent(
         existing_asset_id = int(existing_asset["id"])
         await tray_repo.link_device_to_asset(int(device["id"]), existing_asset_id)
         return existing_asset_id
+
+    if not create_asset_if_missing:
+        raise ValueError("Tactical RMM asset has not been imported into MyPortal")
 
     if not _clean_string(company.get("tacticalrmm_client_id")):
         raise tacticalrmm.TacticalRMMConfigurationError(
@@ -294,6 +310,7 @@ async def sync_tactical_agent(
         ram_gb=details.get("ram_gb"),
         hdd_size=_clean_string(details.get("hdd_size"), max_length=255),
         last_sync=details.get("last_sync"),
+        boot_time=details.get("boot_time"),
         motherboard_manufacturer=_clean_string(details.get("motherboard_manufacturer")),
         form_factor=_clean_string(details.get("form_factor")),
         last_user=_clean_string(details.get("last_user")),
@@ -304,6 +321,9 @@ async def sync_tactical_agent(
         mac_address=_clean_string(details.get("mac_address")),
         tactical_asset_id=agent_id,
         match_name=True,
+        source="tacticalrmm",
+        source_external_id=agent_id,
+        source_fields=list(details.keys()),
     )
     if not asset_id:
         raise tacticalrmm.TacticalRMMAPIError("Unable to create the MyPortal asset")
@@ -344,6 +364,7 @@ async def import_tactical_assets_for_company(
     agents = await tacticalrmm.fetch_agents(client_id)
     processed = 0
     seen: set[tuple[str | None, str | None, str]] = set()
+    active_tactical_ids: set[str] = set()
 
     for agent in agents:
         if not isinstance(agent, Mapping):
@@ -352,6 +373,8 @@ async def import_tactical_assets_for_company(
         name = _clean_string(details.get("name")) or "Asset"
         serial = _clean_string(details.get("serial_number"))
         tactical_id = _clean_string(details.get("tactical_asset_id"))
+        if tactical_id:
+            active_tactical_ids.add(tactical_id)
         dedupe_key = (tactical_id, serial, name.lower())
         if dedupe_key in seen:
             continue
@@ -368,6 +391,7 @@ async def import_tactical_assets_for_company(
             ram_gb=details.get("ram_gb"),
             hdd_size=_clean_string(details.get("hdd_size"), max_length=255),
             last_sync=details.get("last_sync"),
+            boot_time=details.get("boot_time"),
             motherboard_manufacturer=_clean_string(
                 details.get("motherboard_manufacturer")
             ),
@@ -380,6 +404,9 @@ async def import_tactical_assets_for_company(
             mac_address=_clean_string(details.get("mac_address")),
             tactical_asset_id=tactical_id,
             match_name=True,
+            source="tacticalrmm",
+            source_external_id=tactical_id,
+            source_fields=list(details.keys()),
         )
         if asset_id and tactical_id:
             try:
@@ -418,6 +445,15 @@ async def import_tactical_assets_for_company(
                 )
         processed += 1
 
+    try:
+        await _sync_tactical_archive_asset_fields(company_id, active_tactical_ids)
+    except Exception as exc:  # noqa: BLE001 - reconciliation must not discard imported assets
+        log_error(
+            "Failed to reconcile removed Tactical RMM assets",
+            company_id=company_id,
+            error=str(exc),
+        )
+
     log_info(
         "Completed Tactical RMM asset import",
         company_id=company_id,
@@ -426,6 +462,40 @@ async def import_tactical_assets_for_company(
         total=len(agents),
     )
     return processed
+
+
+async def _sync_tactical_archive_asset_fields(
+    company_id: int, active_tactical_ids: set[str]
+) -> None:
+    """Flag imported assets that are no longer returned by Tactical RMM."""
+
+    field_defs = await acf_repo.list_field_definitions()
+    archive_field = next(
+        (
+            field
+            for field in field_defs
+            if str(field.get("name") or "").strip().casefold()
+            == TRMM_ARCHIVE_ASSET_FIELD.casefold()
+            and field.get("field_type") == "checkbox"
+        ),
+        None,
+    )
+    if not archive_field:
+        log_error(
+            "Unable to reconcile removed Tactical RMM assets: Archive Asset field is missing",
+            company_id=company_id,
+        )
+        return
+
+    for asset in await assets_repo.list_company_assets(company_id):
+        tactical_id = _clean_string(asset.get("tactical_asset_id"))
+        if not tactical_id:
+            continue
+        await acf_repo.set_asset_field_value(
+            asset_id=int(asset["id"]),
+            field_definition_id=int(archive_field["id"]),
+            value_boolean=tactical_id not in active_tactical_ids,
+        )
 
 
 async def import_all_tactical_assets() -> dict[str, Any]:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import suppress
 from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
@@ -15,6 +16,7 @@ from fastapi import File, Form, HTTPException, Query, Request, UploadFile, statu
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.security.flash import flash_redirect
+from app.services.file_storage import delete_stored_file, store_product_image
 from app.services.sanitization import sanitize_rich_text
 
 
@@ -70,6 +72,51 @@ def _validate_voice_monitor_calls_per_day(
             detail="Calls per day must be between 1 and 24",
         )
     return calls_per_day
+
+
+def _parse_optional_measurement(value: Any, label: str) -> Decimal | None:
+    """Parse an optional non-negative weight or dimension from a form value."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = Decimal(value.strip()).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{label} must be a valid number",
+        )
+    if parsed < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{label} must be at least zero",
+        )
+    return parsed
+
+
+def _parse_product_freight_fields(
+    *,
+    item_size: Any,
+    weight: Any,
+    length: Any,
+    width: Any,
+    height: Any,
+) -> dict[str, Any]:
+    from app.services import freight_rules as freight_rules_service
+
+    size_value = item_size.strip().lower() if isinstance(item_size, str) else ""
+    normalised_size = freight_rules_service.normalise_item_size(size_value)
+    if size_value and normalised_size is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid item size selection",
+        )
+    return {
+        "item_size": normalised_size,
+        "weight": _parse_optional_measurement(weight, "Weight"),
+        "length": _parse_optional_measurement(length, "Length"),
+        "width": _parse_optional_measurement(width, "Width"),
+        "height": _parse_optional_measurement(height, "Height"),
+    }
 
 
 def _parse_freight_conditions(form: Any) -> list[dict[str, Any]]:
@@ -214,6 +261,7 @@ def _strip_internal_shop_product_fields(products: Sequence[Mapping[str, Any]]) -
 async def shop_page(
     request: Request,
     category: str | None = Query(None),
+    subscription_type: int | None = Query(None, alias="subscriptionType"),
     show_out_of_stock: bool = Query(False, alias="showOutOfStock"),
     q: str | None = None,
     page: int = Query(1, ge=1),
@@ -222,6 +270,7 @@ async def shop_page(
 ):
     from app.repositories import shop as shop_repo
     from app.repositories import subscriptions as subscriptions_repo
+    from app.repositories import subscription_categories as subscription_categories_repo
     from app.services import shop as shop_service
     from app.services import shop_packages as shop_packages_service
 
@@ -244,6 +293,7 @@ async def shop_page(
     category_param = category.strip() if isinstance(category, str) and category.strip() else None
     show_packages = False
     show_featured = False
+    show_subscriptions = False
     category_id: int | None = None
     if category_param:
         category_key = category_param.lower()
@@ -251,6 +301,8 @@ async def shop_page(
             show_packages = True
         elif category_key == "featured":
             show_featured = True
+        elif category_key == "subscriptions":
+            show_subscriptions = True
         else:
             try:
                 parsed_category = int(category_param)
@@ -258,6 +310,11 @@ async def shop_page(
                 parsed_category = None
             if parsed_category is not None and parsed_category > 0:
                 category_id = parsed_category
+
+    # Subscription products are not stock-controlled, so the physical-stock
+    # override must not be available on the legacy subscriptions view.
+    if show_subscriptions:
+        show_out_of_stock = False
 
     is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
 
@@ -294,7 +351,19 @@ async def shop_page(
                 vip_price = product.get("vip_price")
                 if vip_price is not None:
                     product["price"] = vip_price
-        return [product for product in prepared if _product_has_price(product)]
+        for product in prepared:
+            if product.get("subscription_category_id") is not None:
+                options = shop_service.get_subscription_price_options(product)
+                product["subscription_price_options"] = options
+                product["has_multiple_subscription_prices"] = len(options) > 1
+                if len(options) == 1:
+                    product["price"] = options[0]["price"]
+        return [
+            product for product in prepared
+            if (bool(product.get("subscription_price_options"))
+                if product.get("subscription_category_id") is not None
+                else _product_has_price(product))
+        ]
 
     if show_packages:
         packages = await shop_packages_service.load_company_packages(
@@ -402,6 +471,13 @@ async def shop_page(
 
             products = _prepare_customer_products(await shop_repo.list_products_summary(filters))
 
+            if show_subscriptions:
+                products = [
+                    product for product in products
+                    if product.get("subscription_category_id") is not None
+                    and (subscription_type is None or int(product["subscription_category_id"]) == subscription_type)
+                ]
+
         total_count = len(products)
 
     products = _strip_internal_shop_product_fields(products)
@@ -463,16 +539,30 @@ async def shop_page(
 
         category_cards = _category_card_entries(categories)
 
-    # Get active subscription product IDs for the customer
+    # Include the subscription identifier in the customer-safe product payload
+    # so both the product card and details modal can navigate to management.
     active_subscription_product_ids = await subscriptions_repo.get_active_subscription_product_ids(company_id)
+    active_subscriptions = (
+        await subscriptions_repo.get_active_subscriptions_by_product_id(company_id)
+        if active_subscription_product_ids
+        else {}
+    )
+    for product in products:
+        subscription = active_subscriptions.get(int(product.get("id") or 0))
+        if subscription:
+            product["active_subscription_id"] = subscription["id"]
+    subscription_categories = await subscription_categories_repo.list_categories()
 
     extra = {
         "title": "Shop",
         "categories": categories,
         "products": products,
-        "current_category": "packages" if show_packages else "featured" if show_featured else category_id,
+        "current_category": "packages" if show_packages else "featured" if show_featured else "subscriptions" if show_subscriptions else category_id,
         "show_packages": show_packages,
         "show_featured": show_featured,
+        "show_subscriptions": show_subscriptions,
+        "subscription_type": subscription_type,
+        "subscription_categories": subscription_categories,
         "showing_category_cards": showing_category_cards,
         "category_cards": category_cards,
         "show_out_of_stock": show_out_of_stock,
@@ -518,6 +608,8 @@ async def shop_product_detail_api(request: Request, product_id: int):
 
 
 def _public_shop_product_payload(product: Mapping[str, Any], *, is_vip: bool) -> dict[str, Any]:
+    from app.services import shop as shop_service
+
     def public_related_items(items: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
         public_items: list[dict[str, Any]] = []
         for item in items or []:
@@ -538,7 +630,7 @@ def _public_shop_product_payload(product: Mapping[str, Any], *, is_vip: bool) ->
             )
         return public_items
 
-    sanitized_description = sanitize_rich_text(str(product.get("description") or ""))
+    sanitized_description = sanitize_rich_text(str(product.get("description") or ""), allow_embeds=True)
     payload = {
         "id": product.get("id"),
         "name": product.get("name"),
@@ -556,6 +648,8 @@ def _public_shop_product_payload(product: Mapping[str, Any], *, is_vip: bool) ->
         "stock_sa": product.get("stock_sa"),
         "category_id": product.get("category_id"),
         "category_name": product.get("category_name"),
+        "subscription_category_id": product.get("subscription_category_id"),
+        "subscription_price_options": shop_service.get_subscription_price_options(product),
         "features": product.get("features") or [],
         "cross_sell_products": public_related_items(product.get("cross_sell_products")),
         "cross_sell_product_ids": product.get("cross_sell_product_ids") or [],
@@ -615,8 +709,54 @@ async def admin_shop_product_detail_api(request: Request, product_id: int):
     product = await shop_repo.get_product_by_id(product_id, include_archived=True)
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    await shop_repo.populate_product_inbound_recommendations(product)
 
     return JSONResponse(content=cast(dict[str, Any], _main()._serialise_for_json(product)))
+
+
+async def admin_shop_product_freight_preview_api(
+    request: Request,
+    product_id: int,
+    item_size: str | None = Query(default=None),
+    weight: str | None = Query(default=None),
+    length: str | None = Query(default=None),
+    width: str | None = Query(default=None),
+    height: str | None = Query(default=None),
+    price: str | None = Query(default=None),
+    quantity: int = Query(default=1, ge=1, le=1000),
+):
+    """Estimate freight for one product using unsaved editor values."""
+    from app.repositories import freight_rules as freight_rules_repo
+    from app.repositories import shop as shop_repo
+    from app.services import freight_rules as freight_rules_service
+
+    _current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    product = await shop_repo.get_product_by_id(product_id, include_archived=True)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    overrides = _parse_product_freight_fields(
+        item_size=item_size,
+        weight=weight,
+        length=length,
+        width=width,
+        height=height,
+    )
+    preview_product = {**product, **overrides}
+    if isinstance(price, str) and price.strip():
+        preview_product["price"] = _parse_optional_measurement(price, "Price")
+
+    rules = await freight_rules_repo.list_rules(active_only=True)
+    preview = freight_rules_service.calculate_product_freight_preview(
+        preview_product,
+        rules,
+        quantity=quantity,
+    )
+    preview["active_rule_count"] = len(rules)
+    return JSONResponse(content=cast(dict[str, Any], _main()._serialise_for_json(preview)))
 
 
 async def admin_shop_product_price_history_api(request: Request, product_id: int):
@@ -1243,10 +1383,12 @@ async def admin_shop_page(
     search: str = Query("", alias="search"),
 ):
     from app.repositories import companies as company_repo
+    from app.repositories import license_sku_friendly_names as sku_friendly_repo
     from app.repositories import shop as shop_repo
     from app.repositories import stock_feed as stock_feed_repo
     from app.repositories import subscription_categories as subscription_categories_repo
     from app.services import shop as shop_service
+    from app.services import freight_rules as freight_rules_service
 
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
@@ -1265,13 +1407,15 @@ async def admin_shop_page(
     )
     companies_task = asyncio.create_task(company_repo.list_companies())
     subscription_categories_task = asyncio.create_task(subscription_categories_repo.list_categories())
+    microsoft_sku_mappings_task = asyncio.create_task(sku_friendly_repo.list_mappings())
 
-    categories, filter_categories, products, companies, subscription_categories = await asyncio.gather(
+    categories, filter_categories, products, companies, subscription_categories, microsoft_sku_mappings = await asyncio.gather(
         categories_task,
         filter_categories_task,
         products_task,
         companies_task,
         subscription_categories_task,
+        microsoft_sku_mappings_task,
     )
     total_count = len(products)
 
@@ -1309,7 +1453,9 @@ async def admin_shop_page(
         "show_archived": show_archived,
         "search_term": search_term,
         "subscription_categories": subscription_categories,
+        "microsoft_sku_mappings": microsoft_sku_mappings,
         "total_count": total_count,
+        "freight_item_size_options": freight_rules_service.ITEM_SIZE_OPTIONS,
     }
     return await _main()._render_template("admin/shop.html", request, current_user, extra=extra)
 
@@ -1601,7 +1747,7 @@ async def admin_bulk_dismiss_optional_accessories(request: Request):
         try:
             ids.append(int(raw))
         except (ValueError, TypeError):
-            pass
+            continue
 
     if ids:
         await shop_repo.bulk_dismiss_pending_optional_accessories(ids)
@@ -2046,13 +2192,16 @@ async def admin_create_shop_product(
     name: str = Form(...),
     sku: str = Form(...),
     vendor_sku: str = Form(...),
+    microsoft_sku: str | None = Form(default=None),
     description: str | None = Form(default=None),
+    invoice_description: str | None = Form(default=None),
     product_link: str | None = Form(default=None),
     price: str = Form(...),
     stock: str = Form(...),
     vip_price: str | None = Form(default=None),
     category_id: str | None = Form(default=None),
     image: UploadFile | None = File(default=None),
+    features: str | None = Form(default=None),
     cross_sell_product_ids: list[int] | None = Form(default=None),
     upsell_product_ids: list[int] | None = Form(default=None),
     subscription_category_id: str | None = Form(default=None),
@@ -2084,7 +2233,28 @@ async def admin_create_shop_product(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vendor SKU cannot be empty")
 
     description_value = description.strip() if description and description.strip() else None
+    invoice_description_value = (
+        invoice_description.strip()
+        if isinstance(invoice_description, str) and invoice_description.strip()
+        else None
+    )
     product_link_value = product_link.strip() if product_link and product_link.strip() else None
+
+    feature_payload: list[dict[str, Any]] = []
+    if isinstance(features, str) and features:
+        try:
+            raw_features = json.loads(features)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid feature payload") from exc
+        if not isinstance(raw_features, list):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid feature payload")
+        for index, entry in enumerate(raw_features):
+            if not isinstance(entry, Mapping):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid feature payload")
+            name_value = str(entry.get("name") or "").strip()
+            if not name_value:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Feature name cannot be empty")
+            feature_payload.append({"name": name_value, "value": str(entry.get("value") or "").strip(), "position": index})
 
     if subscription_category_id and (price is None or not str(price).strip()):
         # The subscription-specific prices replace the standard product price.
@@ -2139,13 +2309,15 @@ async def admin_create_shop_product(
     calls_per_day_value = _validate_voice_monitor_calls_per_day(
         subscription_category_name, voice_monitor_calls_per_day
     )
-
-    # Validate commitment type and payment frequency for subscriptions
-    commitment_value, payment_freq_value = _main()._validate_subscription_commitment_and_payment(
-        subscription_category_value,
-        commitment_type,
-        payment_frequency,
+    microsoft_sku_value = (
+        microsoft_sku.strip().upper()
+        if subscription_category_value and microsoft_sku and microsoft_sku.strip()
+        else None
     )
+
+    # Price options define their own commitment and billing frequency.  Keep
+    # legacy selector columns empty for newly edited subscription products.
+    commitment_value, payment_freq_value = None, None
 
     # Parse pricing fields
     price_monthly_comm: Decimal | None = None
@@ -2175,6 +2347,15 @@ async def admin_create_shop_product(
         except (TypeError, InvalidOperation):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Annual commitment with annual payment price must be a valid number")
 
+    if subscription_category_value and not any(
+        option is not None and option > 0
+        for option in (price_monthly_comm, price_annual_monthly, price_annual_annual)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Add at least one subscription pricing option",
+        )
+
     cross_sell_ids = await _validate_recommendation_product_ids(
         cross_sell_product_ids,
         field_label="Cross-sell",
@@ -2188,7 +2369,7 @@ async def admin_create_shop_product(
     stored_path: Path | None = None
     if image is not None:
         if image.filename:
-            image_url, stored_path = await _main().store_product_image(
+            image_url, stored_path = await store_product_image(
                 upload=image,
                 uploads_root=_main()._private_uploads_path,
                 max_size=5 * 1024 * 1024,
@@ -2201,7 +2382,9 @@ async def admin_create_shop_product(
             name=cleaned_name,
             sku=cleaned_sku,
             vendor_sku=cleaned_vendor_sku,
+            microsoft_sku=microsoft_sku_value,
             description=description_value,
+            invoice_description=invoice_description_value,
             product_link=product_link_value,
             price=price_decimal,
             stock=stock_int,
@@ -2218,6 +2401,8 @@ async def admin_create_shop_product(
             price_annual_annual_payment=price_annual_annual,
             voice_monitor_calls_per_day=calls_per_day_value,
         )
+        if feature_payload:
+            await shop_repo.replace_product_features(int(product["id"]), feature_payload)
     except aiomysql.IntegrityError as exc:
         if stored_path:
             stored_path.unlink(missing_ok=True)
@@ -2255,18 +2440,23 @@ async def admin_update_shop_product(
     name: str = Form(...),
     sku: str = Form(...),
     vendor_sku: str = Form(...),
+    microsoft_sku: str | None = Form(default=None),
     description: str | None = Form(default=None),
+    invoice_description: str | None = Form(default=None),
     product_link: str | None = Form(default=None),
     price: str = Form(...),
     stock: str = Form(...),
     vip_price: str | None = Form(default=None),
     category_id: str | None = Form(default=None),
     image: UploadFile | None = File(default=None),
+    remove_image: bool = Form(default=False),
     features: str | None = Form(default=None),
     cross_sell_product_ids: list[int] | None = Form(default=None),
     upsell_product_ids: list[int] | None = Form(default=None),
     cross_sell_sku: str | None = Form(default=None),
     upsell_sku: str | None = Form(default=None),
+    remove_inbound_cross_sell_product_ids: list[int] | None = Form(default=None),
+    remove_inbound_upsell_product_ids: list[int] | None = Form(default=None),
     subscription_category_id: str | None = Form(default=None),
     commitment_type: str | None = Form(default=None),
     payment_frequency: str | None = Form(default=None),
@@ -2278,6 +2468,12 @@ async def admin_update_shop_product(
     scheduled_vip_price: str | None = Form(default=None),
     scheduled_buy_price: str | None = Form(default=None),
     price_change_date: str | None = Form(default=None),
+    freight_fields: str | None = Form(default=None),
+    item_size: str | None = Form(default=None),
+    weight: str | None = Form(default=None),
+    length: str | None = Form(default=None),
+    width: str | None = Form(default=None),
+    height: str | None = Form(default=None),
 ):
     from app.repositories import shop as shop_repo
     from app.repositories import subscription_categories as subscription_categories_repo
@@ -2304,6 +2500,11 @@ async def admin_update_shop_product(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vendor SKU cannot be empty")
 
     description_value = description.strip() if description and description.strip() else None
+    invoice_description_value = (
+        invoice_description.strip()
+        if isinstance(invoice_description, str) and invoice_description.strip()
+        else None
+    )
     product_link_value = product_link.strip() if product_link and product_link.strip() else None
 
     feature_payload: list[dict[str, Any]] | None = None
@@ -2392,13 +2593,15 @@ async def admin_update_shop_product(
     calls_per_day_value = _validate_voice_monitor_calls_per_day(
         subscription_category_name, voice_monitor_calls_per_day
     )
-
-    # Validate commitment type and payment frequency for subscriptions
-    commitment_value, payment_freq_value = _main()._validate_subscription_commitment_and_payment(
-        subscription_category_value,
-        commitment_type,
-        payment_frequency,
+    microsoft_sku_value = (
+        microsoft_sku.strip().upper()
+        if subscription_category_value and microsoft_sku and microsoft_sku.strip()
+        else None
     )
+
+    # Price options define their own commitment and billing frequency.  Keep
+    # legacy selector columns empty for newly edited subscription products.
+    commitment_value, payment_freq_value = None, None
 
     # Parse pricing fields
     price_monthly_comm: Decimal | None = None
@@ -2456,6 +2659,18 @@ async def admin_update_shop_product(
         except (TypeError, InvalidOperation):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Scheduled buy price must be a valid number")
 
+    # Only forms that render the freight section post the marker, so other
+    # callers never clear stock-feed weights and dimensions.
+    freight_payload: dict[str, Any] | None = None
+    if freight_fields == "1":
+        freight_payload = _parse_product_freight_fields(
+            item_size=item_size,
+            weight=weight,
+            length=length,
+            width=width,
+            height=height,
+        )
+
     # Parse price change date
     from datetime import datetime as dt
     price_change_date_value: Any | None = None
@@ -2466,11 +2681,11 @@ async def admin_update_shop_product(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Price change date must be in YYYY-MM-DD format")
 
     previous_image_url = product.get("image_url")
-    image_url = previous_image_url
+    image_url = None if remove_image else previous_image_url
     stored_path: Path | None = None
     if image is not None:
         if image.filename:
-            image_url, stored_path = await _main().store_product_image(
+            image_url, stored_path = await store_product_image(
                 upload=image,
                 uploads_root=_main()._private_uploads_path,
                 max_size=5 * 1024 * 1024,
@@ -2482,6 +2697,15 @@ async def admin_update_shop_product(
     resolved_cross_id = await _resolve_related_product_id_by_sku(cross_sell_sku)
     if resolved_cross_id:
         cross_sell_candidates.append(resolved_cross_id)
+
+    if subscription_category_value and not any(
+        option is not None and option > 0
+        for option in (price_monthly_comm, price_annual_monthly, price_annual_annual)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Add at least one subscription pricing option",
+        )
 
     cross_sell_ids = await _validate_recommendation_product_ids(
         cross_sell_candidates,
@@ -2505,7 +2729,9 @@ async def admin_update_shop_product(
             name=cleaned_name,
             sku=cleaned_sku,
             vendor_sku=cleaned_vendor_sku,
+            microsoft_sku=microsoft_sku_value,
             description=description_value,
+            invoice_description=invoice_description_value,
             product_link=product_link_value,
             price=price_decimal,
             stock=stock_int,
@@ -2525,6 +2751,7 @@ async def admin_update_shop_product(
             scheduled_vip_price=scheduled_vip_price_decimal,
             scheduled_buy_price=scheduled_buy_price_decimal,
             price_change_date=price_change_date_value,
+            freight=freight_payload,
         )
     except aiomysql.IntegrityError as exc:
         if stored_path:
@@ -2568,9 +2795,16 @@ async def admin_update_shop_product(
                 detail="Unable to update product features",
             ) from exc
 
-    if stored_path and previous_image_url and previous_image_url != updated.get("image_url"):
+    await shop_repo.remove_inbound_product_recommendations(
+        product_id,
+        cross_sell_source_ids=_normalise_related_product_inputs(remove_inbound_cross_sell_product_ids),
+        upsell_source_ids=_normalise_related_product_inputs(remove_inbound_upsell_product_ids),
+    )
+    updated = await shop_repo.get_product_by_id(product_id, include_archived=True)
+
+    if previous_image_url and previous_image_url != updated.get("image_url"):
         try:
-            _main().delete_stored_file(previous_image_url, _main()._private_uploads_path)
+            delete_stored_file(previous_image_url, _main()._private_uploads_path)
         except HTTPException as exc:
             _main().log_error(
                 "Failed to remove replaced product image",
@@ -2599,7 +2833,7 @@ async def admin_update_shop_product(
         sensitive_extra_keys=("buy_price",),
     )
     redirect_params: dict[str, str] = {}
-    try:
+    with suppress(KeyError):
         # request.query_params accesses scope["query_string"] which may be absent
         # in synthetic test requests; guard with KeyError to stay safe in production
         qp = request.query_params
@@ -2611,8 +2845,6 @@ async def admin_update_shop_product(
         page_size_str = qp.get("pageSize", "")
         if page_size_str.isdigit() and int(page_size_str) > 0:
             redirect_params["pageSize"] = page_size_str
-    except KeyError:
-        pass
     redirect_url = f"/admin/shop?{urlencode(redirect_params)}" if redirect_params else "/admin/shop"
     return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
@@ -2628,14 +2860,13 @@ async def admin_bulk_refresh_shop_product_descriptions(request: Request):
 
     form = await request.form()
     include_archived = _form_bool(form, "include_archived")
-    products = await shop_repo.list_products_summary(
-        shop_repo.ProductFilters(include_archived=include_archived, sort="name_asc")
+    product_ids = await shop_repo.list_product_description_refresh_ids(
+        include_archived=include_archived
     )
 
     refreshed_count = 0
     failed_count = 0
-    for product in products:
-        product_id = int(product["id"])
+    for product_id in product_ids:
         try:
             result = await product_descriptions.improve_product_description(product_id)
         except Exception as exc:  # pragma: no cover - defensive per-item isolation
@@ -2657,14 +2888,14 @@ async def admin_bulk_refresh_shop_product_descriptions(request: Request):
         entity_type="shop.product",
         metadata={
             "include_archived": include_archived,
-            "requested_count": len(products),
+            "requested_count": len(product_ids),
             "refreshed_count": refreshed_count,
             "failed_count": failed_count,
         },
     )
     _main().log_info(
         "Bulk shop product descriptions refreshed",
-        requested_count=len(products),
+        requested_count=len(product_ids),
         refreshed_count=refreshed_count,
         failed_count=failed_count,
         include_archived=include_archived,
@@ -2903,7 +3134,7 @@ async def admin_delete_shop_product(request: Request, product_id: int):
     image_url = product.get("image_url")
     if image_url:
         try:
-            _main().delete_stored_file(image_url, _main()._private_uploads_path)
+            delete_stored_file(image_url, _main()._private_uploads_path)
         except HTTPException as exc:
             _main().log_error(
                 "Failed to remove deleted product image",

@@ -1,0 +1,30 @@
+# Keep the build context to what the running application needs.
+.git
+.github
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.env
+.env.*
+!.env.example
+venv
+.venv
+test_venv
+test_env
+tests
+evals
+# docs/wiki is served in-app by the Help feature pack.
+docs/*
+!docs/wiki
+wiki
+tray
+var
+private_uploads
+app/static/uploads
+myportal.db
+myportal.egg-info
+build
+dist
+node_modules
+Dockerfile
+.dockerignore

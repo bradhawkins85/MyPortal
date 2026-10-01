@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_overflow %}
+
+{% set target_label = update.target_revision if update.mode == 'docker' else (update.target_revision or '')[:12] %}
+
+{% block header_title %}
+  <div class="page-header-bar page-header-bar--record">
+    <span class="header__title-text" title="{{ 'Docker upgrade' if update.mode == 'docker' else 'Rolling update' }} {{ update.id }}">Update to {{ target_label or 'latest' }}</span>
+    <span class="page-header-bar__meta">
+      <span class="tag {{ 'tag--success' if update.status == 'succeeded' else ('tag--danger' if update.status == 'failed' else 'tag--warning') }}" data-system-update-tag>{{ update.status }}</span>
+      <span>{{ 'Docker upgrade' if update.mode == 'docker' else 'Rolling update' }} · started <span data-utc="{{ update.started_at }}"></span></span>
+    </span>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  <div class="header-actions">
+    <a class="button button--ghost" href="/admin/system-updates">Back to system updates</a>
+    {% if target_url %}<a class="button button--ghost" href="{{ target_url }}" target="_blank" rel="noopener noreferrer">View {{ 'release' if update.mode == 'docker' else 'commit' }} on GitHub</a>{% endif %}
+    {% if update.status == 'pending' %}
+      <div data-system-update-cancel>
+        {{ page_header_overflow("system-update-actions-menu", "Actions", [
+          {"label": "Cancel request", "type": "form", "variant": "danger",
+           "action": "/admin/system-updates/" ~ update.id ~ "/cancel",
+           "confirm": "Cancel this update request? The host has not started it yet."}
+        ]) }}
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}
+
+{% block content %}<div class="management management--single"><section class="management__content"
+  data-system-update="{{ update.id }}" data-system-update-status="{{ update.status }}" data-system-update-started="{{ update.started_at }}">
+<div class="card card--panel">
+  <div class="card__body">
+    <dl class="definition-list">
+      <dt>Target</dt><dd><code>{{ update.target_revision }}</code></dd>
+      <dt>Started</dt><dd><span data-utc="{{ update.started_at }}"></span></dd>
+      <dt>Completed</dt><dd data-system-update-completed>{% if update.completed_at %}<span data-utc="{{ update.completed_at }}"></span>{% else %}In progress{% endif %}</dd>
+      <dt>Mode</dt><dd>{{ update.mode }}</dd>
+      <dt>Source</dt><dd>{{ update.source }}</dd>
+    </dl>
+    {% if update.status == 'pending' %}
+      <p class="text-muted" data-system-update-waiting>Waiting for the host to pick up this request; it checks every minute. If it stays queued: {{ host_setup_hint }}</p>
+    {% endif %}
+  </div>
+</div>
+<div class="alert alert--danger" data-system-update-error {% if not update.error %}hidden{% endif %}><strong>Failure</strong><p data-system-update-error-text>{{ update.error or '' }}</p></div>
+<div class="card card--panel">
+  <header class="card__header"><div><h2 class="card__title">Coordinator output</h2>
+    <p class="card__subtitle" data-system-update-live {% if update.status not in ('pending', 'running') %}hidden{% endif %}>Updating live. The portal may be briefly unreachable while it restarts; this page reconnects on its own.</p></div></header>
+  <div class="card__body"><pre class="system-updates__output" data-system-update-output-scroll><code data-system-update-output>{{ update.output or 'No output has been reported.' }}</code></pre></div>
+</div>
+</section></div>
+<script src="{{ static_url('/static/js/system_updates.js') }}" defer></script>
+{% endblock %}

@@ -3,21 +3,39 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator, Iterable, Any
+import types
 import re
+import hashlib
+import json
+import time
 
-import aiomysql
 import aiosqlite
 from loguru import logger
 
 from .config import get_settings
 
+try:
+    import aiomysql
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised in dependency-missing envs
+    aiomysql = None  # type: ignore[assignment]
+    _AIOMYSQL_IMPORT_ERROR = exc
+else:
+    _AIOMYSQL_IMPORT_ERROR = None
+
 
 class Database:
     def __init__(self) -> None:
-        self._pool: aiomysql.Pool | None = None
+        self._pool: Any | None = None
         self._sqlite_conn: aiosqlite.Connection | None = None
         self._settings = get_settings()
         self._use_sqlite = self._should_use_sqlite()
+
+    def _require_aiomysql(self) -> types.ModuleType:
+        if aiomysql is None:
+            raise RuntimeError(
+                "MySQL support requires aiomysql; install project dependencies before running MySQL migrations."
+            ) from _AIOMYSQL_IMPORT_ERROR
+        return aiomysql
 
     def _should_use_sqlite(self) -> bool:
         """Determine if SQLite should be used instead of MySQL.
@@ -128,9 +146,11 @@ class Database:
             await self._sqlite_conn.execute("PRAGMA foreign_keys = ON")
             await self._sqlite_conn.commit()
         else:
+            mysql = self._require_aiomysql()
             logger.info("Connecting to MySQL at {host}", host=self._settings.database_host)
-            self._pool = await aiomysql.create_pool(
+            self._pool = await mysql.create_pool(
                 host=self._settings.database_host,
+                port=self._settings.database_port,
                 user=self._settings.database_user,
                 password=self._settings.database_password,
                 db=self._settings.database_name,
@@ -241,8 +261,9 @@ class Database:
             # Convert sqlite3.Row to dict
             return dict(row) if row else None
         else:
+            mysql = self._require_aiomysql()
             async with self.acquire() as conn:
-                async with conn.cursor(aiomysql.DictCursor) as cursor:
+                async with conn.cursor(mysql.DictCursor) as cursor:
                     adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
                     await cursor.execute(adapted_sql, adapted_params)
                     return await cursor.fetchone()
@@ -263,8 +284,9 @@ class Database:
             rows = await cursor.fetchmany(size)
             return [dict(row) for row in rows]
         else:
+            mysql = self._require_aiomysql()
             async with self.acquire() as conn:
-                async with conn.cursor(aiomysql.DictCursor) as cursor:
+                async with conn.cursor(mysql.DictCursor) as cursor:
                     adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
                     await cursor.execute(adapted_sql, adapted_params)
                     return list(await cursor.fetchmany(size))
@@ -278,8 +300,9 @@ class Database:
             # Convert sqlite3.Row objects to dicts
             return [dict(row) for row in rows]
         else:
+            mysql = self._require_aiomysql()
             async with self.acquire() as conn:
-                async with conn.cursor(aiomysql.DictCursor) as cursor:
+                async with conn.cursor(mysql.DictCursor) as cursor:
                     adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
                     await cursor.execute(adapted_sql, adapted_params)
                     return await cursor.fetchall()
@@ -410,18 +433,38 @@ class Database:
 
     async def _ensure_migrations_table(self, conn: Any) -> None:
         """Create migrations tracking table if it doesn't exist."""
+        columns = (
+            "name VARCHAR(255) PRIMARY KEY, checksum VARCHAR(64), "
+            "state VARCHAR(16) NOT NULL DEFAULT 'completed', phase VARCHAR(16), "
+            "started_at TEXT, completed_at TEXT, duration_ms INTEGER, error_details TEXT"
+        )
         if self._use_sqlite:
-            await conn.execute(
-                "CREATE TABLE IF NOT EXISTS migrations (name VARCHAR(255) PRIMARY KEY)"
-            )
+            await conn.execute("CREATE TABLE IF NOT EXISTS migrations (" + columns + ")")
+            cursor = await conn.execute("PRAGMA table_info(migrations)")
+            present = {row[1] for row in await cursor.fetchall()}
+            additions = {
+                "checksum": "VARCHAR(64)", "state": "VARCHAR(16) NOT NULL DEFAULT 'completed'",
+                "phase": "VARCHAR(16)", "started_at": "TEXT", "completed_at": "TEXT",
+                "duration_ms": "INTEGER", "error_details": "TEXT",
+            }
+            for name, definition in additions.items():
+                if name not in present:
+                    await conn.execute("ALTER TABLE migrations ADD COLUMN " + name + " " + definition)
             await conn.commit()
         else:
             async with conn.cursor() as cursor:
                 await cursor.execute("SET sql_notes = 0")
                 try:
                     await cursor.execute(
-                        "CREATE TABLE IF NOT EXISTS migrations (name VARCHAR(255) PRIMARY KEY)"
+                        "CREATE TABLE IF NOT EXISTS migrations (" + columns.replace("TEXT", "TEXT") + ")"
                     )
+                    for name, definition in (
+                        ("checksum", "VARCHAR(64) NULL"), ("state", "VARCHAR(16) NOT NULL DEFAULT 'completed'"),
+                        ("phase", "VARCHAR(16) NULL"), ("started_at", "DATETIME(6) NULL"),
+                        ("completed_at", "DATETIME(6) NULL"), ("duration_ms", "BIGINT NULL"),
+                        ("error_details", "TEXT NULL"),
+                    ):
+                        await cursor.execute("ALTER TABLE migrations ADD COLUMN IF NOT EXISTS " + name + " " + definition)
                 finally:
                     await cursor.execute("SET sql_notes = 1")
 
@@ -448,6 +491,12 @@ class Database:
         
         # Replace INT with INTEGER for primary key autoincrement compatibility
         sql = re.sub(r'\bINT\b(\s+AUTOINCREMENT|\s+PRIMARY\s+KEY)', r'INTEGER\1', sql, flags=re.IGNORECASE)
+        sql = re.sub(
+            r'\bINTEGER\s+AUTOINCREMENT\s+PRIMARY\s+KEY\b',
+            'INTEGER PRIMARY KEY AUTOINCREMENT',
+            sql,
+            flags=re.IGNORECASE,
+        )
         
         # Replace DATETIME with TEXT (SQLite uses TEXT for dates)
         sql = re.sub(r'\bDATETIME\b', 'TEXT', sql, flags=re.IGNORECASE)
@@ -455,11 +504,48 @@ class Database:
         # Remove ON UPDATE CURRENT_TIMESTAMP (not supported in SQLite)
         sql = re.sub(r'\s*ON\s+UPDATE\s+CURRENT_TIMESTAMP', '', sql, flags=re.IGNORECASE)
         
-        # Replace CURRENT_TIMESTAMP with datetime('now') for defaults
-        sql = re.sub(r'\bCURRENT_TIMESTAMP\b', "datetime('now')", sql, flags=re.IGNORECASE)
+        # Parenthesised expressions are required for SQLite function defaults.
+        sql = re.sub(r'\bCURRENT_TIMESTAMP\b', "(datetime('now'))", sql, flags=re.IGNORECASE)
         
         # Replace JSON column type with TEXT
         sql = re.sub(r'\bJSON\b', 'TEXT', sql, flags=re.IGNORECASE)
+
+        # SQLite has no UUID() function. Generate canonical version-4 UUID text
+        # for MySQL migrations that backfill public identifiers.
+        sql = re.sub(
+            r'\bUUID\(\)',
+            "(lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || "
+            "substr(lower(hex(randomblob(2))), 2) || '-' || "
+            "substr('89ab', abs(random()) % 4 + 1, 1) || "
+            "substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))))",
+            sql,
+            flags=re.IGNORECASE,
+        )
+
+        # SQLite supports ADD COLUMN, but not MySQL's idempotency or placement
+        # modifiers. Migration tracking ensures each file is only applied once.
+        sql = re.sub(
+            r'\bADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\b',
+            'ADD COLUMN',
+            sql,
+            flags=re.IGNORECASE,
+        )
+        sql = re.sub(r'\s+AFTER\s+\w+(?=\s*;|\s*$)', '', sql, flags=re.IGNORECASE)
+
+        # SQLite cannot replace an index inside ALTER TABLE. Convert the
+        # MySQL form used when widening a uniqueness key into standalone
+        # index statements so fallback databases retain the same invariant.
+        sql = re.sub(
+            r"ALTER\s+TABLE\s+(\w+)\s+DROP\s+INDEX\s+(\w+)\s*,\s*"
+            r"ADD\s+UNIQUE\s+KEY\s+(\w+)\s*\(([^)]+)\)\s*;",
+            lambda match: (
+                f"DROP INDEX IF EXISTS {match.group(2)}; "
+                f"CREATE UNIQUE INDEX {match.group(3)} ON {match.group(1)} "
+                f"({match.group(4)});"
+            ),
+            sql,
+            flags=re.IGNORECASE,
+        )
         
         # Handle ENUM types - convert to VARCHAR with CHECK constraint
         # This is a simplified approach; complex ENUMs may need manual handling
@@ -476,10 +562,78 @@ class Database:
                 sql = sql[:match.start()] + "VARCHAR(50)" + sql[match.end():]
                 # Add CHECK constraint at the end of the column definition
                 sql = sql.replace(f"{col_name} VARCHAR(50)", f"{col_name} VARCHAR(50){check_constraint}", 1)
+
+        # SQLite cannot ALTER a column to ENUM. Runtime transition validation
+        # enforces the same canonical values for upgraded fallback databases.
+        alter_enum = re.compile(
+            r"ALTER\s+TABLE\s+(\w+)\s+MODIFY\s+(\w+)\s+VARCHAR\(50\)\s+"
+            r"CHECK\s*\(.*?\)\s+NOT\s+NULL\s+DEFAULT\s+'([^']+)'\s*;",
+            re.IGNORECASE | re.DOTALL,
+        )
+
+        sql = alter_enum.sub("", sql)
         
         return sql
 
-    async def _apply_migration_file(self, conn: Any, path: Path) -> None:
+    def _migration_metadata(self, path: Path) -> dict[str, Any]:
+        """Read deployment compatibility metadata from leading SQL comments."""
+        values: dict[str, str] = {}
+        companion_metadata = False
+        for line in path.read_text(encoding="utf-8").splitlines():
+            match = re.match(r"\s*--\s*(phase|compatible-from|compatible-to|maintenance)\s*:\s*(.*?)\s*$", line, re.I)
+            if match:
+                values[match.group(1).lower()] = match.group(2)
+            elif line.strip() and not line.lstrip().startswith("--"):
+                break
+        # Migrations released before deployment metadata was introduced must
+        # remain byte-for-byte stable: changing them would trip checksums on an
+        # upgraded installation.  A companion manifest supplies metadata for
+        # the recent, still-supported upgrade window without rewriting SQL that
+        # may already have run.
+        manifest_path = path.parent / "deployment_metadata.json"
+        if not values and manifest_path.is_file():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest_values = manifest.get("migrations", {}).get(path.name)
+            except (json.JSONDecodeError, OSError) as exc:
+                raise RuntimeError(f"Invalid migration metadata manifest {manifest_path.name}") from exc
+            if manifest_values is not None:
+                if not isinstance(manifest_values, dict):
+                    raise RuntimeError(f"Invalid metadata for migration {path.name}")
+                values = {str(key).lower(): str(value) for key, value in manifest_values.items()}
+                companion_metadata = True
+        phase = values.get("phase")
+        # Keep the SQLite best-effort compatibility behaviour for immutable
+        # pre-UPG02 SQL even when its deployment policy comes from the manifest.
+        legacy_number = re.match(r"^([0-9]{1,3})_", path.name)
+        legacy = bool(companion_metadata and legacy_number and int(legacy_number.group(1)) <= 382)
+        if phase not in {"expand", "data", "backfill", "contract"}:
+            # Existing migrations predate UPG02 and are grandfathered so a new
+            # installation remains possible. New migrations must be declared.
+            if legacy_number and int(legacy_number.group(1)) <= 382:
+                phase = "expand"
+                legacy = True
+            else:
+                raise RuntimeError(f"Migration {path.name} has no valid phase metadata")
+        return {"phase": "data" if phase == "backfill" else phase, "legacy": legacy,
+                "compatible_from": values.get("compatible-from"),
+                "compatible_to": values.get("compatible-to"),
+                "maintenance": values.get("maintenance", "false").lower() in {"1", "true", "yes"}}
+
+    def _validate_migration_compatibility(self, path: Path, metadata: dict[str, Any],
+                                          serving_release: str | None, target_release: str | None,
+                                          maintenance: bool) -> None:
+        if metadata["phase"] == "contract" and not metadata["maintenance"]:
+            if not metadata["compatible_from"] or not metadata["compatible_to"]:
+                raise RuntimeError(f"Contract migration {path.name} requires compatibility metadata")
+        if metadata["maintenance"] and not maintenance:
+            raise RuntimeError(f"Migration {path.name} requires UPG01 maintenance mode")
+        for key, release in (("compatible_from", serving_release), ("compatible_to", target_release)):
+            declared = metadata[key]
+            if release and declared and declared != "*" and release not in {v.strip() for v in declared.split(",")}:
+                raise RuntimeError(f"Migration {path.name} is not compatible with {release} ({key})")
+
+    async def _apply_migration_file(self, conn: Any, path: Path, metadata: dict[str, Any] | None = None) -> None:
         """Apply a migration file to the database."""
         sql = path.read_text(encoding="utf-8")
         
@@ -499,11 +653,18 @@ class Database:
                         error=str(e),
                         stmt=statement[:100]
                     )
-                    # Continue with other statements
-            await conn.execute(
-                "INSERT INTO migrations (name) VALUES (?)",
-                (path.name,),
-            )
+                    # Historical SQLite fallback migrations intentionally
+                    # contained duplicate/MySQL-only statements. Preserve that
+                    # bootstrap behaviour only for the frozen legacy set.
+                    if not metadata or not metadata.get("legacy"):
+                        raise
+            if metadata is None:
+                await conn.execute("INSERT INTO migrations (name) VALUES (?)", (path.name,))
+            else:
+                await conn.execute(
+                    "UPDATE migrations SET state = ?, completed_at = CURRENT_TIMESTAMP, error_details = NULL WHERE name = ?",
+                    ("completed", path.name),
+                )
             await conn.commit()
         else:
             async with conn.cursor() as cursor:
@@ -513,16 +674,22 @@ class Database:
                         await cursor.execute(statement)
                 finally:
                     await cursor.execute("SET sql_notes = 1")
-                await cursor.execute(
-                    "INSERT INTO migrations (name) VALUES (%s)",
-                    (path.name,),
-                )
+                if metadata is None:
+                    await cursor.execute("INSERT INTO migrations (name) VALUES (%s)", (path.name,))
+                else:
+                    await cursor.execute("UPDATE migrations SET state=%s, completed_at=UTC_TIMESTAMP(6), error_details=NULL WHERE name=%s", ("completed", path.name))
 
-    async def run_migrations(self) -> None:
+    async def run_migrations(self, *, serving_release: str | None = None,
+                             target_release: str | None = None,
+                             maintenance: bool = False) -> None:
         """Run all pending migrations."""
         # For MySQL, ensure database exists
         if not self._use_sqlite:
-            temp_conn = await aiomysql.connect(
+            mysql = self._require_aiomysql()
+            database_name = self._settings.database_name or ""
+            if not re.fullmatch(r"[A-Za-z0-9_]+", database_name):
+                raise RuntimeError("Database name contains unsupported characters")
+            temp_conn = await mysql.connect(
                 host=self._settings.database_host,
                 user=self._settings.database_user,
                 password=self._settings.database_password,
@@ -533,7 +700,7 @@ class Database:
                 await cursor.execute("SET sql_notes = 0")
                 try:
                     await cursor.execute(
-                        f"CREATE DATABASE IF NOT EXISTS `{self._settings.database_name}`"
+                        "CREATE DATABASE IF NOT EXISTS `" + database_name + "`"
                     )
                 finally:
                     await cursor.execute("SET sql_notes = 1")
@@ -574,20 +741,59 @@ class Database:
 
                 # Get list of applied migrations
                 if self._use_sqlite:
-                    cursor = await conn.execute("SELECT name FROM migrations")
+                    cursor = await conn.execute("SELECT name, checksum, state FROM migrations")
                     applied_rows = await cursor.fetchall()
-                    applied = {dict(row)["name"] for row in applied_rows}
+                    applied = {dict(row)["name"]: dict(row) for row in applied_rows}
                 else:
-                    async with conn.cursor(aiomysql.DictCursor) as cursor:
-                        await cursor.execute("SELECT name FROM migrations")
+                    mysql = self._require_aiomysql()
+                    async with conn.cursor(mysql.DictCursor) as cursor:
+                        await cursor.execute("SELECT name, checksum, state FROM migrations")
                         applied_rows = await cursor.fetchall()
-                    applied = {row["name"] for row in applied_rows}
+                    applied = {row["name"]: row for row in applied_rows}
 
                 # Apply pending migrations
                 for path in sorted(migrations_dir.glob("*.sql")):
-                    if path.name in applied:
+                    checksum = hashlib.sha256(path.read_bytes()).hexdigest()
+                    previous = applied.get(path.name)
+                    if previous and previous.get("state") == "completed":
+                        if previous.get("checksum") and previous["checksum"] != checksum:
+                            raise RuntimeError(f"Checksum mismatch for applied migration {path.name}")
+                        # Backfill checksums for the grandfathered tracking rows.
+                        if not previous.get("checksum"):
+                            if self._use_sqlite:
+                                await conn.execute("UPDATE migrations SET checksum=? WHERE name=?", (checksum, path.name)); await conn.commit()
+                            else:
+                                async with conn.cursor() as cursor: await cursor.execute("UPDATE migrations SET checksum=%s WHERE name=%s", (checksum, path.name))
                         continue
-                    await self._apply_migration_file(conn, path)
+                    metadata = self._migration_metadata(path)
+                    # A brand-new empty schema has no concurrently serving old
+                    # release, so maintenance-only contract steps are safe as
+                    # part of bootstrap. Upgrades must explicitly enter UPG01.
+                    self._validate_migration_compatibility(
+                        path, metadata, serving_release, target_release,
+                        maintenance or not applied,
+                    )
+                    started = time.monotonic()
+                    if self._use_sqlite:
+                        await conn.execute("INSERT OR REPLACE INTO migrations (name,checksum,state,phase,started_at,error_details) VALUES (?,?,?,?,CURRENT_TIMESTAMP,NULL)", (path.name, checksum, "running", metadata["phase"])); await conn.commit()
+                    else:
+                        async with conn.cursor() as cursor:
+                            await cursor.execute("INSERT INTO migrations (name,checksum,state,phase,started_at,error_details) VALUES (%s,%s,%s,%s,UTC_TIMESTAMP(6),NULL) ON DUPLICATE KEY UPDATE checksum=VALUES(checksum),state=VALUES(state),phase=VALUES(phase),started_at=VALUES(started_at),completed_at=NULL,error_details=NULL", (path.name, checksum, "running", metadata["phase"]))
+                    try:
+                        await self._apply_migration_file(conn, path, metadata)
+                    except Exception as exc:
+                        error = str(exc)[:4000]
+                        duration = int((time.monotonic() - started) * 1000)
+                        if self._use_sqlite:
+                            await conn.execute("UPDATE migrations SET state=?,duration_ms=?,error_details=? WHERE name=?", ("failed", duration, error, path.name)); await conn.commit()
+                        else:
+                            async with conn.cursor() as cursor: await cursor.execute("UPDATE migrations SET state=%s,duration_ms=%s,error_details=%s WHERE name=%s", ("failed", duration, error, path.name))
+                        raise RuntimeError(f"Migration {path.name} failed after partial DDL; inspect migrations.error_details, repair schema, then retry") from exc
+                    duration = int((time.monotonic() - started) * 1000)
+                    if self._use_sqlite:
+                        await conn.execute("UPDATE migrations SET duration_ms=? WHERE name=?", (duration, path.name)); await conn.commit()
+                    else:
+                        async with conn.cursor() as cursor: await cursor.execute("UPDATE migrations SET duration_ms=%s WHERE name=%s", (duration, path.name))
                     logger.info("Applied migration {name}", name=path.name)
             finally:
                 if lock_acquired and not self._use_sqlite:

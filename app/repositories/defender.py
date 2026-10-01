@@ -3,6 +3,57 @@ import json
 from typing import Any
 from app.core.database import db
 
+
+def _antivirus_product_names(details: Any, antivirus_enabled: Any) -> list[str]:
+    if not isinstance(details, dict):
+        return ["Microsoft Defender Antivirus"] if antivirus_enabled else []
+    raw_names = details.get("antivirus_product_names")
+    if isinstance(raw_names, list):
+        names = [str(name).strip() for name in raw_names if str(name).strip()]
+    elif isinstance(raw_names, str) and raw_names.strip():
+        names = [raw_names.strip()]
+    else:
+        fallback = str(details.get("antivirus_product_name") or "").strip()
+        names = [fallback] if fallback else []
+    if not names and (antivirus_enabled or details.get("product_version") or details.get("engine_version")):
+        names = ["Microsoft Defender Antivirus"]
+    return list(dict.fromkeys(names))
+
+def _json_value(value: Any, default: Any) -> Any:
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8", "replace")
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return default
+    return default if value is None else value
+
+
+# Policy item outcomes that mean a portal setting is not in effect.
+POLICY_PROBLEM_STATUSES = {"blocked_tamper_protection", "managed_by_policy", "unsupported", "failed"}
+
+# Commands the agent claimed but never finished (for example because the
+# device went offline mid-scan) are failed after this long. The agent's own
+# timeout for the longest command, a full scan, is shorter.
+COMMAND_CLAIM_TIMEOUT_HOURS = 24
+
+
+def _policy_summary(policy_result: Any) -> dict[str, Any]:
+    """Summarise an agent policy result for the endpoint table."""
+    if not isinstance(policy_result, dict):
+        return {"policy": None, "policy_issues": [], "tamper_locks_exclusions": False}
+    items = [item for item in policy_result.get("items") or [] if isinstance(item, dict)]
+    tamper = policy_result.get("tamper_protection") if isinstance(policy_result.get("tamper_protection"), dict) else {}
+    return {
+        "policy": policy_result,
+        "policy_issues": [item for item in items if item.get("status") in POLICY_PROBLEM_STATUSES],
+        # Tamper Protection is treated as covering exclusions unless Defender
+        # explicitly reports otherwise, matching the agent's own gate.
+        "tamper_locks_exclusions": bool(tamper.get("enabled")) and tamper.get("protects_exclusions") is not False,
+    }
+
+
 async def company_enabled(company_id: int) -> bool:
     row = await db.fetch_one("SELECT defender_enabled FROM companies WHERE id=%s", (company_id,))
     return bool(row and row.get("defender_enabled"))
@@ -17,9 +68,34 @@ async def device_belongs_to_company(device_id: int, company_id: int) -> bool:
     )
     return bool(row)
 
+async def device_is_managed(device_id: int, company_id: int) -> bool:
+    row = await db.fetch_one(
+        "SELECT defender_managed FROM tray_devices WHERE id=%s AND company_id=%s AND LOWER(os)='windows'",
+        (device_id, company_id),
+    )
+    return bool(row and row.get("defender_managed"))
+
+async def set_device_managed(device_id: int, company_id: int, managed: bool) -> bool:
+    if not await device_belongs_to_company(device_id, company_id):
+        return False
+    await db.execute(
+        "UPDATE tray_devices SET defender_managed=%s WHERE id=%s AND company_id=%s",
+        (managed, device_id, company_id),
+    )
+    if not managed:
+        await db.execute(
+            """UPDATE defender_commands SET status='cancelled', completed_at=UTC_TIMESTAMP()
+            WHERE tray_device_id=%s AND company_id=%s AND status IN ('pending','claimed')""",
+            (device_id, company_id),
+        )
+    return True
+
 async def dashboard(company_id: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    devices = await db.fetch_all("""SELECT td.id, td.asset_id, td.hostname, td.last_seen_utc, ds.health_status, ds.antivirus_enabled,
-        ds.realtime_protection_enabled, ds.tamper_protection_enabled, ds.signatures_updated_at, ds.last_scan_at, ds.threat_count, ds.details_json, ds.updated_at,
+    devices = await db.fetch_all("""SELECT td.id, td.asset_id, td.hostname, td.last_seen_utc, td.defender_managed, ds.health_status, ds.antivirus_enabled,
+        ds.realtime_protection_enabled, ds.tamper_protection_enabled,
+        ds.firewall_domain_enabled, ds.firewall_private_enabled, ds.firewall_public_enabled,
+        ds.signatures_updated_at, ds.last_scan_at, ds.threat_count, ds.details_json, ds.updated_at,
+        ds.policy_status, ds.policy_evaluated_at, ds.policy_result_json,
         CASE WHEN td.last_seen_utc IS NULL OR td.last_seen_utc < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 15 MINUTE) THEN 1 ELSE 0 END AS is_stale
         FROM tray_devices td LEFT JOIN defender_device_status ds ON ds.tray_device_id=td.id
         WHERE td.company_id=%s AND td.status='active' AND LOWER(td.os)='windows'
@@ -33,6 +109,9 @@ async def dashboard(company_id: int) -> tuple[list[dict[str, Any]], list[dict[st
                 details = {}
         history = details.get("scan_history", []) if isinstance(details, dict) else []
         device["last_scan"] = history[0] if history and isinstance(history[0], dict) else None
+        device["antivirus_product_names"] = _antivirus_product_names(details, device.get("antivirus_enabled"))
+        device["running_mode"] = details.get("running_mode") if isinstance(details, dict) else None
+        device.update(_policy_summary(_json_value(device.pop("policy_result_json", None), None)))
     exclusions = await db.fetch_all("""SELECT de.*, td.hostname FROM defender_exclusions de
         LEFT JOIN tray_devices td ON td.id=de.tray_device_id
         WHERE de.scope='global' OR de.company_id=%s ORDER BY de.created_at DESC""", (company_id,))
@@ -76,8 +155,11 @@ async def update_settings(company_id: int, payload: Any) -> None:
        payload.auto_ticket_realtime_off, payload.auto_ticket_tamper_off,
        payload.auto_ticket_threat_detected, company_id))
 
-async def add_exclusion(scope: str, company_id: int, device_id: int | None, kind: str, value: str, user_id: int) -> None:
-    await db.execute("INSERT INTO defender_exclusions (scope,company_id,tray_device_id,exclusion_type,value,created_by_user_id) VALUES (%s,%s,%s,%s,%s,%s)", (scope, None if scope == 'global' else company_id, device_id if scope == 'device' else None, kind, value, user_id))
+async def add_exclusion(scope: str, company_id: int, device_id: int | None, kind: str, value: str, user_id: int) -> int:
+    return await db.execute_returning_lastrowid(
+        "INSERT INTO defender_exclusions (scope,company_id,tray_device_id,exclusion_type,value,created_by_user_id) VALUES (%s,%s,%s,%s,%s,%s)",
+        (scope, None if scope == 'global' else company_id, device_id if scope == 'device' else None, kind, value, user_id),
+    )
 
 async def delete_exclusion(exclusion_id: int, company_id: int, super_admin: bool) -> None:
     sql = ("DELETE FROM defender_exclusions WHERE id=%s AND (scope='global' OR company_id=%s)"
@@ -120,6 +202,8 @@ async def delete_exclusion_list(list_id: int) -> None:
     await db.execute("DELETE FROM defender_exclusion_lists WHERE id=%s", (list_id,))
 
 async def policy(device_id: int, company_id: int) -> dict[str, Any]:
+    if not await device_is_managed(device_id, company_id):
+        return {"enabled": False, "exclusions": []}
     rows = await db.fetch_all("""SELECT exclusion_type, value FROM defender_exclusions
       WHERE scope='global' OR (company_id=%s AND (scope='company' OR tray_device_id=%s))
       UNION SELECT deli.exclusion_type, deli.value FROM defender_exclusion_list_items deli
@@ -130,9 +214,15 @@ async def policy(device_id: int, company_id: int) -> dict[str, Any]:
 async def report_status(device_id: int, company_id: int, payload: Any) -> None:
     details = dict(payload.details)
     details["scan_history"] = [scan.model_dump(mode="json") for scan in payload.scan_history]
-    await db.execute("""INSERT INTO defender_device_status (tray_device_id,company_id,enabled,antivirus_enabled,realtime_protection_enabled,tamper_protection_enabled,signatures_updated_at,last_scan_at,health_status,details_json)
-      VALUES (%s,%s,1,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE enabled=1,antivirus_enabled=VALUES(antivirus_enabled),realtime_protection_enabled=VALUES(realtime_protection_enabled),tamper_protection_enabled=VALUES(tamper_protection_enabled),signatures_updated_at=VALUES(signatures_updated_at),last_scan_at=VALUES(last_scan_at),health_status=VALUES(health_status),details_json=VALUES(details_json)""",
-      (device_id,company_id,payload.antivirus_enabled,payload.realtime_protection_enabled,payload.tamper_protection_enabled,payload.signatures_updated_at,payload.last_scan_at,payload.health_status,json.dumps(details)))
+    # Agents released before policy enforcement send no policy result; store
+    # NULL so the portal can say the policy is not being applied.
+    policy_result = payload.policy_result
+    policy_status = policy_result.status if policy_result else None
+    policy_evaluated_at = (policy_result.evaluated_at if policy_result and policy_result.evaluated_at else None)
+    policy_json = json.dumps(policy_result.model_dump(mode="json")) if policy_result else None
+    await db.execute("""INSERT INTO defender_device_status (tray_device_id,company_id,enabled,antivirus_enabled,realtime_protection_enabled,tamper_protection_enabled,firewall_domain_enabled,firewall_private_enabled,firewall_public_enabled,signatures_updated_at,last_scan_at,health_status,details_json,policy_status,policy_evaluated_at,policy_result_json)
+      VALUES (%s,%s,1,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE enabled=1,antivirus_enabled=VALUES(antivirus_enabled),realtime_protection_enabled=VALUES(realtime_protection_enabled),tamper_protection_enabled=VALUES(tamper_protection_enabled),firewall_domain_enabled=VALUES(firewall_domain_enabled),firewall_private_enabled=VALUES(firewall_private_enabled),firewall_public_enabled=VALUES(firewall_public_enabled),signatures_updated_at=VALUES(signatures_updated_at),last_scan_at=VALUES(last_scan_at),health_status=VALUES(health_status),details_json=VALUES(details_json),policy_status=VALUES(policy_status),policy_evaluated_at=VALUES(policy_evaluated_at),policy_result_json=VALUES(policy_result_json)""",
+      (device_id,company_id,payload.antivirus_enabled,payload.realtime_protection_enabled,payload.tamper_protection_enabled,payload.firewall_domain_enabled,payload.firewall_private_enabled,payload.firewall_public_enabled,payload.signatures_updated_at,payload.last_scan_at,payload.health_status,json.dumps(details),policy_status,policy_evaluated_at,policy_json))
 
 async def alert_ticket(device_id: int, alert_type: str) -> dict[str, Any] | None:
     return await db.fetch_one(
@@ -178,6 +268,10 @@ async def queue_command(company_id: int, device_id: int, command_type: str, user
       (company_id, device_id, detection_id, command_type, user_id))
 
 async def poll_commands(device_id: int, company_id: int) -> list[dict[str, Any]]:
+    await db.execute(f"""UPDATE defender_commands SET status='failed', completed_at=UTC_TIMESTAMP(),
+      result_json=%s WHERE tray_device_id=%s AND company_id=%s AND status='claimed'
+      AND claimed_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL {COMMAND_CLAIM_TIMEOUT_HOURS} HOUR)""",
+      (json.dumps({"message": "The tray agent did not report a result"}), device_id, company_id))
     rows = await db.fetch_all("""SELECT dc.id, dc.command_type, dc.detection_id, dc.requested_at,
       dd.detection_uid, dd.threat_name FROM defender_commands dc
       LEFT JOIN defender_detections dd ON dd.id=dc.detection_id
@@ -195,6 +289,19 @@ async def complete_command(command_id: int, device_id: int, status: str, result:
         if command and command.get("detection_id") and command.get("command_type") in {"quarantine", "remediate"}:
             await db.execute("""UPDATE defender_detections SET status=%s, resolved_at=UTC_TIMESTAMP()
               WHERE id=%s AND tray_device_id=%s""", (command["command_type"] + "d", command["detection_id"], device_id))
+
+async def recent_commands(company_id: int, limit: int = 50) -> list[dict[str, Any]]:
+    """Return recent endpoint actions with the agent's reported outcome."""
+    rows = await db.fetch_all("""SELECT dc.id, dc.tray_device_id, dc.command_type, dc.status, dc.requested_at,
+      dc.completed_at, dc.result_json, td.hostname, dd.threat_name
+      FROM defender_commands dc JOIN tray_devices td ON td.id=dc.tray_device_id
+      LEFT JOIN defender_detections dd ON dd.id=dc.detection_id
+      WHERE dc.company_id=%s ORDER BY dc.requested_at DESC, dc.id DESC LIMIT %s""", (company_id, limit))
+    commands = list(rows or [])
+    for command in commands:
+        result = _json_value(command.pop("result_json", None), {})
+        command["message"] = result.get("message") if isinstance(result, dict) else None
+    return commands
 
 async def update_detection_workflow(detection_id: int, company_id: int, user_id: int, action: str) -> dict[str, Any] | None:
     if action == "acknowledge":

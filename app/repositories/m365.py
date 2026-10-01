@@ -11,6 +11,7 @@ def _normalise(row: dict[str, Any]) -> dict[str, Any]:
     normalised = dict(row)
     for key in (
         "token_expires_at",
+        "app_token_expires_at",
         "client_secret_expires_at",
         "admin_secret_expires_at",
         "created_at",
@@ -87,17 +88,23 @@ async def update_tokens(
     refresh_token: str | None,
     access_token: str | None,
     token_expires_at: datetime | None,
+    cache_tenant_id: str | None = None,
+    cache_client_id: str | None = None,
+    cache_grant_type: str | None = None,
 ) -> dict[str, Any]:
     await db.execute(
         """
         UPDATE company_m365_credentials
-        SET refresh_token = %s, access_token = %s, token_expires_at = %s
+        SET refresh_token = %s, access_token = %s, token_expires_at = %s,
+            token_cache_tenant_id = %s, token_cache_client_id = %s,
+            token_cache_grant_type = %s
         WHERE company_id = %s
         """,
         (
             refresh_token,
             access_token,
             token_expires_at,
+            cache_tenant_id, cache_client_id, cache_grant_type,
             company_id,
         ),
     )
@@ -105,6 +112,33 @@ async def update_tokens(
     if not credentials:
         raise RuntimeError("Credentials not found after token update")
     return credentials
+
+
+async def update_app_token(*, company_id: int, access_token: str | None,
+                           token_expires_at: datetime | None,
+                           cache_tenant_id: str, cache_client_id: str) -> None:
+    """Persist app-only state without modifying delegated authorization."""
+    await db.execute(
+        """UPDATE company_m365_credentials
+           SET app_access_token = %s, app_token_expires_at = %s,
+               app_token_cache_tenant_id = %s, app_token_cache_client_id = %s
+           WHERE company_id = %s""",
+        (access_token, token_expires_at, cache_tenant_id, cache_client_id, company_id),
+    )
+
+
+async def update_application_metadata(
+    *, company_id: int, app_object_id: str, key_id: str | None,
+    expires_at: datetime | None,
+) -> None:
+    """Backfill safely discovered application and secret metadata in place."""
+    await db.execute(
+        """UPDATE company_m365_credentials
+           SET app_object_id = %s, client_secret_key_id = %s,
+               client_secret_expires_at = %s
+           WHERE company_id = %s""",
+        (app_object_id, key_id, expires_at, company_id),
+    )
 
 
 async def update_client_secret(
@@ -132,8 +166,8 @@ async def list_credentials_expiring_before(cutoff: datetime) -> list[dict[str, A
     rows = await db.fetch_all(
         """
         SELECT * FROM company_m365_credentials
-        WHERE client_secret_expires_at IS NOT NULL
-          AND client_secret_expires_at <= %s
+        WHERE client_secret_expires_at IS NULL
+           OR client_secret_expires_at <= %s
         """,
         (cutoff,),
     )
@@ -161,10 +195,10 @@ async def upsert_mailbox(
     user_principal_name: str,
     display_name: str,
     mailbox_type: str,
-    storage_used_bytes: int,
+    storage_used_bytes: int | None,
     archive_storage_used_bytes: int | None,
-    has_archive: bool,
-    forwarding_rule_count: int,
+    has_archive: bool | None,
+    forwarding_rule_count: int | None,
 ) -> None:
     """Insert or update a mailbox record for the given company."""
     await db.execute(
@@ -177,10 +211,10 @@ async def upsert_mailbox(
         ON DUPLICATE KEY UPDATE
             display_name = VALUES(display_name),
             mailbox_type = VALUES(mailbox_type),
-            storage_used_bytes = VALUES(storage_used_bytes),
-            archive_storage_used_bytes = VALUES(archive_storage_used_bytes),
-            has_archive = VALUES(has_archive),
-            forwarding_rule_count = VALUES(forwarding_rule_count),
+            storage_used_bytes = COALESCE(VALUES(storage_used_bytes), storage_used_bytes),
+            archive_storage_used_bytes = COALESCE(VALUES(archive_storage_used_bytes), archive_storage_used_bytes),
+            has_archive = COALESCE(VALUES(has_archive), has_archive),
+            forwarding_rule_count = COALESCE(VALUES(forwarding_rule_count), forwarding_rule_count),
             synced_at = VALUES(synced_at)
         """,
         (
@@ -190,7 +224,7 @@ async def upsert_mailbox(
             mailbox_type,
             storage_used_bytes,
             archive_storage_used_bytes,
-            int(has_archive),
+            int(has_archive) if has_archive is not None else None,
             forwarding_rule_count,
             datetime.utcnow(),
         ),
@@ -226,7 +260,7 @@ async def delete_stale_mailboxes(company_id: int, current_upns: list[str]) -> No
         return
     placeholders = ", ".join(["%s"] * len(current_upns))
     query = (
-        "DELETE FROM m365_mailboxes WHERE company_id = %s AND user_principal_name NOT IN ("
+        "DELETE FROM m365_mailboxes WHERE company_id = %s AND user_principal_name NOT IN ("  # nosec B608
         + placeholders  # contains only %s parameter markers, not user data
         + ")"
     )
@@ -256,6 +290,30 @@ async def get_mailbox_synced_at(company_id: int) -> datetime | None:
         value = row["synced_at"]
         return value if isinstance(value, datetime) else None
     return None
+
+
+async def set_mailbox_sync_state(
+    company_id: int, category: str, *, complete: bool, attempted_at: datetime
+) -> None:
+    """Record source completeness without replacing the last successful read."""
+    await db.execute(
+        """
+        INSERT INTO m365_mailbox_sync_state (
+            company_id, category, is_complete, last_attempt_at, last_success_at
+        ) VALUES (%s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            is_complete = VALUES(is_complete),
+            last_attempt_at = VALUES(last_attempt_at),
+            last_success_at = COALESCE(VALUES(last_success_at), last_success_at)
+        """,
+        (
+            company_id,
+            category,
+            int(complete),
+            attempted_at,
+            attempted_at if complete else None,
+        ),
+    )
 
 
 async def upsert_mailbox_member(
@@ -372,7 +430,7 @@ async def get_mailboxes_accessible_by_member(
         return []
     placeholders = ", ".join(["%s"] * len(upns))
     query = (
-        "SELECT DISTINCT mm.mailbox_email,"
+        "SELECT DISTINCT mm.mailbox_email,"  # nosec B608
         " COALESCE(mb.display_name, mm.mailbox_email) AS display_name"
         " FROM m365_mailbox_members mm"
         " LEFT JOIN m365_mailboxes mb"
@@ -604,7 +662,7 @@ async def bulk_get_consent_status(
         WHERE company_id IN ({company_placeholders})
           AND role_id     IN ({role_placeholders})
         GROUP BY company_id
-        """,
+        """,  # nosec B608
         tuple(company_ids) + tuple(required_role_ids),
     )
 

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
+{% from "macros/tables.html" import table_toolbar %}
 
 {% block header_title %}Microsoft 365 Best Practices{% endblock %}
 
@@ -18,8 +19,14 @@
       "label": "Manage best practices", "type": "link",
       "href": "/m365/best-practices/settings"
     }) %}
-    {{ page_header_actions(bp_actions) }}
+  {% else %}
+    {% set bp_actions = [] %}
   {% endif %}
+  {% set _ = bp_actions.append({
+    "label": "Score history", "type": "link",
+    "href": "/m365/best-practices/history"
+  }) %}
+  {{ page_header_actions(bp_actions) }}
 {% endblock %}
 
 {% block styles %}
@@ -34,6 +41,44 @@
     outline-offset: 2px;
     transform: translateY(-2px);
   }
+  .bp-account-findings ul {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0.5rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .bp-account-findings li {
+    align-items: center;
+    display: flex;
+    gap: 0.5rem;
+    justify-content: space-between;
+    overflow-wrap: anywhere;
+  }
+  .bp-account-findings form { flex: 0 0 auto; }
+  .bp-note-editor textarea {
+    margin-top: 0.5rem;
+    min-height: 5rem;
+    width: 100%;
+  }
+  .bp-note-editor__actions {
+    margin-top: 0.5rem;
+  }
+  .bp-saved-note {
+    margin-top: 0.5rem;
+  }
+  .bp-priority {
+    border-radius: 999px;
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    text-transform: uppercase;
+  }
+  .bp-priority--critical { background: rgba(220, 38, 38, 0.12); color: var(--color-error, #dc2626); }
+  .bp-priority--high { background: rgba(234, 88, 12, 0.12); color: #c2410c; }
+  .bp-priority--medium { background: rgba(217, 119, 6, 0.12); color: var(--color-warning, #d97706); }
+  .bp-priority--low { background: rgba(37, 99, 235, 0.12); color: var(--color-primary, #2563eb); }
 </style>
 {% endblock %}
 
@@ -41,12 +86,20 @@
   {# ------------------------------------------------------------------ #}
   {# Helper macro: stat-strip filter boxes                               #}
   {# ------------------------------------------------------------------ #}
-  {% macro filter_strip(results, table_id) %}
+  {% macro filter_strip(results, secure_score=none) %}
   {% set pass_count = results | selectattr("status", "equalto", "pass") | list | length %}
   {% set fail_count = results | selectattr("status", "equalto", "fail") | list | length %}
   {% set unknown_count = results | selectattr("status", "equalto", "unknown") | list | length %}
   {% set na_count = results | selectattr("status", "equalto", "not_applicable") | list | length %}
-  <div class="stat-strip bp-filter-strip" data-bp-table="{{ table_id }}">
+  {% set excluded_count = results | selectattr("status", "equalto", "excluded") | list | length %}
+  <div class="stat-strip bp-filter-strip">
+    {% if secure_score %}
+    <div class="stat-strip__stat stat-strip__stat--info"
+         title="Microsoft Secure Score: {{ secure_score.current | round(1) }}/{{ secure_score.maximum | round(1) }}">
+      <span class="stat-strip__stat-label">Secure Score</span>
+      <span class="stat-strip__stat-value">{{ secure_score.percentage | round(1) }}%</span>
+    </div>
+    {% endif %}
     {% if pass_count %}
     <button type="button" class="stat-strip__stat stat-strip__stat--success bp-filter-btn"
             data-bp-status="pass" aria-pressed="false" title="Click to filter: Passed checks">
@@ -75,92 +128,211 @@
       <span class="stat-strip__stat-value">{{ na_count }}</span>
     </button>
     {% endif %}
+    {% if excluded_count %}
+    <button type="button" class="stat-strip__stat stat-strip__stat--neutral bp-filter-btn"
+            data-bp-status="excluded" aria-pressed="false" title="Click to filter: Excluded checks">
+      <span class="stat-strip__stat-label">Excluded</span>
+      <span class="stat-strip__stat-value">{{ excluded_count }}</span>
+    </button>
+    {% endif %}
   </div>
   {% endmacro %}
 
   {# ------------------------------------------------------------------ #}
   {# Helper macro: render a results table                                #}
   {# ------------------------------------------------------------------ #}
-  {% macro result_table(checks, show_actions, table_id='') %}
+  {% macro result_table(checks, show_actions, show_account_actions=false, can_edit_notes=false, table_id='', can_submit_tickets=false) %}
+  {% set has_ticket_actions = can_submit_tickets and (checks | selectattr("status", "equalto", "fail") | list | length > 0) %}
+  {{ table_toolbar(
+    table_id,
+    search=true,
+    search_placeholder='Filter checks',
+    search_name='q-' ~ table_id,
+    extra_class='bp-table-toolbar'
+  ) }}
   <div class="panel__body" style="padding:0">
-    <table class="table"{% if table_id %} id="{{ table_id }}"{% endif %}>
+    <table class="table bp-results-table"{% if table_id %} id="{{ table_id }}" data-table data-table-id="m365-best-practices-{{ table_id }}"{% endif %}>
       <thead>
         <tr>
-          <th style="width:3rem"></th>
-          <th>Check</th>
-          <th>Details</th>
-          <th style="white-space:nowrap">Last evaluated</th>
-          {% if show_actions %}<th style="width:10rem">Actions</th>{% endif %}
+          <th style="width:3rem" data-column-key="status" data-sort="string">Status</th>
+          <th style="width:8rem" data-column-key="priority" data-sort="number">Priority</th>
+          <th data-column-key="check" data-sort="string">Check</th>
+          <th data-column-key="details" data-sort="string">Details</th>
+          <th data-column-key="evaluated" data-sort="date" style="white-space:nowrap">Last evaluated</th>
+          {% if show_actions or has_ticket_actions %}<th class="table__actions" data-column-filter-disabled style="width:8rem">Actions</th>{% endif %}
         </tr>
       </thead>
       <tbody>
         {% for check in checks %}
         <tr data-bp-status="{{ check.status }}">
-          <td style="text-align:center">
+          <td data-column-key="status" data-value="{{ check.status }}" style="text-align:center">
             {% if check.status == "pass" %}
               <span title="Pass" style="color:var(--color-success,#16a34a);font-size:1.25rem">✓</span>
             {% elif check.status == "fail" %}
               <span title="Fail" style="color:var(--color-error,#dc2626);font-size:1.25rem">✗</span>
             {% elif check.status == "not_applicable" %}
               <span title="Not applicable" style="color:var(--color-muted,#6b7280);font-size:1.25rem">–</span>
+            {% elif check.status == "excluded" %}
+              <span title="Excluded" style="color:var(--color-muted,#6b7280);font-size:1.25rem">⊘</span>
             {% else %}
               <span title="Unknown" style="color:var(--color-warning,#d97706);font-size:1.25rem">?</span>
             {% endif %}
           </td>
-          <td>
+          <td data-column-key="priority" data-value="{{ check.risk_score or 0 }}">
+            <span class="bp-priority bp-priority--{{ check.risk_severity or 'medium' }}">
+              {{ check.risk_severity or 'medium' }}
+            </span>
+            <br /><small class="text-muted">{{ check.risk_score or 0 }}/100</small>
+          </td>
+          <td data-column-key="check">
             <strong>{{ check.check_name }}</strong>
             {% if check.is_cis_benchmark %}
             <span class="badge badge--info badge--cis" style="margin-left:0.4rem" title="CIS Benchmark check">CIS</span>
             {% endif %}
+            {% if check.regression_detected %}
+            <span class="badge badge--warning" style="margin-left:0.4rem" title="This check regressed from pass to fail on the latest evaluation">Regression</span>
+            {% endif %}
             {% if check.description %}
             <br /><small class="text-muted">{{ check.description }}</small>
             {% endif %}
+            {% if check.benchmark_category %}
+            <br /><small class="text-muted">{{ check.benchmark_category }}</small>
+            {% endif %}
           </td>
-          <td>
+          <td data-column-key="details">
             <span>{{ check.details or '' }}</span>
+            {% if check.business_impact %}
+            <div style="margin-top:0.5rem"><strong>Business impact:</strong> {{ check.business_impact }}</div>
+            {% endif %}
+            {% if check.affected_accounts %}
+            <details class="bp-account-findings" style="margin-top:0.5rem">
+              <summary>Listed accounts ({{ check.affected_accounts | length }})</summary>
+              <ul>
+                {% for account in check.affected_accounts %}
+                <li{% if account.excluded %} class="text-muted"{% endif %}>
+                  <span>{{ account.name }}{% if account.excluded %} — excluded{% endif %}</span>
+                  {% if show_account_actions %}
+                  <form method="post" action="/m365/best-practices/account-exclusion/{{ check.check_id }}">
+                    {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                    <input type="hidden" name="account_id" value="{{ account.id }}" />
+                    <input type="hidden" name="excluded" value="{{ '0' if account.excluded else '1' }}" />
+                    <button type="submit" class="button button--small button--ghost">
+                      {{ 'Restore' if account.excluded else 'Exclude' }}
+                    </button>
+                  </form>
+                  {% endif %}
+                </li>
+                {% endfor %}
+              </ul>
+            </details>
+            {% endif %}
             {% if check.remediation %}
             <details style="margin-top:0.5rem">
               <summary style="cursor:pointer;color:var(--color-primary,#2563eb);font-size:0.875rem">Remediation guidance</summary>
               <p style="margin-top:0.5rem;font-size:0.875rem">{{ check.remediation }}</p>
+              {% if check.remediation_runbook %}
+              <strong style="display:block;margin-top:0.5rem;font-size:0.875rem">Runbook</strong>
+              <ol style="margin:0.35rem 0 0 1.25rem;font-size:0.875rem">
+                {% for step in check.remediation_runbook %}
+                <li>{{ step }}</li>
+                {% endfor %}
+              </ol>
+              {% endif %}
+              {% if check.rollback_guidance %}
+              <p style="margin-top:0.5rem;font-size:0.875rem"><strong>Rollback:</strong> {{ check.rollback_guidance }}</p>
+              {% endif %}
             </details>
             {% endif %}
             {% if check.remediation_status %}
             <div style="margin-top:0.4rem">
               {% if check.remediation_status == "success" %}
                 <span style="color:var(--color-success,#16a34a);font-size:0.8rem">✓ Remediated
-                  {% if check.remediated_at %}<small class="text-muted">on {{ check.remediated_at.strftime('%d %b %Y %H:%M') }}</small>{% endif %}
+                  {% if check.remediated_at %}<small class="text-muted">on <span data-utc="{{ check.remediated_at.isoformat() }}">{{ check.remediated_at.isoformat() }}</span></small>{% endif %}
                 </span>
               {% elif check.remediation_status == "failed" %}
                 <span style="color:var(--color-error,#dc2626);font-size:0.8rem">✗ Remediation failed
-                  {% if check.remediated_at %}<small class="text-muted">on {{ check.remediated_at.strftime('%d %b %Y %H:%M') }}</small>{% endif %}
+                  {% if check.remediated_at %}<small class="text-muted">on <span data-utc="{{ check.remediated_at.isoformat() }}">{{ check.remediated_at.isoformat() }}</span></small>{% endif %}
+                  {% if check.remediation_failure_reason %}<small class="text-muted"> — {{ check.remediation_failure_reason | e }}</small>{% endif %}
                 </span>
               {% endif %}
             </div>
             {% endif %}
+            {% if check.notes %}
+            <div class="bp-saved-note">
+              <strong>Note:</strong> {{ check.notes }}
+            </div>
+            {% endif %}
+            {% if can_edit_notes %}
+            <details class="bp-note-editor" style="margin-top:0.5rem">
+              <summary style="cursor:pointer;color:var(--color-primary,#2563eb);font-size:0.875rem">
+                {{ 'Edit note' if check.notes else 'Add note' }}
+              </summary>
+              <form method="post" action="/m365/best-practices/note/{{ check.check_id }}">
+                {% if csrf_token %}
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                {% endif %}
+                <textarea
+                  class="form__control"
+                  name="notes"
+                  rows="3"
+                  placeholder="Add customer context or technician review notes."
+                >{{ check.notes or '' }}</textarea>
+                <div class="bp-note-editor__actions">
+                  <button type="submit" class="button button--small button--ghost">Save note</button>
+                </div>
+              </form>
+            </details>
+            {% endif %}
           </td>
-          <td style="white-space:nowrap">
+          <td data-column-key="evaluated" data-value="{{ check.run_at.isoformat() if check.run_at else '' }}" style="white-space:nowrap">
             {% if check.run_at %}
-            <small class="text-muted">{{ check.run_at.strftime('%d %b %Y %H:%M') }}</small>
+            <small class="text-muted"><span data-utc="{{ check.run_at.isoformat() }}">{{ check.run_at.isoformat() }}</span></small>
             {% endif %}
           </td>
-          {% if show_actions %}
+          {% if show_actions or has_ticket_actions %}
           <td>
-            <form method="post" action="/m365/best-practices/check/{{ check.check_id }}" style="display:inline">
-              {% if csrf_token %}
-              <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-              {% endif %}
-              <button type="submit" class="button button--small button--ghost"
-                      title="Re-evaluate this check now">Check</button>
-            </form>
-            {% if check.status == "fail" and check.has_remediation %}
-            <form method="post" action="/m365/best-practices/remediate/{{ check.check_id }}" style="display:inline">
-              {% if csrf_token %}
-              <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-              {% endif %}
-              <button type="submit" class="button button--small button--warning"
-                      title="Run automated remediation via PowerShell">Remediate</button>
-            </form>
-            {% endif %}
+            {% set row_menu_id = 'bp-actions-menu-' ~ check.check_id %}
+            <div class="header-menu" data-header-menu>
+              <button type="button"
+                      class="button button--ghost button--small header-menu__button"
+                      data-header-menu-toggle
+                      aria-haspopup="menu"
+                      aria-expanded="false"
+                      aria-controls="{{ row_menu_id }}">
+                <span>Actions</span>
+                <svg class="header-menu__chevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14">
+                  <path fill="currentColor" d="M5.5 7.5 10 12l4.5-4.5z" />
+                </svg>
+              </button>
+              <div id="{{ row_menu_id }}" class="header-menu__panel" role="menu" data-header-menu-panel hidden>
+                {% if has_ticket_actions and check.status == "fail" %}
+                <form method="post" action="/m365/best-practices/ticket/{{ check.check_id }}" class="header-menu__form">
+                  {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                  <button type="submit" class="header-menu__item" role="menuitem" title="Create a support ticket for this failed check">Create ticket</button>
+                </form>
+                {% endif %}
+                {% if show_actions %}
+                {% if check.status == "excluded" %}
+                <a href="/m365/best-practices/settings" class="header-menu__item" role="menuitem">Manage exclusion</a>
+                {% else %}
+                <form method="post" action="/m365/best-practices/check/{{ check.check_id }}" class="header-menu__form">
+                  {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                  <button type="submit" class="header-menu__item" role="menuitem" title="Re-evaluate this check now">Check</button>
+                </form>
+                {% if check.status == "fail" and check.has_remediation %}
+                <form method="post" action="/m365/best-practices/remediate/{{ check.check_id }}" class="header-menu__form">
+                  {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                  <button type="submit" class="header-menu__item" role="menuitem" title="Run automated remediation via PowerShell">Remediate</button>
+                </form>
+                {% endif %}
+                <form method="post" action="/m365/best-practices/exclude/{{ check.check_id }}" class="header-menu__form">
+                  {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                  <button type="submit" class="header-menu__item" role="menuitem" title="Skip this check for this company">Exclude</button>
+                </form>
+                {% endif %}
+                {% endif %}
+              </div>
+            </div>
           </td>
           {% endif %}
         </tr>
@@ -177,13 +349,45 @@
   {% set intune_windows_results = results | selectattr("cis_group", "equalto", "intune_windows") | list %}
   {% set intune_ios_results = results | selectattr("cis_group", "equalto", "intune_ios") | list %}
   {% set intune_macos_results = results | selectattr("cis_group", "equalto", "intune_macos") | list %}
+  {% set m365_applicable_results = m365_results | rejectattr("status", "equalto", "not_applicable") | list %}
+  {% set intune_windows_applicable_results = intune_windows_results | rejectattr("status", "equalto", "not_applicable") | list %}
+  {% set intune_ios_applicable_results = intune_ios_results | rejectattr("status", "equalto", "not_applicable") | list %}
+  {% set intune_macos_applicable_results = intune_macos_results | rejectattr("status", "equalto", "not_applicable") | list %}
 
+  {% if results %}
+  <section class="panel">
+    <div class="panel__body" style="padding-bottom:0">
+      {{ filter_strip(results, secure_score) }}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if is_super_admin and batch_scopes %}
+  <section class="panel">
+    <header class="panel__header">
+      <div>
+        <h3 class="panel__title">Batch remediation</h3>
+        <p class="text-muted" style="margin:var(--space-1) 0 0">Run controlled remediation only for failed checks in the selected benchmark scope for this company. Per-check remediation status is tracked in the results below.</p>
+      </div>
+    </header>
+    <div class="panel__body" style="display:flex;flex-wrap:wrap;gap:0.75rem">
+      {% for scope in batch_scopes %}
+      <form method="post" action="/m365/best-practices/remediate-batch">
+        {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+        <input type="hidden" name="scope" value="{{ scope.id }}" />
+        <button type="submit" class="button button--warning">
+          Remediate {{ scope.label }} ({{ scope.pending_count }})
+        </button>
+      </form>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if not m365_results or m365_applicable_results %}
   <section class="panel">
     {% if m365_results %}
-      <div class="panel__body" style="padding-bottom:0">
-        {{ filter_strip(m365_results, 'bp-table-m365') }}
-      </div>
-      {{ result_table(m365_results, is_super_admin, 'bp-table-m365') }}
+      {{ result_table(m365_results, is_super_admin, can_manage_account_exclusions, can_edit_notes, 'bp-table-m365', can_submit_tickets) }}
     {% else %}
       <div class="panel__body">
         {% if not catalog %}
@@ -202,20 +406,18 @@
       </div>
     {% endif %}
   </section>
+  {% endif %}
 
   {# ------------------------------------------------------------------ #}
   {# CIS Intune Windows section                                           #}
   {# ------------------------------------------------------------------ #}
-  {% if intune_windows_results or (catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_windows") | list) %}
+  {% if intune_windows_applicable_results or (not intune_windows_results and catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_windows") | list) %}
   <section class="panel">
     <header class="panel__header">
       <h3 class="panel__title">CIS Intune Benchmark – Windows</h3>
     </header>
     {% if intune_windows_results %}
-      <div class="panel__body" style="padding-bottom:0">
-        {{ filter_strip(intune_windows_results, 'bp-table-intune-windows') }}
-      </div>
-      {{ result_table(intune_windows_results, is_super_admin, 'bp-table-intune-windows') }}
+      {{ result_table(intune_windows_results, is_super_admin, can_manage_account_exclusions, can_edit_notes, 'bp-table-intune-windows', can_submit_tickets) }}
     {% else %}
       <div class="panel__body">
         <p class="text-muted">No Intune Windows results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to run checks.{% endif %}</p>
@@ -227,16 +429,13 @@
   {# ------------------------------------------------------------------ #}
   {# CIS Intune iOS/iPadOS section                                        #}
   {# ------------------------------------------------------------------ #}
-  {% if intune_ios_results or (catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_ios") | list) %}
+  {% if intune_ios_applicable_results or (not intune_ios_results and catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_ios") | list) %}
   <section class="panel">
     <header class="panel__header">
       <h3 class="panel__title">CIS Intune Benchmark – iOS / iPadOS</h3>
     </header>
     {% if intune_ios_results %}
-      <div class="panel__body" style="padding-bottom:0">
-        {{ filter_strip(intune_ios_results, 'bp-table-intune-ios') }}
-      </div>
-      {{ result_table(intune_ios_results, is_super_admin, 'bp-table-intune-ios') }}
+      {{ result_table(intune_ios_results, is_super_admin, can_manage_account_exclusions, can_edit_notes, 'bp-table-intune-ios', can_submit_tickets) }}
     {% else %}
       <div class="panel__body">
         <p class="text-muted">No Intune iOS/iPadOS results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to run checks.{% endif %}</p>
@@ -248,16 +447,13 @@
   {# ------------------------------------------------------------------ #}
   {# CIS Intune macOS section                                             #}
   {# ------------------------------------------------------------------ #}
-  {% if intune_macos_results or (catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_macos") | list) %}
+  {% if intune_macos_applicable_results or (not intune_macos_results and catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_macos") | list) %}
   <section class="panel">
     <header class="panel__header">
       <h3 class="panel__title">CIS Intune Benchmark – macOS</h3>
     </header>
     {% if intune_macos_results %}
-      <div class="panel__body" style="padding-bottom:0">
-        {{ filter_strip(intune_macos_results, 'bp-table-intune-macos') }}
-      </div>
-      {{ result_table(intune_macos_results, is_super_admin, 'bp-table-intune-macos') }}
+      {{ result_table(intune_macos_results, is_super_admin, can_manage_account_exclusions, can_edit_notes, 'bp-table-intune-macos', can_submit_tickets) }}
     {% else %}
       <div class="panel__body">
         <p class="text-muted">No Intune macOS results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to run checks.{% endif %}</p>
@@ -304,27 +500,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
-(function () {
-  'use strict';
-
-  document.querySelectorAll('.bp-filter-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var strip = btn.closest('.bp-filter-strip');
-      var tableId = strip ? strip.dataset.bpTable : null;
-      var pressed = btn.getAttribute('aria-pressed') === 'true';
-      btn.setAttribute('aria-pressed', pressed ? 'false' : 'true');
-      if (!tableId) return;
-      var table = document.getElementById(tableId);
-      if (!table) return;
-      var activeFilters = Array.from(
-        strip.querySelectorAll('.bp-filter-btn[aria-pressed="true"]')
-      ).map(function (b) { return b.dataset.bpStatus; });
-      table.querySelectorAll('tbody tr').forEach(function (row) {
-        row.hidden = activeFilters.length > 0 && !activeFilters.includes(row.dataset.bpStatus);
-      });
-    });
-  });
-}());
-</script>
+<script src="/static/js/tables.js" defer></script>
+<script src="/static/js/m365_best_practices.js" defer></script>
 {% endblock %}

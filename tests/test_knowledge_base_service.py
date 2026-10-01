@@ -188,6 +188,7 @@ async def test_create_article_generates_ai_tags(monkeypatch):
     update_article_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(knowledge_base_service.kb_repo, "create_article", AsyncMock(side_effect=_create_article))
     monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_sections", AsyncMock())
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_assets", AsyncMock())
     monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_users", AsyncMock())
     monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_companies", AsyncMock())
     monkeypatch.setattr(
@@ -253,6 +254,8 @@ async def test_update_article_refreshes_ai_tags(monkeypatch):
     update_mock = AsyncMock(return_value=dict(current_article, title="Security fundamentals"))
     monkeypatch.setattr(knowledge_base_service.kb_repo, "update_article", update_mock)
     monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_sections", AsyncMock())
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_assets", AsyncMock())
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "create_article_version", AsyncMock())
     monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_users", AsyncMock())
     monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_companies", AsyncMock())
     async def fake_trigger(slug, payload, *, background=True, on_complete=None):
@@ -306,3 +309,38 @@ async def test_search_articles_matches_manual_ai_tags(monkeypatch):
     result = await knowledge_base_service.search_articles("vpn", context, use_ollama=False)
 
     assert [item["slug"] for item in result["results"]] == ["manual-vpn"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_non_published_lifecycle_never_appears_in_customer_listing(monkeypatch):
+    articles = [
+        _article_factory(id=50, slug="published", lifecycle_status="published"),
+        _article_factory(id=51, slug="review", lifecycle_status="in_review"),
+        _article_factory(id=52, slug="retired", lifecycle_status="retired"),
+    ]
+    monkeypatch.setattr(
+        knowledge_base_service.kb_repo, "list_articles", AsyncMock(return_value=articles)
+    )
+
+    context = await knowledge_base_service.build_access_context(None)
+    visible = await knowledge_base_service.list_articles_for_context(context)
+
+    assert [article["slug"] for article in visible] == ["published"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_update_snapshots_old_version_before_revision(monkeypatch):
+    current = _article_factory(id=60, lifecycle_status="published")
+    revised = dict(current, title="Revised runbook")
+    snapshot = AsyncMock(return_value=1)
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "get_article_by_id", AsyncMock(side_effect=[current, revised]))
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "create_article_version", snapshot)
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "update_article", AsyncMock(return_value=revised))
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_sections", AsyncMock())
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_users", AsyncMock())
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_companies", AsyncMock())
+    monkeypatch.setattr(knowledge_base_service.modules_service, "trigger_module", AsyncMock(return_value={"status": "queued"}))
+
+    await knowledge_base_service.update_article(60, {"title": "Revised runbook"}, editor_id=9)
+
+    snapshot.assert_awaited_once_with(current, created_by=9)

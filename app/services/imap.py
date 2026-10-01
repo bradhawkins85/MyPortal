@@ -4,16 +4,16 @@ import base64
 import email
 import hashlib
 import imaplib
-import io
 import json
 import re
 import secrets
+from contextlib import suppress
 from datetime import datetime, timezone
+from importlib import import_module
 from urllib.parse import unquote
 from email.header import decode_header, make_header
 from email.utils import getaddresses, parsedate_to_datetime
 from html import escape
-from pathlib import Path
 from typing import Any, Mapping
 
 from app.core.database import db
@@ -24,10 +24,8 @@ from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import staff as staff_repo
 from app.repositories import users as users_repo
 from app.repositories import tickets as tickets_repo
-from app.repositories import ticket_attachments as attachments_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import modules as modules_service
-from app.services import system_state
 from app.services import ticket_attachments as attachments_service
 from app.services import tickets as tickets_service
 from app.services.sanitization import sanitize_rich_text
@@ -44,10 +42,8 @@ def _normalise_content_reference(value: str | None) -> str:
     if not reference:
         return ""
     reference = reference.strip("<>")
-    try:
+    with suppress(Exception):
         reference = unquote(reference)
-    except Exception:  # pragma: no cover - unquote is defensive here
-        pass
     return reference.strip().lower()
 
 
@@ -61,12 +57,8 @@ def _content_reference_keys(part: email.message.Message) -> set[str]:
             keys.add(key)
     filename = part.get_filename()
     if filename:
-        try:
+        with suppress(Exception):
             filename = str(make_header(decode_header(filename)))
-        except Exception:
-            # Malformed/unknown encoded filenames are tolerated; fall back to
-            # the raw filename value for reference key normalization.
-            pass
         key = _normalise_content_reference(filename)
         if key:
             keys.add(key)
@@ -610,14 +602,10 @@ def _extract_record_id(record: Any) -> int | None:
     if isinstance(record, Mapping):
         return _int_or_none(record.get("id"))
     if hasattr(record, "get"):
-        try:
+        with suppress(Exception):
             return _int_or_none(record.get("id"))  # type: ignore[call-arg]
-        except Exception:  # pragma: no cover - defensive
-            pass
-    try:
+    with suppress(Exception):
         return _int_or_none(record["id"])  # type: ignore[index]
-    except Exception:  # pragma: no cover - defensive
-        pass
     return _int_or_none(getattr(record, "id", None))
 
 
@@ -892,7 +880,7 @@ async def get_account(account_id: int, *, redact: bool = True) -> dict[str, Any]
 
 
 async def _refresh_scheduler() -> None:
-    from app.services.scheduler import scheduler_service
+    scheduler_service = import_module("app.services.scheduler").scheduler_service
 
     await scheduler_service.refresh()
 
@@ -1192,11 +1180,9 @@ def _extract_body_and_attachments(message: email.message.Message) -> tuple[str, 
                 filename = part.get_filename()
                 if filename:
                     # Decode filename if it's encoded
-                    try:
+                    with suppress(Exception):
                         decoded_header = make_header(decode_header(filename))
                         filename = str(decoded_header)
-                    except Exception:
-                        pass  # Use filename as-is if decoding fails
                 else:
                     # Generate a filename if none provided
                     filename = f"attachment_{secrets.token_hex(4)}"
@@ -1397,7 +1383,7 @@ async def _find_existing_ticket_for_reply(
                 # request rather than falling through to a less reliable match.
                 return None if _ticket_is_closed(ticket) else ticket
         except Exception:  # pragma: no cover - defensive
-            pass
+            rows = []
 
         try:
             rows = await db.fetch_all(
@@ -1410,7 +1396,7 @@ async def _find_existing_ticket_for_reply(
                 ticket = _normalise_ticket(rows[0])
                 return None if _ticket_is_closed(ticket) else ticket
         except Exception:  # pragma: no cover - defensive
-            pass
+            rows = []
 
     related_ids = _expand_ticket_external_references(related_message_ids)
 
@@ -1423,7 +1409,7 @@ async def _find_existing_ticket_for_reply(
                 if ticket and not _ticket_is_closed(ticket):
                     return ticket
             except Exception:  # pragma: no cover - defensive logging
-                pass
+                ticket = None
 
             try:
                 rows = await db.fetch_all(
@@ -1441,7 +1427,7 @@ async def _find_existing_ticket_for_reply(
                     if not _ticket_is_closed(ticket):
                         return ticket
             except Exception:  # pragma: no cover - defensive logging
-                pass
+                rows = []
 
     # Next, try to match Syncro-originated replies using the embedded message id
     syncro_external_id = _extract_syncro_message_id(subject) or _extract_syncro_message_id(message_body)
@@ -1451,7 +1437,7 @@ async def _find_existing_ticket_for_reply(
             if ticket and not _ticket_is_closed(ticket):
                 return ticket
         except Exception:  # pragma: no cover - defensive logging
-            pass
+            ticket = None
 
     # If no ticket number found, try to match by normalized subject
     # Only match non-closed tickets where sender is requester or watcher
@@ -1551,6 +1537,57 @@ async def _find_existing_ticket_for_reply(
     return None
 
 
+async def _match_marketing_campaign_reply(
+    *,
+    subject: str,
+    from_email: str | None,
+    related_message_ids: list[str] | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Return ``(open reply ticket, campaign recipient)`` for a marketing email reply.
+
+    Sending a campaign never creates tickets; the first reply from a recipient
+    does, and later replies from them continue that ticket while it is open.
+    """
+
+    try:
+        from app.services import marketing_campaigns as marketing_campaigns_service
+
+        recipient = await marketing_campaigns_service.match_inbound_reply(
+            subject=subject,
+            from_email=from_email,
+            related_message_ids=related_message_ids,
+        )
+    except Exception as exc:  # pragma: no cover - never block mailbox imports
+        log_error("Marketing campaign reply lookup failed", error=str(exc))
+        return None, None
+    if not recipient:
+        return None, None
+    ticket_id = recipient.get("reply_ticket_id")
+    if ticket_id:
+        ticket = await tickets_repo.get_ticket(int(ticket_id))
+        if ticket and not _ticket_is_closed(ticket):
+            return ticket, recipient
+    return None, recipient
+
+
+async def _link_marketing_campaign_reply(
+    recipient: Mapping[str, Any] | None,
+    ticket: Mapping[str, Any] | None,
+    *,
+    is_new_ticket: bool,
+) -> None:
+    if not recipient or not isinstance(ticket, Mapping) or ticket.get("id") is None:
+        return
+    try:
+        from app.services import marketing_campaigns as marketing_campaigns_service
+
+        await marketing_campaigns_service.link_reply(
+            recipient, int(ticket["id"]), new_ticket=is_new_ticket
+        )
+    except Exception as exc:  # pragma: no cover - the ticket itself already exists
+        log_error("Failed to link marketing campaign reply", ticket_id=ticket.get("id"), error=str(exc))
+
+
 async def _resolve_existing_reply_author_id(
     ticket: Mapping[str, Any],
     from_email: str | None,
@@ -1622,13 +1659,6 @@ async def _record_message(
     )
 
 
-def _get_upload_directory() -> Path:
-    """Get the base upload directory for ticket attachments."""
-    base_dir = Path(__file__).parent.parent / "static" / "uploads" / "tickets"
-    base_dir.mkdir(parents=True, exist_ok=True)
-    return base_dir
-
-
 def _generate_secure_filename(original_filename: str) -> str:
     """Generate a secure filename using a random token."""
     # Extract extension from original filename
@@ -1674,12 +1704,6 @@ async def _save_email_attachment(
 
 
 async def sync_account(account_id: int) -> dict[str, Any]:
-    if system_state.is_restart_pending():
-        log_info(
-            "Skipping IMAP sync because system restart is pending",
-            account_id=account_id,
-        )
-        return {"status": "skipped", "reason": "pending_restart"}
     module = await modules_service.get_module("imap", redact=False)
     if not module or not module.get("enabled"):
         return {"status": "skipped", "reason": "Module disabled"}
@@ -1713,10 +1737,8 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             mailbox = imaplib.IMAP4_SSL(host, port)
         else:
             mailbox = imaplib.IMAP4(host, port)
-            try:
+            with suppress(Exception):
                 mailbox.starttls()
-            except Exception:
-                pass
         mailbox.login(username, password)
         mailbox.select(folder, readonly=not mark_as_read)
         criterion = "UNSEEN" if process_unread_only else "ALL"
@@ -1892,6 +1914,13 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 related_message_ids=related_message_ids,
                 message_body=body,
             )
+            campaign_reply: dict[str, Any] | None = None
+            if not existing_ticket:
+                existing_ticket, campaign_reply = await _match_marketing_campaign_reply(
+                    subject=subject,
+                    from_email=from_email_addr,
+                    related_message_ids=related_message_ids,
+                )
             
             ticket: Mapping[str, Any] | None = None
             is_new_ticket = False
@@ -1919,7 +1948,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         assigned_user_id=None,
                         priority="normal",
                         status=None,
-                        category="email",
+                        category="marketing" if campaign_reply else "email",
                         module_slug="imap",
                         external_reference=_normalise_ticket_external_reference(message_id),
                         initial_reply_author_id=requester_id,
@@ -1942,12 +1971,20 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         )
                         try:
                             await tickets_service.refresh_ticket_ai_summary(int(ticket_id))
-                        except RuntimeError:
-                            pass
+                        except RuntimeError as exc:
+                            log_error(
+                                "IMAP ticket AI summary refresh skipped",
+                                ticket_id=int(ticket_id),
+                                error=str(exc),
+                            )
                         try:
                             await tickets_service.refresh_ticket_ai_tags(int(ticket_id))
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            log_error(
+                                "IMAP ticket AI tag refresh skipped",
+                                ticket_id=int(ticket_id),
+                                error=str(exc),
+                            )
             except Exception as exc:  # pragma: no cover - defensive logging
                 error_text = str(exc)
                 errors.append({"uid": uid, "error": error_text})
@@ -1965,6 +2002,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     error=error_text,
                 )
                 continue
+            await _link_marketing_campaign_reply(
+                campaign_reply, ticket, is_new_ticket=is_new_ticket
+            )
             ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
             if isinstance(ticket_id, int):
                 # For existing tickets (replies), always add a conversation entry
@@ -2077,10 +2117,8 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         errors.append({"error": str(exc)})
     finally:
         if mailbox is not None:
-            try:
+            with suppress(Exception):
                 mailbox.logout()
-            except Exception:
-                pass
     await imap_repo.update_account(
         int(account_id),
         last_synced_at=datetime.now(timezone.utc),
