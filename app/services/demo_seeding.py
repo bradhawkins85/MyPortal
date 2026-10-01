@@ -823,20 +823,20 @@ async def remove_demo_data() -> dict[str, Any]:
 
     # Delete demo shop products (by demo SKU prefix)
     await db.execute(
-        "DELETE FROM shop_products WHERE sku LIKE 'DEMO-%'",
-        (),
+        "DELETE FROM shop_products WHERE sku LIKE %s",
+        ("DEMO-%",),
     )
 
     # Delete demo issues (by demo slug prefix)
     await db.execute(
-        "DELETE FROM issue_definitions WHERE slug LIKE 'demo-%'",
-        (),
+        "DELETE FROM issue_definitions WHERE slug LIKE %s",
+        ("demo-%",),
     )
 
     # Delete demo compliance checks (by demo code prefix)
     await db.execute(
-        "DELETE FROM compliance_checks WHERE code LIKE 'DEMO-CC-%'",
-        (),
+        "DELETE FROM compliance_checks WHERE code LIKE %s",
+        ("DEMO-CC-%",),
     )
 
     # Delete the demo company (cascades to staff, assets, licenses, subscriptions,

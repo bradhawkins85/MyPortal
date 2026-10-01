@@ -3,8 +3,15 @@
 
   function loadVisibleColumns(defaultColumns) {
     try {
-      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-      if (Array.isArray(stored) && stored.every((item) => typeof item === 'string')) {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw === null) {
+        return defaultColumns;
+      }
+      const stored = JSON.parse(raw);
+      // A list holding only the locked "name" column was persisted on first load by an
+      // earlier bug, so treat it like no preference rather than hiding every column.
+      const onlyLockedColumn = stored.length === 1 && stored[0] === 'name';
+      if (Array.isArray(stored) && stored.length > 0 && !onlyLockedColumn && stored.every((item) => typeof item === 'string')) {
         return stored;
       }
     } catch (err) {
