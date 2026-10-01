@@ -10352,6 +10352,7 @@ async def _load_ticket_stored_related_items(
             "type": source_type,
             "label": label,
             "url": url,
+            "relationship_type": relationship_type,
             "relationship_label": _RELATIONSHIP_LABELS.get(relationship_type, "Related"),
             "confidence_band": _relationship_confidence_band(row.get("confidence")),
             "score": round(float(row.get("relevance_score") or 0) * 100),
@@ -11005,6 +11006,12 @@ async def _render_ticket_detail(
         "ticket_expense_total": ticket_expense_total,
         "ticket_related_auto_scan": False,
         "ticket_related_items": ticket_related_items,
+        "ticket_suggest_reply_available": any(
+            item.get("available")
+            and item.get("relationship_type") in {"DIRECT_MATCH", "KNOWN_ISSUE"}
+            and item.get("type") in {"knowledge_base", "tickets"}
+            for item in ticket_related_items
+        ),
         "ticket_labour_types": labour_types,
         "ticket_billable_minutes": total_billable_minutes,
         "ticket_non_billable_minutes": total_non_billable_minutes,

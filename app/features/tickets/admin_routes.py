@@ -17,6 +17,7 @@ Mirrors the routes that used to live in ``app/main.py``:
 * ``POST /admin/tickets/bulk-edit``
 * ``POST /admin/tickets/{ticket_id}/replies``
 * ``POST /admin/tickets/canned-responses``
+* ``POST /admin/tickets/{ticket_id}/suggest-reply``
 """
 
 from __future__ import annotations
@@ -59,6 +60,7 @@ from app.services import labour_types as labour_types_service
 from app.services import ticket_attachments as attachments_service
 from app.services import rag_retrieval
 from app.services import tickets as tickets_service
+from app.services import ticket_reply_suggestions as reply_suggestion_service
 from app.services import ticket_shipment_tracking as shipment_watch_service
 from app.services import message_templates as message_template_service
 from app.services import unbill_tickets as unbill_tickets_service
@@ -753,6 +755,29 @@ async def admin_ticket_automation_history(
         },
         "history": [encode(row) for row in rows],
     })
+
+@router.post("/admin/tickets/{ticket_id:int}/suggest-reply", response_class=JSONResponse)
+async def admin_suggest_ticket_reply(ticket_id: int, request: Request):
+    """Draft a reply from stored DIRECT_MATCH/KNOWN_ISSUE resolutions for review."""
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not permitted")
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    try:
+        result = await reply_suggestion_service.suggest_reply(
+            ticket,
+            user=current_user,
+            memberships=getattr(request.state, "available_companies", None) or [],
+        )
+    except reply_suggestion_service.ReplySuggestionError as exc:
+        return JSONResponse(
+            {"detail": str(exc)}, status_code=status.HTTP_422_UNPROCESSABLE_ENTITY
+        )
+    return JSONResponse(result)
+
 
 @router.post("/admin/tickets/{ticket_id:int}/related/rescan", response_class=JSONResponse)
 async def admin_rescan_ticket_related(ticket_id: int, request: Request):
