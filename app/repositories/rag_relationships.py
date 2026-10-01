@@ -688,46 +688,43 @@ async def list_relationship_evidence(
     When ``ticket_id`` is given, relationships a technician voted down from
     that ticket are excluded and ``my_rating`` carries ``user_id``'s vote.
     """
-    feedback_select = "NULL AS my_rating"
-    feedback_join = ""
-    feedback_where = ""
-    params: list[Any] = []
-    if ticket_id is not None:
-        feedback_select = "MAX(mine.rating) AS my_rating"
-        feedback_join = (
-            "LEFT JOIN rag_relationship_feedback mine ON mine.relationship_id = r.id "
-            "AND mine.ticket_id = ? AND mine.user_id = ?"
-        )
-        feedback_where = (
-            "AND NOT EXISTS (SELECT 1 FROM rag_relationship_feedback down_vote "
-            "WHERE down_vote.relationship_id = r.id AND down_vote.ticket_id = ? "
-            "AND down_vote.rating = 'down')"
-        )
-        params.extend([ticket_id, user_id if user_id is not None else 0])
-    params.extend([document_id, document_id, document_id])
-    if ticket_id is not None:
-        params.append(ticket_id)
-    params.append(limit)
+    # Without a ticket the feedback joins match nothing (ticket ids are positive),
+    # which keeps the SQL static for every caller.
+    feedback_ticket_id = ticket_id if ticket_id is not None else -1
+    feedback_user_id = user_id if user_id is not None else 0
     return await db.fetch_all(
-        f"""
+        """
         SELECT r.*, r.id AS relationship_id, d.source_type, d.source_id, d.title, d.url,
                d.permission_scope_json, d.metadata_json,
                CASE WHEN d.id IS NOT NULL AND d.is_active = 1 THEN 1 ELSE 0 END AS target_available,
                GROUP_CONCAT(c.chunk_text, '\n') AS content,
-               {feedback_select}
+               MAX(mine.rating) AS my_rating
         FROM rag_relationships r
-        {feedback_join}
+        LEFT JOIN rag_relationship_feedback mine ON mine.relationship_id = r.id
+            AND mine.ticket_id = ? AND mine.user_id = ?
         LEFT JOIN rag_documents d ON d.id = CASE WHEN r.source_document_id = ? THEN r.target_document_id ELSE r.source_document_id END
         LEFT JOIN rag_chunks c ON c.document_id = d.id AND c.is_active = 1
         WHERE (r.source_document_id = ? OR r.target_document_id = ?)
           AND r.match_status = 'MATCH'
           AND r.relationship_type IN ('DIRECT_MATCH','RELATED','SUPPORTING','DUPLICATE','FOLLOW_UP','KNOWN_ISSUE','PARENT_CHILD')
-          {feedback_where}
+          AND NOT EXISTS (
+              SELECT 1 FROM rag_relationship_feedback down_vote
+              WHERE down_vote.relationship_id = r.id AND down_vote.ticket_id = ?
+                AND down_vote.rating = 'down'
+          )
         GROUP BY r.id, d.id
         ORDER BY r.relevance_score DESC, r.confidence DESC
         LIMIT ?
         """,
-        tuple(params),
+        (
+            feedback_ticket_id,
+            feedback_user_id,
+            document_id,
+            document_id,
+            document_id,
+            feedback_ticket_id,
+            limit,
+        ),
     )
 
 
@@ -811,19 +808,20 @@ async def relationships_for_targets(
     targets = sorted({int(value) for value in target_document_ids if value})
     if not targets:
         return {}
-    placeholders = ",".join("?" for _ in targets)
+    # Filter in Python so the SQL stays static; a document has few relationships.
     rows = await db.fetch_all(
-        f"""
+        """
         SELECT r.id AS relationship_id,
                CASE WHEN r.source_document_id = ? THEN r.target_document_id ELSE r.source_document_id END AS other_document_id,
                EXISTS (SELECT 1 FROM rag_relationship_feedback f WHERE f.relationship_id = r.id
                        AND f.ticket_id = ? AND f.rating = 'down') AS voted_down
         FROM rag_relationships r
-        WHERE (r.source_document_id = ? AND r.target_document_id IN ({placeholders}))
-           OR (r.target_document_id = ? AND r.source_document_id IN ({placeholders}))
+        WHERE r.source_document_id = ? OR r.target_document_id = ?
         """,
-        (document_id, ticket_id, document_id, *targets, document_id, *targets),
+        (document_id, ticket_id, document_id, document_id),
     )
+    wanted = set(targets)
+    rows = [row for row in rows if int(row["other_document_id"]) in wanted]
     return {
         int(row["other_document_id"]): {
             "relationship_id": int(row["relationship_id"]),
