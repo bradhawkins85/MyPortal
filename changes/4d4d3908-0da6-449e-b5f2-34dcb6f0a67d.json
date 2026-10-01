@@ -1,0 +1,7 @@
+{
+  "guid": "4d4d3908-0da6-449e-b5f2-34dcb6f0a67d",
+  "occurred_at": "2026-09-30T15:00Z",
+  "change_type": "Feature",
+  "summary": "Redesign My profile around Security, Work details, Integrations and Left menu tabs with a sign-in summary strip, authenticator and passkey lists, and modals for changing your password, adding an authenticator (now with a QR code), adding, renaming and removing passkeys; contact, booking and Matrix details now save together",
+  "content_hash": "28acb4ce37da20877077d649f82f0e4ad47e3e5068acf42838a6d4259c19ff4b"
+}

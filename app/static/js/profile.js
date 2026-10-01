@@ -70,37 +70,200 @@
   }
 
   const userId = root.dataset.userId;
-  const clickToCallForm = document.getElementById('click-to-call-form');
-  if (clickToCallForm) {
-    const enabledInput = clickToCallForm.querySelector('#click-to-call-enabled');
-    const phoneIpInput = clickToCallForm.querySelector('#click-to-call-phone-ip');
-    const usernameInput = clickToCallForm.querySelector('#click-to-call-username');
-    const passwordInput = clickToCallForm.querySelector('#click-to-call-password');
-    requestJson('/api/click-to-call/settings').then((settings) => {
-      enabledInput.checked = Boolean(settings.enabled);
-      phoneIpInput.value = settings.phone_ip || '';
-      usernameInput.value = settings.login_username || '';
-    }).catch(() => showMessage({ variant: 'error' }, 'Unable to load click-to-call settings.'));
 
-    clickToCallForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      try {
-        await requestJson('/api/click-to-call/settings', {
-          method: 'PUT',
-          body: JSON.stringify({
-            enabled: enabledInput.checked,
-            phone_ip: phoneIpInput.value.trim() || null,
-            login_username: usernameInput.value.trim() || null,
-            password: passwordInput.value || null,
-          }),
-        });
-        passwordInput.value = '';
-        showMessage({ variant: 'success' }, 'Click-to-call settings saved.');
-      } catch (error) {
-        showMessage({ variant: 'error' }, error.message || 'Unable to save click-to-call settings.');
-      }
+  // ── Modals ─────────────────────────────────────────────────────────────
+  // Follows the gold-standard <div class="modal" role="dialog" hidden> pattern:
+  // focus moves into the panel, Tab is trapped, and focus returns to the trigger.
+  const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([type="hidden"]):not([disabled]):not([readonly]), select:not([disabled]), [tabindex="0"]';
+  const modalTriggers = new WeakMap();
+  const modalCloseHandlers = new WeakMap();
+
+  function setModalError(modal, message) {
+    const error = modal ? modal.querySelector('[data-modal-error]') : null;
+    if (!error) {
+      if (message) showMessage({ variant: 'error' }, message);
+      return;
+    }
+    error.textContent = message || '';
+    error.hidden = !message;
+  }
+
+  function openModal(modal, { trigger = null, focus = null, onClose = null } = {}) {
+    if (!modal) {
+      return;
+    }
+    modalTriggers.set(modal, trigger || document.activeElement);
+    modalCloseHandlers.set(modal, onClose);
+    setModalError(modal, '');
+    modal.hidden = false;
+    modal.classList.add('is-visible');
+    document.body.classList.add('scf-modal-open');
+    const body = modal.querySelector('.modal__body');
+    if (body) {
+      body.scrollTop = 0;
+    }
+    window.requestAnimationFrame(() => {
+      const target = (focus && modal.querySelector(focus))
+        || Array.from(modal.querySelectorAll(`.modal__body ${FOCUSABLE}`)).find((node) => node.offsetParent !== null)
+        || modal.querySelector('.modal__close');
+      if (target) target.focus();
     });
   }
+
+  function closeModal(modal) {
+    if (!modal || modal.hidden) {
+      return;
+    }
+    modal.hidden = true;
+    modal.classList.remove('is-visible');
+    if (!document.querySelector('.modal.is-visible:not([hidden])')) {
+      document.body.classList.remove('scf-modal-open');
+    }
+    const onClose = modalCloseHandlers.get(modal);
+    modalCloseHandlers.delete(modal);
+    if (typeof onClose === 'function') {
+      onClose();
+    }
+    const trigger = modalTriggers.get(modal);
+    if (trigger && typeof trigger.focus === 'function' && document.contains(trigger)) {
+      trigger.focus();
+    }
+  }
+
+  root.querySelectorAll('.modal').forEach((modal) => {
+    modal.querySelectorAll('[data-modal-close]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        closeModal(modal);
+      });
+    });
+    modal.addEventListener('keydown', (event) => {
+      if (event.key !== 'Tab') {
+        return;
+      }
+      const focusable = Array.from(modal.querySelectorAll(FOCUSABLE)).filter((node) => node.offsetParent !== null);
+      if (!focusable.length) {
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+  });
+
+  function setBusy(button, busy, busyLabel) {
+    if (!button) {
+      return;
+    }
+    if (busy) {
+      button.dataset.idleLabel = button.textContent;
+      button.disabled = true;
+      button.classList.add('button--processing');
+      if (busyLabel) button.textContent = busyLabel;
+    } else {
+      button.disabled = false;
+      button.classList.remove('button--processing');
+      if (button.dataset.idleLabel) button.textContent = button.dataset.idleLabel;
+    }
+  }
+
+  // Password confirmation for removals, replacing window.confirm + prompt.
+  const confirmModal = document.getElementById('profile-confirm-modal');
+  const confirmForm = document.getElementById('profile-confirm-form');
+
+  function confirmWithPassword({ title, message, submitLabel = 'Continue', danger = false, trigger = null, action }) {
+    if (!confirmModal || !confirmForm) {
+      return;
+    }
+    const titleNode = confirmModal.querySelector('[data-confirm-title]');
+    const messageNode = confirmModal.querySelector('[data-confirm-message]');
+    const submit = confirmModal.querySelector('[data-confirm-submit]');
+    const input = confirmForm.querySelector('#profile-confirm-password');
+    if (titleNode) titleNode.textContent = title;
+    if (messageNode) messageNode.textContent = message;
+    if (submit) {
+      submit.textContent = submitLabel;
+      submit.classList.toggle('button--danger', danger);
+    }
+    if (input) input.value = '';
+    confirmForm.onsubmit = async (event) => {
+      event.preventDefault();
+      const password = input ? input.value : '';
+      if (!password) {
+        setModalError(confirmModal, 'Enter your current password to continue.');
+        if (input) input.focus();
+        return;
+      }
+      setModalError(confirmModal, '');
+      setBusy(submit, true);
+      try {
+        await action(password);
+        closeModal(confirmModal);
+      } catch (error) {
+        setModalError(confirmModal, error.message || 'Something went wrong. Try again.');
+      } finally {
+        setBusy(submit, false);
+        if (submit) submit.textContent = submitLabel;
+      }
+    };
+    openModal(confirmModal, { trigger, focus: '#profile-confirm-password' });
+  }
+
+  // ── Tabs ───────────────────────────────────────────────────────────────
+  // Every panel is visible without JavaScript; the tab bar only appears once enhanced.
+  const tabList = root.querySelector('[data-profile-tabs]');
+  const tabs = Array.from(root.querySelectorAll('[data-profile-tab]'));
+  const panels = Array.from(root.querySelectorAll('[data-profile-panel]'));
+
+  function showTab(name, { updateHash = false, focusTab = false } = {}) {
+    const tab = tabs.find((item) => item.dataset.profileTab === name) || tabs[0];
+    if (!tab) {
+      return;
+    }
+    const active = tab.dataset.profileTab;
+    tabs.forEach((item) => {
+      const selected = item === tab;
+      item.classList.toggle('is-active', selected);
+      item.setAttribute('aria-selected', selected ? 'true' : 'false');
+      item.tabIndex = selected ? 0 : -1;
+    });
+    panels.forEach((panel) => {
+      panel.hidden = panel.dataset.profilePanel !== active;
+    });
+    if (focusTab) tab.focus();
+    if (updateHash && window.history && window.history.replaceState) {
+      window.history.replaceState(null, '', `#${active}`);
+    }
+  }
+
+  if (tabList && tabs.length) {
+    tabList.hidden = false;
+    root.classList.add('profile--tabbed');
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => showTab(tab.dataset.profileTab, { updateHash: true }));
+      tab.addEventListener('keydown', (event) => {
+        let next = null;
+        if (event.key === 'ArrowRight') next = tabs[(index + 1) % tabs.length];
+        if (event.key === 'ArrowLeft') next = tabs[(index - 1 + tabs.length) % tabs.length];
+        if (event.key === 'Home') next = tabs[0];
+        if (event.key === 'End') next = tabs[tabs.length - 1];
+        if (next) {
+          event.preventDefault();
+          showTab(next.dataset.profileTab, { updateHash: true, focusTab: true });
+        }
+      });
+    });
+    showTab((window.location.hash || '').replace('#', '') || 'security');
+    window.addEventListener('hashchange', () => showTab((window.location.hash || '').replace('#', '')));
+  }
+
+  // ── Saved data ─────────────────────────────────────────────────────────
   let totpDevices = [];
   try {
     const parsed = JSON.parse(root.dataset.totpDevices || '[]');
@@ -117,42 +280,131 @@
   try {
     const parsed = JSON.parse(root.dataset.passkeys || '[]');
     if (Array.isArray(parsed)) {
-      passkeys = parsed.map((item) => ({
-        id: item.id,
-        name: item.name || 'Passkey',
-        created_at: item.created_at || null,
-        last_used_at: item.last_used_at || null,
-        transports: Array.isArray(item.transports) ? item.transports : [],
-        credential_device_type: item.credential_device_type || null,
-        credential_backed_up: Boolean(item.credential_backed_up),
-      }));
+      passkeys = parsed.map(normalisePasskey);
     }
   } catch (error) {
     passkeys = [];
   }
 
+  function normalisePasskey(item) {
+    return {
+      id: item.id,
+      name: item.name || item.display_name || 'Passkey',
+      created_at: item.created_at || null,
+      last_used_at: item.last_used_at || null,
+      transports: Array.isArray(item.transports) ? item.transports : [],
+      credential_device_type: item.credential_device_type || null,
+      credential_backed_up: Boolean(item.credential_backed_up),
+    };
+  }
+
+  function updateSecuritySummary() {
+    const setStat = (key, value, variant) => {
+      const tile = root.querySelector(`[data-profile-stat="${key}"]`);
+      if (!tile) return;
+      const valueNode = tile.querySelector('.stat-strip__stat-value');
+      if (valueNode) valueNode.textContent = String(value);
+      if (variant) {
+        tile.className = tile.className.replace(/stat-strip__stat--\w+/, `stat-strip__stat--${variant}`);
+      }
+    };
+    setStat('total', totpDevices.length + passkeys.length);
+    setStat('totp', totpDevices.length, totpDevices.length ? 'success' : 'warning');
+    setStat('passkeys', passkeys.length, passkeys.length ? 'success' : 'neutral');
+    const notice = root.querySelector('[data-profile-no-second-factor]');
+    if (notice) notice.hidden = Boolean(totpDevices.length || passkeys.length);
+  }
+
+  function flashStatus(node, text) {
+    if (!node) return;
+    node.textContent = text;
+    window.clearTimeout(node._profileTimer);
+    node._profileTimer = window.setTimeout(() => { node.textContent = ''; }, 4000);
+  }
+
+  // ── Click to call ──────────────────────────────────────────────────────
+  const clickToCallForm = document.getElementById('click-to-call-form');
+  if (clickToCallForm) {
+    const enabledInput = clickToCallForm.querySelector('#click-to-call-enabled');
+    const phoneIpInput = clickToCallForm.querySelector('#click-to-call-phone-ip');
+    const usernameInput = clickToCallForm.querySelector('#click-to-call-username');
+    const passwordInput = clickToCallForm.querySelector('#click-to-call-password');
+    const submitButton = clickToCallForm.querySelector('button[type="submit"]');
+    requestJson('/api/click-to-call/settings').then((settings) => {
+      enabledInput.checked = Boolean(settings.enabled);
+      phoneIpInput.value = settings.phone_ip || '';
+      usernameInput.value = settings.login_username || '';
+    }).catch(() => showMessage({ variant: 'error' }, 'Unable to load click-to-call settings.'));
+
+    clickToCallForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      setBusy(submitButton, true, 'Saving…');
+      try {
+        await requestJson('/api/click-to-call/settings', {
+          method: 'PUT',
+          body: JSON.stringify({
+            enabled: enabledInput.checked,
+            phone_ip: phoneIpInput.value.trim() || null,
+            login_username: usernameInput.value.trim() || null,
+            password: passwordInput.value || null,
+          }),
+        });
+        passwordInput.value = '';
+        showMessage({ variant: 'success' }, 'Click-to-call settings saved.');
+      } catch (error) {
+        showMessage({ variant: 'error' }, error.message || 'Unable to save click-to-call settings.');
+      } finally {
+        setBusy(submitButton, false);
+      }
+    });
+  }
+
+  // ── Password ───────────────────────────────────────────────────────────
+  const passwordModal = document.getElementById('profile-password-modal');
   const passwordForm = document.getElementById('password-form');
-  const passwordSuccess = { variant: 'success' };
-  const passwordError = { variant: 'error' };
+
+  document.querySelectorAll('[data-profile-open="profile-password-modal"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (passwordForm) passwordForm.reset();
+      openModal(passwordModal, { trigger: button, focus: '#current-password' });
+    });
+  });
 
   if (passwordForm) {
     passwordForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      clearMessages([passwordSuccess, passwordError]);
-
       const current = passwordForm.querySelector('#current-password');
       const nextPassword = passwordForm.querySelector('#new-password');
       const confirmPassword = passwordForm.querySelector('#confirm-password');
+      const submitButton = passwordForm.querySelector('button[type="submit"]');
 
       const currentValue = current ? current.value : '';
       const newValue = nextPassword ? nextPassword.value : '';
       const confirmValue = confirmPassword ? confirmPassword.value : '';
 
-      if (newValue !== confirmValue) {
-        showMessage(passwordError, 'New passwords do not match.');
+      let problem = '';
+      let focusTarget = null;
+      if (!currentValue) {
+        problem = 'Enter your current password.';
+        focusTarget = current;
+      } else if (newValue.length < 12) {
+        problem = 'Your new password needs at least 12 characters.';
+        focusTarget = nextPassword;
+      } else if (newValue === currentValue) {
+        problem = 'Choose a new password that is different from your current one.';
+        focusTarget = nextPassword;
+      } else if (newValue !== confirmValue) {
+        problem = 'The new passwords don’t match.';
+        focusTarget = confirmPassword;
+      }
+      if (problem) {
+        setModalError(passwordModal, problem);
+        if (focusTarget) focusTarget.focus();
         return;
       }
 
+      setModalError(passwordModal, '');
+      setBusy(submitButton, true, 'Updating…');
       try {
         await requestJson('/auth/password/change', {
           method: 'POST',
@@ -161,112 +413,108 @@
             new_password: newValue,
           }),
         });
-        showMessage(passwordSuccess, 'Password updated successfully.');
         passwordForm.reset();
+        closeModal(passwordModal);
+        showMessage({ variant: 'success' }, 'Password updated.');
       } catch (error) {
-        showMessage(passwordError, error.message || 'Unable to update password.');
+        setModalError(passwordModal, error.message || 'Unable to update password.');
+      } finally {
+        setBusy(submitButton, false);
       }
     });
   }
 
-  const mobileForm = document.getElementById('mobile-form');
-  const mobileSuccess = { variant: 'success' };
-  const mobileError = { variant: 'error' };
+  // ── Work details ───────────────────────────────────────────────────────
+  const contactForm = document.getElementById('profile-contact-form');
+  if (contactForm && userId) {
+    const contactStatus = contactForm.querySelector('[data-profile-contact-status]');
+    const bookingInput = contactForm.querySelector('#booking-link-url');
+    const bookingTest = contactForm.querySelector('[data-booking-link-test]');
+    const fields = {
+      mobile_phone: contactForm.querySelector('#mobile-number'),
+      booking_link_url: bookingInput,
+      matrix_user_id: contactForm.querySelector('#matrix-user-id'),
+    };
 
-  if (mobileForm && userId) {
-    mobileForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      clearMessages([mobileSuccess, mobileError]);
-
-      const input = mobileForm.querySelector('#mobile-number');
-      const value = input ? input.value.trim() : '';
-
-      try {
-        await requestJson(`/api/users/${userId}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ mobile_phone: value || null }),
-        });
-        showMessage(mobileSuccess, 'Mobile number saved.');
-      } catch (error) {
-        showMessage(mobileError, error.message || 'Unable to save mobile number.');
-      }
+    const syncBookingTest = () => {
+      if (!bookingTest || !bookingInput) return;
+      const value = bookingInput.value.trim();
+      const valid = /^https?:\/\/\S+$/i.test(value);
+      bookingTest.hidden = !valid;
+      bookingTest.href = valid ? value : '#';
+    };
+    if (bookingInput) {
+      bookingInput.addEventListener('input', syncBookingTest);
+    }
+    contactForm.addEventListener('input', () => {
+      if (contactStatus) contactStatus.textContent = 'Unsaved changes';
     });
-  }
 
-  const bookingLinkForm = document.getElementById('booking-link-form');
-  const bookingSuccess = { variant: 'success' };
-  const bookingError = { variant: 'error' };
-
-  if (bookingLinkForm && userId) {
-    bookingLinkForm.addEventListener('submit', async (event) => {
+    contactForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      clearMessages([bookingSuccess, bookingError]);
-
-      const input = bookingLinkForm.querySelector('#booking-link-url');
-      const value = input ? input.value.trim() : '';
-
+      const payload = {};
+      Object.entries(fields).forEach(([key, input]) => {
+        if (input) payload[key] = input.value.trim() || null;
+      });
+      if (payload.booking_link_url && !/^https?:\/\/\S+$/i.test(payload.booking_link_url)) {
+        showMessage({ variant: 'error' }, 'Booking links must start with https:// or http://.');
+        bookingInput.focus();
+        return;
+      }
+      if (payload.matrix_user_id && !/^@[^:\s]+:\S+$/.test(payload.matrix_user_id)) {
+        showMessage({ variant: 'error' }, 'Matrix user IDs look like @username:server.com.');
+        fields.matrix_user_id.focus();
+        return;
+      }
+      const submitButton = contactForm.querySelector('button[type="submit"]');
+      setBusy(submitButton, true, 'Saving…');
       try {
         await requestJson(`/api/users/${userId}`, {
           method: 'PATCH',
-          body: JSON.stringify({ booking_link_url: value || null }),
+          body: JSON.stringify(payload),
         });
-        showMessage(bookingSuccess, 'Booking link saved.');
+        flashStatus(contactStatus, 'Saved');
+        showMessage({ variant: 'success' }, 'Your details were saved.');
       } catch (error) {
-        showMessage(bookingError, error.message || 'Unable to save booking link.');
+        if (contactStatus) contactStatus.textContent = '';
+        showMessage({ variant: 'error' }, error.message || 'Unable to save your details.');
+      } finally {
+        setBusy(submitButton, false);
       }
     });
   }
 
   const emailSignatureForm = document.getElementById('email-signature-form');
-  const signatureSuccess = { variant: 'success' };
-  const signatureError = { variant: 'error' };
-
   if (emailSignatureForm && userId) {
+    const signatureStatus = emailSignatureForm.querySelector('[data-profile-signature-status]');
+    emailSignatureForm.addEventListener('input', () => {
+      if (signatureStatus) signatureStatus.textContent = 'Unsaved changes';
+    });
     emailSignatureForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      clearMessages([signatureSuccess, signatureError]);
-
       const input = emailSignatureForm.querySelector('#email-signature-value');
       const value = input ? input.value.trim() : '';
 
       // Validate signature length (max 50KB)
       if (value.length > 51200) {
-        showMessage(signatureError, 'Email signature is too large. Please keep it under 50KB.');
+        showMessage({ variant: 'error' }, 'Email signature is too large. Please keep it under 50KB.');
         return;
       }
 
+      const submitButton = emailSignatureForm.querySelector('button[type="submit"]');
+      setBusy(submitButton, true, 'Saving…');
       try {
         await requestJson(`/api/users/${userId}`, {
           method: 'PATCH',
           body: JSON.stringify({ email_signature: value || null }),
         });
-        showMessage(signatureSuccess, 'Email signature saved.');
+        flashStatus(signatureStatus, 'Saved');
+        showMessage({ variant: 'success' }, 'Email signature saved.');
       } catch (error) {
-        showMessage(signatureError, error.message || 'Unable to save email signature.');
-      }
-    });
-  }
-
-  const matrixUsernameForm = document.getElementById('matrix-username-form');
-  const matrixUsernameSuccess = { variant: 'success' };
-  const matrixUsernameError = { variant: 'error' };
-
-  if (matrixUsernameForm && userId) {
-    matrixUsernameForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      clearMessages([matrixUsernameSuccess, matrixUsernameError]);
-
-      const input = matrixUsernameForm.querySelector('#matrix-user-id');
-      const value = input ? input.value.trim() : '';
-
-      try {
-        await requestJson(`/api/users/${userId}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ matrix_user_id: value || null }),
-        });
-        showMessage(matrixUsernameSuccess, 'Matrix username saved.');
-      } catch (error) {
-        showMessage(matrixUsernameError, error.message || 'Unable to save Matrix username.');
+        if (signatureStatus) signatureStatus.textContent = '';
+        showMessage({ variant: 'error' }, error.message || 'Unable to save email signature.');
+      } finally {
+        setBusy(submitButton, false);
       }
     });
   }
@@ -348,6 +596,10 @@
     if (sidebarStatus) {
       sidebarStatus.textContent = dirty ? 'Unsaved changes' : '';
       sidebarStatus.classList.toggle('menu-editor__status--dirty', dirty);
+    }
+    const menuTab = root.querySelector('[data-profile-tab="menu"]');
+    if (menuTab) {
+      menuTab.classList.toggle('is-configured', dirty);
     }
   }
 
@@ -1039,224 +1291,305 @@
     });
   }
 
-  const totpTable = document.getElementById('totp-table');
+  // ── Credential lists ───────────────────────────────────────────────────
+  const ICONS = {
+    phone: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm0 3v13h10V5Zm5 14.25a1 1 0 1 0 0 1.5 1 1 0 0 0 0-1.5Z"/></svg>',
+    key: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 3a7 7 0 1 1-2.1 13.68L10 18.6V21H7v-2H5v-2l4.32-4.32A7 7 0 0 1 14 3Zm2 3.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/></svg>',
+  };
+  const TRANSPORT_LABELS = {
+    internal: 'This device',
+    hybrid: 'Phone',
+    usb: 'USB key',
+    nfc: 'NFC',
+    ble: 'Bluetooth',
+    'smart-card': 'Smart card',
+  };
+
+  function formatDate(value) {
+    if (!value) {
+      return null;
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return null;
+    }
+    return parsed;
+  }
+
+  function makeChip(text, extraClass = '') {
+    const chip = document.createElement('li');
+    chip.className = `scf-chip${extraClass ? ` ${extraClass}` : ''}`;
+    chip.textContent = text;
+    return chip;
+  }
+
+  function makeDate(prefix, value, fallback) {
+    const wrapper = document.createElement('span');
+    const parsed = formatDate(value);
+    if (!parsed) {
+      wrapper.textContent = fallback;
+      return wrapper;
+    }
+    wrapper.append(`${prefix} `);
+    const time = document.createElement('time');
+    time.dateTime = parsed.toISOString();
+    time.title = parsed.toLocaleString();
+    time.textContent = parsed.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    wrapper.appendChild(time);
+    return wrapper;
+  }
+
+  function makeCredentialRow({ id, icon, name, chips = [], meta = [], actions = [] }) {
+    const row = document.createElement('li');
+    row.className = 'profile-credential';
+    row.dataset.credentialId = String(id);
+
+    const iconNode = document.createElement('span');
+    iconNode.className = 'profile-credential__icon';
+    iconNode.innerHTML = ICONS[icon];
+    row.appendChild(iconNode);
+
+    const main = document.createElement('div');
+    main.className = 'profile-credential__main';
+    const title = document.createElement('span');
+    title.className = 'profile-credential__name';
+    title.textContent = name;
+    main.appendChild(title);
+    if (chips.length) {
+      const chipList = document.createElement('ul');
+      chipList.className = 'scf-item__chips';
+      chips.forEach((chip) => chipList.appendChild(chip));
+      main.appendChild(chipList);
+    }
+    if (meta.length) {
+      const metaLine = document.createElement('p');
+      metaLine.className = 'profile-credential__meta';
+      meta.forEach((part, index) => {
+        if (index) metaLine.append(' · ');
+        metaLine.appendChild(part);
+      });
+      main.appendChild(metaLine);
+    }
+    row.appendChild(main);
+
+    const actionWrap = document.createElement('div');
+    actionWrap.className = 'profile-credential__actions';
+    actions.forEach(({ label, className, ariaLabel, onClick }) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `button button--small ${className}`;
+      button.textContent = label;
+      button.setAttribute('aria-label', ariaLabel);
+      button.addEventListener('click', () => onClick(button));
+      actionWrap.appendChild(button);
+    });
+    row.appendChild(actionWrap);
+    return row;
+  }
+
+  // ── Authenticator apps ─────────────────────────────────────────────────
   const totpBody = root.querySelector('[data-totp-body]');
-  const totpEmptyRow = root.querySelector('[data-totp-empty]');
-  const addButton = root.querySelector('[data-totp-add]');
-  const setupSection = root.querySelector('[data-totp-setup]');
+  const totpEmpty = root.querySelector('[data-totp-empty]');
+  const totpModal = document.getElementById('profile-totp-modal');
+  const verifyForm = document.getElementById('totp-verify-form');
   const secretInput = document.getElementById('totp-secret');
   const linkInput = document.getElementById('totp-link');
-  const verifyForm = document.getElementById('totp-verify-form');
   const verifyName = document.getElementById('totp-name');
   const verifyCode = document.getElementById('totp-code');
-  const verifySuccess = { variant: 'success' };
-  const verifyError = { variant: 'error' };
-  const cancelButton = root.querySelector('[data-totp-cancel]');
+  const verifyPassword = document.getElementById('totp-current-password');
+  const verifyPasswordField = root.querySelector('[data-totp-password-field]');
+  const verifySubmit = root.querySelector('[data-totp-submit]');
+  const qrContainer = root.querySelector('[data-totp-qr-container]');
+  const qrPlaceholder = root.querySelector('[data-totp-qr-placeholder]');
+  const qrImage = root.querySelector('[data-totp-qr]');
+  const manualToggle = root.querySelector('[data-totp-manual-toggle]');
+  const manualSection = root.querySelector('[data-totp-manual]');
+  let totpSetupRequest = 0;
 
   function renderTotpDevices() {
     if (!totpBody) {
       return;
     }
-    totpDevices.sort((a, b) => {
-      const nameA = (a.name || '').toLowerCase();
-      const nameB = (b.name || '').toLowerCase();
-      if (nameA < nameB) return -1;
-      if (nameA > nameB) return 1;
-      return 0;
-    });
+    totpDevices.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
     totpBody.innerHTML = '';
-    if (!totpDevices.length) {
-      if (totpEmptyRow) {
-        totpEmptyRow.hidden = false;
-        totpBody.appendChild(totpEmptyRow);
-      }
-    } else {
-      if (totpEmptyRow) {
-        totpEmptyRow.hidden = true;
-      }
-      totpDevices.forEach((device) => {
-        const row = document.createElement('tr');
-        row.dataset.deviceId = String(device.id);
+    totpDevices.forEach((device) => {
+      const name = device.name || 'Authenticator';
+      totpBody.appendChild(makeCredentialRow({
+        id: device.id,
+        icon: 'phone',
+        name,
+        actions: [{
+          label: 'Remove',
+          className: 'button--danger',
+          ariaLabel: `Remove authenticator ${name}`,
+          onClick: (button) => handleRemoveTotp(device, button),
+        }],
+      }));
+    });
+    if (totpEmpty) totpEmpty.hidden = totpDevices.length > 0;
+    if (verifyPasswordField) verifyPasswordField.hidden = totpDevices.length === 0;
+    updateSecuritySummary();
+  }
 
-        const nameCell = document.createElement('td');
-        nameCell.textContent = device.name || 'Authenticator';
-        nameCell.setAttribute('data-label', 'Name');
-        nameCell.setAttribute('data-value', (device.name || '').toLowerCase());
-        row.appendChild(nameCell);
-
-        const actionsCell = document.createElement('td');
-        actionsCell.className = 'table__actions';
-        const removeButton = document.createElement('button');
-        removeButton.type = 'button';
-        removeButton.className = 'button button--danger button--small';
-        removeButton.textContent = 'Remove';
-        removeButton.addEventListener('click', () => handleRemoveTotp(device));
-        actionsCell.appendChild(removeButton);
-        row.appendChild(actionsCell);
-
-        totpBody.appendChild(row);
-      });
+  function setQrLoading(loading) {
+    if (qrPlaceholder) {
+      qrPlaceholder.hidden = !loading;
+      qrPlaceholder.textContent = 'Generating your QR code…';
     }
-    if (totpTable) {
-      const event = new CustomEvent('table:rows-updated');
-      totpTable.dispatchEvent(event);
+    if (qrImage && loading) {
+      qrImage.hidden = true;
+      qrImage.removeAttribute('src');
     }
+    if (qrContainer) qrContainer.setAttribute('aria-busy', String(loading));
+    if (verifySubmit) verifySubmit.disabled = loading;
+  }
+
+  function setManualOpen(open) {
+    if (manualSection) manualSection.hidden = !open;
+    if (manualToggle) manualToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
 
   function resetTotpSetup() {
-    if (setupSection) {
-      setupSection.hidden = true;
-    }
-    if (secretInput) {
-      secretInput.value = '';
-    }
-    if (linkInput) {
-      linkInput.value = '';
-    }
-    if (verifyName) {
-      verifyName.value = '';
-    }
-    if (verifyCode) {
-      verifyCode.value = '';
-    }
-    clearMessages([verifySuccess, verifyError]);
+    totpSetupRequest += 1;
+    [secretInput, linkInput, verifyName, verifyCode, verifyPassword].forEach((input) => {
+      if (input) input.value = '';
+    });
+    setManualOpen(false);
   }
 
-  async function startTotpSetup() {
-    clearMessages([verifySuccess, verifyError]);
+  async function startTotpSetup(trigger) {
     resetTotpSetup();
+    const requestId = totpSetupRequest;
+    setQrLoading(true);
+    openModal(totpModal, { trigger, focus: '#totp-code', onClose: resetTotpSetup });
     try {
       const response = await requestJson('/auth/totp/setup', { method: 'POST' });
-      if (secretInput) {
-        secretInput.value = response.secret || '';
+      if (requestId !== totpSetupRequest) {
+        return;
       }
-      if (linkInput) {
-        linkInput.value = response.otpauth_url || '';
+      if (secretInput) secretInput.value = response.secret || '';
+      if (linkInput) linkInput.value = response.otpauth_url || '';
+      setQrLoading(false);
+      if (qrImage && response.qr_code_data_uri) {
+        qrImage.src = response.qr_code_data_uri;
+        qrImage.hidden = false;
+      } else {
+        // No image: fall back to the secret and link.
+        if (qrPlaceholder) {
+          qrPlaceholder.hidden = false;
+          qrPlaceholder.textContent = 'Use the secret instead.';
+        }
+        setManualOpen(true);
       }
-      if (setupSection) {
-        setupSection.hidden = false;
-      }
-      if (verifyCode) {
-        verifyCode.focus();
-      }
+      if (verifyCode) verifyCode.focus();
     } catch (error) {
-      alert(`Unable to start authenticator setup: ${error.message}`);
+      if (requestId !== totpSetupRequest) {
+        return;
+      }
+      setQrLoading(false);
+      if (verifySubmit) verifySubmit.disabled = true;
+      if (qrPlaceholder) {
+        qrPlaceholder.hidden = false;
+        qrPlaceholder.textContent = 'Couldn’t create a code.';
+      }
+      setModalError(totpModal, `Unable to start authenticator setup: ${error.message}`);
     }
   }
 
-  async function handleRemoveTotp(device) {
+  function handleRemoveTotp(device, trigger) {
     if (!device || !device.id) {
       return;
     }
-    const confirmRemoval = window.confirm(`Remove authenticator "${device.name}"?`);
-    if (!confirmRemoval) {
-      return;
-    }
-    const currentPassword = await promptForPassword(`Enter your current password to remove "${device.name}"`);
-    if (!currentPassword) {
-      return;
-    }
-    try {
-      await requestJson(`/auth/totp/${device.id}`, {
-        method: 'DELETE',
-        body: JSON.stringify({ current_password: currentPassword }),
-      });
-      totpDevices = totpDevices.filter((entry) => entry.id !== device.id);
-      renderTotpDevices();
-    } catch (error) {
-      alert(`Unable to remove authenticator: ${error.message}`);
-    }
-  }
-
-  if (addButton) {
-    addButton.addEventListener('click', () => {
-      startTotpSetup();
+    const lastMethod = totpDevices.length + passkeys.length === 1;
+    confirmWithPassword({
+      title: 'Remove authenticator app?',
+      message: `“${device.name}” will stop working for sign-in.${lastMethod ? ' It’s your only sign-in method besides your password.' : ''} Enter your current password to confirm.`,
+      submitLabel: 'Remove',
+      danger: true,
+      trigger,
+      action: async (currentPassword) => {
+        await requestJson(`/auth/totp/${device.id}`, {
+          method: 'DELETE',
+          body: JSON.stringify({ current_password: currentPassword }),
+        });
+        totpDevices = totpDevices.filter((entry) => entry.id !== device.id);
+        renderTotpDevices();
+        showMessage({ variant: 'success' }, 'Authenticator removed.');
+      },
     });
   }
 
-  if (cancelButton) {
-    cancelButton.addEventListener('click', () => {
-      resetTotpSetup();
+  document.querySelectorAll('[data-totp-add]').forEach((button) => {
+    button.addEventListener('click', () => {
+      showTab('security');
+      startTotpSetup(button);
     });
+  });
+
+  if (manualToggle) {
+    manualToggle.addEventListener('click', () => setManualOpen(manualSection ? manualSection.hidden : true));
   }
 
   if (verifyForm) {
     verifyForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      clearMessages([verifySuccess, verifyError]);
-
-      const codeRaw = verifyCode ? verifyCode.value.trim() : '';
-      const normalisedCode = codeRaw.replace(/\s+/g, '');
+      const normalisedCode = (verifyCode ? verifyCode.value : '').replace(/\s+/g, '');
+      let problem = '';
       if (!normalisedCode) {
-        showMessage(verifyError, 'Enter the authenticator code.');
+        problem = 'Enter the 6-digit code from your authenticator app.';
+      } else if (!/^\d{6}$/.test(normalisedCode)) {
+        problem = 'Codes are 6 digits. Check the app and try again.';
+      }
+      if (problem) {
+        setModalError(totpModal, problem);
+        if (verifyCode) verifyCode.focus();
         return;
       }
-      if (!/^\d+$/.test(normalisedCode)) {
-        showMessage(verifyError, 'Authenticator codes must contain digits only.');
-        return;
-      }
-
-      const nameValue = verifyName ? verifyName.value.trim() : '';
       let currentPassword = null;
       if (totpDevices.length > 0) {
-        currentPassword = await promptForPassword('Enter your current password to add this authenticator');
+        currentPassword = verifyPassword ? verifyPassword.value : '';
         if (!currentPassword) {
+          setModalError(totpModal, 'Enter your current password to add another authenticator.');
+          if (verifyPassword) verifyPassword.focus();
           return;
         }
       }
+      setModalError(totpModal, '');
+      setBusy(verifySubmit, true, 'Verifying…');
       try {
         const response = await requestJson('/auth/totp/verify', {
           method: 'POST',
           body: JSON.stringify({
             code: normalisedCode,
-            name: nameValue || null,
+            name: (verifyName ? verifyName.value.trim() : '') || null,
             current_password: currentPassword,
           }),
         });
         totpDevices.push({ id: response.id, name: response.name || 'Authenticator' });
         renderTotpDevices();
-        showMessage(verifySuccess, 'Authenticator added successfully.');
-        if (verifyCode) {
-          verifyCode.value = '';
-        }
-        if (verifyName) {
-          verifyName.value = '';
-        }
-        if (secretInput) {
-          secretInput.value = '';
-        }
-        if (linkInput) {
-          linkInput.value = '';
-        }
-        if (setupSection) {
-          setupSection.hidden = true;
-        }
+        closeModal(totpModal);
+        showMessage({ variant: 'success' }, 'Authenticator app added.');
       } catch (error) {
-        showMessage(verifyError, error.message || 'Unable to verify authenticator.');
+        setModalError(totpModal, error.message || 'Unable to verify authenticator.');
+      } finally {
+        setBusy(verifySubmit, false);
       }
     });
   }
 
-  const passkeyTable = document.getElementById('passkey-table');
+  // ── Passkeys ───────────────────────────────────────────────────────────
   const passkeyBody = root.querySelector('[data-passkey-body]');
-  const passkeyEmptyRow = root.querySelector('[data-passkey-empty]');
+  const passkeyEmpty = root.querySelector('[data-passkey-empty]');
+  const passkeyModal = document.getElementById('profile-passkey-modal');
   const passkeyAddForm = document.getElementById('passkey-add-form');
   const passkeyNameInput = document.getElementById('passkey-name');
   const passkeyPasswordInput = document.getElementById('passkey-current-password');
-  const passkeySuccess = { variant: 'success' };
-  const passkeyError = { variant: 'error' };
+  const passkeyUnsupported = root.querySelector('[data-passkey-unsupported]');
+  const renameModal = document.getElementById('profile-rename-modal');
+  const renameForm = document.getElementById('passkey-rename-form');
+  const renameInput = document.getElementById('passkey-rename-input');
   const passkeyUtils = window.MyPortalPasskeyUtils;
-
-  function formatDateTime(value) {
-    if (!value) {
-      return 'Never';
-    }
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) {
-      return value;
-    }
-    return parsed.toLocaleString();
-  }
+  const passkeysSupported = Boolean(passkeyUtils && passkeyUtils.supportsPasskeys());
 
   function renderPasskeys() {
     if (!passkeyBody) {
@@ -1264,203 +1597,140 @@
     }
     passkeys.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
     passkeyBody.innerHTML = '';
-    if (!passkeys.length) {
-      if (passkeyEmptyRow) {
-        passkeyEmptyRow.hidden = false;
-        passkeyBody.appendChild(passkeyEmptyRow);
+    passkeys.forEach((item) => {
+      const name = item.name || 'Passkey';
+      const chips = [];
+      if (item.credential_backed_up) {
+        chips.push(makeChip('Synced', 'sif-chip--optional'));
+      } else if (item.credential_device_type === 'single_device') {
+        chips.push(makeChip('This device only'));
       }
-    } else {
-      if (passkeyEmptyRow) {
-        passkeyEmptyRow.hidden = true;
-      }
-      passkeys.forEach((item) => {
-        const row = document.createElement('tr');
-
-        const nameCell = document.createElement('td');
-        const transportSuffix = item.transports.length ? ` (${item.transports.join(', ')})` : '';
-        nameCell.textContent = `${item.name || 'Passkey'}${transportSuffix}`;
-        row.appendChild(nameCell);
-
-        const createdCell = document.createElement('td');
-        createdCell.textContent = formatDateTime(item.created_at);
-        row.appendChild(createdCell);
-
-        const lastUsedCell = document.createElement('td');
-        lastUsedCell.textContent = formatDateTime(item.last_used_at);
-        row.appendChild(lastUsedCell);
-
-        const actionsCell = document.createElement('td');
-        actionsCell.className = 'table__actions';
-
-        const renameButton = document.createElement('button');
-        renameButton.type = 'button';
-        renameButton.className = 'button button--ghost button--small';
-        renameButton.textContent = 'Rename';
-        renameButton.addEventListener('click', () => renamePasskey(item));
-        actionsCell.appendChild(renameButton);
-
-        const removeButton = document.createElement('button');
-        removeButton.type = 'button';
-        removeButton.className = 'button button--danger button--small';
-        removeButton.textContent = 'Remove';
-        removeButton.addEventListener('click', () => removePasskey(item));
-        actionsCell.appendChild(removeButton);
-
-        row.appendChild(actionsCell);
-        passkeyBody.appendChild(row);
+      item.transports.forEach((transport) => {
+        chips.push(makeChip(TRANSPORT_LABELS[transport] || transport));
       });
-    }
-    if (passkeyTable) {
-      passkeyTable.dispatchEvent(new CustomEvent('table:rows-updated'));
-    }
+      passkeyBody.appendChild(makeCredentialRow({
+        id: item.id,
+        icon: 'key',
+        name,
+        chips,
+        meta: [
+          makeDate('Added', item.created_at, 'Added date unknown'),
+          makeDate('Last used', item.last_used_at, 'Not used yet'),
+        ],
+        actions: [
+          {
+            label: 'Rename',
+            className: 'button--ghost',
+            ariaLabel: `Rename passkey ${name}`,
+            onClick: (button) => renamePasskey(item, button),
+          },
+          {
+            label: 'Remove',
+            className: 'button--danger',
+            ariaLabel: `Remove passkey ${name}`,
+            onClick: (button) => removePasskey(item, button),
+          },
+        ],
+      }));
+    });
+    if (passkeyEmpty) passkeyEmpty.hidden = passkeys.length > 0;
+    updateSecuritySummary();
   }
 
-  async function renamePasskey(item) {
-    const nextName = window.prompt('Rename passkey', item.name || 'Passkey');
-    if (!nextName || !nextName.trim()) {
+  function renamePasskey(item, trigger) {
+    if (!renameModal || !renameForm || !renameInput) {
       return;
     }
-    try {
-      const updated = await requestJson(`/auth/passkeys/${item.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ name: nextName.trim() }),
-      });
-      passkeys = passkeys.map((entry) => (entry.id === item.id ? updated : entry));
-      renderPasskeys();
-      showMessage(passkeySuccess, 'Passkey renamed.');
-    } catch (error) {
-      showMessage(passkeyError, error.message || 'Unable to rename passkey.');
-    }
-  }
-
-  async function removePasskey(item) {
-    const confirmed = window.confirm(`Remove passkey "${item.name}"?`);
-    if (!confirmed) {
-      return;
-    }
-    const currentPassword = await promptForPassword(`Enter your current password to remove "${item.name}"`);
-    if (!currentPassword) {
-      return;
-    }
-    try {
-      await requestJson(`/auth/passkeys/${item.id}`, {
-        method: 'DELETE',
-        body: JSON.stringify({ current_password: currentPassword }),
-      });
-      passkeys = passkeys.filter((entry) => entry.id !== item.id);
-      renderPasskeys();
-      showMessage(passkeySuccess, 'Passkey removed.');
-    } catch (error) {
-      showMessage(passkeyError, error.message || 'Unable to remove passkey.');
-    }
-  }
-
-  function promptForPassword(message) {
-    return new Promise((resolve) => {
-      const overlay = document.createElement('div');
-      overlay.style.position = 'fixed';
-      overlay.style.inset = '0';
-      overlay.style.background = 'rgba(15, 23, 42, 0.65)';
-      overlay.style.display = 'flex';
-      overlay.style.alignItems = 'center';
-      overlay.style.justifyContent = 'center';
-      overlay.style.padding = '1rem';
-      overlay.style.zIndex = '1000';
-
-      const dialog = document.createElement('div');
-      dialog.className = 'card card--panel';
-      dialog.style.maxWidth = '28rem';
-      dialog.style.width = '100%';
-
-      const form = document.createElement('form');
-      form.className = 'form';
-      const body = document.createElement('div');
-      body.className = 'card__body card__body--stacked';
-      const text = document.createElement('p');
-      text.textContent = message;
-      body.appendChild(text);
-      const field = document.createElement('div');
-      field.className = 'form-field';
-      const label = document.createElement('label');
-      label.className = 'form-label';
-      label.htmlFor = 'passkey-remove-password';
-      label.textContent = 'Current password';
-      field.appendChild(label);
-      const input = document.createElement('input');
-      input.className = 'form-input';
-      input.id = 'passkey-remove-password';
-      input.type = 'password';
-      input.autocomplete = 'current-password';
-      input.required = true;
-      field.appendChild(input);
-      body.appendChild(field);
-      const actions = document.createElement('div');
-      actions.className = 'form-actions';
-      const cancelButton = document.createElement('button');
-      cancelButton.type = 'button';
-      cancelButton.className = 'button button--ghost';
-      cancelButton.setAttribute('data-passkey-cancel', 'true');
-      cancelButton.textContent = 'Cancel';
-      actions.appendChild(cancelButton);
-      const submitButton = document.createElement('button');
-      submitButton.type = 'submit';
-      submitButton.className = 'button';
-      submitButton.textContent = 'Continue';
-      actions.appendChild(submitButton);
-      body.appendChild(actions);
-      form.appendChild(body);
-
-      const cleanup = (value) => {
-        overlay.remove();
-        resolve(value);
-      };
-
-      form.addEventListener('submit', (event) => {
-        event.preventDefault();
-        const passwordInput = form.querySelector('#passkey-remove-password');
-        cleanup(passwordInput ? passwordInput.value : '');
-      });
-      form.querySelector('[data-passkey-cancel]').addEventListener('click', () => cleanup(''));
-      overlay.addEventListener('click', (event) => {
-        if (event.target === overlay) {
-          cleanup('');
-        }
-      });
-
-      dialog.appendChild(form);
-      overlay.appendChild(dialog);
-      document.body.appendChild(overlay);
-      const focusTarget = form.querySelector('#passkey-remove-password');
-      if (focusTarget) {
-        focusTarget.focus();
+    renameInput.value = item.name || 'Passkey';
+    renameForm.onsubmit = async (event) => {
+      event.preventDefault();
+      const nextName = renameInput.value.trim();
+      if (!nextName) {
+        setModalError(renameModal, 'Enter a name for the passkey.');
+        renameInput.focus();
+        return;
       }
+      const submit = renameForm.querySelector('button[type="submit"]');
+      setBusy(submit, true);
+      try {
+        const updated = await requestJson(`/auth/passkeys/${item.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ name: nextName }),
+        });
+        passkeys = passkeys.map((entry) => (entry.id === item.id ? normalisePasskey(updated) : entry));
+        renderPasskeys();
+        closeModal(renameModal);
+        showMessage({ variant: 'success' }, 'Passkey renamed.');
+      } catch (error) {
+        setModalError(renameModal, error.message || 'Unable to rename passkey.');
+      } finally {
+        setBusy(submit, false);
+      }
+    };
+    openModal(renameModal, { trigger, focus: '#passkey-rename-input' });
+    window.requestAnimationFrame(() => renameInput.select());
+  }
+
+  function removePasskey(item, trigger) {
+    confirmWithPassword({
+      title: 'Remove passkey?',
+      message: `“${item.name}” will stop signing in to this portal. Enter your current password to confirm.`,
+      submitLabel: 'Remove',
+      danger: true,
+      trigger,
+      action: async (currentPassword) => {
+        await requestJson(`/auth/passkeys/${item.id}`, {
+          method: 'DELETE',
+          body: JSON.stringify({ current_password: currentPassword }),
+        });
+        passkeys = passkeys.filter((entry) => entry.id !== item.id);
+        renderPasskeys();
+        showMessage({ variant: 'success' }, 'Passkey removed.');
+      },
     });
   }
 
-  if (passkeyAddForm) {
-    if (!passkeyUtils || !passkeyUtils.supportsPasskeys()) {
-      const submitButton = passkeyAddForm.querySelector('[data-passkey-add]');
-      if (submitButton) {
-        submitButton.disabled = true;
+  if (!passkeysSupported) {
+    if (passkeyUnsupported) passkeyUnsupported.hidden = false;
+    document.querySelectorAll('[data-passkey-open]').forEach((button) => {
+      button.disabled = true;
+      button.title = 'Passkeys aren’t available in this browser or on this connection.';
+    });
+  }
+
+  document.querySelectorAll('[data-passkey-open]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (!passkeysSupported) {
+        return;
       }
-      showMessage(passkeyError, 'Passkeys are not supported in this browser or on this connection.');
-    }
+      showTab('security');
+      if (passkeyAddForm) passkeyAddForm.reset();
+      openModal(passkeyModal, { trigger: button, focus: '#passkey-name' });
+    });
+  });
+
+  if (passkeyAddForm) {
     passkeyAddForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      if (!passkeyUtils || !passkeyUtils.supportsPasskeys()) {
-        showMessage(passkeyError, 'Passkeys are not supported in this browser or on this connection.');
+      if (!passkeysSupported) {
+        setModalError(passkeyModal, 'Passkeys aren’t available in this browser or on this connection.');
         return;
       }
       const passkeyName = passkeyNameInput ? passkeyNameInput.value.trim() : '';
       const currentPassword = passkeyPasswordInput ? passkeyPasswordInput.value : '';
       if (!passkeyName) {
-        showMessage(passkeyError, 'Enter a name for the passkey.');
+        setModalError(passkeyModal, 'Enter a name for the passkey.');
+        if (passkeyNameInput) passkeyNameInput.focus();
         return;
       }
       if (!currentPassword) {
-        showMessage(passkeyError, 'Enter your current password to continue.');
+        setModalError(passkeyModal, 'Enter your current password to continue.');
+        if (passkeyPasswordInput) passkeyPasswordInput.focus();
         return;
       }
+      setModalError(passkeyModal, '');
+      const submitButton = passkeyAddForm.querySelector('[data-passkey-add]');
+      setBusy(submitButton, true, 'Waiting for your device…');
       try {
         const options = await requestJson('/auth/passkeys/register/options', {
           method: 'POST',
@@ -1480,17 +1750,18 @@
             credential: passkeyUtils.serializeCredential(credential),
           }),
         });
-        passkeys.push(created);
+        passkeys.push(normalisePasskey(created));
         renderPasskeys();
-        if (passkeyAddForm) {
-          passkeyAddForm.reset();
-        }
-        showMessage(passkeySuccess, 'Passkey registered successfully.');
+        passkeyAddForm.reset();
+        closeModal(passkeyModal);
+        showMessage({ variant: 'success' }, 'Passkey added.');
       } catch (error) {
-        showMessage(
-          passkeyError,
+        setModalError(
+          passkeyModal,
           passkeyUtils.passkeyErrorMessage(error, error.message || 'Unable to register a passkey.'),
         );
+      } finally {
+        setBusy(submitButton, false);
       }
     });
   }
@@ -1512,7 +1783,8 @@
           button.textContent = 'Copy';
         }, 2000);
       } catch (error) {
-        alert('Unable to copy to clipboard.');
+        target.select();
+        showMessage({ variant: 'error' }, 'Couldn’t copy automatically. The text is selected so you can copy it.');
       }
     });
   });

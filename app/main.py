@@ -5618,7 +5618,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         return flash_redirect("/m365", "The Microsoft sign-in session expired or was already used.", "error")
     flow = str(state_data.get("flow") or "connect")
     company_id = int(state_data.get("company_id") or 0)
-    error_redirect = "/admin/profile" if flow == "user_m365_contacts" else (
+    error_redirect = "/admin/profile#integrations" if flow == "user_m365_contacts" else (
         "/admin/modules/m365-mail" if flow == "m365_mail_auth" else "/m365"
     )
 
@@ -5652,10 +5652,10 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     if flow == "user_m365_contacts":
         current_user, auth_redirect = await _require_authenticated_user(request)
         if auth_redirect or not current_user or int(current_user["id"]) != int(state_data.get("user_id") or 0):
-            return flash_redirect("/admin/profile", "The Microsoft sign-in session is not valid.", "error")
+            return flash_redirect("/admin/profile#integrations", "The Microsoft sign-in session is not valid.", "error")
         verifier = str(state_data.get("code_verifier") or "")
         if not verifier:
-            return flash_redirect("/admin/profile", "The Microsoft sign-in verifier is missing.", "error")
+            return flash_redirect("/admin/profile#integrations", "The Microsoft sign-in verifier is missing.", "error")
         redirect_uri = str(state_data.get("redirect_uri") or "")
         token_data = {
             "client_id": str(state_data.get("client_id") or ""),
@@ -5667,11 +5667,11 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 "https://login.microsoftonline.com/organizations/oauth2/v2.0/token", data=token_data
             )
         if token_response.status_code != 200:
-            return flash_redirect("/admin/profile", "Microsoft 365 contact sign-in failed.", "error")
+            return flash_redirect("/admin/profile#integrations", "Microsoft 365 contact sign-in failed.", "error")
         payload = token_response.json()
         access_token, refresh_token = payload.get("access_token"), payload.get("refresh_token")
         if not access_token or not refresh_token:
-            return flash_redirect("/admin/profile", "Microsoft did not grant offline contact access.", "error")
+            return flash_redirect("/admin/profile#integrations", "Microsoft did not grant offline contact access.", "error")
         # Graph access tokens are intended for Microsoft Graph and are not
         # guaranteed to be JWTs that this application can decode.  The ID
         # token, on the other hand, is issued to this client and is the stable
@@ -5684,7 +5684,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             tenant_id = str(identity["tid"])
         except m365_service.M365Error:
             return flash_redirect(
-                "/admin/profile", "Microsoft did not return a verified account identity.", "error"
+                "/admin/profile#integrations", "Microsoft did not return a verified account identity.", "error"
             )
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(payload.get("expires_in") or 3600))
         await user_m365_contacts_service.store_tokens(
@@ -5696,7 +5696,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             scopes=str(payload.get("scope") or user_m365_contacts_service.CONTACTS_SCOPE),
             connection_version=int(state_data["connection_version"]) if state_data.get("connection_version") else None,
         )
-        return flash_redirect("/admin/profile", "Outlook contacts connected.", "success")
+        return flash_redirect("/admin/profile#integrations", "Outlook contacts connected.", "success")
 
     if flow == "m365_mail_auth":
         from app.features.m365_mail.oauth import handle_m365_mail_auth_callback as _pack_handler
@@ -6627,7 +6627,7 @@ async def profile_m365_contacts_disconnect(request: Request):
         return redirect
     from app.repositories import user_m365_contacts as user_contacts_repo
     await user_contacts_repo.delete_integration(int(user["id"]))
-    return flash_redirect("/admin/profile", "Outlook contacts disconnected.", "success")
+    return flash_redirect("/admin/profile#integrations", "Outlook contacts disconnected.", "success")
 
 
 @app.api_route(

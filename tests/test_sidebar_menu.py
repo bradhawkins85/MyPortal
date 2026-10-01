@@ -386,13 +386,13 @@ def test_non_admin_with_profile_permission_can_open_profile_page(monkeypatch):
         response = client.get("/admin/profile")
 
     assert response.status_code == 200
-    assert "Manage your account security" in response.text
+    assert 'id="profile-panel-security"' in response.text
     assert response.text.count("rich_text_editor.js") == 0
-    assert "Notification Contact" not in response.text
-    assert "Booking Link" not in response.text
-    assert "Matrix Username" not in response.text
+    assert 'id="mobile-number"' not in response.text
+    assert 'id="booking-link-url"' not in response.text
+    assert 'id="matrix-user-id"' not in response.text
     assert "Email signature" not in response.text
-    assert "profile-columns--standard" in response.text
+    assert 'data-profile-tab="details"' not in response.text
 
 
 def test_technician_with_profile_permission_keeps_profile_contact_tools(monkeypatch):
@@ -459,12 +459,12 @@ def test_technician_with_profile_permission_keeps_profile_contact_tools(monkeypa
         response = client.get("/admin/profile")
 
     assert response.status_code == 200
-    assert "Notification Contact" in response.text
-    assert "Booking Link" in response.text
-    assert "Matrix Username" in response.text
+    assert 'id="mobile-number"' in response.text
+    assert 'id="booking-link-url"' in response.text
+    assert 'id="matrix-user-id"' in response.text
     assert "Email signature" in response.text
     assert response.text.count("rich_text_editor.js") == 1
-    assert "profile-columns--standard" not in response.text
+    assert 'data-profile-tab="details"' in response.text
 
 
 def test_bcp_menu_replaces_business_continuity(company_admin_context):
