@@ -15,7 +15,7 @@ import tempfile
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 import httpx
 import jwt
@@ -1854,6 +1854,44 @@ async def _acquire_teams_access_tokens(company_id: int) -> tuple[str, str, str]:
     return graph_token, teams_token, tenant_id
 
 
+async def _post_with_redirect(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+    *,
+    max_redirects: int = 3,
+) -> httpx.Response:
+    """POST to *url* with manual redirect handling that forces port 443.
+
+    Microsoft's SCC/EXO endpoints may 302-redirect to a regional host on a
+    non-standard port (e.g. 446).  httpx's built-in ``follow_redirects`` converts
+    POST→GET on 302, breaking the InvokeCommand API.  This helper intercepts
+    the redirect, rewrites the target to the default HTTPS port (443), and
+    preserves the POST method and body.
+    """
+    response = await client.post(url, headers=headers, json=payload)
+    for _ in range(max_redirects):
+        if response.status_code not in (301, 302, 303, 307, 308):
+            break
+        location = response.headers.get("location")
+        if not location:
+            break
+        # Strip any non-default port so the client connects to 443 (the default
+        # HTTPS port).  This avoids non-standard ports like 446 that some
+        # network policies may not permit.
+        parsed = urlsplit(location)
+        redirect_url = urlunsplit((
+            parsed.scheme,
+            parsed.hostname or "",
+            parsed.path,
+            parsed.query,
+            "",
+        ))
+        response = await client.post(redirect_url, headers=headers, json=payload)
+    return response
+
+
 async def _exo_invoke_command(
     exo_token: str,
     tenant_id: str,
@@ -1885,8 +1923,8 @@ async def _exo_invoke_command(
         "Content-Type": "application/json; charset=utf-8",
     }
     try:
-        async with monitored_client(httpx.AsyncClient, timeout=30, follow_redirects=True) as client:
-            response = await client.post(url, headers=headers, json=payload)
+        async with monitored_client(httpx.AsyncClient, timeout=30, follow_redirects=False) as client:
+            response = await _post_with_redirect(client, url, headers, payload)
     except httpx.DecodingError as exc:
         raise M365Error(
             f"Exchange Online {cmdlet_name} request decode error: {exc}"
@@ -2091,8 +2129,8 @@ async def _scc_invoke_command(
     if appid and route_organization:
         headers["X-AnchorMailbox"] = f"app:{appid}@{route_organization}"
     try:
-        async with monitored_client(httpx.AsyncClient, timeout=30, follow_redirects=True) as client:
-            response = await client.post(url, headers=headers, json=payload)
+        async with monitored_client(httpx.AsyncClient, timeout=30, follow_redirects=False) as client:
+            response = await _post_with_redirect(client, url, headers, payload)
     except httpx.DecodingError as exc:
         raise M365Error(
             f"Security & Compliance {cmdlet_name} request decode error: {exc}"
