@@ -1,0 +1,7 @@
+{
+  "guid": "85780f4e-a7e9-461d-9590-94c14f8e7ec9",
+  "occurred_at": "2026-10-01T00:00Z",
+  "change_type": "Security",
+  "summary": "Update tray chat build dependencies to patched releases that prevent denial-of-service vulnerabilities.",
+  "content_hash": "553ee1023167b99268b54ea02239fac799a8fdf56031a0b14ce2379f74610887"
+}
