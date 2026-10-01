@@ -15,8 +15,223 @@
   {% set show_attachment_blocklist = is_helpdesk_technician | default(false) %}
   {% set can_create_canned_response = is_helpdesk_technician | default(false) %}
   {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor or show_labour_type_editor or show_next_ticket_number or show_unbill_tickets or show_email_blocklist or show_attachment_blocklist or show_tag_exclusions or can_bulk_delete_tickets or can_merge_tickets or can_bulk_edit_tickets or can_create_canned_response %}
-  <div class="header-title-menu">
-    <span class="header-title-menu__label">Ticketing workspace</span>
+  <div class="header-title-menu ticket-header-title-menu">
+    <span class="header-title-menu__label ticket-header-toolbar__label">Tickets</span>
+    <div class="ticket-header-toolbar" data-ticket-header-toolbar>
+      <div class="ticket-header-toolbar__group ticket-header-toolbar__views">
+        <label class="visually-hidden" for="ticket-view-select">Saved view</label>
+        <select id="ticket-view-select" class="form-input ticket-header-toolbar__select" data-view-select>
+          <option value="">Saved views…</option>
+        </select>
+        <button type="button" class="button button--ghost button--compact" data-save-view title="Save current filters as a new view">
+          Save view
+        </button>
+        <button type="button" class="button button--primary button--compact" data-update-view title="Update selected view with current filters" hidden>
+          Update view
+        </button>
+        <button type="button" class="button button--ghost button--compact" data-delete-view title="Delete current view">
+          Delete view
+        </button>
+      </div>
+      <div class="ticket-header-toolbar__group">
+        <label class="visually-hidden" for="ticket-quick-filter">Quick search</label>
+        <input
+          id="ticket-quick-filter"
+          type="search"
+          class="form-input ticket-header-toolbar__search"
+          placeholder="Quick search"
+          aria-label="Filter tickets"
+          data-table-filter="tickets-table" data-ticket-dashboard-search
+        />
+        <label class="visually-hidden" for="ticket-result-limit">Results</label>
+        <select id="ticket-result-limit" class="form-input ticket-header-toolbar__select" data-ticket-dashboard-limit title="Results">
+          <option value="50">50 tickets</option>
+          <option value="100">100 tickets</option>
+          <option value="200" selected>200 tickets</option>
+          <option value="500">500 tickets</option>
+          <option value="all">All tickets</option>
+        </select>
+      </div>
+      <div class="ticket-header-toolbar__group">
+        <div class="ticket-columns ticket-group-by ticket-header-toolbar__menu" data-ticket-group-by>
+          <button type="button" class="button button--ghost button--compact ticket-columns__toggle" data-group-by-toggle aria-haspopup="true" aria-expanded="false">
+            <span data-group-by-label>Group By</span>
+            <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
+          </button>
+          <div class="ticket-columns__panel" data-group-by-panel hidden>
+            <p class="ticket-columns__title">Group tickets by</p>
+            <p class="ticket-group-by__hint">Select multiple fields in the order they should be grouped.</p>
+            <div class="ticket-columns__options">
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-group-by-toggle" data-grouping-field="company" />
+                <span>Company</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-group-by-toggle" data-grouping-field="assigned" />
+                <span>Assigned user</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-group-by-toggle" data-grouping-field="status" />
+                <span>Status</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-group-by-toggle" data-grouping-field="priority" />
+                <span>Priority</span>
+              </label>
+            </div>
+            <button type="button" class="button button--ghost button--compact ticket-group-by__clear" data-group-by-clear>Clear grouping</button>
+          </div>
+        </div>
+        <div class="ticket-columns ticket-header-toolbar__menu" data-ticket-columns>
+          <button type="button" class="button button--ghost button--compact ticket-columns__toggle" data-columns-toggle aria-haspopup="true">
+            <span>Columns</span>
+            <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
+          </button>
+          <div class="ticket-columns__panel" data-columns-panel hidden>
+            <p class="ticket-columns__title">Toggle columns</p>
+            <div class="ticket-columns__options">
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="id" checked />
+                <span>ID</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="subject" checked disabled />
+                <span>Subject</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="status" checked />
+                <span>Status</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="priority" checked />
+                <span>Priority</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="company" checked />
+                <span>Company</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="sla" checked />
+                <span>SLA</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="assigned" checked />
+                <span>Assigned</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="updated" checked />
+                <span>Updated</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="last-reply-status" checked />
+                <span>Last Reply Status</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="review-date" />
+                <span>Review Date</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="category" />
+                <span>Category</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="requester" />
+                <span>Requester</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="module" />
+                <span>Module</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="external-ref" />
+                <span>External Ref</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="created" />
+                <span>Created</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="closed" />
+                <span>Closed</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="ai-status" />
+                <span>AI Status</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="ai-tags" />
+                <span>AI Tags</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="billable-minutes" />
+                <span>Billable Minutes</span>
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="ticket-column-toggle" data-column="non-billable-minutes" />
+                <span>Non-Billable Minutes</span>
+              </label>
+              {% set automation_column_options = [
+                ('requester-email', 'ticket.requester_email'),
+                ('requester-display-name', 'ticket.requester_display_name'),
+                ('assigned-user-email', 'ticket.assigned_user_email'),
+                ('assigned-user-display-name', 'ticket.assigned_user_display_name'),
+                ('company-id', 'ticket.company.id'),
+                ('has-attachments', 'ticket.has_attachments'),
+                ('attachment-count', 'ticket.attachment_count'),
+                ('has-tasks', 'ticket.has_tasks'),
+                ('task-count', 'ticket.task_count'),
+                ('has-open-tasks', 'ticket.has_open_tasks'),
+                ('open-task-count', 'ticket.open_task_count'),
+                ('labels', 'ticket.labels'),
+                ('age-days', 'ticket.age_days'),
+                ('updated-age-hours', 'ticket.updated_age_hours'),
+                ('in-status-hours', 'ticket.in_status_age_hours'),
+                ('last-reply-age-hours', 'ticket.last_reply_age_hours'),
+                ('latest-reply-internal', 'reply.is_internal'),
+                ('latest-reply-kind', 'reply.kind'),
+                ('ticket-update-actor-type', 'ticket_update.actor_type')
+              ] %}
+              {% for column_key, column_label in automation_column_options %}
+                <label class="ticket-columns__option">
+                  <input type="checkbox" class="ticket-column-toggle" data-column="{{ column_key }}" />
+                  <span>{{ column_label }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+        <div class="ticket-stat-controls ticket-columns ticket-header-toolbar__menu" data-ticket-stat-controls>
+          <button
+            type="button"
+            class="button button--ghost button--compact ticket-columns__toggle"
+            data-ticket-stats-toggle
+            aria-haspopup="true"
+            aria-expanded="false"
+          >
+            <span>Stats</span>
+            <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
+          </button>
+          <div class="ticket-columns__panel ticket-stat-controls__panel" data-ticket-stats-panel hidden>
+            <p class="ticket-columns__title">Show ticket stats</p>
+            <div class="ticket-columns__options">
+              {% for definition in ticket_status_definitions %}
+                {% set status_count = ticket_status_counts.get(definition.tech_status, 0) %}
+                <label class="ticket-columns__option">
+                  <input
+                    type="checkbox"
+                    class="ticket-stat-toggle"
+                    data-ticket-stat-toggle="{{ definition.tech_status }}"
+                    {% if status_count > 0 %}checked{% endif %}
+                  />
+                  <span>{{ definition.tech_label }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+      <span class="ticket-header-toolbar__info" data-table-info aria-live="polite">Showing {{ tickets|length }} tickets</span>
+    </div>
     <button
       type="button"
       class="button button--primary"
@@ -254,6 +469,26 @@
 {% endblock %}
 
 {% block content %}
+  {% if can_bulk_delete_tickets %}
+    {% set current_query = request.url.query %}
+    <form
+      id="tickets-bulk-delete-form"
+      action="/admin/tickets/bulk-delete"
+      method="post"
+      data-bulk-delete-form
+      hidden
+    >
+      {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+      {% endif %}
+      <input
+        type="hidden"
+        name="returnUrl"
+        value="{{ request.url.path }}{% if current_query %}?{{ current_query }}{% endif %}"
+      />
+    </form>
+  {% endif %}
+
   {% if can_bulk_edit_tickets %}
     <div class="modal" id="bulk-edit-tickets-modal" data-ticket-bulk-edit-modal hidden role="dialog" aria-modal="true" aria-labelledby="bulk-edit-tickets-title">
       <div class="modal__backdrop" data-ticket-bulk-edit-close></div>
@@ -314,230 +549,6 @@
     <section class="management__content">
       <div class="management__body" data-ticket-view-manager>
         <div class="ticket-dashboard__overview">
-          <!-- Filters and Controls Container -->
-          <aside class="ticket-filters-panel" data-ticket-filters-panel>
-            <div class="ticket-filters" id="ticket-filters">
-              <!-- View Management Section -->
-              <div class="ticket-filters__section">
-                <h3 class="ticket-filters__section-title">Saved Views</h3>
-                <div class="ticket-filters__view-controls">
-                  <div class="ticket-filters__view-selector">
-                    <label class="form-label" for="ticket-view-select">Select saved view</label>
-                    <select id="ticket-view-select" class="form-input" data-view-select>
-                      <option value="">Select a view...</option>
-                    </select>
-                  </div>
-                  <div class="ticket-filters__view-actions">
-                    <button type="button" class="button button--ghost button--compact" data-save-view title="Save current filters as a new view">
-                      Save View
-                    </button>
-                    <button type="button" class="button button--primary button--compact" data-update-view title="Update selected view with current filters" hidden>
-                      Update View
-                    </button>
-                    <button type="button" class="button button--ghost button--compact" data-delete-view title="Delete current view">
-                      Delete View
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Search Section -->
-              <div class="ticket-filters__section ticket-filters__section--horizontal">
-                <div class="ticket-filters__search-control">
-                  <label class="form-label" for="ticket-quick-filter">Quick search</label>
-                  <input
-                    id="ticket-quick-filter"
-                    type="search"
-                    class="form-input"
-                    placeholder="Filter tickets"
-                    aria-label="Filter tickets"
-                    data-table-filter="tickets-table" data-ticket-dashboard-search
-                  />
-                </div>
-                <div class="ticket-filters__limit-control">
-                  <label class="form-label" for="ticket-result-limit">Results</label>
-                  <select id="ticket-result-limit" class="form-input" data-ticket-dashboard-limit>
-                    <option value="50">50 tickets</option>
-                    <option value="100">100 tickets</option>
-                    <option value="200" selected>200 tickets</option>
-                    <option value="500">500 tickets</option>
-                    <option value="all">All tickets</option>
-                  </select>
-                </div>
-                <div class="management__toolbar ticket-dashboard__dropdowns">
-            {% if can_bulk_delete_tickets %}
-              {% set current_query = request.url.query %}
-              <form
-                id="tickets-bulk-delete-form"
-                action="/admin/tickets/bulk-delete"
-                method="post"
-                data-bulk-delete-form
-                hidden
-              >
-                {% if csrf_token %}
-                  <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                {% endif %}
-                <input
-                  type="hidden"
-                  name="returnUrl"
-                  value="{{ request.url.path }}{% if current_query %}?{{ current_query }}{% endif %}"
-                />
-              </form>
-            {% endif %}
-
-            <div class="ticket-columns ticket-group-by" data-ticket-group-by>
-              <button type="button" class="button button--ghost ticket-columns__toggle" data-group-by-toggle aria-haspopup="true" aria-expanded="false">
-                <span data-group-by-label>Group By</span>
-                <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
-              </button>
-              <div class="ticket-columns__panel" data-group-by-panel hidden>
-                <p class="ticket-columns__title">Group tickets by</p>
-                <p class="ticket-group-by__hint">Select multiple fields in the order they should be grouped.</p>
-                <div class="ticket-columns__options">
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-group-by-toggle" data-grouping-field="company" />
-                    <span>Company</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-group-by-toggle" data-grouping-field="assigned" />
-                    <span>Assigned user</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-group-by-toggle" data-grouping-field="status" />
-                    <span>Status</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-group-by-toggle" data-grouping-field="priority" />
-                    <span>Priority</span>
-                  </label>
-                </div>
-                <button type="button" class="button button--ghost button--compact ticket-group-by__clear" data-group-by-clear>Clear grouping</button>
-              </div>
-            </div>
-            <div class="ticket-columns" data-ticket-columns>
-              <button type="button" class="button button--ghost ticket-columns__toggle" data-columns-toggle aria-haspopup="true">
-                <span>Columns</span>
-                <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
-              </button>
-              <div class="ticket-columns__panel" data-columns-panel hidden>
-                <p class="ticket-columns__title">Toggle columns</p>
-                <div class="ticket-columns__options">
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="id" checked />
-                    <span>ID</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="subject" checked disabled />
-                    <span>Subject</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="status" checked />
-                    <span>Status</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="priority" checked />
-                    <span>Priority</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="company" checked />
-                    <span>Company</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="sla" checked />
-                    <span>SLA</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="assigned" checked />
-                    <span>Assigned</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="updated" checked />
-                    <span>Updated</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="last-reply-status" checked />
-                    <span>Last Reply Status</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="review-date" />
-                    <span>Review Date</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="category" />
-                    <span>Category</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="requester" />
-                    <span>Requester</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="module" />
-                    <span>Module</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="external-ref" />
-                    <span>External Ref</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="created" />
-                    <span>Created</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="closed" />
-                    <span>Closed</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="ai-status" />
-                    <span>AI Status</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="ai-tags" />
-                    <span>AI Tags</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="billable-minutes" />
-                    <span>Billable Minutes</span>
-                  </label>
-                  <label class="ticket-columns__option">
-                    <input type="checkbox" class="ticket-column-toggle" data-column="non-billable-minutes" />
-                    <span>Non-Billable Minutes</span>
-                  </label>
-                  {% set automation_column_options = [
-                    ('requester-email', 'ticket.requester_email'),
-                    ('requester-display-name', 'ticket.requester_display_name'),
-                    ('assigned-user-email', 'ticket.assigned_user_email'),
-                    ('assigned-user-display-name', 'ticket.assigned_user_display_name'),
-                    ('company-id', 'ticket.company.id'),
-                    ('has-attachments', 'ticket.has_attachments'),
-                    ('attachment-count', 'ticket.attachment_count'),
-                    ('has-tasks', 'ticket.has_tasks'),
-                    ('task-count', 'ticket.task_count'),
-                    ('has-open-tasks', 'ticket.has_open_tasks'),
-                    ('open-task-count', 'ticket.open_task_count'),
-                    ('labels', 'ticket.labels'),
-                    ('age-days', 'ticket.age_days'),
-                    ('updated-age-hours', 'ticket.updated_age_hours'),
-                    ('in-status-hours', 'ticket.in_status_age_hours'),
-                    ('last-reply-age-hours', 'ticket.last_reply_age_hours'),
-                    ('latest-reply-internal', 'reply.is_internal'),
-                    ('latest-reply-kind', 'reply.kind'),
-                    ('ticket-update-actor-type', 'ticket_update.actor_type')
-                  ] %}
-                  {% for column_key, column_label in automation_column_options %}
-                    <label class="ticket-columns__option">
-                      <input type="checkbox" class="ticket-column-toggle" data-column="{{ column_key }}" />
-                      <span>{{ column_label }}</span>
-                    </label>
-                  {% endfor %}
-                </div>
-              </div>
-            </div>
-          </div>
-              </div>
-
-            </div>
-          </aside>
-
           <div class="ticket-dashboard__right-column">
             {% set ticket_stat_items = [] %}
             {% set visible_ticket_total = namespace(value=0) %}
@@ -565,35 +576,6 @@
                 }) %}
             {% endfor %}
             <div class="ticket-dashboard__stats" data-ticket-stats>
-              <div class="ticket-stat-controls ticket-columns" data-ticket-stat-controls>
-                <button
-                  type="button"
-                  class="button button--ghost button--compact ticket-columns__toggle"
-                  data-ticket-stats-toggle
-                  aria-haspopup="true"
-                  aria-expanded="false"
-                >
-                  <span>Stats</span>
-                  <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
-                </button>
-                <div class="ticket-columns__panel ticket-stat-controls__panel" data-ticket-stats-panel hidden>
-                  <p class="ticket-columns__title">Show ticket stats</p>
-                  <div class="ticket-columns__options">
-                    {% for definition in ticket_status_definitions %}
-                      {% set status_count = ticket_status_counts.get(definition.tech_status, 0) %}
-                      <label class="ticket-columns__option">
-                        <input
-                          type="checkbox"
-                          class="ticket-stat-toggle"
-                          data-ticket-stat-toggle="{{ definition.tech_status }}"
-                          {% if status_count > 0 %}checked{% endif %}
-                        />
-                        <span>{{ definition.tech_label }}</span>
-                      </label>
-                    {% endfor %}
-                  </div>
-                </div>
-              </div>
               {{ counter_strip(
                 ticket_stat_items,
                 total=visible_ticket_total.value,
@@ -602,12 +584,6 @@
                 class='ticket-dashboard__stats-strip',
               ) }}
             </div>
-
-
-
-          <div class="management__toolbar-info">
-            <span data-table-info>Showing {{ tickets|length }} tickets</span>
-          </div>
 
           <div class="table-wrapper">
           <table
