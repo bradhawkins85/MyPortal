@@ -27,26 +27,37 @@ def test_columns_toggle_button_present():
     assert '>Columns<' in html
 
 
-def test_dashboard_controls_precede_stats_and_full_width_table():
-    """The dashboard uses one control row followed by the full-width ticket list."""
+def test_dashboard_controls_live_in_header_bar_above_full_width_stats_and_table():
+    """List controls sit in the header bar so the stat strip and table span the page."""
     html = _template_html()
-    quick_search_index = html.index('id="ticket-quick-filter"')
-    result_limit_index = html.index('id="ticket-result-limit"')
-    group_by_index = html.index('data-ticket-group-by')
-    columns_index = html.index('data-ticket-columns')
-    stats_index = html.index('data-ticket-stats')
-    table_index = html.index('id="tickets-table"')
+    header = html[html.index("{% block header_title %}"):html.index("{% block content %}")]
+    content = html[html.index("{% block content %}"):]
 
-    assert quick_search_index < result_limit_index < group_by_index < stats_index < table_index
-    assert quick_search_index < columns_index < stats_index
+    for marker in (
+        "data-view-select",
+        "data-update-view",
+        "data-delete-view",
+        'id="ticket-quick-filter"',
+        'id="ticket-result-limit"',
+        "data-ticket-group-by",
+        "data-ticket-columns",
+        "data-ticket-stat-controls",
+        "data-table-info",
+    ):
+        assert marker in header, marker
+        assert marker not in content, marker
+
+    assert header.index('id="ticket-quick-filter"') < header.index('id="ticket-result-limit"')
+    assert header.index("data-ticket-group-by") < header.index("data-ticket-columns")
+    assert "ticket-filters-panel" not in html
+    assert content.index("data-ticket-stats") < content.index('id="tickets-table"')
     assert '<option value="200" selected>200 tickets</option>' in html
     assert '<option value="500">500 tickets</option>' in html
     assert '<option value="all">All tickets</option>' in html
 
     css = (TEMPLATE_PATH.parent.parent.parent / "static" / "css" / "app.css").read_text(encoding="utf-8")
-    assert "grid-template-columns: minmax(260px, 320px) minmax(260px, 340px) minmax(0, 1fr);" in css
-    assert ".ticket-dashboard__overview .table-wrapper" in css
-    assert "grid-column: 1 / -1;" in css
+    assert "grid-template-columns: minmax(260px, 320px) minmax(260px, 340px) minmax(0, 1fr);" not in css
+    assert ".ticket-header-toolbar {" in css
 
 
 def test_ticket_stats_render_every_status_with_customisation_controls():

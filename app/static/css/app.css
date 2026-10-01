@@ -7671,7 +7671,7 @@ body:has(.stf-modal.is-visible) {
 
 .ticket-dashboard__overview {
   display: grid;
-  gap: 1.5rem;
+  gap: 1rem;
 }
 
 .ticket-dashboard__filters {
@@ -7680,41 +7680,6 @@ body:has(.stf-modal.is-visible) {
 
 .ticket-dashboard__filters .form-input {
   min-width: 0;
-}
-
-@media (min-width: 960px) {
-  .ticket-dashboard__overview {
-    grid-template-columns: minmax(260px, 320px) minmax(260px, 340px) minmax(0, 1fr);
-    align-items: start;
-  }
-
-  .ticket-dashboard__overview > .ticket-filters-panel,
-  .ticket-dashboard__overview > .ticket-filters-panel > .ticket-filters,
-  .ticket-dashboard__overview > .ticket-dashboard__right-column {
-    display: contents;
-  }
-
-  .ticket-dashboard__overview .ticket-filters__section:first-child {
-    grid-column: 1;
-    grid-row: 1;
-    height: 100%;
-  }
-
-  .ticket-dashboard__overview .ticket-filters__section--horizontal {
-    grid-column: 2;
-    grid-row: 1;
-    height: 100%;
-  }
-
-  .ticket-dashboard__stats {
-    grid-column: 3;
-    grid-row: 1;
-  }
-
-  .ticket-dashboard__overview .management__toolbar-info,
-  .ticket-dashboard__overview .table-wrapper {
-    grid-column: 1 / -1;
-  }
 }
 
 .ticket-dashboard__stats {
@@ -7729,12 +7694,94 @@ body:has(.stf-modal.is-visible) {
 .ticket-stat-controls {
   display: flex;
   justify-content: flex-end;
-  margin-bottom: 0.5rem;
 }
 
 .ticket-stat-controls__panel {
   max-height: min(420px, 70vh);
   overflow-y: auto;
+}
+
+/* /admin/tickets: list controls live in the page header bar so the stat
+ * strip and ticket table can use the full width of the page. */
+.ticket-header-title-menu {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+
+.ticket-header-title-menu > .button,
+.ticket-header-title-menu > .header-title-menu__dropdown {
+  flex: 0 0 auto;
+}
+
+.ticket-header-toolbar__label {
+  flex: 0 0 auto;
+}
+
+.ticket-header-toolbar {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  min-width: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  letter-spacing: normal;
+}
+
+.ticket-header-toolbar__group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.ticket-header-toolbar .form-input {
+  width: auto;
+  min-height: 0;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+.ticket-header-toolbar .button {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+}
+
+.ticket-header-toolbar__select {
+  max-width: 10rem;
+}
+
+.ticket-header-toolbar__search {
+  width: 11rem;
+  max-width: 100%;
+}
+
+.ticket-header-toolbar .ticket-columns__panel {
+  max-height: min(420px, 70vh);
+  overflow-y: auto;
+  font-weight: 400;
+}
+
+.ticket-header-toolbar__info {
+  color: var(--hf-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .ticket-header-title-menu {
+    flex-wrap: wrap;
+  }
+
+  .ticket-header-toolbar {
+    flex-basis: 100%;
+  }
+
+  .ticket-header-toolbar__search {
+    flex: 1 1 10rem;
+  }
 }
 
 @media (max-width: 640px) {
@@ -12878,6 +12925,55 @@ a.service-card__ai-icon:hover {
 
 .management--ticket-detail .management__header-actions {
   gap: 0.5rem;
+}
+
+/* Admin ticket detail: subject and SLA sit in the page header bar, with
+ * navigation links directly left of the Actions menu. */
+.ticket-detail-header {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+}
+
+.ticket-detail-header__subject {
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+
+.ticket-detail-header__sla {
+  display: inline-flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  min-width: 0;
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: normal;
+}
+
+.ticket-detail-header__sla-meta {
+  color: var(--hf-muted);
+  white-space: nowrap;
+}
+
+.ticket-detail-header__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.ticket-detail-header__actions > a.button {
+  text-decoration: none;
+}
+
+@media (max-width: 1100px) {
+  .ticket-detail-header__actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
 }
 
 .management__body--ticket-detail .card {

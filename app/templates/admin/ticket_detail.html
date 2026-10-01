@@ -1,16 +1,79 @@
 {% extends "base.html" %}
-{% from "macros/header.html" import page_header_actions %}
+{% from "macros/header.html" import page_header_overflow %}
 
 
-{% block header_title %}Ticket detail{% endblock %}
+{% block header_title %}
+  <div class="header-title-menu ticket-detail-header">
+    <span class="header-title-menu__label ticket-detail-header__subject" title="{{ ticket.subject }}">{{ ticket.subject }}</span>
+    <span class="ticket-detail-header__sla">
+      <span class="status status--{{ 'danger' if ticket_sla.state == 'breached' else ('warning' if ticket_sla.state == 'at_risk' else ('success' if ticket_sla.state in ['met','on_track'] else 'neutral')) }}" title="SLA">{{ ticket_sla.name ~ ' · ' if ticket_sla.name else '' }}{{ ticket_sla.label }}</span>
+      {%- if ticket_sla.paused %}
+        <span class="ticket-detail-header__sla-meta">Timer paused{% if ticket_sla.paused_reason == 'outside_business_hours' %} (outside business hours){% endif %}</span>
+      {%- endif %}
+      {%- if ticket_sla.resolution_due_at %}
+        <span class="ticket-detail-header__sla-meta">Resolution due <span data-utc="{{ ticket_sla.resolution_due_at.isoformat() }}">{{ ticket_sla.resolution_due_at.isoformat() }}</span></span>
+      {%- endif %}
+    </span>
+  </div>
+{% endblock %}
 
 {% block header_actions %}
-  {{ page_header_actions([
+  {% set ticket_header_actions = [
     {"label": "Start process", "type": "link", "href": "/processes/start?ticket_id=" ~ ticket.id},
     {"label": "Clock history", "type": "button", "attrs": {"data-ticket-page-clock-history": true}},
-    {"label": "Audit Trail", "type": "button", "attrs": {"data-ticket-automation-history-open": true, "data-ticket-id": ticket.id}},
-    {"label": "All tickets", "type": "link", "href": "/admin/tickets"}
-  ]) }}
+    {"label": "Audit Trail", "type": "button", "attrs": {"data-ticket-automation-history-open": true, "data-ticket-id": ticket.id}}
+  ] %}
+  {% if not ticket.xero_invoice_number and is_super_admin and module_enabled.get('xero', false) %}
+    {% set _ = ticket_header_actions.append({"label": "Bill Now", "type": "button", "attrs": {"data-ticket-bill-now": ticket.id}}) %}
+  {% endif %}
+  {% if can_delete_ticket %}
+    {% set _ = ticket_header_actions.append({
+      "label": "Delete ticket",
+      "type": "form",
+      "variant": "danger",
+      "action": "/admin/tickets/" ~ ticket.id ~ "/delete",
+      "attrs": {"data-confirm": "Delete ticket " ~ ticket.id ~ "? This cannot be undone."}
+    }) %}
+  {% endif %}
+  <div class="ticket-detail-header__actions">
+    <a href="/admin/tickets" class="button button--ghost">Back to tickets</a>
+    {% if module_enabled.get('hudu', false) and hudu_company_url %}
+      <a
+        href="{{ hudu_company_url }}"
+        target="_blank"
+        rel="noreferrer noopener"
+        class="button button--ghost"
+        title="Open company in Hudu"
+        aria-label="Open company in Hudu"
+      >
+        <span class="button__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false" fill="currentColor">
+            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+          </svg>
+        </span>
+        Hudu
+      </a>
+    {% endif %}
+    {% if solidtime_links and solidtime_links.enabled and solidtime_links.timer_url %}
+      <a
+        href="{{ solidtime_links.timer_url }}"
+        target="_blank"
+        rel="noreferrer noopener"
+        class="button button--ghost"
+        title="Open Solidtime timer for this ticket"
+        aria-label="Open Solidtime timer for this ticket"
+      >
+        <span class="button__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false" fill="currentColor">
+            <title>Solidtime timer</title>
+            <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 18a8 8 0 110-16 8 8 0 010 16zm.5-13H11v6l5.2 3.1.8-1.3-4.5-2.7V7z"/>
+          </svg>
+        </span>
+        Solidtime
+      </a>
+    {% endif %}
+    {{ page_header_overflow('ticket-actions-menu', 'Actions', ticket_header_actions) }}
+  </div>
 {% endblock %}
 {% block extra_head %}
   {{ super() }}
@@ -25,74 +88,18 @@
     data-ticket-id="{{ ticket.id }}"
   >
     <section class="management__content">
-      <header class="management__header">
-        <div>
-          <h1 class="management__title">{{ ticket.subject }}</h1>
-          {% set ticket_status = (ticket.status or 'open') %}
-          {% set ai_badge_map = {'succeeded': 'badge--success', 'error': 'badge--danger', 'skipped': 'badge--muted', 'unknown': 'badge--muted'} %}
-          {% set ai_date_color_map = {'succeeded': '#bbf7d0', 'error': '#fecaca', 'skipped': 'rgba(226, 232, 240, 0.75)', 'unknown': 'rgba(226, 232, 240, 0.75)'} %}
-          {% set resolution_label_map = {'likely_resolved': 'Likely Resolved', 'likely_in_progress': 'Likely In Progress'} %}
-          {% set resolution_badge_map = {'likely_resolved': 'badge--success', 'likely_in_progress': 'badge--warning'} %}
-          {% set ai_status_value = ticket.ai_summary_status if ticket.ai_summary_status is not none else 'skipped' %}
-          {% set ai_status_lower = ai_status_value | lower %}
-          {% set ai_status_label = ai_status_lower.replace('_', ' ') | title %}
-          {% set tag_status_value = ticket.ai_tags_status if ticket.ai_tags_status is not none else 'skipped' %}
-          {% set tag_status_lower = tag_status_value | lower %}
-          {% set ticket_status_label = ticket_status_label_map.get(ticket_status, ticket_status.replace('_', ' ').title()) %}
-          <p class="management__meta">SLA: <span class="status status--{{ 'danger' if ticket_sla.state == 'breached' else ('warning' if ticket_sla.state == 'at_risk' else ('success' if ticket_sla.state in ['met','on_track'] else 'neutral')) }}">{{ ticket_sla.name ~ ' · ' if ticket_sla.name else '' }}{{ ticket_sla.label }}</span>{% if ticket_sla.paused %} &middot; Timer paused{% if ticket_sla.paused_reason == 'outside_business_hours' %} (outside business hours){% endif %}{% endif %}{% if ticket_sla.resolution_due_at %} &middot; Resolution due <span data-utc="{{ ticket_sla.resolution_due_at.isoformat() }}">{{ ticket_sla.resolution_due_at.isoformat() }}</span>{% endif %}</p>
-        </div>
-        <div class="management__header-actions">
-          <a href="/admin/tickets" class="button button--ghost">Back to tickets</a>
-          {% if module_enabled.get('hudu', false) and hudu_company_url %}
-            <a
-              href="{{ hudu_company_url }}"
-              target="_blank"
-              rel="noreferrer noopener"
-              class="button button--ghost"
-              title="Open company in Hudu"
-              aria-label="Open company in Hudu"
-            >
-              <span class="button__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false" fill="currentColor">
-                  <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
-                </svg>
-              </span>
-              Hudu
-            </a>
-          {% endif %}
-          {% if solidtime_links and solidtime_links.enabled and solidtime_links.timer_url %}
-            <a
-              href="{{ solidtime_links.timer_url }}"
-              target="_blank"
-              rel="noreferrer noopener"
-              class="button button--ghost"
-              title="Open Solidtime timer for this ticket"
-              aria-label="Open Solidtime timer for this ticket"
-            >
-              <span class="button__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false" fill="currentColor">
-                  <title>Solidtime timer</title>
-                  <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 18a8 8 0 110-16 8 8 0 010 16zm.5-13H11v6l5.2 3.1.8-1.3-4.5-2.7V7z"/>
-                </svg>
-              </span>
-              Solidtime
-            </a>
-          {% endif %}
-          {% if can_delete_ticket %}
-            <form
-              action="/admin/tickets/{{ ticket.id }}/delete"
-              method="post"
-              class="inline-form"
-              data-confirm="Delete ticket {{ ticket.id }}? This cannot be undone."
-            >
-              {% if csrf_token %}
-                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-              {% endif %}
-              <button type="submit" class="button button--danger">Delete ticket</button>
-            </form>
-          {% endif %}
-        </div>
-      </header>
+      {% set ticket_status = (ticket.status or 'open') %}
+      {% set ai_badge_map = {'succeeded': 'badge--success', 'error': 'badge--danger', 'skipped': 'badge--muted', 'unknown': 'badge--muted'} %}
+      {% set ai_date_color_map = {'succeeded': '#bbf7d0', 'error': '#fecaca', 'skipped': 'rgba(226, 232, 240, 0.75)', 'unknown': 'rgba(226, 232, 240, 0.75)'} %}
+      {% set resolution_label_map = {'likely_resolved': 'Likely Resolved', 'likely_in_progress': 'Likely In Progress'} %}
+      {% set resolution_badge_map = {'likely_resolved': 'badge--success', 'likely_in_progress': 'badge--warning'} %}
+      {% set ai_status_value = ticket.ai_summary_status if ticket.ai_summary_status is not none else 'skipped' %}
+      {% set ai_status_lower = ai_status_value | lower %}
+      {% set ai_status_label = ai_status_lower.replace('_', ' ') | title %}
+      {% set tag_status_value = ticket.ai_tags_status if ticket.ai_tags_status is not none else 'skipped' %}
+      {% set tag_status_lower = tag_status_value | lower %}
+      {% set ticket_status_label = ticket_status_label_map.get(ticket_status, ticket_status.replace('_', ' ').title()) %}
+
 
       <div class="management__body management__body--columns management__body--ticket-detail management__body--ticket-detail-admin">
         <div class="management__column management__column--details">
@@ -700,18 +707,6 @@
                 <p class="card__help" style="margin-top: 1rem;">
                   This ticket has been billed and closed. No further time can be added.
                 </p>
-              </div>
-            </article>
-          {% elif is_super_admin and module_enabled.get('xero', false) %}
-            <article class="card card--panel">
-              <header class="card__header">
-                <h2 class="card__title">Bill Now</h2>
-              </header>
-              <div class="card__body">
-                <p class="card__subtitle">Create a ticket-only invoice draft and require approval before it is pushed to Xero.</p>
-                <button type="button" class="button button--primary button--small" data-ticket-bill-now="{{ ticket.id }}">
-                  Bill Now
-                </button>
               </div>
             </article>
           {% endif %}
@@ -2051,7 +2046,7 @@
         if (!ticketId) {
           return;
         }
-        if (!window.confirm('Create a manual invoice draft for this ticket now?')) {
+        if (!window.confirm('Create a ticket-only invoice for this ticket? The invoice draft needs approval before it is pushed to Xero.')) {
           return;
         }
         billNowButton.disabled = true;
