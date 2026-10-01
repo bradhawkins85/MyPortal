@@ -76,5 +76,5 @@ def test_health_handles_empty_index(monkeypatch):
 
 
 def test_health_covering_index_migration_exists():
-    sql = Path("migrations/453_rag_health_covering_indexes.sql").read_text()
+    sql = Path("migrations/454_rag_health_covering_indexes.sql").read_text()
     assert "rag_chunks (is_active, document_id, token_count)" in sql
