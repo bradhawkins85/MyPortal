@@ -78,6 +78,35 @@
       .replace(/"/g, '&quot;');
   }
 
+  const HTML_ALLOWED_TAGS = new Set([
+    'a', 'b', 'blockquote', 'br', 'code', 'div', 'em', 'h1', 'h2', 'h3', 'h4', 'h5',
+    'h6', 'hr', 'i', 'img', 'li', 'ol', 'p', 'pre', 's', 'span', 'strong', 'table',
+    'tbody', 'td', 'th', 'thead', 'tr', 'u', 'ul',
+  ]);
+  const HTML_BLOCKED_TAGS = new Set(['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form']);
+  const HTML_GLOBAL_ATTRS = new Set(['class', 'title', 'colspan', 'rowspan']);
+  const HTML_ATTRS_BY_TAG = {
+    a: new Set(['href', 'target', 'rel']),
+    img: new Set(['src', 'alt', 'width', 'height']),
+  };
+
+  function sanitizeHtml(html) {
+    const source = String(html || '');
+    if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+      const allowedAttrs = [
+        ...Array.from(HTML_GLOBAL_ATTRS),
+        ...Object.values(HTML_ATTRS_BY_TAG).flatMap((attrs) => Array.from(attrs)),
+      ];
+      return window.DOMPurify.sanitize(source, {
+        ALLOWED_TAGS: Array.from(HTML_ALLOWED_TAGS),
+        ALLOWED_ATTR: Array.from(new Set(allowedAttrs)),
+        FORBID_TAGS: Array.from(HTML_BLOCKED_TAGS),
+        ALLOW_DATA_ATTR: false,
+      });
+    }
+    return escapeHtml(source).replace(/\n/g, '<br>');
+  }
+
   function tokensIn(content) {
     const found = [];
     String(content || '').replace(TOKEN_PATTERN, (match, path) => {
@@ -278,7 +307,7 @@
   }
 
   function htmlToText(html) {
-    const doc = new DOMParser().parseFromString(`<body>${html || ''}</body>`, 'text/html');
+    const doc = new DOMParser().parseFromString(`<body>${sanitizeHtml(html)}</body>`, 'text/html');
     doc.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
     doc.querySelectorAll('a[href]').forEach((link) => {
       const href = link.getAttribute('href');
@@ -298,8 +327,7 @@
 
   // Wrap {{ tokens }} in text nodes so the preview shows where values go.
   function highlightHtml(html) {
-    const doc = new DOMParser().parseFromString('<!doctype html><html><body></body></html>', 'text/html');
-    doc.body.innerHTML = html || '';
+    const doc = new DOMParser().parseFromString(`<body>${sanitizeHtml(html)}</body>`, 'text/html');
     const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
     const nodes = [];
     while (walker.nextNode()) {

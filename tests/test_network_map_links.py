@@ -160,6 +160,21 @@ def test_pdf_svg_scales_to_the_page():
     assert 'width="1200"' not in fitted and 'class="pdf-map"' in fitted
 
 
+def test_svg_sanitization_removes_active_content_and_keeps_encoded_text():
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" onload="alert(1)">'
+        '<script>alert(1)</script>'
+        '<a href="javascript:alert(1)"><text>click</text></a>'
+        '<text>&lt;script&gt;encoded&lt;/script&gt;</text>'
+        '</svg>'
+    )
+    sanitized = routes._sanitize_svg(svg)
+    assert "<script" not in sanitized
+    assert "onload=" not in sanitized
+    assert "javascript:" not in sanitized
+    assert "&lt;script&gt;encoded&lt;/script&gt;" in sanitized
+
+
 def test_migration_adds_network_map_tables():
     sql = (ROOT / "migrations/438_network_map.sql").read_text()
     for fragment in ("ADD COLUMN asset_type ", "ADD COLUMN asset_type_source", "CREATE TABLE IF NOT EXISTS asset_interfaces",
