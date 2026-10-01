@@ -42,8 +42,10 @@ def test_maintenance_returns_page_and_structured_api_503(monkeypatch):
 
 def test_upgrade_page_preserves_return_url_and_has_bounded_backoff():
     page = (Path(__file__).parents[1] / "app" / "static" / "upgrade.html").read_text()
+    assert ";(() => {" in page
     assert "location.pathname+location.search+location.hash" in page
     assert "location.replace(original)" in page
     assert "Math.min(30000" in page
+    assert "attempt += 1;" in page
     assert '<img src="/static/favicon.svg" alt="" width="64" height="64">' in page
     assert '<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">' in page

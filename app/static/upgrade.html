@@ -21,8 +21,53 @@
   <p class="meta" id="phase">Checking upgrade status…</p>
   <button type="button" id="retry">Check again</button>
 </main><script>
-(()=>{const original=sessionStorage.getItem('myportal-upgrade-return')||location.pathname+location.search+location.hash;sessionStorage.setItem('myportal-upgrade-return',original);let attempt=0,timer;
-const detail=document.getElementById('detail'),phase=document.getElementById('phase');
-async function poll(){clearTimeout(timer);try{const r=await fetch('/upgrade-status',{cache:'no-store',headers:{Accept:'application/json'}});if(r.ok){const s=await r.json();detail.textContent=s.message||detail.textContent;phase.textContent=s.phase==='idle'?'Waiting for the service…':`Current stage: ${String(s.phase).replaceAll('_',' ')}`;if(!s.maintenance&&(s.phase==='succeeded'||s.phase==='idle'||s.outcome==='rolled_back'||s.outcome==='interrupted')){sessionStorage.removeItem('myportal-upgrade-return');location.replace(original);return;}}}catch(_){phase.textContent='The service is restarting. We’ll keep trying.'}attempt++;timer=setTimeout(poll,Math.min(30000,2000*Math.pow(1.6,attempt)));}
-document.getElementById('retry').addEventListener('click',()=>{attempt=0;poll()});poll();})();
+;(() => {
+  const original = sessionStorage.getItem('myportal-upgrade-return')
+    || location.pathname + location.search + location.hash;
+  sessionStorage.setItem('myportal-upgrade-return', original);
+  let attempt = 0;
+  let timer;
+  const detail = document.getElementById('detail');
+  const phase = document.getElementById('phase');
+
+  async function poll() {
+    clearTimeout(timer);
+    try {
+      const r = await fetch('/upgrade-status', {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      });
+      if (r.ok) {
+        const s = await r.json();
+        detail.textContent = s.message || detail.textContent;
+        phase.textContent = s.phase === 'idle'
+          ? 'Waiting for the service…'
+          : `Current stage: ${String(s.phase).replaceAll('_', ' ')}`;
+        if (
+          !s.maintenance
+          && (
+            s.phase === 'succeeded'
+            || s.phase === 'idle'
+            || s.outcome === 'rolled_back'
+            || s.outcome === 'interrupted'
+          )
+        ) {
+          sessionStorage.removeItem('myportal-upgrade-return');
+          location.replace(original);
+          return;
+        }
+      }
+    } catch (_) {
+      phase.textContent = 'The service is restarting. We’ll keep trying.';
+    }
+    attempt += 1;
+    timer = setTimeout(poll, Math.min(30000, 2000 * Math.pow(1.6, attempt)));
+  }
+
+  document.getElementById('retry').addEventListener('click', () => {
+    attempt = 0;
+    poll();
+  });
+  poll();
+})();
 </script></body></html>
