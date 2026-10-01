@@ -11,7 +11,7 @@ import wave
 from importlib import import_module
 from defusedxml import ElementTree as DefusedET
 from defusedxml.common import DefusedXmlException
-from html import unescape
+from html import escape as html_escape, unescape
 from html.parser import HTMLParser
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -39,7 +39,7 @@ from app.repositories import webhook_events as webhook_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import module_dispatch
 from app.services.module_constants import ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS
-from app.services.ai_prompt_security import UntrustedRecord, build_prompt
+from app.services.ai_prompt_security import UntrustedRecord, build_prompt, validate_object
 from app.services.realtime import RefreshNotifier, refresh_notifier
 from app.core.module_capabilities import COMMANDS_BY_MODULE, MODULE_CAPABILITIES
 from app.services.component_availability import (
@@ -1309,6 +1309,30 @@ _ALWAYS_ON_TICKET_ACTION_MODULES: tuple[dict[str, Any], ...] = (
         "name": "AI Rename Ticket",
         "description": "Use the current subject and initial problem description to create a more descriptive 3 to 12 word ticket subject.",
         "icon": "✨",
+        "settings": {},
+        "enabled": True,
+    },
+    {
+        "slug": "ai-classify-ticket",
+        "name": "AI Classify Ticket",
+        "description": "Use AI to set the ticket category and priority from allowed values and note a likely duplicate ticket.",
+        "icon": "🏷️",
+        "settings": {},
+        "enabled": True,
+    },
+    {
+        "slug": "ai-link-related",
+        "name": "AI Link Related Items",
+        "description": "Attach the ticket's top stored AI relationships (tickets, articles, assets) as an internal note.",
+        "icon": "🔗",
+        "settings": {},
+        "enabled": True,
+    },
+    {
+        "slug": "ai-request-missing-info",
+        "name": "AI Request Missing Info",
+        "description": "When the description lacks key details such as the device, error text or affected user, draft a follow-up question as an internal note.",
+        "icon": "❓",
         "settings": {},
         "enabled": True,
     },
@@ -2623,6 +2647,52 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    "ai-classify-ticket": {
+        "fields": [
+            {
+                "name": "ticket_id",
+                "label": "Ticket ID",
+                "type": "string",
+                "placeholder": "{{ticket.id}}",
+            },
+            {
+                "name": "allowed_categories",
+                "label": "Allowed categories (comma separated; defaults to categories in use)",
+                "type": "string",
+            },
+            {"name": "classify_category", "label": "Set category", "type": "boolean"},
+            {"name": "overwrite_category", "label": "Replace an existing category", "type": "boolean"},
+            {"name": "classify_priority", "label": "Set priority", "type": "boolean"},
+            {"name": "detect_duplicates", "label": "Note likely duplicate", "type": "boolean"},
+        ],
+    },
+    "ai-link-related": {
+        "fields": [
+            {
+                "name": "ticket_id",
+                "label": "Ticket ID",
+                "type": "string",
+                "placeholder": "{{ticket.id}}",
+            },
+            {"name": "limit", "label": "Maximum related items (1-10)", "type": "integer"},
+        ],
+    },
+    "ai-request-missing-info": {
+        "fields": [
+            {
+                "name": "ticket_id",
+                "label": "Ticket ID",
+                "type": "string",
+                "placeholder": "{{ticket.id}}",
+            },
+            {
+                "name": "required_details",
+                "label": "Required details (device, error_text, affected_user, when_started, steps_to_reproduce)",
+                "type": "string",
+                "placeholder": "device, error_text, affected_user",
+            },
+        ],
+    },
     "reprocess-ai": {
         "fields": [
             {
@@ -3019,6 +3089,9 @@ async def trigger_module(
         "update-ticket": _invoke_update_ticket,
         "update-ticket-description": _invoke_update_ticket_description,
         "ai-rename-ticket": _invoke_ai_rename_ticket,
+        "ai-classify-ticket": _invoke_ai_classify_ticket,
+        "ai-link-related": _invoke_ai_link_related,
+        "ai-request-missing-info": _invoke_ai_request_missing_info,
         "reprocess-ai": _invoke_reprocess_ai,
         "add-ticket-reply": _invoke_add_ticket_reply,
         "smart-attachment-removal": _invoke_smart_attachment_removal,
@@ -6248,6 +6321,587 @@ async def _invoke_ai_rename_ticket(
         "subject": new_subject,
         "previous_values": {"subject": current_subject},
         "updated_fields": ["subject"],
+    }
+
+
+_AI_TICKET_PRIORITIES = ("urgent", "high", "normal", "low")
+_AI_MAX_ALLOWED_CATEGORIES = 50
+_AI_CATEGORY_MAX_LENGTH = 64
+_AI_DUPLICATE_CANDIDATE_LIMIT = 5
+_AI_DUPLICATE_RELATIONSHIP_TYPES = {"DUPLICATE", "DIRECT_MATCH"}
+_AI_LINK_RELATED_DEFAULT_LIMIT = 5
+_AI_LINK_RELATED_MAX_LIMIT = 10
+_AI_FOLLOW_UP_QUESTION_MAX_LENGTH = 1000
+_AI_MISSING_DETAILS = {
+    "device": "the affected device, computer or hostname",
+    "error_text": "the exact error message or error code shown",
+    "affected_user": "the affected user or users",
+    "when_started": "when the problem started",
+    "steps_to_reproduce": "the steps that reproduce the problem",
+}
+_AI_DEFAULT_MISSING_DETAILS = ("device", "error_text", "affected_user")
+_AI_RELATIONSHIP_LABELS = {
+    "DIRECT_MATCH": "Direct match",
+    "DUPLICATE": "Duplicate",
+    "FOLLOW_UP": "Follow-up",
+    "KNOWN_ISSUE": "Known issue",
+    "PARENT_CHILD": "Parent / child",
+    "RELATED": "Related",
+    "SUPPORTING": "Supporting evidence",
+}
+
+
+async def _load_ai_action_ticket(
+    payload: Mapping[str, Any],
+) -> tuple[int, Mapping[str, Any]]:
+    """Resolve the ticket an AI ticket action targets from payload or context."""
+
+    context = (
+        payload.get("context") if isinstance(payload.get("context"), Mapping) else {}
+    )
+    context_ticket = (
+        context.get("ticket") if isinstance(context.get("ticket"), Mapping) else {}
+    )
+    raw_ticket_id = (
+        payload.get("ticket_id") or context_ticket.get("id") or context.get("ticket_id")
+    )
+    try:
+        ticket_id = int(raw_ticket_id)
+    except (TypeError, ValueError):
+        raise ValueError("ticket_id is required and must be a valid integer")
+    ticket = await _tickets_repo().get_ticket(ticket_id)
+    if not ticket:
+        raise ValueError(f"Ticket {ticket_id} not found")
+    return ticket_id, ticket
+
+
+async def _ai_action_ollama_settings() -> Mapping[str, Any]:
+    ollama_module = await module_repo.get_module("ollama")
+    if not ollama_module or not ollama_module.get("enabled"):
+        raise ValueError("Ollama AI module is not configured or enabled")
+    return _resolve_module_settings_for_runtime("ollama", ollama_module)
+
+
+def _ai_response_object(payload: Any, expected_keys: set[str]) -> Any:
+    """Return the JSON object text or mapping produced by an AI action call."""
+
+    if isinstance(payload, Mapping):
+        if expected_keys & set(payload):
+            return payload
+        candidate = (
+            payload.get("response") or payload.get("message") or payload.get("text")
+        )
+    else:
+        candidate = payload
+    if not isinstance(candidate, str):
+        return candidate
+    text = candidate.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE)
+    return text.strip()
+
+
+def _ai_prompt_ticket_text(value: Any, *, limit: int) -> str:
+    # Ticket text is customer-controlled email/HTML: strip markup, quoted
+    # history and signatures and bound its size before it enters a prompt.
+    return _tickets_service()._prepare_prompt_text(value)[:limit]
+
+
+def _ai_ticket_record(
+    ticket_id: int, ticket: Mapping[str, Any], allowed_use: str
+) -> UntrustedRecord:
+    return UntrustedRecord(
+        f"ticket:{ticket_id}",
+        "helpdesk ticket",
+        {
+            "subject": _ai_prompt_ticket_text(ticket.get("subject"), limit=255),
+            "description": _ai_prompt_ticket_text(
+                ticket.get("description"), limit=4000
+            ),
+        },
+        allowed_use,
+    )
+
+
+def _ai_ticket_label(ticket: Mapping[str, Any]) -> str:
+    number = str(ticket.get("ticket_number") or ticket.get("id") or "").strip()
+    return f"#{number}" if number else "ticket"
+
+
+async def _create_ai_internal_note(ticket_id: int, body: str) -> Mapping[str, Any] | None:
+    reply = await _tickets_repo().create_reply(
+        ticket_id=ticket_id,
+        author_id=None,
+        body=body,
+        is_internal=True,
+    )
+    await _tickets_service().emit_ticket_updated_event(
+        ticket_id, actor_type="automation", trigger_automations=False
+    )
+    return reply
+
+
+async def _load_ticket_relationship_evidence(
+    ticket_id: int, ticket: Mapping[str, Any], *, limit: int
+) -> list[dict[str, Any]]:
+    """Return available stored relationships the ticket's company may see.
+
+    Relationships were already company-filtered when they were evaluated, but
+    the target may have moved since, so the boundary is re-checked here before
+    anything is written into the ticket.
+    """
+
+    rag_index_repo = import_module("app.repositories.rag_index")
+    rag_index_service = import_module("app.services.rag_index")
+    rel_repo = import_module("app.repositories.rag_relationships")
+    rel_service = import_module("app.services.rag_relationships")
+    rag_urls = import_module("app.services.rag_urls")
+
+    document = await rag_index_repo.get_document_by_source(
+        "tickets", str(ticket_id), rag_index_service.embedding_model()
+    )
+    if not document:
+        return []
+    rows = await rel_service.load_evidence_for_document(
+        int(document["id"]), limit=limit * 3
+    )
+    items: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    for row in rows:
+        if not bool(row.get("target_available")):
+            continue
+        target = {
+            "company_id": row.get("target_company_id"),
+            "permission_scope_json": row.get("permission_scope_json"),
+        }
+        if not rel_repo.company_scope_compatible(
+            {"company_id": ticket.get("company_id")}, target
+        ):
+            continue
+        source_type = str(row.get("source_type") or "").strip()
+        source_id = row.get("source_id")
+        if source_type == "tickets" and str(source_id) == str(ticket_id):
+            continue
+        try:
+            metadata = json.loads(str(row.get("metadata_json") or "{}"))
+        except (TypeError, ValueError):
+            metadata = {}
+        url = rag_urls.canonical_source_url(
+            source_type,
+            source_id,
+            metadata=metadata if isinstance(metadata, Mapping) else {},
+            supplied_url=row.get("url"),
+        )
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        items.append(
+            {
+                "source_type": source_type,
+                "source_id": source_id,
+                "url": url,
+                "label": str(row.get("title") or f"{source_type.title()} {source_id}")
+                .strip()[:180],
+                "relationship_type": str(row.get("relationship_type") or "RELATED"),
+                "confidence": row.get("confidence"),
+            }
+        )
+        if len(items) >= limit:
+            break
+    return items
+
+
+def _ai_confidence_band(value: Any) -> str:
+    try:
+        score = float(value or 0)
+    except (TypeError, ValueError):
+        score = 0.0
+    if score >= 0.85:
+        return "high confidence"
+    if score >= 0.65:
+        return "medium confidence"
+    return "low confidence"
+
+
+async def _invoke_ai_link_related(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Attach the ticket's top stored AI relationships as an internal note."""
+
+    ticket_id, ticket = await _load_ai_action_ticket(payload)
+    limit = _parse_nullable_int(payload.get("limit")) or _AI_LINK_RELATED_DEFAULT_LIMIT
+    limit = max(1, min(limit, _AI_LINK_RELATED_MAX_LIMIT))
+    items = await _load_ticket_relationship_evidence(ticket_id, ticket, limit=limit)
+    if not items:
+        return {
+            "status": "skipped",
+            "reason": "No stored related items for this ticket yet",
+            "ticket_id": ticket_id,
+        }
+
+    lines = []
+    for item in items:
+        relationship = _AI_RELATIONSHIP_LABELS.get(item["relationship_type"], "Related")
+        lines.append(
+            f'<li><a href="{html_escape(item["url"], quote=True)}">'
+            f"{html_escape(item['label'])}</a> "
+            f"({html_escape(relationship)}, {_ai_confidence_band(item['confidence'])})</li>"
+        )
+    body = "<p><strong>AI related items</strong></p><ul>" + "".join(lines) + "</ul>"
+    reply = await _create_ai_internal_note(ticket_id, body)
+    return {
+        "status": "succeeded",
+        "ticket_id": ticket_id,
+        "ticket_number": ticket.get("ticket_number"),
+        "reply_id": reply.get("id") if reply else None,
+        "related_items": [
+            {
+                "url": item["url"],
+                "label": item["label"],
+                "relationship_type": item["relationship_type"],
+            }
+            for item in items
+        ],
+    }
+
+
+def _ai_allowed_categories(raw: Any) -> list[str]:
+    categories: list[str] = []
+    seen: set[str] = set()
+    for value in _ensure_list(raw) if not isinstance(raw, (list, tuple)) else raw:
+        text = str(value or "").strip()
+        if not text or len(text) > _AI_CATEGORY_MAX_LENGTH:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        categories.append(text)
+        if len(categories) >= _AI_MAX_ALLOWED_CATEGORIES:
+            break
+    return categories
+
+
+async def _load_duplicate_candidates(
+    ticket_id: int, ticket: Mapping[str, Any]
+) -> dict[int, Mapping[str, Any]]:
+    """Return stored duplicate/direct-match tickets from the same company."""
+
+    try:
+        related = await _load_ticket_relationship_evidence(
+            ticket_id, ticket, limit=_AI_DUPLICATE_CANDIDATE_LIMIT * 2
+        )
+    except Exception as exc:  # pragma: no cover - relationships are optional
+        logger.warning(
+            "AI classify could not load duplicate candidates",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
+        return {}
+    candidates: dict[int, Mapping[str, Any]] = {}
+    for item in related:
+        if item["source_type"] != "tickets":
+            continue
+        if item["relationship_type"] not in _AI_DUPLICATE_RELATIONSHIP_TYPES:
+            continue
+        try:
+            candidate_id = int(item["source_id"])
+        except (TypeError, ValueError):
+            continue
+        candidate = await _tickets_repo().get_ticket(candidate_id)
+        if not candidate or candidate.get("company_id") != ticket.get("company_id"):
+            continue
+        candidates[candidate_id] = candidate
+        if len(candidates) >= _AI_DUPLICATE_CANDIDATE_LIMIT:
+            break
+    return candidates
+
+
+def _is_optional_choice(value: Any, choices: Mapping[str, str]) -> bool:
+    return value is None or (isinstance(value, str) and value.strip().casefold() in choices)
+
+
+async def _invoke_ai_classify_ticket(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Classify a ticket's category, priority and likely duplicate with AI.
+
+    Every value the model returns is validated against the allowed values
+    before it is written, so the model can only choose, never invent.
+    """
+
+    ticket_id, ticket = await _load_ai_action_ticket(payload)
+    if not str(ticket.get("subject") or "").strip() and not str(
+        ticket.get("description") or ""
+    ).strip():
+        return {
+            "status": "skipped",
+            "reason": "Ticket has no subject or description",
+            "ticket_id": ticket_id,
+        }
+
+    classify_category = _ensure_bool(payload.get("classify_category"), True)
+    classify_priority = _ensure_bool(payload.get("classify_priority"), True)
+    detect_duplicates = _ensure_bool(payload.get("detect_duplicates"), True)
+    overwrite_category = _ensure_bool(payload.get("overwrite_category"), False)
+    current_category = str(ticket.get("category") or "").strip()
+    if current_category and not overwrite_category:
+        classify_category = False
+
+    categories: list[str] = []
+    if classify_category:
+        categories = _ai_allowed_categories(payload.get("allowed_categories"))
+        if not categories:
+            categories = _ai_allowed_categories(
+                await _tickets_repo().list_ticket_categories(
+                    limit=_AI_MAX_ALLOWED_CATEGORIES
+                )
+            )
+        classify_category = bool(categories)
+    candidates = (
+        await _load_duplicate_candidates(ticket_id, ticket) if detect_duplicates else {}
+    )
+    if not (classify_category or classify_priority or candidates):
+        return {
+            "status": "skipped",
+            "reason": "Nothing to classify",
+            "ticket_id": ticket_id,
+        }
+
+    category_choices = {value.casefold(): value for value in categories}
+    priority_choices = (
+        {value: value for value in _AI_TICKET_PRIORITIES} if classify_priority else {}
+    )
+    records = [
+        _ai_ticket_record(
+            ticket_id, ticket, "Use only to classify the reported problem"
+        )
+    ]
+    for candidate_id, candidate in candidates.items():
+        records.append(
+            _ai_ticket_record(
+                candidate_id,
+                candidate,
+                "Use only to decide whether the main ticket reports the same problem",
+            )
+        )
+    allowed_categories = json.dumps(categories) if classify_category else "[] (return null)"
+    allowed_priorities = (
+        json.dumps(list(_AI_TICKET_PRIORITIES)) if classify_priority else "[] (return null)"
+    )
+    allowed_duplicates = json.dumps(sorted(candidates)) if candidates else "[] (return null)"
+    prompt = build_prompt(
+        "Classify the helpdesk ticket record "
+        f"ticket:{ticket_id}. Choose a category only from the allowed categories, "
+        "a priority only from the allowed priorities, and duplicate_of only from "
+        "the allowed duplicate ticket IDs when the other ticket record clearly "
+        "reports the same problem. Use null when nothing fits or a list is empty. "
+        "Priority guide: urgent = business stopped or many users down; high = one "
+        "user fully blocked; normal = degraded or workaround exists; low = "
+        "question or cosmetic.\n"
+        f"Allowed categories: {allowed_categories}\n"
+        f"Allowed priorities: {allowed_priorities}\n"
+        f"Allowed duplicate ticket IDs: {allowed_duplicates}",
+        records,
+        task=(
+            'Return only a JSON object: {"category": string or null, '
+            '"priority": string or null, "duplicate_of": integer or null}.'
+        ),
+    )
+    ai_result = await _invoke_ollama(
+        await _ai_action_ollama_settings(),
+        {"prompt": prompt, "temperature": 0.1, "max_tokens": 512},
+        event_future=event_future,
+    )
+    if not module_result_succeeded(ai_result):
+        return {**ai_result, "ticket_id": ticket_id}
+    try:
+        parsed = validate_object(
+            _ai_response_object(
+                ai_result.get("response"), {"category", "priority", "duplicate_of"}
+            ),
+            {
+                "category": lambda value: _is_optional_choice(value, category_choices),
+                "priority": lambda value: _is_optional_choice(value, priority_choices),
+                "duplicate_of": lambda value: value is None
+                or (
+                    isinstance(value, int)
+                    and not isinstance(value, bool)
+                    and value in candidates
+                ),
+            },
+        )
+    except ValueError as exc:
+        return {
+            **ai_result,
+            "status": "error",
+            "error": f"AI returned an invalid classification: {exc}",
+            "ticket_id": ticket_id,
+        }
+
+    update_fields: dict[str, Any] = {}
+    previous_values: dict[str, Any] = {}
+    category = parsed["category"]
+    if category is not None:
+        category = category_choices[category.strip().casefold()]
+        if category != current_category:
+            update_fields["category"] = category
+            previous_values["category"] = ticket.get("category")
+    priority = parsed["priority"]
+    if priority is not None:
+        priority = priority.strip().casefold()
+        if priority != str(ticket.get("priority") or "").strip().casefold():
+            update_fields["priority"] = priority
+            previous_values["priority"] = ticket.get("priority")
+    if update_fields:
+        await _tickets_repo().update_ticket(ticket_id, **update_fields)
+
+    duplicate_of = parsed["duplicate_of"]
+    reply_id = None
+    if duplicate_of is not None:
+        duplicate = candidates[duplicate_of]
+        note = (
+            "<p><strong>AI classification:</strong> likely duplicate of "
+            f'<a href="/admin/tickets/{duplicate_of}">'
+            f"{html_escape(_ai_ticket_label(duplicate))}</a> "
+            f"({html_escape(str(duplicate.get('subject') or '').strip()[:180])}).</p>"
+        )
+        reply = await _create_ai_internal_note(ticket_id, note)
+        reply_id = reply.get("id") if reply else None
+    elif update_fields:
+        await _tickets_service().emit_ticket_updated_event(
+            ticket_id, actor_type="automation", trigger_automations=False
+        )
+    return {
+        **ai_result,
+        "ticket_id": ticket_id,
+        "ticket_number": ticket.get("ticket_number"),
+        "category": category,
+        "priority": priority,
+        "duplicate_of": duplicate_of,
+        "reply_id": reply_id,
+        "previous_values": previous_values,
+        "updated_fields": sorted(update_fields),
+    }
+
+
+async def _invoke_ai_request_missing_info(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Draft a follow-up question when a ticket lacks key troubleshooting details.
+
+    The draft is saved as an internal note for a technician to review and send;
+    model output never reaches the requester directly.
+    """
+
+    ticket_id, ticket = await _load_ai_action_ticket(payload)
+    required = [
+        key
+        for key in dict.fromkeys(
+            item.strip().casefold() for item in _ensure_list(payload.get("required_details"))
+        )
+        if key in _AI_MISSING_DETAILS
+    ] or list(_AI_DEFAULT_MISSING_DETAILS)
+
+    records = [
+        _ai_ticket_record(
+            ticket_id, ticket, "Use only to decide which details the requester gave"
+        )
+    ]
+    replies = await _tickets_repo().list_replies(ticket_id, include_internal=False)
+    for reply in list(replies)[-5:]:
+        body = _ai_prompt_ticket_text(reply.get("body"), limit=1500)
+        if body:
+            records.append(
+                UntrustedRecord(
+                    f"ticket-reply:{reply.get('id')}",
+                    "public helpdesk ticket reply",
+                    {"body": body},
+                    "Use only to decide which details have since been provided",
+                )
+            )
+    detail_guide = "\n".join(f"- {key}: {_AI_MISSING_DETAILS[key]}" for key in required)
+    prompt = build_prompt(
+        "Review the helpdesk ticket and its public replies and decide which of "
+        "these key details the requester has not provided:\n"
+        f"{detail_guide}\n"
+        "If any are missing, write one short, polite follow-up question addressed "
+        "to the requester asking only for the missing details. Do not attempt to "
+        "solve the problem.",
+        records,
+        task=(
+            'Return only a JSON object: {"missing": [detail keys from the list], '
+            '"question": string}. Use an empty list and an empty question when '
+            "nothing is missing."
+        ),
+    )
+    ai_result = await _invoke_ollama(
+        await _ai_action_ollama_settings(),
+        {"prompt": prompt, "temperature": 0.2, "max_tokens": 768},
+        event_future=event_future,
+    )
+    if not module_result_succeeded(ai_result):
+        return {**ai_result, "ticket_id": ticket_id}
+    try:
+        parsed = validate_object(
+            _ai_response_object(ai_result.get("response"), {"missing", "question"}),
+            {
+                "missing": lambda value: isinstance(value, list)
+                and all(isinstance(item, str) and item in required for item in value),
+                "question": lambda value: isinstance(value, str)
+                and len(value.strip()) <= _AI_FOLLOW_UP_QUESTION_MAX_LENGTH,
+            },
+        )
+    except ValueError as exc:
+        return {
+            **ai_result,
+            "status": "error",
+            "error": f"AI returned an invalid missing-info result: {exc}",
+            "ticket_id": ticket_id,
+        }
+    missing = list(dict.fromkeys(parsed["missing"]))
+    question = parsed["question"].strip()
+    if not missing:
+        return {
+            **ai_result,
+            "status": "skipped",
+            "reason": "Ticket already includes the key details",
+            "ticket_id": ticket_id,
+            "missing": [],
+        }
+    if not question:
+        return {
+            **ai_result,
+            "status": "error",
+            "error": "AI reported missing details but drafted no follow-up question",
+            "ticket_id": ticket_id,
+            "missing": missing,
+        }
+
+    missing_labels = ", ".join(key.replace("_", " ") for key in missing)
+    question_html = "<br>".join(html_escape(line) for line in question.splitlines())
+    note = (
+        f"<p><strong>AI drafted follow-up question</strong> "
+        f"(missing: {html_escape(missing_labels)}). Review before sending to the "
+        f"requester:</p><blockquote>{question_html}</blockquote>"
+    )
+    reply = await _create_ai_internal_note(ticket_id, note)
+    return {
+        **ai_result,
+        "ticket_id": ticket_id,
+        "ticket_number": ticket.get("ticket_number"),
+        "missing": missing,
+        "question": question,
+        "reply_id": reply.get("id") if reply else None,
     }
 
 
