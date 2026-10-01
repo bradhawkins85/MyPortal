@@ -31,6 +31,12 @@ def test_gzip_and_zip():
     with zipfile.ZipFile(stream, "w") as archive: archive.writestr("report.xml", XML)
     assert unpack_attachment("report.zip", stream.getvalue())[0][1] == XML
 
+def test_gzip_expansion_is_bounded():
+    payload = gzip.compress(b"x" * 10_000)
+    limits = IngestionLimits(expanded_bytes=1_024)
+    with pytest.raises(DmarcInputError, match="Expanded attachment exceeds limit"):
+        unpack_attachment("report.xml.gz", payload, limits)
+
 def test_nested_and_unsafe_archives_rejected():
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w") as archive: archive.writestr("../report.xml", XML)
