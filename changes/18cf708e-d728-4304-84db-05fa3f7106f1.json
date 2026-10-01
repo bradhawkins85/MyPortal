@@ -1,0 +1,7 @@
+{
+  "guid": "18cf708e-d728-4304-84db-05fa3f7106f1",
+  "occurred_at": "2026-07-31T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed company automation editing so the modal loads existing task details and preserves cron calendar visibility.",
+  "content_hash": "0cb780820a471151bfc96cc893154a870fbd09c5eadc55a63b10dc409eedc0e8"
+}

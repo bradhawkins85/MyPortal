@@ -1,12 +1,18 @@
 """Regression tests for the M365 mail OAuth callback."""
+import asyncio
+import base64
+import json
 from urllib.parse import quote
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.core.database import db
+from app.features.m365_mail import oauth as m365_mail_oauth
 from app.main import app, scheduler_service
+from app.services import m365_mail as m365_mail_service
 
 
 @pytest.fixture(autouse=True)
@@ -56,11 +62,19 @@ def test_m365_mail_callback_handles_null_company_id(monkeypatch):
         "extract_tenant_id_from_token",
         lambda token: "tenant-123",
     )
+    async def fake_validate_id_token(token, *, client_id):
+        return {"tid": "tenant-123", "oid": "user-1"}
+
+    monkeypatch.setattr(
+        main_module.m365_service,
+        "validate_microsoft_id_token",
+        fake_validate_id_token,
+    )
 
     stored: dict = {}
 
     async def fake_store_tokens(
-        account_id, *, tenant_id, refresh_token, access_token, expires_at
+        account_id, *, tenant_id, refresh_token, access_token, expires_at, **kwargs
     ):
         stored.update(
             {
@@ -73,12 +87,27 @@ def test_m365_mail_callback_handles_null_company_id(monkeypatch):
         )
 
     async def fake_get_account(account_id):
-        return {"name": "Shared Mailbox", "id": account_id}
+        return {
+            "name": "Shared Mailbox",
+            "id": account_id,
+            "company_id": None,
+            "user_principal_name": "shared@contoso.example",
+        }
+
+    async def fake_validate_mailbox(access_token, mailbox, *, signed_in_address=None):
+        assert access_token == "access-token"
+        assert mailbox == "shared@contoso.example"
+        assert signed_in_address == ""
 
     monkeypatch.setattr(
         main_module.m365_mail_service, "store_delegated_tokens", fake_store_tokens
     )
     monkeypatch.setattr(main_module.m365_mail_service, "get_account", fake_get_account)
+    monkeypatch.setattr(
+        main_module.m365_mail_service,
+        "validate_mailbox_access",
+        fake_validate_mailbox,
+    )
 
     class FakeResponse:
         status_code = 200
@@ -117,6 +146,8 @@ def test_m365_mail_callback_handles_null_company_id(monkeypatch):
             "account_id": 1,
             "company_id": None,  # shared mailbox without company association
             "code_verifier": "code-verify",
+            "client_id": "pkce-client-id",
+            "redirect_uri": "https://portal.example/m365/callback",
         }
     )
 
@@ -130,8 +161,53 @@ def test_m365_mail_callback_handles_null_company_id(monkeypatch):
     assert response.headers["location"] == "/admin/modules/m365-mail"
     flash_cookie = response.headers.get("set-cookie", "")
     assert "_flash=" in flash_cookie
-    assert "success" in flash_cookie
+    flash_payload = json.loads(
+        base64.b64decode(
+            flash_cookie.split("_flash=", 1)[1].split(";", 1)[0].encode("utf-8")
+        )
+        .decode("utf-8")
+        .rsplit("|", 1)[0]
+    )
+    assert flash_payload["variant"] == "success"
     assert stored["account_id"] == 1
     assert stored["tenant_id"] == "tenant-123"
     assert calls, "Token exchange should be attempted"
     assert calls[0]["data"]["code_verifier"] == "code-verify"
+
+
+def test_m365_mail_callback_loads_service_in_cold_worker(monkeypatch):
+    """The callback must not rely on external access to a lazy module export."""
+    state_data = {
+        "flow": "m365_mail_auth",
+        "account_id": 7,
+        "company_id": 4,
+        "code_verifier": "verifier",
+    }
+
+    async def fake_consume_state(request, state):
+        return state_data
+
+    async def fake_authenticated_user(request):
+        return {"id": 1, "is_super_admin": True}, None
+
+    received_service = None
+
+    async def fake_handler(request, **kwargs):
+        nonlocal received_service
+        received_service = kwargs["m365_mail_service"]
+        return main_module.RedirectResponse("/success", status_code=303)
+
+    monkeypatch.setattr(main_module, "_consume_m365_oauth_state", fake_consume_state)
+    monkeypatch.setattr(main_module, "_require_authenticated_user", fake_authenticated_user)
+    monkeypatch.setattr(m365_mail_oauth, "handle_m365_mail_auth_callback", fake_handler)
+    monkeypatch.delitem(main_module.__dict__, "m365_mail_service", raising=False)
+
+    request = Request(
+        {"type": "http", "method": "GET", "path": "/m365/callback", "headers": []}
+    )
+    response = asyncio.run(
+        main_module.m365_callback(request, code="auth-code", state="opaque-state")
+    )
+
+    assert response.status_code == 303
+    assert received_service is m365_mail_service

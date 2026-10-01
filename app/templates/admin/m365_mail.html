@@ -1,6 +1,15 @@
 {% extends "base.html" %}
+{% from "macros/mail_filter.html" import mail_filter_field %}
 
-{% block header_title %}M365 mail{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">M365 mail</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="m365-mail-accounts-table-filter">Filter mailboxes</label>
+      <input id="m365-mail-accounts-table-filter" type="search" class="form-input page-header-toolbar__search" placeholder="Filter mailboxes" data-table-filter="m365-mail-accounts-table" />
+    </div>
+  </div>
+{% endblock %}
 
 {% block content %}
   {% set is_editing = editing_account is not none %}
@@ -13,7 +22,7 @@
     <aside class="management__sidebar">
       <h2 class="management__heading">{{ 'Update mailbox' if is_editing else 'Create mailbox' }}</h2>
       <p class="management__intro">
-        Import emails from an Office 365 mailbox into the ticketing workspace using Microsoft Graph API.
+        Import emails from an Office 365 mailbox into tickets or the DMARC reporting workspace using Microsoft Graph API.
         Use the <strong>Sign in</strong> button to authenticate as a user with access to each mailbox.
       </p>
       <form action="{{ form_action }}" method="post" class="form management__form">
@@ -32,15 +41,39 @@
           </label>
         </div>
         <label class="form-field">
-          <span class="form-label">Company</span>
-          <select name="companyId" class="form-input">
+          <span class="form-label">Import purpose</span>
+          <select name="importPurpose" class="form-input" data-import-purpose>
+            <option value="support_ticket" {% if not is_editing or editing_account.import_purpose == 'support_ticket' %}selected{% endif %}>Support tickets</option>
+            <option value="dmarc" {% if is_editing and editing_account.import_purpose == 'dmarc' %}selected{% endif %}>DMARC aggregate and forensic reports</option>
+          </select>
+          <span class="form-help">A DMARC mailbox imports RUA and RUF attachments and routes each report to the matching company email domain. DMARC mailboxes never create support tickets.</span>
+        </label>
+        <label class="form-field">
+          <span class="form-label">Ticket destination company</span>
+          <select name="companyId" class="form-input" data-company-select>
             <option value="">— None —</option>
             {% for company in companies %}
               <option value="{{ company.id }}" {% if is_editing and company.id == editing_account.company_id %}selected{% endif %}>{{ company.name }}</option>
             {% endfor %}
           </select>
-          <span class="form-help">Optional. When not set, the ticket company and contact are resolved from the sender's email domain.</span>
+          <span class="form-help" data-company-help>Optional for support tickets. DMARC mailboxes ignore company selection and route by DMARC policy domain.</span>
         </label>
+        {% if is_editing %}
+          <div class="form-field">
+            <span class="form-label">Authentication tenant</span>
+            <div class="form-input" aria-readonly="true">
+              {{ editing_account.auth_tenant_id or editing_account.tenant_id or 'Not verified' }}
+            </div>
+            <span class="form-help">Authentication is bound independently of ticket routing. Reauthorize this mailbox to verify a missing or incorrect tenant.</span>
+          </div>
+          <div class="form-field form-field--checkbox">
+            <label class="checkbox">
+              <input type="checkbox" name="appFallbackEnabled" value="1" {% if editing_account.app_fallback_enabled and editing_account.mailbox_app_authorized %}checked{% endif %} {% if not editing_account.auth_connection_id %}disabled{% endif %} />
+              <span>Authorize application fallback for this exact mailbox</span>
+            </label>
+            <span class="form-help">Allows app-only access after a delegated denial only through this mailbox's active, verified tenant connection.</span>
+          </div>
+        {% endif %}
         <label class="form-field">
           <span class="form-label">User principal name (email)</span>
           <input type="text" name="userPrincipalName" class="form-input" value="{{ editing_account.user_principal_name if is_editing else '' }}" maxlength="255" required placeholder="user@contoso.com or shared@contoso.com" />
@@ -65,14 +98,7 @@
           <input type="text" name="scheduleCron" class="form-input" value="{{ editing_account.schedule_cron if is_editing else '*/15 * * * *' }}" maxlength="100" required />
           <span class="form-help">Cron expression evaluated in the configured timezone.</span>
         </label>
-        <label class="form-field">
-          <span class="form-label">Message filter (JSON)</span>
-          <textarea name="filterQuery" class="form-input form-input--textarea" rows="8" placeholder='{"all": [{"field": "from.domain", "equals": "example.com"}]}'>{% if is_editing and editing_account.filter_query %}{{ editing_account.filter_query | tojson(indent=2) }}{% endif %}</textarea>
-          <span class="form-help">
-            Optional JSON rules that control which emails this mailbox processes.
-            <a href="/docs/imap-filters" target="_blank" rel="noopener">View filter examples</a>.
-          </span>
-        </label>
+        {{ mail_filter_field(editing_account.filter_query if is_editing else none) }}
         <div class="form-field form-field--checkbox">
           <label class="checkbox">
             <input type="checkbox" name="processUnreadOnly" value="1" {% if not is_editing or editing_account.process_unread_only %}checked{% endif %} />
@@ -81,9 +107,24 @@
         </div>
         <div class="form-field form-field--checkbox">
           <label class="checkbox">
-            <input type="checkbox" name="markAsRead" value="1" {% if not is_editing or editing_account.mark_as_read %}checked{% endif %} />
+            <input type="radio" name="postImportAction" value="mark_read" onchange="this.form.markAsRead.value='1'; this.form.deleteAfterImport.value='0'" {% if not is_editing or editing_account.mark_as_read %}checked{% endif %} />
             <span>Mark messages as read after processing</span>
           </label>
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="checkbox">
+            <input type="radio" name="postImportAction" value="delete" onchange="this.form.markAsRead.value='0'; this.form.deleteAfterImport.value='1'" {% if is_editing and editing_account.delete_after_import %}checked{% endif %} />
+            <span>Delete messages after processing</span>
+          </label>
+          <span class="form-help">Successfully imported messages are moved to the mailbox's Deleted Items folder. Failed imports remain available for retry.</span>
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="checkbox">
+            <input type="radio" name="postImportAction" value="none" onchange="this.form.markAsRead.value='0'; this.form.deleteAfterImport.value='0'" {% if is_editing and not editing_account.mark_as_read and not editing_account.delete_after_import %}checked{% endif %} />
+            <span>Leave messages unchanged after processing</span>
+          </label>
+          <input type="hidden" name="markAsRead" value="{{ '1' if not is_editing or editing_account.mark_as_read else '0' }}" />
+          <input type="hidden" name="deleteAfterImport" value="{{ '1' if is_editing and editing_account.delete_after_import else '0' }}" />
         </div>
         <div class="form-field form-field--checkbox">
           <label class="checkbox">
@@ -107,123 +148,9 @@
     </aside>
 
     <section class="management__content">
-      <header class="management__header">
-        <div>
-          <h1 class="management__title">Office 365 mailboxes</h1>
-          <p class="management__subtitle">Manage inbound Office 365 email connectors that automatically create or update tickets on the defined schedule.</p>
-        </div>
-        <div class="management__filters">
-          <input type="search" class="form-input" placeholder="Filter mailboxes" aria-label="Filter mailboxes" data-table-filter="m365-mail-accounts-table" />
-        </div>
-      </header>
+      <p class="management__subtitle">Manage inbound Office 365 email connectors that automatically create or update tickets on the defined schedule.</p>
 
       <div class="management__body">
-
-        {% if history_account %}
-          <section class="panel" aria-labelledby="m365-sync-history-heading">
-            <div class="panel__header">
-              <div>
-                <h2 class="panel__title" id="m365-sync-history-heading">Sync history for {{ history_account.name or history_account.user_principal_name }}</h2>
-                <p class="panel__subtitle">Review past mailbox sync runs, imported-message decisions, and failure details.</p>
-              </div>
-              <a class="button button--small button--ghost" href="/admin/modules/m365-mail">Close history</a>
-            </div>
-            {% if history_runs %}
-              <div class="table-wrapper">
-                <table class="table" id="m365-mail-sync-history-table" data-table data-table-id="m365-mail-sync-history">
-                  <thead>
-                    <tr>
-                      <th scope="col" data-sort="string" data-column-key="completed">Completed</th>
-                      <th scope="col" data-sort="string" data-column-key="status">Status</th>
-                      <th scope="col" data-sort="number" data-column-key="processed">Imported</th>
-                      <th scope="col" data-sort="number" data-column-key="created">Created</th>
-                      <th scope="col" data-sort="number" data-column-key="attached">Attached</th>
-                      <th scope="col" data-sort="number" data-column-key="ignored">Ignored</th>
-                      <th scope="col" data-sort="number" data-column-key="errors">Errors</th>
-                      <th scope="col" data-column-key="details">Details</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% for run in history_runs %}
-                      {% set run_actions = run.message_actions or [] %}
-                      <tr>
-                        <td data-column-key="completed">{{ run.completed_at.isoformat() if run.completed_at else '—' }}</td>
-                        <td data-column-key="status">
-                          <span class="badge {% if run.status == 'succeeded' %}badge--success{% elif run.status == 'completed_with_errors' or run.status == 'error' %}badge--danger{% elif run.status == 'skipped' %}badge--muted{% else %}badge--warning{% endif %}">{{ (run.status or 'unknown')|replace('_', ' ')|title }}</span>
-                        </td>
-                        <td data-column-key="processed">{{ run.processed or 0 }}</td>
-                        <td data-column-key="created">{{ run.created_count or 0 }}</td>
-                        <td data-column-key="attached">{{ run.attached_count or 0 }}</td>
-                        <td data-column-key="ignored">{{ run.ignored_count or 0 }}</td>
-                        <td data-column-key="errors">{{ run.error_count or 0 }}</td>
-                        <td data-column-key="details">
-                          <details>
-                            <summary>{{ run_actions|length }} message decision{{ 's' if run_actions|length != 1 else '' }}</summary>
-                            {% if run.errors %}
-                              <div class="alert alert--error" role="alert">
-                                <strong>Sync errors</strong>
-                                <ul>
-                                  {% for err in run.errors %}
-                                    <li>{{ err.error or err }}</li>
-                                  {% endfor %}
-                                </ul>
-                              </div>
-                            {% endif %}
-                            {% if run_actions %}
-                              <div class="table-wrapper">
-                                <table class="table">
-                                  <thead>
-                                    <tr>
-                                      <th scope="col">Received</th>
-                                      <th scope="col">Outcome</th>
-                                      <th scope="col">Message</th>
-                                      <th scope="col">Sender</th>
-                                      <th scope="col">Ticket / reason</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {% for action in run_actions %}
-                                      <tr>
-                                        <td>{{ action.received_at or '—' }}</td>
-                                        <td>{{ (action.outcome or 'unknown')|replace('_', ' ')|title }}</td>
-                                        <td>
-                                          <strong>{{ action.subject or 'No subject' }}</strong>
-                                          <div class="table__meta">Graph: <code>{{ action.message_id or '—' }}</code></div>
-                                          <div class="table__meta">Internet: <code>{{ action.internet_message_id or '—' }}</code></div>
-                                        </td>
-                                        <td>{{ action.from_address or action.mailbox or '—' }}</td>
-                                        <td>
-                                          {% if action.ticket_id %}
-                                            <a href="/admin/tickets/{{ action.ticket_id }}">#{{ action.ticket_number or action.ticket_id }}</a>
-                                            {% if action.ticket_subject %}<div class="table__meta">{{ action.ticket_subject }}</div>{% endif %}
-                                          {% elif action.reason %}
-                                            {{ action.reason|replace('_', ' ') }}
-                                          {% elif action.error %}
-                                            <span class="text-danger">{{ action.error }}</span>
-                                          {% else %}
-                                            —
-                                          {% endif %}
-                                        </td>
-                                      </tr>
-                                    {% endfor %}
-                                  </tbody>
-                                </table>
-                              </div>
-                            {% else %}
-                              <p class="text-muted">No per-message decisions were recorded for this run.</p>
-                            {% endif %}
-                          </details>
-                        </td>
-                      </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            {% else %}
-              <p class="empty-state">No sync history has been recorded for this mailbox yet.</p>
-            {% endif %}
-          </section>
-        {% endif %}
 
         {% if sync_result %}
           {% set sync_actions = sync_result.message_actions or [] %}
@@ -305,6 +232,8 @@
                         <td data-column-key="matching">
                           {% if action.matched_by_related_message_ids %}
                             Related message IDs matched
+                          {% elif action.message_deleted %}
+                            Already imported; message deleted
                           {% elif action.read_state_repaired %}
                             Already imported; read state repaired
                           {% elif action.has_attachments %}
@@ -366,6 +295,7 @@
                     <td data-column-key="mailbox">
                       {{ account.user_principal_name }}
                       <div class="table__meta">{{ account.mailbox_type }}</div>
+                      <div class="table__meta">{{ 'DMARC reports' if account.import_purpose == 'dmarc' else 'Support tickets' }}</div>
                     </td>
                     <td data-column-key="folder">{{ account.folder }}</td>
                     <td data-column-key="schedule"><code>{{ account.schedule_cron }}</code></td>
@@ -397,7 +327,7 @@
                     <td class="table__actions" data-column-key="actions">
                       <div class="button-group">
                         {% if account.auth_status == 'signed_in' %}
-                          <form action="/admin/modules/m365-mail/accounts/{{ account.id }}/disconnect" method="post" class="inline-form" onsubmit="return confirm('Disconnect user sign-in for {{ account.name }}? The mailbox will fall back to company credentials.');">
+                          <form action="/admin/modules/m365-mail/accounts/{{ account.id }}/disconnect" method="post" class="inline-form" onsubmit="return confirm({{ ('Disconnect user sign-in for ' ~ account.name ~ '? The mailbox will fall back to company credentials.') | tojson | forceescape }});">
                             {% if csrf_token %}
                               <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
                             {% endif %}
@@ -420,7 +350,16 @@
                           {% endif %}
                           <button type="submit" class="button button--small">Sync now</button>
                         </form>
-                        <form action="/admin/modules/m365-mail/accounts/{{ account.id }}/delete" method="post" class="inline-form" onsubmit="return confirm('Delete mailbox {{ account.name }}?');">
+                        <form action="/admin/modules/m365-mail/accounts/{{ account.id }}/sync" method="post" class="inline-form" onsubmit="return confirm('Import this mailbox for recovery without sending ticket notifications?');">
+                          {% if csrf_token %}
+                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                          {% endif %}
+                          <input type="hidden" name="recovery" value="1" />
+                          <label class="sr-only" for="recovery-folder-{{ account.id }}">Recovery folder for {{ account.name }}</label>
+                          <input id="recovery-folder-{{ account.id }}" class="form-input form-input--small" type="text" name="recoveryFolder" placeholder="All configured folder" maxlength="255" aria-label="Optional recovery folder" />
+                          <button type="submit" class="button button--small button--ghost">Recovery import</button>
+                        </form>
+                        <form action="/admin/modules/m365-mail/accounts/{{ account.id }}/delete" method="post" class="inline-form" onsubmit="return confirm({{ ('Delete mailbox ' ~ account.name ~ '?') | tojson | forceescape }});">
                           {% if csrf_token %}
                             <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
                           {% endif %}
@@ -441,6 +380,131 @@
       </div>
     </section>
   </div>
+  {% if history_account %}
+    <div class="modal" id="m365-mail-sync-history-modal" role="dialog" aria-modal="true" aria-labelledby="m365-sync-history-heading" aria-describedby="m365-sync-history-description">
+      <div class="modal__dialog modal__dialog--wide">
+        <a class="modal__close" href="/admin/modules/m365-mail" aria-label="Close sync history">
+          <span aria-hidden="true">&times;</span>
+          <span class="visually-hidden">Close sync history</span>
+        </a>
+        <h2 class="modal__title" id="m365-sync-history-heading">Sync history for {{ history_account.name or history_account.user_principal_name }}</h2>
+        <div class="modal__body stack-sm">
+          <p class="text-muted" id="m365-sync-history-description">Review past mailbox sync runs, imported-message decisions, and failure details.</p>
+          {% if history_runs %}
+            <div class="table-wrapper">
+              <table class="table" id="m365-mail-sync-history-table" data-table data-table-id="m365-mail-sync-history">
+                <thead>
+                  <tr>
+                    <th scope="col" data-sort="string" data-column-key="completed">Completed</th>
+                    <th scope="col" data-sort="string" data-column-key="status">Status</th>
+                    <th scope="col" data-sort="number" data-column-key="processed">Imported</th>
+                    <th scope="col" data-sort="number" data-column-key="created">Created</th>
+                    <th scope="col" data-sort="number" data-column-key="attached">Attached</th>
+                    <th scope="col" data-sort="number" data-column-key="ignored">Ignored</th>
+                    <th scope="col" data-sort="number" data-column-key="errors">Errors</th>
+                    <th scope="col" data-column-key="details">Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for run in history_runs %}
+                    {% set run_actions = run.message_actions or [] %}
+                    <tr>
+                      <td data-column-key="completed">
+                        {% if run.completed_at %}
+                          <time datetime="{{ run.completed_at.isoformat() }}" data-m365-history-completed>{{ run.completed_at.isoformat() }}</time>
+                        {% else %}
+                          —
+                        {% endif %}
+                      </td>
+                      <td data-column-key="status">
+                        <span class="badge {% if run.status == 'succeeded' %}badge--success{% elif run.status == 'completed_with_errors' or run.status == 'error' %}badge--danger{% elif run.status == 'skipped' %}badge--muted{% else %}badge--warning{% endif %}">{{ (run.status or 'unknown')|replace('_', ' ')|title }}</span>
+                      </td>
+                      <td data-column-key="processed">{{ run.processed or 0 }}</td>
+                      <td data-column-key="created">{{ run.created_count or 0 }}</td>
+                      <td data-column-key="attached">{{ run.attached_count or 0 }}</td>
+                      <td data-column-key="ignored">{{ run.ignored_count or 0 }}</td>
+                      <td data-column-key="errors">{{ run.error_count or 0 }}</td>
+                      <td data-column-key="details">
+                        <details>
+                          <summary>{{ run_actions|length }} message decision{{ 's' if run_actions|length != 1 else '' }}</summary>
+                          {% if run.errors %}
+                            <div class="alert alert--error" role="alert">
+                              <strong>Sync errors</strong>
+                              <ul>
+                                {% for err in run.errors %}
+                                  <li>{{ err.error or err }}</li>
+                                {% endfor %}
+                              </ul>
+                            </div>
+                          {% endif %}
+                          {% if run_actions %}
+                            <div class="table-wrapper">
+                              <table class="table">
+                                <thead>
+                                  <tr>
+                                    <th scope="col">Received</th>
+                                    <th scope="col">Outcome</th>
+                                    <th scope="col">Message</th>
+                                    <th scope="col">Sender</th>
+                                    <th scope="col">Ticket / reason</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {% for action in run_actions %}
+                                    <tr>
+                                      <td>{{ action.received_at or '—' }}</td>
+                                      <td>{{ (action.outcome or 'unknown')|replace('_', ' ')|title }}</td>
+                                      <td>
+                                        <strong>{{ action.subject or 'No subject' }}</strong>
+                                        <div class="table__meta">Graph: <code>{{ action.message_id or '—' }}</code></div>
+                                        <div class="table__meta">Internet: <code>{{ action.internet_message_id or '—' }}</code></div>
+                                      </td>
+                                      <td>{{ action.from_address or action.mailbox or '—' }}</td>
+                                      <td>
+                                        {% if action.ticket_id %}
+                                          <a href="/admin/tickets/{{ action.ticket_id }}">#{{ action.ticket_number or action.ticket_id }}</a>
+                                          {% if action.ticket_subject %}<div class="table__meta">{{ action.ticket_subject }}</div>{% endif %}
+                                        {% elif action.reason %}
+                                          {{ action.reason|replace('_', ' ') }}
+                                        {% elif action.error %}
+                                          <span class="text-danger">{{ action.error }}</span>
+                                        {% else %}
+                                          —
+                                        {% endif %}
+                                      </td>
+                                    </tr>
+                                  {% endfor %}
+                                </tbody>
+                              </table>
+                            </div>
+                          {% else %}
+                            <p class="text-muted">No per-message decisions were recorded for this run.</p>
+                          {% endif %}
+                        </details>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <p class="empty-state">No sync history has been recorded for this mailbox yet.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <script>
+      (() => {
+        const pad = (value) => String(value).padStart(2, '0');
+        document.querySelectorAll('[data-m365-history-completed]').forEach((element) => {
+          const completedAt = new Date(element.dateTime);
+          if (Number.isNaN(completedAt.getTime())) return;
+          element.textContent = `${completedAt.getFullYear()}-${pad(completedAt.getMonth() + 1)}-${pad(completedAt.getDate())} ${pad(completedAt.getHours())}:${pad(completedAt.getMinutes())}`;
+        });
+      })();
+    </script>
+  {% endif %}
+
   {% if sync_result %}
     {% set sync_account = sync_result.account or {} %}
     {% set sync_actions = sync_result.message_actions or [] %}
@@ -499,8 +563,14 @@
                           <a href="/admin/tickets/{{ action.ticket_id }}">#{{ action.ticket_number or action.ticket_id }}</a>
                           {% if action.ticket_subject %}<div class="table__meta">{{ action.ticket_subject }}</div>{% endif %}
                           {% if action.reply_outcome %}<div class="table__meta">{{ action.reply_outcome|replace('_', ' ') }}</div>{% endif %}
+                          {% if action.reason_detail %}<div class="table__meta">{{ action.reason_detail }}</div>{% endif %}
+                          {% if action.read_state_repaired %}<div class="table__meta">Mailbox read state was repaired.</div>{% endif %}
+                          {% if action.corrected_stale_import_marker %}
+                            <div class="table__meta">Corrected a stale import record previously linked to ticket #{{ action.previous_ticket_number or 'unknown' }}.</div>
+                          {% endif %}
                         {% elif action.reason %}
                           {{ action.reason|replace('_', ' ') }}
+                          {% if action.reason_detail %}<div class="table__meta">{{ action.reason_detail }}</div>{% endif %}
                         {% elif action.error %}
                           <span class="text-danger">{{ action.error }}</span>
                         {% else %}
@@ -548,4 +618,34 @@
     </script>
   {% endif %}
 
+  <script>
+    (function () {
+      const purpose = document.querySelector('[data-import-purpose]');
+      const company = document.querySelector('[data-company-select]');
+      const help = document.querySelector('[data-company-help]');
+      if (!purpose || !company) return;
+      function updateCompanyRequirement() {
+        const dmarc = purpose.value === 'dmarc';
+        company.required = false;
+        company.setAttribute('aria-required', 'false');
+        company.disabled = dmarc;
+        if (dmarc) {
+          company.value = '';
+        }
+        if (help) {
+          help.textContent = dmarc
+            ? 'Disabled for DMARC. Reports are assigned automatically from policy_published/domain and company email domains.'
+            : "Optional. When not set, the ticket company and contact are resolved from the sender's email domain.";
+        }
+      }
+      purpose.addEventListener('change', updateCompanyRequirement);
+      updateCompanyRequirement();
+    }());
+  </script>
+
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/mail_filter_builder.js') }}" defer></script>
 {% endblock %}

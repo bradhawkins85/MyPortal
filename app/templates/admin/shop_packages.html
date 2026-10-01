@@ -1,9 +1,23 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 
-{% block header_title_content %}
-  <div class="header__title-content">
-    <span class="header__title-text">{{ super() }}</span>
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">{{ title | default('Packages') }}</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="admin-packages-filter">Search packages</label>
+      <input
+        id="admin-packages-filter"
+        type="search"
+        class="form-input page-header-toolbar__search"
+        placeholder="Search packages"
+        data-table-filter="admin-packages-table"
+      />
+      <label class="page-header-toolbar__check">
+        <input type="checkbox" id="packages-show-archived" {% if show_archived %}checked{% endif %} />
+        <span>Show archived</span>
+      </label>
+    </div>
   </div>
 {% endblock %}
 
@@ -52,19 +66,6 @@
       <div>
         <h2 class="card__title">Packages</h2>
         <p class="card__subtitle">Manage existing bundles, update their contents, and control visibility.</p>
-      </div>
-      <div class="card__controls">
-        <input
-          type="search"
-          class="form-input card__control"
-          placeholder="Search packages"
-          aria-label="Search packages"
-          data-table-filter="admin-packages-table"
-        />
-        <label class="checkbox card__control">
-          <input type="checkbox" id="packages-show-archived" {% if show_archived %}checked{% endif %} />
-          <span>Show archived</span>
-        </label>
       </div>
     </header>
     <div class="table-wrapper">

@@ -1,0 +1,7 @@
+{
+  "guid": "380015cd-8141-4fe2-97c1-9e22add3cf8e",
+  "occurred_at": "2026-09-28T00:00Z",
+  "change_type": "Fix",
+  "summary": "The Windows tray agent now applies Defender exclusions and scheduled scans, skips changes Tamper Protection could block, and the Defender page flags tamper-locked endpoints, per-setting policy results and command outcomes.",
+  "content_hash": "3c383d602568ab83b96464d9054a1b9f0331c4790ea0ebdc264aa51c4fccea05"
+}

@@ -60,6 +60,16 @@ has_uvicorn_log_level_arg() {
   return 1
 }
 
+has_uvicorn_forwarded_ips_arg() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --forwarded-allow-ips|--forwarded-allow-ips=*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
 build_uvicorn_command() {
   UVICORN_COMMAND=("$@")
   local resolved_log_level=""
@@ -71,6 +81,14 @@ build_uvicorn_command() {
 
   if [[ -n "$resolved_log_level" ]] && ! has_uvicorn_log_level_arg "$@"; then
     UVICORN_COMMAND+=(--log-level "$resolved_log_level")
+  fi
+
+  # Keep Uvicorn's access log and request.client in sync with MyPortal's
+  # TRUSTED_PROXIES security boundary. Uvicorn otherwise trusts only localhost,
+  # so a Traefik container/network peer appears as the client on every line.
+  # An explicit CLI option remains authoritative.
+  if [[ -n "${TRUSTED_PROXIES:-}" ]] && ! has_uvicorn_forwarded_ips_arg "$@"; then
+    UVICORN_COMMAND+=(--proxy-headers --forwarded-allow-ips "$TRUSTED_PROXIES")
   fi
 }
 
@@ -100,8 +118,10 @@ if detect_bool "${UVICORN_AUTO_UPDATE_ENABLED:-1}"; then
 fi
 
 uvicorn_pid=0
+shutdown_signal=""
 forward_signal() {
   local signal="$1"
+  shutdown_signal="$signal"
   if [[ "$uvicorn_pid" -gt 0 ]]; then
     kill -s "$signal" "$uvicorn_pid" 2>/dev/null || true
   fi
@@ -115,8 +135,21 @@ run_uvicorn() {
   build_uvicorn_command "$@"
   "${UVICORN_COMMAND[@]}" &
   uvicorn_pid=$!
-  wait "$uvicorn_pid"
-  local status=$?
+  local status
+  while true; do
+    wait "$uvicorn_pid"
+    status=$?
+
+    # A trapped signal interrupts bash's wait before Uvicorn has finished
+    # draining its workers.  Keep the wrapper (and therefore the systemd
+    # cgroup) alive until the child has completed its own cleanup.  Otherwise
+    # systemd can tear down multiprocessing's resource tracker while worker
+    # semaphores are still registered, producing leaked-semaphore warnings.
+    if [[ -n "$shutdown_signal" ]] && kill -0 "$uvicorn_pid" 2>/dev/null; then
+      continue
+    fi
+    break
+  done
   uvicorn_pid=0
   return "$status"
 }

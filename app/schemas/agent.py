@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, constr
+from pydantic import BaseModel, Field, constr, field_validator
 
 
 class AgentSourceArticle(BaseModel):
@@ -228,6 +228,43 @@ class AgentEvidenceItem(BaseModel):
 
 class AgentQueryRequest(BaseModel):
     query: constr(strip_whitespace=True, min_length=1, max_length=2000)
+    source_filters: list[constr(strip_whitespace=True, min_length=1, max_length=40)] = (
+        Field(default_factory=list)
+    )
+
+    @field_validator("source_filters")
+    @classmethod
+    def validate_sources(cls, value: list[str]) -> list[str]:
+        from app.services.agent_sources import validate_source_filters
+
+        return validate_source_filters(value)
+
+
+class AgentSavedSearchCreateRequest(BaseModel):
+    name: constr(strip_whitespace=True, min_length=1, max_length=120)
+    query: constr(strip_whitespace=True, min_length=1, max_length=2000)
+    source_filters: list[constr(strip_whitespace=True, min_length=1, max_length=40)] = (
+        Field(default_factory=list)
+    )
+    is_shared: bool = False
+
+    @field_validator("source_filters")
+    @classmethod
+    def validate_sources(cls, value: list[str]) -> list[str]:
+        from app.services.agent_sources import validate_source_filters
+
+        return validate_source_filters(value)
+
+
+class AgentSavedSearchItem(BaseModel):
+    id: int
+    name: str
+    query: str
+    source_filters: list[str] = Field(default_factory=list)
+    is_shared: bool = False
+    created_by_user_id: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class AgentQueryResponse(BaseModel):
@@ -239,7 +276,18 @@ class AgentQueryResponse(BaseModel):
     message: Optional[str] = None
     generated_at: datetime
     has_relevant_sources: bool = True
+    answer_confidence: float | None = None
+    answer_confidence_label: str | None = None
+    missing_sources: list[str] = Field(default_factory=list)
     stages: list[AgentStage] = Field(default_factory=list)
     evidence: dict[str, list[AgentEvidenceItem]] = Field(default_factory=dict)
     sources: AgentSources
     context: AgentContext
+    quality_response_id: int | None = None
+
+
+class AgentFeedbackRequest(BaseModel):
+    response_id: int = Field(gt=0)
+    rating: str = Field(pattern="^(up|down)$")
+    reason: str | None = Field(default=None, max_length=40)
+    comment: str | None = Field(default=None, max_length=1000)

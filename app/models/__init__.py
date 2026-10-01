@@ -7,8 +7,6 @@ and can be used for type-safe database operations with async/await.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
-
 from sqlalchemy import MetaData
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func

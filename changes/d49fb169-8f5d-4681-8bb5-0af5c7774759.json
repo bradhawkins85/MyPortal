@@ -1,0 +1,7 @@
+{
+  "guid": "d49fb169-8f5d-4681-8bb5-0af5c7774759",
+  "occurred_at": "2026-09-21T00:00Z",
+  "change_type": "Fix",
+  "summary": "Email imports now continue while an application upgrade is pending.",
+  "content_hash": "2acac42962e6f2bc078b95d16310d81ef5bebb2553190a63d9282931dac73b41"
+}

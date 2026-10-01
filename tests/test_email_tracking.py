@@ -351,6 +351,36 @@ async def test_get_tracking_status(db_connection):
     pass
 
 
+def test_extract_ticket_reply_id_uses_triggering_system_reply():
+    """Shipment events link tracking to their direct, system-authored reply."""
+    from app.services import modules as modules_service
+
+    context = {
+        "reply": {
+            "id": 812,
+            "author_id": None,
+            "external_reference": "shipment-watch:startrack:abc123",
+        },
+        # System replies are not represented by latest_reply; it can still
+        # contain an older technician response.
+        "ticket": {"id": 41, "latest_reply": {"id": 799, "author_id": 9}},
+    }
+
+    assert modules_service._extract_ticket_reply_id(context) == 812
+
+
+def test_extract_ticket_reply_id_keeps_existing_context_fallbacks():
+    from app.services import modules as modules_service
+
+    assert modules_service._extract_ticket_reply_id(
+        {"metadata": {"ticket_reply_id": "456"}}
+    ) == 456
+    assert modules_service._extract_ticket_reply_id(
+        {"ticket": {"latest_reply": {"id": 789}}}
+    ) == 789
+    assert modules_service._extract_ticket_reply_id({"reply": {"id": "invalid"}}) is None
+
+
 def test_invoke_smtp_with_ticket_reply_context(monkeypatch):
     """Test that _invoke_smtp enables tracking when ticket reply context is present."""
     import asyncio

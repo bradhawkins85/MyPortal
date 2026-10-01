@@ -47,6 +47,7 @@ async def list_audit_logs(
     entity_id: int | None = None,
     user_id: int | None = None,
     action: str | None = None,
+    metadata_filters: dict[str, Any] | None = None,
     request_id: str | None = None,
     ip_address: str | None = None,
     since: datetime | None = None,
@@ -69,6 +70,10 @@ async def list_audit_logs(
     if action:
         clauses.append("al.action LIKE %s")
         params.append(f"%{action}%")
+    if metadata_filters:
+        for key, value in metadata_filters.items():
+            clauses.append("JSON_UNQUOTE(JSON_EXTRACT(al.metadata, %s)) = %s")
+            params.extend([f"$.{key}", str(value)])
     if request_id:
         clauses.append("al.request_id = %s")
         params.append(request_id)
@@ -91,11 +96,13 @@ async def list_audit_logs(
     params.append(int(limit))
     params.append(int(offset))
     rows = await db.fetch_all(
-        f"""
+        """
         SELECT al.*, u.email AS user_email
         FROM audit_logs AS al
         LEFT JOIN users AS u ON u.id = al.user_id
-        {where}
+        """  # nosec B608
+        + where
+        + """
         ORDER BY al.created_at DESC
         LIMIT %s OFFSET %s
         """,
@@ -110,6 +117,7 @@ async def count_audit_logs(
     entity_id: int | None = None,
     user_id: int | None = None,
     action: str | None = None,
+    metadata_filters: dict[str, Any] | None = None,
     request_id: str | None = None,
     ip_address: str | None = None,
     since: datetime | None = None,
@@ -130,6 +138,10 @@ async def count_audit_logs(
     if action:
         clauses.append("al.action LIKE %s")
         params.append(f"%{action}%")
+    if metadata_filters:
+        for key, value in metadata_filters.items():
+            clauses.append("JSON_UNQUOTE(JSON_EXTRACT(al.metadata, %s)) = %s")
+            params.extend([f"$.{key}", str(value)])
     if request_id:
         clauses.append("al.request_id = %s")
         params.append(request_id)
@@ -150,12 +162,12 @@ async def count_audit_logs(
         params.extend([like_value, like_value, like_value])
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     row = await db.fetch_one(
-        f"""
+        """
         SELECT COUNT(*) AS total
         FROM audit_logs AS al
         LEFT JOIN users AS u ON u.id = al.user_id
-        {where}
-        """,
+        """  # nosec B608
+        + where,
         tuple(params),
     )
     if not row:

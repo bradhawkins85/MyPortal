@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "title": "Client service overview",
+  "panels": [
+    {"id":"support","type":"link","title":"Support","label":"Create a support ticket","url":"/tickets/new","x":0,"y":0,"w":4,"h":2},
+    {"id":"open-tickets","type":"stat","title":"Open tickets","report":"dashboard-open-tickets","function":"count","x":4,"y":0,"w":4,"h":2},
+    {"id":"managed-assets","type":"stat","title":"Managed assets","report":"dashboard-assets","function":"count","x":8,"y":0,"w":4,"h":2},
+    {"id":"ticket-trend","type":"graph","title":"Tickets opened over 30 days","report":"dashboard-tickets-created-30-days","chart":"bar","x":0,"y":2,"w":8,"h":4},
+    {"id":"portal-version","type":"variable","title":"Portal version","variable":"APP_VERSION","x":8,"y":2,"w":4,"h":2}
+  ]
+}

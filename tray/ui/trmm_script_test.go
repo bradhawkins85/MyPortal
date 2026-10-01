@@ -1,6 +1,26 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func TestTRMMScriptHTTPTimeoutAllowsPortalUpstreamRequests(t *testing.T) {
+	if trmmHTTPClient.Timeout < 30*time.Second {
+		t.Fatalf("TRMM HTTP timeout is too short: %s", trmmHTTPClient.Timeout)
+	}
+	if httpClient.Timeout >= trmmHTTPClient.Timeout {
+		t.Fatalf("general HTTP client should retain a shorter timeout: %s", httpClient.Timeout)
+	}
+}
+
+func TestNormalizedMenuNodeTypeRecognizesTRMMScriptVariants(t *testing.T) {
+	for _, nodeType := range []string{"TRMM_Script", "trmm_script", " TRMM_SCRIPT\t"} {
+		if got := normalizedMenuNodeType(nodeType); got != "trmm_script" {
+			t.Errorf("normalizedMenuNodeType(%q) = %q, want %q", nodeType, got, "trmm_script")
+		}
+	}
+}
 
 func TestTRMMScriptSuccessMessageUsesAutomationScheduledNotice(t *testing.T) {
 	msg := trmmScriptSuccessMessage("Nightly Maintenance", "")

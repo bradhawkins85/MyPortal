@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ComplianceStatus(str, Enum):
@@ -13,6 +13,13 @@ class ComplianceStatus(str, Enum):
     COMPLIANT = "compliant"
     NON_COMPLIANT = "non_compliant"
     NOT_APPLICABLE = "not_applicable"
+
+
+class ApprovalStatus(str, Enum):
+    DRAFT = "draft"
+    PENDING = "pending_approval"
+    APPROVED = "approved"
+    CHANGES_REQUESTED = "changes_requested"
 
 
 class MaturityLevel(str, Enum):
@@ -117,6 +124,16 @@ class CompanyEssential8RequirementComplianceBase(BaseModel):
     evidence: Optional[str] = None
     notes: Optional[str] = None
     last_reviewed_date: Optional[date] = None
+    target_compliance_date: Optional[date] = None
+    owner_user_id: Optional[int] = None
+    approval_status: ApprovalStatus = ApprovalStatus.DRAFT
+    approval_notes: Optional[str] = None
+    approved_by: Optional[int] = None
+    approved_at: Optional[datetime] = None
+    reminder_days_before: Optional[int] = 14
+    overdue_alert_enabled: bool = True
+    last_reminder_sent_at: Optional[datetime] = None
+    last_overdue_alert_at: Optional[datetime] = None
 
 
 class CompanyEssential8RequirementComplianceCreate(CompanyEssential8RequirementComplianceBase):
@@ -131,6 +148,16 @@ class CompanyEssential8RequirementComplianceUpdate(BaseModel):
     evidence: Optional[str] = None
     notes: Optional[str] = None
     last_reviewed_date: Optional[date] = None
+    target_compliance_date: Optional[date] = None
+    owner_user_id: Optional[int] = None
+    approval_status: Optional[ApprovalStatus] = None
+    approval_notes: Optional[str] = None
+    approved_by: Optional[int] = None
+    approved_at: Optional[datetime] = None
+    reminder_days_before: Optional[int] = None
+    overdue_alert_enabled: Optional[bool] = None
+    last_reminder_sent_at: Optional[datetime] = None
+    last_overdue_alert_at: Optional[datetime] = None
 
 
 class CompanyEssential8RequirementComplianceResponse(CompanyEssential8RequirementComplianceBase):
@@ -141,6 +168,44 @@ class CompanyEssential8RequirementComplianceResponse(CompanyEssential8Requiremen
     requirement: Optional[Essential8RequirementResponse] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CompanyEssential8RequirementBulkUpdate(BaseModel):
+    company_ids: list[int] = Field(default_factory=list)
+    control_ids: list[int] = Field(default_factory=list)
+    requirement_ids: list[int] = Field(default_factory=list)
+    status: ComplianceStatus
+    evidence: Optional[str] = None
+    notes: Optional[str] = None
+    last_reviewed_date: Optional[date] = None
+    target_compliance_date: Optional[date] = None
+    owner_user_id: Optional[int] = None
+    approval_status: Optional[ApprovalStatus] = None
+    approval_notes: Optional[str] = None
+    reminder_days_before: Optional[int] = None
+    overdue_alert_enabled: Optional[bool] = None
+
+
+class Essential8RequirementEvidenceCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    file_name: str
+    content_type: Optional[str] = None
+    file_path: str
+    file_size_bytes: Optional[int] = None
+
+
+class Essential8RequirementEvidenceResponse(Essential8RequirementEvidenceCreate):
+    id: int
+    company_id: int
+    requirement_id: int
+    version_number: int
+    uploaded_by: Optional[int] = None
+    uploaded_at: Optional[str] = None
+    is_current: bool = True
 
     class Config:
         from_attributes = True

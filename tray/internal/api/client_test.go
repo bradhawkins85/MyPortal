@@ -53,6 +53,58 @@ func newStubServer(t *testing.T) *httptest.Server {
 		w.WriteHeader(http.StatusOK)
 	})
 
+	mux.HandleFunc("/api/tray/defender/policy", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-auth-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(api.DefenderPolicy{Enabled: true, Exclusions: []api.DefenderExclusion{
+			{Type: "path", Value: `C:\Trusted`},
+		}})
+	})
+
+	mux.HandleFunc("/api/tray/defender/status", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-auth-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		var status api.DefenderStatus
+		if err := json.NewDecoder(r.Body).Decode(&status); err != nil || status.HealthStatus != "healthy" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	mux.HandleFunc("/api/tray/defender/commands", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-auth-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"commands": []api.DefenderCommand{{
+			ID: 17, CommandType: "quick_scan",
+		}}})
+	})
+
+	mux.HandleFunc("/api/tray/defender/commands/17/result", func(w http.ResponseWriter, r *http.Request) {
+		var result struct {
+			Status string `json:"status"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&result); err != nil || result.Status != "completed" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	mux.HandleFunc("/api/tray/wan-ip", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-auth-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"wan_ip": "203.0.113.42"})
+	})
+
 	mux.HandleFunc("/api/tray/version", func(w http.ResponseWriter, r *http.Request) {
 		// Echo the X-Tray-OS header back so tests can assert it was sent.
 		osHeader := r.Header.Get("X-Tray-OS")
@@ -65,6 +117,49 @@ func newStubServer(t *testing.T) *httptest.Server {
 	})
 
 	return httptest.NewServer(mux)
+}
+
+func TestDefenderStatusReporting(t *testing.T) {
+	srv := newStubServer(t)
+	defer srv.Close()
+
+	client := api.New(srv.URL)
+	client.SetAuth("test-device-uid", "test-auth-token")
+	policy, err := client.GetDefenderPolicy(context.Background())
+	if err != nil {
+		t.Fatalf("GetDefenderPolicy: %v", err)
+	}
+	if !policy.Enabled {
+		t.Fatal("expected Defender policy to be enabled")
+	}
+	if len(policy.Exclusions) != 1 || policy.Exclusions[0].Value != `C:\Trusted` {
+		t.Fatalf("unexpected Defender exclusions: %#v", policy.Exclusions)
+	}
+	if err := client.ReportDefenderStatus(context.Background(), api.DefenderStatus{
+		AntivirusEnabled: true,
+		HealthStatus:     "healthy",
+		Details:          map[string]interface{}{},
+	}); err != nil {
+		t.Fatalf("ReportDefenderStatus: %v", err)
+	}
+}
+
+func TestDefenderCommandDelivery(t *testing.T) {
+	srv := newStubServer(t)
+	defer srv.Close()
+
+	client := api.New(srv.URL)
+	client.SetAuth("test-device-uid", "test-auth-token")
+	commands, err := client.GetDefenderCommands(context.Background())
+	if err != nil {
+		t.Fatalf("GetDefenderCommands: %v", err)
+	}
+	if len(commands) != 1 || commands[0].ID != 17 || commands[0].CommandType != "quick_scan" {
+		t.Fatalf("unexpected commands: %#v", commands)
+	}
+	if err := client.ReportDefenderCommandResult(context.Background(), 17, "completed", map[string]interface{}{"message": "ok"}); err != nil {
+		t.Fatalf("ReportDefenderCommandResult: %v", err)
+	}
 }
 
 func TestEnrol(t *testing.T) {
@@ -135,6 +230,67 @@ func TestHeartbeat(t *testing.T) {
 		AgentVersion: "0.1.0",
 	}); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
+	}
+}
+
+func TestGetWANIP(t *testing.T) {
+	srv := newStubServer(t)
+	defer srv.Close()
+
+	client := api.New(srv.URL)
+	client.SetAuth("test-device-uid", "test-auth-token")
+	wanIP, err := client.GetWANIP(context.Background())
+	if err != nil {
+		t.Fatalf("GetWANIP: %v", err)
+	}
+	if wanIP != "203.0.113.42" {
+		t.Fatalf("WAN IP = %q, want 203.0.113.42", wanIP)
+	}
+}
+
+func TestGetWANIPFromConfiguredWhoamiSource(t *testing.T) {
+	whoami := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("Name: scanner\nCf-Connecting-Ip: 180.150.103.160\nX-Forwarded-For: 198.51.100.7\n"))
+	}))
+	defer whoami.Close()
+
+	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tray/wan-ip" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"source_url": whoami.URL, "source_field": "cf-connecting-ip",
+		})
+	}))
+	defer portal.Close()
+
+	client := api.New(portal.URL)
+	wanIP, err := client.GetWANIP(context.Background())
+	if err != nil {
+		t.Fatalf("GetWANIP: %v", err)
+	}
+	if wanIP != "180.150.103.160" {
+		t.Fatalf("WAN IP = %q, want 180.150.103.160", wanIP)
+	}
+}
+
+func TestGetWANIPFromConfiguredForwardedChain(t *testing.T) {
+	whoami := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("X-Forwarded-For: 203.0.113.9, 172.18.0.1\n"))
+	}))
+	defer whoami.Close()
+	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"source_url": whoami.URL, "source_field": "X-Forwarded-For",
+		})
+	}))
+	defer portal.Close()
+
+	client := api.New(portal.URL)
+	wanIP, err := client.GetWANIP(context.Background())
+	if err != nil || wanIP != "203.0.113.9" {
+		t.Fatalf("GetWANIP = %q, %v; want 203.0.113.9", wanIP, err)
 	}
 }
 

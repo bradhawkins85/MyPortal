@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import re
 import json
-from html import escape as html_escape
+import re
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from html import escape as html_escape
 from threading import RLock
-from collections.abc import Sequence
 from typing import Any, Mapping
 
 from loguru import logger
@@ -151,6 +151,16 @@ def _coerce_template(record: Mapping[str, Any]) -> MessageTemplate:
         description = str(description)
     created_at = record.get("created_at")
     updated_at = record.get("updated_at")
+    if isinstance(created_at, str):
+        try:
+            created_at = datetime.fromisoformat(created_at)
+        except ValueError:
+            created_at = None
+    if isinstance(updated_at, str):
+        try:
+            updated_at = datetime.fromisoformat(updated_at)
+        except ValueError:
+            updated_at = None
     if created_at is not None and not isinstance(created_at, datetime):
         created_at = None
     if updated_at is not None and not isinstance(updated_at, datetime):
@@ -171,6 +181,14 @@ def _to_dict(template: MessageTemplate) -> dict[str, Any]:
     return asdict(template)
 
 
+def _json_default(value: Any) -> str:
+    """Encode cache values that have a stable JSON representation."""
+
+    if isinstance(value, datetime):
+        return value.isoformat()
+    raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
+
+
 def _set_cache(records: list[MessageTemplate]) -> None:
     with _CACHE_LOCK:
         _TEMPLATE_CACHE.clear()
@@ -184,7 +202,7 @@ async def _persist_cache_to_redis(records: list[MessageTemplate]) -> None:
         return
     payload = [_to_dict(template) for template in records]
     try:
-        await client.set(_REDIS_CACHE_KEY, json.dumps(payload))
+        await client.set(_REDIS_CACHE_KEY, json.dumps(payload, default=_json_default))
     except RedisError as exc:
         logger.warning("Failed to persist message template cache to Redis", error=str(exc))
 

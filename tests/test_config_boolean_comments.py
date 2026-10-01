@@ -11,6 +11,7 @@ def test_boolean_field_with_inline_comment():
     with patch.dict(os.environ, {
         "SESSION_SECRET": "test-secret",
         "TOTP_ENCRYPTION_KEY": "test-totp-key",
+        "ENVIRONMENT": "test",
         "IP_WHITELIST_ADMIN_ONLY": "true  # admin routes only"
     }, clear=True):
         settings = Settings()
@@ -24,6 +25,7 @@ def test_boolean_field_false_with_inline_comment():
     with patch.dict(os.environ, {
         "SESSION_SECRET": "test-secret",
         "TOTP_ENCRYPTION_KEY": "test-totp-key",
+        "ENVIRONMENT": "test",
         "IP_WHITELIST_ENABLED": "false  # disabled for now"
     }, clear=True):
         settings = Settings()
@@ -37,6 +39,7 @@ def test_boolean_field_without_comment():
     with patch.dict(os.environ, {
         "SESSION_SECRET": "test-secret",
         "TOTP_ENCRYPTION_KEY": "test-totp-key",
+        "ENVIRONMENT": "test",
         "IP_WHITELIST_ADMIN_ONLY": "true"
     }, clear=True):
         settings = Settings()
@@ -50,6 +53,7 @@ def test_multiple_boolean_fields_with_comments():
     with patch.dict(os.environ, {
         "SESSION_SECRET": "test-secret",
         "TOTP_ENCRYPTION_KEY": "test-totp-key",
+        "ENVIRONMENT": "test",
         "ENABLE_CSRF": "true  # enable CSRF protection",
         "ENABLE_AUTO_REFRESH": "false  # disable auto refresh",
         "BCP_ENABLED": "true  # business continuity enabled"

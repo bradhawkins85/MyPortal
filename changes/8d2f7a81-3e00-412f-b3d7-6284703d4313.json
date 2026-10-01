@@ -1,0 +1,7 @@
+{
+  "guid": "8d2f7a81-3e00-412f-b3d7-6284703d4313",
+  "occurred_at": "2026-09-15T00:00Z",
+  "change_type": "Feature",
+  "summary": "Added automated per-mailbox remediation for required mailbox owner audit actions.",
+  "content_hash": "1236d764509c7c3a41628cf3165df0d290fdbc6c5bc2766ee89eaa6f6cfa1af5"
+}

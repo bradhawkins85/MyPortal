@@ -1,3 +1,4 @@
+{% if module_enabled.get('huntress', false) %}
 {% from "macros/counters.html" import counter_strip %}
 <section class="card card--panel" data-report-section="huntress_soc">
   <header class="card__header report-section__header">
@@ -14,3 +15,5 @@
     ]) }}
   </div>
 </section>
+
+{% endif %}

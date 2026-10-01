@@ -6,6 +6,7 @@
   'use strict';
 
   const API_BASE = '/api/tickets';
+  const COLLAPSED_GROUPS_STORAGE_KEY = 'portal.tickets.collapsedGroups';
 
   function getCookie(name) {
     const pattern = `(?:^|; )${name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1')}=([^;]*)`;
@@ -34,14 +35,38 @@
         priorities: [],
         companies: [],
         assignedUsers: [],
-        search: ''
+        search: '',
+        columnFilters: {}
       };
       this.groupingFields = [];
       this.groupingField = null;
+      this.collapsedGroups = this.loadCollapsedGroups();
       this.sortField = null;
       this.sortDirection = 'asc';
       
       this.init();
+    }
+
+    loadCollapsedGroups() {
+      try {
+        const stored = JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_STORAGE_KEY) || '[]');
+        return new Set(Array.isArray(stored) ? stored.filter((item) => typeof item === 'string') : []);
+      } catch (error) {
+        console.warn('Failed to read collapsed ticket groups', error);
+        return new Set();
+      }
+    }
+
+    saveCollapsedGroups() {
+      try {
+        localStorage.setItem(COLLAPSED_GROUPS_STORAGE_KEY, JSON.stringify([...this.collapsedGroups]));
+      } catch (error) {
+        console.warn('Failed to persist collapsed ticket groups', error);
+      }
+    }
+
+    collapsedGroupStorageId(groupKey) {
+      return `${this.groupingFields.join('>')}::${groupKey}`;
     }
 
     async init() {
@@ -49,6 +74,8 @@
       // that fire while async initialization (loadViews) is in progress.
       this.setupEventListeners();
       this.setupStatusFilters();
+      this.setupStatusFilterMenu();
+      this.setupColumnFilters();
       this.setupGroupingControls();
       await this.loadViews();
       this.updateViewActions();
@@ -91,7 +118,7 @@
       }
 
       // View selector
-      const viewSelect = this.container.querySelector('[data-view-select]');
+      const viewSelect = document.querySelector('[data-view-select]');
       if (viewSelect) {
         viewSelect.addEventListener('change', (e) => {
           const viewId = parseInt(e.target.value);
@@ -104,13 +131,13 @@
       }
 
       // Save view button
-      const saveViewBtn = this.container.querySelector('[data-save-view]');
+      const saveViewBtn = document.querySelector('[data-save-view]');
       if (saveViewBtn) {
         saveViewBtn.addEventListener('click', () => this.showSaveViewModal());
       }
 
       // Update view button
-      const updateViewBtn = this.container.querySelector('[data-update-view]');
+      const updateViewBtn = document.querySelector('[data-update-view]');
       if (updateViewBtn) {
         updateViewBtn.addEventListener('click', () => this.updateCurrentView());
       }
@@ -149,7 +176,7 @@
       });
 
       // Delete view button
-      const deleteViewBtn = this.container.querySelector('[data-delete-view]');
+      const deleteViewBtn = document.querySelector('[data-delete-view]');
       if (deleteViewBtn) {
         deleteViewBtn.addEventListener('click', () => this.deleteCurrentView());
       }
@@ -180,7 +207,187 @@
             this.filterState.statuses = this.filterState.statuses.filter(s => s !== status);
           }
           this.applyFilters();
+          this.updateActiveFilterHeaders();
         });
+      });
+    }
+
+    /** Add a type-appropriate filter popover to every data column header. */
+    setupColumnFilters() {
+      const table = this.container.querySelector('[data-table]');
+      if (!table) return;
+      const dateColumns = new Set(['updated', 'review-date', 'created', 'closed']);
+      const numberColumns = new Set([
+        'id', 'billable-minutes', 'non-billable-minutes', 'company-id',
+        'attachment-count', 'task-count', 'open-task-count', 'age-days',
+        'updated-age-hours', 'in-status-hours', 'last-reply-age-hours'
+      ]);
+      const booleanColumns = new Set(['has-attachments', 'has-tasks', 'has-open-tasks', 'latest-reply-internal']);
+
+      table.querySelectorAll('thead th[data-column]').forEach((header) => {
+        const column = header.dataset.column;
+        // Status already has its purpose-built multi-select filter.
+        if (!column || column === 'status') return;
+        const type = dateColumns.has(column) ? 'date' : numberColumns.has(column) ? 'number' : booleanColumns.has(column) ? 'boolean' : 'text';
+        const label = header.textContent.trim();
+        header.textContent = '';
+        const wrapper = document.createElement('span');
+        wrapper.className = 'ticket-column-filter';
+        wrapper.dataset.columnFilterMenu = column;
+        wrapper.innerHTML = `<span class="ticket-column-filter__label">${this.escapeHtml(label)}</span>`;
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'ticket-column-filter__toggle';
+        toggle.setAttribute('aria-label', `Filter ${label}`);
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 5.25A1.25 1.25 0 0 1 4.75 4h14.5a1.25 1.25 0 0 1 .96 2.05L14.5 12.9v5.35a1.25 1.25 0 0 1-.69 1.12l-2.5 1.25a1.25 1.25 0 0 1-1.81-1.12v-6.6L3.79 6.05a1.25 1.25 0 0 1-.29-.8Z"/></svg>';
+        const panel = document.createElement('span');
+        panel.className = 'ticket-column-filter__panel';
+        panel.hidden = true;
+        panel.innerHTML = this.columnFilterControls(column, type, label);
+        const dateReference = panel.querySelector('[data-column-filter-date-reference]');
+        if (dateReference) {
+          dateReference.addEventListener('change', () => this.updateDateFilterValueControl(panel));
+          this.updateDateFilterValueControl(panel);
+        }
+        wrapper.append(toggle, panel);
+        header.appendChild(wrapper);
+
+        const stop = (event) => event.stopPropagation();
+        panel.addEventListener('click', stop);
+        toggle.addEventListener('click', (event) => {
+          stop(event);
+          this.container.querySelectorAll('[data-column-filter-menu]').forEach((menu) => {
+            if (menu !== wrapper) {
+              menu.querySelector('.ticket-column-filter__panel').hidden = true;
+              menu.querySelector('.ticket-column-filter__toggle').setAttribute('aria-expanded', 'false');
+            }
+          });
+          panel.hidden = !panel.hidden;
+          toggle.setAttribute('aria-expanded', String(!panel.hidden));
+        });
+        panel.querySelector('[data-column-filter-apply]').addEventListener('click', () => {
+          const operator = panel.querySelector('[data-column-filter-operator]').value;
+          const input = panel.querySelector('[data-column-filter-value]');
+          const value = dateReference && dateReference.value === 'today'
+            ? 'today'
+            : (input ? input.value.trim() : '');
+          if (operator === 'relative' || value !== '') this.filterState.columnFilters[column] = { type, operator, value };
+          else delete this.filterState.columnFilters[column];
+          panel.hidden = true;
+          toggle.setAttribute('aria-expanded', 'false');
+          this.updateActiveFilterHeaders();
+          this.applyFilters();
+        });
+        panel.querySelector('[data-column-filter-clear]').addEventListener('click', () => {
+          delete this.filterState.columnFilters[column];
+          this.populateColumnFilterPanel(column);
+          panel.hidden = true;
+          this.updateActiveFilterHeaders();
+          this.applyFilters();
+        });
+      });
+      document.addEventListener('click', () => this.closeColumnFilterMenus());
+      this.updateActiveFilterHeaders();
+    }
+
+    escapeHtml(value) {
+      const node = document.createElement('span');
+      node.textContent = value;
+      return node.innerHTML;
+    }
+
+    columnFilterControls(column, type, label) {
+      const operators = type === 'text'
+        ? [['contains', 'Contains'], ['not_contains', 'Does not contain'], ['equals', 'Equals'], ['not_equals', 'Does not equal'], ['starts_with', 'Starts with'], ['ends_with', 'Ends with']]
+        : type === 'number'
+          ? [['equals', 'Equals'], ['not_equals', 'Does not equal'], ['greater', 'Greater than'], ['greater_equal', 'At least'], ['less', 'Less than'], ['less_equal', 'At most']]
+          : type === 'date'
+            ? [['on', 'On'], ['before', 'Before'], ['after', 'After'], ['on_or_before', 'On or before'], ['on_or_after', 'On or after'], ['relative', 'In the last 30 days']]
+            : [['equals', 'Is']];
+      const options = operators.map(([value, text]) => `<option value="${value}">${text}</option>`).join('');
+      const inputType = type === 'number' ? 'number' : type === 'date' ? 'date' : 'text';
+      const valueControl = type === 'boolean'
+        ? '<select class="form-input" data-column-filter-value><option value="true">True</option><option value="false">False</option></select>'
+        : type === 'date'
+          ? '<select class="form-input" data-column-filter-date-reference aria-label="Date reference"><option value="date">Specific date</option><option value="today">Today</option></select><input class="form-input" data-column-filter-value type="date" aria-label="Filter value for ' + this.escapeHtml(label) + '">'
+        : `<input class="form-input" data-column-filter-value type="${inputType}" aria-label="Filter value for ${this.escapeHtml(label)}">`;
+      return `<span class="ticket-column-filter__title">Filter ${this.escapeHtml(label)}</span><select class="form-input" data-column-filter-operator>${options}</select>${valueControl}<span class="ticket-column-filter__actions"><button type="button" class="button button--primary button--compact" data-column-filter-apply>Apply</button><button type="button" class="button button--ghost button--compact" data-column-filter-clear>Clear</button></span>`;
+    }
+
+    closeColumnFilterMenus() {
+      this.container.querySelectorAll('[data-column-filter-menu]').forEach((menu) => {
+        menu.querySelector('.ticket-column-filter__panel').hidden = true;
+        menu.querySelector('.ticket-column-filter__toggle').setAttribute('aria-expanded', 'false');
+      });
+    }
+
+    populateColumnFilterPanel(column) {
+      const menu = this.container.querySelector(`[data-column-filter-menu="${column}"]`);
+      if (!menu) return;
+      const filter = this.filterState.columnFilters[column];
+      const operator = menu.querySelector('[data-column-filter-operator]');
+      const value = menu.querySelector('[data-column-filter-value]');
+      const dateReference = menu.querySelector('[data-column-filter-date-reference]');
+      if (operator) operator.value = filter ? filter.operator : operator.options[0].value;
+      if (dateReference) dateReference.value = filter && filter.value === 'today' ? 'today' : 'date';
+      if (value) value.value = filter && filter.value !== 'today' ? filter.value : (filter && filter.type === 'boolean' ? 'true' : '');
+      this.updateDateFilterValueControl(menu);
+    }
+
+    updateDateFilterValueControl(container) {
+      const dateReference = container.querySelector('[data-column-filter-date-reference]');
+      const value = container.querySelector('[data-column-filter-value]');
+      if (!dateReference || !value) return;
+      const usesToday = dateReference.value === 'today';
+      value.hidden = usesToday;
+      value.disabled = usesToday;
+    }
+
+    updateActiveFilterHeaders() {
+      this.container.querySelectorAll('[data-column-filter-menu]').forEach((menu) => {
+        const active = Boolean(this.filterState.columnFilters[menu.dataset.columnFilterMenu]);
+        menu.classList.toggle('ticket-column-filter--active', active);
+      });
+      const statusMenu = this.container.querySelector('[data-ticket-status-filter-menu]');
+      if (statusMenu) {
+        const total = this.container.querySelectorAll('[data-status-filter]').length;
+        statusMenu.classList.toggle('ticket-status-filter--active', this.filterState.statuses.length > 0 && this.filterState.statuses.length < total);
+      }
+    }
+
+    /**
+     * Setup the status column's filter menu without triggering table sorting.
+     */
+    setupStatusFilterMenu() {
+      const menu = this.container.querySelector('[data-ticket-status-filter-menu]');
+      if (!menu) return;
+      const toggle = menu.querySelector('[data-ticket-status-filter-toggle]');
+      const panel = menu.querySelector('[data-ticket-status-filter-panel]');
+      if (!toggle || !panel) return;
+
+      const closeMenu = () => {
+        panel.hidden = true;
+        menu.classList.remove('ticket-status-filter--open');
+        toggle.setAttribute('aria-expanded', 'false');
+      };
+
+      toggle.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const willOpen = panel.hidden;
+        panel.hidden = !willOpen;
+        menu.classList.toggle('ticket-status-filter--open', willOpen);
+        toggle.setAttribute('aria-expanded', String(willOpen));
+      });
+      panel.addEventListener('click', (event) => event.stopPropagation());
+      document.addEventListener('click', (event) => {
+        if (!menu.contains(event.target)) closeMenu();
+      });
+      menu.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          closeMenu();
+          toggle.focus();
+        }
       });
     }
 
@@ -281,7 +488,7 @@
       let visibleCount = 0;
 
       rows.forEach(row => {
-        let shouldShow = true;
+        let shouldShow = this.rowMatchesColumnFilters(row);
 
         // Status filter
         if (this.filterState.statuses.length > 0) {
@@ -326,7 +533,7 @@
       let visibleCount = 0;
 
       rows.forEach(row => {
-        let shouldShow = true;
+        let shouldShow = this.rowMatchesColumnFilters(row);
 
         // Priority filter is client-side only (API does not support priority filtering)
         if (this.filterState.priorities.length > 0) {
@@ -348,6 +555,37 @@
       if (this.groupingField || this.groupingFields.length) {
         this.applyGrouping();
       }
+    }
+
+    rowMatchesColumnFilters(row) {
+      return Object.entries(this.filterState.columnFilters).every(([column, filter]) => {
+        const cell = row.querySelector(`[data-column="${column}"]`);
+        if (!cell) return false;
+        const raw = (cell.getAttribute('data-value') || cell.textContent || '').trim();
+        if (filter.type === 'number') {
+          const actual = Number(raw);
+          const expected = Number(filter.value);
+          if (!Number.isFinite(actual) || !Number.isFinite(expected)) return false;
+          return { equals: actual === expected, not_equals: actual !== expected, greater: actual > expected,
+            greater_equal: actual >= expected, less: actual < expected, less_equal: actual <= expected }[filter.operator] ?? true;
+        }
+        if (filter.type === 'date') {
+          const actual = new Date(raw.replace(' ', 'T'));
+          if (Number.isNaN(actual.getTime())) return false;
+          if (filter.operator === 'relative') return actual >= new Date(Date.now() - (30 * 86400000)) && actual <= new Date();
+          const expected = filter.value === 'today' ? new Date() : new Date(`${filter.value}T00:00:00`);
+          if (Number.isNaN(expected.getTime())) return false;
+          const actualDay = new Date(actual.getFullYear(), actual.getMonth(), actual.getDate()).getTime();
+          const expectedDay = new Date(expected.getFullYear(), expected.getMonth(), expected.getDate()).getTime();
+          return { on: actualDay === expectedDay, before: actualDay < expectedDay, after: actualDay > expectedDay,
+            on_or_before: actualDay <= expectedDay, on_or_after: actualDay >= expectedDay }[filter.operator] ?? true;
+        }
+        const actual = raw.toLocaleLowerCase();
+        const expected = String(filter.value).toLocaleLowerCase();
+        if (filter.type === 'boolean') return actual === expected;
+        return { contains: actual.includes(expected), not_contains: !actual.includes(expected), equals: actual === expected,
+          not_equals: actual !== expected, starts_with: actual.startsWith(expected), ends_with: actual.endsWith(expected) }[filter.operator] ?? true;
+      });
     }
 
     /**
@@ -479,6 +717,32 @@
           this.toggleGroup(groupKey);
         });
       });
+
+      tbody.querySelectorAll('[data-group-key]').forEach((headerRow) => {
+        const groupKey = headerRow.getAttribute('data-group-key');
+        if (!groupKey || !this.collapsedGroups.has(this.collapsedGroupStorageId(groupKey))) return;
+        const toggle = headerRow.querySelector('[data-group-toggle]');
+        if (toggle) toggle.setAttribute('aria-expanded', 'false');
+        headerRow.classList.add('ticket-group-header--collapsed');
+      });
+      this.updateGroupVisibility();
+    }
+
+    updateGroupVisibility() {
+      const tbody = this.container.querySelector('tbody');
+      if (!tbody) return;
+      const collapsedPaths = Array.from(tbody.querySelectorAll('.ticket-group-header--collapsed[data-group-key]'))
+        .map((row) => row.getAttribute('data-group-key'))
+        .filter(Boolean);
+
+      tbody.querySelectorAll('tr[data-group-path]').forEach((row) => {
+        const path = row.getAttribute('data-group-path') || '';
+        const isHeader = row.classList.contains('ticket-group-header');
+        const hidden = collapsedPaths.some((collapsedPath) => (
+          path.startsWith(`${collapsedPath}¦`) || (!isHeader && path === collapsedPath)
+        ));
+        row.classList.toggle('ticket-group-hidden', hidden);
+      });
     }
 
     /**
@@ -494,19 +758,16 @@
       const toggle = headerRow.querySelector('[data-group-toggle]');
       if (!toggle) return;
       const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
-      const descendantRows = Array.from(tbody.querySelectorAll('tr[data-group-path]'))
-        .filter((row) => row !== headerRow && (row.getAttribute('data-group-path') || '').startsWith(groupKey));
-
-      descendantRows.forEach(row => {
-        if (isExpanded) {
-          row.classList.add('ticket-group-hidden');
-        } else {
-          row.classList.remove('ticket-group-hidden');
-        }
-      });
-
       toggle.setAttribute('aria-expanded', String(!isExpanded));
       headerRow.classList.toggle('ticket-group-header--collapsed', isExpanded);
+      const storageId = this.collapsedGroupStorageId(groupKey);
+      if (isExpanded) {
+        this.collapsedGroups.add(storageId);
+      } else {
+        this.collapsedGroups.delete(storageId);
+      }
+      this.saveCollapsedGroups();
+      this.updateGroupVisibility();
     }
 
     /**
@@ -536,7 +797,7 @@
         if (response.ok) {
           const view = await response.json();
           this.currentView = view;
-          const viewSelect = this.container.querySelector('[data-view-select]');
+          const viewSelect = document.querySelector('[data-view-select]');
           if (viewSelect) {
             viewSelect.value = String(view.id);
           }
@@ -546,6 +807,10 @@
           if (view.filters) {
             this.filterState.statuses = view.filters.status || [];
             this.filterState.priorities = view.filters.priority || [];
+            this.filterState.columnFilters = view.filters.column_filters || {};
+            if (Array.isArray(view.filters.visible_columns) && window.ticketColumns) {
+              window.ticketColumns.applyVisibleColumns(view.filters.visible_columns);
+            }
             // Update UI checkboxes
             this.updateFilterUI();
           }
@@ -582,12 +847,14 @@
         priorities: [],
         companies: [],
         assignedUsers: [],
-        search: ''
+        search: '',
+        columnFilters: {}
       };
       this.groupingFields = [];
       this.groupingField = null;
       this.updateGroupingUI();
       this.updateFilterUI();
+      this.updateActiveFilterHeaders();
       this.removeGrouping();
       this.applyFilters();
     }
@@ -600,6 +867,10 @@
       this.container.querySelectorAll('[data-status-filter]').forEach(checkbox => {
         checkbox.checked = this.filterState.statuses.includes(checkbox.value);
       });
+      this.container.querySelectorAll('[data-column-filter-menu]').forEach((menu) => {
+        this.populateColumnFilterPanel(menu.dataset.columnFilterMenu);
+      });
+      this.updateActiveFilterHeaders();
     }
 
     /**
@@ -621,6 +892,8 @@
         filters: {
           status: this.filterState.statuses,
           priority: this.filterState.priorities,
+          column_filters: this.filterState.columnFilters,
+          visible_columns: window.ticketColumns ? window.ticketColumns.getVisibleColumns() : null,
         },
         grouping_field: this.groupingField,
         grouping_fields: this.groupingFields,
@@ -728,11 +1001,11 @@
      * Render view selector
      */
     renderViewSelector(selectedViewId = null) {
-      const viewSelect = this.container.querySelector('[data-view-select]');
+      const viewSelect = document.querySelector('[data-view-select]');
       if (!viewSelect) return;
 
       const activeViewId = selectedViewId || (this.currentView && this.currentView.id);
-      viewSelect.innerHTML = '<option value="">Select a view...</option>';
+      viewSelect.innerHTML = '<option value="">Saved views…</option>';
       this.views.forEach(view => {
         const option = document.createElement('option');
         option.value = view.id;
@@ -747,9 +1020,9 @@
      */
     updateViewActions() {
       const hasCurrentView = Boolean(this.currentView);
-      const saveViewBtn = this.container.querySelector('[data-save-view]');
-      const updateViewBtn = this.container.querySelector('[data-update-view]');
-      const deleteViewBtn = this.container.querySelector('[data-delete-view]');
+      const saveViewBtn = document.querySelector('[data-save-view]');
+      const updateViewBtn = document.querySelector('[data-update-view]');
+      const deleteViewBtn = document.querySelector('[data-delete-view]');
 
       if (saveViewBtn) {
         saveViewBtn.hidden = hasCurrentView;
@@ -767,7 +1040,7 @@
      * Update table info
      */
     updateTableInfo(visible, total) {
-      const infoElement = this.container.querySelector('[data-table-info]');
+      const infoElement = document.querySelector('[data-table-info]');
       if (infoElement) {
         infoElement.textContent = `Showing ${visible} of ${total} tickets`;
       }

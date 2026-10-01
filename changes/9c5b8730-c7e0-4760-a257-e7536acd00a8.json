@@ -1,0 +1,7 @@
+{
+  "guid": "9c5b8730-c7e0-4760-a257-e7536acd00a8",
+  "occurred_at": "2026-09-21T00:00Z",
+  "change_type": "Fix",
+  "summary": "Allowed blue-green upgrade readiness requests enough time to complete during application startup.",
+  "content_hash": "b245918cbe72f0e541a10834da675f942a9554e9dd5e4174cb5ea7854004936a"
+}

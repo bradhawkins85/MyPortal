@@ -155,7 +155,8 @@
                       <li class="header-title-menu__item" role="none">
                         <form action="/chat/auto-assign/rules/{{ rule.id }}/delete"
                               method="post" class="inline-form"
-                              onsubmit="return confirm('Delete rule \'{{ rule.name | replace("'", "\\'") }}\'?');">
+                              data-confirm-name="{{ rule.name | e }}"
+                              onsubmit="return confirm('Delete rule \'' + this.dataset.confirmName + '\'?');">
                           {% if csrf_token %}
                             <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
                           {% endif %}
@@ -181,6 +182,7 @@
   aria-modal="true"
   aria-labelledby="rule-modal-title"
   aria-hidden="true"
+  data-is-editing="{{ 'true' if is_editing else 'false' }}"
   hidden
 >
   <div class="modal__content" role="document">
@@ -577,11 +579,11 @@
     });
   });
 
-  {% if is_editing %}
+  if (modal.dataset.isEditing === 'true') {
     title.textContent = 'Edit rule';
     submitButton.textContent = 'Update rule';
     openModal();
-  {% endif %}
+  }
 })();
 </script>
 {% endblock %}

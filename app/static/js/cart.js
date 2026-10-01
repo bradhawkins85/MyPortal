@@ -14,10 +14,20 @@
     return input ? input.value : null;
   }
 
+  let quantityRequest;
+  let cotermRequest;
+
   function autoSaveQuantity(input) {
     const name = input.getAttribute('name');
     if (!name || !name.startsWith('quantity_')) return;
-    if (!input.validity.valid) return;
+    if (!input.validity.valid || input.dataset.saving === input.value) return;
+
+    if (quantityRequest) quantityRequest.abort();
+    quantityRequest = new AbortController();
+    input.dataset.saving = input.value;
+    input.setAttribute('aria-busy', 'true');
+    const status = document.getElementById('cart-quantity-status');
+    if (status) status.textContent = Number(input.value) === 0 ? 'Removing item from cart.' : 'Updating cart quantity.';
 
     const csrf = getCsrfToken();
     const formData = new FormData();
@@ -27,18 +37,74 @@
     fetch('/cart/update', {
       method: 'POST',
       body: formData,
-      redirect: 'manual',
+      signal: quantityRequest.signal,
     })
       .then((response) => {
-        if (response.type === 'opaqueredirect' || response.ok) {
-          window.location.href = window.location.pathname + '?_=' + Date.now();
-        } else {
-          window.location.reload();
-        }
-      })
-      .catch(() => {
+        if (!response.ok) throw new Error('Unable to update cart quantity.');
         window.location.reload();
+      })
+      .catch((error) => {
+        if (error.name === 'AbortError') return;
+        delete input.dataset.saving;
+        input.removeAttribute('aria-busy');
+        if (status) status.textContent = 'Unable to update the cart. Please try again.';
       });
+  }
+
+  function bindQuantityAutoSave(container) {
+    container.querySelectorAll('[data-cart-quantity]').forEach((input) => {
+      if (!(input instanceof HTMLInputElement)) return;
+
+      const debouncedSave = debounce(() => autoSaveQuantity(input), 350);
+      input.addEventListener('input', () => {
+        if (!input.validity.valid || input.value === '') return;
+        if (Number(input.value) === 0) {
+          autoSaveQuantity(input);
+        } else {
+          debouncedSave();
+        }
+      });
+      input.addEventListener('change', () => autoSaveQuantity(input));
+    });
+  }
+
+  function autoSaveCoterm(input) {
+    if (!(input instanceof HTMLInputElement)) return;
+    const productId = input.getAttribute('data-product-id');
+    if (!productId) return;
+
+    if (cotermRequest) cotermRequest.abort();
+    cotermRequest = new AbortController();
+    input.setAttribute('aria-busy', 'true');
+    const status = document.getElementById('cart-quantity-status');
+    if (status) status.textContent = 'Updating co-term settings.';
+
+    const csrf = getCsrfToken();
+    const formData = new FormData();
+    if (csrf) formData.append('_csrf', csrf);
+    formData.append(`coterm_${productId}`, input.checked ? '1' : '0');
+
+    fetch('/cart/update', {
+      method: 'POST',
+      body: formData,
+      signal: cotermRequest.signal,
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('Unable to update co-term settings.');
+        window.location.reload();
+      })
+      .catch((error) => {
+        if (error.name === 'AbortError') return;
+        input.removeAttribute('aria-busy');
+        if (status) status.textContent = 'Unable to update co-term settings. Please try again.';
+      });
+  }
+
+  function bindCotermAutoSave(container) {
+    container.querySelectorAll('[data-cart-coterm]').forEach((input) => {
+      if (!(input instanceof HTMLInputElement)) return;
+      input.addEventListener('change', () => autoSaveCoterm(input));
+    });
   }
 
   function parseJson(elementId) {
@@ -114,8 +180,6 @@
         input.reportValidity();
       });
 
-      const debouncedSave = debounce(() => autoSaveQuantity(input), 600);
-      input.addEventListener('change', debouncedSave);
     });
   }
 
@@ -420,6 +484,8 @@
   document.addEventListener('DOMContentLoaded', () => {
     const container = document.body;
     bindStockLimitInputs(container);
+    bindQuantityAutoSave(container);
+    bindCotermAutoSave(container);
     handleFormSubmitAndReload();
 
     const modal = document.getElementById('cart-product-details-modal');

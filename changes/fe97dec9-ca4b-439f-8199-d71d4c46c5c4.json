@@ -1,0 +1,7 @@
+{
+  "guid": "fe97dec9-ca4b-439f-8199-d71d4c46c5c4",
+  "occurred_at": "2026-09-21T00:00Z",
+  "change_type": "Fix",
+  "summary": "Prevent deleted migration metadata and nounset link variables from aborting atomic upgrades.",
+  "content_hash": "286c6be2d9f6ad19679e632b5007f88b7fa02022c63dbbde47e1f8aefd1ff65d"
+}

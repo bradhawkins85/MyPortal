@@ -52,7 +52,8 @@
                 <div class="table__action-buttons">
                   <a class="button button--ghost" href="/reporting?report={{ report.id }}">Run</a>
                   <a class="button button--ghost" href="/admin/reporting/{{ report.id }}/edit">Edit</a>
-                  <form method="post" action="/admin/reporting/{{ report.id }}/delete" onsubmit="return confirm('Delete report &quot;{{ report.name|e }}&quot;?');" style="display:inline;">
+                  <a class="button button--ghost" href="/admin/reporting/{{ report.id }}/clone">Clone</a>
+                  <form method="post" action="/admin/reporting/{{ report.id }}/delete" data-confirm="{{ ('Delete report \"' ~ report.name ~ '\"?') | e }}" style="display:inline;">
                     {% include "partials/csrf.html" %}
                     <button type="submit" class="button button--danger">Delete</button>
                   </form>

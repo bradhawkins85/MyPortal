@@ -214,6 +214,22 @@ def test_admin_saves_require_po_disabled(monkeypatch, active_session):
     assert updated.get("require_po") == 0
 
 
+def test_admin_saves_company_phone(monkeypatch, active_session):
+    updated = _admin_update_test(
+        monkeypatch,
+        active_session,
+        {"invoicePrepay": "1", "phone": "  +1 212 555 0100  "},
+    )
+    assert updated.get("phone") == "+1 212 555 0100"
+
+
+def test_admin_clears_company_phone(monkeypatch, active_session):
+    updated = _admin_update_test(
+        monkeypatch, active_session, {"invoicePrepay": "1", "phone": ""}
+    )
+    assert updated.get("phone") is None
+
+
 # ---------------------------------------------------------------------------
 # Cart view: require_po passed to template context
 # ---------------------------------------------------------------------------

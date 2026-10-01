@@ -1,0 +1,7 @@
+{
+  "guid": "83a6f69e-a17a-445f-8d37-2f97cb8fb8a9",
+  "occurred_at": "2026-09-27T00:00Z",
+  "change_type": "Fix",
+  "summary": "Restored website TLS checks on Python versions where the deprecated ssl.match_hostname helper has been removed.",
+  "content_hash": "73afddf1d70eb33eb6ea60e4d5e3f810b65b24c3b1082002e5654aa30ebc4c8b"
+}

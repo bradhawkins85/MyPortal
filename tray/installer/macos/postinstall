@@ -111,7 +111,10 @@ for uid in $(stat -f '%u' /dev/console 2>/dev/null; ps -axo uid= 2>/dev/null | s
     if [[ "$uid" =~ ^[0-9]+$ && "$uid" -ge 500 ]]; then
         launchctl bootout "gui/$uid" "$AGENT_PLIST" 2>/dev/null || launchctl asuser "$uid" launchctl unload "$AGENT_PLIST" 2>/dev/null || true
         if ! launchctl bootstrap "gui/$uid" "$AGENT_PLIST" 2>/dev/null; then
-            launchctl asuser "$uid" launchctl load -w "$AGENT_PLIST" 2>/dev/null || true
+            if ! launchctl asuser "$uid" launchctl load -w "$AGENT_PLIST" 2>/dev/null; then
+                warn "failed to load the menu-bar agent for user $uid; it will be loaded at the next login"
+                continue
+            fi
         fi
         launchctl enable "gui/$uid/io.myportal.tray.agent" 2>/dev/null || true
         launchctl kickstart -k "gui/$uid/io.myportal.tray.agent" 2>/dev/null || true

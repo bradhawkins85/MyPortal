@@ -82,6 +82,7 @@ func main() {
 
 	// Connect to IPC server in background.
 	go connectIPC()
+	go runOutlookSignatureWorker()
 
 	// systray.Run blocks until Quit is called.
 	systray.Run(onTrayReady, onTrayExit)
@@ -148,7 +149,7 @@ func defaultConfig() *api.ConfigResponse {
 
 func onTrayReady() {
 	trayReady.Store(true)
-	systray.SetTitle("MyPortal")
+	configureTrayIcon()
 	systray.SetTooltip(trayTooltip(gConfig))
 	// Use a simple built-in icon; real icon bytes loaded from branding URL in Phase 6.
 	buildMenu(gConfig)
@@ -199,7 +200,12 @@ func addTraySeparator(parent *systray.MenuItem) {
 }
 
 func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuItem) {
-	switch node.Type {
+	// The server historically emitted TRMM_Script with mixed casing while most
+	// node types are lower-case. Treat the discriminator as case-insensitive so
+	// a harmless casing/whitespace difference cannot leave a visible menu item
+	// without a click handler.
+	nodeType := normalizedMenuNodeType(node.Type)
+	switch nodeType {
 	case "separator":
 		addTraySeparator(parent)
 
@@ -253,7 +259,7 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 		item := addTrayMenuItem(parent, label, "Click to copy value")
 		go func(varName string) {
 			for range item.ClickedCh {
-				val := os.Getenv(varName)
+				val := resolveEnvVarValue(varName)
 				if val == "" {
 					val = "(not set)"
 				}
@@ -282,11 +288,11 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 		item := addTrayMenuItem(parent, label, "Submit a support ticket")
 		go func() {
 			for range item.ClickedCh {
-				go openNewTicketWindow(cfg)
+				go openNewTicketDialog(cfg)
 			}
 		}()
 
-	case "TRMM_Script", "trmm_script":
+	case "trmm_script":
 		label := node.Label
 		if label == "" {
 			label = node.ScriptName
@@ -300,6 +306,21 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 				go runTRMMScriptFromMenu(menuNode)
 			}
 		}(node)
+
+	case "scan_network":
+		if !cfg.NetworkScannerEnabled {
+			return
+		}
+		label := node.Label
+		if label == "" {
+			label = "Scan Network"
+		}
+		item := addTrayMenuItem(parent, label, "Scan the local network now")
+		go func() {
+			for range item.ClickedCh {
+				requestNetworkScan()
+			}
+		}()
 
 	case "refresh_config":
 		label := node.Label
@@ -324,6 +345,9 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 				systray.Quit()
 			}
 		}()
+
+	default:
+		logger.Warn("Ignoring unsupported tray menu node type %q (label=%q)", node.Type, node.Label)
 	}
 }
 
@@ -367,6 +391,7 @@ func handleIPCMessages(conn net.Conn) {
 			// Re-read cached config. Menu rebuild on config_changed is deferred
 			// until a systray library version that exposes ResetMenu is adopted.
 			gConfig = loadCachedConfig()
+			triggerOutlookSignatureSync()
 			if trayReady.Load() {
 				systray.SetTooltip(trayTooltip(gConfig))
 			} else {

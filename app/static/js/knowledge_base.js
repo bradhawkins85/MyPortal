@@ -97,7 +97,11 @@
 
   function renderError(error) {
     if (resultsBody && resultsSection) {
-      resultsBody.innerHTML = `<p class="knowledge-base__empty">Search failed: ${error.message}</p>`;
+      resultsBody.innerHTML = '';
+      const message = document.createElement('p');
+      message.className = 'knowledge-base__empty';
+      message.textContent = `Search failed: ${error.message}`;
+      resultsBody.appendChild(message);
       setSectionVisibility(resultsSection, false);
     }
     if (ollamaSection) {
@@ -105,51 +109,79 @@
     }
   }
 
-  if (searchForm) {
-    searchForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      if (!input) {
+  async function runSearch(query) {
+    searchForm.classList.add('is-loading');
+    if (inFlightController) {
+      inFlightController.abort();
+    }
+    inFlightController = new AbortController();
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+      const csrfToken = getCsrfToken();
+      if (csrfToken) {
+        headers['X-CSRF-Token'] = csrfToken;
+      }
+
+      const response = await fetch('/api/knowledge-base/search', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ query }),
+        signal: inFlightController.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`Search failed with status ${response.status}`);
+      }
+      const payload = await response.json();
+      renderResults(payload);
+    } catch (error) {
+      if (error.name === 'AbortError') {
         return;
       }
+      renderError(error);
+    } finally {
+      searchForm.classList.remove('is-loading');
+      inFlightController = null;
+    }
+  }
+
+  if (searchForm && input) {
+    searchForm.addEventListener('submit', (event) => {
+      event.preventDefault();
       const query = input.value.trim();
       if (!query) {
         input.focus();
         return;
       }
-      searchForm.classList.add('is-loading');
-      if (inFlightController) {
-        inFlightController.abort();
+      if (!resultsSection) {
+        // Article pages have no results panel; show results on the index.
+        window.location.assign(`/knowledge-base?q=${encodeURIComponent(query)}`);
+        return;
       }
-      inFlightController = new AbortController();
-      try {
-        const headers = {
-          'Content-Type': 'application/json',
-        };
-        const csrfToken = getCsrfToken();
-        if (csrfToken) {
-          headers['X-CSRF-Token'] = csrfToken;
-        }
+      const url = new URL(window.location.href);
+      url.searchParams.set('q', query);
+      window.history.replaceState(null, '', url);
+      runSearch(query);
+    });
 
-        const response = await fetch('/api/knowledge-base/search', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ query }),
-          signal: inFlightController.signal,
-        });
-        if (!response.ok) {
-          throw new Error(`Search failed with status ${response.status}`);
-        }
-        const payload = await response.json();
-        renderResults(payload);
-      } catch (error) {
-        if (error.name === 'AbortError') {
-          return;
-        }
-        renderError(error);
-      } finally {
-        searchForm.classList.remove('is-loading');
-        inFlightController = null;
+    const initialQuery = new URLSearchParams(window.location.search).get('q');
+    if (initialQuery && resultsSection) {
+      input.value = initialQuery;
+      runSearch(initialQuery.trim());
+    }
+  }
+
+  const clearResults = document.querySelector('[data-knowledge-base-results-clear]');
+  if (clearResults) {
+    clearResults.addEventListener('click', () => {
+      setSectionVisibility(resultsSection, true);
+      if (input) {
+        input.value = '';
       }
+      const url = new URL(window.location.href);
+      url.searchParams.delete('q');
+      window.history.replaceState(null, '', url);
     });
   }
 

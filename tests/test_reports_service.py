@@ -21,6 +21,9 @@ async def test_build_company_report_assembles_all_sections():
         reports.report_sections_repo, "get_section_preferences",
         new=AsyncMock(return_value={}),  # all sections default to enabled
     ), patch.object(
+        reports.report_sections_repo, "get_detail_preferences",
+        new=AsyncMock(return_value={}),
+    ), patch.object(
         reports.report_sections_repo, "get_company_report_settings",
         new=AsyncMock(return_value={"auto_hide_empty": False, "section_order": None}),
     ), patch.object(
@@ -91,6 +94,9 @@ async def test_build_company_report_assembles_all_sections():
             1: {"ml1": "compliant", "ml2": "in_progress", "ml3": "not_started"},
             2: {"ml1": "compliant", "ml2": "not_started", "ml3": "not_started"},
         }),
+    ), patch.object(
+        reports.essential8_repo, "build_requirement_export_bundle",
+        new=AsyncMock(return_value={"requirements": [], "generated_at": "2026-01-01T00:00:00+00:00"}),
     ), patch.object(
         reports.compliance_checks_repo, "get_assignment_summary",
         new=AsyncMock(return_value={
@@ -460,6 +466,7 @@ def _make_full_patches(reports_module):
         (reports_module.assets_repo, "count_active_assets_by_type", AsyncMock(return_value=2)),
         (reports_module.staff_repo, "count_staff", AsyncMock(return_value=2)),
         (reports_module.m365_bp_repo, "list_results", AsyncMock(return_value=[])),
+        (reports_module.m365_bp_repo, "list_daily_history", AsyncMock(return_value=[])),
         (reports_module.shop_repo, "list_order_summaries", AsyncMock(return_value=[])),
         (reports_module.licenses_repo, "list_company_licenses", AsyncMock(return_value=[])),
         (reports_module.licenses_repo, "list_staff_by_license_for_company", AsyncMock(return_value={})),
@@ -525,6 +532,92 @@ async def test_build_company_report_populates_detail_data():
         if section.key != "assets":
             assert section.detailed is False
             assert section.detail_data == {}
+
+
+@pytest.mark.asyncio
+async def test_build_company_report_m365_detail_includes_notes():
+    from app.services import reports
+    from unittest.mock import AsyncMock, patch
+    from contextlib import ExitStack
+
+    company = {"id": 22, "name": "M365 DetailCo"}
+    preferences = {key: True for key in reports.SECTION_KEYS}
+    detail_prefs = {key: (key == "m365_best_practices") for key in reports.SECTION_KEYS}
+
+    patches = [
+        patch.object(reports.company_repo, "get_company_by_id", new=AsyncMock(return_value=company)),
+        patch.object(reports.report_sections_repo, "get_section_preferences", new=AsyncMock(return_value=preferences)),
+        patch.object(reports.report_sections_repo, "get_detail_preferences", new=AsyncMock(return_value=detail_prefs)),
+        patch.object(
+            reports.report_sections_repo,
+            "get_company_report_settings",
+            new=AsyncMock(return_value={"auto_hide_empty": False, "section_order": None}),
+        ),
+        patch.object(
+            reports.m365_bp_repo,
+            "list_results",
+            new=AsyncMock(return_value=[
+                {
+                    "check_id": "bp_test",
+                    "check_name": "Test check",
+                    "status": "fail",
+                    "details": "Needs attention",
+                    "notes": "Customer approved temporary exception.",
+                    "run_at": datetime(2026, 9, 15, 1, 2, 3),
+                    "remediation_status": "pending",
+                }
+            ]),
+        ),
+    ]
+    for (obj, attr, mock) in _make_full_patches(reports):
+        if obj is reports.m365_bp_repo and attr == "list_results":
+            continue
+        patches.append(patch.object(obj, attr, new=mock))
+
+    with ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        report = await reports.build_company_report(22)
+
+    m365_section = report.section("m365_best_practices")
+    assert m365_section is not None
+    assert m365_section.detailed is True
+    checks = m365_section.detail_data.get("checks") or []
+    assert len(checks) == 1
+    assert checks[0]["notes"] == "Customer approved temporary exception."
+    assert checks[0]["risk_severity"] == "medium"
+    assert checks[0]["benchmark_category"] == "Microsoft 365"
+
+
+@pytest.mark.asyncio
+async def test_build_m365_best_practices_adds_exposure_and_trend_data():
+    from app.services import reports
+
+    with patch.object(
+        reports.m365_bp_repo,
+        "list_results",
+        new=AsyncMock(
+            return_value=[
+                {"check_id": "bp_block_legacy_auth", "status": "fail", "run_at": datetime(2026, 9, 15, 1, 2, 3)},
+                {"check_id": "bp_monitor_secure_score", "status": "pass", "run_at": datetime(2026, 9, 15, 1, 2, 3)},
+            ]
+        ),
+    ), patch.object(
+        reports.m365_bp_repo,
+        "list_daily_history",
+        new=AsyncMock(
+            return_value=[
+                {"snapshot_date": datetime(2026, 9, 15).date(), "fail_count": 1, "secure_score_percentage": 75.0},
+                {"snapshot_date": datetime(2026, 9, 1).date(), "fail_count": 3, "secure_score_percentage": 60.0},
+            ]
+        ),
+    ):
+        result = await reports._build_m365_best_practices(22)
+
+    assert result["exposure"]["critical"] == 1
+    assert result["exposure"]["risk_points"] == 90
+    assert result["trend"]["fail_delta"] == -2
+    assert result["trend"]["secure_score_delta"] == 15.0
 
 
 @pytest.mark.asyncio

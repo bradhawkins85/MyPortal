@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from contextlib import suppress
 from typing import Any
 
 from inspect import isawaitable
@@ -12,23 +13,44 @@ AutomationRecord = dict[str, Any]
 AutomationRunRecord = dict[str, Any]
 AutomationHistoryRecord = dict[str, Any]
 
+# Columns that may be updated via update_automation(); used to prevent SQL injection.
+_UPDATABLE_COLUMNS: frozenset[str] = frozenset(
+    {
+        "name",
+        "description",
+        "kind",
+        "execution_order",
+        "cadence",
+        "cron_expression",
+        "trigger_event",
+        "trigger_filters",
+        "action_module",
+        "action_payload",
+        "status",
+        "next_run_at",
+        "scheduled_time",
+        "run_once",
+        "last_run_at",
+        "business_hours_mode",
+        "business_hours_source",
+    }
+)
+
 
 async def _ensure_connection() -> None:
     """Ensure the automation repository has an active database connection."""
 
     is_connected = getattr(db, "is_connected", None)
     if callable(is_connected):
-        try:
+        with suppress(Exception):
             if is_connected():
                 return
-        except Exception:  # pragma: no cover - defensive guard
-            pass
     connect = getattr(db, "connect", None)
     if not connect:
         return
     result = connect()
     if isawaitable(result):
-        await result
+        _ = await result
 
 
 def _serialise(value: Any) -> str | None:
@@ -119,6 +141,8 @@ async def create_automation(
     action_payload: Any,
     status: str,
     next_run_at: datetime | None,
+    business_hours_mode: str | None = None,
+    business_hours_source: str | None = None,
 ) -> AutomationRecord:
     await _ensure_connection()
     automation_id = await db.execute_returning_lastrowid(
@@ -137,9 +161,11 @@ async def create_automation(
             status,
             next_run_at,
             scheduled_time,
-            run_once
+            run_once,
+            business_hours_mode,
+            business_hours_source
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             name,
@@ -156,6 +182,8 @@ async def create_automation(
             _prepare_for_storage(next_run_at),
             _prepare_for_storage(scheduled_time),
             run_once,
+            business_hours_mode,
+            business_hours_source,
         ),
     )
     row = await db.fetch_one("SELECT * FROM automations WHERE id = %s", (automation_id,))
@@ -176,6 +204,8 @@ async def create_automation(
             "next_run_at": next_run_at,
             "scheduled_time": scheduled_time,
             "run_once": run_once,
+            "business_hours_mode": business_hours_mode,
+            "business_hours_source": business_hours_source,
             "last_run_at": None,
             "last_error": None,
             "created_at": None,
@@ -227,6 +257,8 @@ async def clone_automation(automation_id: int, *, next_run_at: datetime | None =
         action_payload=original.get("action_payload"),
         status=str(original.get("status") or "inactive"),
         next_run_at=next_run_at,
+        business_hours_mode=original.get("business_hours_mode"),
+        business_hours_source=original.get("business_hours_source"),
     )
 
 
@@ -259,7 +291,7 @@ async def list_automations(
             CASE WHEN execution_order = 0 THEN updated_at ELSE NULL END DESC,
             id ASC
         LIMIT %s OFFSET %s
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return [_normalise_automation(row) for row in rows]
@@ -285,7 +317,7 @@ async def update_automation_order(ordered_ids: list[int]) -> list[AutomationReco
 
     placeholders = ", ".join(["%s"] * len(unique_ids))
     rows = await db.fetch_all(
-        f"SELECT id, execution_order FROM automations WHERE id IN ({placeholders})",
+        f"SELECT id, execution_order FROM automations WHERE id IN ({placeholders})",  # nosec B608
         tuple(unique_ids),
     )
     existing_orders = {
@@ -304,7 +336,7 @@ async def update_automation_order(ordered_ids: list[int]) -> list[AutomationReco
         )
 
     refreshed_rows = await db.fetch_all(
-        f"SELECT * FROM automations WHERE id IN ({placeholders})",
+        f"SELECT * FROM automations WHERE id IN ({placeholders})",  # nosec B608
         tuple(unique_ids),
     )
     by_id = {int(row["id"]): _normalise_automation(row) for row in refreshed_rows}
@@ -318,6 +350,8 @@ async def update_automation(automation_id: int, **fields: Any) -> AutomationReco
     assignments: list[str] = []
     params: list[Any] = []
     for key, value in fields.items():
+        if key not in _UPDATABLE_COLUMNS:
+            raise ValueError(f"Invalid field for automation update: {key!r}")
         if key in {"trigger_filters", "action_payload"}:
             assignments.append(f"{key} = %s")
             params.append(_serialise(value))
@@ -329,7 +363,7 @@ async def update_automation(automation_id: int, **fields: Any) -> AutomationReco
             params.append(value)
     assignments.append("updated_at = UTC_TIMESTAMP(6)")
     params.append(automation_id)
-    query = f"UPDATE automations SET {', '.join(assignments)} WHERE id = %s"
+    query = f"UPDATE automations SET {', '.join(assignments)} WHERE id = %s"  # nosec B608
     await db.execute(query, tuple(params))
     return await get_automation(automation_id)
 

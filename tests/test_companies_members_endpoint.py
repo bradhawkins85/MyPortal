@@ -180,6 +180,11 @@ def test_list_company_members_returns_403_without_access(monkeypatch, active_ses
     try:
         with TestClient(app) as client:
             response = client.get("/api/companies/5/members")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+
 
 def test_list_company_assets_denies_cross_tenant_access(monkeypatch, active_session):
     async def fake_get_company(company_id):

@@ -1,0 +1,7 @@
+{
+  "guid": "61e0b52d-feb2-4a38-96bb-2c0a8cd488a0",
+  "occurred_at": "2026-09-19T02:30Z",
+  "change_type": "Feature",
+  "summary": "Add a company-scoped Approvals admin experience for managing change approval types, technicians, contacts, and activation status.",
+  "content_hash": "30402951df74f70e1568c04e39cbff952fd746d5478f53b4dfd998d5cec07905"
+}

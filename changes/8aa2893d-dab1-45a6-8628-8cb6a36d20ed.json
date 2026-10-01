@@ -1,0 +1,7 @@
+{
+  "guid": "8aa2893d-dab1-45a6-8628-8cb6a36d20ed",
+  "occurred_at": "2026-09-16T00:00Z",
+  "change_type": "Fix",
+  "summary": "Prevent subscription products from being stock-limited or decrementing inventory during checkout.",
+  "content_hash": "1751cae8698800092b265fa90240a10842b0c4316530e89c1788a0dce10b50a4"
+}

@@ -148,13 +148,40 @@ def test_ip_restriction_allows_listed_address(test_app, usage_calls, monkeypatch
         }
 
     monkeypatch.setattr(api_key_repo, "get_api_key_record", fake_get_api_key_record)
+    # The resolved client IP (trusted-proxy aware) is inside the allowed range.
+    monkeypatch.setattr(
+        api_key_dependency, "get_client_ip", lambda request, default=None: "203.0.113.9"
+    )
 
     with TestClient(test_app) as client:
-        response = client.get(
-            "/protected",
-            headers={"x-api-key": "key", "x-forwarded-for": "203.0.113.9"},
-        )
+        response = client.get("/protected", headers={"x-api-key": "key"})
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
     assert usage_calls == [(6, "203.0.113.9")]
+
+
+def test_ip_restriction_ignores_spoofed_forwarded_headers(test_app, usage_calls, monkeypatch):
+    async def fake_get_api_key_record(_: str):
+        return {
+            "id": 6,
+            "permissions": [],
+            "ip_restrictions": [{"cidr": "203.0.113.0/24"}],
+        }
+
+    monkeypatch.setattr(api_key_repo, "get_api_key_record", fake_get_api_key_record)
+
+    with TestClient(test_app) as client:
+        response = client.get(
+            "/protected",
+            headers={
+                "x-api-key": "key",
+                "x-forwarded-for": "203.0.113.9",
+                "cf-connecting-ip": "203.0.113.9",
+            },
+        )
+
+    # The test client is not a trusted proxy, so the forwarded headers are
+    # ignored and the real peer address is outside the allowed range.
+    assert response.status_code == 403
+    assert usage_calls == []

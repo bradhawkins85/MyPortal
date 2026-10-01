@@ -1,0 +1,7 @@
+{
+  "guid": "79f13995-c18a-4767-a849-68e2c4cc60a7",
+  "occurred_at": "2026-09-27T00:00Z",
+  "change_type": "Fix",
+  "summary": "Re-authorise indexed knowledge base and asset records against live publication, role audience, and content permissions before search or RAG scoring.",
+  "content_hash": "eeb793509d0200452df78496fbcf13a1e0ca23c413f7e08c7d085ce96c1f1dd1"
+}

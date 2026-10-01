@@ -1,607 +1,711 @@
 {% extends "base.html" %}
-{% block header_title %}<span class="header__title-text">{{ title | default('Scheduled Tasks') }}</span>{% endblock %}
-
-{% block header_actions %}
-  <a class="button button--ghost" href="/admin/cron-calendar">Schedule calendar</a>
-  <button
-    type="button"
-    class="button button--ghost"
-    data-bulk-task-create
-    aria-haspopup="dialog"
-    aria-controls="bulk-task-create-modal"
-  >
-    Bulk create
-  </button>
-  <button
-    type="button"
-    class="button button--primary"
-    data-task-create
-    aria-haspopup="dialog"
-    aria-controls="task-editor-modal"
-  >
-    New Task
-  </button>
-  <div class="header-menu" data-header-menu>
-    <button
-      type="button"
-      class="button button--ghost header-menu__button"
-      data-header-menu-toggle
-      aria-label="Bulk actions"
-      aria-haspopup="menu"
-      aria-expanded="false"
-      aria-controls="scheduled-tasks-bulk-actions-menu"
-    >
-      <span>Bulk actions</span>
-      <svg class="header-menu__chevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14">
-        <path fill="currentColor" d="M5.5 7.5 10 12l4.5-4.5z" />
-      </svg>
-    </button>
-    <div
-      id="scheduled-tasks-bulk-actions-menu"
-      class="header-menu__panel"
-      role="menu"
-      data-header-menu-panel
-      hidden
-    >
-      <button
-        type="button"
-        class="header-menu__item header-menu__item--danger"
-        role="menuitem"
-        id="scheduled-tasks-bulk-delete-btn"
-        form="scheduled-tasks-bulk-delete-form"
-        data-scheduled-tasks-bulk-action="delete"
-        disabled
-      >
-        <span>Delete selected</span>
-        <span id="scheduled-tasks-bulk-count" hidden></span>
-      </button>
-      <button
-        type="button"
-        class="header-menu__item"
-        role="menuitem"
-        id="scheduled-tasks-bulk-rename-btn"
-        form="scheduled-tasks-bulk-rename-form"
-        data-scheduled-tasks-bulk-action="rename"
-        disabled
-      >
-        <span>Rename selected</span>
-      </button>
-      <button
-        type="button"
-        class="header-menu__item"
-        role="menuitem"
-        id="scheduled-tasks-bulk-redistribute-btn"
-        form="scheduled-tasks-bulk-redistribute-form"
-        data-scheduled-tasks-bulk-action="redistribute"
-        disabled
-      >
-        <span>Redistribute selected</span>
-      </button>
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/scheduled_ticket_payload.html" import scheduled_ticket_payload %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">{{ title | default('Scheduled Tasks') }}</span>
+    <div class="page-header-toolbar sch-toolbar">
+      <label class="visually-hidden" for="sch-search">Search tasks</label>
+      <input id="sch-search" type="search" class="form-input page-header-toolbar__search" placeholder="Search tasks" title="Search tasks, companies or commands" data-sch-search />
+      <div class="page-header-toolbar__group sch-toolbar__filters">
+        {% if tasks %}
+          <details class="sch-types" data-sch-types>
+            <summary class="form-input sch-types__toggle"><span data-sch-types-label>All task types</span></summary>
+            <div class="sch-types__panel" role="group" aria-label="Task types to show">
+              <div class="sch-types__actions">
+                <button type="button" class="button button--ghost button--small" data-sch-types-all>Show all</button>
+                <button type="button" class="button button--ghost button--small" data-sch-types-none>Hide all</button>
+              </div>
+              <div class="sch-types__list">
+                {% for group in tasks | groupby('command_label') %}
+                  <label class="sch-types__option">
+                    <input type="checkbox" value="{{ group.grouper }}" data-sch-type checked />
+                    <span>{{ group.grouper }}</span>
+                    <span class="sch-types__count">{{ group.list | length }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+            </div>
+          </details>
+        {% endif %}
+        <label class="visually-hidden" for="sch-sort">Sort by</label>
+        <select class="form-input page-header-toolbar__select" id="sch-sort" data-sch-sort>
+          <option value="name">Sort by name</option>
+          <option value="next">Sort by next run</option>
+          <option value="last">Sort by last run</option>
+        </select>
+        <form method="get" class="sch-toolbar__inactive" data-sch-inactive-form>
+          <label class="scf-switch">
+            <input type="checkbox" name="show_inactive" value="1" data-sch-show-inactive {% if show_inactive %}checked{% endif %} />
+            <span class="scf-switch__track" aria-hidden="true"></span>
+            <span>Show paused</span>
+          </label>
+          <noscript><button type="submit" class="button button--ghost button--small">Apply</button></noscript>
+        </form>
+      </div>
     </div>
   </div>
 {% endblock %}
 
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "New task", "variant": "primary", "attrs": {"data-task-create": true, "aria-haspopup": "dialog", "aria-controls": "task-editor-modal"}},
+    {"label": "Create for many companies", "attrs": {"data-bulk-task-create": true, "aria-haspopup": "dialog", "aria-controls": "bulk-task-create-modal"}},
+    {"label": "Schedule calendar", "type": "link", "href": "/admin/cron-calendar"},
+  ], menu_id="scheduled-tasks-actions-menu") }}
+{% endblock %}
+
 {% block content %}
-<div class="management management--single" data-layout>
-  <section class="management__content">
-    {% set upgrade_status = upgrade_status | default({}, true) %}
-    <header class="management__header">
-      <form method="get" class="management__filters">
-        <label class="form-checkbox-label">
-          <input
-            type="checkbox"
-            name="show_inactive"
-            value="1"
-            class="form-checkbox"
-            {% if show_inactive %}checked{% endif %}
-            onchange="this.form.submit()"
-          />
-          <span class="form-checkbox-text">Show inactive tasks</span>
-        </label>
-      </form>
+{% set upgrade_status = upgrade_status | default({}, true) %}
+{% set schedule_timezone = schedule_timezone | default('UTC', true) %}
+{% set command_groups = command_options | map(attribute='group') | unique | list %}
+{% set failing_tasks = tasks | selectattr('last_status', 'equalto', 'failed') | list %}
+{% set paused_tasks = tasks | rejectattr('active') | list %}
+{% set rich_preview_commands = ["sync_to_xero", "sync_to_xero_auto_send", "generate_invoice", "unbill_time_entries", "send_price_change_notifications"] %}
+
+<section class="card card--panel sch" aria-labelledby="sch-title" data-sch-root>
+  <header class="card__header card__header--stacked">
+    <div>
+      <h2 class="card__title" id="sch-title">Background jobs</h2>
+      <p class="card__subtitle">Syncs, billing runs and housekeeping that MyPortal runs on a schedule. Times are in the scheduler's timezone, {{ schedule_timezone }}.</p>
+    </div>
+  </header>
+
+  <div class="card__body card__body--stacked">
+    {% set succeeded_tasks = tasks | selectattr('last_status', 'equalto', 'succeeded') | list %}
+    {% set never_run_tasks = tasks | rejectattr('last_status') | list %}
+    {% set calendar_hidden_tasks = tasks | selectattr('exclude_from_calendar') | list %}
+    {% macro sch_filter_tile(key, label, count, variant, hint) -%}
+      <button type="button" class="stat-strip__stat stat-strip__stat--{{ variant }} sch-filter-tile" data-sch-status="{{ key }}" aria-pressed="false" title="Show only {{ hint }}">
+        <span class="stat-strip__stat-label">{{ label }}</span>
+        <span class="stat-strip__stat-value"{% if count is none %} data-sch-stat="{{ key }}"{% endif %}>{{ '—' if count is none else count }}</span>
+      </button>
+    {%- endmacro %}
+    <div class="stat-strip sch-filter-strip" role="group" aria-label="Filter tasks by status" data-sch-filter-strip>
+      <button type="button" class="stat-strip__stat stat-strip__stat--total sch-filter-tile" data-sch-status-clear aria-pressed="true" title="Show every task">
+        <span class="stat-strip__stat-label">{{ 'Tasks' if show_inactive else 'Active tasks' }}</span>
+        <span class="stat-strip__stat-value">{{ tasks | length }}</span>
+      </button>
+      {% if succeeded_tasks %}{{ sch_filter_tile('succeeded', 'Succeeded', succeeded_tasks | length, 'success', 'tasks whose last run succeeded') }}{% endif %}
+      {% if failing_tasks %}{{ sch_filter_tile('failed', 'Failed last run', failing_tasks | length, 'danger', 'tasks whose last run failed') }}{% endif %}
+      {% if never_run_tasks %}{{ sch_filter_tile('never', 'Never run', never_run_tasks | length, 'neutral', 'tasks that have never run') }}{% endif %}
+      {% if tasks %}{{ sch_filter_tile('due', 'Due in 24 hours', none, 'info', 'tasks due to run in the next 24 hours') }}{% endif %}
+      {% if show_inactive and paused_tasks %}{{ sch_filter_tile('paused', 'Paused', paused_tasks | length, 'warning', 'paused tasks') }}{% endif %}
+      {% if calendar_hidden_tasks %}{{ sch_filter_tile('hidden', 'Hidden from calendar', calendar_hidden_tasks | length, 'neutral', 'tasks hidden from the schedule calendar') }}{% endif %}
+    </div>
+
+    <div class="oof__bulk sch-bulk" data-sch-bulk hidden role="region" aria-label="Selected tasks">
+      <span data-sch-bulk-count role="status" aria-live="polite"></span>
+      <button type="button" class="button button--ghost button--small" data-scheduled-tasks-bulk-action="redistribute" aria-haspopup="dialog" aria-controls="scheduled-tasks-redistribute-modal">Spread out run times</button>
+      <button type="button" class="button button--ghost button--small" data-scheduled-tasks-bulk-action="rename">Rename to standard names</button>
+      <button type="button" class="button button--danger button--small" data-scheduled-tasks-bulk-action="delete">Delete</button>
+      <button type="button" class="button button--ghost button--small" data-sch-bulk-clear>Clear selection</button>
+    </div>
+
+    {% if tasks %}
+      <label class="sch-select-all">
+        <input type="checkbox" class="form-checkbox" data-scheduled-tasks-select-all />
+        <span>Select all shown</span>
+      </label>
+      <div class="scf-groups sch-groups" data-sch-groups>
+        {% for group in tasks | groupby('command_label') %}
+          {% set group_failing = group.list | selectattr('last_status', 'equalto', 'failed') | list %}
+          <section class="scf-group sch-group" data-sch-group aria-labelledby="sch-group-{{ loop.index }}">
+            <h3 class="scf-group__title sch-group__title" id="sch-group-{{ loop.index }}">
+              {{ group.grouper }}
+              <span class="sch-group__count" data-sch-group-count>{{ group.list | length }}</span>
+              {% if group_failing %}<span class="sch-group__failing">{{ group_failing | length }} failed</span>{% endif %}
+            </h3>
+            <ul class="scf-list sch-list" data-sch-list>
+              {% for task in group.list | sort(attribute='name') %}
+                {% set status = 'paused' if not task.active else (task.last_status or 'never') %}
+                <li
+                  class="scf-item sch-item{% if not task.active %} scf-item--inactive{% endif %}"
+                  data-sch-item
+                  data-task-id="{{ task.id }}"
+                  data-status="{{ status }}"
+                  data-last-status="{{ task.last_status or 'never' }}"
+                  data-type="{{ task.command_label }}"
+                  data-active="{{ 'true' if task.active else 'false' }}"
+                  data-hidden="{{ 'true' if task.exclude_from_calendar else 'false' }}"
+                  data-name="{{ task.name }}"
+                  data-next-run="{{ task.next_run_iso or '' }}"
+                  data-last-run="{{ task.last_run_iso or '' }}"
+                  data-search-text="{{ [task.name, task.command, task.command_label, task.company_name, task.cron] | join(' ') }}"
+                >
+                  <label class="oof-item__select">
+                    <input type="checkbox" name="taskIds" value="{{ task.id }}" form="scheduled-tasks-bulk-delete-form" data-scheduled-tasks-row-checkbox />
+                    <span class="visually-hidden">Select {{ task.name }}</span>
+                  </label>
+                  <span class="sch-status-icon sch-status-icon--{{ status }}" aria-hidden="true"></span>
+                  <div class="scf-item__main">
+                    <div class="scf-item__heading">
+                      <button type="button" class="scf-item__label" data-task-edit aria-haspopup="dialog" aria-controls="task-editor-modal">{{ task.name }}</button>
+                      {% if not task.name.startswith(task.company_name ~ ' ') %}
+                        {% if task.company_edit_url %}
+                          <a class="sch-item__company" href="{{ task.company_edit_url }}">{{ task.company_name }}</a>
+                        {% else %}
+                          <span class="sch-item__company">{{ task.company_name }}</span>
+                        {% endif %}
+                      {% endif %}
+                    </div>
+                    <p class="sch-item__schedule">
+                      <span data-sch-cron-summary="{{ task.cron }}">{{ task.cron }}</span>
+                      <code class="scf-item__key">{{ task.cron }}</code>
+                    </p>
+                    <ul class="scf-item__chips" aria-label="Task status">
+                      {% if not task.active %}
+                        <li class="scf-chip scf-chip--muted">Paused</li>
+                      {% endif %}
+                      <li class="scf-chip sch-chip sch-chip--{{ task.last_status or 'never' }}" data-sch-status-chip>
+                        {% if task.last_status == 'succeeded' %}Succeeded
+                        {% elif task.last_status == 'failed' %}Failed
+                        {% elif task.last_status == 'running' %}Running
+                        {% elif task.last_status %}{{ task.last_status | replace('_', ' ') | capitalize }}
+                        {% else %}Never run{% endif %}
+                        {% if task.last_run_iso %}<span class="sch-chip__time" data-utc="{{ task.last_run_iso }}" data-sch-relative>{{ task.last_run_iso[:16] | replace('T', ' ') }} UTC</span>{% endif %}
+                      </li>
+                      {% if task.active %}
+                        <li class="scf-chip">
+                          {% if task.next_run_iso %}Next run <span data-utc="{{ task.next_run_iso }}" data-sch-relative>{{ task.next_run_iso[:16] | replace('T', ' ') }} UTC</span>{% else %}<span class="sch-invalid">Schedule can't be read</span>{% endif %}
+                        </li>
+                      {% endif %}
+                      {% if task.exclude_from_calendar %}<li class="scf-chip">Hidden from calendar</li>{% endif %}
+                    </ul>
+                    {% if task.last_status == 'failed' and task.last_error %}
+                      <p class="scf-item__help sch-item__error" title="{{ task.last_error }}">{{ task.last_error | truncate(180) }}</p>
+                    {% endif %}
+                  </div>
+                  <div class="scf-item__actions sch-item__actions">
+                    <button type="button" class="button button--ghost button--small" data-task-run>Run now<span class="visually-hidden"> {{ task.name }}</span></button>
+                    <button type="button" class="button button--ghost button--small" data-task-edit aria-haspopup="dialog" aria-controls="task-editor-modal">Edit<span class="visually-hidden"> {{ task.name }}</span></button>
+                    <details class="sch-more" data-sch-more data-floating-menu>
+                      <summary class="button button--ghost button--small sch-more__toggle" aria-label="More actions for {{ task.name }}">
+                        <svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16"><circle cx="4" cy="10" r="1.6" fill="currentColor"/><circle cx="10" cy="10" r="1.6" fill="currentColor"/><circle cx="16" cy="10" r="1.6" fill="currentColor"/></svg>
+                      </summary>
+                      <div class="sch-more__menu" data-floating-menu-panel role="menu">
+                        <button type="button" class="sch-more__item" role="menuitem" data-task-logs aria-haspopup="dialog" aria-controls="task-logs-modal">Run history</button>
+                        {% if task.command in rich_preview_commands %}
+                          <button type="button" class="sch-more__item" role="menuitem" data-task-preview aria-haspopup="dialog" aria-controls="task-preview-modal">Preview what it will do</button>
+                        {% endif %}
+                        <button type="button" class="sch-more__item" role="menuitem" data-task-duplicate aria-haspopup="dialog" aria-controls="task-editor-modal">Duplicate</button>
+                        {% if task.company_edit_url %}
+                          <a class="sch-more__item" role="menuitem" href="{{ task.company_edit_url }}">Open company</a>
+                        {% endif %}
+                      </div>
+                    </details>
+                  </div>
+                </li>
+              {% endfor %}
+            </ul>
+          </section>
+        {% endfor %}
+      </div>
+      <p class="scf-empty scf-empty--search" data-sch-no-results hidden>No tasks match. Try a different search or filter.</p>
+    {% else %}
+      <div class="scf-empty">
+        {% if show_inactive %}
+          <p class="scf-empty__title">No scheduled tasks yet</p>
+          <p class="text-muted">Scheduled tasks run syncs, billing and housekeeping for you, such as pulling Microsoft 365 licences every night or sending invoices to Xero at month end.</p>
+        {% else %}
+          <p class="scf-empty__title">No active scheduled tasks</p>
+          <p class="text-muted">Turn on "Show paused" to review paused tasks, or add a task to start running jobs on a schedule.</p>
+        {% endif %}
+        <button type="button" class="button" data-task-create aria-haspopup="dialog" aria-controls="task-editor-modal">+ Add your first task</button>
+      </div>
+    {% endif %}
+
+    <p class="form-help sch-upgrade">
+      <strong>Upgrade mode:</strong> {{ upgrade_status.configured_mode | default('graceful') }}.
+      {% if upgrade_status.pending %}
+        <strong>Pending upgrade:</strong> {{ upgrade_status.requested_mode | default(upgrade_status.configured_mode | default('graceful')) }}{% if upgrade_status.requested_reason %} ({{ upgrade_status.requested_reason | replace('_', ' ') }}){% endif %}.
+      {% endif %}
+      {% if upgrade_status.last_status %}
+        <strong>Last upgrade:</strong> {{ upgrade_status.last_status }} via {{ upgrade_status.last_mode | default(upgrade_status.configured_mode | default('graceful')) }}.
+      {% endif %}
+      Running tasks finish before MyPortal restarts for an upgrade.
+    </p>
+  </div>
+</section>
+
+<noscript><p class="alert alert--warning">JavaScript is required to add, edit or run tasks. You can still review tasks and use the selection forms.</p></noscript>
+
+{# Bulk action forms. Row checkboxes belong to the delete form; the script mirrors them into the others. #}
+<form id="scheduled-tasks-bulk-delete-form" method="post" action="/admin/scheduled-tasks/bulk-delete" data-scheduled-tasks-bulk-form="delete" hidden>
+  {% include "partials/csrf.html" %}
+  {% if show_inactive %}<input type="hidden" name="show_inactive" value="1" />{% endif %}
+</form>
+<form id="scheduled-tasks-bulk-rename-form" method="post" action="/admin/scheduled-tasks/bulk-rename" data-scheduled-tasks-bulk-form="rename" hidden>
+  {% include "partials/csrf.html" %}
+  {% if show_inactive %}<input type="hidden" name="show_inactive" value="1" />{% endif %}
+</form>
+
+{% set sch_tasks = [] %}
+{% for task in tasks %}
+  {% set _ = sch_tasks.append({
+    'id': task.id,
+    'name': task.name,
+    'command': task.command,
+    'command_label': task.command_label,
+    'company_id': task.company_id,
+    'company_name': task.company_name,
+    'cron': task.cron,
+    'description': task.description,
+    'active': true if task.active else false,
+    'exclude_from_calendar': true if task.exclude_from_calendar else false,
+    'max_retries': task.max_retries,
+    'retry_backoff_seconds': task.retry_backoff_seconds,
+    'last_status': task.last_status,
+    'last_run_iso': task.last_run_iso,
+    'next_run_iso': task.next_run_iso,
+  }) %}
+{% endfor %}
+<script type="application/json" id="scheduled-tasks-data">{{ {
+  'tasks': sch_tasks,
+  'timezone': schedule_timezone,
+  'showInactive': true if show_inactive else false,
+  'commandDefaults': {'unbill_time_entries': '0 0 L * *', 'generate_invoice': '1 0 L * *', 'sync_to_xero': '1 15 L * *', 'sync_to_xero_auto_send': '1 16 L * *'},
+} | tojson }}</script>
+
+{# ---------------------------------------------------------------- Task editor #}
+<div class="modal scf-modal" id="task-editor-modal" role="dialog" aria-modal="true" aria-labelledby="task-editor-title" aria-describedby="task-editor-subtitle" aria-hidden="true" hidden>
+  <form id="scheduled-task-form" class="modal__panel modal__panel--wide scf-editor sch-editor" autocomplete="off" novalidate data-sch-form>
+    <input type="hidden" name="task_id" id="task-id" />
+    <input type="hidden" id="task-name" name="name" />
+
+    <header class="modal__header scf-editor__header">
+      <button type="button" class="modal__close" data-modal-close aria-label="Close task editor"></button>
+      <div>
+        <p class="scf-preview__eyebrow">Scheduled task</p>
+        <h2 class="modal__title" id="task-editor-title" data-sch-editor-title>New task</h2>
+        <p class="scf-editor__subtitle" id="task-editor-subtitle" data-sch-editor-subtitle>Choose what to run, for whom, and when.</p>
+      </div>
     </header>
 
-    {# Hidden bulk-delete form #}
-    <form
-      id="scheduled-tasks-bulk-delete-form"
-      method="post"
-      action="/admin/scheduled-tasks/bulk-delete"
-      data-scheduled-tasks-bulk-form="delete"
-      hidden
-    >
-      {% include "partials/csrf.html" %}
-      {% if show_inactive %}<input type="hidden" name="show_inactive" value="1" />{% endif %}
-    </form>
+    <nav class="scf-tabs" role="tablist" aria-label="Task settings">
+      <button type="button" class="scf-tab is-active" role="tab" id="sch-tab-what" aria-controls="sch-panel-what" aria-selected="true" data-sch-tab="what">What it does<span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="sch-tab-when" aria-controls="sch-panel-when" aria-selected="false" tabindex="-1" data-sch-tab="when">When it runs<span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="sch-tab-options" aria-controls="sch-panel-options" aria-selected="false" tabindex="-1" data-sch-tab="options">Retries and options<span class="scf-tab__dot" aria-hidden="true"></span></button>
+    </nav>
 
-    {# Hidden bulk-rename form #}
-    <form
-      id="scheduled-tasks-bulk-rename-form"
-      method="post"
-      action="/admin/scheduled-tasks/bulk-rename"
-      data-scheduled-tasks-bulk-form="rename"
-      hidden
-    >
-      {% include "partials/csrf.html" %}
-      {% if show_inactive %}<input type="hidden" name="show_inactive" value="1" />{% endif %}
-    </form>
-
-    {# Hidden bulk-redistribute form #}
-    <form
-      id="scheduled-tasks-bulk-redistribute-form"
-      method="post"
-      action="/admin/scheduled-tasks/bulk-redistribute"
-      data-scheduled-tasks-bulk-form="redistribute"
-      hidden
-    >
-      {% include "partials/csrf.html" %}
-      <input type="hidden" name="redistributeHour" data-scheduled-tasks-redistribute-hour />
-      <input type="hidden" name="redistributeOffset" data-scheduled-tasks-redistribute-offset />
-      {% if show_inactive %}<input type="hidden" name="show_inactive" value="1" />{% endif %}
-    </form>
-
-    <div class="management__body">
-      <div class="management__toolbar">
-        <div class="management__toolbar-search">
-          <input
-            type="search"
-            class="form-input"
-            placeholder="Filter tasks"
-            aria-label="Filter tasks"
-            data-table-filter="scheduled-tasks-table"
-          />
-        </div>
-        <div class="management__toolbar-actions">
-          <div data-scheduled-task-columns>
-            <button
-              type="button"
-              class="button button--ghost"
-              data-columns-toggle
-              aria-expanded="false"
-              aria-haspopup="true"
-            >
-              Columns
-            </button>
-            <div class="columns-panel" data-columns-panel hidden>
-              <fieldset>
-                <legend class="visually-hidden">Toggle columns</legend>
-                <label class="form-checkbox-label">
-                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="id" checked />
-                  <span class="form-checkbox-text">ID</span>
-                </label>
-                <label class="form-checkbox-label">
-                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="name" checked disabled />
-                  <span class="form-checkbox-text">Name</span>
-                </label>
-                <label class="form-checkbox-label">
-                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="command" checked />
-                  <span class="form-checkbox-text">Command</span>
-                </label>
-                <label class="form-checkbox-label">
-                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="company" checked />
-                  <span class="form-checkbox-text">Company</span>
-                </label>
-                <label class="form-checkbox-label">
-                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="cron" checked />
-                  <span class="form-checkbox-text">Schedule</span>
-                </label>
-                <label class="form-checkbox-label">
-                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="active" checked />
-                  <span class="form-checkbox-text">Active</span>
-                </label>
-                <label class="form-checkbox-label">
-                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="calendar" checked />
-                  <span class="form-checkbox-text">Calendar</span>
-                </label>
-                <label class="form-checkbox-label">
-                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="next-run" checked />
-                  <span class="form-checkbox-text">Next run</span>
-                </label>
-                <label class="form-checkbox-label">
-                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="last-run" checked />
-                  <span class="form-checkbox-text">Last run</span>
-                </label>
-                <label class="form-checkbox-label">
-                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="status" checked />
-                  <span class="form-checkbox-text">Status</span>
-                </label>
-              </fieldset>
+    <div class="modal__body scf-editor__body">
+      <div class="scf-editor__main">
+        <section class="scf-panel" id="sch-panel-what" role="tabpanel" aria-labelledby="sch-tab-what" data-sch-panel="what">
+          <div class="scf-grid">
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="task-command">Task</label>
+              <select class="form-input" id="task-command" name="command" required data-initial-focus>
+                {% for group in command_groups %}
+                  <optgroup label="{{ group }}">
+                    {% for option in command_options if option.group == group %}
+                      <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
+                  </optgroup>
+                {% endfor %}
+              </select>
+              <p class="scf-error" data-sch-error="command" hidden></p>
+            </div>
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="task-company">Company</label>
+              <select class="form-input" id="task-company" name="companyId">
+                {% for option in company_options %}
+                  <option value="{{ option.value }}">{{ option.label }}</option>
+                {% endfor %}
+              </select>
+              <p class="form-help">Pick a company, or leave All companies to run it once for everyone.</p>
+            </div>
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="task-name-display">Name</label>
+              <input class="form-input is-readonly" id="task-name-display" type="text" value="" readonly aria-readonly="true" tabindex="-1" />
+              <p class="form-help">Named automatically from the company and task.</p>
+            </div>
+            <div class="form-field scf-grid__full" id="task-description-field">
+              <label class="form-label" for="task-description">Notes <span class="scf-optional">optional</span></label>
+              <textarea class="form-input form-input--textarea" id="task-description" name="description" rows="3" placeholder="Why this task exists or anything the next person should know"></textarea>
+            </div>
+            <div class="scf-grid__full">
+              {{ scheduled_ticket_payload('task', 'hidden', 'Created each time the task runs.') }}
             </div>
           </div>
-        </div>
-      </div>
+        </section>
 
-      <div class="table-wrapper">
-        <table class="table" id="scheduled-tasks-table" data-table data-table-id="scheduled-tasks">
-          <thead>
-            <tr>
-              <th scope="col" class="table__checkbox-col">
-                <input
-                  type="checkbox"
-                  class="form-checkbox"
-                  id="scheduled-tasks-select-all"
-                  aria-label="Select all tasks"
-                  data-scheduled-tasks-select-all
-                />
-              </th>
-              <th scope="col" data-sort="int" data-column="id" data-column-key="id">ID</th>
-              <th scope="col" data-sort="string" data-column="name" data-column-key="name">Name</th>
-              <th scope="col" data-sort="string" data-column="command" data-column-key="command">Command</th>
-              <th scope="col" data-sort="string" data-column="company" data-column-key="company">Company</th>
-              <th scope="col" data-sort="string" data-column="cron" data-column-key="schedule">Schedule</th>
-              <th scope="col" data-sort="string" data-column="active" data-column-key="active">Active</th>
-              <th scope="col" data-sort="string" data-column="calendar" data-column-key="calendar">Calendar</th>
-              <th scope="col" data-sort="date" data-column="next-run" data-column-key="next_run">Next Run</th>
-              <th scope="col" data-sort="date" data-column="last-run" data-column-key="last_run">Last run</th>
-              <th scope="col" data-sort="string" data-column="status" data-column-key="status">Status</th>
-              <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% if tasks %}
-              {% for task in tasks %}
-                <tr data-task='{{ task | tojson }}'>
-                  <td class="table__checkbox-col">
-                    <input
-                      type="checkbox"
-                      class="form-checkbox"
-                      name="taskIds"
-                      value="{{ task.id }}"
-                      aria-label="Select task {{ task.name }}"
-                      form="scheduled-tasks-bulk-delete-form"
-                      data-scheduled-tasks-row-checkbox
-                    />
-                  </td>
-                  <td data-label="ID" data-column="id" data-column-key="id">{{ task.id }}</td>
-                  <td data-label="Name" data-column="name" data-column-key="name">{{ task.name }}</td>
-                  <td data-label="Command" data-column="command" data-column-key="command">
-                    <code>{{ task.command }}</code>
-                  </td>
-                  <td data-label="Company" data-column="company" data-value="{{ task.company_name }}" data-column-key="company">
-                    {% if task.company_edit_url %}
-                      <a href="{{ task.company_edit_url }}">{{ task.company_name }}</a>
-                    {% else %}
-                      {{ task.company_name }}
-                    {% endif %}
-                  </td>
-                  <td data-label="Schedule" data-column="cron" data-column-key="schedule">
-                    <code>{{ task.cron }}</code>
-                  </td>
-                  <td data-label="Active" data-column="active" data-column-key="active">
-                    <span class="tag {{ 'tag--success' if task.active else 'tag--muted' }}">{{ 'Yes' if task.active else 'No' }}</span>
-                  </td>
-                  <td data-label="Calendar" data-column="calendar" data-column-key="calendar">
-                    <span class="tag {{ 'tag--muted' if task.exclude_from_calendar else 'tag--success' }}">{{ 'Hidden' if task.exclude_from_calendar else 'Shown' }}</span>
-                  </td>
-                  <td data-label="Next Run" data-column="next-run" data-value="{{ task.next_run_iso or '' }}" data-column-key="next_run">
-                    {% if task.next_run_iso %}
-                      <span data-utc="{{ task.next_run_iso }}"></span>
-                    {% else %}
-                      <span class="text-muted">Invalid schedule</span>
-                    {% endif %}
-                  </td>
-                  <td data-label="Last run" data-column="last-run" data-value="{{ task.last_run_iso or '' }}" data-column-key="last_run">
-                    {% if task.last_run_iso %}
-                      <span data-utc="{{ task.last_run_iso }}"></span>
-                    {% else %}
-                      <span class="text-muted">Never</span>
-                    {% endif %}
-                  </td>
-                  <td data-label="Status" data-column="status" data-column-key="status">
-                    {% if task.last_status %}
-                      <span class="tag {{ 'tag--success' if task.last_status == 'succeeded' else ('tag--danger' if task.last_status == 'failed' else 'tag--warning') }}">
-                        {{ task.last_status }}
-                      </span>
-                    {% else %}
-                      <span class="text-muted">—</span>
-                    {% endif %}
-                  </td>
-                  <td class="table__actions" data-column-key="actions">
-                    <details class="header-title-menu__dropdown" data-header-menu>
-                      <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
-                        Actions
-                        <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
-                          <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
-                        </svg>
-                        <span class="visually-hidden">Toggle row actions menu</span>
-                      </summary>
-                      <ul class="header-title-menu__list" role="menu">
-                        <li class="header-title-menu__item" role="none">
-                          <button type="button" class="header-title-menu__link" role="menuitem" data-task-edit>Edit</button>
-                        </li>
-                        {% if task.command in ["sync_to_xero", "sync_to_xero_auto_send", "generate_invoice", "unbill_time_entries", "send_price_change_notifications"] %}
-                        <li class="header-title-menu__item" role="none">
-                          <button type="button" class="header-title-menu__link" role="menuitem" data-task-preview>Preview</button>
-                        </li>
-                        {% endif %}
-                        <li class="header-title-menu__item" role="none">
-                          <button type="button" class="header-title-menu__link" role="menuitem" data-task-run>Run now</button>
-                        </li>
-                        <li class="header-title-menu__item" role="none">
-                          <button type="button" class="header-title-menu__link" role="menuitem" data-task-logs>View logs</button>
-                        </li>
-                        {% if task.company_edit_url %}
-                        <li class="header-title-menu__item" role="none">
-                          <a class="header-title-menu__link" role="menuitem" href="{{ task.company_edit_url }}">Source</a>
-                        </li>
-                        {% endif %}
-                      </ul>
-                    </details>
-                  </td>
-                </tr>
+        <section class="scf-panel" id="sch-panel-when" role="tabpanel" aria-labelledby="sch-tab-when" data-sch-panel="when" hidden>
+          <div class="scf-panel__intro">
+            <h3 class="scf-panel__title">How often should it run?</h3>
+            <p class="text-muted">Times are in {{ schedule_timezone }}. The summary shows the next runs in your own time.</p>
+          </div>
+          <div class="sch-builder" data-sch-builder="task">
+            <div class="sch-segments" role="radiogroup" aria-label="Repeat">
+              {% for mode, label in [('minutes', 'Every few minutes'), ('hourly', 'Hourly'), ('daily', 'Daily'), ('weekly', 'Weekly'), ('monthly', 'Monthly'), ('custom', 'Custom')] %}
+                <label class="sch-segment">
+                  <input type="radio" name="sch_mode" value="{{ mode }}" data-sch-mode {% if mode == 'daily' %}checked{% endif %} />
+                  <span>{{ label }}</span>
+                </label>
               {% endfor %}
-            {% else %}
-              <tr>
-                <td colspan="12" class="table__empty">
-                  {% if show_inactive %}
-                    No scheduled tasks configured yet.
-                  {% else %}
-                    No active scheduled tasks. Enable "Show inactive tasks" to review all entries.
-                  {% endif %}
-                </td>
-              </tr>
-            {% endif %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-</div>
+            </div>
 
-<div class="modal" id="bulk-task-create-modal" role="dialog" aria-modal="true" hidden>
-  <div class="modal__content" role="document">
-    <button type="button" class="modal__close" data-modal-close>
-      <span class="visually-hidden">Close bulk task creator</span>
-    </button>
-    <h2 class="modal__title">Bulk create scheduled tasks</h2>
-    <div class="modal__body">
-      <form id="bulk-scheduled-task-form" class="form" method="post" action="/admin/scheduled-tasks/bulk-create" autocomplete="off">
-        {% include "partials/csrf.html" %}
-        {% if show_inactive %}<input type="hidden" name="show_inactive" value="1" />{% endif %}
-        <div class="form-field">
-          <label class="form-label" for="bulk-task-command">Task option</label>
-          <select class="form-input" id="bulk-task-command" name="command" required>
-            {% for option in command_options %}
-              <option value="{{ option.value }}">{{ option.label }}</option>
-            {% endfor %}
-          </select>
-          <p class="form-help">One scheduled task will be created for each selected company.</p>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="bulk-task-cron">Desired start cron expression</label>
-          <input class="form-input" id="bulk-task-cron" name="cron" required placeholder="0 2 * * *" pattern="^[^\s]+(\s+[^\s]+){4,5}$" />
-          <p class="form-help">The minute and hour are auto-incremented by one minute per company, starting from this UTC time.</p>
-        </div>
-        <div class="form-field" id="bulk-task-description-field">
-          <label class="form-label" for="bulk-task-description">Description</label>
-          <textarea class="form-input form-input--textarea" id="bulk-task-description" name="description" rows="3"></textarea>
-          <p class="form-help">Optional description or notes copied to each created task.</p>
-        </div>
-        <div class="form-field" id="bulk-task-json-payload-field" hidden>
-          <label class="form-label" for="bulk-task-json-payload">JSON Payload</label>
-          <textarea class="form-input form-input--textarea" id="bulk-task-json-payload" name="jsonPayload" rows="8" placeholder='{"subject": "Example ticket", "description": "Ticket details", "priority": "normal", "status": "open"}'></textarea>
-          <p class="form-help">Required when bulk creating scheduled ticket tasks. The same payload is copied to each company task.</p>
-        </div>
-        <div class="form-field form-field--inline">
-          <label class="form-label" for="bulk-task-max-retries">Max retries</label>
-          <input class="form-input" id="bulk-task-max-retries" name="maxRetries" type="number" min="0" value="12" />
-        </div>
-        <div class="form-field form-field--inline">
-          <label class="form-label" for="bulk-task-backoff">Retry backoff (seconds)</label>
-          <input class="form-input" id="bulk-task-backoff" name="retryBackoffSeconds" type="number" min="30" value="300" />
-        </div>
-        <div class="form-field form-field--checkbox">
-          <label class="form-checkbox">
-            <input type="checkbox" id="bulk-task-active" name="active" checked />
-            <span>Tasks active</span>
-          </label>
-        </div>
-        <div class="form-field form-field--checkbox">
-          <label class="form-checkbox">
-            <input type="checkbox" id="bulk-task-exclude-calendar" name="excludeFromCalendar" />
-            <span>Hide from cron calendar</span>
-          </label>
-        </div>
-        <fieldset class="form-field">
-          <legend class="form-label">Active companies</legend>
-          <div class="checkbox-list">
-            {% for option in bulk_company_options %}
-              <label class="form-checkbox-label">
-                <input type="checkbox" class="form-checkbox" name="companyIds" value="{{ option.value }}" />
-                <span class="form-checkbox-text">{{ option.label }}</span>
+            <div class="sch-builder__row" data-sch-mode-panel="minutes" hidden>
+              <label for="sch-every-minutes">Every</label>
+              <select class="form-input sch-builder__small" id="sch-every-minutes" data-sch-part="everyMinutes">
+                {% for n in [1, 2, 5, 10, 15, 20, 30] %}<option value="{{ n }}"{% if n == 15 %} selected{% endif %}>{{ n }}</option>{% endfor %}
+              </select>
+              <span>minutes</span>
+            </div>
+
+            <div class="sch-builder__row" data-sch-mode-panel="hourly" hidden>
+              <label for="sch-every-hours">Every</label>
+              <select class="form-input sch-builder__small" id="sch-every-hours" data-sch-part="everyHours">
+                {% for n in [1, 2, 3, 4, 6, 8, 12] %}<option value="{{ n }}">{{ n }}</option>{% endfor %}
+              </select>
+              <label for="sch-hour-minute">hour(s), at minute</label>
+              <input class="form-input sch-builder__small" id="sch-hour-minute" type="number" min="0" max="59" value="0" data-sch-part="minute" />
+            </div>
+
+            <div class="sch-builder__days" data-sch-mode-panel="weekly" hidden>
+              <span class="form-label" id="sch-days-label">On</span>
+              <div class="sch-days" role="group" aria-labelledby="sch-days-label">
+                {% for value, short, long in [('1', 'Mon', 'Monday'), ('2', 'Tue', 'Tuesday'), ('3', 'Wed', 'Wednesday'), ('4', 'Thu', 'Thursday'), ('5', 'Fri', 'Friday'), ('6', 'Sat', 'Saturday'), ('0', 'Sun', 'Sunday')] %}
+                  <label class="sch-day"><input type="checkbox" value="{{ value }}" data-sch-day /><span aria-hidden="true">{{ short }}</span><span class="visually-hidden">{{ long }}</span></label>
+                {% endfor %}
+              </div>
+            </div>
+
+            <div class="sch-builder__row" data-sch-mode-panel="monthly" hidden>
+              <label for="sch-month-day">On day</label>
+              <select class="form-input sch-builder__small" id="sch-month-day" data-sch-part="monthDay">
+                {% for n in range(1, 29) %}<option value="{{ n }}">{{ n }}</option>{% endfor %}
+                <option value="L">Last day</option>
+              </select>
+              <span>of the month</span>
+            </div>
+
+            <div class="sch-builder__row" data-sch-mode-panel="daily weekly monthly" hidden>
+              <label for="sch-time">At</label>
+              <input class="form-input sch-builder__time" id="sch-time" type="time" value="02:00" step="60" data-sch-part="time" />
+              <span class="text-muted">{{ schedule_timezone }}</span>
+            </div>
+
+            <div class="form-field" data-sch-cron-field>
+              <label class="form-label" for="task-cron">Cron expression</label>
+              <input class="form-input scf-mono" id="task-cron" name="cron" required placeholder="0 2 * * *" pattern="^[^\s]+(\s+[^\s]+){4,5}$" spellcheck="false" data-sch-cron />
+              <p class="form-help" data-sch-cron-help>Built from the choices above. Pick Custom to write your own: minute, hour, day of month, month, day of week, and an optional year.</p>
+              <p class="scf-error" data-sch-error="cron" hidden></p>
+            </div>
+          </div>
+        </section>
+
+        <section class="scf-panel" id="sch-panel-options" role="tabpanel" aria-labelledby="sch-tab-options" data-sch-panel="options" hidden>
+          <div class="scf-grid">
+            <div class="form-field scf-grid__full">
+              <span class="form-label">Status</span>
+              <label class="scf-switch">
+                <input type="checkbox" id="task-active" name="active" checked />
+                <span class="scf-switch__track" aria-hidden="true"></span>
+                <span>Run on schedule</span>
               </label>
-            {% endfor %}
+              <p class="form-help">Turn off to pause the task without losing its settings.</p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="task-max-retries">Retry attempts</label>
+              <input class="form-input" id="task-max-retries" name="maxRetries" type="number" min="0" value="12" />
+              <p class="form-help">How many times to try again after a failure. 0 means don't retry.</p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="task-backoff">Wait between retries (seconds)</label>
+              <input class="form-input" id="task-backoff" name="retryBackoffSeconds" type="number" min="30" step="30" value="300" />
+              <p class="form-help" data-sch-backoff-help>At least 30 seconds.</p>
+            </div>
+            <p class="scf-error scf-grid__full" data-sch-error="retries" hidden></p>
+            <div class="form-field scf-grid__full">
+              <span class="form-label">Schedule calendar</span>
+              <label class="scf-switch">
+                <input type="checkbox" id="task-exclude-calendar" name="excludeFromCalendar" />
+                <span class="scf-switch__track" aria-hidden="true"></span>
+                <span>Hide from the schedule calendar</span>
+              </label>
+              <p class="form-help">Useful for frequent jobs, such as mailbox imports, that would otherwise fill the calendar.</p>
+            </div>
           </div>
-          <p class="form-help">Tick every company that should receive this scheduled task.</p>
-        </fieldset>
-        <div class="form-actions">
-          <button type="submit" class="button button--primary">Create tasks</button>
-          <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<div class="modal" id="task-editor-modal" role="dialog" aria-modal="true" hidden>
-  <div class="modal__content" role="document">
-    <button type="button" class="modal__close" data-modal-close>
-      <span class="visually-hidden">Close task editor</span>
-    </button>
-    <h2 class="modal__title">Scheduled task</h2>
-    <div class="modal__body">
-      <form id="scheduled-task-form" class="form" autocomplete="off">
-        <input type="hidden" name="task_id" id="task-id" />
-        <div class="form-field">
-          <label class="form-label" for="task-name-display">Task name</label>
-          <input
-            class="form-input"
-            id="task-name-display"
-            type="text"
-            value=""
-            readonly
-            aria-readonly="true"
-            tabindex="-1"
-          />
-          <p class="form-help">Generated automatically from the selected company and command.</p>
-          <input type="hidden" id="task-name" name="name" />
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="task-command">Command</label>
-          <select class="form-input" id="task-command" name="command" required data-initial-focus>
-            {% for option in command_options %}
-              <option value="{{ option.value }}">{{ option.label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="task-company">Company</label>
-          <select class="form-input" id="task-company" name="companyId">
-            {% for option in company_options %}
-              <option value="{{ option.value }}">{{ option.label }}</option>
-            {% endfor %}
-          </select>
-          <p class="form-help">Choose a company or leave All companies selected to run globally.</p>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="task-cron">Cron expression</label>
-          <input
-            class="form-input"
-            id="task-cron"
-            name="cron"
-            required
-            placeholder="0 2 * * *"
-            pattern="^[^\s]+(\s+[^\s]+){4,5}$"
-          />
-          <p class="form-help">Crontab syntax in UTC. Use five fields for minute through weekday.</p>
-        </div>
-        <div class="form-field" id="task-description-field">
-          <label class="form-label" for="task-description">Description</label>
-          <textarea class="form-input form-input--textarea" id="task-description" name="description" rows="3"></textarea>
-          <p class="form-help" id="task-description-help">Optional description or notes about this task.</p>
-        </div>
-        <div class="form-field" id="task-json-payload-field" style="display: none;">
-          <label class="form-label" for="task-json-payload">JSON Payload</label>
-          <textarea class="form-input form-input--textarea" id="task-json-payload" name="jsonPayload" rows="8" placeholder='{"subject": "Example ticket", "description": "Ticket details", "priority": "normal", "status": "open"}'></textarea>
-          <p class="form-help">JSON configuration for ticket creation. Required fields: subject. Optional: description, priority, status, category, requester_id, assigned_user_id.</p>
-        </div>
-        <div class="form-field form-field--inline">
-          <label class="form-label" for="task-max-retries">Max retries</label>
-          <input class="form-input" id="task-max-retries" name="maxRetries" type="number" min="0" value="12" />
-        </div>
-        <div class="form-field form-field--inline">
-          <label class="form-label" for="task-backoff">Retry backoff (seconds)</label>
-          <input class="form-input" id="task-backoff" name="retryBackoffSeconds" type="number" min="30" value="300" />
-        </div>
-        <div class="form-field form-field--checkbox">
-          <label class="form-checkbox">
-            <input type="checkbox" id="task-active" name="active" checked />
-            <span>Task active</span>
-          </label>
-        </div>
-        <div class="form-field form-field--checkbox">
-          <label class="form-checkbox">
-            <input type="checkbox" id="task-exclude-calendar" name="excludeFromCalendar" />
-            <span>Hide from cron calendar</span>
-          </label>
-          <p class="form-help">Use for high-frequency jobs such as M365 or IMAP imports that would otherwise fill the calendar.</p>
-        </div>
-        <div class="form-actions">
-          <div class="form-actions__group">
-            <button type="submit" class="button">Save task</button>
-            <button type="button" class="button button--ghost" data-task-reset>Clear form</button>
-          </div>
-          <button
-            type="button"
-            class="button button--danger"
-            data-task-delete-modal
-            hidden
-            aria-hidden="true"
-          >
-            Delete task
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<div class="modal" id="task-logs-modal" role="dialog" aria-modal="true" hidden>
-  <div class="modal__content" role="document">
-    <button type="button" class="modal__close" data-modal-close>
-      <span class="visually-hidden">Close task logs</span>
-    </button>
-    <h2 class="modal__title" id="task-logs-title">Task run history</h2>
-    <div class="modal__body">
-      <p id="task-logs-description" class="modal__subtitle text-muted">
-        View the most recent executions for this scheduled task. All timestamps are displayed in your local timezone.
-      </p>
-      <div class="modal__controls">
-        <input
-          type="search"
-          class="form-input"
-          placeholder="Filter runs"
-          aria-label="Filter task runs"
-          data-table-filter="task-logs-table"
-        />
+        </section>
       </div>
+
+      <aside class="scf-preview sch-preview" aria-label="Task summary">
+        <p class="scf-preview__eyebrow">Summary</p>
+        <div class="scf-preview__card sch-preview__card">
+          <p class="sch-preview__name" data-sch-preview-name>—</p>
+          <p class="sch-preview__schedule" data-sch-preview-schedule role="status" aria-live="polite">—</p>
+          <p class="sch-preview__paused" data-sch-preview-paused hidden>Paused: it won't run until you turn it back on.</p>
+        </div>
+        <div class="sch-preview__runs">
+          <p class="scf-preview__eyebrow">Next runs, your time</p>
+          <ol class="sch-runs-list" data-sch-preview-runs></ol>
+        </div>
+        <ul class="scf-preview__rules" data-sch-preview-rules></ul>
+      </aside>
+    </div>
+
+    <footer class="modal__footer scf-editor__footer">
+      <button type="button" class="button button--danger" data-task-delete-modal hidden>Delete task</button>
+      <span class="scf-editor__spacer"></span>
+      <p class="scf-error sch-editor__save-error" data-sch-error="save" role="alert" hidden></p>
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button" data-sch-save>Create task</button>
+    </footer>
+  </form>
+</div>
+
+{# ---------------------------------------------------------------- Bulk create #}
+<div class="modal scf-modal" id="bulk-task-create-modal" role="dialog" aria-modal="true" aria-labelledby="bulk-task-title" aria-describedby="bulk-task-subtitle" aria-hidden="true" hidden>
+  <form id="bulk-scheduled-task-form" class="modal__panel modal__panel--wide scf-editor sch-editor" method="post" action="/admin/scheduled-tasks/bulk-create" autocomplete="off" novalidate data-sch-bulk-form>
+    {% include "partials/csrf.html" %}
+    {% if show_inactive %}<input type="hidden" name="show_inactive" value="1" />{% endif %}
+
+    <header class="modal__header scf-editor__header">
+      <button type="button" class="modal__close" data-modal-close aria-label="Close bulk task creator"></button>
+      <div>
+        <p class="scf-preview__eyebrow">Scheduled tasks</p>
+        <h2 class="modal__title" id="bulk-task-title">Create a task for many companies</h2>
+        <p class="scf-editor__subtitle" id="bulk-task-subtitle">One task is created for each company you pick, each at its own time so they don't all run at once.</p>
+      </div>
+    </header>
+
+    <div class="modal__body scf-editor__body">
+      <div class="scf-editor__main sch-sections">
+        <section class="sch-section" aria-labelledby="bulk-what-title">
+          <h3 class="scf-panel__title" id="bulk-what-title">Task</h3>
+          <div class="form-field">
+            <label class="visually-hidden" for="bulk-task-command">Task</label>
+            <select class="form-input" id="bulk-task-command" name="command" required>
+              {% for group in command_groups %}
+                <optgroup label="{{ group }}">
+                  {% for option in command_options if option.group == group %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                  {% endfor %}
+                </optgroup>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-field" id="bulk-task-description-field">
+            <label class="form-label" for="bulk-task-description">Notes <span class="scf-optional">optional</span></label>
+            <textarea class="form-input form-input--textarea" id="bulk-task-description" name="description" rows="2" placeholder="Copied to every task created"></textarea>
+          </div>
+          {{ scheduled_ticket_payload('bulk-task', 'hidden', 'The same ticket is created for each company.') }}
+          <p class="scf-error" data-sch-bulk-error="payload" hidden></p>
+        </section>
+
+        <section class="sch-section" aria-labelledby="bulk-companies-title">
+          <div class="oof-section__head sch-section__head">
+            <h3 class="scf-panel__title" id="bulk-companies-title">Companies <span class="scf-tab__count" data-sch-bulk-company-count>0</span></h3>
+            <div class="sch-section__tools">
+              <button type="button" class="button button--ghost button--small" data-sch-bulk-companies="all">Select all shown</button>
+              <button type="button" class="button button--ghost button--small" data-sch-bulk-companies="none">Clear</button>
+            </div>
+          </div>
+          <input type="search" class="form-input" placeholder="Filter companies" aria-label="Filter companies" data-sch-bulk-company-search />
+          <div class="oof-who__list sch-company-list">
+            {% for option in bulk_company_options %}
+              <label class="oof-who__row" data-sch-bulk-company-row data-search-text="{{ option.label }}">
+                <input type="checkbox" name="companyIds" value="{{ option.value }}" data-sch-bulk-company />
+                <span>{{ option.label }}</span>
+              </label>
+            {% else %}
+              <p class="text-muted">No active companies yet.</p>
+            {% endfor %}
+          </div>
+          <p class="scf-error" data-sch-bulk-error="companies" hidden></p>
+        </section>
+
+        <section class="sch-section" aria-labelledby="bulk-when-title">
+          <h3 class="scf-panel__title" id="bulk-when-title">When</h3>
+          <div class="scf-choice-list" role="radiogroup" aria-labelledby="bulk-when-title">
+            <label class="scf-choice">
+              <input type="radio" name="sch_bulk_timing" value="random" data-sch-bulk-timing checked />
+              <span><strong>A random time each day</strong><span class="text-muted">Each company gets its own daily time, which spreads the load.</span></span>
+            </label>
+            <label class="scf-choice">
+              <input type="radio" name="sch_bulk_timing" value="stagger" data-sch-bulk-timing />
+              <span><strong>From a start time, one minute apart</strong><span class="text-muted">The first company runs at the start time, the next a minute later, and so on.</span></span>
+            </label>
+          </div>
+          <div class="sch-builder" data-sch-bulk-stagger hidden>
+            <div class="sch-builder__row">
+              <label for="bulk-sch-repeat">Repeat</label>
+              <select class="form-input" id="bulk-sch-repeat" data-sch-bulk-part="repeat">
+                <option value="daily">Every day</option>
+                <option value="weekdays">Every weekday</option>
+                <option value="weekly">Every week on</option>
+                <option value="monthly">Every month on day</option>
+              </select>
+              <select class="form-input sch-builder__small" aria-label="Day of the week" data-sch-bulk-part="weekday" hidden>
+                {% for value, long in [('1', 'Monday'), ('2', 'Tuesday'), ('3', 'Wednesday'), ('4', 'Thursday'), ('5', 'Friday'), ('6', 'Saturday'), ('0', 'Sunday')] %}<option value="{{ value }}">{{ long }}</option>{% endfor %}
+              </select>
+              <select class="form-input sch-builder__small" aria-label="Day of the month" data-sch-bulk-part="monthDay" hidden>
+                {% for n in range(1, 29) %}<option value="{{ n }}">{{ n }}</option>{% endfor %}
+                <option value="L">Last day</option>
+              </select>
+            </div>
+            <div class="sch-builder__row">
+              <label for="bulk-sch-time">Starting at</label>
+              <input class="form-input sch-builder__time" id="bulk-sch-time" type="time" value="02:00" step="60" data-sch-bulk-part="time" />
+              <span class="text-muted">{{ schedule_timezone }}</span>
+            </div>
+          </div>
+          <details class="stp__advanced sch-advanced">
+            <summary>Advanced: start from a cron expression</summary>
+            <div class="form-field">
+              <label class="form-label" for="bulk-task-cron">Start cron expression</label>
+              <input class="form-input scf-mono" id="bulk-task-cron" name="cron" placeholder="0 2 * * *" pattern="^[^\s]+(\s+[^\s]+){4,5}$" spellcheck="false" />
+              <p class="form-help">Leave blank to assign each company a random daily time. When set, the minute and hour must be plain numbers; each company after the first runs one minute later.</p>
+            </div>
+          </details>
+          <p class="scf-error" data-sch-bulk-error="cron" hidden></p>
+        </section>
+
+        <section class="sch-section" aria-labelledby="bulk-options-title">
+          <h3 class="scf-panel__title" id="bulk-options-title">Retries and options</h3>
+          <div class="scf-grid">
+            <div class="form-field">
+              <label class="form-label" for="bulk-task-max-retries">Retry attempts</label>
+              <input class="form-input" id="bulk-task-max-retries" name="maxRetries" type="number" min="0" value="12" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="bulk-task-backoff">Wait between retries (seconds)</label>
+              <input class="form-input" id="bulk-task-backoff" name="retryBackoffSeconds" type="number" min="30" step="30" value="300" />
+            </div>
+            <label class="scf-switch scf-grid__full">
+              <input type="checkbox" id="bulk-task-active" name="active" checked />
+              <span class="scf-switch__track" aria-hidden="true"></span>
+              <span>Run on schedule straight away</span>
+            </label>
+            <label class="scf-switch scf-grid__full">
+              <input type="checkbox" id="bulk-task-exclude-calendar" name="excludeFromCalendar" />
+              <span class="scf-switch__track" aria-hidden="true"></span>
+              <span>Hide from the schedule calendar</span>
+            </label>
+          </div>
+        </section>
+      </div>
+
+      <aside class="scf-preview sch-preview" aria-label="What will be created">
+        <p class="scf-preview__eyebrow">What will be created</p>
+        <div class="scf-preview__card sch-preview__card">
+          <p class="sch-preview__name" data-sch-bulk-preview-title role="status" aria-live="polite">Pick at least one company.</p>
+          <p class="sch-preview__schedule" data-sch-bulk-preview-schedule></p>
+        </div>
+        <ol class="sch-runs-list" data-sch-bulk-preview-list></ol>
+      </aside>
+    </div>
+
+    <footer class="modal__footer scf-editor__footer">
+      <span class="scf-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button" data-sch-bulk-submit>Create tasks</button>
+    </footer>
+  </form>
+</div>
+
+{# ---------------------------------------------------------------- Spread out run times #}
+<div class="modal scf-modal" id="scheduled-tasks-redistribute-modal" role="dialog" aria-modal="true" aria-labelledby="redistribute-title" aria-describedby="redistribute-subtitle" aria-hidden="true" hidden>
+  <form id="scheduled-tasks-bulk-redistribute-form" class="modal__panel scf-editor sch-editor sch-editor--narrow" method="post" action="/admin/scheduled-tasks/bulk-redistribute" data-scheduled-tasks-bulk-form="redistribute" novalidate>
+    {% include "partials/csrf.html" %}
+    <input type="hidden" name="redistributeHour" data-scheduled-tasks-redistribute-hour />
+    <input type="hidden" name="redistributeOffset" data-scheduled-tasks-redistribute-offset />
+    {% if show_inactive %}<input type="hidden" name="show_inactive" value="1" />{% endif %}
+
+    <header class="modal__header scf-editor__header">
+      <button type="button" class="modal__close" data-modal-close aria-label="Close"></button>
+      <div>
+        <p class="scf-preview__eyebrow">Selected tasks</p>
+        <h2 class="modal__title" id="redistribute-title">Spread out run times</h2>
+        <p class="scf-editor__subtitle" id="redistribute-subtitle">Run the selected tasks one minute apart from a start time. Days and months in their schedules stay the same.</p>
+      </div>
+    </header>
+
+    <div class="modal__body sch-sections">
+      <div class="sch-builder__row">
+        <label for="redistribute-time">Start at</label>
+        <input class="form-input sch-builder__time" id="redistribute-time" type="time" value="00:00" step="60" data-sch-redistribute-time />
+        <span class="text-muted">{{ schedule_timezone }}</span>
+      </div>
+      <p class="scf-error" data-sch-redistribute-error hidden></p>
+      <ol class="sch-runs-list" data-sch-redistribute-preview></ol>
+    </div>
+
+    <footer class="modal__footer scf-editor__footer">
+      <span class="scf-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button" data-sch-redistribute-submit>Update times</button>
+    </footer>
+  </form>
+</div>
+
+{# ---------------------------------------------------------------- Run history #}
+<div class="modal scf-modal" id="task-logs-modal" role="dialog" aria-modal="true" aria-labelledby="task-logs-title" aria-describedby="task-logs-description" aria-hidden="true" hidden>
+  <div class="modal__panel modal__panel--wide scf-editor sch-editor">
+    <header class="modal__header scf-editor__header">
+      <button type="button" class="modal__close" data-modal-close aria-label="Close run history"></button>
+      <div>
+        <p class="scf-preview__eyebrow">Run history</p>
+        <h2 class="modal__title" id="task-logs-title">Task</h2>
+        <p class="scf-editor__subtitle" id="task-logs-description">The last 50 runs, in your local time.</p>
+      </div>
+    </header>
+    <div class="modal__body sch-sections">
+      <dl class="sif-stats sch-stats" aria-label="Run summary" data-sch-logs-stats hidden>
+        <div class="sif-stats__item"><dt>Runs</dt><dd data-sch-logs-stat="total">0</dd></div>
+        <div class="sif-stats__item"><dt>Succeeded</dt><dd data-sch-logs-stat="succeeded">0</dd></div>
+        <div class="sif-stats__item"><dt>Failed</dt><dd data-sch-logs-stat="failed">0</dd></div>
+        <div class="sif-stats__item"><dt>Typical duration</dt><dd data-sch-logs-stat="duration">—</dd></div>
+      </dl>
+      <div class="scf-toolbar">
+        <input type="search" class="form-input scf-toolbar__search" placeholder="Search run details" aria-label="Search run details" data-sch-logs-search />
+        <label class="visually-hidden" for="sch-logs-filter">Show</label>
+        <select class="form-input sch-toolbar-select" id="sch-logs-filter" data-sch-logs-filter>
+          <option value="">All runs</option>
+          <option value="failed">Failed only</option>
+          <option value="succeeded">Succeeded only</option>
+        </select>
+      </div>
+      <ol class="scf-list sch-runs" id="task-logs-body" aria-live="polite"></ol>
+      <p class="scf-empty scf-empty--inline" data-sch-logs-empty>Loading runs…</p>
+    </div>
+  </div>
+</div>
+
+{# ---------------------------------------------------------------- Preview #}
+<div class="modal scf-modal" id="task-preview-modal" role="dialog" aria-modal="true" aria-labelledby="task-preview-title" aria-describedby="task-preview-summary" aria-hidden="true" hidden>
+  <div class="modal__panel modal__panel--wide scf-editor sch-editor">
+    <header class="modal__header scf-editor__header">
+      <button type="button" class="modal__close" data-modal-close aria-label="Close preview"></button>
+      <div>
+        <p class="scf-preview__eyebrow">Preview, nothing is changed</p>
+        <h2 class="modal__title" id="task-preview-title">What this task will do</h2>
+        <p class="scf-editor__subtitle" id="task-preview-summary">Loading preview…</p>
+      </div>
+    </header>
+    <div class="modal__body sch-sections">
+      <dl class="sif-stats sch-stats" id="task-preview-totals" aria-label="Preview totals" hidden></dl>
       <div class="table-wrapper">
-        <table class="table" id="task-logs-table" data-table data-table-id="task-logs">
+        <table class="table" id="task-preview-table">
+          <caption class="visually-hidden">Records the task would process</caption>
           <thead>
             <tr>
-              <th scope="col" data-sort="string">Status</th>
-              <th scope="col" data-sort="date">Started</th>
-              <th scope="col" data-sort="date">Finished</th>
-              <th scope="col" data-sort="number">Duration (ms)</th>
-              <th scope="col" data-sort="string">Details</th>
+              <th scope="col">Type</th>
+              <th scope="col">Item</th>
+              <th scope="col">Action</th>
+              <th scope="col">Details</th>
             </tr>
           </thead>
-          <tbody id="task-logs-body">
-            <tr>
-              <td colspan="5" class="table__empty" id="task-logs-empty">Select a task to view its recent runs.</td>
-            </tr>
-          </tbody>
+          <tbody id="task-preview-body"></tbody>
         </table>
       </div>
     </div>
   </div>
 </div>
-
-<div class="modal" id="task-preview-modal" role="dialog" aria-modal="true" hidden>
-  <div class="modal__content" role="document">
-    <button type="button" class="modal__close" data-modal-close>
-      <span class="visually-hidden">Close task preview</span>
-    </button>
-    <h2 class="modal__title" id="task-preview-title">Scheduled task preview</h2>
-    <div class="modal__body">
-      <p id="task-preview-summary" class="modal__subtitle text-muted">Select a task to preview what it will do.</p>
-      <div id="task-preview-totals" class="detail-grid" hidden></div>
-      <div class="table-wrapper">
-        <table class="table" id="task-preview-table" data-table data-table-id="task-preview">
-          <thead>
-            <tr>
-              <th scope="col" data-sort="string">Type</th>
-              <th scope="col" data-sort="string">Item</th>
-              <th scope="col" data-sort="string">Action</th>
-              <th scope="col" data-sort="string">Details</th>
-            </tr>
-          </thead>
-          <tbody id="task-preview-body">
-            <tr>
-              <td colspan="4" class="table__empty">No preview loaded.</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-</div>
-
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
-  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
-  <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
-  <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
-  <script src="{{ static_url('/static/js/scheduled_task_columns.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/scheduled_ticket_payload.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/scheduled_tasks.js') }}" defer></script>
 {% endblock %}

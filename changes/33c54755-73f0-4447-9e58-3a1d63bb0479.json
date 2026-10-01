@@ -1,0 +1,7 @@
+{
+  "guid": "33c54755-73f0-4447-9e58-3a1d63bb0479",
+  "occurred_at": "2026-09-27T03:11Z",
+  "change_type": "Fix",
+  "summary": "Bound website check retries and collect DNS RRsets concurrently",
+  "content_hash": "3e53d490cd0ced059fb2568925f5937633e86229fe07f53ece25864580d9121b"
+}

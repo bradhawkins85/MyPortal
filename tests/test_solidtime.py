@@ -768,7 +768,7 @@ async def test_sync_ticket_logs_reason_when_ticket_push_toggle_off(
 
 
 @pytest.mark.anyio
-async def test_schedule_ticket_sync_records_skipped_outcome_when_module_disabled(
+async def test_schedule_ticket_sync_does_not_create_webhook_when_module_disabled(
     reset_solidtime_caches,
 ):
     async def fake_get_module(slug):
@@ -782,41 +782,21 @@ async def test_schedule_ticket_sync_records_skipped_outcome_when_module_disabled
 
     reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
 
-    created_events: list[dict[str, object]] = []
-    failure_records: list[dict[str, object]] = []
-    completion_event = asyncio.Event()
-
     async def fake_create_manual_event(**kwargs):
-        created_events.append(kwargs)
-        return {"id": 901}
+        pytest.fail("disabled Solidtime module created a webhook event")
 
-    async def fake_record_manual_success(event_id, **kwargs):
-        return {"id": event_id, **kwargs}
-
-    async def fake_record_manual_failure(event_id, **kwargs):
-        failure_records.append({"event_id": event_id, **kwargs})
-        completion_event.set()
-        return {"id": event_id, **kwargs}
+    async def fake_sync_ticket_to_project(ticket_id):
+        pytest.fail("disabled Solidtime module attempted to sync a ticket")
 
     reset_solidtime_caches.setattr(
         solidtime.webhook_monitor, "create_manual_event", fake_create_manual_event
     )
     reset_solidtime_caches.setattr(
-        solidtime.webhook_monitor, "record_manual_success", fake_record_manual_success
-    )
-    reset_solidtime_caches.setattr(
-        solidtime.webhook_monitor, "record_manual_failure", fake_record_manual_failure
+        solidtime, "sync_ticket_to_project", fake_sync_ticket_to_project
     )
 
     solidtime.schedule_ticket_sync(77)
-    await asyncio.wait_for(completion_event.wait(), timeout=1.0)
-
-    assert created_events
-    assert created_events[0]["name"] == "solidtime.ticket.sync"
-    assert failure_records
-    assert failure_records[0]["event_id"] == 901
-    assert failure_records[0]["status"] == "skipped"
-    assert "disabled" in str(failure_records[0]["error_message"]).lower()
+    await asyncio.gather(*solidtime._BACKGROUND_TASKS)
 
 
 @pytest.mark.anyio

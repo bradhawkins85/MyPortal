@@ -3,18 +3,10 @@
 
 
 {% block header_title %}Knowledge base editor{% endblock %}
-{% set scope_labels = {
-  "anonymous": "Public",
-  "user": "Specific users",
-  "company": "Company members",
-  "company_admin": "Company admins",
-  "super_admin": "Super admins"
-} %}
 
-{% set editor_heading = 'Compose article' %}
+{% set editor_heading = 'New article' %}
 {% if kb_initial_article %}
-  {% set heading_source = kb_initial_article.title or kb_initial_article.slug %}
-  {% set editor_heading = 'Edit “' ~ heading_source ~ '”' %}
+  {% set editor_heading = kb_initial_article.title or kb_initial_article.slug %}
 {% endif %}
 
 {% block header_actions %}
@@ -25,7 +17,7 @@
     {% set _ = kb_editor_actions.append({
       "label": "View article",
       "type": "link",
-      "href": "/knowledge-base?slug=" ~ kb_initial_article.slug,
+      "href": "/knowledge-base/articles/" ~ kb_initial_article.slug,
       "attrs": {"target": "_blank", "rel": "noopener noreferrer"}
     }) %}
   {% endif %}
@@ -33,116 +25,171 @@
 {% endblock %}
 
 {% block content %}
-<div class="kb-admin">
-  <section class="card card--panel kb-admin__panel kb-admin__panel--editor" data-kb-editor>
-      <header class="card__header card__header--stacked">
-        <div>
-          <h2 class="card__title" data-kb-editor-title>{{ editor_heading }}</h2>
-          <p class="card__subtitle">Draft new knowledge base entries or update existing content with granular visibility controls.</p>
-        </div>
-        <div class="card__controls">
-          <label class="switch">
-            <input type="checkbox" id="kb-article-published" />
-            <span class="switch__label">Published</span>
-          </label>
-        </div>
-      </header>
-      <form id="kb-article-form" class="kb-admin__form" autocomplete="off" data-kb-mode="{{ kb_form_mode }}">
-        <input type="hidden" id="kb-article-id" />
-        <fieldset class="kb-admin__fieldset">
-          <legend class="kb-admin__fieldset-title">Article details</legend>
-          <div class="kb-admin__fieldset-body">
-            <div class="form-field">
-              <label class="form-label" for="kb-article-slug">Slug</label>
-              <input class="form-input" id="kb-article-slug" name="slug" required minlength="1" maxlength="191" />
-              <p class="form-help">Use a unique, URL-friendly slug. Existing links update automatically after saving changes.</p>
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="kb-article-title">Title</label>
-              <input class="form-input" id="kb-article-title" name="title" required maxlength="255" />
-            </div>
-            <div class="form-field form-field--wide">
-              <label class="form-label" for="kb-article-summary">Summary</label>
-              <textarea class="form-input form-input--textarea" id="kb-article-summary" name="summary" rows="3" maxlength="2000"></textarea>
-              <p class="form-help">Summaries appear beside article titles and improve search relevance.</p>
-            </div>
-          </div>
-        </fieldset>
-        <fieldset class="kb-admin__fieldset">
-          <legend class="kb-admin__fieldset-title">Visibility &amp; permissions</legend>
-          <div class="kb-admin__fieldset-body">
-            <div class="form-field">
-              <label class="form-label" for="kb-article-scope">Permission scope</label>
-              <select class="form-input" id="kb-article-scope" name="permission_scope">
-                <option value="anonymous">Public</option>
-                <option value="user">Specific users</option>
-                <option value="company">Company members</option>
-                <option value="company_admin">Company admins</option>
-                <option value="super_admin">Super admins</option>
-              </select>
-              <p class="form-help kb-admin__scope-help" data-kb-scope-help>Public articles are visible to anyone with the URL.</p>
-            </div>
-            <div class="form-field" data-kb-user-select hidden>
-              <label class="form-label" for="kb-article-users">Allow specific users</label>
-              <select class="form-input" id="kb-article-users" name="allowed_user_ids" multiple size="6"></select>
-              <p class="form-help">Hold Ctrl (Windows) or Command (macOS) to select multiple users. Leave empty to revoke access.</p>
-            </div>
-            <div class="form-field" data-kb-company-select hidden>
-              <label class="form-label" for="kb-article-companies">Allow specific companies</label>
-              <select class="form-input" id="kb-article-companies" name="allowed_company_ids" multiple size="6"></select>
-              <p class="form-help" data-kb-company-help>Leave empty to grant access to every company membership within the selected scope.</p>
-            </div>
-          </div>
-        </fieldset>
-        <fieldset class="kb-admin__fieldset" data-kb-ai-tags-section hidden>
-          <legend class="kb-admin__fieldset-title">AI Tags</legend>
-          <div class="kb-admin__fieldset-body">
-            <div class="form-field">
-              <div class="kb-admin__ai-tags-header">
-                <label class="form-label">Generated tags</label>
-                <button type="button" class="button button--ghost button--sm" data-kb-refresh-tags>
-                  <span class="button__icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" focusable="false"><path d="M12 4V2l-3 3 3 3V6a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg>
-                  </span>
-                  <span class="button__label">Refresh tags</span>
-                </button>
-              </div>
-              <div class="tag-list" id="kb-ai-tags-container" data-kb-ai-tags>
-                <span class="card__empty">No AI tags yet. Tags will be generated when you save the article.</span>
-              </div>
-              <p class="form-help">AI-generated tags are automatically created when you save. Click a tag to remove it.</p>
-            </div>
-          </div>
-        </fieldset>
-        <section class="kb-admin__sections-card" aria-labelledby="kb-article-sections-heading">
-          <header class="kb-admin__sections-header">
-            <div class="kb-admin__sections-title-group">
-              <h3 class="kb-admin__sections-title" id="kb-article-sections-heading">Sections</h3>
-              <p class="form-help kb-admin__sections-help" id="kb-article-sections-help">Compose rich content in ordered sections. Drag the toolbar buttons to format text, add lists, or insert links. Reorder or delete sections without losing content.</p>
-            </div>
-            <button type="button" class="button button--ghost" data-kb-add-section aria-describedby="kb-article-sections-help">
-              <span class="button__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false"><path d="M11 5a1 1 0 0 1 2 0v6h6a1 1 0 0 1 0 2h-6v6a1 1 0 0 1-2 0v-6H5a1 1 0 0 1 0-2h6z"/></svg>
-              </span>
-              <span class="button__label">Add section</span>
-            </button>
-          </header>
-          <div class="kb-admin__sections-body" aria-describedby="kb-article-sections-help">
-            <div class="kb-admin__sections" id="kb-article-sections" data-kb-sections>
-              <p class="kb-admin__sections-empty" data-kb-sections-empty>No sections added yet. Start by creating the introduction.</p>
-            </div>
-          </div>
-        </section>
-        <div class="form-actions">
-          <button type="submit" class="button" data-kb-save>Save article</button>
-          <button type="button" class="button button--ghost" data-kb-reset>Reset</button>
-          <button type="button" class="button button--danger" data-kb-delete hidden>Delete</button>
-        </div>
-        <p class="form-help kb-admin__status" role="status" aria-live="polite" data-kb-status></p>
-      </form>
-  </section>
+<div class="kbe" data-kb-editor>
+  <form id="kb-article-form" class="kbe__layout" autocomplete="off" data-kb-mode="{{ kb_form_mode }}" novalidate>
+    <input type="hidden" id="kb-article-id" />
 
+    <div class="kbe__main">
+      <section class="kbe__card kbe__meta" aria-label="Article details">
+        <p class="kbe__eyebrow" data-kb-editor-title>{{ editor_heading }}</p>
+        <label class="visually-hidden" for="kb-article-title">Title</label>
+        <input class="kbe__title-input" id="kb-article-title" name="title" required maxlength="255" placeholder="Article title" />
+        <div class="kbe__slug">
+          <label class="kbe__slug-prefix" for="kb-article-slug">/knowledge-base/articles/</label>
+          <input class="kbe__slug-input" id="kb-article-slug" name="slug" required minlength="1" maxlength="191" placeholder="article-slug" spellcheck="false" />
+        </div>
+        <label class="visually-hidden" for="kb-article-summary">Summary</label>
+        <textarea class="kbe__summary-input" id="kb-article-summary" name="summary" rows="1" maxlength="2000" placeholder="Short summary shown in listings and search results (optional)"></textarea>
+      </section>
+
+      <section class="kbe__sections" aria-labelledby="kb-article-sections-heading">
+        <header class="kbe__sections-bar">
+          <h2 class="kbe__sections-title" id="kb-article-sections-heading">Sections <span class="kbe__count" data-kb-section-count>0</span></h2>
+          <div class="kbe__sections-actions">
+            <button type="button" class="kbe-btn" data-kb-collapse-all title="Collapse every section to rearrange quickly">Collapse all</button>
+            <button type="button" class="kbe-btn" data-kb-expand-all>Expand all</button>
+          </div>
+        </header>
+        <p class="kbe__hint" id="kb-article-sections-help">Drag <span aria-hidden="true">⠿</span> to reorder, or focus a section and press <kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>. <kbd>Ctrl</kbd>+<kbd>S</kbd> saves.</p>
+        <div class="kbe__section-list" id="kb-article-sections" data-kb-sections aria-describedby="kb-article-sections-help"></div>
+        <button type="button" class="kbe__add-section" data-kb-add-section>
+          <span aria-hidden="true">+</span> Add section
+        </button>
+      </section>
+    </div>
+
+    <aside class="kbe__sidebar" aria-label="Article settings">
+      <div class="kbe__card kbe__publish">
+        <div class="kbe__publish-row">
+          <label class="visually-hidden" for="kb-article-lifecycle">Status</label>
+          <select class="form-input kbe__status-select" id="kb-article-lifecycle" data-kb-lifecycle>
+            <option value="draft">Draft</option>
+            <option value="in_review">In review</option>
+            <option value="published">Published</option>
+            <option value="retired">Retired</option>
+          </select>
+          <button type="submit" class="button kbe__save" data-kb-save>Save</button>
+        </div>
+        <p class="kbe__status" role="status" aria-live="polite" data-kb-status></p>
+        <a class="kbe__view-link" href="#" target="_blank" rel="noopener noreferrer" data-kb-view-link hidden>Open published view ↗</a>
+      </div>
+
+      <details class="kbe__panel" open>
+        <summary class="kbe__panel-summary">Visibility <span class="kbe__panel-meta" data-kb-visibility-summary></span></summary>
+        <div class="kbe__panel-body">
+          <div class="form-field">
+            <label class="form-label" for="kb-article-scope">Who can read it</label>
+            <select class="form-input" id="kb-article-scope" name="permission_scope">
+              <option value="anonymous">Public</option>
+              <option value="user">Specific users</option>
+              <option value="company">Company members</option>
+              <option value="company_admin">Company admins</option>
+              <option value="super_admin">Super admins</option>
+            </select>
+            <p class="form-help" data-kb-scope-help></p>
+          </div>
+          <div class="form-field" data-kb-user-select hidden>
+            <label class="form-label" for="kb-article-users">Allowed users</label>
+            <select class="form-input" id="kb-article-users" name="allowed_user_ids" multiple data-kb-picklist></select>
+          </div>
+          <div class="form-field" data-kb-company-select hidden>
+            <label class="form-label" for="kb-article-companies">Allowed companies</label>
+            <select class="form-input" id="kb-article-companies" name="allowed_company_ids" multiple data-kb-picklist data-kb-picklist-empty="All companies"></select>
+            <p class="form-help" data-kb-company-help></p>
+          </div>
+          <div class="form-field" data-kb-role-select hidden>
+            <label class="form-label" for="kb-article-roles">Customer roles</label>
+            <select class="form-input" id="kb-article-roles" name="allowed_role_ids" multiple data-kb-picklist>{% for role in kb_role_options %}<option value="{{ role.id }}">{{ role.name }}</option>{% endfor %}</select>
+            <p class="form-help">Deny by default. Roles also need the Published articles &amp; runbooks permission.</p>
+          </div>
+        </div>
+      </details>
+
+      <details class="kbe__panel">
+        <summary class="kbe__panel-summary">Runbook <span class="kbe__panel-meta" data-kb-runbook-summary></span></summary>
+        <div class="kbe__panel-body">
+          <div class="form-field"><label class="form-label" for="kb-article-owner">Owner</label><select class="form-input" id="kb-article-owner"><option value="">Unassigned</option>{% for user in kb_user_options %}<option value="{{ user.id }}">{{ user.label }}</option>{% endfor %}</select></div>
+          <div class="form-field"><label class="form-label" for="kb-article-review-due">Review due</label><input class="form-input" id="kb-article-review-due" type="date" /></div>
+          <div class="form-field"><label class="form-label" for="kb-article-assets">Linked assets</label><select class="form-input" id="kb-article-assets" multiple data-kb-picklist>{% for asset in kb_asset_options %}<option value="{{ asset.id }}">{{ asset.company_name or 'No company' }} — {{ asset.name or ('Asset ' ~ asset.id) }}{% if asset.type %} ({{ asset.type }}){% endif %}</option>{% endfor %}</select></div>
+        </div>
+      </details>
+
+      <details class="kbe__panel" data-kb-ai-tags-section hidden>
+        <summary class="kbe__panel-summary">AI tags <span class="kbe__panel-meta" data-kb-ai-tags-count></span></summary>
+        <div class="kbe__panel-body">
+          <div class="tag-list kbe__tags" id="kb-ai-tags-container" data-kb-ai-tags></div>
+          <div class="kbe__inline-actions">
+            <button type="button" class="kbe-btn" data-kb-refresh-tags>Regenerate tags</button>
+          </div>
+          <p class="form-help">Tags regenerate after each save. × removes a tag; ⊘ also excludes it everywhere.</p>
+        </div>
+      </details>
+
+      <details class="kbe__panel" data-kb-existing-tools hidden>
+        <summary class="kbe__panel-summary">Attachments <span class="kbe__panel-meta" data-kb-attachment-count></span></summary>
+        <div class="kbe__panel-body">
+          <div class="kbe__attachments" data-kb-attachments></div>
+          <label class="kbe__upload">
+            <input id="kb-attachment-file" type="file" data-kb-upload-input />
+            <span class="kbe-btn" data-kb-upload role="button" tabindex="0">Upload file…</span>
+          </label>
+          <p class="form-help">Up to 15 MB. Executables and active web content are rejected.</p>
+        </div>
+      </details>
+
+      <details class="kbe__panel" data-kb-review-tools hidden>
+        <summary class="kbe__panel-summary">Review</summary>
+        <div class="kbe__panel-body">
+          <div class="form-field">
+            <label class="form-label" for="kb-preview-company">Preview as customer of</label>
+            <select class="form-input" id="kb-preview-company"><option value="">Anonymous customer</option>{% for company in kb_company_options %}<option value="{{ company.id }}">{{ company.name }}</option>{% endfor %}</select>
+          </div>
+          <div class="kbe__inline-actions">
+            <button class="kbe-btn" type="button" data-kb-preview>Customer preview</button>
+            <button class="kbe-btn" type="button" data-kb-versions>Version history</button>
+          </div>
+          <hr class="kbe__divider" />
+          <button type="button" class="kbe-btn kbe-btn--danger" data-kb-delete hidden>Delete article</button>
+        </div>
+      </details>
+    </aside>
+  </form>
 </div>
+
+<dialog class="dialog kbe-dialog" data-kb-access-dialog aria-labelledby="kb-access-dialog-title">
+  <div class="dialog__container">
+    <header class="dialog__header">
+      <div>
+        <h2 class="dialog__title" id="kb-access-dialog-title">Section access</h2>
+        <p class="kbe-dialog__subtitle">Leave everything unticked to show the section to every company that can read the article.</p>
+      </div>
+      <button class="dialog__close" type="button" data-kb-dialog-close aria-label="Close">&times;</button>
+    </header>
+    <div class="dialog__body kbe-dialog__body">
+      <input class="form-input" type="search" placeholder="Filter companies" aria-label="Filter companies" data-kb-access-filter />
+      <div class="kbe-dialog__list" data-kb-access-list></div>
+    </div>
+    <footer class="kbe-dialog__footer">
+      <button type="button" class="kbe-btn" data-kb-access-clear>Clear selection</button>
+      <span class="kbe-dialog__spacer"></span>
+      <button type="button" class="button button--ghost" data-kb-dialog-close>Cancel</button>
+      <button type="button" class="button" data-kb-access-apply>Apply</button>
+    </footer>
+  </div>
+</dialog>
+
+<dialog class="dialog dialog--wide kbe-dialog" data-kb-review-dialog aria-labelledby="kb-review-dialog-title">
+  <div class="dialog__container">
+    <header class="dialog__header">
+      <h2 class="dialog__title" id="kb-review-dialog-title" data-kb-review-title>Preview</h2>
+      <button class="dialog__close" type="button" data-kb-dialog-close aria-label="Close">&times;</button>
+    </header>
+    <div class="dialog__body kbe-dialog__body kbe-review">
+      <nav class="kbe-review__versions" data-kb-version-list hidden aria-label="Versions"></nav>
+      <article class="kbe-review__content knowledge-base__body" data-kb-review-content></article>
+    </div>
+  </div>
+</dialog>
 {% endblock %}
 
 {% block scripts %}
@@ -151,5 +198,6 @@
   <script type="application/json" id="kb-admin-user-options">{{ kb_user_options | tojson }}</script>
   <script type="application/json" id="kb-admin-company-options">{{ kb_company_options | tojson }}</script>
   <script type="application/json" id="kb-admin-active-article">{{ kb_initial_article | tojson }}</script>
+  <script src="{{ static_url('/static/js/purify.min.js') }}" defer></script>
   <script src="{{ static_url('/static/js/knowledge_base_admin.js') }}" defer></script>
 {% endblock %}

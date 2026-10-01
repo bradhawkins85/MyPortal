@@ -28,6 +28,39 @@ def default_agent_rag_mocks(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_feature_pack_results_require_and_canonicalise_stable_ids(monkeypatch):
+    provider = lambda **_kwargs: [  # noqa: E731
+        {"order_number": " FP-100 ", "title": "Valid result"},
+        {"title": "Missing stable identifier"},
+    ]
+    module = SimpleNamespace(AGENT_SEARCH_PROVIDER=provider)
+    registry = SimpleNamespace(
+        _states={"demo": SimpleNamespace(pack=SimpleNamespace(slug="demo"))}
+    )
+    warnings = []
+    monkeypatch.setattr(agent_service, "get_registry", lambda: registry)
+    monkeypatch.setattr(agent_service.importlib, "import_module", lambda _name: module)
+    monkeypatch.setattr(
+        agent_service,
+        "log_warning",
+        lambda message, **meta: warnings.append((message, meta)),
+    )
+
+    sources = await agent_service._search_feature_pack_sources(
+        "query",
+        user={"id": 1},
+        active_company_id=None,
+        memberships=[],
+        company_ids=[],
+        is_super_admin=True,
+    )
+
+    assert sources["demo"][0]["id"] == "FP-100"
+    assert len(sources["demo"]) == 1
+    assert warnings[0][1]["reason"] == "stable source identifier is required"
+
+
+@pytest.mark.anyio
 async def test_execute_agent_query_returns_sources(monkeypatch):
     user = {"id": 7, "is_super_admin": False}
     memberships = [
@@ -111,21 +144,8 @@ async def test_execute_agent_query_returns_sources(monkeypatch):
         AsyncMock(return_value=package_rows),
     )
 
-    async def fake_trigger(slug, payload, *, background):
-        assert slug == "ollama"
-        assert background is False
-        prompt = payload.get("prompt")
-        assert prompt
-        assert "No relevant RAG evidence was found." in prompt
-        assert "Knowledge base articles:" not in prompt
-        return {
-            "status": "succeeded",
-            "model": "llama3",
-            "response": {"response": "Answer text"},
-            "event_id": 918,
-        }
-
-    monkeypatch.setattr(agent_service.modules_service, "trigger_module", fake_trigger)
+    trigger_mock = AsyncMock()
+    monkeypatch.setattr(agent_service.modules_service, "trigger_module", trigger_mock)
 
     result = await agent_service.execute_agent_query(
         "network setup",
@@ -135,8 +155,11 @@ async def test_execute_agent_query_returns_sources(monkeypatch):
     )
 
     assert result["status"] == "succeeded"
-    assert result["answer"] == "Answer text"
-    assert result["model"] == "llama3"
+    assert "couldn't find authorised evidence" in result["answer"]
+    assert "create a support ticket" in result["answer"]
+    assert result["model"] is None
+    trigger_mock.assert_not_awaited()
+    agent_service.rag_index_service.index_agent_sources.assert_not_awaited()
     assert result["sources"]["knowledge_base"][0]["slug"] == "network-guide"
     assert result["sources"]["tickets"][0]["id"] == 42
     assert result["sources"]["products"][0]["sku"] == "HW-001"
@@ -144,11 +167,44 @@ async def test_execute_agent_query_returns_sources(monkeypatch):
     assert result["context"]["companies"][0]["company_id"] == 1
 
 
+def test_agent_model_call_budget_is_bounded_and_configurable(monkeypatch):
+    monkeypatch.setenv("AI_AGENT_MAX_MODEL_CALLS", "2")
+    assert agent_service._max_agent_model_calls() == 2
+    monkeypatch.setenv("AI_AGENT_MAX_MODEL_CALLS", "99")
+    assert agent_service._max_agent_model_calls() == 2
+    monkeypatch.setenv("AI_AGENT_MAX_MODEL_CALLS", "invalid")
+    assert agent_service._max_agent_model_calls() == 1
+
+
 @pytest.mark.anyio
 async def test_execute_agent_query_rejects_blank(monkeypatch):
     result = await agent_service.execute_agent_query("   ", {"id": 1}, memberships=[])
     assert result["status"] == "error"
     assert result["answer"] is None
+
+
+def test_extract_explicit_ticket_ids_supported_formats():
+    query = "Check ticket #123, #456, ticket789, 9876, and repeat #123."
+
+    result = agent_service._extract_explicit_ticket_ids(query)
+
+    assert result == [123, 456, 789, 9876]
+
+
+def test_extract_explicit_ticket_ids_requires_markers():
+    query = "Reference abc1234def, #      nope, ticketabc123, " "and ticket      nope."
+
+    result = agent_service._extract_explicit_ticket_ids(query)
+
+    assert result == []
+
+
+def test_extract_explicit_ticket_ids_rejects_three_digit_standalone_values():
+    result = agent_service._extract_explicit_ticket_ids(
+        "Check 321 before anything else."
+    )
+
+    assert result == []
 
 
 @pytest.mark.anyio
@@ -471,6 +527,7 @@ async def test_execute_agent_query_includes_generic_feature_pack_sources(monkeyp
         provider_calls.append(context)
         return [
             {
+                "id": "backup-1",
                 "title": "Backups policy",
                 "summary": "Nightly backup completed successfully",
                 "url": "/backups/jobs/1",
@@ -660,14 +717,8 @@ async def test_execute_agent_query_minimises_llm_prompt_context(monkeypatch):
         AsyncMock(return_value=[]),
     )
 
-    captured_prompt = ""
-
-    async def fake_trigger(slug, payload, *, background):
-        nonlocal captured_prompt
-        captured_prompt = payload.get("prompt", "")
-        return {"status": "succeeded", "response": {"response": "Minimised"}}
-
-    monkeypatch.setattr(agent_service.modules_service, "trigger_module", fake_trigger)
+    trigger_mock = AsyncMock()
+    monkeypatch.setattr(agent_service.modules_service, "trigger_module", trigger_mock)
 
     result = await agent_service.execute_agent_query(
         "network", user, active_company_id=1, memberships=memberships
@@ -676,12 +727,8 @@ async def test_execute_agent_query_minimises_llm_prompt_context(monkeypatch):
     assert len(result["sources"]["knowledge_base"]) == 6
     assert len(result["sources"]["tickets"]) == 6
     assert len(result["sources"]["products"]) == 6
-    assert "No relevant RAG evidence was found." in captured_prompt
-    assert "Knowledge base articles:" not in captured_prompt
-    assert "Tickets created by or watched by the user:" not in captured_prompt
-    assert "Products and hardware recommendations" not in captured_prompt
-    assert "Companies available to the user:" not in captured_prompt
-    assert "Extra Co" not in captured_prompt
+    assert "couldn't find authorised evidence" in result["answer"]
+    trigger_mock.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -938,12 +985,9 @@ async def test_execute_agent_query_returns_stages_and_grouped_evidence(monkeypat
     assert result["evidence"]["tickets"][0]["label"] == "[Ticket:#24425]"
     assert result["evidence"]["chats"][0]["duplicate_count"] == 1
     assert "Also found in 1 similar results: [Chat:#31]" in captured_prompt
-    assert llm_stages == [
-        "query_understanding",
-        "evidence_review",
-        "category_summaries",
-        "final_answer",
-    ]
+    assert llm_stages == ["final_answer"]
+    assert result["metrics"]["model_calls"] == 1
+    assert result["metrics"]["max_model_calls"] == 1
 
 
 def test_filter_rag_candidates_does_not_duplicate_selected_sources(monkeypatch):
@@ -1021,11 +1065,138 @@ async def test_execute_agent_query_passes_all_allowed_source_types_to_rag(monkey
     )
 
     source_filters = retrieve_mock.await_args.kwargs["source_filters"]
-    assert source_filters == [
-        "assets",
-        "chats",
-        "issues",
-        "knowledge_base",
-        "ticket_comments",
+    assert set(source_filters) == set(agent_service._SUPPORTED_SOURCE_FILTERS) - {
+        "feature_packs"
+    }
+
+
+@pytest.mark.parametrize(
+    ("query", "source_type"),
+    [
+        ("show recent orders", "orders"),
+        ("find staff named Sam", "staff"),
+        ("list shared mailboxes", "mailboxes"),
+        ("show service status", "service_status"),
+        ("which backups failed", "backup_jobs"),
+        ("show monthly reports", "reports"),
+    ],
+)
+def test_source_routing_never_excludes_supported_query_sources(query, source_type):
+    assert source_type in agent_service._infer_allowed_rag_sources(query)
+
+
+@pytest.mark.parametrize(
+    "source_type",
+    ["orders", "staff", "mailboxes", "service_status", "backup_jobs", "reports"],
+)
+def test_explicit_single_source_filter_is_not_restricted_by_inferred_intent(
+    source_type,
+):
+    requested = agent_service._normalise_source_filters([source_type])
+    allowed = requested or agent_service._infer_allowed_rag_sources("unrelated wording")
+    assert allowed == {source_type}
+
+
+def test_apply_source_caps_limits_overrepresented_sources():
+    candidates = [
+        {"source_type": "chats", "source_id": idx, "score": 0.9 - (idx * 0.01)}
+        for idx in range(1, 8)
+    ] + [{"source_type": "tickets", "source_id": 1, "score": 0.88}]
+
+    limited = agent_service._apply_source_caps(
+        candidates, caps={"chats": 4, "tickets": 2}
+    )
+
+    assert len([item for item in limited if item["source_type"] == "chats"]) == 4
+    assert len([item for item in limited if item["source_type"] == "tickets"]) == 1
+
+
+@pytest.mark.anyio
+async def test_execute_agent_query_applies_source_filters_and_reports_confidence(
+    monkeypatch,
+):
+    user = {"id": 7, "is_super_admin": False}
+    memberships = [{"company_id": 1, "company_name": "Visible Co"}]
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "build_access_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "search_articles",
+        AsyncMock(return_value={"results": []}),
+    )
+    monkeypatch.setattr(
+        agent_service.tickets_repo, "list_tickets_for_user", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(agent_service.db, "fetch_all", AsyncMock(return_value=[]))
+    retrieve_mock = AsyncMock(
+        return_value=[
+            {
+                "source_type": "tickets",
+                "source_id": 100,
+                "title": "Ticket match",
+                "excerpt": "Relevant ticket",
+                "score": 0.9,
+            },
+            {
+                "source_type": "chats",
+                "source_id": 30,
+                "title": "Chat match",
+                "excerpt": "Relevant chat",
+                "score": 0.7,
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        agent_service.rag_retrieval, "retrieve_candidates", retrieve_mock
+    )
+
+    async def fake_trigger(slug, payload, *, background):
+        return {"status": "succeeded", "response": {"response": "ok"}}
+
+    monkeypatch.setattr(agent_service.modules_service, "trigger_module", fake_trigger)
+
+    result = await agent_service.execute_agent_query(
+        "find relevant records",
+        user,
+        memberships=memberships,
+        source_filters=["tickets", "chats"],
+    )
+
+    assert set(retrieve_mock.await_args.kwargs["source_filters"]) == {
         "tickets",
+        "chats",
+    }
+    assert result["stages"][0]["data"]["applied_source_filters"] == ["chats", "tickets"]
+    assert result["answer_confidence"] is None
+    assert result["answer_confidence_label"] == "not_calibrated"
+    assert "representative evaluation set" in result["answer_confidence_explanation"]
+
+
+def test_confidence_missing_sources_only_uses_user_intent():
+    _, label, missing = agent_service._calculate_answer_confidence(
+        [{"source_type": "tickets", "score": 0.9}],
+        preferred_sources=["tickets"],
+    )
+    assert label == "not_calibrated"
+    assert missing == []
+
+
+def test_weak_evidence_is_rejected_before_generation():
+    assert agent_service._filter_rag_candidates(
+        [{"source_type": "tickets", "source_id": 1, "score": 0.01}],
+        allowed_sources={"tickets"},
+    ) == []
+
+
+def test_conflicting_authorised_evidence_is_preserved_for_grounded_answers():
+    candidates = [
+        {"source_type": "tickets", "source_id": 1, "score": 0.9, "excerpt": "Enabled"},
+        {"source_type": "tickets", "source_id": 2, "score": 0.88, "excerpt": "Disabled"},
     ]
+    filtered = agent_service._filter_rag_candidates(
+        candidates, allowed_sources={"tickets"}
+    )
+    assert [item["source_id"] for item in filtered] == [1, 2]

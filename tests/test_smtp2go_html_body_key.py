@@ -184,3 +184,38 @@ async def test_invoke_smtp2go_html_key_precedence(monkeypatch, mock_smtp2go_depe
     
     # 'html' should take precedence over 'html_body' and 'body'
     assert mock_smtp2go_dependencies["html_body"] == "<p>HTML content</p>"
+
+
+@pytest.mark.anyio
+async def test_invoke_smtp2go_does_not_auto_attach_ticket_files_for_reminders(
+    monkeypatch, mock_smtp2go_dependencies
+):
+    """Ticket reminder automations must not attach existing ticket files."""
+
+    async def fail_list_attachments(*args, **kwargs):
+        raise AssertionError("ticket attachment repository should not be queried")
+
+    from app.repositories import ticket_attachments as attachments_repo
+
+    monkeypatch.setattr(attachments_repo, "list_attachments", fail_list_attachments)
+
+    settings = {"api_key": "test-api-key", "enable_tracking": True}
+    payload = {
+        "to": ["requester@example.com"],
+        "cc": ["watcher@example.com"],
+        "subject": "Re: Ticket #1234",
+        "html_body": "<p>Reminder body</p>",
+        "text_body": "Reminder body",
+        "sender": "Support <support@example.com>",
+        "context": {
+            "ticket": {
+                "id": 1234,
+                "status": "waiting_on_client",
+                "has_attachments": True,
+            }
+        },
+    }
+
+    await modules._invoke_smtp2go(settings, payload)
+
+    assert mock_smtp2go_dependencies["attachments"] == []

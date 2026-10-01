@@ -3,6 +3,7 @@
 Generates invoices from company recurring invoice items and billable tickets,
 storing them locally in MyPortal (no external accounting system required).
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
@@ -20,20 +21,36 @@ from app.repositories import company_recurring_invoice_items as recurring_items_
 from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import ticket_expenses as expenses_repo
 from app.repositories import tickets as tickets_repo
-from app.repositories import users as users_repo
 from app.services import modules as modules_service
 from app.services import xero as xero_service
 
-
-DEFAULT_XERO_LINE_ITEM_TEMPLATE = "Ticket {ticket_id}: {ticket_subject} {labour_suffix} ({labour_duration})"
+DEFAULT_XERO_LINE_ITEM_TEMPLATE = (
+    "Ticket {ticket_id}: {ticket_subject} {labour_suffix} ({labour_duration})"
+)
 
 
 def _env_xero_line_item_template() -> str:
     return str(os.getenv("XERO_LINE_ITEM_TEMPLATE", "")).strip()
 
 
+def _get_env_xero_billable_statuses() -> set[str]:
+    """Return ticket statuses that may be billed by local invoice generation.
+
+    The Generate Invoice scheduled task must follow the XERO_BILLABLE_STATUSES
+    environment setting so tickets in other workflow states are not pulled into
+    local invoices just because they have unbilled time or expenses.
+    """
+
+    return (
+        xero_service._normalise_status_filter(os.getenv("XERO_BILLABLE_STATUSES", ""))
+        or set()
+    )
+
+
 def _minutes_to_hours(minutes: int) -> Decimal:
-    return (Decimal(minutes) / Decimal(60)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return (Decimal(minutes) / Decimal(60)).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
 
 
 def _coerce_minutes(value: Any) -> int:
@@ -61,7 +78,10 @@ async def _get_xero_line_item_template() -> str:
         settings = await modules_service.get_module_settings("xero") or {}
     except RuntimeError:
         settings = {}
-    return str(settings.get("line_item_description_template") or "").strip() or DEFAULT_XERO_LINE_ITEM_TEMPLATE
+    return (
+        str(settings.get("line_item_description_template") or "").strip()
+        or DEFAULT_XERO_LINE_ITEM_TEMPLATE
+    )
 
 
 def _strip_empty_description_segments(description: str) -> str:
@@ -112,7 +132,11 @@ def _build_expense_line_description(
     if not expense_descriptions:
         return base_description
     if len(expense_descriptions) == 1:
-        return f"{base_description} - {expense_descriptions[0]}" if base_description else expense_descriptions[0]
+        return (
+            f"{base_description} - {expense_descriptions[0]}"
+            if base_description
+            else expense_descriptions[0]
+        )
     expenses_text = "\n".join(expense_descriptions)
     return f"{base_description}\n{expenses_text}" if base_description else expenses_text
 
@@ -167,7 +191,9 @@ async def _get_xero_rate_lookup_credentials() -> tuple[str | None, str | None]:
     try:
         module = await modules_service.get_module("xero", redact=False)
     except Exception as exc:
-        logger.warning("Failed to load Xero module for recurring item price lookup", error=str(exc))
+        logger.warning(
+            "Failed to load Xero module for recurring item price lookup", error=str(exc)
+        )
         return None, None
 
     if not module or not module.get("enabled"):
@@ -177,28 +203,44 @@ async def _get_xero_rate_lookup_credentials() -> tuple[str | None, str | None]:
     try:
         credentials = await modules_service.get_xero_credentials() or {}
     except Exception as exc:
-        logger.warning("Failed to load Xero credentials for recurring item price lookup", error=str(exc))
+        logger.warning(
+            "Failed to load Xero credentials for recurring item price lookup",
+            error=str(exc),
+        )
         credentials = {}
 
-    tenant_id = str(credentials.get("tenant_id") or settings.get("tenant_id") or "").strip()
+    tenant_id = str(
+        credentials.get("tenant_id") or settings.get("tenant_id") or ""
+    ).strip()
     if not tenant_id:
         return None, None
 
     try:
         access_token = await modules_service.acquire_xero_access_token()
     except Exception as exc:
-        logger.warning("Failed to acquire Xero access token for recurring item price lookup", error=str(exc))
+        logger.warning(
+            "Failed to acquire Xero access token for recurring item price lookup",
+            error=str(exc),
+        )
         return None, None
 
     return tenant_id, access_token
 
 
-async def generate_invoice(company_id: int) -> dict[str, Any]:
+async def generate_invoice(
+    company_id: int,
+    *,
+    ticket_ids: list[int] | None = None,
+    include_recurring_items: bool = True,
+    recurring_line_items: list[dict[str, Any]] | None = None,
+    include_ticket_items: bool = True,
+    approval_required: bool = False,
+) -> dict[str, Any]:
     """Generate a local invoice for the given company.
 
     Builds invoice line items from:
     - Company recurring invoice items
-    - Billable tickets with unbilled time entries
+    - Billable tickets with unbilled time entries or expenses
 
     The generated invoice is stored locally in MyPortal and accessible
     via the /invoices page.
@@ -224,26 +266,36 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
 
     # Build recurring invoice items. When Xero is configured, pass credentials
     # so items without a local price override use their Xero sales price.
-    recurring_line_items = await xero_service.build_recurring_invoice_items(
-        company_id,
-        tax_type=None,
-        context=context,
-        tenant_id=tenant_id,
-        access_token=access_token,
-        include_metadata=True,
-    )
+    generated_recurring_line_items: list[dict[str, Any]] = []
+    if recurring_line_items is not None:
+        generated_recurring_line_items = list(recurring_line_items)
+    elif include_recurring_items:
+        generated_recurring_line_items = await xero_service.build_recurring_invoice_items(
+            company_id,
+            tax_type=None,
+            context=context,
+            tenant_id=tenant_id,
+            access_token=access_token,
+            include_metadata=True,
+        )
 
     line_item_template = await _get_xero_line_item_template()
 
     # Build ticket line items for billable tickets
     ticket_line_items: list[dict[str, Any]] = []
     tickets_context: list[dict[str, Any]] = []
-    ticket_numbers: list[str] = []
     billable_tickets_found = 0
+
+    billable_statuses = _get_env_xero_billable_statuses()
+
+    requested_ticket_ids = {int(ticket_id) for ticket_id in ticket_ids or [] if ticket_id}
 
     # Fetch all tickets for the company and find unbilled ones
     try:
-        all_tickets = await tickets_repo.list_tickets(company_id=company_id, limit=1000)
+        # Do not silently omit older tickets for companies with more than 1,000
+        # records. Status filtering below still protects tickets which are not in
+        # a billable workflow state.
+        all_tickets = await tickets_repo.list_tickets(company_id=company_id, limit=None)
     except Exception as exc:
         logger.warning(
             "Failed to fetch tickets for invoice generation",
@@ -252,24 +304,43 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
         )
         all_tickets = []
 
-    for ticket in all_tickets:
-        ticket_id = ticket.get("id")
+    for ticket in all_tickets if include_ticket_items else []:
+        try:
+            ticket_id = int(ticket.get("id")) if ticket.get("id") is not None else None
+        except (TypeError, ValueError):
+            ticket_id = None
+        if requested_ticket_ids and ticket_id not in requested_ticket_ids:
+            continue
+
+        ticket_status = str(ticket.get("status") or "").strip().lower()
+        if ticket_status not in billable_statuses:
+            continue
         if not ticket_id:
             continue
 
         unbilled_reply_ids = await billed_time_repo.get_unbilled_reply_ids(ticket_id)
-        unbilled_expenses = await expenses_repo.list_expenses(ticket_id, unbilled_only=True)
-        expense_total = sum((_to_decimal(expense.get("amount")) or Decimal("0")) for expense in unbilled_expenses)
+        unbilled_expenses = await expenses_repo.list_expenses(
+            ticket_id, unbilled_only=True
+        )
+        expense_total = sum(
+            (_to_decimal(expense.get("amount")) or Decimal("0"))
+            for expense in unbilled_expenses
+        )
         if not unbilled_reply_ids and expense_total <= 0:
             continue
 
         billable_tickets_found += 1
+        # Internal notes can carry technician time in exactly the same way as
+        # public replies.  Always load both visibilities here so billable time
+        # is not silently omitted merely because the customer cannot see the
+        # underlying note.
         all_replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
         unbilled_replies = [r for r in all_replies if r.get("id") in unbilled_reply_ids]
 
         # Group by labour type
         labour_map: dict[tuple[str | None, str | None], dict[str, Any]] = {}
         billable_minutes = 0
+        billed_replies: list[dict[str, Any]] = []
 
         for reply in unbilled_replies:
             minutes = _coerce_minutes(reply.get("minutes_spent"))
@@ -278,6 +349,13 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
             if not reply.get("is_billable"):
                 continue
             billable_minutes += minutes
+            billed_replies.append(
+                {
+                    "id": int(reply["id"]),
+                    "minutes": minutes,
+                    "labour_type_id": reply.get("labour_type_id"),
+                }
+            )
             labour_code = str(reply.get("labour_type_code") or "").strip() or None
             labour_name = str(reply.get("labour_type_name") or "").strip() or None
             labour_rate = reply.get("labour_type_rate")
@@ -299,7 +377,6 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
             group_minutes = int(group.get("minutes") or 0)
             if group_minutes <= 0:
                 continue
-            hours_decimal = _minutes_to_hours(group_minutes)
             labour_name = str(group.get("name") or "").strip()
             labour_code = str(group.get("code") or "").strip()
             description = _build_ticket_line_description(
@@ -321,7 +398,7 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
 
             line_item: dict[str, Any] = {
                 "Description": description,
-                "Quantity": float(hours_decimal),
+                "Quantity": group_minutes,
                 "UnitAmount": float(rate),
                 "ItemCode": labour_code,
             }
@@ -336,7 +413,15 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                 "labour_groups": labour_groups,
                 "requester_name": requester_name,
                 "requester_email": requester_email,
-                "expense_ids": [int(expense["id"]) for expense in unbilled_expenses if expense.get("id")],
+                # Preserve the exact entries used to construct the invoice. A
+                # reply added or edited while the invoice is being saved must
+                # not be marked as billed without appearing on an invoice line.
+                "billed_replies": billed_replies,
+                "expense_ids": [
+                    int(expense["id"])
+                    for expense in unbilled_expenses
+                    if expense.get("id")
+                ],
             }
         )
 
@@ -348,19 +433,23 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                 requester_name=requester_name,
                 requester_email=requester_email,
             )
-            ticket_line_items.append({
-                "Description": description,
-                "Quantity": 1.0,
-                "UnitAmount": float(expense_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
-                "ItemCode": "",
-                "MyPortalTicketExpenseIds": [int(expense["id"]) for expense in unbilled_expenses if expense.get("id")],
-            })
+            ticket_line_items.append(
+                {
+                    "Description": description,
+                    "Quantity": 1.0,
+                    "UnitAmount": float(
+                        expense_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    ),
+                    "ItemCode": "",
+                    "MyPortalTicketExpenseIds": [
+                        int(expense["id"])
+                        for expense in unbilled_expenses
+                        if expense.get("id")
+                    ],
+                }
+            )
 
-        ticket_num = str(ticket_id)
-        if ticket_num not in ticket_numbers:
-            ticket_numbers.append(ticket_num)
-
-    combined_line_items = recurring_line_items + ticket_line_items
+    combined_line_items = generated_recurring_line_items + ticket_line_items
 
     if not combined_line_items:
         logger.info(
@@ -385,8 +474,10 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
     # Generate invoice number
     invoice_number = await _generate_invoice_number()
 
-    # Determine due date (30 days from today)
-    due_date = date.today() + timedelta(days=30)
+    # Keep the local invoice aligned with the terms sent to Xero.
+    due_date = date.today() + timedelta(
+        days=xero_service.resolve_invoice_due_days(company)
+    )
 
     # Create the invoice record
     try:
@@ -395,7 +486,8 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
             invoice_number=invoice_number,
             amount=total_amount,
             due_date=due_date,
-            status="draft",
+            status="pending_approval" if approval_required else "draft",
+            approval_required=approval_required,
         )
     except Exception as exc:
         logger.error(
@@ -414,8 +506,10 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
     invoice_id = invoice["id"]
 
     # Create invoice line records
+    line_creation_error: Exception | None = None
     for item in combined_line_items:
-        qty = Decimal(str(item.get("Quantity") or 1))
+        raw_quantity = item.get("Quantity")
+        qty = Decimal(str(1 if raw_quantity is None else raw_quantity))
         unit = Decimal(str(item.get("UnitAmount") or 0))
         line_amount = (qty * unit).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         description = str(item.get("Description") or "").strip() or None
@@ -435,15 +529,38 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                 invoice_id=invoice_id,
                 error=str(exc),
             )
+            line_creation_error = exc
+            break
+
+    if line_creation_error is not None:
+        # An incomplete draft must never consume ticket time/expenses. Remove it
+        # (and its lines via the invoice_lines FK) before returning the failure.
+        try:
+            await invoice_repo.delete_invoice(invoice_id)
+        except Exception as cleanup_exc:
+            logger.error(
+                "Failed to remove incomplete local invoice",
+                invoice_id=invoice_id,
+                error=str(cleanup_exc),
+            )
+        return {
+            "status": "error",
+            "reason": "Failed to create invoice lines",
+            "error": str(line_creation_error),
+            "company_id": company_id,
+            "invoice_id": invoice_id,
+        }
 
     recurring_item_ids = [
         int(item["MyPortalRecurringItemId"])
-        for item in recurring_line_items
+        for item in generated_recurring_line_items
         if item.get("MyPortalRecurringItemId")
     ]
     now = datetime.now(timezone.utc)
     try:
-        await recurring_items_repo.mark_recurring_invoice_items_billed(recurring_item_ids, billed_at=now)
+        await recurring_items_repo.mark_recurring_invoice_items_billed(
+            recurring_item_ids, billed_at=now
+        )
     except Exception as exc:
         logger.error(
             "Failed to update recurring invoice item billing timestamps",
@@ -451,6 +568,21 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
             invoice_id=invoice_id,
             error=str(exc),
         )
+        try:
+            await invoice_repo.delete_invoice(invoice_id)
+        except Exception as cleanup_exc:
+            logger.error(
+                "Failed to remove invoice after recurring billing update failed",
+                invoice_id=invoice_id,
+                error=str(cleanup_exc),
+            )
+        return {
+            "status": "error",
+            "reason": "Failed to mark recurring invoice items as billed",
+            "error": str(exc),
+            "company_id": company_id,
+            "invoice_id": invoice_id,
+        }
 
     # Mark time entries as billed and update ticket statuses
     billed_count = 0
@@ -460,18 +592,9 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
         if not ticket_id:
             continue
 
-        unbilled_ids = await billed_time_repo.get_unbilled_reply_ids(ticket_id)
-        replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
-
-        for reply in replies:
-            reply_id = reply.get("id")
-            if reply_id not in unbilled_ids:
-                continue
-            if not reply.get("is_billable"):
-                continue
-            minutes = reply.get("minutes_spent")
-            if not minutes or minutes <= 0:
-                continue
+        for reply in ticket_ctx.get("billed_replies") or []:
+            reply_id = reply["id"]
+            minutes = reply["minutes"]
             labour_type_id = reply.get("labour_type_id")
             try:
                 await billed_time_repo.create_billed_time_entry(
@@ -491,9 +614,17 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                 )
 
         try:
-            await expenses_repo.mark_expenses_billed(list(ticket_ctx.get("expense_ids") or []), invoice_number=invoice_number, billed_at=now)
+            await expenses_repo.mark_expenses_billed(
+                list(ticket_ctx.get("expense_ids") or []),
+                invoice_number=invoice_number,
+                billed_at=now,
+            )
         except Exception as exc:
-            logger.error("Failed to mark ticket expenses billed", ticket_id=ticket_id, error=str(exc))
+            logger.error(
+                "Failed to mark ticket expenses billed",
+                ticket_id=ticket_id,
+                error=str(exc),
+            )
 
         # Update ticket: mark as billed and move to the configured invoiced status.
         invoiced_status = xero_service.resolve_invoiced_ticket_status()
@@ -530,8 +661,142 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
         "invoice_number": invoice_number,
         "total_amount": str(total_amount),
         "line_items": len(combined_line_items),
-        "recurring_items": len(recurring_line_items),
+        "recurring_items": len(generated_recurring_line_items),
         "ticket_items": len(ticket_line_items),
         "tickets_billed": len(tickets_context),
         "time_entries_recorded": billed_count,
     }
+
+
+async def generate_subscription_invoice(
+    company_id: int,
+    *,
+    recurring_item: dict[str, Any],
+    quantity: int,
+    unit_amount: Decimal,
+    coterm_end_date: date | datetime | str | None = None,
+) -> dict[str, Any]:
+    """Invoice one subscription charge locally, then sync it using its send policy."""
+    if int(recurring_item.get("company_id") or 0) != int(company_id):
+        raise ValueError("Recurring invoice item does not belong to the company")
+    if quantity <= 0 or unit_amount < 0:
+        raise ValueError("Subscription invoice quantity and unit amount must be valid")
+
+    description = str(
+        recurring_item.get("description_template")
+        or recurring_item.get("product_code")
+        or "Subscription"
+    )
+    if coterm_end_date:
+        if isinstance(coterm_end_date, datetime):
+            coterm_text = coterm_end_date.date().isoformat()
+        elif isinstance(coterm_end_date, date):
+            coterm_text = coterm_end_date.isoformat()
+        else:
+            try:
+                coterm_text = date.fromisoformat(str(coterm_end_date)[:10]).isoformat()
+            except ValueError as exc:
+                raise ValueError("Co-term end date must be a valid ISO date") from exc
+        description = f"{description}\nCo-Term Expiry: {coterm_text}"
+
+    line_item = {
+        "Description": description,
+        "Quantity": quantity,
+        "UnitAmount": float(unit_amount),
+        "ItemCode": str(recurring_item.get("product_code") or ""),
+        "MyPortalRecurringItemId": int(recurring_item["id"]),
+    }
+    result = await generate_invoice(
+        company_id,
+        include_recurring_items=False,
+        recurring_line_items=[line_item],
+        include_ticket_items=False,
+    )
+    if result.get("status") != "succeeded":
+        return result
+
+    company = await company_repo.get_company_by_id(company_id) or {}
+    auto_send = bool(company.get("xero_auto_send_subscription_invoices", 1))
+    result["xero_result"] = await xero_service.sync_invoice(
+        int(result["invoice_id"]), auto_send=auto_send
+    )
+    return result
+
+
+async def generate_order_invoice(
+    *,
+    order_number: str,
+    company_id: int,
+    order_items: list[dict[str, Any]],
+    user_name: str | None = None,
+    freight_amount: Decimal | None = None,
+) -> dict[str, Any]:
+    """Create a durable MyPortal invoice for a cart order, then sync it to Xero.
+
+    Subscription products are deliberately excluded by the caller because their
+    charges use the subscription invoice workflow.  Keeping the local invoice
+    as the source of truth lets administrators retry a failed Xero sync from the
+    normal invoice screens.
+    """
+    line_items: list[dict[str, Any]] = []
+    for item in order_items:
+        quantity = max(0, int(item.get("quantity") or 0))
+        if quantity == 0:
+            continue
+        unit_amount = item.get("coterm_price") if item.get("coterm_enabled") else None
+        if unit_amount is None:
+            unit_amount = item.get("unit_price")
+        amount = _to_decimal(unit_amount) or Decimal("0")
+        line_items.append(
+            {
+                "Description": str(item.get("product_name") or "Item").strip(),
+                "Quantity": quantity,
+                "UnitAmount": float(amount),
+                "ItemCode": str(item.get("product_sku") or "").strip(),
+            }
+        )
+
+    freight = _to_decimal(freight_amount) or Decimal("0")
+    if freight > 0:
+        line_items.append(
+            {
+                "Description": "Freight",
+                "Quantity": 1,
+                "UnitAmount": float(freight),
+                "ItemCode": "",
+            }
+        )
+    if user_name:
+        line_items.append(
+            {
+                "Description": f"Order {order_number} placed by {user_name}",
+                "Quantity": 0,
+                "UnitAmount": 0,
+                "ItemCode": "",
+            }
+        )
+
+    if not any(Decimal(str(line["Quantity"])) > 0 for line in line_items):
+        return {
+            "status": "skipped",
+            "reason": "Order has no invoiceable product lines",
+            "order_number": order_number,
+            "company_id": company_id,
+        }
+
+    result = await generate_invoice(
+        company_id,
+        include_recurring_items=False,
+        recurring_line_items=line_items,
+        include_ticket_items=False,
+    )
+    result["order_number"] = order_number
+    if result.get("status") != "succeeded":
+        return result
+
+    company = await company_repo.get_company_by_id(company_id) or {}
+    auto_send = bool(company.get("xero_auto_send_product_invoices", 1))
+    result["xero_result"] = await xero_service.sync_invoice(
+        int(result["invoice_id"]), auto_send=auto_send
+    )
+    return result

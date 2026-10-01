@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from app.api.dependencies.modules import require_module_enabled
 from app.repositories import calls as calls_repo
 
 
-router = APIRouter(tags=["Calls"])
+router = APIRouter(tags=["Calls"], dependencies=[Depends(require_module_enabled("calls"))])
 
 
 def _main():

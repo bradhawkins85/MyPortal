@@ -1,0 +1,7 @@
+{
+  "guid": "3075df23-1b33-491d-9316-69b7aac2d94b",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "feature",
+  "summary": "Rebuild Edit company > Staff custom fields as a searchable, grouped field list with a tabbed modal editor (live preview, option builder, visual condition and select-map builder, requester visibility and Microsoft 365 mapping).",
+  "content_hash": "eda9f23f4a70898da6425601b180793061402f3dd73e23d53683555af6d4053c"
+}

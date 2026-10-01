@@ -16,11 +16,14 @@ handlers unless the feature pack renders its own response).
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
 import json
 import re
 from typing import Literal
+from urllib.parse import unquote, urlparse
 
 from fastapi import Request, Response
 from fastapi.responses import RedirectResponse
@@ -78,9 +81,13 @@ def set_flash(
     signed = _sign(payload)
     settings = get_settings()
     secure = settings.environment.lower() == "production"
+    # Base64-encode so the cookie value is restricted to [A-Za-z0-9+/=]:
+    # - prevents any header-injection via special / whitespace characters
+    # - keeps the value RFC 6265-compliant
+    cookie_value = base64.b64encode(signed.encode("utf-8")).decode("utf-8")
     response.set_cookie(
         _COOKIE_NAME,
-        signed,
+        cookie_value,
         httponly=True,
         secure=secure,
         max_age=_MAX_AGE,
@@ -97,6 +104,11 @@ def pop_flash(request: Request) -> dict[str, str] | None:
     """
     raw = request.cookies.get(_COOKIE_NAME)
     if not raw:
+        return None
+    # Decode the base64 wrapper applied in set_flash; reject malformed values.
+    try:
+        raw = base64.b64decode(raw.encode("utf-8")).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
         return None
     payload = _verify(raw)
     if payload is None:
@@ -119,6 +131,23 @@ def clear_flash(response: Response) -> None:
     response.delete_cookie(_COOKIE_NAME)
 
 
+def _safe_redirect_target(url: str, *, fallback: str = "/") -> str:
+    """Return a local redirect target, or *fallback* when *url* is unsafe."""
+    candidate = str(url or "").strip()
+    if not candidate:
+        return fallback
+    # Browsers strip tab/CR/LF from URLs, so "/\t/evil" would become "//evil".
+    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in candidate):
+        return fallback
+    candidate = candidate.replace("\\", "/")
+    parsed = urlparse(candidate)
+    if parsed.scheme or parsed.netloc:
+        return fallback
+    if not candidate.startswith("/") or candidate.startswith("//"):
+        return fallback
+    return candidate
+
+
 def flash_redirect(
     url: str,
     message: str,
@@ -132,6 +161,13 @@ def flash_redirect(
 
         return flash_redirect("/admin/foo", "Saved.", "success")
     """
-    response = RedirectResponse(url=url, status_code=status_code)
+    # Decode percent-encoding and normalise backslashes before validating.
+    decoded = unquote(str(url or "").strip()).replace("\\", "/")
+    parsed = urlparse(decoded)
+    if decoded and not parsed.scheme and not parsed.netloc and decoded.startswith("/") and not decoded.startswith("//"):
+        safe_url = decoded
+    else:
+        safe_url = "/"
+    response = RedirectResponse(url=safe_url, status_code=status_code)
     set_flash(response, message, variant)
     return response

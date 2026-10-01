@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% from "macros/header.html" import page_header_actions %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block header_title %}
+  <div class="page-header-bar page-header-bar--record">
+    <span class="header__title-text" title="{{ title }}">{{ title }}</span>
+    <span class="page-header-bar__meta">
+      {% if job %}
+        <span class="status status--info">Status-tracked</span>
+        <span>Status tracking is managed in Backup history; document how this job works here.</span>
+      {% else %}
+        <span class="status status--neutral">Not tracked</span>
+        <span>A backup documented here that does not report its status.</span>
+      {% endif %}
+    </span>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  {% set backup_actions = [
+    {"label": "Save" if entry or job else "Add backup", "type": "submit", "variant": "primary",
+     "attrs": {"form": "backup-form"}}
+  ] %}
+  {% if delete_url %}
+    {% set _ = backup_actions.append({"label": "Delete backup", "type": "form", "action": delete_url, "variant": "danger",
+       "confirm": "Delete this backup entry? Its documented details will be removed."}) %}
+  {% endif %}
+  <div class="header-actions">
+    <a class="button button--ghost" href="/backups">Back to backups</a>
+    {{ page_header_actions(backup_actions, menu_id="backup-actions-menu") }}
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card card--panel">
+  <div class="card__body">
+    <form id="backup-form" method="post" action="{{ form_action }}" class="form">
+      {% include "partials/csrf.html" %}
+      <div class="form-field">
+        <label class="form-label" for="backup-name">Name</label>
+        {% if job %}
+          <input id="backup-name" class="form-input" value="{{ job.name }}" disabled>
+        {% else %}
+          <input id="backup-name" name="name" class="form-input" required maxlength="200" value="{{ entry.name or '' }}">
+        {% endif %}
+      </div>
+
+      <div class="form-grid">
+        <div class="form-field">
+          <label class="form-label" for="backup-app">Backup app</label>
+          <select id="backup-app" name="backup_app_id" class="form-input" data-searchable="on">
+            <option value="">Not set</option>
+            {% for app in backup_apps %}
+              <option value="{{ app.id }}" {% if entry.backup_app_id == app.id %}selected{% endif %}>{{ app.name }}</option>
+            {% endfor %}
+          </select>
+          <label class="form-label" for="backup-new-app">Or add a new app</label>
+          <input id="backup-new-app" name="new_backup_app" class="form-input" maxlength="120" placeholder="e.g. Veeam Backup &amp; Replication">
+          <p class="form-help">A new app is added to the list for everyone and replaces the selection above.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="backup-frequency">Frequency</label>
+          <input id="backup-frequency" name="frequency" class="form-input" maxlength="120" list="backup-frequency-options" value="{{ entry.frequency or '' }}" placeholder="e.g. Daily at 10pm">
+          <datalist id="backup-frequency-options">
+            {% for option in frequency_suggestions %}<option value="{{ option }}"></option>{% endfor %}
+          </datalist>
+        </div>
+      </div>
+
+      <div class="form-field">
+        <label class="form-label" for="backup-source">Source</label>
+        <textarea id="backup-source" name="source" class="form-input form-input--textarea" rows="3" maxlength="4000" placeholder="What is backed up, e.g. FS01 D:\Shares, SQL01 all databases">{{ entry.source or '' }}</textarea>
+      </div>
+
+      <div class="form-field">
+        <label class="form-label" for="backup-destinations">Destinations</label>
+        <textarea id="backup-destinations" name="destinations" class="form-input form-input--textarea" rows="3" placeholder="One per line, e.g. NAS01 \\nas01\backups">{{ (entry.destinations or []) | join('\n') }}</textarea>
+        <p class="form-help">One destination per line (up to 20).</p>
+      </div>
+
+      <fieldset class="form-fieldset">
+        <legend class="form-fieldset__legend">Encryption keys</legend>
+        {% if vault_credentials is not none %}
+          <div class="form-field">
+            <label class="form-label" for="backup-credentials">Credential vault</label>
+            <select id="backup-credentials" name="credential_ids" class="form-input" multiple>
+              {% for credential in vault_credentials %}
+                <option value="{{ credential.id }}" {% if credential.id in (entry.credential_ids or []) %}selected{% endif %}>{{ credential.name }}{% if credential.archived %} (archived){% endif %}</option>
+              {% endfor %}
+            </select>
+            <p class="form-help">Link the encryption keys or passwords stored in this company's credential vault. Only the name is shown here; secrets stay in the vault.</p>
+          </div>
+        {% elif entry.credential_ids %}
+          <p class="form-help">{{ entry.credential_ids | length }} vault credential{{ '' if entry.credential_ids | length == 1 else 's' }} linked. You need Credential vault access to change them.</p>
+        {% endif %}
+        <div class="form-field">
+          <label class="form-label" for="backup-key-links">Key links</label>
+          <textarea id="backup-key-links" name="key_links" class="form-input form-input--textarea" rows="3" placeholder="Label | https://…">{% for link in entry.key_links or [] %}{{ link.label }} | {{ link.url }}{% if not loop.last %}
+{% endif %}{% endfor %}</textarea>
+          <p class="form-help">One link per line as <code>Label | https://…</code>, for keys kept in another password manager or document. Never paste a key itself here.</p>
+        </div>
+      </fieldset>
+
+      <div class="form-field">
+        <label class="form-label" for="backup-notes">Notes</label>
+        <textarea id="backup-notes" name="notes" class="form-input form-input--textarea" rows="4" maxlength="4000">{{ entry.notes or '' }}</textarea>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,7 @@
+{
+  "guid": "bcf2a128-a6bf-4291-aa1c-c53db93f459d",
+  "occurred_at": "2026-09-25T00:00Z",
+  "change_type": "Fix",
+  "summary": "Recover an existing Microsoft 365 application by client ID when its stored Graph object ID is stale.",
+  "content_hash": "4f398bccc35060c87789d023cfa1480deed58a46890282530899c377faefdb5a"
+}

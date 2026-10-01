@@ -1,7 +1,36 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}Quotes{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Quotes</span>
+    {% if quotes_total_all %}
+    <div class="page-header-toolbar">
+      <form method="get" class="page-header-toolbar__group">
+        <label class="visually-hidden" for="quote-status-filter">Status</label>
+        <select id="quote-status-filter" name="status" class="form-input page-header-toolbar__select" onchange="this.form.submit()">
+          <option value="">All statuses</option>
+          {% for option in status_options %}
+            <option value="{{ option.value }}" {% if status_filter and status_filter == option.value %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+        <noscript><button type="submit" class="button button--ghost button--compact">Apply filters</button></noscript>
+        {% if filters_active %}
+          <a href="{{ request.url.path }}" class="button button--ghost button--compact">Clear</a>
+        {% endif %}
+      </form>
+      <label class="visually-hidden" for="quotes-quick-filter">Filter quotes</label>
+      <input
+        id="quotes-quick-filter"
+        type="search"
+        class="form-input page-header-toolbar__search"
+        placeholder="Quick filter quotes"
+        data-table-filter="quotes-table"
+      />
+    </div>
+    {% endif %}
+  </div>
+{% endblock %}
 
 {% block header_actions %}
   {{ page_header_actions([
@@ -46,32 +75,6 @@
       <div>
         <h2 class="card__title">Saved quotes</h2>
         <p class="card__subtitle">Search and filter saved quotes, then load them to your cart for ordering.</p>
-      </div>
-      <div class="card__controls orders-toolbar">
-        <form method="get" class="orders-toolbar__form">
-          <div class="orders-toolbar__field">
-            <label class="form-label" for="quote-status-filter">Status</label>
-            <select id="quote-status-filter" name="status" class="form-input">
-              <option value="">All statuses</option>
-              {% for option in status_options %}
-                <option value="{{ option.value }}" {% if status_filter and status_filter == option.value %}selected{% endif %}>{{ option.label }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="orders-toolbar__actions">
-            <button type="submit" class="button">Apply filters</button>
-            {% if filters_active %}
-              <a href="{{ request.url.path }}" class="button button--ghost">Clear</a>
-            {% endif %}
-          </div>
-        </form>
-        <input
-          type="search"
-          class="form-input orders-toolbar__search"
-          placeholder="Quick filter quotes"
-          aria-label="Filter quotes"
-          data-table-filter="quotes-table"
-        />
       </div>
     </header>
     {% if filters_active and quotes_total == 0 %}
@@ -141,7 +144,7 @@
                             <button type="submit" class="header-title-menu__link" role="menuitem">Load to Cart</button>
                           </form>
                         </li>
-                        {% if is_admin %}
+                        {% if is_admin and module_enabled.get('xero', false) %}
                           <li class="header-title-menu__item" role="none">
                             <button
                               type="button"

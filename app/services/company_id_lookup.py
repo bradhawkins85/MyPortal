@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
 from app.services import modules as modules_service
@@ -201,6 +203,19 @@ async def lookup_missing_company_ids(company_id: int) -> dict[str, Any]:
             )
             results["huntress_lookup"] = "error"
             results["huntress_error"] = str(exc)
+
+    if not company.get("huntress_sat_account_id"):
+        try:
+            sat_id = await _lookup_huntress_sat_account_id(company_name)
+            if sat_id:
+                updates["huntress_sat_account_id"] = sat_id
+                results["huntress_sat_lookup"] = "found"
+                results["updates"]["huntress_sat_account_id"] = sat_id
+            else:
+                results["huntress_sat_lookup"] = "not_found"
+        except Exception as exc:
+            log_error("Failed to lookup Huntress SAT account ID", company_id=company_id, error=str(exc))
+            results["huntress_sat_lookup"] = "error"
     
     # Apply updates if any IDs were found
     if updates:
@@ -354,7 +369,7 @@ async def _lookup_xero_contact_id(company_name: str) -> str | None:
         page = 1
         max_pages = 10  # Limit search to avoid excessive API calls
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
             while page <= max_pages:
                 params = {
                     "page": page,
@@ -478,6 +493,28 @@ async def _lookup_huntress_organization_id(company_name: str) -> str | None:
                 return str(org_id)
 
     log_info("No exact-match Huntress organisation found", company_name=company_name)
+    return None
+
+
+async def _lookup_huntress_sat_account_id(company_name: str) -> str | None:
+    """Search Managed SAT accounts and return the exact name match's ID."""
+    try:
+        accounts = await huntress_service.list_sat_accounts()
+    except huntress_service.HuntressConfigurationError:
+        log_info("Huntress SAT integration not configured, skipping lookup")
+        return None
+    except Exception as exc:
+        log_error("Error fetching Huntress SAT accounts", company_name=company_name, error=str(exc))
+        return None
+    search_name = _normalize_company_name(company_name)
+    for account in accounts:
+        if not isinstance(account, dict):
+            continue
+        candidate = account.get("name") or account.get("display_name") or account.get("account_name") or ""
+        if _normalize_company_name(candidate) == search_name:
+            account_id = account.get("id") or account.get("external_id")
+            if account_id is not None:
+                return str(account_id)
     return None
 
 

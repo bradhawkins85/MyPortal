@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
+from app.core.config import get_settings
 from app.repositories import companies as company_repo
 from app.repositories import shop as shop_repo
 from app.repositories import user_companies as user_company_repo
@@ -20,6 +21,23 @@ from app.schemas.quotes import (
 from app.services import xero as xero_service
 
 router = APIRouter(prefix="/api/quotes", tags=["Quotes"])
+
+
+def _build_quote_magic_url(request: Request, token: str) -> str:
+    """Build an HTTPS URL for a quote token that may leave the application."""
+    route_url = request.url_for("download_quote_magic_pdf", token=token)
+    public_base = str(get_settings().public_base_url or "").strip().rstrip("/")
+    if public_base:
+        if "://" not in public_base:
+            public_base = f"https://{public_base}"
+        elif not public_base.lower().startswith("https://"):
+            public_base = f"https://{public_base.split('://', 1)[1]}"
+        return f"{public_base}{route_url.path}"
+
+    # Uvicorn commonly sees the unencrypted proxy-to-app hop as HTTP. Magic
+    # links contain a bearer token, so never expose one over that inferred
+    # scheme; public deployments should always terminate HTTPS at the proxy.
+    return str(route_url.replace(scheme="https"))
 
 
 async def _resolve_company_id(
@@ -188,6 +206,9 @@ async def sync_quote_to_xero(
     _: None = Depends(require_database),
     current_user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
+    from app.services.module_gate import require_enabled
+
+    await require_enabled("xero")
     resolved_company_id = await _resolve_company_id(company_id, company_id_alt)
     await _ensure_company(resolved_company_id)
     summary = await shop_repo.get_quote_summary(quote_number, resolved_company_id)
@@ -270,7 +291,7 @@ async def create_quote_magic_link(
                 detail="Unable to generate quote link",
             )
 
-    url = str(request.url_for("download_quote_magic_pdf", token=token))
+    url = _build_quote_magic_url(request, token)
     return QuoteMagicLinkResponse.model_validate(
         {"quote_number": quote_number, "company_id": resolved_company_id, "url": url}
     )

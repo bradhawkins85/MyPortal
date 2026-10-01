@@ -19,8 +19,10 @@ Use dotted paths in automation filters to reference specific ticket fields. Key
 paths now available include:
 
 - `ticket.number` / `ticket.ticket_number` - Ticket number (e.g., "TKT-123")
-- `ticket.body` - Initial request body, using the first public conversation
-  entry when available and falling back to the ticket description
+- `ticket.body` - Body associated with the current event. For reply-backed
+  events this is the triggering reply; otherwise it is the initial request body
+- `ticket.initial_body` - Initial request body, using the first public
+  conversation entry when available and falling back to the ticket description
 - `ticket.requester.email` / `ticket.requester.display_name`
 - `ticket.assigned_user.email` / `ticket.assigned_user.display_name`
 - `ticket.company.name`
@@ -30,7 +32,10 @@ paths now available include:
 - `ticket.watchers[0].email` (and subsequent indexes) for individual watcher
   details
 - `ticket.latest_reply.body` and `ticket.latest_reply.author_email` for the most
-  recent conversation entry
+  recent public technician reply
+- `ticket.latest_customer_reply.body`, `ticket.latest_customer_reply.author_email`,
+  and `ticket.latest_customer_reply.author_display_name` for the most recent
+  public reply from the requester or a ticket watcher
 - `ticket_update.actor_type` to identify whether the update originated from the
   system, an automation, the requester, a watcher, or a technician
 - `ticket_update.actor_user_email` / `ticket_update.actor_user_display_name`
@@ -76,6 +81,9 @@ emails or webhook requests). Newly added tokens include:
 | `{{ TICKET_WATCHER_EMAILS_0 }}` ... | Flattened list of watcher emails for quick iteration. |
 | `{{ TICKET_LATEST_REPLY_BODY }}` | Body of the most recent reply. |
 | `{{ TICKET_LATEST_REPLY_AUTHOR_EMAIL }}` | Email for the author of the latest reply. |
+| `{{ TICKET_LATEST_CUSTOMER_REPLY_BODY }}` | Body of the most recent public requester or watcher reply. |
+| `{{ TICKET_LATEST_CUSTOMER_REPLY_AUTHOR_EMAIL }}` | Email for the author of the latest customer reply. |
+| `{{ TICKET_LATEST_CUSTOMER_REPLY_AUTHOR_DISPLAY_NAME }}` | Display name for the author of the latest customer reply. |
 | `{{ TICKET_LATEST_REPLY_AUTHOR_DISPLAY_NAME }}` | Display name for the latest reply author. |
 | `{{ ACTIVE_ASSETS }}` / `{{ ACTIVE_ASSETS:7 }}` | Count of assets that synced in the current month, or within the last `N` days when the `:N` suffix is provided. |
 | `{{ count:asset:field-name }}` | Count of assets with a specific custom field checkbox set to true (e.g., `{{ count:asset:bitdefender }}` or `{{ count:asset:threatlocker-installed }}`). |

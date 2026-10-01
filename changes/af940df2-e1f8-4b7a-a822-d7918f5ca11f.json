@@ -1,0 +1,7 @@
+{
+  "guid": "af940df2-e1f8-4b7a-a822-d7918f5ca11f",
+  "occurred_at": "2026-09-29T03:30Z",
+  "change_type": "Feature",
+  "summary": "Start and follow MyPortal upgrades from the System updates page for both bare-metal and Docker installations, with live progress.",
+  "content_hash": "5ea742d88799018851d44351a814428108a0e05b7b57abb90f48a70a7101d590"
+}

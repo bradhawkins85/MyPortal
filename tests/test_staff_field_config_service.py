@@ -313,3 +313,86 @@ def test_validate_multiple_fields_multiple_errors():
     ]
     _, errors = validate_staff_form_values({}, config)
     assert len(errors) >= 2
+
+
+# ---------------------------------------------------------------------------
+# _parse_options_json and save_company_staff_field_admin_config
+# ---------------------------------------------------------------------------
+
+
+def test_parse_options_json_reads_builder_payload():
+    from app.services.staff_field_config import _parse_options_json
+
+    payload = '[{"value": "sales", "label": "Sales"}, {"value": "ops", "label": ""}, "Finance"]'
+    assert _parse_options_json(payload) == [
+        {"value": "sales", "label": "Sales"},
+        {"value": "ops", "label": "ops"},
+        {"value": "Finance", "label": "Finance"},
+    ]
+
+
+def test_parse_options_json_keeps_commas_and_colons_in_labels():
+    from app.services.staff_field_config import _parse_options_json
+
+    payload = '[{"value": "rd", "label": "Research, Development: Lab"}]'
+    assert _parse_options_json(payload) == [{"value": "rd", "label": "Research, Development: Lab"}]
+
+
+def test_parse_options_json_drops_blank_and_duplicate_values():
+    from app.services.staff_field_config import _parse_options_json
+
+    payload = '[{"value": ""}, {"value": "a"}, {"value": "a", "label": "Again"}]'
+    assert _parse_options_json(payload) == [{"value": "a", "label": "a"}]
+
+
+@pytest.mark.parametrize("payload", ["", "   ", "not json", '{"value": "a"}'])
+def test_parse_options_json_returns_none_for_missing_or_invalid(payload):
+    from app.services.staff_field_config import _parse_options_json
+
+    assert _parse_options_json(payload) is None
+
+
+@pytest.mark.asyncio
+async def test_save_admin_config_prefers_options_json_and_falls_back_to_text(monkeypatch):
+    from app.services import staff_field_config as service
+
+    fields = [
+        {"definition_id": 1, "key": "department", "type": "select", "base_type": "text", "sort_order": 5},
+        {"definition_id": 2, "key": "location", "type": "select", "base_type": "select", "sort_order": 6},
+    ]
+    saved: dict = {}
+
+    async def fake_load(company_id):
+        return fields
+
+    async def fake_upsert(company_id, configs):
+        saved["configs"] = configs
+
+    async def fake_replace(company_id, options):
+        saved["options"] = options
+
+    monkeypatch.setattr(service, "load_effective_company_staff_fields", fake_load)
+    monkeypatch.setattr(service.staff_field_config_repo, "upsert_company_staff_field_configs", fake_upsert)
+    monkeypatch.setattr(service.staff_field_config_repo, "replace_company_staff_field_options", fake_replace)
+
+    await service.save_company_staff_field_admin_config(
+        7,
+        {
+            "field_department_type": "select",
+            "field_department_visible": "1",
+            "field_department_sort_order": "2",
+            "field_department_options_json": '[{"value": "sales", "label": "Sales, AU"}]',
+            "field_location_type": "select",
+            "field_location_options": "syd:Sydney, mel",
+        },
+    )
+
+    assert saved["options"] == {
+        1: [{"value": "sales", "label": "Sales, AU"}],
+        2: [{"value": "syd", "label": "Sydney"}, {"value": "mel", "label": "mel"}],
+    }
+    department = saved["configs"][0]
+    assert department["visible"] is True
+    assert department["required"] is False
+    assert department["sort_order"] == 2
+    assert department["field_type"] == "select"

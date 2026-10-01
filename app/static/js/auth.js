@@ -1,7 +1,87 @@
 const initAuthForms = () => {
   const forms = document.querySelectorAll('[data-auth-form]');
   forms.forEach((form) => new AuthForm(form));
+  initPasskeyLogin();
 };
+
+function initPasskeyLogin() {
+  const passkeyUtils = window.MyPortalPasskeyUtils;
+  const button = document.querySelector('[data-passkey-login]');
+  const errorContainer = document.querySelector('[data-passkey-error]');
+  const helpText = document.querySelector('[data-passkey-help]');
+  if (!button || !passkeyUtils) {
+    return;
+  }
+  if (!passkeyUtils.supportsPasskeys()) {
+    button.disabled = true;
+    if (helpText) {
+      helpText.hidden = true;
+    }
+    if (errorContainer) {
+      errorContainer.hidden = false;
+      errorContainer.textContent = 'Passkeys are not supported in this browser. Sign in with your password instead.';
+    }
+    return;
+  }
+  const defaultLabel = button.textContent;
+  button.addEventListener('click', async () => {
+    if (errorContainer) {
+      errorContainer.hidden = true;
+      errorContainer.textContent = '';
+    }
+    button.disabled = true;
+    button.textContent = 'Waiting for passkey…';
+    try {
+      const optionsResponse = await fetch('/auth/passkeys/authenticate/options', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+      const optionsResult = await optionsResponse.json();
+      if (!optionsResponse.ok) {
+        throw new Error(optionsResult.detail || 'Unable to start passkey sign-in.');
+      }
+      const credential = await navigator.credentials.get({
+        publicKey: passkeyUtils.decodeCredentialOptions(optionsResult.public_key),
+      });
+      if (!credential) {
+        throw new Error('No passkey was selected.');
+      }
+      const verifyResponse = await fetch('/auth/passkeys/authenticate/verify', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          challenge_id: optionsResult.challenge_id,
+          credential: passkeyUtils.serializeCredential(credential),
+        }),
+      });
+      const verifyResult = await verifyResponse.json();
+      if (!verifyResponse.ok) {
+        throw new Error(verifyResult.detail || 'Passkey sign-in failed.');
+      }
+      const loginForm = document.querySelector('[data-auth-form][data-success-redirect]');
+      const fallbackRedirect = (loginForm && loginForm.dataset.successRedirect) || '/';
+      window.location.assign(verifyResult.redirect || fallbackRedirect);
+    } catch (error) {
+      if (errorContainer) {
+        errorContainer.hidden = false;
+        errorContainer.textContent = passkeyUtils.passkeyErrorMessage(
+          error,
+          error.message || 'Passkey sign-in failed.',
+        );
+      }
+    } finally {
+      button.disabled = false;
+      button.textContent = defaultLabel;
+    }
+  });
+}
 
 class AuthForm {
   constructor(form) {
@@ -93,7 +173,7 @@ class AuthForm {
       }
 
       if (result && result.verification_required) {
-        this.showError(this.extractDetail(result) || 'Check your email to verify your account before signing in.');
+        this.showSuccess(this.extractDetail(result) || 'Check your email to verify your account before signing in.');
         this.form.reset();
         return;
       }

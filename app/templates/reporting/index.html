@@ -1,13 +1,38 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}<span class="header__title-text">Reporting</span>{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Reporting</span>
+    <form method="get" action="/reporting" class="page-header-toolbar" aria-label="Choose report">
+      <label class="visually-hidden" for="reporting-select">Report</label>
+      <select id="reporting-select" name="report" class="form-input page-header-toolbar__select" {% if not available_reports %}disabled{% endif %}>
+        <option value="">-- Select a report --</option>
+        {% for report in available_reports %}
+          <option value="{{ report.id }}" {% if selected_report and selected_report.id == report.id %}selected{% endif %}>{{ report.name }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="button button--primary button--compact" {% if not available_reports %}disabled{% endif %}>Run report</button>
+    </form>
+  </div>
+{% endblock %}
 
 {% block header_actions %}
-{% if can_admin_reporting %}
-<div class="header-actions header-actions--right">
-  <a class="button button--ghost" href="/admin/reporting">Manage reports</a>
-</div>
-{% endif %}
+  {% set reporting_actions = [] %}
+  {% if selected_report %}
+    {% for fmt in ['csv', 'json', 'xml', 'pdf'] %}
+      {% set _ = reporting_actions.append({"label": "Export " ~ fmt | upper, "type": "link", "href": "/reporting/" ~ selected_report.id ~ "/export?format=" ~ fmt}) %}
+    {% endfor %}
+  {% endif %}
+  {% if can_admin_reporting %}
+    {% if selected_report %}
+      {% set _ = reporting_actions.append({"label": "Edit report", "type": "link", "href": "/admin/reporting/" ~ selected_report.id ~ "/edit"}) %}
+    {% endif %}
+    {% set _ = reporting_actions.append({"label": "Manage reports", "type": "link", "href": "/admin/reporting"}) %}
+  {% endif %}
+  {% if reporting_actions %}
+    {{ page_header_actions(reporting_actions, menu_id="reporting-actions") }}
+  {% endif %}
 {% endblock %}
 
 {% block content %}
@@ -18,29 +43,15 @@
     </div>
   {% endif %}
 
-  <section class="card card--panel">
-    <header class="card__header">
-      <h2 class="card__title">Run a report</h2>
-      <p class="card__description">Pick a saved report to execute. Results stay on this page and can be exported.</p>
-    </header>
-    <form method="get" action="/reporting" class="card__controls" aria-label="Choose report">
-      <div class="form-field">
-        <label class="form-label" for="reporting-select">Report</label>
-        <select id="reporting-select" name="report" class="form-input" {% if not available_reports %}disabled{% endif %}>
-          <option value="">-- Select a report --</option>
-          {% for report in available_reports %}
-            <option value="{{ report.id }}" {% if selected_report and selected_report.id == report.id %}selected{% endif %}>{{ report.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="form-actions">
-        <button type="submit" class="button button--primary" {% if not available_reports %}disabled{% endif %}>Run report</button>
-      </div>
-    </form>
-    {% if not available_reports %}
+  {% if not available_reports %}
+    <section class="card card--panel">
       <p class="form-hint">No reports are available to you yet. Ask a super admin to grant access or to create a report.</p>
-    {% endif %}
-  </section>
+    </section>
+  {% elif not selected_report %}
+    <section class="card card--panel">
+      <p class="form-hint">Pick a saved report in the header to run it. Results stay on this page and can be exported.</p>
+    </section>
+  {% endif %}
 
   {% if selected_report %}
     <section class="card card--panel">
@@ -54,12 +65,6 @@
             {{ result.row_count }} row(s){% if result.truncated %} (capped at {{ max_rows }}){% endif %}{% if generated_at_iso %}
               · Generated <span data-utc="{{ generated_at_iso }}">{{ generated_at_iso }}</span>{% endif %}
           </p>
-        </div>
-        <div class="header-actions header-actions--right">
-          <a class="button button--ghost" href="/reporting/{{ selected_report.id }}/export?format=csv">Export CSV</a>
-          <a class="button button--ghost" href="/reporting/{{ selected_report.id }}/export?format=json">Export JSON</a>
-          <a class="button button--ghost" href="/reporting/{{ selected_report.id }}/export?format=xml">Export XML</a>
-          <a class="button button--ghost" href="/reporting/{{ selected_report.id }}/export?format=pdf">Export PDF</a>
         </div>
       </header>
       <div class="table-container">

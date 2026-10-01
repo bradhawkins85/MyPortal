@@ -1,0 +1,7 @@
+{
+  "guid": "f3125c6e-ed6e-4da6-ba15-cdb111778450",
+  "occurred_at": "2026-09-30T11:20Z",
+  "change_type": "Fixed",
+  "summary": "Restore the Out of Office editor, add select-all-visible and bulk reply controls, and connect Set replies actions to the shared scheduling workflow",
+  "content_hash": "e0c5be99f2a404a631ad9910ba23355f46f0d6491b7dfb32dc8d611e21d8e86e"
+}

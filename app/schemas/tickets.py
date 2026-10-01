@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
@@ -22,6 +22,44 @@ class TicketBase(BaseModel):
 
 class TicketCreate(TicketBase):
     requester_id: Optional[int] = None
+
+
+class TacticalRMMTicketCreate(BaseModel):
+    """Ticket payload accepted from a Tactical RMM alert webhook.
+
+    ``company_id`` is deliberately a string-compatible external identifier: it
+    refers to Tactical RMM's client ID, not the MyPortal company primary key.
+    The two user ID fields are accepted for compatibility with existing alert
+    templates, but are not used because Tactical RMM user IDs cannot safely be
+    mapped to MyPortal users.
+    """
+
+    subject: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    status: str = Field(default="open", max_length=32)
+    priority: str = Field(default="normal", max_length=32)
+    category: Optional[str] = Field(default=None, max_length=64)
+    company_id: str | int = Field(..., description="Tactical RMM client ID")
+    agent_id: str | int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("agent_id", "tactical_agent_id"),
+        description="Optional Tactical RMM agent ID to link to the ticket",
+    )
+    requester_id: str | int | None = None
+    assigned_user_id: str | int | None = None
+    alert_id: str | int = Field(
+        ...,
+        description="Tactical RMM Alert primary key (for example {{alert.id}})",
+    )
+
+
+class TacticalRMMTicketResolve(BaseModel):
+    """Payload sent by a Tactical RMM alert resolved webhook."""
+
+    alert_id: str | int = Field(
+        ...,
+        description="Tactical RMM Alert primary key (for example {{alert.id}})",
+    )
 
 
 class TicketUpdate(BaseModel):
@@ -168,6 +206,8 @@ class TicketDashboardRow(BaseModel):
     task_count: int = 0
     has_open_tasks: bool = False
     open_task_count: int = 0
+    linked_asset_count: int = 0
+    suggested_asset_count: int = 0
     labels: list[str] = Field(default_factory=list)
     age_days: Optional[int] = None
     updated_age_hours: Optional[int] = None
@@ -175,7 +215,13 @@ class TicketDashboardRow(BaseModel):
     last_reply_age_hours: Optional[int] = None
     latest_reply_is_internal: Optional[bool] = None
     latest_reply_kind: Optional[str] = None
+    latest_public_reply_email_status: Optional[str] = None
     ticket_update_actor_type: Optional[str] = None
+    sla_state: Optional[str] = None
+    sla_label: Optional[str] = None
+    sla_name: Optional[str] = None
+    sla_response_due_at: Optional[datetime] = None
+    sla_resolution_due_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -376,6 +422,8 @@ class TicketViewFilters(BaseModel):
     assigned_user_id: Optional[list[int]] = None
     module_slug: Optional[str] = None
     search: Optional[str] = None
+    column_filters: Optional[dict[str, dict[str, Any]]] = None
+    visible_columns: Optional[list[str]] = Field(default=None, max_length=64)
 
     model_config = ConfigDict(populate_by_name=True)
 

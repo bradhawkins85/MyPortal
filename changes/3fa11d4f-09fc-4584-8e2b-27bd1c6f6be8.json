@@ -1,0 +1,7 @@
+{
+  "guid": "3fa11d4f-09fc-4584-8e2b-27bd1c6f6be8",
+  "occurred_at": "2026-09-26T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed website creation and monitoring check queue inserts returning no identifier",
+  "content_hash": "1eae024f1467ebe573c8f9315b0ce697baf94b4362957a9892b6407b530a49cd"
+}

@@ -24,6 +24,38 @@ and surfaces them in the Company Overview report.
 The module has no other UI configuration — credentials never live in the
 database.
 
+### Managed SAT OAuth2 setup
+
+The Managed SAT learner endpoint, `GET /accounts/{account_id}/learners`, does
+not accept the HTTP Basic authentication used by the other Huntress endpoints.
+It uses the OAuth2 **client credentials** grant. Create a parent/channel-partner
+Managed SAT API application that can access the managed child accounts, then
+add its client ID and client secret to `.env`:
+
+```
+CURRICULA_API_KEY=<OAuth2 client ID>
+CURRICULA_API_SECRET=<OAuth2 client secret>
+CURRICULA_BASE_URL=https://dev.curricula.com/api/v1
+```
+
+If Huntress supplies a tenant-specific API URL, use that as
+`CURRICULA_BASE_URL`. MyPortal derives both OAuth2 endpoints from that URL by
+removing the trailing `/api/v1`: `CURRICULA_AUTH_URL` is
+`<base>/oauth/authorize`, and `CURRICULA_TOKEN_URL` is `<base>/oauth/token`.
+The authorization endpoint is available for applications using the
+Authorization Code flow; MyPortal's unattended SAT synchronisation uses the
+token endpoint directly with the Client Credentials flow. At sync time
+MyPortal posts `grant_type=client_credentials` and the required read scopes
+(`account:read`, `assignments:read`,
+`assignments:learner-activity`, and `learners:read`) using the client ID and
+secret as HTTP Basic credentials. It then sends the returned access token as
+`Authorization: Bearer ...` on every Curricula API request. Tokens and secrets
+are never stored in the database or written to logs.
+
+In each company's edit page, set **Huntress SAT account ID** to the child
+account ID used in the learner URL. This is distinct from the Huntress
+organisation ID used by EDR and other product endpoints.
+
 ## Linking companies to Huntress organisations
 
 Huntress organises data by *organisation*. To link a MyPortal company to a
@@ -72,8 +104,9 @@ the company yet, matching the existing auto-hide-empty behaviour.
 
 ## Rate limiting and resilience
 
-* The HTTP client uses HTTP Basic auth (`api_key:api_secret`) and a 30 s
-  timeout per request.
+* Huntress product requests use HTTP Basic auth (`api_key:api_secret`), while
+  Managed SAT learner requests exchange their credentials for an OAuth2 bearer
+  token. All HTTP clients use a 30 s timeout per request.
 * A short sleep is enforced between calls to stay well under Huntress's
   documented 60 req/min limit.
 * If one product endpoint errors, the rest of the snapshot still updates —

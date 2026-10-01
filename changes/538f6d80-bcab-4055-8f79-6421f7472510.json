@@ -1,0 +1,7 @@
+{
+  "guid": "538f6d80-bcab-4055-8f79-6421f7472510",
+  "occurred_at": "2026-09-22T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed upgrades failing validation because the M365 best-practices stat-strip migration lacked deployment phase metadata.",
+  "content_hash": "0080f0caaeff71dc641f1c3c8238e2ea4cd2b2a499190fa0c12653528c312209"
+}

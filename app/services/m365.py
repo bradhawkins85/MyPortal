@@ -12,11 +12,15 @@ import secrets
 import shutil
 import string
 import tempfile
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import httpx
+import jwt
+
+from app.services.monitored_http import monitored_client
 
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
@@ -26,14 +30,40 @@ from app.repositories import licenses as license_repo
 from app.repositories import license_sku_friendly_names as sku_friendly_repo
 from app.repositories import integration_modules as modules_repo
 from app.repositories import m365 as m365_repo
+from app.repositories import m365_connections as connection_repo
 from app.repositories import staff as staff_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import modules as modules_service
+from app.services.m365_access_baseline import (
+    PERMISSION_CONTRACT,
+    REQUIRED_DIRECTORY_ROLES,
+    RESOURCE_APP_IDS,
+    permissions_by_resource,
+)
 
 
 _GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 _GRAPH_ALLOWED_HOSTS = frozenset({"graph.microsoft.com"})
+_GRAPH_API_VERSIONS = frozenset({"v1.0", "beta"})
+_GRAPH_MIN_PATH_SEGMENTS = 3
+_GRAPH_OBJECT_ID_PATTERN = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+
+# Microsoft Graph's least-privileged application permission mapping for staff
+# lifecycle commands.  Keep this close to the implementations so UI actions,
+# workflows and actionable errors cannot drift from the consent inventory.
+STAFF_LIFECYCLE_PERMISSION_REQUIREMENTS: dict[str, tuple[str, ...]] = {
+    "reset_password": ("User-PasswordProfile.ReadWrite.All",),
+    "set_account_enabled": ("User.EnableDisableAccount.All", "User.Read.All"),
+    "revoke_sessions": ("User.RevokeSessions.All",),
+    "create_user": ("User.ReadWrite.All",),
+    "update_user": ("User.ReadWrite.All",),
+    "set_manager": ("User.ReadWrite.All",),
+    "assign_license": ("LicenseAssignment.ReadWrite.All", "User.Read.All"),
+    "change_group_membership": ("GroupMember.ReadWrite.All",),
+}
 
 # Exchange Online (Office 365 Exchange Online) service principal app ID and scope.
 # Used to acquire app-only tokens for Exchange Online PowerShell REST API calls
@@ -43,11 +73,41 @@ _EXO_SCOPE = "https://outlook.office365.com/.default"
 # Exchange.ManageAsApp application role – grants app-only access to Exchange Online
 # PowerShell cmdlets when combined with an appropriate Exchange RBAC role assignment.
 _EXO_MANAGE_AS_APP_ROLE = "dc50a0fb-09a3-484d-be87-e023b12c6440"
+# Security & Compliance PowerShell is a different resource service principal
+# from Office 365 Exchange Online.  Purview tokens require the EOP assignment;
+# granting the identically named role only on EXO does not authorize them.
+_SCC_APP_ID = "00000007-0000-0ff1-ce00-000000000000"
+_SCC_MANAGE_AS_APP_ROLE = _EXO_MANAGE_AS_APP_ROLE
 # Azure AD built-in Exchange Administrator directory role template ID.
 # Assigning this role (or a suitable Exchange RBAC role) to the app's service
 # principal is required *in addition to* the Exchange.ManageAsApp app role for
 # Exchange Online PowerShell REST API access (e.g. Get-MailboxPermission).
 _EXO_ADMIN_ROLE_TEMPLATE_ID = "29232cdf-9323-42fd-ade2-1d097af3e4de"
+_COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID = "17315797-102d-40b4-93e0-432062caca18"
+
+# This role is intentionally resolved from Graph by display name rather than
+# relying on a copied identifier.  The remediation below verifies that Graph
+# returned the built-in, tenant-wide role definition before assigning it.
+_COMPLIANCE_ADMIN_ROLE_NAME = "Compliance Administrator"
+_COMPLIANCE_ROLE_VERIFY_ATTEMPTS = 5
+_COMPLIANCE_ROLE_VERIFY_DELAY_SECONDS = 2.0
+
+# Security & Compliance (Microsoft Purview) PowerShell REST API.
+# Protection alert policies (Get-ProtectionAlert / New-ProtectionAlert) require a
+# token scoped to the compliance endpoint rather than the Exchange Online endpoint.
+# The app must have the ``ComplianceManager.ReadWrite.All`` (or equivalent) application
+# permission and be assigned a Compliance Administrator (or global admin) role in the tenant.
+_SCC_SCOPE = "https://ps.compliance.protection.outlook.com/.default"
+_SCC_ORGANIZATION_PATTERN = re.compile(
+    r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.onmicrosoft\.com"
+)
+
+PURVIEW_ADMIN_CONSENT_STEPS = (
+    "App registrations → select MyPortal application; API permissions → "
+    "Add a permission → APIs my organization uses; select Microsoft Exchange "
+    "Online Protection; Application permissions → Exchange → "
+    "Exchange.ManageAsApp; Grant admin consent for the organization."
+)
 
 # Skype and Teams Tenant Admin API service principal app ID.
 # Teams PowerShell cmdlets (Get-CsTeamsMeetingPolicy, Get-CsTenantFederationConfiguration,
@@ -55,6 +115,7 @@ _EXO_ADMIN_ROLE_TEMPLATE_ID = "29232cdf-9323-42fd-ade2-1d097af3e4de"
 # endpoint require the Teams.ManageAsApp application role from this service principal
 # in addition to Exchange.ManageAsApp.
 _TEAMS_APP_ID = "48ac35b8-9aa8-4d74-927d-1f4a14a0b239"
+_TEAMS_SCOPE = "https://api.interfaces.records.teams.microsoft.com/.default"
 # Teams.ManageAsApp application role ID.
 # Note: Microsoft assigns the same GUID to both Exchange.ManageAsApp and
 # Teams.ManageAsApp – they share the same role ID (dc50a0fb-...) but target
@@ -80,6 +141,9 @@ _SITES_READWRITE_ALL_ROLE = "9492366f-7969-46a4-8d15-ed1a20078fff"
 # Microsoft Graph application permission required to create the backing Microsoft
 # 365 group for the default Offboarded Staff SharePoint export site.
 _GROUP_READWRITE_ALL_ROLE = "62a82d76-70ea-41e2-9197-370581804d09"
+# Microsoft Graph application permission required to resolve the tenant's
+# initial *.onmicrosoft.com domain for Purview app-only connections.
+_DOMAIN_READ_ALL_ROLE = "dbb9058a-0e50-45d7-ae91-66909b5d4664"
 
 # Pattern matching auto-generated package mailbox names, e.g. package_9024cbae-6e9a-4cee-934e-5f05143cd7ae
 PACKAGE_MAILBOX_RE = re.compile(
@@ -90,6 +154,7 @@ _PACKAGE_MAILBOX_RE = PACKAGE_MAILBOX_RE  # backward-compat alias
 
 # Microsoft Graph's own well-known app ID (constant across all tenants)
 _GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
+_APP_SELF_OWNER_CHECK_ID = "myportal-app-self-owner"
 
 # Application-permission role IDs required for the provisioned integration app.
 # The CIS benchmark checks require several additional read-only permissions so
@@ -97,50 +162,14 @@ _GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
 # audit logs.  These are included in the initial provisioning grant so that
 # newly provisioned apps immediately support CIS benchmarking without requiring
 # re-provisioning.
-_PROVISION_APP_ROLES: list[str] = [
-    "df021288-bdef-4463-88db-98f22de89214",  # User.Read.All
-    "741f803b-c850-494e-b5df-cde7c675a1ca",  # User.ReadWrite.All (staff onboarding: create/update users, assign licenses)
-    "7ab1d382-f21e-4acd-a863-ba3e13f7da61",  # Directory.Read.All
-    "18a4783c-866b-4cc7-a460-3d5e5662c884",  # Application.ReadWrite.OwnedBy (for self-renewal)
-    # Additional permissions for CIS benchmark checks:
-    "246dd0d5-5bd0-4def-940b-0421030a5b68",  # Policy.Read.All
-    "fb221be6-99f2-473f-bd32-01c6a0e9ca3b",  # Policy.ReadWrite.Authorization (required to PATCH /policies/authorizationPolicy for guest access remediation)
-    "498476ce-e0fe-48b0-b801-37ba7e2685c6",  # Organization.Read.All
-    "dc377aa6-52d8-4e23-b271-2a7ae04cedf3",  # DeviceManagementConfiguration.Read.All
-    "2f51be20-0bb4-4fed-bf7b-db946066c75e",  # DeviceManagementManagedDevices.Read.All
-    "b0afded3-3588-46d8-8b3d-9842eff778da",  # AuditLog.Read.All
-    # Additional permissions for mailbox reporting:
-    "230c1aed-a721-4c5d-9cb4-a90514e508ef",  # Reports.Read.All
-    "40f97065-369a-49f4-947c-6a255697ae91",  # MailboxSettings.Read
-    # Required by the "Display concealed names in reports" best-practice check
-    # (GET /admin/reportSettings) and its PATCH-based remediation. Distinct
-    # from Reports.Read.All – /admin/reportSettings rejects tokens that lack
-    # ReportSettings.* with S2SUnauthorized / "Invalid permission".
-    "ee353f83-55ef-4b78-82da-555bfa2b4b95",  # ReportSettings.ReadWrite.All
-    # Permission for Office 365 Mailbox Import (m365-mail module):
-    "e2a3a72e-5f79-4c64-b1b1-878b674786c9",  # Mail.ReadWrite
-    # Permissions for staff onboarding/offboarding group management:
-    "dbaae8cf-10b5-4b86-a4a1-f871c94c6695",  # GroupMember.ReadWrite.All (add/remove group members)
-    # Additional permissions for M365 monitoring best-practice checks:
-    "dc5007c0-2d7d-4c42-879c-2dab87571379",  # IdentityRiskyUser.Read.All
-    "9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30",  # Application.Read.All
-    "bf394140-e372-4bf9-a898-299cfc7564e5",  # SecurityEvents.Read.All
-    "e0b77adb-e790-44a3-b0a0-257d06303687",  # SecuritySecureScore.Read.All (required by /security/secureScores)
-    # SharePoint Online tenant settings (required for SPO best-practice checks)
-    _SHAREPOINT_TENANT_SETTINGS_ROLE,  # SharePointTenantSettings.ReadWrite.All
-    # SharePoint sites and default document libraries (OneDrive export destination picker):
-    _SITES_READ_ALL_ROLE,  # Sites.Read.All
-    # SharePoint document library writes (OneDrive export folder creation/copy):
-    _SITES_READWRITE_ALL_ROLE,  # Sites.ReadWrite.All
-    _GROUP_READWRITE_ALL_ROLE,  # Group.ReadWrite.All (create Offboarded Staff export site)
-    # MFA registration details report and per-user MFA state checks:
-    # - GET /v1.0/reports/authenticationMethods/userRegistrationDetails
-    # - GET /beta/users/{id}/authentication/requirements
-    "38d9df27-64da-44fd-b7c5-a6fbac20248f",  # UserAuthenticationMethod.Read.All
-    # Microsoft Forms tenant settings (required for bp_internal_phishing_forms check):
-    # - GET /beta/admin/forms/settings
-    "434d7c66-07c6-4b1f-ab21-417cf2cdaaca",  # OrgSettings-Forms.Read.All
-]
+_GRAPH_ROLE_NAMES: dict[str, str] = {
+    permission.permission_id: permission.name
+    for permission in PERMISSION_CONTRACT
+    if permission.resource == "Microsoft Graph"
+    and permission.permission_type == "Application"
+    and permission.permission_id
+}
+_PROVISION_APP_ROLES: list[str] = list(_GRAPH_ROLE_NAMES)
 
 def get_required_app_role_ids() -> list[str]:
     """Return the list of Microsoft Graph application permission role IDs
@@ -157,13 +186,16 @@ def get_required_app_role_ids() -> list[str]:
 PROVISION_SCOPE = (
     "https://graph.microsoft.com/Application.ReadWrite.All "
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
-    "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory offline_access"
+    "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory "
+    "openid profile offline_access"
 )
 
 # Delegated scopes requested during the "Authorize portal access" (connect) flow.
 # The connect callback calls try_grant_missing_permissions() which needs
 # AppRoleAssignment.ReadWrite.All to add any newly-required application permissions
 # (e.g. SharePointTenantSettings.Read.All for SPO best-practice checks),
+# Application.ReadWrite.All to register the integration service principal as an
+# owner of its app registration (required for automatic credential renewal),
 # Directory.Read.All to look up service principals (including the Teams SP for
 # Teams.ManageAsApp grants), and RoleManagement.ReadWrite.Directory to assign the
 # Exchange Administrator and Teams Service Administrator directory roles.
@@ -171,9 +203,11 @@ PROVISION_SCOPE = (
 # delegated permissions even if they are not statically configured on the enterprise
 # app registration (Microsoft Entra ID dynamic consent).
 CONNECT_SCOPE = (
+    "https://graph.microsoft.com/Application.ReadWrite.All "
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
     "https://graph.microsoft.com/Directory.Read.All "
-    "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory offline_access"
+    "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory "
+    "openid profile offline_access"
 )
 
 # Minimal scopes used for the tenant-discovery sign-in step
@@ -181,6 +215,7 @@ DISCOVER_SCOPE = "openid profile"
 
 # Module slug used to store the admin app credentials for PKCE bootstrap flows
 _M365_ADMIN_MODULE_SLUG = "m365-admin"
+_M365_SECRET_DISPLAY_NAME = "MyPortal"
 
 # Well-known Microsoft public client used as a fallback for PKCE-based bootstrap
 # provisioning when no custom PKCE client is configured.  This is the Azure CLI
@@ -204,37 +239,6 @@ _NON_PREMIUM_ERROR_CODE = "Authentication_RequestFromNonPremiumTenantOrB2CTenant
 # permission-gated field rather than propagating a hard failure.
 _MISSING_PERMISSION_ERROR_CODE = "Authentication_MSGraphPermissionMissing"
 
-# Human-readable names for each Graph API application permission role ID.
-# Mirrors the inline comments on _PROVISION_APP_ROLES for structured output.
-_GRAPH_ROLE_NAMES: dict[str, str] = {
-    "df021288-bdef-4463-88db-98f22de89214": "User.Read.All",
-    "741f803b-c850-494e-b5df-cde7c675a1ca": "User.ReadWrite.All",
-    "7ab1d382-f21e-4acd-a863-ba3e13f7da61": "Directory.Read.All",
-    "18a4783c-866b-4cc7-a460-3d5e5662c884": "Application.ReadWrite.OwnedBy",
-    "246dd0d5-5bd0-4def-940b-0421030a5b68": "Policy.Read.All",
-    "fb221be6-99f2-473f-bd32-01c6a0e9ca3b": "Policy.ReadWrite.Authorization",
-    "498476ce-e0fe-48b0-b801-37ba7e2685c6": "Organization.Read.All",
-    "dc377aa6-52d8-4e23-b271-2a7ae04cedf3": "DeviceManagementConfiguration.Read.All",
-    "2f51be20-0bb4-4fed-bf7b-db946066c75e": "DeviceManagementManagedDevices.Read.All",
-    "b0afded3-3588-46d8-8b3d-9842eff778da": "AuditLog.Read.All",
-    "230c1aed-a721-4c5d-9cb4-a90514e508ef": "Reports.Read.All",
-    "40f97065-369a-49f4-947c-6a255697ae91": "MailboxSettings.Read",
-    "ee353f83-55ef-4b78-82da-555bfa2b4b95": "ReportSettings.ReadWrite.All",
-    "e2a3a72e-5f79-4c64-b1b1-878b674786c9": "Mail.ReadWrite",
-    "dbaae8cf-10b5-4b86-a4a1-f871c94c6695": "GroupMember.ReadWrite.All",
-    "dc5007c0-2d7d-4c42-879c-2dab87571379": "IdentityRiskyUser.Read.All",
-    "9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30": "Application.Read.All",
-    "bf394140-e372-4bf9-a898-299cfc7564e5": "SecurityEvents.Read.All",
-    "e0b77adb-e790-44a3-b0a0-257d06303687": "SecuritySecureScore.Read.All",
-    "19b94e34-907c-4f43-bde9-38b1909ed408": "SharePointTenantSettings.ReadWrite.All",
-    "332a536c-c7ef-4017-ab91-336970924f0d": "Sites.Read.All",
-    "9492366f-7969-46a4-8d15-ed1a20078fff": "Sites.ReadWrite.All",
-    "62a82d76-70ea-41e2-9197-370581804d09": "Group.ReadWrite.All",
-    "38d9df27-64da-44fd-b7c5-a6fbac20248f": "UserAuthenticationMethod.Read.All",
-    "434d7c66-07c6-4b1f-ab21-417cf2cdaaca": "OrgSettings-Forms.Read.All",
-}
-
-
 # Microsoft Graph application permissions that must be requested/granted even
 # when a tenant's servicePrincipal appRoles projection does not include them.
 # SharePointTenantSettings.ReadWrite.All is assignable in tenants where the Entra
@@ -244,6 +248,10 @@ _GRAPH_ROLE_NAMES: dict[str, str] = {
 _FORCE_GRANT_GRAPH_APP_ROLES: frozenset[str] = frozenset(
     {
         _SHAREPOINT_TENANT_SETTINGS_ROLE,
+        # This permission is a hard requirement for automatic credential
+        # rotation.  Never silently omit it because a tenant's Graph service
+        # principal projection is stale or incomplete.
+        "18a4783c-866b-4cc7-a460-3d5e5662c884",
     }
 )
 
@@ -251,6 +259,22 @@ _FORCE_GRANT_GRAPH_APP_ROLES: frozenset[str] = frozenset(
 def _is_graph_role_grantable(role_id: str, graph_sp_role_ids: set[str]) -> bool:
     """Return whether a Graph application role should be requested/granted."""
     return role_id in graph_sp_role_ids or role_id in _FORCE_GRANT_GRAPH_APP_ROLES
+
+
+def _app_role_assignment_url(resource_sp_id: str) -> str:
+    """Return the resource-side endpoint used to grant an application role.
+
+    Graph supports creating the same grant from the assignee's
+    ``appRoleAssignments`` collection or the resource's ``appRoleAssignedTo``
+    collection.  New MyPortal service principals are not always immediately
+    routable through their assignee-side collection.  The resource principal
+    (Microsoft Graph, Exchange, and so on) is already established, so posting
+    to its collection avoids that propagation race.
+    """
+    return (
+        "https://graph.microsoft.com/v1.0/servicePrincipals/"
+        f"{_graph_path_segment(resource_sp_id)}/appRoleAssignedTo"
+    )
 
 
 # Catalog of enterprise apps and their expected application permissions.
@@ -262,6 +286,11 @@ ENTERPRISE_APP_CATALOG: list[dict[str, Any]] = [
         "permissions": [
             {"id": role_id, "name": _GRAPH_ROLE_NAMES.get(role_id, role_id)}
             for role_id in _PROVISION_APP_ROLES
+        ] + [
+            {
+                "id": _APP_SELF_OWNER_CHECK_ID,
+                "name": "App registration self-owner",
+            }
         ],
     },
     {
@@ -271,14 +300,170 @@ ENTERPRISE_APP_CATALOG: list[dict[str, Any]] = [
             {"id": _EXO_MANAGE_AS_APP_ROLE, "name": "Exchange.ManageAsApp"},
         ],
     },
-    {
-        "name": "Skype and Teams Tenant Admin API",
-        "app_id": _TEAMS_APP_ID,
-        "permissions": [
-            {"id": _TEAMS_MANAGE_AS_APP_ROLE, "name": "Teams.ManageAsApp"},
-        ],
-    },
 ]
+
+
+async def diagnose_required_m365_access(company_id: int) -> dict[str, Any]:
+    """Verify manifest configuration, tenant consent, and directory roles.
+
+    Configuration and effective grants are intentionally checked separately:
+    ``requiredResourceAccess`` is only a request in an app manifest and does not
+    prove that an administrator granted tenant-wide consent.
+    """
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("No M365 credentials found for company")
+    access_token, _, _ = await _exchange_token(
+        tenant_id=creds["tenant_id"],
+        client_id=creds["client_id"],
+        client_secret=creds.get("client_secret") or "",
+        refresh_token=None,
+    )
+    client_id = str(creds["client_id"])
+    applications = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/applications"
+        f"?$filter=appId eq '{quote(client_id, safe='')}'&$select=id,requiredResourceAccess",
+    )
+    if not applications.get("value"):
+        raise M365Error("MyPortal app registration not found in tenant")
+    app = applications["value"][0]
+    configured = {
+        (str(entry.get("resourceAppId")), str(item.get("type")), str(item.get("id")))
+        for entry in app.get("requiredResourceAccess", [])
+        for item in entry.get("resourceAccess", [])
+    }
+    principals = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/servicePrincipals"
+        f"?$filter=appId eq '{quote(client_id, safe='')}'&$select=id",
+    )
+    if not principals.get("value"):
+        raise M365Error("MyPortal service principal not found in tenant")
+    principal_id = str(principals["value"][0]["id"])
+    assignments = await _graph_get(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(principal_id)}/appRoleAssignments",
+    )
+    assigned = {
+        (str(item.get("resourceId")), str(item.get("appRoleId")))
+        for item in assignments.get("value", [])
+    }
+    grants = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/oauth2PermissionGrants"
+        f"?$filter=clientId eq '{quote(principal_id, safe='')}'&$select=resourceId,scope,consentType",
+    )
+    delegated_grants = {
+        (str(grant.get("resourceId")), scope)
+        for grant in grants.get("value", [])
+        if grant.get("consentType") == "AllPrincipals"
+        for scope in str(grant.get("scope") or "").split()
+    }
+
+    results: list[dict[str, Any]] = []
+    for resource_name, requirements in permissions_by_resource().items():
+        app_id = RESOURCE_APP_IDS[resource_name]
+        filter_part = (
+            f"appId eq '{app_id}'" if app_id else f"displayName eq '{resource_name}'"
+        )
+        resources = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/servicePrincipals"
+            f"?$filter={filter_part}&$select=id,appId,appRoles,oauth2PermissionScopes",
+        )
+        resource = _select_contract_resource(resource_name, app_id, resources.get("value", []))
+        role_ids = {
+            str(role.get("value")): str(role.get("id"))
+            for role in (resource or {}).get("appRoles", [])
+            if role.get("value") and role.get("id")
+        }
+        scope_ids = {
+            str(scope.get("value")): str(scope.get("id"))
+            for scope in (resource or {}).get("oauth2PermissionScopes", [])
+            if scope.get("value") and scope.get("id")
+        }
+        resource_id = str((resource or {}).get("id") or "")
+        actual_app_id = str((resource or {}).get("appId") or app_id or "")
+        permission_results = []
+        for requirement in requirements:
+            definitions = role_ids if requirement.permission_type == "Application" else scope_ids
+            permission_id = definitions.get(requirement.name)
+            manifest_type = "Role" if requirement.permission_type == "Application" else "Scope"
+            is_configured = bool(permission_id and (actual_app_id, manifest_type, permission_id) in configured)
+            is_consented = bool(
+                permission_id
+                and (
+                    (resource_id, permission_id) in assigned
+                    if requirement.permission_type == "Application"
+                    else (resource_id, requirement.name) in delegated_grants
+                )
+            )
+            if not permission_id:
+                remediation = (
+                    f"The {resource_name} service principal does not expose {requirement.name} as a "
+                    f"{requirement.permission_type.lower()} permission. Confirm the resource is provisioned "
+                    "and the permission is available in this tenant; contact the API owner if it is not."
+                )
+            elif not is_configured:
+                remediation = (
+                    f"Add {resource_name} > {requirement.permission_type} > {requirement.name} "
+                    "to the MyPortal app registration, then grant tenant-wide admin consent."
+                )
+            elif not is_consented:
+                remediation = (
+                    f"Grant tenant-wide admin consent for {resource_name} > "
+                    f"{requirement.name}; a configured permission alone is not an effective grant."
+                )
+            else:
+                remediation = None
+            permission_results.append({
+                "name": requirement.name,
+                "type": requirement.permission_type,
+                "id": permission_id,
+                "configured": is_configured,
+                "consented": is_consented,
+                "status": "pass" if is_configured and is_consented else ("unavailable" if not permission_id else "fail"),
+                "remediation": remediation,
+            })
+        results.append({
+            "name": resource_name,
+            "app_id": actual_app_id,
+            "permissions": permission_results,
+            "all_ok": all(item["status"] == "pass" for item in permission_results),
+        })
+
+    role_assignments = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments"
+        f"?$filter=principalId eq '{quote(principal_id, safe='')}'&$select=roleDefinitionId",
+    )
+    assigned_role_ids = {str(row.get("roleDefinitionId")) for row in role_assignments.get("value", [])}
+    role_definitions = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions?$select=id,displayName",
+    )
+    definitions_by_name = {
+        str(row.get("displayName")): str(row.get("id")) for row in role_definitions.get("value", [])
+    }
+    role_results = []
+    for role_name in REQUIRED_DIRECTORY_ROLES:
+        role_id = definitions_by_name.get(role_name)
+        granted = bool(role_id and role_id in assigned_role_ids)
+        role_results.append({
+            "name": role_name,
+            "status": "pass" if granted else "fail",
+            "remediation": None if granted else (
+                f"In Microsoft Entra admin center, open Roles and administrators > {role_name}, "
+                "add an assignment for the MyPortal enterprise application at directory scope (/), then re-run diagnostics."
+            ),
+        })
+    return {
+        "resources": results,
+        "directory_roles": role_results,
+        "all_ok": all(resource["all_ok"] for resource in results)
+        and all(role["status"] == "pass" for role in role_results),
+    }
 
 
 def is_azure_cli_pkce_fallback(client_id: str | None) -> bool:
@@ -312,6 +497,185 @@ async def _get_sp_app_role_ids(access_token: str, app_id: str) -> tuple[str | No
         return sp["id"], role_ids
     except M365Error:
         return None, set()
+
+
+def _select_contract_resource(
+    resource_name: str, app_id: str | None, items: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Resolve a resource without treating a tenant-owned display name as identity."""
+    if app_id:
+        matches = [item for item in items if str(item.get("appId") or "").lower() == app_id.lower()]
+        if not matches and len(items) == 1 and not items[0].get("appId"):
+            # The query itself is appId-filtered; tolerate projections/tests that omit appId.
+            matches = items
+    else:
+        matches = [
+            item for item in items
+            if str(item.get("displayName") or "") == resource_name
+            and _GRAPH_OBJECT_ID_PATTERN.fullmatch(str(item.get("appId") or ""))
+        ]
+    return matches[0] if len(matches) == 1 else None
+
+
+async def _build_required_resource_access(
+    access_token: str,
+) -> tuple[list[dict[str, Any]], list[tuple[str, str]], list[tuple[str, list[str]]]]:
+    """Resolve the named baseline against this tenant's resource principals.
+
+    Permission identifiers are owned by each Microsoft API and can change or be
+    absent in sovereign/unlicensed tenants, so they are discovered rather than
+    copied from an unrelated tenant.  Missing definitions remain visible as
+    actionable ``unavailable`` diagnostics instead of silently changing type.
+    """
+    manifest: list[dict[str, Any]] = []
+    application_grants: list[tuple[str, str]] = []
+    delegated_grants: list[tuple[str, list[str]]] = []
+    for resource_name, requirements in permissions_by_resource().items():
+        app_id = RESOURCE_APP_IDS[resource_name]
+        filter_part = f"appId eq '{app_id}'" if app_id else f"displayName eq '{resource_name}'"
+        response = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/servicePrincipals"
+            f"?$filter={filter_part}&$select=id,appId,appRoles,oauth2PermissionScopes",
+        )
+        resource = _select_contract_resource(resource_name, app_id, response.get("value", []))
+        if not resource:
+            log_warning("Required Microsoft 365 resource is unavailable or ambiguous", resource=resource_name)
+            continue
+        roles = {str(item.get("value")): str(item.get("id")) for item in resource.get("appRoles", [])}
+        scopes = {str(item.get("value")): str(item.get("id")) for item in resource.get("oauth2PermissionScopes", [])}
+        resource_access = []
+        delegated_names = []
+        for requirement in requirements:
+            definitions = roles if requirement.permission_type == "Application" else scopes
+            permission_id = definitions.get(requirement.name)
+            if (
+                not permission_id
+                and requirement.permission_id
+                and (
+                    requirement.permission_id in definitions.values()
+                    or (
+                        resource_name == "Microsoft Graph"
+                        and requirement.permission_id in _FORCE_GRANT_GRAPH_APP_ROLES
+                    )
+                )
+            ):
+                permission_id = requirement.permission_id
+            if not permission_id:
+                log_warning(
+                    "Required Microsoft 365 permission is unavailable",
+                    resource=resource_name,
+                    permission=requirement.name,
+                    permission_type=requirement.permission_type,
+                )
+                continue
+            access_type = "Role" if requirement.permission_type == "Application" else "Scope"
+            resource_access.append({"id": permission_id, "type": access_type})
+            if access_type == "Role":
+                application_grants.append((str(resource["id"]), permission_id))
+            else:
+                delegated_names.append(requirement.name)
+        if resource_access:
+            manifest.append({"resourceAppId": str(resource.get("appId") or app_id), "resourceAccess": resource_access})
+        if delegated_names:
+            delegated_grants.append((str(resource["id"]), delegated_names))
+    return manifest, application_grants, delegated_grants
+
+
+async def _grant_required_admin_consent(
+    access_token: str,
+    sp_object_id: str,
+    application_grants: list[tuple[str, str]],
+    delegated_grants: list[tuple[str, list[str]]],
+) -> bool:
+    """Grant every resolved application role and tenant-wide delegated scope.
+
+    Microsoft Graph permits only one ``AllPrincipals`` OAuth grant for a given
+    client/resource pair.  Existing grants therefore have to be updated with
+    the union of old and required scopes; treating the resulting create-time
+    conflict as success leaves newly requested scopes without admin consent.
+    """
+    changed = False
+    assignments = await _graph_get_all(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
+    )
+    assigned = {
+        (str(item.get("resourceId")), str(item.get("appRoleId")))
+        for item in assignments
+    }
+    for resource_id, role_id in set(application_grants):
+        if (resource_id, role_id) in assigned:
+            continue
+        await _post_app_role_assignment_with_retry(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
+            {"principalId": sp_object_id, "resourceId": resource_id, "appRoleId": role_id},
+        )
+        changed = True
+
+    existing_grants = await _graph_get_all(
+        access_token,
+        "https://graph.microsoft.com/v1.0/oauth2PermissionGrants"
+        f"?$filter=clientId eq '{quote(sp_object_id, safe='')}' and consentType eq 'AllPrincipals'"
+        "&$select=id,resourceId,scope",
+    )
+    existing_by_resource = {
+        str(item.get("resourceId")): item
+        for item in existing_grants
+        if item.get("resourceId") and item.get("id")
+    }
+    for resource_id, required_scopes in delegated_grants:
+        existing = existing_by_resource.get(resource_id)
+        current_scopes = set(str((existing or {}).get("scope") or "").split())
+        merged_scopes = current_scopes | set(required_scopes)
+        if existing and merged_scopes == current_scopes:
+            continue
+        payload = {"scope": " ".join(sorted(merged_scopes))}
+        if existing:
+            await _graph_patch(
+                access_token,
+                "https://graph.microsoft.com/v1.0/oauth2PermissionGrants/"
+                f"{_graph_path_segment(existing['id'])}",
+                payload,
+            )
+        else:
+            await _graph_post(
+                access_token,
+                "https://graph.microsoft.com/v1.0/oauth2PermissionGrants",
+                {
+                    "clientId": sp_object_id,
+                    "consentType": "AllPrincipals",
+                    "resourceId": resource_id,
+                    **payload,
+                },
+            )
+        changed = True
+    return changed
+
+
+async def grant_required_m365_admin_consent(
+    company_id: int, access_token: str
+) -> bool:
+    """Resolve and grant the full baseline to an existing MyPortal app."""
+    creds = await get_credentials(company_id)
+    if not creds or not creds.get("client_id"):
+        raise M365Error("No M365 credentials are configured for this company")
+    client_id = str(creds["client_id"])
+    principals = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/servicePrincipals"
+        f"?$filter=appId eq '{quote(client_id, safe='')}'&$select=id",
+    )
+    if not principals.get("value"):
+        raise M365Error("MyPortal service principal not found in tenant")
+    _, application_grants, delegated_grants = await _build_required_resource_access(access_token)
+    return await _grant_required_admin_consent(
+        access_token,
+        str(principals["value"][0]["id"]),
+        application_grants,
+        delegated_grants,
+    )
 
 
 def get_pkce_client_id() -> str:
@@ -610,6 +974,9 @@ class M365Error(RuntimeError):
         error body, when available.  Callers can use this to distinguish
         specific failure modes (e.g. ``Authentication_RequestFromNonPremiumTenantOrB2CTenant``)
         from generic permission errors.
+    :param graph_error_detail_codes: Sanitized ``error.details[].code`` values
+        returned by Graph.  Detail messages and other fields are deliberately
+        not retained because they may contain tenant data.
     """
 
     def __init__(
@@ -618,10 +985,23 @@ class M365Error(RuntimeError):
         *,
         http_status: int | None = None,
         graph_error_code: str | None = None,
+        graph_error_detail_codes: tuple[str, ...] = (),
+        failure_kind: str | None = None,
     ) -> None:
         super().__init__(message)
         self.http_status: int | None = http_status
         self.graph_error_code: str | None = graph_error_code
+        self.graph_error_detail_codes: tuple[str, ...] = graph_error_detail_codes
+        self.failure_kind: str | None = failure_kind
+
+
+def _safe_m365_error_fields(exc: M365Error) -> dict[str, Any]:
+    """Return actionable Graph diagnostics without logging response payloads."""
+    return {
+        "http_status": exc.http_status,
+        "graph_error_code": exc.graph_error_code,
+        "graph_error_detail_codes": exc.graph_error_detail_codes,
+    }
 
 
 class M365NoDelegatedTokenError(M365Error):
@@ -632,6 +1012,224 @@ class M365NoDelegatedTokenError(M365Error):
     completed the 'Authorize portal access' connect flow).  Callers can
     catch this specific subclass to redirect the user to the connect flow.
     """
+
+
+class M365ReprovisionRequiredError(M365Error):
+    """Raised when automatic secret renewal requires app re-provisioning first."""
+
+
+def _compliance_role_error(exc: M365Error) -> M365Error:
+    """Add safe, actionable guidance to delegated role-management failures."""
+    if exc.http_status in {401, 403}:
+        return M365Error(
+            "Microsoft Graph denied the Compliance Administrator assignment. "
+            "Grant delegated RoleManagement.ReadWrite.Directory consent and sign "
+            "in with an administrator whose supported role is active, such as "
+            "Privileged Role Administrator, then reconnect and retry.",
+            http_status=exc.http_status,
+            graph_error_code=exc.graph_error_code,
+        )
+    return M365Error(
+        "Microsoft Graph could not configure Compliance Administrator: " + str(exc),
+        http_status=exc.http_status,
+        graph_error_code=exc.graph_error_code,
+    )
+
+
+async def ensure_compliance_administrator_role(
+    company_id: int,
+    access_token: str,
+    *,
+    verify_attempts: int = _COMPLIANCE_ROLE_VERIFY_ATTEMPTS,
+    verify_delay_seconds: float = _COMPLIANCE_ROLE_VERIFY_DELAY_SECONDS,
+) -> dict[str, Any]:
+    """Idempotently assign Compliance Administrator to the configured app.
+
+    ``access_token`` must be a delegated token obtained from an interactive
+    administrator session.  No token or credential value is logged.  The
+    authenticated Graph tenant is checked before any mutating request.
+    """
+    credentials = await get_credentials(company_id)
+    if not credentials:
+        raise M365Error("No Microsoft 365 credentials are configured for this company.")
+    configured_tenant = str(credentials.get("tenant_id") or "").strip().lower()
+    client_id = str(credentials.get("client_id") or "").strip()
+    if not configured_tenant or not client_id:
+        raise M365Error("The configured Microsoft 365 tenant ID or client ID is missing.")
+    try:
+        organizations = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/organization?$select=id",
+        )
+        organization_rows = organizations.get("value") or []
+        authenticated_tenant = str(
+            organization_rows[0].get("id") if organization_rows else ""
+        ).strip().lower()
+        if not authenticated_tenant:
+            raise M365Error("Microsoft Graph did not return the authenticated tenant ID.")
+        if authenticated_tenant != configured_tenant:
+            raise M365Error(
+                "The signed-in administrator belongs to tenant "
+                f"{authenticated_tenant}, but this company is configured for tenant "
+                f"{configured_tenant}. Sign out and reconnect with an administrator "
+                "from the configured tenant.",
+                http_status=409,
+            )
+
+        escaped_client_id = client_id.replace("'", "''")
+        principals = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/servicePrincipals"
+            f"?$filter=appId eq '{escaped_client_id}'&$select=id,appId",
+        )
+        principal_rows = principals.get("value") or []
+        if len(principal_rows) != 1 or not principal_rows[0].get("id"):
+            raise M365Error(
+                "The enterprise application service principal could not be found "
+                f"using the configured client ID {client_id}. Re-provision the "
+                "Microsoft 365 connection in this tenant and retry.",
+                http_status=404,
+            )
+        principal_id = str(principal_rows[0]["id"])
+
+        definitions = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions"
+            "?$filter=displayName eq 'Compliance Administrator'"
+            "&$select=id,displayName,isBuiltIn",
+        )
+        definition_rows = [
+            row for row in (definitions.get("value") or [])
+            if row.get("displayName") == _COMPLIANCE_ADMIN_ROLE_NAME
+            and row.get("isBuiltIn", True) is not False
+            and row.get("id")
+        ]
+        if len(definition_rows) != 1:
+            raise M365Error(
+                "Microsoft Graph did not return the built-in Compliance "
+                "Administrator role definition. Confirm directory role access and retry.",
+                http_status=404,
+            )
+        role_definition_id = str(definition_rows[0]["id"])
+        assignment_url = (
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments"
+            f"?$filter=principalId eq '{principal_id}' and roleDefinitionId eq "
+            f"'{role_definition_id}' and directoryScopeId eq '/'&$select=id"
+        )
+        if (await _graph_get(access_token, assignment_url)).get("value"):
+            return {"status": "existing", "verified": True}
+
+        try:
+            await _graph_post(
+                access_token,
+                "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments",
+                {
+                    "principalId": principal_id,
+                    "roleDefinitionId": role_definition_id,
+                    "directoryScopeId": "/",
+                },
+            )
+        except M365Error as exc:
+            # A concurrent remediation can win between the GET and POST.
+            if exc.http_status != 409:
+                raise
+
+        attempts = max(1, min(int(verify_attempts), 10))
+        for attempt in range(attempts):
+            if (await _graph_get(access_token, assignment_url)).get("value"):
+                log_info(
+                    "Verified Compliance Administrator directory role assignment",
+                    company_id=company_id,
+                    principal_id=principal_id,
+                )
+                return {"status": "created", "verified": True, "attempts": attempt + 1}
+            if attempt + 1 < attempts:
+                await asyncio.sleep(max(0.0, min(verify_delay_seconds, 30.0)))
+        raise M365Error(
+            "Compliance Administrator was submitted but Microsoft Graph did not "
+            f"confirm it after {attempts} checks. Wait for directory propagation, "
+            "reconnect, and retry the Purview operation.",
+            http_status=503,
+        )
+    except M365Error as exc:
+        if exc.http_status in {404, 409, 503}:
+            raise
+        raise _compliance_role_error(exc) from exc
+
+
+def _self_renewal_reprovision_message(*, admin_flow: bool) -> str:
+    subject = (
+        "MyPortal PKCE/bootstrap admin credential"
+        if admin_flow
+        else "Microsoft 365 client credential"
+    )
+    target = "managed admin app" if admin_flow else "managed app"
+    return (
+        f"Automatic {subject} renewal requires Application.ReadWrite.OwnedBy and "
+        "the app to be registered as an owner of its own app registration. "
+        f"Re-provision the {target} and retry."
+    )
+
+
+async def _add_password_credential(
+    access_token: str,
+    app_object_id: str,
+    end_datetime: str,
+    *,
+    admin_flow: bool,
+) -> dict[str, Any]:
+    """Create an app secret and normalize 403 self-renewal failures."""
+    try:
+        return await _graph_post(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/addPassword",
+            {
+                "passwordCredential": {
+                    "displayName": _M365_SECRET_DISPLAY_NAME,
+                    "endDateTime": end_datetime,
+                }
+            },
+        )
+    except M365Error as exc:
+        if exc.http_status == 403:
+            raise M365ReprovisionRequiredError(
+                _self_renewal_reprovision_message(admin_flow=admin_flow)
+            ) from exc
+        raise
+
+
+async def validate_microsoft_id_token(id_token: str, *, client_id: str) -> dict[str, Any]:
+    """Cryptographically validate a Microsoft v2 ID token and return claims.
+
+    Access tokens are intentionally not inspected: Graph access tokens are an
+    opaque credential from this application's perspective.
+    """
+    if not id_token or not client_id:
+        raise M365Error("Microsoft did not return a verifiable identity token")
+    try:
+        header = jwt.get_unverified_header(id_token)
+        kid = str(header.get("kid") or "")
+        async with monitored_client(httpx.AsyncClient, timeout=15) as client:
+            response = await client.get(
+                "https://login.microsoftonline.com/common/discovery/v2.0/keys"
+            )
+        response.raise_for_status()
+        jwk = next(key for key in response.json().get("keys", []) if key.get("kid") == kid)
+        public_key = jwt.algorithms.RSAAlgorithm.from_jwk(jwk)
+        claims = jwt.decode(
+            id_token,
+            public_key,
+            algorithms=["RS256"],
+            audience=client_id,
+            options={"require": ["exp", "iat", "aud", "iss", "tid"]},
+        )
+    except (jwt.PyJWTError, httpx.HTTPError, KeyError, StopIteration, TypeError, ValueError) as exc:
+        raise M365Error("Microsoft returned an invalid identity token") from exc
+    tenant_id = str(claims.get("tid") or "").strip()
+    issuer = str(claims.get("iss") or "").rstrip("/")
+    if issuer != f"https://login.microsoftonline.com/{tenant_id}/v2.0":
+        raise M365Error("Microsoft identity issuer did not match its tenant")
+    return claims
 
 
 def generate_pkce_pair() -> tuple[str, str]:
@@ -717,12 +1315,34 @@ def _parse_client_secret_expires(value: Any) -> datetime | None:
     return None
 
 
+async def _lookup_application_object_id(access_token: str, client_id: str) -> str | None:
+    """Return the Entra application object ID for an application (client) ID."""
+    clean_client_id = str(client_id or "").strip()
+    if not clean_client_id:
+        return None
+    if not _GRAPH_OBJECT_ID_PATTERN.fullmatch(clean_client_id):
+        raise M365Error("Invalid Microsoft Entra application ID", http_status=400)
+    data = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/applications"
+        f"?$filter=appId eq '{clean_client_id}'&$select=id",
+    )
+    app = next(iter(data.get("value") or []), None)
+    app_object_id = str((app or {}).get("id") or "").strip()
+    return app_object_id or None
+
+
 async def get_credentials(company_id: int) -> dict[str, Any] | None:
     record = await m365_repo.get_credentials(company_id)
     if not record:
         return None
     decrypted = record.copy()
-    for key in ("client_secret", "refresh_token", "access_token"):
+    for key in (
+        "client_secret",
+        "refresh_token",
+        "access_token",
+        "app_access_token",
+    ):
         decrypted[key] = _decrypt(decrypted.get(key))
     return decrypted
 
@@ -756,6 +1376,171 @@ async def delete_credentials(company_id: int) -> None:
     await m365_repo.delete_credentials(company_id)
 
 
+async def stage_connection_candidate(
+    company_id: int, tenant_id: str, provisioned: dict[str, Any]
+) -> dict[str, Any]:
+    """Persist a candidate and initialise credentials for a first connection.
+
+    Existing complete credentials remain untouched until the verified cutover.
+    During initial setup, however, there is no active connection to protect, so
+    the compatibility row must be populated immediately.  The consent step and
+    other existing consumers use that row to continue the setup journey.
+    """
+    current = await m365_repo.get_credentials(company_id)
+    has_complete_current = bool(
+        current
+        and all(
+            str(current.get(key) or "").strip()
+            for key in ("tenant_id", "client_id", "client_secret")
+        )
+    )
+    # Admin-only configuration creates a compatibility row with blank customer
+    # credentials.  Such a placeholder is not a legacy connection and must not
+    # be inventoried before the company's first managed connection is staged.
+    if has_complete_current:
+        legacy = current.copy()
+        legacy["client_secret"] = _encrypt(str(current["client_secret"]))
+        await connection_repo.ensure_legacy(company_id, legacy)
+    candidate = await connection_repo.stage_candidate(
+        company_id=company_id,
+        tenant_id=tenant_id,
+        client_id=provisioned["client_id"],
+        client_secret=_encrypt(provisioned["client_secret"]),
+        app_object_id=provisioned.get("app_object_id"),
+        service_principal_object_id=provisioned.get("service_principal_object_id"),
+        client_secret_key_id=provisioned.get("client_secret_key_id"),
+        client_secret_expires_at=provisioned.get("client_secret_expires_at"),
+    )
+    if not has_complete_current:
+        await m365_repo.upsert_credentials(
+            company_id=company_id,
+            tenant_id=tenant_id,
+            client_id=provisioned["client_id"],
+            client_secret=_encrypt(provisioned["client_secret"]),
+            refresh_token=None,
+            access_token=None,
+            token_expires_at=None,
+            app_object_id=provisioned.get("app_object_id"),
+            client_secret_key_id=provisioned.get("client_secret_key_id"),
+            client_secret_expires_at=provisioned.get("client_secret_expires_at"),
+        )
+    return candidate
+
+
+async def get_pending_connection(
+    company_id: int, tenant_id: str | None = None
+) -> dict[str, Any] | None:
+    pending = await connection_repo.get_pending(company_id)
+    if tenant_id and pending and str(pending.get("tenant_id", "")).lower() != tenant_id.lower():
+        return None
+    return pending
+
+
+async def verify_connection_candidate(
+    company_id: int, connection_id: int
+) -> dict[str, Any]:
+    """Verify tenant, workload access, and future secret-renewal access."""
+    candidate = await connection_repo.get(connection_id)
+    if not candidate or int(candidate["company_id"]) != company_id:
+        raise M365Error("Microsoft 365 connection candidate not found", http_status=404)
+    tenant_ok = workload_ok = renewal_ok = False
+    error: str | None = None
+    try:
+        secret = _decrypt(candidate.get("client_secret"))
+        token = await _exchange_new_connection_token(
+            tenant_id=str(candidate["tenant_id"]),
+            client_id=str(candidate["client_id"]),
+            client_secret=secret,
+        )
+        organization = await _graph_get(
+            token, "https://graph.microsoft.com/v1.0/organization?$select=id"
+        )
+        actual_tenant = str((organization.get("value") or [{}])[0].get("id") or "")
+        tenant_ok = actual_tenant.lower() == str(candidate["tenant_id"]).lower()
+        if not tenant_ok:
+            raise M365Error("Candidate authenticated to a different Microsoft 365 tenant")
+        await _graph_get(token, "https://graph.microsoft.com/v1.0/users?$top=1&$select=id")
+        workload_ok = True
+        app_object_id = str(candidate.get("app_object_id") or "")
+        if not app_object_id:
+            raise M365Error("Candidate has no stable application object identity")
+        await _graph_get(
+            token,
+            f"https://graph.microsoft.com/v1.0/applications/"
+            f"{_graph_object_id(app_object_id)}?$select=id",
+        )
+        renewal_ok = True
+    except M365Error as exc:
+        error = str(exc)
+    await connection_repo.record_verification(
+        connection_id, tenant=tenant_ok, workload=workload_ok,
+        renewal=renewal_ok, error=error,
+    )
+    result = await connection_repo.get(connection_id)
+    if not result:
+        raise M365Error("Microsoft 365 connection candidate disappeared")
+    return result
+
+
+async def _exchange_new_connection_token(
+    *, tenant_id: str, client_id: str, client_secret: str | None
+) -> str:
+    """Acquire a newly provisioned app token after Entra replication.
+
+    ``addPassword`` can return successfully before the new credential is
+    accepted by every Microsoft identity endpoint.  The setup page is shown
+    immediately afterwards, so a single exchange made by *Complete setup* can
+    otherwise reject a valid connection with ``invalid_client``.  Keep this
+    retry local to candidate verification: normal authentication failures must
+    continue to fail fast for established connections.
+    """
+    last_error: M365Error | None = None
+    delay = 1.0
+    for attempt in range(1, 6):
+        try:
+            token, _, _ = await _exchange_token(
+                tenant_id=tenant_id,
+                client_id=client_id,
+                client_secret=client_secret or "",
+                refresh_token=None,
+            )
+            return token
+        except M365Error as exc:
+            last_error = exc
+            if attempt == 5:
+                break
+            log_info(
+                "New M365 connection credential not yet available; retrying",
+                tenant_id=tenant_id,
+                client_id=client_id,
+                attempt=attempt,
+                delay_seconds=delay,
+            )
+            await asyncio.sleep(delay)
+            delay *= 2
+    assert last_error is not None
+    raise last_error
+
+
+async def activate_connection_candidate(company_id: int, connection_id: int) -> dict[str, Any]:
+    return await connection_repo.activate(company_id, connection_id)
+
+
+async def rollback_connection(company_id: int) -> dict[str, Any]:
+    return await connection_repo.rollback(company_id)
+
+
+async def connection_dependency_inventory(connection_id: int) -> list[dict[str, Any]]:
+    return await connection_repo.dependency_inventory(connection_id)
+
+
+async def retire_connection(company_id: int, connection_id: int) -> None:
+    connection = await connection_repo.get(connection_id)
+    if not connection or int(connection["company_id"]) != company_id:
+        raise M365Error("Microsoft 365 connection not found", http_status=404)
+    await connection_repo.retire(connection_id)
+
+
 async def _exchange_token(
     *,
     tenant_id: str,
@@ -784,17 +1569,31 @@ async def _exchange_token(
         }
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.post(token_endpoint, data=data)
     except httpx.TimeoutException as exc:
         raise M365Error(
-            f"Microsoft 365 token request timed out ({type(exc).__name__})"
+            f"Microsoft 365 token request timed out ({type(exc).__name__})",
+            failure_kind="network",
         ) from exc
     except httpx.NetworkError as exc:
         raise M365Error(
-            f"Microsoft 365 token request network error ({type(exc).__name__})"
+            f"Microsoft 365 token request network error ({type(exc).__name__})",
+            failure_kind="network",
         ) from exc
     if response.status_code != 200:
+        try:
+            error_code = str(response.json().get("error") or "")
+        except (TypeError, ValueError):
+            error_code = ""
+        if error_code in {"invalid_grant", "interaction_required", "consent_required"}:
+            failure_kind = "reauthentication_required"
+        elif response.status_code == 429:
+            failure_kind = "throttled"
+        elif response.status_code >= 500:
+            failure_kind = "transient"
+        else:
+            failure_kind = "permanent"
         grant_type = "refresh_token" if refresh_token else "client_credentials"
         log_error(
             "Failed to acquire Microsoft 365 token",
@@ -804,7 +1603,12 @@ async def _exchange_token(
             status=response.status_code,
             body=response.text,
         )
-        raise M365Error("Unable to acquire Microsoft 365 access token")
+        raise M365Error(
+            "Unable to acquire Microsoft 365 access token",
+            http_status=response.status_code,
+            graph_error_code=error_code or None,
+            failure_kind=failure_kind,
+        )
 
     payload = response.json()
     access_token = str(payload.get("access_token"))
@@ -819,7 +1623,10 @@ async def _exchange_token(
 
 
 async def acquire_access_token(
-    company_id: int, *, force_client_credentials: bool = False
+    company_id: int,
+    *,
+    force_client_credentials: bool = False,
+    force_refresh: bool = False,
 ) -> str:
     creds = await get_credentials(company_id)
     if not creds:
@@ -827,6 +1634,13 @@ async def acquire_access_token(
 
     tenant_id = str(creds.get("tenant_id") or "").strip()
     client_id = str(creds.get("client_id") or "").strip()
+
+    # Resolve the customer boundary before consulting any token cache.  A CSP
+    # remap therefore invalidates warm tokens instead of leaking the previous
+    # customer's authorization into the new tenant.
+    csp_tenant_id = await companies_repo.get_company_csp_tenant_id(company_id)
+    effective_tenant_id = str(csp_tenant_id or tenant_id).strip()
+    csp_mapping_applied = bool(csp_tenant_id)
 
     # Reuse a stored token that is still valid (with a 5-minute safety margin).
     # This avoids an unnecessary round-trip to Microsoft's token endpoint on
@@ -836,9 +1650,24 @@ async def acquire_access_token(
     # For flows that explicitly require application permissions (for example
     # mailbox reporting APIs), callers can set ``force_client_credentials=True``
     # to bypass the cached delegated token and force an app-only token refresh.
-    stored_token = creds.get("access_token")
-    stored_expires_at = creds.get("token_expires_at")
-    if not force_client_credentials and stored_token and stored_expires_at:
+    use_app_cache = force_client_credentials or not creds.get("refresh_token")
+    token_prefix = "app_" if use_app_cache else ""
+    stored_token = creds.get(token_prefix + "access_token")
+    stored_expires_at = creds.get(token_prefix + "token_expires_at")
+    cache_tenant = creds.get(token_prefix + "token_cache_tenant_id")
+    cache_client = creds.get(token_prefix + "token_cache_client_id")
+    cache_grant = creds.get("token_cache_grant_type")
+    identity_matches = (
+        str(cache_tenant or "").casefold() == effective_tenant_id.casefold()
+        and str(cache_client or "").casefold() == client_id.casefold()
+        and (use_app_cache or cache_grant == "refresh_token")
+    )
+    if not csp_mapping_applied and not cache_tenant and not cache_client:
+        # Legacy records have reliable tenant/client evidence in the credential
+        # row itself. Preserve their working cache until the first refresh
+        # backfills the explicit cache identity.
+        identity_matches = not use_app_cache
+    if not force_refresh and stored_token and stored_expires_at and identity_matches:
         # token_expires_at is stored as a naive UTC datetime; compare likewise.
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         margin = timedelta(minutes=5)
@@ -855,13 +1684,6 @@ async def acquire_access_token(
             )
             return stored_token
 
-    # Legacy CSP deployments may still store the customer tenant mapping on the
-    # company record while credentials point at a shared partner tenant app.
-    # Use the mapped customer tenant when present to avoid cross-tenant sync.
-    csp_tenant_id = await companies_repo.get_company_csp_tenant_id(company_id)
-    effective_tenant_id = csp_tenant_id or tenant_id
-    csp_mapping_applied = bool(csp_tenant_id)
-
     log_info(
         "M365 acquiring access token",
         company_id=company_id,
@@ -873,35 +1695,12 @@ async def acquire_access_token(
 
     stored_refresh = None if force_client_credentials else creds.get("refresh_token")
     grant_type = "refresh_token" if stored_refresh else "client_credentials"
-    try:
-        access_token, refresh, expires_at = await _exchange_token(
-            tenant_id=effective_tenant_id,
-            client_id=client_id,
-            client_secret=creds.get("client_secret") or "",
-            refresh_token=stored_refresh,
-        )
-    except M365Error:
-        if not stored_refresh:
-            raise
-        # The stored refresh token is stale or revoked.  Fall back to the
-        # client_credentials grant so that background sync jobs can continue
-        # using application permissions without user interaction.
-        log_error(
-            "M365 refresh token is invalid; falling back to client_credentials grant",
-            company_id=company_id,
-            tenant_id=effective_tenant_id,
-            client_id=client_id,
-        )
-        access_token, refresh, expires_at = await _exchange_token(
-            tenant_id=effective_tenant_id,
-            client_id=client_id,
-            client_secret=creds.get("client_secret") or "",
-            refresh_token=None,
-        )
-        grant_type = "client_credentials"
-        # Clear the stale refresh token so future calls use client_credentials
-        # immediately rather than attempting the refresh_token grant again.
-        refresh = None
+    access_token, refresh, expires_at = await _exchange_token(
+        tenant_id=effective_tenant_id,
+        client_id=client_id,
+        client_secret=creds.get("client_secret") or "",
+        refresh_token=stored_refresh,
+    )
 
     log_info(
         "M365 access token acquired successfully",
@@ -920,17 +1719,21 @@ async def acquire_access_token(
     # value so that future delegated operations (e.g. auto-granting missing
     # permissions on a 403) can still use it.  Only overwrite when a real
     # refresh token was returned or when a stale one was explicitly cleared.
-    if force_client_credentials and refresh is None:
-        refresh_to_store = _encrypt(creds.get("refresh_token"))
-    else:
-        refresh_to_store = _encrypt(refresh)
+    refresh_to_store = _encrypt(refresh or creds.get("refresh_token"))
 
-    await m365_repo.update_tokens(
-        company_id=company_id,
-        refresh_token=refresh_to_store,
-        access_token=_encrypt(access_token),
-        token_expires_at=expires_value,
-    )
+    if grant_type == "client_credentials":
+        await m365_repo.update_app_token(
+            company_id=company_id, access_token=_encrypt(access_token),
+            token_expires_at=expires_value, cache_tenant_id=effective_tenant_id,
+            cache_client_id=client_id,
+        )
+    else:
+        await m365_repo.update_tokens(
+            company_id=company_id, refresh_token=refresh_to_store,
+            access_token=_encrypt(access_token), token_expires_at=expires_value,
+            cache_tenant_id=effective_tenant_id, cache_client_id=client_id,
+            cache_grant_type=grant_type,
+        )
     return access_token
 
 
@@ -994,6 +1797,29 @@ async def _acquire_exo_access_token(company_id: int) -> tuple[str, str]:
     return access_token, tenant_id
 
 
+async def _acquire_teams_access_tokens(company_id: int) -> tuple[str, str, str]:
+    """Acquire the two documented tokens used by ``Connect-MicrosoftTeams``.
+
+    The returned order is Graph, Teams resource, tenant.  Tokens are neither
+    persisted nor shared across company boundaries.
+    """
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("Microsoft 365 credentials have not been configured")
+    tenant_id = str(creds.get("tenant_id") or "").strip()
+    client_id = str(creds.get("client_id") or "").strip()
+    secret = str(creds.get("client_secret") or "")
+    graph_token, _, _ = await _exchange_token(
+        tenant_id=tenant_id, client_id=client_id, client_secret=secret,
+        refresh_token=None, scope=_GRAPH_SCOPE,
+    )
+    teams_token, _, _ = await _exchange_token(
+        tenant_id=tenant_id, client_id=client_id, client_secret=secret,
+        refresh_token=None, scope=_TEAMS_SCOPE,
+    )
+    return graph_token, teams_token, tenant_id
+
+
 async def _exo_invoke_command(
     exo_token: str,
     tenant_id: str,
@@ -1008,7 +1834,8 @@ async def _exo_invoke_command(
     must already be granted.
 
     Returns the raw JSON response body on success.  Raises :exc:`M365Error` on any
-    non-200 HTTP status.
+    non-200 HTTP status and includes Exchange Online's safe error detail so callers
+    can present an actionable remediation failure instead of a silent generic error.
     """
     safe_tenant = quote(str(tenant_id or "").strip(), safe="")
     url = f"https://outlook.office365.com/adminapi/beta/{safe_tenant}/InvokeCommand"
@@ -1024,7 +1851,7 @@ async def _exo_invoke_command(
         "Content-Type": "application/json; charset=utf-8",
     }
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.post(url, headers=headers, json=payload)
     except httpx.DecodingError as exc:
         raise M365Error(
@@ -1039,13 +1866,16 @@ async def _exo_invoke_command(
             f"Exchange Online {cmdlet_name} network error ({type(exc).__name__})"
         ) from exc
     if response.status_code not in (200, 201, 204):
+        error_detail = _exo_error_detail(response)
         log_error(
             "Exchange Online InvokeCommand failed",
             cmdlet=cmdlet_name,
             status=response.status_code,
+            error=error_detail,
         )
+        detail_suffix = f": {error_detail}" if error_detail else ""
         raise M365Error(
-            f"Exchange Online {cmdlet_name} failed ({response.status_code})",
+            f"Exchange Online {cmdlet_name} failed ({response.status_code}){detail_suffix}",
             http_status=response.status_code,
         )
     if response.status_code == 204 or not response.text:
@@ -1055,6 +1885,175 @@ async def _exo_invoke_command(
     except (ValueError, httpx.DecodingError) as exc:
         raise M365Error(
             f"Exchange Online {cmdlet_name} response parse error: {exc}"
+        ) from exc
+
+
+def _exo_error_detail(response: httpx.Response) -> str:
+    """Extract a bounded, single-line error message from an EXO response."""
+    candidates: list[Any] = []
+    try:
+        body = response.json()
+    except (ValueError, httpx.DecodingError):
+        body = None
+
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict):
+            candidates.extend((error.get("message"), error.get("description")))
+            inner = error.get("innererror") or error.get("innerError")
+            if isinstance(inner, dict):
+                candidates.append(inner.get("message"))
+        elif isinstance(error, str):
+            candidates.append(error)
+        candidates.extend(
+            (body.get("Message"), body.get("message"), body.get("error_description"))
+        )
+    candidates.append(getattr(response, "text", ""))
+
+    for candidate in candidates:
+        if not isinstance(candidate, str) or not candidate.strip():
+            continue
+        # Control characters make logs difficult to read and can permit log
+        # injection. Keep the diagnostic useful while bounding what is exposed.
+        return " ".join(candidate.split())[:500]
+    return ""
+
+
+async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
+    """Acquire an app-only access token for the Security & Compliance PowerShell REST API.
+
+    Uses the ``client_credentials`` grant with the Microsoft Purview/Compliance
+    scope (``https://ps.compliance.protection.outlook.com/.default``).  The
+    provisioned app must have application permissions that allow reading and
+    writing protection alert policies (e.g. Compliance Administrator role or
+    ``ComplianceManager.ReadWrite.All``).
+
+    :returns: A tuple of ``(access_token, tenant_id)``.
+    """
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("Microsoft 365 credentials have not been configured")
+
+    tenant_id = str(creds.get("tenant_id") or "").strip()
+    client_id = str(creds.get("client_id") or "").strip()
+
+    access_token, _, _ = await _exchange_token(
+        tenant_id=tenant_id,
+        client_id=client_id,
+        client_secret=creds.get("client_secret") or "",
+        refresh_token=None,
+        scope=_SCC_SCOPE,
+    )
+    return access_token, tenant_id
+
+
+def _jwt_appid(token: str) -> str | None:
+    """Extract the ``appid`` claim from a JWT access token without verification.
+
+    Used to build an ``X-AnchorMailbox`` routing hint for SCC REST API calls so
+    that requests reach the correct Exchange/Purview forest rather than the
+    Microsoft-internal FFO pre-production environment (DC=FFO,DC=extest).
+    """
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None
+        padding = 4 - len(parts[1]) % 4
+        payload_bytes = base64.urlsafe_b64decode(parts[1] + "=" * padding)
+        claims = json.loads(payload_bytes)
+        # Entra v1 access tokens expose the client application as ``appid``;
+        # v2 tokens use ``azp``.  Supporting both is important because the SCC
+        # endpoint requires this value in X-AnchorMailbox to establish the
+        # organization context before it runs a cmdlet.
+        app_id = str(claims.get("appid") or claims.get("azp") or "").strip()
+        return app_id or None
+    except Exception:  # noqa: BLE001 - best-effort; absence is non-fatal
+        return None
+
+
+async def _scc_invoke_command(
+    scc_token: str,
+    tenant_id: str,
+    cmdlet_name: str,
+    parameters: dict[str, Any] | None = None,
+    *,
+    organization: str | None = None,
+) -> dict[str, Any]:
+    """Call a Security & Compliance PowerShell cmdlet via the Purview REST InvokeCommand API.
+
+    POSTs to the Security & Compliance admin API. When *organization* is
+    supplied, its initial ``*.onmicrosoft.com`` domain is used in both the URL
+    route and the routing header, matching ``Connect-IPPSSession -Organization``.
+    Other callers continue to use *tenant_id*. The request uses an app-only
+    Security & Compliance access token. The app must have a
+    Compliance Administrator (or Global Administrator) role assigned so that
+    cmdlets such as ``Get-ProtectionAlert`` and ``New-ProtectionAlert`` succeed.
+
+    An ``X-AnchorMailbox`` header is included when the ``appid`` claim can be
+    decoded from *scc_token*. Compliance-search callers must supply the tenant's
+    initial domain because using the tenant GUID in the route can make Purview
+    look for ``CN={tenant GUID}`` in the FFO test forest.
+
+    Returns the raw JSON response body on success.  Raises :exc:`M365Error` on any
+    non-200 HTTP status.
+    """
+    route_organization = str(organization or tenant_id or "").strip().lower()
+    if organization and not _SCC_ORGANIZATION_PATTERN.fullmatch(route_organization):
+        raise M365Error("Invalid Security & Compliance organization identifier")
+    safe_organization = quote(route_organization, safe="")
+    url = (
+        "https://ps.compliance.protection.outlook.com/adminapi/beta/"
+        f"{safe_organization}/InvokeCommand"
+    )
+    payload: dict[str, Any] = {
+        "CmdletInput": {
+            "CmdletName": cmdlet_name,
+            "Parameters": parameters or {},
+        }
+    }
+    headers = {
+        "Authorization": f"Bearer {scc_token}",
+        "Accept-Encoding": "identity",
+        "Content-Type": "application/json; charset=utf-8",
+    }
+    appid = _jwt_appid(scc_token)
+    if appid and route_organization:
+        headers["X-AnchorMailbox"] = f"app:{appid}@{route_organization}"
+    try:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
+            response = await client.post(url, headers=headers, json=payload)
+    except httpx.DecodingError as exc:
+        raise M365Error(
+            f"Security & Compliance {cmdlet_name} request decode error: {exc}"
+        ) from exc
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Security & Compliance {cmdlet_name} request timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Security & Compliance {cmdlet_name} network error ({type(exc).__name__})"
+        ) from exc
+    if response.status_code not in (200, 201, 204):
+        error_detail = _exo_error_detail(response)
+        log_error(
+            "Security & Compliance InvokeCommand failed",
+            cmdlet=cmdlet_name,
+            status=response.status_code,
+            error=error_detail,
+        )
+        detail_suffix = f": {error_detail}" if error_detail else ""
+        raise M365Error(
+            f"Security & Compliance {cmdlet_name} failed ({response.status_code}){detail_suffix}",
+            http_status=response.status_code,
+        )
+    if response.status_code == 204 or not response.text:
+        return {}
+    try:
+        return response.json()
+    except (ValueError, httpx.DecodingError) as exc:
+        raise M365Error(
+            f"Security & Compliance {cmdlet_name} response parse error: {exc}"
         ) from exc
 
 
@@ -1069,7 +2068,7 @@ async def _graph_get(
     if extra_headers:
         req_headers.update(extra_headers)
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.get(url, headers=req_headers)
     except httpx.TimeoutException as exc:
         raise M365Error(
@@ -1090,7 +2089,7 @@ async def _graph_get(
         try:
             graph_error_code = (response.json().get("error") or {}).get("code")
         except Exception:  # noqa: BLE001
-            pass
+            graph_error_code = None
         raise M365Error(
             f"Microsoft Graph request failed ({response.status_code})",
             http_status=response.status_code,
@@ -1252,14 +2251,55 @@ async def _graph_get_all(access_token: str, url: str) -> list[dict[str, Any]]:
     return items
 
 
+def _graph_path_segment(value: Any) -> str:
+    """Encode a dynamic Microsoft Graph path value as one safe URL segment."""
+    return quote(str(value).strip(), safe="")
+
+
+def _graph_object_id(value: Any) -> str:
+    """Validate a Microsoft Entra directory object ID GUID for Graph paths."""
+    candidate = str(value).strip()
+    if not _GRAPH_OBJECT_ID_PATTERN.fullmatch(candidate):
+        raise M365Error("Invalid Microsoft Graph object ID", http_status=400)
+    return candidate
+
+
 def _validate_graph_url(url: str) -> None:
     """Reject non-Microsoft Graph targets to prevent SSRF via forwarded URLs."""
     parsed = urlsplit(url)
     scheme = (parsed.scheme or "").lower()
     host = (parsed.hostname or "").lower()
+    path = parsed.path or "/"
 
-    if scheme != "https" or host not in _GRAPH_ALLOWED_HOSTS:
+    if (
+        scheme != "https"
+        or host not in _GRAPH_ALLOWED_HOSTS
+        or parsed.username
+        or parsed.password
+        or parsed.port is not None
+        or parsed.fragment
+    ):
         log_error("Rejected non-Graph URL in Microsoft Graph helper", url=url)
+        raise M365Error("Invalid Microsoft Graph URL", http_status=400)
+
+    segments = path.split("/")
+    has_versioned_resource_path = (
+        len(segments) >= _GRAPH_MIN_PATH_SEGMENTS
+        and segments[0] == ""
+        and segments[1] in _GRAPH_API_VERSIONS
+    )
+    if not has_versioned_resource_path:
+        log_error("Rejected non-Graph URL in Microsoft Graph helper", url=url)
+        raise M365Error("Invalid Microsoft Graph URL", http_status=400)
+
+    resource_segments = segments[2:]
+    contains_unsafe_resource_segments = not resource_segments
+    for segment in resource_segments:
+        if segment == "" or unquote(segment) in {".", ".."}:
+            contains_unsafe_resource_segments = True
+            break
+    if contains_unsafe_resource_segments:
+        log_error("Rejected unsafe Graph path in Microsoft Graph helper", url=url)
         raise M365Error("Invalid Microsoft Graph URL", http_status=400)
 
 
@@ -1271,7 +2311,7 @@ async def _graph_post(
     _validate_graph_url(url)
     headers = {"Authorization": f"Bearer {access_token}"}
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.post(url, headers=headers, json=payload)
     except httpx.TimeoutException as exc:
         raise M365Error(
@@ -1282,14 +2322,9 @@ async def _graph_post(
             f"Microsoft Graph POST network error ({type(exc).__name__})"
         ) from exc
     if response.status_code not in (200, 201, 204):
-        log_error(
-            "Microsoft Graph POST failed",
-            url=url,
-            status=response.status_code,
-            body=response.text,
-        )
         graph_error_code: str | None = None
         graph_error_message: str | None = None
+        graph_error_detail_codes: tuple[str, ...] = ()
         try:
             err = (response.json().get("error") or {})
             code_value = err.get("code")
@@ -1298,13 +2333,52 @@ async def _graph_post(
                 graph_error_code = code_value
             if isinstance(message_value, str):
                 graph_error_message = message_value
+            details = err.get("details")
+            if isinstance(details, list):
+                graph_error_detail_codes = tuple(
+                    code
+                    for detail in details
+                    if isinstance(detail, dict)
+                    and isinstance((code := detail.get("code")), str)
+                )
         except Exception:  # noqa: BLE001
-            pass
+            graph_error_code = None
+            graph_error_message = None
+            graph_error_detail_codes = ()
+        # Role assignment creation is idempotent from MyPortal's perspective.
+        # Although Graph commonly reports an existing assignment as 409, some
+        # tenants return Request_BadRequest/InvalidUpdate instead.  Treat only
+        # that precise response on a role-assignment collection as success so
+        # a repeated tenant confirmation cannot fail on a grant it already has.
+        if _is_app_role_assignment_already_exists_response(
+            url=url,
+            status=response.status_code,
+            graph_error_code=graph_error_code,
+            graph_error_message=graph_error_message,
+            graph_error_detail_codes=graph_error_detail_codes,
+        ):
+            log_info("App role assignment already exists, skipping", url=url)
+            return {}
+        if _is_app_owner_already_exists_response(
+            url=url,
+            status=response.status_code,
+            graph_error_code=graph_error_code,
+            graph_error_message=graph_error_message,
+        ):
+            log_info("Application owner already exists, skipping", url=url)
+            return {}
+        log_error(
+            "Microsoft Graph POST failed",
+            url=url,
+            status=response.status_code,
+            body=response.text,
+        )
         suffix = f": {graph_error_message}" if graph_error_message else ""
         raise M365Error(
             f"Microsoft Graph POST failed ({response.status_code}){suffix}",
             http_status=response.status_code,
             graph_error_code=graph_error_code,
+            graph_error_detail_codes=graph_error_detail_codes,
         )
     if response.status_code == 204:
         return {}
@@ -1320,12 +2394,86 @@ async def _graph_post(
 # documented mitigation is to retry with backoff – the assignment succeeds
 # within a few seconds once propagation completes.
 _APP_ROLE_ASSIGN_TRANSIENT_MESSAGE = "permission being assigned was not found"
+_APP_ROLE_ASSIGN_ALREADY_EXISTS_MESSAGE = "permission being assigned already exists on the object"
+_APP_OWNER_ALREADY_EXISTS_MESSAGE = (
+    "one or more added object references already exist for the following "
+    "modified properties: 'owners'."
+)
+
+
+def _is_app_owner_already_exists_response(
+    *,
+    url: str,
+    status: int,
+    graph_error_code: str | None,
+    graph_error_message: str | None,
+) -> bool:
+    """Recognize the precise Graph response for an existing app owner."""
+    path = urlsplit(url).path.rstrip("/")
+    return (
+        path.endswith("/owners/$ref")
+        and status == 400
+        and graph_error_code == "Request_BadRequest"
+        and (graph_error_message or "").strip().lower()
+        == _APP_OWNER_ALREADY_EXISTS_MESSAGE
+    )
+
+
+def _is_app_owner_already_exists_error(exc: "M365Error") -> bool:
+    """Recognize an existing-owner response after it has been wrapped."""
+    return (
+        exc.http_status == 400
+        and exc.graph_error_code == "Request_BadRequest"
+        and _APP_OWNER_ALREADY_EXISTS_MESSAGE in str(exc).strip().lower()
+    )
+
+
+def _is_app_role_assignment_already_exists_response(
+    *,
+    url: str,
+    status: int,
+    graph_error_code: str | None,
+    graph_error_message: str | None,
+    graph_error_detail_codes: tuple[str, ...],
+) -> bool:
+    """Recognize Graph's non-standard duplicate role-assignment response."""
+    path = urlsplit(url).path.rstrip("/")
+    is_assignment_collection = path.endswith("/appRoleAssignments") or path.endswith(
+        "/appRoleAssignedTo"
+    )
+    return (
+        is_assignment_collection
+        and status == 400
+        and graph_error_code == "Request_BadRequest"
+        and "InvalidUpdate" in graph_error_detail_codes
+        and (graph_error_message or "").strip().lower()
+        == _APP_ROLE_ASSIGN_ALREADY_EXISTS_MESSAGE
+    )
+
+
+def _is_app_role_assignment_already_exists_error(exc: "M365Error") -> bool:
+    """Recognize the duplicate response after it has been wrapped."""
+    return (
+        exc.http_status == 400
+        and exc.graph_error_code == "Request_BadRequest"
+        and "InvalidUpdate" in exc.graph_error_detail_codes
+        and _APP_ROLE_ASSIGN_ALREADY_EXISTS_MESSAGE in str(exc).lower()
+    )
 
 
 def _is_app_role_assignment_propagation_error(exc: "M365Error") -> bool:
     if exc.http_status == 404:
         return True
     if exc.http_status == 400:
+        # Graph can express the same newly-created-principal propagation race
+        # as a generic Request_BadRequest with only an InvalidUpdate detail.
+        # This predicate is used solely for app-role assignment POSTs, so the
+        # bounded retry cannot turn unrelated application updates into retries.
+        if (
+            exc.graph_error_code == "Request_BadRequest"
+            and "InvalidUpdate" in exc.graph_error_detail_codes
+        ):
+            return True
         message = (str(exc) or "").lower()
         if _APP_ROLE_ASSIGN_TRANSIENT_MESSAGE in message:
             return True
@@ -1361,6 +2509,9 @@ async def _post_app_role_assignment_with_retry(
         try:
             return await _graph_post(access_token, url, payload)
         except M365Error as exc:
+            if _is_app_role_assignment_already_exists_error(exc):
+                log_info("App role assignment already exists, skipping", url=url)
+                return {}
             if not _is_app_role_assignment_propagation_error(exc):
                 raise
             last_exc = exc
@@ -1382,15 +2533,22 @@ async def _graph_patch(
     access_token: str,
     url: str,
     payload: dict[str, Any],
+    *,
+    expected_error_statuses: frozenset[int] = frozenset(),
 ) -> dict[str, Any]:
-    """Issue a PATCH request to Microsoft Graph.  Raises :exc:`M365Error` on failure."""
+    """Issue a PATCH request to Microsoft Graph.  Raises :exc:`M365Error` on failure.
+
+    Statuses in ``expected_error_statuses`` are still raised to the caller, but
+    are not logged here as unexpected failures.  This lets recovery flows own
+    the appropriate, sanitized log message for an anticipated response.
+    """
     _validate_graph_url(url)
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
     }
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.patch(url, headers=headers, json=payload)
     except httpx.TimeoutException as exc:
         raise M365Error(
@@ -1401,12 +2559,13 @@ async def _graph_patch(
             f"Microsoft Graph PATCH network error ({type(exc).__name__})"
         ) from exc
     if response.status_code not in (200, 204):
-        log_error(
-            "Microsoft Graph PATCH failed",
-            url=url,
-            status=response.status_code,
-            body=response.text,
-        )
+        if response.status_code not in expected_error_statuses:
+            log_error(
+                "Microsoft Graph PATCH failed",
+                url=url,
+                status=response.status_code,
+                body=response.text,
+            )
         graph_error_code: str | None = None
         graph_error_message: str | None = None
         try:
@@ -1418,7 +2577,8 @@ async def _graph_patch(
             if isinstance(message_value, str):
                 graph_error_message = message_value
         except Exception:  # noqa: BLE001
-            pass
+            graph_error_code = None
+            graph_error_message = None
         suffix = f": {graph_error_message}" if graph_error_message else ""
         raise M365Error(
             f"Microsoft Graph PATCH failed ({response.status_code}){suffix}",
@@ -1430,12 +2590,66 @@ async def _graph_patch(
     return response.json()
 
 
+async def _graph_put(
+    access_token: str,
+    url: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Issue a PUT request to Microsoft Graph.  Raises :exc:`M365Error` on failure.
+
+    Some singleton policies (for example ``/policies/deviceRegistrationPolicy``)
+    only support full replacement, so callers must send the complete object.
+    """
+    _validate_graph_url(url)
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
+            response = await client.put(url, headers=headers, json=payload)
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Microsoft Graph PUT timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Microsoft Graph PUT network error ({type(exc).__name__})"
+        ) from exc
+    if response.status_code not in (200, 201, 204):
+        log_error(
+            "Microsoft Graph PUT failed",
+            url=url,
+            status=response.status_code,
+            body=response.text,
+        )
+        graph_error_code: str | None = None
+        graph_error_message: str | None = None
+        try:
+            err = response.json().get("error") or {}
+            if isinstance(err.get("code"), str):
+                graph_error_code = err["code"]
+            if isinstance(err.get("message"), str):
+                graph_error_message = err["message"]
+        except Exception:  # noqa: BLE001
+            pass
+        suffix = f": {graph_error_message}" if graph_error_message else ""
+        raise M365Error(
+            f"Microsoft Graph PUT failed ({response.status_code}){suffix}",
+            http_status=response.status_code,
+            graph_error_code=graph_error_code,
+        )
+    if response.status_code == 204 or not response.text:
+        return {}
+    return response.json()
+
+
 async def _graph_delete(access_token: str, url: str) -> None:
     """Issue a DELETE request to Microsoft Graph.  Raises :exc:`M365Error` on failure."""
     _validate_graph_url(url)
     headers = {"Authorization": f"Bearer {access_token}"}
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.delete(url, headers=headers)
     except httpx.TimeoutException as exc:
         raise M365Error(
@@ -1458,66 +2672,14 @@ async def _graph_delete(access_token: str, url: str) -> None:
         )
 
 
-async def _delete_existing_apps_by_display_name(
-    access_token: str,
-    display_name: str,
-) -> None:
-    """Delete all app registrations whose ``displayName`` matches *display_name*.
-
-    Searching by display name covers the case where a previous provision run
-    left behind an orphaned app registration (e.g. if the stored
-    ``app_object_id`` is stale or was never recorded).  Deletion of the app
-    registration also removes the corresponding service principal in the same
-    tenant.
-
-    Errors are logged but never re-raised so that the caller (the provision
-    flow) can continue to create a fresh registration even when cleanup fails.
-    """
-    safe_name = display_name.replace("'", "''")
-    try:
-        existing = await _graph_get(
-            access_token,
-            f"https://graph.microsoft.com/v1.0/applications"
-            f"?$filter=displayName eq '{safe_name}'&$select=id,appId,displayName",
-        )
-    except M365Error as exc:
-        log_error(
-            "Failed to search for existing app registrations; skipping cleanup",
-            display_name=display_name,
-            error=str(exc),
-        )
-        return
-
-    for app in existing.get("value", []):
-        obj_id = app.get("id", "")
-        app_id = app.get("appId", "")
-        if not obj_id:
-            continue
-        try:
-            await _graph_delete(
-                access_token,
-                f"https://graph.microsoft.com/v1.0/applications/{obj_id}",
-            )
-            log_info(
-                "Deleted existing app registration before re-provisioning",
-                app_object_id=obj_id,
-                app_id=app_id,
-                display_name=display_name,
-            )
-        except M365Error as exc:
-            log_error(
-                "Failed to delete existing app registration; continuing with provisioning",
-                app_object_id=obj_id,
-                app_id=app_id,
-                error=str(exc),
-            )
-
-
 async def provision_app_registration(
     *,
     access_token: str,
     display_name: str = "MyPortal Integration",
     redirect_uri: str | None = None,
+    app_object_id: str | None = None,
+    client_id: str | None = None,
+    service_principal_object_id: str | None = None,
 ) -> dict[str, Any]:
     """Create a per-tenant app registration with required permissions.
 
@@ -1548,9 +2710,9 @@ async def provision_app_registration(
     settings = get_settings()
     secret_lifetime_days = settings.m365_client_secret_lifetime_days
 
-    # 0. Remove any existing app registrations with the same display name so
-    #    that re-provisioning always starts from a clean slate.
-    await _delete_existing_apps_by_display_name(access_token, display_name)
+    # Display names are not identities: two companies may deliberately use the
+    # same name. Repair only an explicitly stored object, otherwise create a
+    # side-by-side candidate and leave every existing registration untouched.
 
     # 1. Validate permissions against the tenant's actual resource SP app roles.
     #    Some permissions (e.g. SharePointTenantSettings.Read.All) are only
@@ -1562,8 +2724,6 @@ async def provision_app_registration(
         raise M365Error(
             "Unable to locate Microsoft Graph service principal in the tenant"
         )
-
-    _teams_sp_id, teams_sp_role_ids = await _get_sp_app_role_ids(access_token, _TEAMS_APP_ID)
 
     # Filter Graph roles to those present in this tenant's Graph SP, plus
     # explicitly force-granted roles whose availability lookup can be stale or
@@ -1582,33 +2742,14 @@ async def provision_app_registration(
             skipped_roles=skipped_graph_roles,
         )
 
-    teams_role_available = _TEAMS_MANAGE_AS_APP_ROLE in teams_sp_role_ids
+    required_resource_access = [{
+        "resourceAppId": _GRAPH_APP_ID,
+        "resourceAccess": [
+            {"id": role_id, "type": "Role"} for role_id in valid_graph_roles
+        ],
+    }]
 
-    required_resource_access: list[dict[str, Any]] = [
-        {
-            "resourceAppId": _GRAPH_APP_ID,
-            "resourceAccess": [
-                {"id": role_id, "type": "Role"} for role_id in valid_graph_roles
-            ],
-        },
-        {
-            "resourceAppId": _EXO_APP_ID,
-            "resourceAccess": [
-                {"id": _EXO_MANAGE_AS_APP_ROLE, "type": "Role"},
-            ],
-        },
-    ]
-    if teams_role_available and _teams_sp_id:
-        required_resource_access.append(
-            {
-                "resourceAppId": _TEAMS_APP_ID,
-                "resourceAccess": [
-                    {"id": _TEAMS_MANAGE_AS_APP_ROLE, "type": "Role"},
-                ],
-            }
-        )
-
-    # 2. Create the app registration with only the validated permissions.
+    # 2. Repair the known app in place or create a side-by-side registration.
     app_payload: dict[str, Any] = {
         "displayName": display_name,
         "signInAudience": "AzureADMyOrg",
@@ -1616,23 +2757,84 @@ async def provision_app_registration(
     }
     if redirect_uri:
         app_payload["web"] = {"redirectUris": [redirect_uri]}
-    app_data = await _graph_post(
-        access_token,
-        "https://graph.microsoft.com/v1.0/applications",
-        app_payload,
-    )
-    app_object_id: str = app_data["id"]
-    client_id: str = app_data["appId"]
-    log_info("Provisioned M365 app registration", client_id=client_id)
+    if app_object_id and client_id:
+        try:
+            await _graph_patch(
+                access_token,
+                f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}",
+                app_payload,
+                expected_error_statuses=frozenset({404}),
+            )
+            log_info("Repaired M365 app registration in place", client_id=client_id)
+        except M365Error as exc:
+            if exc.http_status != 404:
+                raise
+            # The object ID stored by an older deployment can be stale even
+            # while the same application (identified by its immutable appId)
+            # still exists.  Resolve by client ID before creating another app
+            # registration; this repairs the stored object identity without
+            # producing duplicate enterprise applications.
+            applications = await _graph_get(
+                access_token,
+                "https://graph.microsoft.com/v1.0/applications"
+                f"?$filter=appId eq '{quote(client_id, safe='')}'&$select=id",
+            )
+            matching_applications = applications.get("value") or []
+            if matching_applications:
+                recovered_app_object_id = str(
+                    matching_applications[0].get("id") or ""
+                ).strip()
+                if not recovered_app_object_id:
+                    raise M365Error(
+                        "Microsoft Graph returned an application without an object ID"
+                    )
+                await _graph_patch(
+                    access_token,
+                    "https://graph.microsoft.com/v1.0/applications/"
+                    f"{_graph_object_id(recovered_app_object_id)}",
+                    app_payload,
+                )
+                app_object_id = recovered_app_object_id
+                log_info(
+                    "Recovered M365 app registration by client ID",
+                    client_id=client_id,
+                    app_object_id=app_object_id,
+                )
+            else:
+                # A pending connection can outlive an app registration that an
+                # administrator deleted directly in Entra.  The old service
+                # principal identity is tied to that deleted registration and
+                # must not be reused for its replacement.
+                log_warning(
+                    "Stored M365 app registration no longer exists; creating a replacement",
+                    app_object_id=app_object_id,
+                    client_id=client_id,
+                )
+                app_object_id = None
+                client_id = None
+                service_principal_object_id = None
+
+    if not app_object_id or not client_id:
+        app_data = await _graph_post(
+            access_token,
+            "https://graph.microsoft.com/v1.0/applications",
+            app_payload,
+        )
+        app_object_id = app_data["id"]
+        client_id = app_data["appId"]
+        log_info("Provisioned M365 app registration candidate", client_id=client_id)
 
     # 3. Create a service principal (Enterprise App) for the registration
-    sp_data = await _graph_post(
-        access_token,
-        "https://graph.microsoft.com/v1.0/servicePrincipals",
-        {"appId": client_id},
-    )
-    sp_object_id: str = sp_data["id"]
-    log_info("Created M365 service principal", sp_object_id=sp_object_id)
+    if service_principal_object_id:
+        sp_object_id = service_principal_object_id
+    else:
+        sp_data = await _graph_post(
+            access_token,
+            "https://graph.microsoft.com/v1.0/servicePrincipals",
+            {"appId": client_id},
+        )
+        sp_object_id = sp_data["id"]
+        log_info("Created M365 service principal", sp_object_id=sp_object_id)
 
     # 4. Create a client secret with a configurable lifetime (default: 730 days / 2 years).
     # This is done *before* the role-assignment step so that the HTTP callback
@@ -1644,10 +2846,10 @@ async def provision_app_registration(
     secret_expiry_str = secret_expiry_date.isoformat() + "T00:00:00Z"
     secret_data = await _graph_post(
         access_token,
-        f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/addPassword",
+        f"https://graph.microsoft.com/v1.0/applications/{quote(str(app_object_id), safe='')}/addPassword",
         {
             "passwordCredential": {
-                "displayName": "MyPortal",
+                "displayName": _M365_SECRET_DISPLAY_NAME,
                 "endDateTime": secret_expiry_str,
             }
         },
@@ -1684,6 +2886,7 @@ async def provision_app_registration(
         "client_id": client_id,
         "client_secret": client_secret,
         "app_object_id": app_object_id,
+        "service_principal_object_id": sp_object_id,
         "client_secret_key_id": client_secret_key_id,
         "client_secret_expires_at": client_secret_expires_at,
     }
@@ -1719,14 +2922,52 @@ async def _grant_provisioned_roles(
     # of attempting grants for roles that may not exist in the tenant).
     roles_to_grant = valid_graph_roles if valid_graph_roles is not None else _PROVISION_APP_ROLES
     try:
+        for role_name in REQUIRED_DIRECTORY_ROLES:
+            await _ensure_directory_role_by_name(access_token, sp_object_id, role_name)
+
+        # Confirmation may resume a partially (or fully) provisioned app.  Read
+        # the assignee's current grants once and avoid submitting duplicate
+        # creates: Graph reports duplicate appRoleAssignedTo POSTs as a 400
+        # InvalidUpdate in some tenants rather than the documented conflict.
+        existing_role_assignments: set[tuple[str, str]] = set()
+        try:
+            assignment_response = await _graph_get(
+                access_token,
+                "https://graph.microsoft.com/v1.0/servicePrincipals/"
+                f"{_graph_path_segment(sp_object_id)}/appRoleAssignments"
+                "?$select=resourceId,appRoleId",
+            )
+            existing_role_assignments = {
+                (str(item["resourceId"]), str(item["appRoleId"]))
+                for item in assignment_response.get("value", [])
+                if isinstance(item, dict)
+                and item.get("resourceId")
+                and item.get("appRoleId")
+            }
+        except M365Error as exc:
+            # Preserve the existing best-effort behaviour if Graph cannot list
+            # assignments; individual creates still have their normal guards.
+            log_info(
+                "Could not preflight existing app role assignments",
+                sp_object_id=sp_object_id,
+                error=str(exc),
+            )
+
         # 1. Grant each required Microsoft Graph application permission.
         # 409 Conflict means the assignment already exists – treat as success.
         # Any other error is logged and skipped so remaining roles still process.
         for role_id in roles_to_grant:
+            if (graph_sp_id, role_id) in existing_role_assignments:
+                log_info(
+                    "App role assignment already exists, skipping",
+                    role_id=role_id,
+                    sp_object_id=sp_object_id,
+                )
+                continue
             try:
                 await _post_app_role_assignment_with_retry(
                     access_token,
-                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                    _app_role_assignment_url(graph_sp_id),
                     {
                         "principalId": sp_object_id,
                         "resourceId": graph_sp_id,
@@ -1752,132 +2993,106 @@ async def _grant_provisioned_roles(
             sp_object_id=sp_object_id,
         )
 
-        # 2. Grant Exchange Online Exchange.ManageAsApp role (best-effort).
-        try:
-            exo_sp_response = await _graph_get(
-                access_token,
-                f"https://graph.microsoft.com/v1.0/servicePrincipals"
-                f"?$filter=appId eq '{_EXO_APP_ID}'&$select=id",
-            )
-            exo_sp_list = exo_sp_response.get("value", [])
-            if exo_sp_list:
-                exo_sp_id: str = exo_sp_list[0]["id"]
+        # 2. Grant Exchange.ManageAsApp on Exchange Online. Do not attempt the
+        # identically numbered role against Exchange Online Protection: EOP
+        # does not expose that app role and Graph rejects it with InvalidUpdate.
+        for resource_app_id, resource_name in (
+            (_EXO_APP_ID, "Office 365 Exchange Online"),
+        ):
+            try:
+                resource_response = await _graph_get(
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/servicePrincipals"
+                    f"?$filter=appId eq '{resource_app_id}'&$select=id,appId",
+                )
+                resource_list = resource_response.get("value", [])
+                if not resource_list:
+                    log_info(
+                        f"{resource_name} service principal not found in tenant; "
+                        "skipping Exchange.ManageAsApp role grant",
+                    )
+                    continue
+                resource_sp_id: str = resource_list[0]["id"]
+                if (resource_sp_id, _EXO_MANAGE_AS_APP_ROLE) in existing_role_assignments:
+                    log_info(
+                        f"{resource_name} Exchange.ManageAsApp role already assigned, skipping",
+                        sp_object_id=sp_object_id,
+                    )
+                    continue
                 try:
                     await _post_app_role_assignment_with_retry(
                         access_token,
-                        f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                        _app_role_assignment_url(resource_sp_id),
                         {
                             "principalId": sp_object_id,
-                            "resourceId": exo_sp_id,
+                            "resourceId": resource_sp_id,
                             "appRoleId": _EXO_MANAGE_AS_APP_ROLE,
                         },
                     )
                     log_info(
-                        "Granted Exchange.ManageAsApp role",
+                        f"Granted {resource_name} Exchange.ManageAsApp role",
                         sp_object_id=sp_object_id,
                     )
                 except M365Error as exc:
                     if exc.http_status == 409:
                         log_info(
-                            "Exchange.ManageAsApp role already assigned, skipping",
+                            f"{resource_name} Exchange.ManageAsApp role already assigned, skipping",
                             sp_object_id=sp_object_id,
                         )
                     else:
                         log_error(
-                            "Failed to grant Exchange.ManageAsApp role; "
-                            "Get-MailboxPermission will not be available",
+                            f"Failed to grant {resource_name} Exchange.ManageAsApp role",
                             error=str(exc),
                         )
-            else:
-                log_info(
-                    "Exchange Online service principal not found in tenant; "
-                    "skipping Exchange.ManageAsApp role grant",
-                )
-        except M365Error as exc:
-            log_error(
-                "Failed to look up Exchange Online service principal; "
-                "Get-MailboxPermission will not be available",
-                error=str(exc),
-            )
+            except M365Error as exc:
+                log_error(f"Failed to look up {resource_name} service principal", error=str(exc))
 
-        # 2b. Grant Skype and Teams Tenant Admin API Teams.ManageAsApp role (best-effort).
-        # Required for Teams PowerShell cmdlets (Get-CsTeamsMeetingPolicy etc.) via
-        # the Exchange Online InvokeCommand endpoint.
-        try:
-            teams_sp_response = await _graph_get(
-                access_token,
-                f"https://graph.microsoft.com/v1.0/servicePrincipals"
-                f"?$filter=appId eq '{_TEAMS_APP_ID}'&$select=id,appRoles",
-            )
-            teams_sp_list = teams_sp_response.get("value", [])
-            if teams_sp_list:
-                teams_sp_obj = teams_sp_list[0]
-                teams_sp_id: str = teams_sp_obj["id"]
-                teams_app_roles = teams_sp_obj.get("appRoles", [])
-                if not any(
-                    r.get("id") == _TEAMS_MANAGE_AS_APP_ROLE for r in teams_app_roles
-                ):
-                    log_info(
-                        "Teams SP does not expose ManageAsApp role in this tenant; "
-                        "skipping Teams.ManageAsApp role grant",
-                        sp_object_id=sp_object_id,
-                    )
-                else:
-                    try:
-                        await _post_app_role_assignment_with_retry(
-                            access_token,
-                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
-                            {
-                                "principalId": sp_object_id,
-                                "resourceId": teams_sp_id,
-                                "appRoleId": _TEAMS_MANAGE_AS_APP_ROLE,
-                            },
-                        )
-                        log_info(
-                            "Granted Teams.ManageAsApp role",
-                            sp_object_id=sp_object_id,
-                        )
-                    except M365Error as exc:
-                        if exc.http_status == 409:
-                            log_info(
-                                "Teams.ManageAsApp role already assigned, skipping",
-                                sp_object_id=sp_object_id,
-                            )
-                        else:
-                            log_error(
-                                "Failed to grant Teams.ManageAsApp role; "
-                                "Teams PowerShell cmdlets will not be available",
-                                error=str(exc),
-                            )
-            else:
-                log_info(
-                    "Skype and Teams Tenant Admin API service principal not found in tenant; "
-                    "skipping Teams.ManageAsApp role grant",
-                )
-        except M365Error as exc:
-            log_error(
-                "Failed to look up Skype and Teams Tenant Admin API service principal; "
-                "Teams PowerShell cmdlets will not be available",
-                error=str(exc),
-            )
+        # Teams application authentication has no permission grant on the
+        # Skype/Teams API. Existing legacy grants are intentionally left untouched.
 
         # 3. Assign Exchange Administrator directory role (best-effort).
         await _ensure_exchange_admin_role(access_token, sp_object_id)
 
         # 3b. Assign Teams Service Administrator directory role (best-effort).
-        # Required in addition to Teams.ManageAsApp for Teams PowerShell cmdlets to
-        # succeed when called via the Exchange Online InvokeCommand REST endpoint.
+        # Required for MicrosoftTeams application authentication.
         await _ensure_teams_service_admin_role(access_token, sp_object_id)
 
         # 4. Add the service principal as an owner of the app registration so it
         #    can call addPassword on itself (Application.ReadWrite.OwnedBy).
         try:
+            owner_ids: set[str] = set()
+            try:
+                owners_response = await _graph_get(
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/applications/"
+                    f"{_graph_path_segment(app_object_id)}/owners?$select=id",
+                )
+                owner_ids = {
+                    str(owner["id"])
+                    for owner in owners_response.get("value", [])
+                    if isinstance(owner, dict) and owner.get("id")
+                }
+            except M365Error as exc:
+                # A failed read must not prevent a first-time owner assignment.
+                # Fall through to the idempotent POST and its duplicate guards.
+                log_info(
+                    "Could not preflight existing M365 app owners",
+                    app_object_id=app_object_id,
+                    error=str(exc),
+                )
+            if sp_object_id in owner_ids:
+                log_info(
+                    "Service principal is already an owner of M365 app registration",
+                    app_object_id=app_object_id,
+                    sp_object_id=sp_object_id,
+                )
+                return
             await _graph_post(
                 access_token,
-                f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/owners/$ref",
+                f"https://graph.microsoft.com/v1.0/applications/{_graph_path_segment(app_object_id)}/owners/$ref",
                 {
                     "@odata.id": (
-                        f"https://graph.microsoft.com/v1.0/directoryObjects/{sp_object_id}"
+                        f"https://graph.microsoft.com/v1.0/directoryObjects/{_graph_path_segment(sp_object_id)}"
                     )
                 },
             )
@@ -1887,12 +3102,19 @@ async def _grant_provisioned_roles(
                 sp_object_id=sp_object_id,
             )
         except M365Error as exc:
-            log_error(
-                "Failed to add SP as owner of M365 app registration; "
-                "automatic secret renewal will not be available",
-                app_object_id=app_object_id,
-                error=str(exc),
-            )
+            if _is_app_owner_already_exists_error(exc):
+                log_info(
+                    "Service principal is already an owner of M365 app registration",
+                    app_object_id=app_object_id,
+                    sp_object_id=sp_object_id,
+                )
+            else:
+                log_error(
+                    "Failed to add SP as owner of M365 app registration; "
+                    "automatic secret renewal will not be available",
+                    app_object_id=app_object_id,
+                    error=str(exc),
+                )
     except Exception as exc:  # noqa: BLE001
         log_error(
             "_grant_provisioned_roles: unexpected error in background role grant",
@@ -1901,107 +3123,234 @@ async def _grant_provisioned_roles(
         )
 
 
-async def renew_client_secret(company_id: int) -> None:
-    """Renew the Azure AD client secret for a provisioned M365 integration app.
+def _credential_overlap_days() -> int:
+    """Return a concrete overlap duration even for partial test/config objects."""
+    value = getattr(get_settings(), "m365_client_secret_overlap_days", 7)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 7
 
-    Authenticates using the provisioned app's own credentials via the
-    ``client_credentials`` grant, then calls ``addPassword`` on the app
-    registration to create a new secret.  The old secret is revoked after the
-    new one has been safely persisted.
 
-    Requires the provisioned app to:
-    - Have ``Application.ReadWrite.OwnedBy`` application permission granted.
-    - Be registered as an owner of its own app registration.
+async def _validate_replacement_secret(
+    *, tenant_id: str, client_id: str, client_secret: str
+) -> None:
+    """Validate a candidate credential, allowing for Entra propagation delay."""
+    last_error: M365Error | None = None
+    for attempt in range(3):
+        try:
+            await _exchange_token(
+                tenant_id=tenant_id,
+                client_id=client_id,
+                client_secret=client_secret,
+                refresh_token=None,
+            )
+            return
+        except M365Error as exc:
+            last_error = exc
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+    raise M365Error(
+        "Replacement M365 credential failed validation; the previous credential remains active"
+    ) from last_error
 
-    Both of these are configured automatically by :func:`provision_app_registration`
-    for apps provisioned after this feature was introduced.
 
-    Raises :class:`M365Error` if the credentials are missing or the app object ID
-    has not been stored (apps provisioned before this feature require re-provisioning).
+async def _remove_candidate_secret(
+    access_token: str, app_object_id: str, key_id: str | None, *, company_id: int | None
+) -> None:
+    """Best-effort cleanup of a candidate which was never activated."""
+    if not key_id:
+        return
+    try:
+        await _graph_post(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/removePassword",
+            {"keyId": key_id},
+        )
+    except M365Error as exc:
+        log_error(
+            "Failed to remove inactive M365 replacement credential",
+            company_id=company_id,
+            key_id=key_id,
+            error=str(exc),
+        )
+
+
+async def _create_and_validate_secret(
+    *, access_token: str, tenant_id: str, client_id: str, app_object_id: str,
+    expires_at: datetime, company_id: int | None, admin_flow: bool,
+) -> tuple[str, str | None]:
+    """Shared create -> validate portion of every secret rotation."""
+    expiry = expires_at.date().isoformat() + "T00:00:00Z"
+    secret_data = await _add_password_credential(
+        access_token, app_object_id, expiry, admin_flow=admin_flow
+    )
+    new_secret = str(secret_data["secretText"])
+    new_key_id = secret_data.get("keyId")
+    try:
+        await _validate_replacement_secret(
+            tenant_id=tenant_id, client_id=client_id, client_secret=new_secret
+        )
+    except M365Error:
+        await _remove_candidate_secret(
+            access_token, app_object_id, new_key_id, company_id=company_id
+        )
+        raise
+    return new_secret, new_key_id
+
+
+async def renew_client_secret(company_id: int) -> dict[str, Any]:
+    """Validate and atomically activate a replacement company credential.
+
+    The previous key is deliberately retained for the configured overlap window.
+    Retirement is a separate recovery-safe operation, so a failed validation or
+    persistence never makes the working credential unavailable.
     """
-    settings = get_settings()
     creds = await get_credentials(company_id)
     if not creds:
         raise M365Error("No M365 credentials found for company")
-
-    app_object_id = creds.get("app_object_id")
-    if not app_object_id:
-        raise M365Error(
-            "App object ID not stored – re-provisioning is required to enable "
-            "automatic client secret renewal for this company"
-        )
-
-    # Get an access token using the provisioned app's own client credentials.
-    # refresh_token=None forces the client_credentials grant which returns a
-    # token with all granted application permissions including
-    # Application.ReadWrite.OwnedBy.
+    tenant_id = str(creds.get("tenant_id") or "").strip()
+    client_id = str(creds.get("client_id") or "").strip()
+    old_secret = str(creds.get("client_secret") or "")
     access_token, _, _ = await _exchange_token(
-        tenant_id=creds["tenant_id"],
-        client_id=creds["client_id"],
-        client_secret=creds.get("client_secret") or "",
+        tenant_id=tenant_id, client_id=client_id, client_secret=old_secret,
         refresh_token=None,
     )
+    app_object_id = str(creds.get("app_object_id") or "").strip()
+    if not app_object_id:
+        try:
+            app_object_id = await _lookup_application_object_id(access_token, client_id) or ""
+        except M365Error as exc:
+            raise M365ReprovisionRequiredError(
+                "Application ID is missing and could not be safely discovered; "
+                "verify the client ID, app ownership, and Application.ReadWrite.OwnedBy "
+                "consent. Re-provisioning is not performed automatically."
+            ) from exc
+        if not app_object_id:
+            raise M365ReprovisionRequiredError(
+                "Application ID could not be discovered. Verify app ownership and "
+                "Application.ReadWrite.OwnedBy consent, then retry adoption."
+            )
+        await m365_repo.update_application_metadata(
+            company_id=company_id, app_object_id=app_object_id,
+            key_id=creds.get("client_secret_key_id"),
+            expires_at=_parse_client_secret_expires(creds.get("client_secret_expires_at")),
+        )
 
-    # Calculate new expiry
-    secret_lifetime_days = settings.m365_client_secret_lifetime_days
-    new_expiry_date = date.today() + timedelta(days=secret_lifetime_days)
-    new_expiry_str = new_expiry_date.isoformat() + "T00:00:00Z"
+    lock_name = f"m365_credential_rotation_{tenant_id}_{client_id}"
+    async with m365_repo.db.acquire_lock(lock_name, timeout=10) as acquired:
+        if not acquired:
+            raise M365Error("Credential renewal is already running for this application")
+        # Re-read inside the distributed lock so concurrent manual/scheduled runs
+        # cannot activate or retire one another's key.
+        current = await get_credentials(company_id)
+        if not current:
+            raise M365Error("M365 credentials were removed during renewal")
+        lifetime = get_settings().m365_client_secret_lifetime_days
+        expires_at = datetime.combine(date.today() + timedelta(days=lifetime), datetime.min.time())
+        new_secret, new_key_id = await _create_and_validate_secret(
+            access_token=access_token, tenant_id=tenant_id, client_id=client_id,
+            app_object_id=app_object_id, expires_at=expires_at,
+            company_id=company_id, admin_flow=False,
+        )
+        try:
+            await m365_repo.update_client_secret(
+                company_id=company_id, client_secret=_encrypt(new_secret),
+                key_id=new_key_id, expires_at=expires_at,
+            )
+        except Exception:
+            await _remove_candidate_secret(
+                access_token, app_object_id, new_key_id, company_id=company_id
+            )
+            raise
 
-    # Create new client secret via Graph API
-    secret_data = await _graph_post(
-        access_token,
-        f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/addPassword",
-        {
-            "passwordCredential": {
-                "displayName": "MyPortal",
-                "endDateTime": new_expiry_str,
-            }
-        },
-    )
-    new_secret: str = secret_data["secretText"]
-    new_key_id: str | None = secret_data.get("keyId")
-    new_expires_at = datetime(
-        new_expiry_date.year, new_expiry_date.month, new_expiry_date.day
-    )
-
-    # Save old key ID before updating so we can revoke it afterwards
-    old_key_id: str | None = creds.get("client_secret_key_id")
-
-    # Persist new secret – do this BEFORE revoking old key so we never lose access
-    await m365_repo.update_client_secret(
-        company_id=company_id,
-        client_secret=_encrypt(new_secret),
-        key_id=new_key_id,
-        expires_at=new_expires_at,
+    overlap_until = datetime.now(timezone.utc) + timedelta(
+        days=_credential_overlap_days()
     )
     log_info(
-        "Renewed M365 client secret",
-        company_id=company_id,
-        new_key_id=new_key_id,
-        expires_at=new_expiry_str,
+        "Activated validated M365 client secret; previous key retained for overlap",
+        company_id=company_id, new_key_id=new_key_id,
+        previous_key_id=current.get("client_secret_key_id"),
+        overlap_until=overlap_until.isoformat(),
     )
+    return {"key_id": new_key_id, "expires_at": expires_at,
+            "previous_key_id": current.get("client_secret_key_id"),
+            "overlap_until": overlap_until}
 
-    # Revoke the old secret now that the new one is safely stored
-    if old_key_id:
+
+async def renew_admin_client_secret(company_id: int | None = None) -> dict[str, Any]:
+    """Validate then activate a bootstrap credential using the shared lifecycle."""
+    creds = (await get_admin_m365_credentials() if company_id is None
+             else await get_company_admin_credentials(company_id))
+    if not creds:
+        raise M365Error("No M365 admin credentials found")
+    tenant_id = str(creds.get("tenant_id") or "").strip()
+    client_id = str(creds.get("client_id") or "").strip()
+    client_secret = str(creds.get("client_secret") or "").strip()
+    if not tenant_id or not client_id or not client_secret:
+        raise M365Error("Incomplete M365 admin credentials")
+    access_token, _, _ = await _exchange_token(
+        tenant_id=tenant_id, client_id=client_id, client_secret=client_secret,
+        refresh_token=None,
+    )
+    app_object_id = str(creds.get("app_object_id") or "").strip()
+    if not app_object_id:
+        app_object_id = await _lookup_application_object_id(access_token, client_id) or ""
+        if not app_object_id:
+            raise M365ReprovisionRequiredError(
+                "Application ID could not be discovered. Verify app ownership and "
+                "Application.ReadWrite.OwnedBy consent, then retry adoption."
+            )
+        await _persist_backfilled_admin_app_object_id(
+            company_id=company_id, client_id=client_id, client_secret=client_secret,
+            tenant_id=tenant_id, app_object_id=app_object_id,
+            client_secret_key_id=creds.get("client_secret_key_id"),
+            client_secret_expires_at=_parse_client_secret_expires(creds.get("client_secret_expires_at")),
+            pkce_client_id=creds.get("pkce_client_id"),
+        )
+
+    lock_name = f"m365_credential_rotation_{tenant_id}_{client_id}"
+    async with m365_repo.db.acquire_lock(lock_name, timeout=10) as acquired:
+        if not acquired:
+            raise M365Error("Credential renewal is already running for this application")
+        lifetime = get_settings().m365_client_secret_lifetime_days
+        expires_at = datetime.combine(date.today() + timedelta(days=lifetime), datetime.min.time())
+        new_secret, new_key_id = await _create_and_validate_secret(
+            access_token=access_token, tenant_id=tenant_id, client_id=client_id,
+            app_object_id=app_object_id, expires_at=expires_at,
+            company_id=company_id, admin_flow=True,
+        )
         try:
-            await _graph_post(
-                access_token,
-                f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/removePassword",
-                {"keyId": old_key_id},
+            if company_id is None:
+                await update_admin_m365_credentials(
+                    client_id=client_id, client_secret=new_secret, tenant_id=tenant_id,
+                    app_object_id=app_object_id, client_secret_key_id=new_key_id,
+                    client_secret_expires_at=expires_at,
+                    pkce_client_id=creds.get("pkce_client_id"),
+                )
+            else:
+                await upsert_company_admin_credentials(
+                    company_id=company_id, client_id=client_id,
+                    client_secret=new_secret, tenant_id=tenant_id,
+                    app_object_id=app_object_id, client_secret_key_id=new_key_id,
+                    client_secret_expires_at=expires_at,
+                    pkce_client_id=creds.get("pkce_client_id"),
+                )
+        except Exception:
+            await _remove_candidate_secret(
+                access_token, app_object_id, new_key_id, company_id=company_id
             )
-            log_info(
-                "Revoked old M365 client secret",
-                company_id=company_id,
-                old_key_id=old_key_id,
-            )
-        except M365Error as exc:
-            # Non-fatal: old secret will expire naturally; log for admin visibility
-            log_error(
-                "Failed to revoke old M365 client secret",
-                company_id=company_id,
-                old_key_id=old_key_id,
-                error=str(exc),
-            )
+            raise
+
+    overlap_until = datetime.now(timezone.utc) + timedelta(
+        days=_credential_overlap_days()
+    )
+    log_info(
+        "Activated validated M365 admin secret; previous key retained for overlap",
+        company_id=company_id, new_key_id=new_key_id,
+        previous_key_id=creds.get("client_secret_key_id"),
+        overlap_until=overlap_until.isoformat(),
+    )
+    return {"expires_at": expires_at, "had_previous_key": bool(creds.get("client_secret_key_id")),
+            "key_id": new_key_id, "revoked_previous": False,
+            "overlap_until": overlap_until}
 
 
 async def renew_expiring_client_secrets() -> dict[str, Any]:
@@ -2009,7 +3358,7 @@ async def renew_expiring_client_secrets() -> dict[str, Any]:
 
     A secret is considered "expiring soon" if its ``client_secret_expires_at``
     is within the configured renewal window
-    (``M365_CLIENT_SECRET_RENEWAL_DAYS``, default 14 days).
+    (``M365_CLIENT_SECRET_RENEWAL_DAYS``, default 30 days).
 
     Returns a summary dict with ``renewed``, ``skipped``, and ``failed`` counts.
     """
@@ -2025,20 +3374,96 @@ async def renew_expiring_client_secrets() -> dict[str, Any]:
 
     for cred in expiring:
         company_id = int(cred["company_id"])
-        if not cred.get("app_object_id"):
-            log_error(
-                "Skipping M365 secret renewal – app_object_id not stored; "
-                "re-provisioning required",
-                company_id=company_id,
-            )
-            skipped += 1
-            continue
         try:
             await renew_client_secret(company_id)
             renewed += 1
+        except M365ReprovisionRequiredError as exc:
+            log_error(
+                "M365 credential adoption requires ownership or consent repair",
+                company_id=company_id,
+                action="Verify self-ownership and Application.ReadWrite.OwnedBy consent, then retry",
+                error=str(exc),
+            )
+            skipped += 1
         except M365Error as exc:
             log_error(
                 "Failed to renew M365 client secret",
+                company_id=company_id,
+                error=str(exc),
+            )
+            failed += 1
+
+    # Global admin credentials used by PKCE/bootstrap flows
+    try:
+        admin_creds = await get_admin_m365_credentials()
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        log_error("Failed to load global M365 admin credentials for renewal", error=str(exc))
+        admin_creds = None
+    if admin_creds:
+        admin_expires = _parse_client_secret_expires(
+            admin_creds.get("client_secret_expires_at")
+        )
+        if admin_expires and admin_expires <= cutoff:
+            try:
+                await renew_admin_client_secret()
+                renewed += 1
+            except M365ReprovisionRequiredError as exc:
+                log_error(
+                    "Skipping global M365 admin secret renewal",
+                    error=str(exc),
+                )
+                skipped += 1
+            except M365Error as exc:
+                log_error("Failed to renew global M365 admin client secret", error=str(exc))
+                failed += 1
+
+    # Per-company admin credentials used for per-company PKCE provisioning
+    try:
+        provisioned_company_ids = await m365_repo.list_provisioned_company_ids()
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        log_error("Failed to list company IDs for M365 admin renewal", error=str(exc))
+        provisioned_company_ids = set()
+
+    company_ids = sorted(provisioned_company_ids)
+    if company_ids:
+        company_admin_cred_pairs = await asyncio.gather(
+            *[
+                get_company_admin_credentials(company_id)
+                for company_id in company_ids
+            ],
+            return_exceptions=True,
+        )
+    else:
+        company_admin_cred_pairs = []
+
+    for company_id, company_admin_creds in zip(company_ids, company_admin_cred_pairs):
+        if isinstance(company_admin_creds, Exception):
+            log_error(
+                "Failed to load per-company M365 admin credentials for renewal",
+                company_id=company_id,
+                error=str(company_admin_creds),
+            )
+            continue
+        if not company_admin_creds:
+            continue
+        admin_expires = _parse_client_secret_expires(
+            company_admin_creds.get("client_secret_expires_at")
+        )
+        if not admin_expires or admin_expires > cutoff:
+            continue
+        try:
+            await renew_admin_client_secret(company_id)
+            renewed += 1
+        except M365ReprovisionRequiredError as exc:
+            log_error(
+                "Skipping per-company M365 admin secret renewal",
+                company_id=company_id,
+                error=str(exc),
+            )
+            skipped += 1
+        except M365Error as exc:
+            log_error(
+                "Failed to renew per-company M365 admin client secret",
                 company_id=company_id,
                 error=str(exc),
             )
@@ -2072,8 +3497,6 @@ async def provision_pkce_public_client_app(
         endpoint of this MyPortal instance).
     :returns: The Application (client) ID of the newly created registration.
     """
-    await _delete_existing_apps_by_display_name(access_token, display_name)
-
     app_payload: dict[str, Any] = {
         "displayName": display_name,
         # AzureADMultipleOrgs enables sign-in for users from any Azure AD tenant
@@ -2167,6 +3590,41 @@ async def update_admin_m365_credentials(
     )
     log_info(
         "Updated M365 admin credentials in integration module", client_id=client_id
+    )
+
+
+async def _persist_backfilled_admin_app_object_id(
+    *,
+    company_id: int | None,
+    client_id: str,
+    client_secret: str,
+    tenant_id: str,
+    app_object_id: str,
+    client_secret_key_id: str | None,
+    client_secret_expires_at: datetime | None,
+    pkce_client_id: str | None,
+) -> None:
+    """Persist a recovered admin app object ID without changing the active secret."""
+    if company_id is None:
+        await update_admin_m365_credentials(
+            client_id=client_id,
+            client_secret=client_secret,
+            tenant_id=tenant_id,
+            app_object_id=app_object_id,
+            client_secret_key_id=client_secret_key_id,
+            client_secret_expires_at=client_secret_expires_at,
+            pkce_client_id=pkce_client_id,
+        )
+        return
+    await upsert_company_admin_credentials(
+        company_id=company_id,
+        client_id=client_id,
+        client_secret=client_secret,
+        tenant_id=tenant_id,
+        app_object_id=app_object_id,
+        client_secret_key_id=client_secret_key_id,
+        client_secret_expires_at=client_secret_expires_at,
+        pkce_client_id=pkce_client_id,
     )
 
 
@@ -2950,7 +4408,7 @@ async def _lookup_user_by_email(access_token: str, email: str) -> dict[str, Any]
         if matched:
             return matched
     except M365Error:
-        pass
+        matched = None
 
     # Fall back to a full list scan (handles edge cases with filter support)
     all_users = await _graph_get_all(
@@ -3007,9 +4465,11 @@ async def reset_user_password(company_id: int, staff_email: str) -> str:
         if exc.http_status == 403 and exc.graph_error_code == "Authorization_RequestDenied":
             raise M365Error(
                 "The Microsoft 365 app does not have permission to reset this password. "
-                "Ensure the app has the User.ReadWrite.All application permission with "
-                "admin consent, and that the target account does not hold a privileged "
-                "admin role (which requires additional Azure AD role assignments).",
+                "Grant admin consent for the User-PasswordProfile.ReadWrite.All application "
+                "permission. Password resets are supported for ordinary cloud-only users; "
+                "federated or synchronized identities must be reset at their identity source. "
+                "For a privileged target, use an appropriately authorized Entra administrator "
+                "rather than assigning MyPortal a broader directory role.",
                 http_status=403,
                 graph_error_code=exc.graph_error_code,
             ) from exc
@@ -3039,12 +4499,65 @@ async def set_user_sign_in_enabled(
     user = await _lookup_user_by_email(access_token, staff_email.strip().lower())
     user_id = str(user["id"]).strip()
 
+    await set_user_account_enabled(access_token, user_id, enabled=enabled)
+
+
+async def set_user_account_enabled(
+    access_token: str, user_id: str, *, enabled: bool
+) -> None:
+    """Shared accountEnabled command for standalone and workflow actions."""
     encoded_user_id = quote(user_id, safe="")
-    await _graph_patch(
-        access_token,
-        f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}",
-        {"accountEnabled": enabled},
-    )
+    try:
+        await _graph_patch(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}",
+            {"accountEnabled": enabled},
+        )
+    except M365Error as exc:
+        if exc.http_status == 403:
+            raise M365Error(
+                "The Microsoft 365 app cannot change accountEnabled. Grant admin consent "
+                "for User.EnableDisableAccount.All and User.Read.All. Privileged targets "
+                "can require an appropriate Entra role; do not broaden the app role automatically.",
+                http_status=403,
+                graph_error_code=exc.graph_error_code,
+            ) from exc
+        raise
+
+
+async def revoke_user_sign_in_sessions(company_id: int, staff_email: str) -> None:
+    """Invalidate a user's refresh tokens independently of account disabling.
+
+    Graph documents a propagation delay for this operation, so success is never
+    described as immediate termination of every active application session.
+    """
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("No M365 credentials found for company")
+    access_token = await acquire_access_token(company_id, force_client_credentials=True)
+    user = await _lookup_user_by_email(access_token, staff_email.strip().lower())
+    await revoke_sign_in_sessions(access_token, str(user["id"]).strip())
+
+
+async def revoke_sign_in_sessions(access_token: str, user_id: str) -> None:
+    """Shared revokeSignInSessions command for standalone and workflows."""
+    encoded_user_id = quote(user_id, safe="")
+    try:
+        await _graph_post(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/revokeSignInSessions",
+            {},
+        )
+    except M365Error as exc:
+        if exc.http_status == 403:
+            raise M365Error(
+                "The Microsoft 365 app cannot revoke sign-in sessions. Grant admin "
+                "consent for User.RevokeSessions.All. Disabling sign-in is a separate "
+                "operation and does not prove all existing sessions have ended.",
+                http_status=403,
+                graph_error_code=exc.graph_error_code,
+            ) from exc
+        raise
 
 
 async def verify_tenant_permissions(
@@ -3090,10 +4603,28 @@ async def verify_tenant_permissions(
         raise M365Error("Service principal not found in tenant")
     sp_object_id: str = sp_list[0]["id"]
 
+    # Credential renewal needs both the Graph application role and ownership
+    # of the application object.  Treat ownership as a first-class diagnostic
+    # prerequisite; checking only appRoleAssignments can otherwise report a
+    # healthy integration that cannot rotate its own secret.
+    app_object_id = str(creds.get("app_object_id") or "").strip()
+    if not app_object_id and _GRAPH_OBJECT_ID_PATTERN.fullmatch(client_id):
+        app_object_id = await _lookup_application_object_id(access_token, client_id) or ""
+    self_owner_ok = False
+    if app_object_id:
+        owners_response = await _graph_get(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/owners?$select=id",
+        )
+        self_owner_ok = any(
+            str(owner.get("id") or "").lower() == sp_object_id.lower()
+            for owner in owners_response.get("value", [])
+        )
+
     # Retrieve current app role assignments for the service principal
     assignments_response = await _graph_get(
         access_token,
-        f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
     )
     assigned_roles: set[str] = {
         str(a.get("appRoleId") or "") for a in assignments_response.get("value", [])
@@ -3102,6 +4633,10 @@ async def verify_tenant_permissions(
     required_roles: set[str] = set(_PROVISION_APP_ROLES)
     present: list[str] = sorted(required_roles & assigned_roles)
     missing: list[str] = sorted(required_roles - assigned_roles)
+    if self_owner_ok:
+        present.append(_APP_SELF_OWNER_CHECK_ID)
+    else:
+        missing.append(_APP_SELF_OWNER_CHECK_ID)
 
     if not missing:
         return {"all_ok": True, "missing": [], "present": present, "updated": False}
@@ -3112,6 +4647,325 @@ async def verify_tenant_permissions(
         "missing": missing,
         "present": present,
         "updated": False,
+    }
+
+
+def _purview_check(
+    key: str,
+    label: str,
+    status: str,
+    detail: str,
+    remediation: str | None = None,
+) -> dict[str, str]:
+    result = {"key": key, "label": label, "status": status, "detail": detail}
+    if remediation:
+        result["remediation"] = remediation
+    return result
+
+
+async def run_purview_preflight(
+    company_id: int,
+    *,
+    repair: bool = False,
+) -> dict[str, Any]:
+    """Check whether the app-only Purview route can reach the compliance organization.
+
+    Graph is authoritative for the EOP resource assignment.  The similarly named
+    Office 365 Exchange Online assignment is deliberately never accepted here.
+    The enterprise application's supported Entra administrator role is checked
+    through Graph. Purview-native registration and role membership are checked
+    through the SCC session because those objects are not represented by Entra
+    directory roles.
+    Microsoft explicitly excludes Purview compliance/eDiscovery cmdlets from
+    app-only authentication support, so a ready result is best-effort: Purview
+    can still reject an individual cmdlet, and that error is surfaced verbatim.
+    ``repair`` is accepted for API compatibility, but role-group membership is
+    never broadened automatically.
+    """
+    _ = repair
+    checked_at = datetime.now(timezone.utc)
+    correlation_id = str(uuid.uuid4())
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("No M365 credentials found for company")
+    tenant_id = str(creds.get("tenant_id") or "")
+    client_id = str(creds.get("client_id") or "")
+    graph_token = await acquire_access_token(company_id, force_client_credentials=True)
+    domain_payload = await _graph_get(
+        graph_token, "https://graph.microsoft.com/v1.0/domains?$select=id,isInitial"
+    )
+    tenant_domain = next(
+        (
+            str(item.get("id") or "")
+            for item in domain_payload.get("value", [])
+            if isinstance(item, dict) and item.get("isInitial")
+        ),
+        "",
+    )
+    sp_payload = await _graph_get(
+        graph_token,
+        "https://graph.microsoft.com/v1.0/servicePrincipals"
+        f"?$filter=appId eq '{client_id}'&$select=id,appId",
+    )
+    enterprise_sp = next(iter(sp_payload.get("value") or []), {})
+    object_id = str(enterprise_sp.get("id") or "")
+    checks: list[dict[str, str]] = []
+    repaired: list[str] = []
+
+    admin_role_ok = False
+    admin_role_name = ""
+    admin_role_error = ""
+    if object_id:
+        try:
+            role_payload = await _graph_get(
+                graph_token,
+                f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(object_id)}"
+                "/transitiveMemberOf/microsoft.graph.directoryRole"
+                "?$select=displayName,roleTemplateId",
+            )
+            supported_roles = {
+                _EXO_ADMIN_ROLE_TEMPLATE_ID: "Exchange Administrator",
+                _COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID: _COMPLIANCE_ADMIN_ROLE_NAME,
+            }
+            for role in role_payload.get("value") or []:
+                template_id = str(role.get("roleTemplateId") or "").lower()
+                if template_id in supported_roles:
+                    admin_role_ok = True
+                    admin_role_name = str(role.get("displayName") or supported_roles[template_id])
+                    break
+        except M365Error as exc:
+            admin_role_error = str(exc)
+
+    permission_configured = False
+    app_object_id = str(creds.get("app_object_id") or "")
+    try:
+        if app_object_id:
+            application = await _graph_get(
+                graph_token,
+                f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}"
+                "?$select=requiredResourceAccess",
+            )
+        else:
+            application_response = await _graph_get(
+                graph_token,
+                "https://graph.microsoft.com/v1.0/applications"
+                f"?$filter=appId eq '{client_id}'&$select=requiredResourceAccess",
+            )
+            application = next(iter(application_response.get("value") or []), {})
+        permission_configured = any(
+            str(resource.get("resourceAppId") or "").lower() == _SCC_APP_ID
+            and any(
+                str(access.get("id") or "").lower() == _SCC_MANAGE_AS_APP_ROLE
+                and str(access.get("type") or "").lower() == "role"
+                for access in resource.get("resourceAccess") or []
+            )
+            for resource in application.get("requiredResourceAccess") or []
+        )
+    except M365Error:
+        # Some least-privilege app tokens can inspect assignments but cannot read
+        # the app-registration manifest.  Report this independently, not as pass.
+        pass
+    consent_granted = False
+    if object_id:
+        try:
+            assignments = await _graph_get(
+                graph_token,
+                f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(object_id)}/appRoleAssignments",
+            )
+        except M365Error:
+            # A least-privilege Graph token may be unable to enumerate role
+            # assignments even though Entra can issue a working Purview token.
+            # The live SCC probe below is authoritative in that situation.
+            assignments = {}
+        resource_ids = {
+            str(item.get("resourceId") or "")
+            for item in assignments.get("value") or []
+            if str(item.get("appRoleId") or "").lower() == _SCC_MANAGE_AS_APP_ROLE
+        }
+        for resource_id in resource_ids:
+            resource = await _graph_get(
+                graph_token,
+                f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(resource_id)}?$select=appId",
+            )
+            if str(resource.get("appId") or "").lower() == _SCC_APP_ID:
+                consent_granted = True
+                break
+    registration_command = (
+        'New-ServicePrincipal `\n'
+        f'  -AppId "{client_id}" `\n'
+        f'  -ObjectId "{object_id}" `\n'
+        '  -DisplayName "MyPortal Purview eDiscovery"'
+    )
+    membership_command = (
+        'Add-RoleGroupMember `\n  -Identity "eDiscoveryManager" `\n'
+        f'  -Member "{object_id}"'
+    )
+    org_ok = registration_ok = membership_ok = False
+    scc_error = ""
+    if tenant_domain:
+        try:
+            scc_token, _ = await _acquire_scc_access_token(company_id)
+            # Probe the role group itself. Purview's REST front end can throw
+            # ArgumentNullException for Get-RoleGroupMember even when Identity
+            # is supplied, which used to prevent every search from starting.
+            role_groups = await _scc_invoke_command(
+                scc_token, tenant_id, "Get-RoleGroup",
+                {"Identity": "eDiscoveryManager"}, organization=tenant_domain,
+            )
+            # A successful app-only Purview command proves the EOP application
+            # permission, tenant consent, and organization routing directly.
+            # Do not gate this probe on Graph metadata: manually granted roles
+            # can be usable before (or without permission for) Graph enumeration.
+            permission_configured = consent_granted = org_ok = True
+            principals = await _scc_invoke_command(
+                scc_token, tenant_id, "Get-ServicePrincipal",
+                {"Identity": object_id}, organization=tenant_domain,
+            )
+            principal_rows = principals.get("value") or principals.get("Value") or []
+            if isinstance(principal_rows, dict):
+                principal_rows = [principal_rows]
+            principal_identities = {object_id.lower(), client_id.lower()}
+            for row in principal_rows if isinstance(principal_rows, list) else []:
+                if not isinstance(row, dict):
+                    continue
+                principal_identities.update(
+                    str(row.get(key) or "").lower()
+                    for key in ("ObjectId", "ExternalDirectoryObjectId", "AppId", "Identity", "Name")
+                    if row.get(key)
+                )
+            registration_ok = any(
+                str(row.get("ObjectId") or row.get("ExternalDirectoryObjectId") or row.get("Identity") or "").lower()
+                == object_id.lower()
+                or str(row.get("AppId") or "").lower() == client_id.lower()
+                for row in principal_rows if isinstance(row, dict)
+            )
+            # Get-RoleGroup exposes the group's Members property without using
+            # the broken Get-RoleGroupMember REST binding seen in affected
+            # tenants. Match all identities returned for the registered app.
+            role_rows = role_groups.get("value") or role_groups.get("Value") or []
+            if isinstance(role_rows, dict):
+                role_rows = [role_rows]
+            for row in role_rows if isinstance(role_rows, list) else []:
+                if not isinstance(row, dict):
+                    continue
+                members = row.get("Members") or row.get("members") or []
+                if not isinstance(members, list):
+                    members = [members]
+                member_identities = {
+                    str(value).lower()
+                    for member in members
+                    for value in (
+                        member.values() if isinstance(member, dict) else (member,)
+                    )
+                    if value
+                }
+                if principal_identities & member_identities:
+                    membership_ok = True
+                    break
+        except M365Error as exc:
+            scc_error = str(exc)
+            correlation_id = getattr(exc, "correlation_id", None) or correlation_id
+    # Either an exact Graph assignment or a successful live SCC command proves
+    # both configuration and consent. The live command is the stronger signal.
+    permission_configured = permission_configured or consent_granted
+    checks.extend([
+        _purview_check(
+            "eop_permission", "EOP Exchange.ManageAsApp application permission",
+            "Passed" if permission_configured else "Requires Admin Action",
+            "Configured on Microsoft Exchange Online Protection." if permission_configured else
+            "The application permission is absent or its app-registration manifest could not be read. Office 365 Exchange Online Exchange.ManageAsApp is not sufficient for Purview.",
+            None if permission_configured else PURVIEW_ADMIN_CONSENT_STEPS,
+        ),
+        _purview_check(
+            "admin_consent", "Tenant-wide admin consent",
+            "Passed" if consent_granted else "Requires Admin Action",
+            "The EOP application role is usable by the enterprise application." if consent_granted else
+            "Tenant-wide consent for the EOP permission has not been verified.",
+            None if consent_granted else PURVIEW_ADMIN_CONSENT_STEPS,
+        ),
+        _purview_check(
+            "administrator_role", "Purview administrator directory role",
+            "Passed" if admin_role_ok else "Requires Admin Action",
+            (f"The enterprise application has the {admin_role_name} role."
+             if admin_role_ok else
+             "The enterprise application is not assigned Exchange Administrator or "
+             "Compliance Administrator."
+             + (f" Role lookup failed: {admin_role_error}" if admin_role_error else "")),
+            None if admin_role_ok else
+            "Microsoft Entra admin center → Roles and administrators → Compliance "
+            "Administrator → Add assignments → select the MyPortal enterprise application.",
+        ),
+    ])
+    org_help = (
+        "Confirm https://purview.microsoft.com loads, including Settings → Role groups "
+        "and eDiscovery, then retry after Microsoft has completed provisioning."
+    )
+    checks.extend([
+        _purview_check("organization", "Purview compliance organization availability",
+                       "Passed" if org_ok else "Failed",
+                       "The compliance organization loaded successfully." if org_ok else
+                       ("The compliance organization could not be loaded. " + (scc_error or "It may not be provisioned yet.")),
+                       None if org_ok else org_help),
+        _purview_check("service_principal", "Purview/Exchange service-principal registration",
+                       "Passed" if registration_ok else "Requires Admin Action",
+                       "The enterprise application is registered in Purview." if registration_ok else
+                       "Purview does not expose this enterprise application service principal.",
+                       None if registration_ok else registration_command),
+        _purview_check("ediscovery_manager", "eDiscoveryManager role-group membership",
+                       "Passed" if membership_ok else "Requires Admin Action",
+                       "The enterprise application is an eDiscoveryManager member." if membership_ok else
+                       "The enterprise application object ID is not a verified role-group member.",
+                       None if membership_ok else membership_command + '\n\nGet-RoleGroupMember -Identity "eDiscoveryManager"'),
+    ])
+    checks.insert(0, _purview_check(
+        "provider_support", "Microsoft-supported execution route", "Warning",
+        "The configured route uses app-only Security & Compliance PowerShell. "
+        "Microsoft documents app-only eDiscovery cmdlets as best-effort rather than "
+        "supported, so Purview may reject a search or purge even when every probe passes.",
+        "If Purview rejects the request, use an appropriately licensed administrator "
+        "in an interactive Exchange Online PowerShell session, run Connect-IPPSSession "
+        "with -EnableSearchOnlySession, and perform the reviewed search and purge in "
+        "Microsoft Purview. Keep the query and remote action name with this request.",
+    ))
+    checks.extend([
+        _purview_check(
+            "tenant_license", "Tenant eDiscovery/search-and-purge licensing",
+            "Not Verified",
+            "Application permissions do not prove that every searched custodian and "
+            "operator has the Microsoft licensing required for the selected Purview workflow.",
+            "Verify the current Microsoft Purview licensing requirements for the tenant "
+            "and the users in scope before running the interactive workflow.",
+        ),
+        _purview_check(
+            "search_rbac", "Purview search authorization", "Not Verified",
+            "Legacy eDiscoveryManager membership does not independently prove the "
+            "interactive operator can create and run this search.",
+            "In Purview, assign the interactive operator the least-privilege search role "
+            "and verify the intended Exchange locations are in scope.",
+        ),
+        _purview_check(
+            "purge_rbac", "Purview Search And Purge authorization", "Not Verified",
+            "Search authorization does not grant the separate Search And Purge role.",
+            "After review, have an administrator separately assign the Search And Purge "
+            "role to the interactive operator; do not add it to the application.",
+        ),
+    ])
+    # A successful live SCC command proves the token, EOP permission and
+    # organization routing. Role-group and registration checks stay advisory:
+    # their parsing can miss valid memberships, and Purview itself returns an
+    # actionable authorization error if the application lacks a role.
+    return {
+        "ready": org_ok,
+        "execution_route": "legacy_app_only_scc_invokecommand",
+        "provider_supported": False,
+        "tenant_domain": tenant_domain,
+        "tenant_id": tenant_id,
+        "client_id": client_id,
+        "enterprise_application_object_id": object_id,
+        "timestamp": checked_at.isoformat(),
+        "correlation_id": correlation_id,
+        "checks": checks,
+        "repaired": repaired,
     }
 
 
@@ -3171,13 +5025,26 @@ async def check_enterprise_app_permissions(
         raise M365Error("Service principal not found in tenant")
     sp_object_id: str = sp_list[0]["id"]
 
+    app_object_id = str(creds.get("app_object_id") or "").strip()
+    if not app_object_id and _GRAPH_OBJECT_ID_PATTERN.fullmatch(client_id):
+        app_object_id = await _lookup_application_object_id(access_token, client_id) or ""
+    self_owner_ok = False
+    if app_object_id:
+        owners_response = await _graph_get(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/owners?$select=id",
+        )
+        self_owner_ok = any(
+            str(owner.get("id") or "").lower() == sp_object_id.lower()
+            for owner in owners_response.get("value", [])
+        )
+
     # Fetch all app role assignments for this service principal.
     # Each assignment has appRoleId and resourceId (the resource SP object ID).
-    assignments_response = await _graph_get(
+    assignment_list = await _graph_get_all(
         access_token,
-        f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
     )
-    assignment_list = assignments_response.get("value", [])
 
     # Build a set of (appRoleId, resourceAppId) tuples for precise matching.
     # Exchange.ManageAsApp and Teams.ManageAsApp share the same appRoleId GUID
@@ -3199,12 +5066,14 @@ async def check_enterprise_app_permissions(
         try:
             sp_info = await _graph_get(
                 access_token,
-                f"https://graph.microsoft.com/v1.0/servicePrincipals/{resource_id}"
-                "?$select=appId",
+                (
+                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(resource_id)}"
+                    "?$select=appId"
+                ),
             )
             resource_id_to_app_id[resource_id] = str(sp_info.get("appId") or "")
         except M365Error:
-            pass  # leave as empty string; the permission will appear as fail
+            resource_id_to_app_id[resource_id] = ""
 
     # Build a set of (appRoleId, resourceAppId) tuples for quick membership test.
     assigned_by_app: set[tuple[str, str]] = {
@@ -3235,6 +5104,22 @@ async def check_enterprise_app_permissions(
         for perm in app_entry["permissions"]:
             role_id: str = perm["id"]
             role_name: str = perm["name"]
+            if role_id == _APP_SELF_OWNER_CHECK_ID:
+                perm_status = "pass" if self_owner_ok else "fail"
+                app_all_ok = app_all_ok and self_owner_ok
+                perm_results.append(
+                    {"id": role_id, "name": role_name, "status": perm_status}
+                )
+                await m365_repo.upsert_permission_check_result(
+                    company_id=company_id,
+                    app_id=app_id,
+                    app_name=app_name,
+                    role_id=role_id,
+                    role_name=role_name,
+                    status=perm_status,
+                    checked_at=checked_at,
+                )
+                continue
             granted = (role_id, app_id) in assigned_by_app
             # Determine whether the role GUID exists at all on the resource SP.
             # When it doesn't, the permission can never be granted via admin
@@ -3246,6 +5131,12 @@ async def check_enterprise_app_permissions(
             # so diagnostics show an actionable failure.
             if app_id == _GRAPH_APP_ID and role_id == _SHAREPOINT_TENANT_SETTINGS_ROLE:
                 available = True
+            # Teams.ManageAsApp is required for Teams PowerShell cmdlet checks.
+            # The Skype/Teams SP may not be present in every tenant, but the
+            # role is always actionable: treat it as a reportable failure so
+            # diagnostics show Pass/Fail rather than "Not Supported".
+            if app_id == _TEAMS_APP_ID and role_id == _TEAMS_MANAGE_AS_APP_ROLE:
+                available = True
             if granted:
                 perm_status = "pass"
             elif not available:
@@ -3253,9 +5144,9 @@ async def check_enterprise_app_permissions(
             else:
                 perm_status = "fail"
 
-            # Only 'fail' counts against all_ok; 'not_supported' permissions
-            # cannot be granted in this tenant and are not actionable failures.
-            app_all_ok = app_all_ok and perm_status in ("pass", "not_supported")
+            # Unavailable permissions remain distinct from denied consent, but
+            # cannot make a partial repair appear complete.
+            app_all_ok = app_all_ok and perm_status == "pass"
 
             perm_results.append({"id": role_id, "name": role_name, "status": perm_status})
 
@@ -3294,10 +5185,24 @@ async def get_last_enterprise_app_permissions(
     if not rows:
         return []
 
+    # Only current contract entries can determine connection health.  Permission
+    # GUIDs occasionally change upstream, and the result table is intentionally
+    # upserted by GUID so that an interrupted check cannot erase the last known
+    # state.  That also means rows written by an older contract can remain in
+    # the table.  Do not let those obsolete rows keep an otherwise repaired
+    # tenant degraded (or make a removed permission appear to be required).
+    catalog_permissions = {
+        (str(app["app_id"]), str(permission["id"]))
+        for app in ENTERPRISE_APP_CATALOG
+        for permission in app["permissions"]
+    }
+
     # Group rows by app_id, preserving the catalog order.
     by_app: dict[str, dict[str, Any]] = {}
     for row in rows:
-        app_id = row["app_id"]
+        app_id = str(row["app_id"])
+        if (app_id, str(row["role_id"])) not in catalog_permissions:
+            continue
         if app_id not in by_app:
             by_app[app_id] = {
                 "name": row["app_name"],
@@ -3307,10 +5212,9 @@ async def get_last_enterprise_app_permissions(
                 "checked_at": row.get("checked_at"),
             }
         perm_status = row["status"]
-        # 'not_supported' means the permission GUID doesn't exist in this
-        # tenant's resource SP and can never be granted; it does NOT indicate
-        # a configuration problem that the admin needs to fix.
-        if perm_status not in ("pass", "not_supported"):
+        # Preserve unsupported/unavailable as a distinct status while ensuring
+        # a partial setup is never represented as complete.
+        if perm_status != "pass":
             by_app[app_id]["all_ok"] = False
         by_app[app_id]["permissions"].append(
             {"id": row["role_id"], "name": row["role_name"], "status": perm_status}
@@ -3367,9 +5271,74 @@ async def repair_enterprise_app_permissions(
     granted = await try_grant_missing_permissions(
         company_id=company_id,
         access_token=access_token,
+        raise_on_consent_error=True,
+    )
+    role_result = await ensure_compliance_administrator_role(
+        company_id=company_id,
+        access_token=access_token,
     )
     results = await check_enterprise_app_permissions(company_id)
-    return {"granted": granted, "results": results}
+    purview = await run_purview_preflight(company_id, repair=True)
+    unavailable = [
+        {"app_id": app["app_id"], "permission": permission["name"]}
+        for app in results
+        for permission in app["permissions"]
+        if permission["status"] == "not_supported"
+    ]
+    complete = (
+        all(app["all_ok"] for app in results)
+        and bool(purview.get("ready"))
+        and not unavailable
+    )
+    return {
+        "granted": granted,
+        "complete": complete,
+        "unavailable": unavailable,
+        "compliance_role": role_result,
+        "results": results,
+        "purview": purview,
+        "purview_repaired": bool(purview["repaired"]),
+    }
+
+
+async def _ensure_directory_role_by_name(
+    access_token: str, sp_object_id: str, role_name: str
+) -> bool:
+    """Assign a verified built-in directory role at tenant scope."""
+    try:
+        definitions = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions"
+            f"?$filter=displayName eq '{quote(role_name, safe='')}'&$select=id,displayName,isBuiltIn",
+        )
+        matching = [
+            row for row in definitions.get("value", [])
+            if row.get("displayName") == role_name and row.get("isBuiltIn") is not False
+        ]
+        if len(matching) != 1:
+            log_error("Could not uniquely resolve required built-in directory role", role_name=role_name)
+            return False
+        role_id = str(matching[0]["id"])
+        existing = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments"
+            f"?$filter=principalId eq '{quote(sp_object_id, safe='')}' and roleDefinitionId eq '{quote(role_id, safe='')}'",
+        )
+        if existing.get("value"):
+            return False
+        await _graph_post(
+            access_token,
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments",
+            {"principalId": sp_object_id, "roleDefinitionId": role_id, "directoryScopeId": "/"},
+        )
+        return True
+    except M365Error as exc:
+        log_error(
+            "Failed to assign required directory role; assign it in Microsoft Entra Roles and administrators",
+            role_name=role_name,
+            error=str(exc),
+        )
+        return False
 
 
 async def _ensure_exchange_admin_role(
@@ -3478,6 +5447,8 @@ async def _ensure_teams_service_admin_role(
 async def try_grant_missing_permissions(
     company_id: int,
     access_token: str,
+    *,
+    raise_on_consent_error: bool = False,
 ) -> bool:
     """Best-effort: grant any missing ``_PROVISION_APP_ROLES`` to the company's
     enterprise app service principal using the provided *access_token*.
@@ -3524,7 +5495,7 @@ async def try_grant_missing_permissions(
         # share the same appRoleId GUID so we must check by resourceId as well.
         assignments_response = await _graph_get(
             access_token,
-            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
         )
         assignment_list = assignments_response.get("value", [])
         assigned_roles: set[str] = {
@@ -3540,12 +5511,9 @@ async def try_grant_missing_permissions(
         required_roles: set[str] = set(_PROVISION_APP_ROLES)
         missing: list[str] = sorted(required_roles - assigned_roles)
 
-        # Look up the Graph, EXO, and Teams service principal object IDs so we
-        # can check whether ManageAsApp has been granted to each one individually.
-        # We also retrieve the Graph SP's appRoles to filter out any required
-        # permissions that don't exist in this tenant.
+        # Look up the Exchange Online service principal so its ManageAsApp
+        # assignment can be checked independently from Microsoft Graph roles.
         exo_sp_id: str | None = None
-        teams_sp_id: str | None = None
         try:
             exo_sp_resp = await _graph_get(
                 access_token,
@@ -3555,33 +5523,14 @@ async def try_grant_missing_permissions(
             exo_sp_list = exo_sp_resp.get("value", [])
             if exo_sp_list:
                 exo_sp_id = exo_sp_list[0]["id"]
-        except M365Error:
-            pass  # non-fatal – will skip EXO grant
-
-        teams_sp_has_role: bool = False
-        try:
-            teams_sp_resp = await _graph_get(
-                access_token,
-                "https://graph.microsoft.com/v1.0/servicePrincipals"
-                f"?$filter=appId eq '{_TEAMS_APP_ID}'&$select=id,appRoles",
+        except M365Error as exc:
+            log_warning(
+                "M365 permission repair could not discover Exchange service principal",
+                company_id=company_id,
+                **_safe_m365_error_fields(exc),
             )
-            teams_sp_list = teams_sp_resp.get("value", [])
-            if teams_sp_list:
-                teams_sp_obj = teams_sp_list[0]
-                teams_sp_id = teams_sp_obj["id"]
-                teams_sp_has_role = any(
-                    r.get("id") == _TEAMS_MANAGE_AS_APP_ROLE
-                    for r in teams_sp_obj.get("appRoles", [])
-                )
-        except M365Error:
-            pass  # non-fatal – will skip Teams grant
 
         exo_needed = exo_sp_id is not None and exo_sp_id not in manage_as_app_resource_ids
-        teams_needed = (
-            teams_sp_id is not None
-            and teams_sp_has_role
-            and teams_sp_id not in manage_as_app_resource_ids
-        )
 
         granted: list[str] = []
 
@@ -3619,7 +5568,7 @@ async def try_grant_missing_permissions(
                     try:
                         await _graph_post(
                             access_token,
-                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
                             {
                                 "principalId": sp_object_id,
                                 "resourceId": graph_sp_id,
@@ -3632,7 +5581,7 @@ async def try_grant_missing_permissions(
                             "try_grant_missing_permissions: failed to grant role",
                             company_id=company_id,
                             role_id=role_id,
-                            error=str(exc),
+                            **_safe_m365_error_fields(exc),
                         )
 
             if granted:
@@ -3649,7 +5598,7 @@ async def try_grant_missing_permissions(
                     try:
                         await _graph_post(
                             access_token,
-                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
                             {
                                 "principalId": sp_object_id,
                                 "resourceId": exo_sp_id,
@@ -3667,42 +5616,17 @@ async def try_grant_missing_permissions(
                                 "try_grant_missing_permissions: "
                                 "failed to grant Exchange.ManageAsApp",
                                 company_id=company_id,
-                                error=str(exc),
+                                **_safe_m365_error_fields(exc),
                             )
-            except M365Error:
-                pass  # Exchange Online SP lookup failed; non-fatal
+            except M365Error as exc:
+                log_error(
+                    "try_grant_missing_permissions: unexpected Exchange grant failure",
+                    company_id=company_id,
+                    **_safe_m365_error_fields(exc),
+                )
 
-        # Best-effort: grant Teams.ManageAsApp if not already assigned.
-        # Exchange.ManageAsApp and Teams.ManageAsApp share the same role GUID but
-        # target different service principals, so both must be granted separately.
-        if teams_needed:
-            try:
-                if teams_sp_id:
-                    try:
-                        await _graph_post(
-                            access_token,
-                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
-                            {
-                                "principalId": sp_object_id,
-                                "resourceId": teams_sp_id,
-                                "appRoleId": _TEAMS_MANAGE_AS_APP_ROLE,
-                            },
-                        )
-                        granted.append(_TEAMS_MANAGE_AS_APP_ROLE)
-                        log_info(
-                            "Granted Teams.ManageAsApp via connect flow",
-                            company_id=company_id,
-                        )
-                    except M365Error as exc:
-                        if exc.http_status != 409:
-                            log_error(
-                                "try_grant_missing_permissions: "
-                                "failed to grant Teams.ManageAsApp",
-                                company_id=company_id,
-                                error=str(exc),
-                            )
-            except M365Error:
-                pass  # Teams SP lookup failed; non-fatal
+        # Do not add or revoke legacy Teams.ManageAsApp assignments. Supported
+        # Teams authentication uses resource tokens and Teams RBAC.
 
         # Best-effort: assign the Exchange Administrator directory role so that
         # Exchange Online PowerShell cmdlets (Get-MailboxPermission) succeed.
@@ -3716,13 +5640,49 @@ async def try_grant_missing_permissions(
         if await _ensure_teams_service_admin_role(access_token, sp_object_id):
             granted.append("teams-admin-role")
 
+        for role_name in REQUIRED_DIRECTORY_ROLES:
+            if await _ensure_directory_role_by_name(access_token, sp_object_id, role_name):
+                granted.append(f"directory-role:{role_name}")
+
+        # Repair the second half of the self-renewal contract as well as the
+        # Application.ReadWrite.OwnedBy assignment.  Existing installations
+        # may have the role but predate registration of their own service
+        # principal as an application owner.
+        app_object_id = str(creds.get("app_object_id") or "").strip()
+        if not app_object_id and _GRAPH_OBJECT_ID_PATTERN.fullmatch(client_id):
+            app_object_id = await _lookup_application_object_id(access_token, client_id) or ""
+        if app_object_id:
+            try:
+                await _graph_post(
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/owners/$ref",
+                    {
+                        "@odata.id": (
+                            "https://graph.microsoft.com/v1.0/directoryObjects/"
+                            f"{_graph_object_id(sp_object_id)}"
+                        )
+                    },
+                )
+                granted.append(_APP_SELF_OWNER_CHECK_ID)
+            except M365Error as exc:
+                # Graph returns 400 when the owner reference already exists.
+                # It is safe to leave it in place; diagnostics will verify it.
+                if exc.http_status not in (400, 409):
+                    log_error(
+                        "try_grant_missing_permissions: failed to register app self-owner",
+                        company_id=company_id,
+                        **_safe_m365_error_fields(exc),
+                    )
+
         return bool(granted)
     except Exception as exc:  # noqa: BLE001
         log_error(
             "try_grant_missing_permissions: unexpected error",
             company_id=company_id,
-            error=str(exc),
+            exception_type=type(exc).__name__,
         )
+        if raise_on_consent_error and isinstance(exc, M365Error):
+            raise
         return False
 
 
@@ -3774,7 +5734,7 @@ async def _count_forwarding_rules(access_token: str, user_id: str) -> int:
     users instead of repeating failing requests for every mailbox.
     """
     url = (
-        f"https://graph.microsoft.com/v1.0/users/{user_id}"
+        f"https://graph.microsoft.com/v1.0/users/{_graph_path_segment(user_id)}"
         "/mailFolders/inbox/messageRules"
     )
     try:
@@ -3805,7 +5765,7 @@ async def _get_user_mail_enabled_groups(
     list if the request fails so callers can treat any failure as *no groups*.
     """
     url = (
-        f"https://graph.microsoft.com/v1.0/users/{user_id}/memberOf"
+        f"https://graph.microsoft.com/v1.0/users/{_graph_path_segment(user_id)}/memberOf"
         "?$select=id,displayName,mail,mailEnabled"
     )
     try:
@@ -3847,7 +5807,7 @@ async def _get_mailbox_group_members(
 
     # Fetch the direct members of the backing group.
     members_url = (
-        f"https://graph.microsoft.com/v1.0/groups/{group_id}/members"
+        f"https://graph.microsoft.com/v1.0/groups/{_graph_path_segment(group_id)}/members"
         "?$select=id,displayName,userPrincipalName,mail"
     )
     try:
@@ -4000,7 +5960,7 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
         "Accept": "text/csv",
     }
     try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30, follow_redirects=False) as client:
             response = await client.get(csv_report_url, headers=headers)
             if response.status_code not in (302, 303, 307, 308):
                 log_error(
@@ -4394,7 +6354,7 @@ async def _exo_get_mailbox_permission(
         "Content-Type": "application/json; charset=utf-8",
     }
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.post(url, headers=headers, json=payload)
     except httpx.DecodingError as exc:
         log_warning(
@@ -4567,7 +6527,7 @@ async def _exo_get_archive_mailbox_size(
         "Content-Type": "application/json; charset=utf-8",
     }
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.post(url, headers=headers, json=payload)
     except httpx.DecodingError as exc:
         log_warning(
@@ -4671,6 +6631,14 @@ async def _fetch_exo_archive_mailbox_sizes(
     return sizes_by_mailbox
 
 
+class _PermissionSnapshot(dict[str, list[dict[str, str]]]):
+    """Permission rows plus whether every requested mailbox was read."""
+
+    def __init__(self, *args: Any, complete: bool, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.complete = complete
+
+
 async def _fetch_exo_mailbox_permissions(
     company_id: int,
     mailbox_emails: set[str],
@@ -4688,14 +6656,15 @@ async def _fetch_exo_mailbox_permissions(
     queries fail, those mailboxes are silently skipped.
     """
     if not mailbox_emails:
-        return {}
+        return _PermissionSnapshot(complete=True)
 
     try:
         exo_token, effective_tenant_id = await _acquire_exo_access_token(company_id)
     except M365Error:
-        return {}
+        return _PermissionSnapshot(complete=False)
 
     members_by_mailbox: dict[str, list[dict[str, str]]] = {}
+    complete = True
     for mailbox_email in mailbox_emails:
         normalised = str(mailbox_email or "").strip().lower()
         if not normalised:
@@ -4712,13 +6681,44 @@ async def _fetch_exo_mailbox_permissions(
                     "Exchange.ManageAsApp permission and an Exchange RBAC role.",
                     mailbox_email=normalised,
                 )
+                complete = False
                 break
             raise
         parsed = _parse_exo_mailbox_permission_records(normalised, records)
         if parsed:
             members_by_mailbox[normalised] = parsed
 
-    return members_by_mailbox
+    return _PermissionSnapshot(members_by_mailbox, complete=complete)
+
+
+async def _fetch_exo_recipient_types(company_id: int) -> dict[str, str]:
+    """Return the authoritative Exchange recipient type for every mailbox.
+
+    Usage reports are intentionally not used for classification: they are
+    delayed telemetry and do not distinguish shared, room, and equipment
+    mailboxes reliably.
+    """
+    exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+    data = await _exo_invoke_command(
+        exo_token,
+        tenant_id,
+        "Get-Mailbox",
+        {"ResultSize": "Unlimited"},
+    )
+    rows = data.get("value") or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    result: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        address = _coerce_exo_string(
+            row.get("UserPrincipalName") or row.get("PrimarySmtpAddress")
+        ).lower()
+        recipient_type = _coerce_exo_string(row.get("RecipientTypeDetails"))
+        if address and recipient_type:
+            result[address] = recipient_type
+    return result
 
 
 async def sync_mailboxes(company_id: int) -> int:
@@ -4763,32 +6763,49 @@ async def sync_mailboxes(company_id: int) -> int:
     try:
         report_items = await _fetch_mailbox_usage_report(access_token)
     except M365Error as exc:
-        if exc.http_status != 403:
+        if exc.http_status == 401:
+            # A cached app-only token can be revoked before its recorded expiry
+            # (or may have been written incorrectly by an older deployment).
+            # Evict it by forcing a client-credentials exchange and retry the
+            # idempotent report request once.  Do not enter permission repair:
+            # invalid authentication is distinct from a missing Graph role.
+            access_token = await acquire_access_token(
+                company_id,
+                force_client_credentials=True,
+                force_refresh=True,
+            )
+            report_items = await _fetch_mailbox_usage_report(access_token)
+        elif exc.http_status != 403:
             raise
-        # Attempt to self-heal using the same pattern as sync_company_licenses.
-        delegated_token = await acquire_delegated_token(company_id)
-        if delegated_token:
-            await try_grant_missing_permissions(company_id, access_token=delegated_token)
-            access_token = await acquire_access_token(company_id, force_client_credentials=True)
-            try:
-                report_items = await _fetch_mailbox_usage_report(access_token)
-            except M365Error as retry_exc:
-                if retry_exc.http_status == 403:
-                    raise M365Error(
-                        "Mailbox sync failed (403 Forbidden). Permissions have been "
-                        "re-applied but may not yet be effective due to Azure AD propagation "
-                        "delay. Please wait a few minutes and try again.",
-                        http_status=403,
-                    ) from retry_exc
-                raise
         else:
-            raise M365Error(
-                "Mailbox sync failed (403 Forbidden). The enterprise app does not have the "
-                "required permissions (e.g. Reports.Read.All). To fix this: on the M365 "
-                "settings page, click 'Authorise portal access' to complete setup and grant "
-                "the required permissions.",
-                http_status=403,
-            ) from exc
+            # Attempt to self-heal using the same pattern as sync_company_licenses.
+            delegated_token = await acquire_delegated_token(company_id)
+            if delegated_token:
+                await try_grant_missing_permissions(company_id, access_token=delegated_token)
+                access_token = await acquire_access_token(
+                    company_id,
+                    force_client_credentials=True,
+                    force_refresh=True,
+                )
+                try:
+                    report_items = await _fetch_mailbox_usage_report(access_token)
+                except M365Error as retry_exc:
+                    if retry_exc.http_status == 403:
+                        raise M365Error(
+                            "Mailbox sync failed (403 Forbidden). Permissions have been "
+                            "re-applied but may not yet be effective due to Azure AD propagation "
+                            "delay. Please wait a few minutes and try again.",
+                            http_status=403,
+                        ) from retry_exc
+                    raise
+            else:
+                raise M365Error(
+                    "Mailbox sync failed (403 Forbidden). The enterprise app does not have the "
+                    "required permissions (e.g. Reports.Read.All). To fix this: on the M365 "
+                    "settings page, click 'Authorise portal access' to complete setup and grant "
+                    "the required permissions.",
+                    http_status=403,
+                ) from exc
 
     def _looks_obfuscated_identifier(value: str) -> bool:
         """Return True for report identifiers that look privacy-obfuscated.
@@ -4835,10 +6852,11 @@ async def sync_mailboxes(company_id: int) -> int:
                 identifiers.append(value)
         return identifiers
 
-    # Get all users (enabled + disabled); mailboxes only exist for enabled accounts.
+    # Account state is not a mailbox type.  Disabled ordinary users remain user
+    # mailboxes, while Exchange recipient details identify shared/resource types.
     users = await get_all_users(company_id)
     users_with_identifiers = [
-        (u, _user_identifiers(u)) for u in users if u.get("accountEnabled", True)
+        (u, _user_identifiers(u)) for u in users
     ]
     users_with_identifiers = [
         (user, identifiers)
@@ -4869,6 +6887,18 @@ async def sync_mailboxes(company_id: int) -> int:
     # repeating N failing API calls (they would all fail identically).
     rules_permission_denied = False
 
+    recipient_types: dict[str, str] = {}
+    recipient_inventory_complete = False
+    try:
+        recipient_types = await _fetch_exo_recipient_types(company_id)
+        recipient_inventory_complete = True
+    except Exception as exc:
+        log_info(
+            "Preserving mailbox classification; Exchange recipient inventory unavailable",
+            company_id=company_id,
+            error=str(exc),
+        )
+
     # --- User mailboxes ---
     for user, identifiers in users_with_identifiers:
         preferred_upn = identifiers[0]
@@ -4883,7 +6913,9 @@ async def sync_mailboxes(company_id: int) -> int:
         report_upn = str(report_entry.get("userPrincipalName") or "").strip().lower()
         if report_upn:
             matched_report_upns.add(report_upn)
-        storage_bytes = int(report_entry.get("storageUsedInBytes") or 0)
+        storage_bytes = (
+            int(report_entry.get("storageUsedInBytes") or 0) if report_entry else None
+        )
         archive_raw = report_entry.get("archiveMailboxStorageUsedInBytes")
         archive_bytes = int(archive_raw) if archive_raw else 0
         # Use the dedicated "Has Archive" flag from the report when present;
@@ -4894,7 +6926,7 @@ async def sync_mailboxes(company_id: int) -> int:
             user.get("displayName") or report_entry.get("displayName") or preferred_upn
         )
 
-        fw_count = 0
+        fw_count: int | None = None
         if not rules_permission_denied:
             try:
                 fw_count = await _count_forwarding_rules(access_token, user["id"])
@@ -4933,10 +6965,16 @@ async def sync_mailboxes(company_id: int) -> int:
             {
                 "user_principal_name": preferred_upn,
                 "display_name": display_name,
-                "mailbox_type": "UserMailbox",
+                "mailbox_type": recipient_types.get(preferred_upn, "UserMailbox"),
                 "storage_used_bytes": storage_bytes,
-                "archive_storage_used_bytes": archive_bytes if has_archive else None,
-                "has_archive": has_archive,
+                "archive_storage_used_bytes": (
+                    archive_bytes if archive_raw is not None else None
+                ),
+                "has_archive": (
+                    has_archive
+                    if "hasArchive" in report_entry or archive_raw is not None
+                    else None
+                ),
                 "forwarding_rule_count": fw_count,
             }
         )
@@ -4956,11 +6994,15 @@ async def sync_mailboxes(company_id: int) -> int:
             {
                 "user_principal_name": upn_lower,
                 "display_name": display_name,
-                "mailbox_type": "SharedMailbox",
+                "mailbox_type": recipient_types.get(upn_lower, "SharedMailbox"),
                 "storage_used_bytes": storage_bytes,
-                "archive_storage_used_bytes": archive_bytes if has_archive else None,
-                "has_archive": has_archive,
-                "forwarding_rule_count": 0,
+                "archive_storage_used_bytes": (
+                    archive_bytes if archive_raw is not None else None
+                ),
+                "has_archive": (
+                    has_archive if "hasArchive" in entry or archive_raw is not None else None
+                ),
+                "forwarding_rule_count": None,
             }
         )
 
@@ -4976,7 +7018,7 @@ async def sync_mailboxes(company_id: int) -> int:
     # now and copy matching group-member entries to the mailbox UPN.
     if group_member_cache:
         for row in rows_to_upsert:
-            if row["mailbox_type"] != "SharedMailbox":
+            if row["mailbox_type"] not in {"SharedMailbox", "RoomMailbox", "EquipmentMailbox"}:
                 continue
             mb_upn = row["user_principal_name"]
             if mb_upn in group_member_cache:
@@ -5026,10 +7068,14 @@ async def sync_mailboxes(company_id: int) -> int:
         if str(row["user_principal_name"] or "").strip()
     }
     direct_members_by_mailbox: dict[str, list[dict[str, str]]] = {}
+    permission_inventory_complete = False
     if mailbox_emails:
         try:
             direct_members_by_mailbox = await _fetch_exo_mailbox_permissions(
                 company_id, mailbox_emails
+            )
+            permission_inventory_complete = bool(
+                getattr(direct_members_by_mailbox, "complete", False)
             )
         except Exception as exc:
             log_info(
@@ -5084,12 +7130,45 @@ async def sync_mailboxes(company_id: int) -> int:
 
     # Remove stale entries (mailboxes that no longer exist in the tenant).
     current_upns = [r["user_principal_name"] for r in rows_to_upsert]
-    await m365_repo.delete_stale_mailboxes(company_id, current_upns)
+    # Absence is authoritative only when Exchange supplied a complete mailbox
+    # inventory.  Empty/delayed Graph reports must never purge real mailboxes.
+    if recipient_inventory_complete:
+        await m365_repo.delete_stale_mailboxes(company_id, current_upns)
 
     # Purge mailbox-member rows that were not touched in this sync run.
     # Rows written above have synced_at == member_sync_start; older rows belong
     # to previous syncs and should be removed.
-    await m365_repo.delete_stale_mailbox_members(company_id, member_sync_start)
+    if permission_inventory_complete:
+        await m365_repo.delete_stale_mailbox_members(company_id, member_sync_start)
+
+    # Completeness is persisted independently for each authority.  A failed
+    # attempt updates freshness/staleness without destroying last_success_at.
+    category_states = {
+        "usage_report": True,
+        "recipient_inventory": recipient_inventory_complete,
+        "direct_permissions": permission_inventory_complete,
+        "archive_metrics": bool(mailbox_emails) and mailbox_emails.issubset(
+            archive_sizes_by_mailbox
+        ),
+        "forwarding_rules": not rules_permission_denied,
+    }
+    for category, complete in category_states.items():
+        try:
+            await m365_repo.set_mailbox_sync_state(
+                company_id,
+                category,
+                complete=complete,
+                attempted_at=member_sync_start,
+            )
+        except Exception as exc:
+            # State metadata is additive during rollout and must not make an
+            # otherwise safe mailbox sync destructive or unavailable.
+            log_warning(
+                "Unable to record mailbox source completeness",
+                company_id=company_id,
+                category=category,
+                error=str(exc),
+            )
 
     synced_staff_custom_fields = await sync_staff_custom_fields_from_m365_mailboxes(
         company_id

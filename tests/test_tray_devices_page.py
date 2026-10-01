@@ -301,7 +301,7 @@ async def test_tray_chat_popup_rejects_closed_explicit_room_without_creating_new
     monkeypatch.setattr(
         chat_repo,
         "get_room",
-        AsyncMock(return_value={"id": 42, "status": "closed", "tray_device_id": 7}),
+        AsyncMock(return_value={"id": 42, "status": "closed", "tray_device_id": 7, "company_id": 3}),
     )
     get_open_mock = AsyncMock()
     create_matrix_mock = AsyncMock(return_value={"room_id": "!new:example"})
@@ -335,7 +335,7 @@ async def test_issue_chat_token_rejects_closed_explicit_room(monkeypatch):
 
     monkeypatch.setattr(tray_routes._settings, "matrix_enabled", True)
     monkeypatch.setattr(companies_repo, "get_company_by_id", AsyncMock(return_value={"id": 3, "tray_chat_enabled": True}))
-    monkeypatch.setattr(chat_repo, "get_room", AsyncMock(return_value={"id": 42, "status": "closed"}))
+    monkeypatch.setattr(chat_repo, "get_room", AsyncMock(return_value={"id": 42, "status": "closed", "company_id": 3}))
     create_token_mock = AsyncMock()
     monkeypatch.setattr(tray_repo, "create_chat_token", create_token_mock)
 

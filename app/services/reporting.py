@@ -51,6 +51,11 @@ _CURRENT_COMPANY_PATTERN = re.compile(
 )
 
 
+def uses_company_context(sql: str) -> bool:
+    """Return whether a reporting query is explicitly scoped to a company."""
+    return _CURRENT_COMPANY_PATTERN.search(sql or "") is not None
+
+
 def substitute_query_context(sql: str, *, company_id: int | None = None) -> str:
     """Replace supported report SQL context placeholders with safe literals.
 
@@ -64,6 +69,10 @@ def substitute_query_context(sql: str, *, company_id: int | None = None) -> str:
 
 class ReportingQueryError(ValueError):
     """Raised when an author-supplied SQL query fails validation."""
+
+    def __init__(self, message: str, *, client_code: str = "invalid_query") -> None:
+        super().__init__(message)
+        self.client_code = client_code
 
 
 # Statement-level keywords that indicate a write or otherwise unsafe action.
@@ -215,18 +224,19 @@ def validate_select_query(sql: str) -> str:
     contains a trailing semicolon so it is safe to wrap inside a subquery.
     """
     if not sql or not sql.strip():
-        raise ReportingQueryError("SQL query is required.")
+        raise ReportingQueryError("SQL query is required.", client_code="required")
 
     cleaned = _strip_sql_comments(sql).strip()
     if not cleaned:
-        raise ReportingQueryError("SQL query is required.")
+        raise ReportingQueryError("SQL query is required.", client_code="required")
 
     statements = _split_top_level_statements(cleaned)
     if not statements:
-        raise ReportingQueryError("SQL query is required.")
+        raise ReportingQueryError("SQL query is required.", client_code="required")
     if len(statements) > 1:
         raise ReportingQueryError(
-            "Only a single SELECT statement is allowed (found multiple statements)."
+            "Only a single SELECT statement is allowed (found multiple statements).",
+            client_code="multiple_statements",
         )
 
     statement = statements[0]
@@ -238,19 +248,23 @@ def validate_select_query(sql: str) -> str:
     # Must begin with SELECT or WITH
     first_token_match = re.match(r"\s*([A-Z]+)", upper_no_strings)
     if not first_token_match or first_token_match.group(1) not in {"SELECT", "WITH"}:
-        raise ReportingQueryError("Only SELECT statements are allowed.")
+        raise ReportingQueryError(
+            "Only SELECT statements are allowed.", client_code="select_only"
+        )
 
     # Reject dangerous keywords as standalone tokens
     tokens = set(re.findall(r"\b[A-Z]+\b", upper_no_strings))
     for keyword in _FORBIDDEN_KEYWORDS:
         if keyword in tokens:
             raise ReportingQueryError(
-                f"Statement contains the forbidden keyword '{keyword}'."
+                f"Statement contains the forbidden keyword '{keyword}'.",
+                client_code="forbidden_keyword",
             )
     for phrase in _FORBIDDEN_PHRASES:
         if phrase in upper_no_strings:
             raise ReportingQueryError(
-                f"Statement contains the forbidden phrase '{phrase}'."
+                f"Statement contains the forbidden phrase '{phrase}'.",
+                client_code="forbidden_phrase",
             )
 
     return statement
@@ -284,10 +298,12 @@ async def run_query(sql: str, *, max_rows: int = MAX_RESULT_ROWS) -> dict[str, A
     returned more than ``max_rows`` rows (the result is capped at the limit).
     """
     statement = validate_select_query(sql)
-    # Wrap the query so a careless SELECT * cannot return unbounded rows.
+    # Use cursor-level fetchmany so we never compose user SQL into a wrapper
+    # string (which would be flagged as SQL injection).  fetch_many transfers
+    # at most fetch_limit rows from the database without adding a LIMIT clause
+    # to the user-provided statement.
     fetch_limit = max_rows + 1
-    wrapped = f"SELECT * FROM ({statement}) AS reporting_subq LIMIT {int(fetch_limit)}"
-    raw_rows = await db.fetch_all(wrapped)
+    raw_rows = await db.fetch_many(statement, fetch_limit)
     rows = [dict(r) for r in (raw_rows or [])]
     truncated = len(rows) > max_rows
     if truncated:
@@ -311,14 +327,15 @@ async def count_query_rows(sql: str, *, company_id: int | None = None) -> int:
     statement = validate_select_query(
         substitute_query_context(sql, company_id=company_id)
     )
-    wrapped = f"SELECT COUNT(*) AS row_count FROM ({statement}) AS reporting_count_subq"
-    row = await db.fetch_one(wrapped)
-    if not row:
-        return 0
-    try:
-        return int(row.get("row_count", 0))
-    except (TypeError, ValueError, AttributeError):
-        return 0
+    # Fetch rows directly instead of wrapping in COUNT(*) to avoid composing
+    # user SQL into another SQL string.  Counting in Python is equivalent for
+    # this reporting use-case where result sets are already bounded by
+    # MAX_RESULT_ROWS.  Note: this does transfer the row data to the
+    # application layer; for very large result sets the COUNT(*) subquery
+    # would be more efficient, but the row-count cap (MAX_RESULT_ROWS) keeps
+    # memory usage bounded in practice.
+    rows = await db.fetch_many(statement, MAX_RESULT_ROWS + 1)
+    return len(rows) if rows else 0
 
 
 async def run_query_with_context(

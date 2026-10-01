@@ -16,9 +16,11 @@ class M365MailAccountBase(BaseModel):
     filter_query: dict[str, Any] | None = None
     process_unread_only: bool = True
     mark_as_read: bool = True
+    delete_after_import: bool = False
     sync_known_only: bool = False
     active: bool = True
     priority: int = Field(100, ge=0, le=32767)
+    import_purpose: str = Field("support_ticket", pattern="^(support_ticket|dmarc)$")
 
 
 class M365MailAccountCreate(M365MailAccountBase):
@@ -35,9 +37,11 @@ class M365MailAccountUpdate(BaseModel):
     filter_query: dict[str, Any] | None = None
     process_unread_only: bool | None = None
     mark_as_read: bool | None = None
+    delete_after_import: bool | None = None
     sync_known_only: bool | None = None
     active: bool | None = None
     priority: int | None = Field(default=None, ge=0, le=32767)
+    import_purpose: str | None = Field(default=None, pattern="^(support_ticket|dmarc)$")
 
 
 class M365MailAccountResponse(BaseModel):
@@ -51,9 +55,11 @@ class M365MailAccountResponse(BaseModel):
     filter_query: dict[str, Any] | None
     process_unread_only: bool
     mark_as_read: bool
+    delete_after_import: bool = False
     sync_known_only: bool
     active: bool
     priority: int
+    import_purpose: str = "support_ticket"
     last_synced_at: datetime | None
     scheduled_task_id: int | None
     auth_status: str | None = None
@@ -69,3 +75,11 @@ class M365MailSyncResponse(BaseModel):
     errors: list[dict[str, object]] | None = None
     reason: str | None = None
     error: str | None = None
+    recovery: bool | None = None
+    folder: str | None = None
+
+
+class M365MailRecoveryImportRequest(BaseModel):
+    """Options for an explicit, notification-free mailbox recovery import."""
+
+    folder: str | None = Field(default=None, min_length=1, max_length=255)

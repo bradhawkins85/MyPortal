@@ -91,6 +91,8 @@ async def _render_automation_form(
         "triggerFiltersRaw": "",
         "actionModule": "",
         "actionPayloadRaw": "",
+        "businessHoursMode": "",
+        "businessHoursSource": "company",
     }
     if form_values:
         for key, value in form_values.items():
@@ -179,6 +181,8 @@ def _automation_to_form_values(automation: Mapping[str, Any]) -> dict[str, Any]:
         "triggerFiltersRaw": "",
         "actionModule": str(automation.get("action_module") or ""),
         "actionPayloadRaw": "",
+        "businessHoursMode": str(automation.get("business_hours_mode") or ""),
+        "businessHoursSource": str(automation.get("business_hours_source") or "company"),
     }
     scheduled_time = automation.get("scheduled_time")
     if scheduled_time and isinstance(scheduled_time, datetime):
@@ -205,6 +209,7 @@ def _parse_automation_form_submission(
     kind: str,
 ) -> tuple[dict[str, Any] | None, dict[str, Any], str | None, int]:
     from app.services import modules as modules_service
+    from app.services.component_availability import get_component_availability
 
     def _get_str_value(key: str) -> str:
         value = form.get(key)
@@ -235,6 +240,17 @@ def _parse_automation_form_submission(
     )
     action_module_raw = _get_str_value("actionModule").strip()
     action_payload_raw = _get_str_value("actionPayload").strip()
+    business_hours_mode_raw = _get_str_value("businessHoursMode").strip().lower()
+    allowed_modes = {"pause", "skip"} if kind_normalised == "event" else {"skip"}
+    business_hours_mode = (
+        business_hours_mode_raw if business_hours_mode_raw in allowed_modes else None
+    )
+    business_hours_source_raw = _get_str_value("businessHoursSource").strip().lower()
+    business_hours_source = (
+        ("global" if business_hours_source_raw == "global" else "company")
+        if business_hours_mode
+        else None
+    )
 
     form_state = {
         "name": name,
@@ -250,6 +266,8 @@ def _parse_automation_form_submission(
         "triggerFiltersMode": trigger_filters_mode,
         "actionModule": action_module_raw,
         "actionPayloadRaw": action_payload_raw,
+        "businessHoursMode": business_hours_mode or "",
+        "businessHoursSource": business_hours_source or "company",
     }
 
     if not name:
@@ -358,6 +376,13 @@ def _parse_automation_form_submission(
                     f"Select an action module for trigger action {index}.",
                     status.HTTP_400_BAD_REQUEST,
                 )
+            if not get_component_availability().module_available(module_value):
+                return (
+                    None,
+                    form_state,
+                    f"Trigger action {index} uses a module unavailable in this deployment.",
+                    status.HTTP_400_BAD_REQUEST,
+                )
             payload_value = entry.get("payload") or {}
             if not isinstance(payload_value, dict):
                 return (
@@ -384,7 +409,7 @@ def _parse_automation_form_submission(
                 try:
                     action_entry["order"] = int(raw_order)
                 except (TypeError, ValueError):
-                    pass
+                    action_entry.pop("order", None)
             note_value = str(entry.get("note") or "").strip()
             if note_value:
                 action_entry["note"] = note_value
@@ -396,6 +421,13 @@ def _parse_automation_form_submission(
         form_state["actionPayloadRaw"] = json.dumps(action_payload)
         form_state["actionModule"] = action_module or ""
     elif action_module and isinstance(action_payload, dict):
+        if not get_component_availability().module_available(action_module):
+            return (
+                None,
+                form_state,
+                "The selected action module is unavailable in this deployment.",
+                status.HTTP_400_BAD_REQUEST,
+            )
         try:
             modules_service.validate_action_payload(action_module, action_payload)
         except ValueError as exc:
@@ -420,6 +452,8 @@ def _parse_automation_form_submission(
         "action_module": action_module,
         "action_payload": action_payload,
         "status": status_value,
+        "business_hours_mode": business_hours_mode,
+        "business_hours_source": business_hours_source,
     }
 
     return data, form_state, None, status.HTTP_200_OK
@@ -889,13 +923,16 @@ async def admin_test_automation(automation_id: int, request: Request):
             apply=apply_action,
         )
     except ValueError as exc:
-        message = str(exc)
-        status_code = (
-            status.HTTP_404_NOT_FOUND
-            if "not found" in message.lower()
-            else status.HTTP_400_BAD_REQUEST
+        is_not_found = "not found" in str(exc).lower()
+        if is_not_found:
+            return JSONResponse(
+                {"detail": "The requested resource was not found."},
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        return JSONResponse(
+            {"detail": "Invalid request parameters."},
+            status_code=status.HTTP_400_BAD_REQUEST,
         )
-        return JSONResponse({"detail": message}, status_code=status_code)
     return JSONResponse(_main()._serialise_for_json(result))
 
 

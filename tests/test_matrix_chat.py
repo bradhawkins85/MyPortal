@@ -227,6 +227,19 @@ async def test_rate_limit_retry(monkeypatch):
     assert call_count == 2
 
 
+@pytest.mark.asyncio
+async def test_request_rejects_non_matrix_and_traversal_paths(monkeypatch):
+    monkeypatch.setattr(_matrix._settings, "matrix_homeserver_url", "https://matrix.example.com")
+
+    with pytest.raises(MatrixError) as non_matrix_exc:
+        await _matrix._request("GET", "/not-matrix/client/v3/sync", headers={})
+    assert non_matrix_exc.value.errcode == "M_INVALID_PARAM"
+
+    with pytest.raises(MatrixError) as traversal_exc:
+        await _matrix._request("GET", "/_matrix/client/v3/rooms/../admin", headers={})
+    assert traversal_exc.value.errcode == "M_INVALID_PARAM"
+
+
 # ---------------------------------------------------------------------------
 # set_user_power_level
 # ---------------------------------------------------------------------------

@@ -83,6 +83,54 @@ async def test_list_company_staff_users_returns_all_enabled_staff(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_list_company_staff_users_omits_invalid_email_addresses(monkeypatch):
+    """Invalid staff email addresses must not prevent valid requesters loading."""
+    from app.api.routes import companies
+    from app.repositories import companies as company_repo
+    from app.repositories import staff as staff_repo
+
+    monkeypatch.setattr(
+        company_repo,
+        "get_company_by_id",
+        AsyncMock(return_value={"id": 1, "name": "Test Company"}),
+    )
+    monkeypatch.setattr(
+        staff_repo,
+        "list_enabled_staff_users",
+        AsyncMock(
+            return_value=[
+                {
+                    "id": 10,
+                    "staff_id": 10,
+                    "requester_value": "staff:10",
+                    "email": "valid@example.com",
+                },
+                {
+                    "id": 11,
+                    "staff_id": 11,
+                    "requester_value": "staff:11",
+                    "email": "",
+                },
+                {
+                    "id": 12,
+                    "staff_id": 12,
+                    "requester_value": "staff:12",
+                    "email": "not-an-email",
+                },
+            ]
+        ),
+    )
+
+    result = await companies.list_company_staff_users(
+        company_id=1,
+        _=None,
+        __={"id": 1, "is_super_admin": True},
+    )
+
+    assert [option.email for option in result] == ["valid@example.com"]
+
+
+@pytest.mark.anyio
 async def test_list_company_staff_users_company_not_found(monkeypatch):
     """Verify that the endpoint returns 404 for non-existent company."""
     from app.api.routes import companies

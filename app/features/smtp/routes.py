@@ -6,14 +6,34 @@ import base64
 import hashlib
 import hmac
 import json
+import time
+import os
 from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+
+from app.api.dependencies.modules import require_module_enabled
 from loguru import logger
 
 from app.services import smtp2go
 
-router = APIRouter(prefix="/api/webhooks/smtp2go", tags=["SMTP2Go Webhooks"])
+router = APIRouter(prefix="/api/webhooks/smtp2go", tags=["SMTP2Go Webhooks"], dependencies=[Depends(require_module_enabled("smtp2go"))])
+
+
+# Maximum age (in either direction) of a timestamped SMTP2Go signature.
+SIGNATURE_TIMESTAMP_TOLERANCE_SECONDS = 300
+
+
+def _timestamp_within_tolerance(timestamp: str, *, now: float | None = None) -> bool:
+    """Return whether a signature timestamp is within the replay window."""
+    try:
+        value = float(timestamp)
+    except (TypeError, ValueError):
+        return False
+    if value > 1e12:  # milliseconds since the epoch
+        value /= 1000.0
+    current = time.time() if now is None else now
+    return abs(current - value) <= SIGNATURE_TIMESTAMP_TOLERANCE_SECONDS
 
 
 def _parse_timestamp_signature(signature: str) -> tuple[str | None, str | None]:
@@ -71,6 +91,15 @@ async def verify_webhook_signature(
     # This is the primary format used by SMTP2Go for webhook verification
     timestamp, sig_value = _parse_timestamp_signature(signature_to_check)
     if timestamp and sig_value:
+        # Reject stale or future-dated signatures to prevent replaying a
+        # previously captured webhook delivery.
+        if not _timestamp_within_tolerance(timestamp):
+            logger.warning(
+                "SMTP2Go webhook signature timestamp outside tolerance",
+                timestamp=timestamp,
+                tolerance_seconds=SIGNATURE_TIMESTAMP_TOLERANCE_SECONDS,
+            )
+            return False
         # SMTP2Go computes: HMAC-SHA256(secret, "<timestamp>.<payload>")
         signed_payload = f"{timestamp}.".encode('utf-8') + payload
         expected_sig = hmac.new(
@@ -192,12 +221,35 @@ async def smtp2go_webhook(
 
     try:
         module_settings = await modules_service.get_module_settings('smtp2go')
-        webhook_secret = module_settings.get('webhook_secret') if module_settings else None
+        webhook_secret = (
+            str(module_settings.get('webhook_secret') or '').strip() if module_settings else ''
+        )
+        if not webhook_secret:
+            # Deployments commonly set the secret only in the environment, and
+            # a module row saved before it was set holds an empty value.
+            webhook_secret = os.getenv('SMTP2GO_WEBHOOK_SECRET', '').strip()
         disable_signature_verification = bool(
             module_settings.get('disable_webhook_signature_verification')
         ) if module_settings else False
 
-        # Verify webhook signature if secret is configured
+        # Verify the webhook signature. Without a configured secret the
+        # endpoint fails closed: unauthenticated events could otherwise
+        # tamper with delivery tracking and the global email blocklist.
+        if not webhook_secret and not disable_signature_verification:
+            logger.warning(
+                "SMTP2Go webhook rejected: no webhook_secret is configured for the smtp2go module. "
+                "Set SMTP2GO_WEBHOOK_SECRET or the webhook secret in the SMTP2Go module settings to accept events."
+            )
+            await webhook_monitor.log_incoming_webhook(
+                name="SMTP2Go Webhook - Secret Not Configured",
+                source_url=source_url,
+                payload=raw_body.decode('utf-8', errors='replace')[:1000],
+                headers=request_headers,
+                response_status=503,
+                response_body="Webhook secret not configured",
+                error_message="SMTP2Go webhook secret is not configured",
+            )
+            raise HTTPException(status_code=503, detail="Webhook secret not configured")
         if webhook_secret and not disable_signature_verification:
             if not await verify_webhook_signature(raw_body, x_smtp2go_signature, webhook_secret):
                 logger.warning(
@@ -217,10 +269,8 @@ async def smtp2go_webhook(
                     error_message="Signature verification failed",
                 )
                 raise HTTPException(status_code=401, detail="Invalid webhook signature")
-        elif disable_signature_verification:
-            logger.info("SMTP2Go webhook signature verification disabled by configuration")
         else:
-            logger.info("SMTP2Go webhook received without signature verification (secret not configured)")
+            logger.warning("SMTP2Go webhook signature verification disabled by configuration")
 
     except HTTPException:
         raise
@@ -229,7 +279,8 @@ async def smtp2go_webhook(
             "Failed to verify SMTP2Go webhook",
             error=str(exc),
         )
-        # Continue processing even if verification fails to avoid losing events
+        # Fail closed: never process an event whose signature was not checked.
+        raise HTTPException(status_code=503, detail="Unable to verify webhook signature") from exc
 
     # Parse the JSON body manually now that signature is verified
     try:

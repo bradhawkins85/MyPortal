@@ -13,6 +13,7 @@ def test_send_email_success(monkeypatch):
     monkeypatch.setattr(settings, "smtp_user", "noreply@example.com")
     monkeypatch.setattr(settings, "smtp_password", "secret")
     monkeypatch.setattr(settings, "smtp_use_tls", True)
+    monkeypatch.setattr(settings, "outbound_audit_bcc", "audit@example.com")
 
     captured: dict[str, object] = {}
     event_store: dict[int, dict[str, object]] = {}
@@ -99,6 +100,7 @@ def test_send_email_success(monkeypatch):
     message = captured["message"]
     assert message["Subject"] == "Subject"
     assert "user@example.com" in message["To"]
+    assert message["Bcc"] == "audit@example.com"
     assert captured["enqueue_event"]["payload"]["recipients"] == ["user@example.com"]
     assert event_metadata["status"] == "succeeded"
     assert event_metadata["response_status"] == 250
@@ -160,7 +162,7 @@ def test_send_email_uses_smtp_from_as_sender(monkeypatch):
     assert captured["login"] == "user@example.com"
 
 
-def test_send_email_adds_tracking_when_plausible_enabled(monkeypatch):
+def test_send_email_adds_tracking_when_enabled(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
     monkeypatch.setattr(settings, "smtp_port", 587)
@@ -237,25 +239,13 @@ def test_send_email_adds_tracking_when_plausible_enabled(monkeypatch):
     monkeypatch.setattr(email_service.webhook_monitor, "record_manual_success", fake_record_manual_success)
     monkeypatch.setattr(email_service.webhook_monitor, "record_manual_failure", fake_record_manual_failure)
 
-    async def fake_get_module(slug: str, *, redact: bool = True):
-        assert slug == "plausible"
-        return {"slug": slug, "enabled": True, "settings": {"track_opens": True, "track_clicks": True}}
-
-    async def fake_get_module_settings(slug: str):
-        assert slug == "plausible"
-        return {"track_opens": True, "track_clicks": True}
-
-    from app.services import modules as modules_service
-
-    monkeypatch.setattr(modules_service, "get_module", fake_get_module)
-    monkeypatch.setattr(modules_service, "get_module_settings", fake_get_module_settings)
-
     result = asyncio.run(
         email_service.send_email(
             subject="Subject",
             recipients=["user@example.com"],
             text_body="Hello",
             html_body="<p>Hello</p><a href=\"https://example.com\">Link</a>",
+            enable_tracking=True,
         )
     )
 

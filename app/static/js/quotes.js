@@ -227,7 +227,7 @@
     const errorDiv = document.getElementById('modal-assign-error');
     
     try {
-      const response = await requestJson(
+      await requestJson(
         `/api/quotes/${quoteNumber}/assign?companyId=${companyId}`,
         {
           method: 'POST',

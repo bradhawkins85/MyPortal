@@ -133,7 +133,7 @@ class TestCompanyScopingAndPermissions:
         )
         
         with patch('app.repositories.users.get_user_by_id', new_callable=AsyncMock) as mock_user:
-            with patch('app.repositories.company_memberships.user_has_permission', new_callable=AsyncMock) as mock_perm:
+            with patch('app.api.routes.bcp.user_has_company_permission', new_callable=AsyncMock) as mock_perm:
                 mock_user.return_value = {"id": 2, "is_super_admin": False}
                 mock_perm.return_value = False  # No permission
                 

@@ -1,0 +1,295 @@
+{#
+  Ticket intake question list + modal editor, shared by the global
+  Tray → Ticket questions page and each company's tray settings.
+
+  Expects:
+    tq_questions  – questions to list (each with a ``conditions`` list)
+    tq_parents    – questions that may be used in "Show when" conditions
+    tq_base_url   – e.g. /admin/tray/ticket-questions
+    tq_companies  – companies for the scope picker (global page), or none
+    tq_company    – the fixed company (company page), or none
+#}
+{% set tq_type_labels = {'text': 'Text', 'select': 'Dropdown', 'boolean': 'Yes / No'} %}
+{% set tq_type_icons = {'text': 'text', 'select': 'select', 'boolean': 'checkbox'} %}
+{% set tq_operator_labels = {'equals': 'is', 'not_equals': 'is not', 'contains': 'contains'} %}
+{% set tq_labels = {} %}
+{% for pq in tq_parents %}{% set _ = tq_labels.update({pq.id: pq.label}) %}{% endfor %}
+{% set tq_company_names = {} %}
+{% for c in (tq_companies or []) %}{% set _ = tq_company_names.update({c.id: c.name}) %}{% endfor %}
+
+<div class="scf tq" data-tq-root>
+  {% if tq_questions %}
+    <div class="scf-toolbar">
+      <input
+        type="search"
+        class="form-input scf-toolbar__search"
+        placeholder="Search questions"
+        aria-label="Search ticket intake questions"
+        data-tq-search
+      />
+      {% if tq_company %}
+        <a class="button" href="{{ tq_base_url }}/new" data-tq-create aria-haspopup="dialog" aria-controls="tq-modal">+ Add question</a>
+      {% endif %}
+    </div>
+    <div class="scf-groups" data-tq-list>
+      {% set tq_ns = namespace(group=None, open=False) %}
+      {% for q in tq_questions | sort(attribute='scope,company_id', reverse=true) %}
+        {% if q.scope == 'global' %}
+          {% set group_name = 'Global — every company' %}
+        {% elif tq_company %}
+          {% set group_name = tq_company.name %}
+        {% else %}
+          {% set group_name = 'Company — ' ~ tq_company_names.get(q.company_id, 'Unknown company') %}
+        {% endif %}
+        {% if not tq_ns.open or group_name != tq_ns.group %}
+          {% if tq_ns.open %}</ul></section>{% endif %}
+          {% set tq_ns.group = group_name %}
+          {% set tq_ns.open = True %}
+          <section class="scf-group" data-tq-group>
+            {% if not tq_company %}<h3 class="scf-group__title">{{ group_name }}</h3>{% endif %}
+            <ul class="scf-list">
+        {% endif %}
+        <li
+          class="scf-item{% if not q.is_active %} scf-item--inactive{% endif %}"
+          data-tq-item
+          data-tq-search-text="{{ [q.label, q.placeholder or '', group_name, q.options | join(' ')] | join(' ') }}"
+        >
+          <span class="scf-type-icon scf-type-icon--{{ tq_type_icons.get(q.field_type, 'text') }}" aria-hidden="true"></span>
+          <div class="scf-item__main">
+            <div class="scf-item__heading">
+              <a class="scf-item__label" href="{{ tq_base_url }}/{{ q.id }}/edit" data-tq-edit="{{ q.id }}" aria-haspopup="dialog" aria-controls="tq-modal">{{ q.label }}</a>
+            </div>
+            {% if q.placeholder %}<p class="scf-item__help">{{ q.placeholder }}</p>{% endif %}
+            <ul class="scf-item__chips" aria-label="Question summary">
+              <li class="scf-chip">{{ tq_type_labels.get(q.field_type, q.field_type) }}{% if q.field_type == 'select' %} · {{ q.options | length }} option{% if q.options | length != 1 %}s{% endif %}{% endif %}</li>
+              <li class="scf-chip sif-chip--{{ 'required' if q.is_required else 'optional' }}">{{ 'Required' if q.is_required else 'Optional' }}</li>
+              {% if not q.is_active %}<li class="scf-chip scf-chip--muted">Inactive</li>{% endif %}
+              {% if q.conditions %}
+                {% set first = q.conditions[0] %}
+                <li class="scf-chip scf-chip--logic">
+                  Shown when {{ tq_labels.get(first.parent_question_id, 'another question') }} {{ tq_operator_labels.get(first.operator, first.operator) }} “{{ first.expected_value | truncate(30) }}”{% if q.conditions | length > 1 %} + {{ (q.conditions | length) - 1 }} more{% endif %}
+                </li>
+              {% endif %}
+            </ul>
+          </div>
+          <div class="scf-item__actions">
+            <span class="scf-item__order" title="Sort order">#{{ q.sort_order }}</span>
+            <a class="button button--ghost button--small" href="{{ tq_base_url }}/{{ q.id }}/edit" data-tq-edit="{{ q.id }}" aria-haspopup="dialog" aria-controls="tq-modal">Edit<span class="visually-hidden"> {{ q.label }}</span></a>
+            <button type="button" class="button button--ghost button--small" data-tq-duplicate="{{ q.id }}" hidden>Duplicate<span class="visually-hidden"> {{ q.label }}</span></button>
+            <noscript>
+              <form method="post" action="{{ tq_base_url }}/{{ q.id }}/delete" class="inline-form">
+                {% include "partials/csrf.html" %}
+                <button type="submit" class="button button--ghost button--small">Delete</button>
+              </form>
+            </noscript>
+          </div>
+        </li>
+        {% if loop.last %}</ul></section>{% endif %}
+      {% endfor %}
+    </div>
+    <p class="scf-empty scf-empty--search" data-tq-no-results hidden>No questions match your search.</p>
+  {% else %}
+    <div class="scf-empty">
+      <p class="scf-empty__title">No questions yet</p>
+      <p class="text-muted">
+        Ask for details such as the affected site, device or urgency when people submit a ticket from the tray icon.
+        Answers are added to the ticket automatically.
+      </p>
+      <a class="button" href="{{ tq_base_url }}/new" data-tq-create aria-haspopup="dialog" aria-controls="tq-modal">+ Add your first question</a>
+    </div>
+  {% endif %}
+</div>
+
+{% set tq_editor_questions = [] %}
+{% for q in tq_questions %}
+  {% set _ = tq_editor_questions.append({
+    'id': q.id,
+    'scope': q.scope,
+    'company_id': q.company_id,
+    'label': q.label,
+    'placeholder': q.placeholder or '',
+    'field_type': q.field_type,
+    'is_required': true if q.is_required else false,
+    'is_active': true if q.is_active else false,
+    'sort_order': q.sort_order or 0,
+    'options': q.options or [],
+    'conditions': q.conditions or [],
+  }) %}
+{% endfor %}
+{% set tq_editor_parents = [] %}
+{% for pq in tq_parents %}
+  {% set _ = tq_editor_parents.append({
+    'id': pq.id,
+    'scope': pq.scope,
+    'company_id': pq.company_id,
+    'label': pq.label,
+    'field_type': pq.field_type,
+    'options': pq.options or [],
+  }) %}
+{% endfor %}
+<script type="application/json" id="tq-editor-data">{{ {
+  'baseUrl': tq_base_url,
+  'companyId': tq_company.id if tq_company else none,
+  'questions': tq_editor_questions,
+  'parents': tq_editor_parents,
+} | tojson }}</script>
+
+<div class="modal scf-modal" id="tq-modal" role="dialog" aria-modal="true" aria-labelledby="tq-modal-title" hidden>
+  <form class="modal__panel modal__panel--wide scf-editor tq-editor" method="post" data-tq-form novalidate>
+    {% include "partials/csrf.html" %}
+    <input type="hidden" name="options_text" data-tq-out="options_text" />
+    <div data-tq-condition-outputs></div>
+
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="scf-preview__eyebrow">Tray ticket question</p>
+        <h2 class="modal__title" id="tq-modal-title" data-tq-title>Add question</h2>
+        <p class="scf-editor__subtitle" data-tq-subtitle>Asked when someone submits a ticket from the tray icon.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close question editor"></button>
+    </header>
+
+    <nav class="scf-tabs" role="tablist" aria-label="Question settings">
+      <button type="button" class="scf-tab is-active" role="tab" id="tq-tab-details" aria-controls="tq-panel-details" aria-selected="true" data-tq-tab="details">Details<span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="tq-tab-options" aria-controls="tq-panel-options" aria-selected="false" tabindex="-1" data-tq-tab="options">Choices<span class="scf-tab__count" data-tq-options-count></span><span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="tq-tab-logic" aria-controls="tq-panel-logic" aria-selected="false" tabindex="-1" data-tq-tab="logic">Show when<span class="scf-tab__count" data-tq-conditions-count></span><span class="scf-tab__dot" aria-hidden="true"></span></button>
+    </nav>
+
+    <div class="modal__body scf-editor__body">
+      <div class="scf-editor__main">
+        <section class="scf-panel" id="tq-panel-details" role="tabpanel" aria-labelledby="tq-tab-details" data-tq-panel="details">
+          <div class="scf-grid">
+            {% if not tq_company %}
+              <fieldset class="scf-grid__full scf-fieldset" data-tq-scope-fieldset>
+                <legend class="form-label">Who is asked</legend>
+                <div class="scf-choice-list tq-scope">
+                  <label class="scf-choice">
+                    <input type="radio" name="scope" value="global" data-tq-input="scope" checked />
+                    <span><strong>Every company</strong><span class="text-muted">Shown on every enrolled device.</span></span>
+                  </label>
+                  <label class="scf-choice">
+                    <input type="radio" name="scope" value="company" data-tq-input="scope" />
+                    <span><strong>One company</strong><span class="text-muted">Only that company's devices.</span></span>
+                  </label>
+                </div>
+                <div class="form-field" data-tq-company-field hidden>
+                  <label class="form-label" for="tq-company">Company</label>
+                  <select class="form-input" id="tq-company" name="company_id" data-tq-input="company_id">
+                    <option value="">Select a company…</option>
+                    {% for c in tq_companies or [] %}
+                      <option value="{{ c.id }}">{{ c.name }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <p class="form-help" data-tq-scope-locked hidden>Who is asked can't be changed after a question is created. Duplicate it to ask a different audience.</p>
+              </fieldset>
+            {% else %}
+              <input type="hidden" name="scope" value="company" />
+              <input type="hidden" name="company_id" value="{{ tq_company.id }}" />
+            {% endif %}
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="tq-label">Question</label>
+              <input class="form-input" id="tq-label" name="label" maxlength="255" placeholder="e.g. Which site are you at?" autocomplete="off" data-tq-input="label" />
+              <p class="scf-error" data-tq-error="details" hidden></p>
+            </div>
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="tq-placeholder">Hint <span class="scf-optional">optional</span></label>
+              <input class="form-input" id="tq-placeholder" name="placeholder" maxlength="255" placeholder="e.g. Building and floor" autocomplete="off" data-tq-input="placeholder" />
+              <p class="form-help">Shown inside the answer box to guide people.</p>
+            </div>
+            <fieldset class="scf-grid__full scf-fieldset">
+              <legend class="form-label">Answer type</legend>
+              <div class="scf-type-grid tq-type-grid">
+                {% for type_value, type_label, type_help in [
+                  ('text', 'Text', 'Free-form answer'),
+                  ('select', 'Dropdown', 'Pick one option'),
+                  ('boolean', 'Yes / No', 'A simple yes or no'),
+                ] %}
+                  <label class="scf-type-card">
+                    <input type="radio" name="field_type" value="{{ type_value }}" data-tq-input="field_type" {% if loop.first %}checked{% endif %} />
+                    <span class="scf-type-icon scf-type-icon--{{ tq_type_icons[type_value] }}" aria-hidden="true"></span>
+                    <span class="scf-type-card__label">{{ type_label }}</span>
+                    <span class="scf-type-card__help">{{ type_help }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+            </fieldset>
+            <div class="form-field">
+              <span class="form-label">Answer</span>
+              <label class="scf-switch">
+                <input type="checkbox" name="is_required" value="1" data-tq-input="is_required" />
+                <span class="scf-switch__track" aria-hidden="true"></span>
+                <span>Required</span>
+              </label>
+              <p class="form-help">People can't submit the ticket until they answer.</p>
+            </div>
+            <div class="form-field">
+              <span class="form-label">Status</span>
+              <label class="scf-switch">
+                <input type="checkbox" name="is_active" value="1" data-tq-input="is_active" checked />
+                <span class="scf-switch__track" aria-hidden="true"></span>
+                <span>Active</span>
+              </label>
+              <p class="form-help">Inactive questions aren't asked but keep past answers.</p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="tq-order">Sort order</label>
+              <input class="form-input tq-order" id="tq-order" name="sort_order" type="number" min="0" max="9999" step="1" value="0" data-tq-input="sort_order" />
+              <p class="form-help">Lower numbers are asked first. Global questions always come before company questions.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="scf-panel" id="tq-panel-options" role="tabpanel" aria-labelledby="tq-tab-options" data-tq-panel="options" hidden>
+          <div class="scf-panel__intro">
+            <h3 class="scf-panel__title">Choices</h3>
+            <p class="text-muted">Add the answers people can pick from, in the order they should appear.</p>
+          </div>
+          <ol class="scf-options tq-options" data-tq-options></ol>
+          <div class="scf-options__actions">
+            <button type="button" class="button button--ghost button--small" data-tq-option-add>+ Add option</button>
+            <button type="button" class="button button--ghost button--small" data-tq-bulk-toggle aria-expanded="false" aria-controls="tq-bulk">Paste a list</button>
+          </div>
+          <div class="scf-bulk" id="tq-bulk" data-tq-bulk hidden>
+            <label class="form-label" for="tq-bulk-input">One option per line</label>
+            <textarea class="form-input" id="tq-bulk-input" rows="5" placeholder="Hardware issue&#10;Software issue&#10;Network issue" data-tq-bulk-input></textarea>
+            <div class="scf-bulk__actions">
+              <button type="button" class="button button--small" data-tq-bulk-apply>Add options</button>
+              <button type="button" class="button button--ghost button--small" data-tq-bulk-toggle>Cancel</button>
+            </div>
+          </div>
+          <p class="scf-error" data-tq-error="options" hidden></p>
+        </section>
+
+        <section class="scf-panel" id="tq-panel-logic" role="tabpanel" aria-labelledby="tq-tab-logic" data-tq-panel="logic" hidden>
+          <div class="scf-panel__intro">
+            <h3 class="scf-panel__title">When should this question be asked?</h3>
+            <p class="text-muted">Only ask it when earlier answers match. Every rule must match.</p>
+          </div>
+          <ul class="tq-conditions" data-tq-conditions></ul>
+          <div class="scf-options__actions">
+            <button type="button" class="button button--ghost button--small" data-tq-condition-add>+ Add rule</button>
+          </div>
+          <p class="scf-empty scf-empty--inline" data-tq-no-parents hidden>Add another question first — rules compare against earlier answers.</p>
+          <p class="scf-error" data-tq-error="logic" hidden></p>
+        </section>
+      </div>
+
+      <aside class="scf-preview" aria-label="Live preview">
+        <p class="scf-preview__eyebrow">Live preview</p>
+        <div class="scf-preview__card" data-tq-preview></div>
+        <ul class="scf-preview__rules" data-tq-preview-rules></ul>
+      </aside>
+    </div>
+
+    <footer class="modal__footer scf-editor__footer">
+      <button type="button" class="button button--danger" data-tq-delete hidden>Delete question</button>
+      <span class="scf-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button" data-tq-submit>Save question</button>
+    </footer>
+  </form>
+</div>
+<form method="post" data-tq-delete-form hidden>
+  {% include "partials/csrf.html" %}
+</form>

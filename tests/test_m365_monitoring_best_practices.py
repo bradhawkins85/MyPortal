@@ -361,6 +361,43 @@ async def test_check_monitor_app_credential_expiry_ignores_already_expired():
     assert result["status"] == STATUS_PASS
 
 
+@pytest.mark.anyio("asyncio")
+async def test_best_practice_check_monitor_app_credential_expiry_targets_configured_pkce_app():
+    """Best-practice expiry detection narrows remediation scope to the configured MyPortal PKCE app."""
+    soon = datetime.now(timezone.utc) + timedelta(days=10)
+    with (
+        patch(
+            "app.services.m365_best_practices.get_company_admin_credentials",
+            new_callable=AsyncMock,
+            return_value={
+                "client_id": "myportal-app-id",
+                "client_secret": "secret",
+                "client_secret_expires_at": soon.replace(tzinfo=None),
+            },
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_get",
+            new_callable=AsyncMock,
+            return_value={
+                "value": [
+                    {
+                        "id": "obj-id",
+                        "appId": "myportal-app-id",
+                        "displayName": "MyPortal PKCE",
+                        "passwordCredentials": [{"endDateTime": _iso(soon)}],
+                        "keyCredentials": [],
+                    }
+                ]
+            },
+        ),
+    ):
+        result = await bp_service._check_myportal_pkce_app_credential_expiry("tok", 42)
+
+    assert result["status"] == STATUS_FAIL
+    assert "MyPortal PKCE" in result["details"]
+    assert "myportal-app-id" in result["details"]
+
+
 # ---------------------------------------------------------------------------
 # bp_monitor_cloud_admin_accounts
 # ---------------------------------------------------------------------------

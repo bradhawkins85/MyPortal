@@ -1,0 +1,7 @@
+{
+  "guid": "a707584e-d74b-48be-a02c-3f746c4316ce",
+  "occurred_at": "2026-09-27T00:00Z",
+  "change_type": "fixed",
+  "summary": "Prevent website detail pages from treating DNS record values as a dictionary method.",
+  "content_hash": "c98e4988de1e03219ccad52841b9ca2da3cd11dc3f918f4f6fcd030d077eceb5"
+}

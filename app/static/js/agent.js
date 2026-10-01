@@ -2,9 +2,7 @@
   'use strict';
 
   function escapeHtml(value) {
-    if (value == null) {
-      return '';
-    }
+    if (value == null) return '';
     return String(value)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
@@ -14,9 +12,7 @@
   }
 
   function renderSimpleText(container, text) {
-    if (!container) {
-      return;
-    }
+    if (!container) return;
     container.innerHTML = '';
     if (!text) {
       container.hidden = true;
@@ -24,15 +20,51 @@
     }
     const paragraph = document.createElement('p');
     paragraph.className = 'agent-answer__paragraph';
-    paragraph.innerHTML = escapeHtml(text).replace(/\n{2,}/g, '</p><p class="agent-answer__paragraph">').replace(/\n/g, '<br />');
+    paragraph.innerHTML = escapeHtml(text)
+      .replace(/\n{2,}/g, '</p><p class="agent-answer__paragraph">')
+      .replace(/\n/g, '<br />');
     container.appendChild(paragraph);
     container.hidden = false;
   }
 
-  function createSourceList(title, items, formatter) {
-    if (!items || items.length === 0) {
-      return null;
-    }
+  function sourceUrl(sourceType, item) {
+    if (item.url) return String(item.url);
+    const id = encodeURIComponent(item.id == null ? item.source_id || '' : item.id);
+    const destinations = {
+      tickets: id ? `/tickets/${id}` : '/tickets',
+      knowledge_base: '/knowledge-base',
+      products: id ? `/shop?product=${id}` : '/shop',
+      packages: id ? `/shop/packages?package=${id}` : '/shop/packages',
+      chats: id ? `/chat/${id}` : '/chat',
+      orders: '/orders',
+      assets: id ? `/assets/${id}` : '/assets',
+      companies: '/',
+      staff: '/staff',
+      issues: '/issues',
+      service_status: '/service-status',
+      backup_jobs: '/admin/backup-summary',
+      reports: '/reports/company-overview',
+      mailboxes: item.mailbox_type === 'shared' ? '/m365/mailboxes/shared' : '/m365/mailboxes/users',
+      best_practices: '/m365/best-practices'
+    };
+    return destinations[sourceType] || '/search';
+  }
+
+  function renderDuplicateMeta(item) {
+    const duplicateCount = Number.parseInt(item.duplicate_count, 10);
+    const duplicates = Array.isArray(item.duplicates) ? item.duplicates : [];
+    if ((!duplicateCount || duplicateCount < 1) && duplicates.length === 0) return '';
+    const labels = duplicates.slice(0, 5).map((duplicate) => {
+      const source = escapeHtml(duplicate.source_type || item.source_type || 'source');
+      const sourceId = escapeHtml(duplicate.source_id || duplicate.id || '?');
+      const title = duplicate.title ? ` ${escapeHtml(duplicate.title)}` : '';
+      return `<li>[${source}:${sourceId}]${title}</li>`;
+    }).join('');
+    return `<details class="agent-sources__meta"><summary>Similar items: ${escapeHtml(duplicateCount || duplicates.length)}</summary>${labels ? `<ul>${labels}</ul>` : ''}</details>`;
+  }
+
+  function createSourceList(title, sourceType, items, formatter) {
+    if (!items || items.length === 0) return null;
     const section = document.createElement('details');
     section.className = 'agent-sources__group';
     const heading = document.createElement('summary');
@@ -45,7 +77,19 @@
     items.forEach((item) => {
       const entry = document.createElement('li');
       entry.className = 'agent-sources__item';
-      entry.innerHTML = formatter(item);
+      const link = document.createElement('a');
+      link.className = 'agent-sources__link';
+      link.href = sourceUrl(sourceType, item);
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.innerHTML = formatter(item);
+      entry.appendChild(link);
+      const duplicateMeta = renderDuplicateMeta(item);
+      if (duplicateMeta) {
+        const extra = document.createElement('div');
+        extra.innerHTML = duplicateMeta;
+        entry.appendChild(extra);
+      }
       list.appendChild(entry);
     });
     section.appendChild(list);
@@ -54,17 +98,14 @@
 
   function formatKnowledgeBaseSource(item) {
     const title = escapeHtml(item.title || item.slug);
-    const slug = escapeHtml(item.slug);
+    const slug = escapeHtml(item.slug || item.source_id || '');
     const summary = escapeHtml(item.summary || item.excerpt || '');
-    const url = item.url ? escapeHtml(item.url) : null;
-    const linkStart = url ? `<a href="${url}">` : '';
-    const linkEnd = url ? '</a>' : '';
-    return `${linkStart}[KB:${slug}] ${title}${linkEnd}${summary ? `<div class="agent-sources__meta">${summary}</div>` : ''}`;
+    return `[KB:${slug}] ${title}${summary ? `<div class="agent-sources__meta">${summary}</div>` : ''}`;
   }
 
   function formatTicketSource(item) {
-    const id = escapeHtml(item.id);
-    const subject = escapeHtml(item.subject || `Ticket #${item.id}`);
+    const id = escapeHtml(item.id || item.source_id);
+    const subject = escapeHtml(item.subject || item.title || `Ticket #${id}`);
     const status = escapeHtml(item.status || 'unknown');
     const priority = escapeHtml(item.priority || 'normal');
     const summary = escapeHtml(item.summary || '');
@@ -73,25 +114,16 @@
 
   function formatProductSource(item) {
     const sku = item.sku ? escapeHtml(item.sku) : null;
-    const name = escapeHtml(item.name || (sku ? sku : 'Product'));
+    const name = escapeHtml(item.name || item.title || (sku ? sku : 'Product'));
     const price = item.price ? escapeHtml(item.price) : null;
     const description = item.description ? escapeHtml(item.description) : null;
-    const recommendations = Array.isArray(item.recommendations) && item.recommendations.length
-      ? item.recommendations.map(escapeHtml).join(', ')
-      : null;
-    const label = sku ? `[${sku}] ${name}` : name;
+    const recommendations = Array.isArray(item.recommendations) && item.recommendations.length ? item.recommendations.map(escapeHtml).join(', ') : null;
     const metaParts = [];
-    if (price) {
-      metaParts.push(`Price: ${price}`);
-    }
-    if (description) {
-      metaParts.push(description);
-    }
-    if (recommendations) {
-      metaParts.push(`Recommended with: ${recommendations}`);
-    }
-    const meta = metaParts.length ? `<div class="agent-sources__meta">${metaParts.join('<br />')}</div>` : '';
-    return `${label}${meta}`;
+    if (price) metaParts.push(`Price: ${price}`);
+    if (description) metaParts.push(description);
+    if (recommendations) metaParts.push(`Recommended with: ${recommendations}`);
+    const label = sku ? `[${sku}] ${name}` : name;
+    return `${label}${metaParts.length ? `<div class="agent-sources__meta">${metaParts.join('<br />')}</div>` : ''}`;
   }
 
   function formatPackageSource(item) {
@@ -103,59 +135,52 @@
     const metaParts = [];
     if (!Number.isNaN(productCount) && Number.isFinite(productCount)) {
       const count = Math.max(0, productCount);
-      const plural = count === 1 ? 'item' : 'items';
-      metaParts.push(`Includes ${count} ${plural}`);
+      metaParts.push(`Includes ${count} ${count === 1 ? 'item' : 'items'}`);
     }
-    if (description) {
-      metaParts.push(description);
-    }
-    const meta = metaParts.length ? `<div class="agent-sources__meta">${metaParts.join('<br />')}</div>` : '';
-    return `${label}${meta}`;
+    if (description) metaParts.push(description);
+    return `${label}${metaParts.length ? `<div class="agent-sources__meta">${metaParts.join('<br />')}</div>` : ''}`;
   }
 
-
   function formatChatSource(item) {
-    const id = escapeHtml(item.id);
-    const subject = escapeHtml(item.subject || `Chat #${item.id}`);
+    const id = escapeHtml(item.id || item.source_id);
+    const subject = escapeHtml(item.subject || item.title || `Chat #${id}`);
     const status = escapeHtml(item.status || 'unknown');
-    const summary = escapeHtml(item.summary || '');
+    const summary = escapeHtml(item.summary || item.excerpt || '');
     const ticket = item.linked_ticket_id ? ` • Ticket #${escapeHtml(item.linked_ticket_id)}` : '';
     return `[#${id}] ${subject}<div class="agent-sources__meta">Status: ${status}${ticket}${summary ? `<br />${summary}` : ''}</div>`;
   }
 
   function formatOrderSource(item) {
-    const number = escapeHtml(item.order_number || 'Order');
+    const number = escapeHtml(item.order_number || item.source_id || 'Order');
     const status = escapeHtml(item.status || 'unknown');
     const shipping = item.shipping_status ? ` • Shipping: ${escapeHtml(item.shipping_status)}` : '';
     const po = item.po_number ? ` • PO: ${escapeHtml(item.po_number)}` : '';
-    const summary = escapeHtml(item.summary || '');
+    const summary = escapeHtml(item.summary || item.notes || '');
     return `[${number}]<div class="agent-sources__meta">Status: ${status}${shipping}${po}${summary ? `<br />${summary}` : ''}</div>`;
   }
 
   function formatAssetSource(item) {
-    const id = escapeHtml(item.id);
-    const name = escapeHtml(item.name || `Asset #${item.id}`);
+    const id = escapeHtml(item.id || item.source_id);
+    const name = escapeHtml(item.name || item.title || `Asset #${id}`);
     const metaParts = [];
     if (item.type) metaParts.push(`Type: ${escapeHtml(item.type)}`);
     if (item.serial_number) metaParts.push(`Serial: ${escapeHtml(item.serial_number)}`);
     if (item.status) metaParts.push(`Status: ${escapeHtml(item.status)}`);
     if (item.os_name) metaParts.push(`OS: ${escapeHtml(item.os_name)}`);
     if (item.last_user) metaParts.push(`Last user: ${escapeHtml(item.last_user)}`);
-    const meta = metaParts.length ? `<div class="agent-sources__meta">${metaParts.join(' • ')}</div>` : '';
-    return `[#${id}] ${name}${meta}`;
+    return `[#${id}] ${name}${metaParts.length ? `<div class="agent-sources__meta">${metaParts.join(' • ')}</div>` : ''}`;
   }
 
-
   function formatCompanySource(item) {
-    const id = escapeHtml(item.id);
-    const name = escapeHtml(item.name || `Company #${item.id}`);
+    const id = escapeHtml(item.id || item.source_id);
+    const name = escapeHtml(item.name || item.title || `Company #${id}`);
     const syncro = item.syncro_company_id ? `<div class="agent-sources__meta">Syncro ID: ${escapeHtml(item.syncro_company_id)}</div>` : '';
     return `[#${id}] ${name}${syncro}`;
   }
 
   function formatStaffSource(item) {
-    const id = escapeHtml(item.id);
-    const name = escapeHtml(item.name || `Staff #${item.id}`);
+    const id = escapeHtml(item.id || item.source_id);
+    const name = escapeHtml(item.name || item.title || `Staff #${id}`);
     const metaParts = [];
     if (item.email) metaParts.push(`Email: ${escapeHtml(item.email)}`);
     if (item.job_title) metaParts.push(`Title: ${escapeHtml(item.job_title)}`);
@@ -178,308 +203,361 @@
     if (item.onboarding_status) metaParts.push(`Status: ${escapeHtml(item.onboarding_status)}`);
     if (item.is_ex_staff) metaParts.push('Ex-staff');
     else if (item.enabled === false) metaParts.push('Disabled');
-    const meta = metaParts.length ? `<div class="agent-sources__meta">${metaParts.join(' • ')}</div>` : '';
-    return `[#${id}] ${name}${meta}`;
+    return `[#${id}] ${name}${metaParts.length ? `<div class="agent-sources__meta">${metaParts.join(' • ')}</div>` : ''}`;
   }
 
   function formatIssueSource(item) {
-    const id = escapeHtml(item.id);
-    const name = escapeHtml(item.name || `Issue #${item.id}`);
+    const id = escapeHtml(item.id || item.source_id);
+    const name = escapeHtml(item.name || item.title || `Issue #${id}`);
     const description = item.description ? escapeHtml(item.description) : '';
     const assignments = Array.isArray(item.assignments) && item.assignments.length
       ? item.assignments.map((assignment) => {
-          const company = assignment.company_name || assignment.company_id || 'Company';
-          const status = assignment.status_label || assignment.status || 'unknown';
-          return `${escapeHtml(company)}: ${escapeHtml(status)}`;
-        }).join(', ')
+        const company = assignment.company_name || assignment.company_id || 'Company';
+        const status = assignment.status_label || assignment.status || 'unknown';
+        return `${escapeHtml(company)}: ${escapeHtml(status)}`;
+      }).join(', ')
       : '';
     const meta = [description, assignments ? `Assignments: ${assignments}` : null].filter(Boolean).join('<br />');
     return `[#${id}] ${name}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
   }
 
   function formatServiceStatusSource(item) {
-    const id = escapeHtml(item.id);
-    const name = escapeHtml(item.name || `Service #${item.id}`);
+    const id = escapeHtml(item.id || item.source_id);
+    const name = escapeHtml(item.name || item.title || `Service #${id}`);
     const meta = [item.status ? `Status: ${escapeHtml(item.status)}` : null, item.status_message || item.description ? escapeHtml(item.status_message || item.description) : null].filter(Boolean).join('<br />');
     return `[#${id}] ${name}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
   }
 
   function formatBackupJobSource(item) {
-    const id = escapeHtml(item.id);
-    const name = escapeHtml(item.name || `Backup job #${item.id}`);
+    const id = escapeHtml(item.id || item.source_id);
+    const name = escapeHtml(item.name || item.title || `Backup job #${id}`);
     const meta = [item.today_status ? `Today: ${escapeHtml(item.today_status)}` : null, item.latest_status ? `Latest: ${escapeHtml(item.latest_status)}` : null, item.description ? escapeHtml(item.description) : null].filter(Boolean).join(' • ');
     return `[#${id}] ${name}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
   }
 
   function formatReportSource(item) {
-    const key = escapeHtml(item.key || 'report');
+    const key = escapeHtml(item.key || item.source_id || 'report');
     const title = escapeHtml(item.title || key);
     const meta = [item.source_type ? `Type: ${escapeHtml(item.source_type)}` : null, item.description ? escapeHtml(item.description) : null].filter(Boolean).join('<br />');
     return `[${key}] ${title}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
   }
 
   function formatMailboxSource(item) {
-    const upn = escapeHtml(item.user_principal_name || 'mailbox');
+    const upn = escapeHtml(item.user_principal_name || item.title || 'mailbox');
     const name = escapeHtml(item.display_name || item.user_principal_name || 'Mailbox');
     const meta = [item.mailbox_type ? `Type: ${escapeHtml(item.mailbox_type)}` : null, item.storage_used_bytes != null ? `Storage: ${escapeHtml(item.storage_used_bytes)} bytes` : null].filter(Boolean).join(' • ');
     return `[${upn}] ${name}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
   }
 
   function formatBestPracticeSource(item) {
-    const id = escapeHtml(item.check_id || 'check');
-    const name = escapeHtml(item.check_name || item.check_id || 'Best practice');
+    const id = escapeHtml(item.check_id || item.source_id || 'check');
+    const name = escapeHtml(item.check_name || item.title || id);
     const meta = [item.status ? `Status: ${escapeHtml(item.status)}` : null, item.details ? escapeHtml(item.details) : null].filter(Boolean).join('<br />');
     return `[${id}] ${name}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
   }
 
-  function formatFeaturePackTitle(slug) {
-    return String(slug || 'feature pack')
-      .replace(/[_-]+/g, ' ')
-      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  function formatGenericSource(item) {
+    const label = escapeHtml(item.label || item.title || item.name || item.id || item.source_id || 'Result');
+    const summary = item.summary || item.description || '';
+    return `${label}${summary ? `<div class="agent-sources__meta">${escapeHtml(summary)}</div>` : ''}`;
   }
 
-  function formatFeaturePackSource(item) {
-    const title = escapeHtml(item.title || 'Result');
-    const summary = escapeHtml(item.summary || '');
-    const type = item.source_type ? escapeHtml(item.source_type) : null;
-    const url = item.url ? escapeHtml(item.url) : null;
-    const linkStart = url ? `<a href="${url}">` : '';
-    const linkEnd = url ? '</a>' : '';
-    const meta = [type ? `Type: ${type}` : null, summary].filter(Boolean).join('<br />');
-    return `${linkStart}${title}${linkEnd}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
+  function formatFeaturePackTitle(slug) {
+    return String(slug || 'feature pack').replace(/[_-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
   }
 
   function renderSources(container, sources) {
-    if (!container) {
-      return;
-    }
+    if (!container) return;
     container.innerHTML = '';
-    if (!sources) {
+    if (!sources || typeof sources !== 'object') {
       container.hidden = true;
       return;
     }
-
-    const groups = [];
-    if (Array.isArray(sources.knowledge_base)) {
-      groups.push(createSourceList('Knowledge base', sources.knowledge_base, formatKnowledgeBaseSource));
-    }
-    if (Array.isArray(sources.tickets)) {
-      groups.push(createSourceList('Tickets', sources.tickets, formatTicketSource));
-    }
-    if (Array.isArray(sources.products)) {
-      groups.push(createSourceList('Products', sources.products, formatProductSource));
-    }
-    if (Array.isArray(sources.chats)) {
-      groups.push(createSourceList('Chats', sources.chats, formatChatSource));
-    }
-    if (Array.isArray(sources.orders)) {
-      groups.push(createSourceList('Orders', sources.orders, formatOrderSource));
-    }
-    if (Array.isArray(sources.assets)) {
-      groups.push(createSourceList('Assets', sources.assets, formatAssetSource));
-    }
-    if (Array.isArray(sources.packages)) {
-      groups.push(createSourceList('Packages', sources.packages, formatPackageSource));
-    }
-    if (Array.isArray(sources.companies)) {
-      groups.push(createSourceList('Companies', sources.companies, formatCompanySource));
-    }
-    if (Array.isArray(sources.staff)) {
-      groups.push(createSourceList('Staff', sources.staff, formatStaffSource));
-    }
-    if (Array.isArray(sources.issues)) {
-      groups.push(createSourceList('Issues', sources.issues, formatIssueSource));
-    }
-    if (Array.isArray(sources.service_status)) {
-      groups.push(createSourceList('Service status', sources.service_status, formatServiceStatusSource));
-    }
-    if (Array.isArray(sources.backup_jobs)) {
-      groups.push(createSourceList('Backup summary', sources.backup_jobs, formatBackupJobSource));
-    }
-    if (Array.isArray(sources.reports)) {
-      groups.push(createSourceList('Reports', sources.reports, formatReportSource));
-    }
-    if (Array.isArray(sources.mailboxes)) {
-      groups.push(createSourceList('Office 365 mailboxes', sources.mailboxes, formatMailboxSource));
-    }
-    if (Array.isArray(sources.best_practices)) {
-      groups.push(createSourceList('Best practices', sources.best_practices, formatBestPracticeSource));
-    }
+    const map = [
+      ['Knowledge base', 'knowledge_base', formatKnowledgeBaseSource],
+      ['Tickets', 'tickets', formatTicketSource],
+      ['Products', 'products', formatProductSource],
+      ['Chats', 'chats', formatChatSource],
+      ['Orders', 'orders', formatOrderSource],
+      ['Assets', 'assets', formatAssetSource],
+      ['Packages', 'packages', formatPackageSource],
+      ['Companies', 'companies', formatCompanySource],
+      ['Staff', 'staff', formatStaffSource],
+      ['Issues', 'issues', formatIssueSource],
+      ['Service status', 'service_status', formatServiceStatusSource],
+      ['Backup summary', 'backup_jobs', formatBackupJobSource],
+      ['Reports', 'reports', formatReportSource],
+      ['Office 365 mailboxes', 'mailboxes', formatMailboxSource],
+      ['Best practices', 'best_practices', formatBestPracticeSource]
+    ];
+    const groups = map.map(([title, sourceType, formatter]) => {
+      const items = sources[sourceType];
+      return Array.isArray(items) ? createSourceList(title, sourceType, items, formatter) : null;
+    }).filter(Boolean);
     if (sources.feature_packs && typeof sources.feature_packs === 'object') {
       Object.keys(sources.feature_packs).sort().forEach((slug) => {
         const items = sources.feature_packs[slug];
-        if (Array.isArray(items)) {
-          groups.push(createSourceList(formatFeaturePackTitle(slug), items, formatFeaturePackSource));
-        }
+        if (Array.isArray(items)) groups.push(createSourceList(formatFeaturePackTitle(slug), slug, items, formatGenericSource));
       });
     }
-
-    const usable = groups.filter((group) => group);
-    if (usable.length === 0) {
+    Object.keys(sources).filter((key) => key.startsWith('feature:')).sort().forEach((key) => {
+      const items = sources[key];
+      if (Array.isArray(items)) groups.push(createSourceList(formatFeaturePackTitle(key.slice(8)), key, items, formatGenericSource));
+    });
+    if (!groups.length) {
       container.hidden = true;
       return;
     }
-    usable.forEach((group) => container.appendChild(group));
+    groups.forEach((group) => container.appendChild(group));
     container.hidden = false;
   }
 
   function formatStatus(result) {
-    if (!result || typeof result !== 'object') {
-      return '';
-    }
+    if (!result || typeof result !== 'object') return '';
     const parts = [];
     if (result.status) {
       const statusText = String(result.status).toLowerCase();
-      if (statusText === 'succeeded') {
-        parts.push('Answer generated successfully.');
-      } else if (statusText === 'skipped') {
-        parts.push('The Ollama module is disabled; showing recent context.');
-      } else {
-        parts.push('The agent could not generate a response.');
-      }
+      if (statusText === 'succeeded') parts.push('Answer generated successfully.');
+      else if (statusText === 'skipped') parts.push('The Ollama module is disabled; showing recent context.');
+      else parts.push('The agent could not generate a response.');
     }
-    if (result.model) {
-      parts.push(`Model: ${result.model}`);
-    }
+    if (result.model) parts.push(`Model: ${result.model}`);
     if (result.generated_at) {
       const generatedDate = new Date(result.generated_at);
-      if (!Number.isNaN(generatedDate.getTime())) {
-        parts.push(`Generated at ${generatedDate.toLocaleString()}`);
-      }
+      if (!Number.isNaN(generatedDate.getTime())) parts.push(`Generated at ${generatedDate.toLocaleString()}`);
     }
-    if (result.event_id) {
-      parts.push(`Webhook event #${result.event_id}`);
-    }
-    if (result.message) {
-      parts.push(result.message);
-    }
+    if (result.message) parts.push(result.message);
     return parts.join(' ');
+  }
+
+  function formatStage(stage) {
+    const data = stage && stage.data && typeof stage.data === 'object' ? stage.data : {};
+    const metrics = [];
+    Object.keys(data).slice(0, 4).forEach((key) => {
+      const value = data[key];
+      if (typeof value === 'number' || typeof value === 'string') metrics.push(`${key}: ${value}`);
+    });
+    return `${stage.name} (${stage.status})${metrics.length ? ` — ${metrics.join(', ')}` : ''}`;
+  }
+
+  function renderStages(container, stages) {
+    if (!container) return;
+    container.innerHTML = '';
+    if (!Array.isArray(stages) || stages.length === 0) {
+      container.hidden = true;
+      return;
+    }
+    stages.forEach((stage) => {
+      const item = document.createElement('div');
+      item.className = 'agent-panel__stage';
+      item.textContent = formatStage(stage);
+      container.appendChild(item);
+    });
+    container.hidden = false;
+  }
+
+  function renderAnswerMeta(container, payload) {
+    if (!container) return;
+    const label = payload.answer_confidence_label;
+    const explanation = payload.answer_confidence_explanation;
+    const missing = Array.isArray(payload.missing_sources) ? payload.missing_sources : [];
+    const parts = [];
+    if (label && label !== 'not_calibrated') {
+      parts.push(`Confidence: ${label}`);
+    } else if (explanation) {
+      parts.push(explanation);
+    }
+    if (missing.length) {
+      parts.push(`No strong matches in: ${missing.join(', ')}`);
+    }
+    if (!parts.length) {
+      container.hidden = true;
+      container.textContent = '';
+      return;
+    }
+    container.textContent = parts.join(' • ');
+    container.hidden = false;
   }
 
   document.addEventListener('DOMContentLoaded', () => {
     const panel = document.querySelector('[data-agent-panel]');
-    if (!panel) {
-      return;
-    }
+    if (!panel) return;
 
     const form = panel.querySelector('[data-agent-form]');
     const input = panel.querySelector('[data-agent-input]');
+    const filterInputs = Array.from(panel.querySelectorAll('[data-agent-filter]'));
     const submitButton = panel.querySelector('[data-agent-submit]');
     const status = panel.querySelector('[data-agent-status]');
+    const stages = panel.querySelector('[data-agent-stages]');
     const results = panel.querySelector('[data-agent-results]');
     const answer = panel.querySelector('[data-agent-answer]');
+    const answerMeta = panel.querySelector('[data-agent-answer-meta]');
     const answerBody = panel.querySelector('[data-agent-answer-body]');
     const sources = panel.querySelector('[data-agent-sources]');
     const sourcesLists = panel.querySelector('[data-agent-source-lists]');
+    const evidence = panel.querySelector('[data-agent-evidence]');
+    const evidenceLists = panel.querySelector('[data-agent-evidence-lists]');
     const createTicketButton = panel.querySelector('[data-agent-create-ticket]');
+    const saveNameInput = panel.querySelector('[data-agent-save-name]');
+    const saveSearchButton = panel.querySelector('[data-agent-save-search]');
+    const savedLibrary = panel.querySelector('[data-agent-saved-library]');
+    const feedback = panel.querySelector('[data-agent-feedback]');
+    const feedbackReason = panel.querySelector('[data-agent-feedback-reason]');
+    const feedbackComment = panel.querySelector('[data-agent-feedback-comment]');
+    const feedbackStatus = panel.querySelector('[data-agent-feedback-status]');
 
-    if (!form || !input) {
-      return;
-    }
+    if (!form || !input) return;
 
     const defaultStatus = 'Enter a question to ask the agent.';
-    if (status) {
-      status.textContent = defaultStatus;
-    }
-
+    if (status) status.textContent = defaultStatus;
     let lastQuery = '';
     let lastAnswer = '';
+    let qualityResponseId = null;
+    let activeQueryController = null;
+
+    function selectedSourceFilters() {
+      return filterInputs.filter((inputEl) => inputEl.checked).map((inputEl) => inputEl.value);
+    }
 
     function setBusy(isBusy) {
-      if (submitButton) {
-        submitButton.disabled = isBusy;
-      }
-      if (input) {
-        input.disabled = isBusy;
-      }
+      if (submitButton) submitButton.disabled = isBusy;
+      if (input) input.disabled = isBusy;
+      filterInputs.forEach((item) => { item.disabled = isBusy; });
       panel.classList.toggle('agent-panel--busy', Boolean(isBusy));
     }
 
     function resetResults() {
-      if (answer) {
-        answer.hidden = true;
+      if (answer) answer.hidden = true;
+      qualityResponseId = null;
+      if (feedback) feedback.hidden = true;
+      if (answerBody) answerBody.textContent = '';
+      if (answerMeta) {
+        answerMeta.hidden = true;
+        answerMeta.textContent = '';
       }
-      if (answerBody) {
-        answerBody.textContent = '';
+      if (sources) sources.hidden = true;
+      if (sourcesLists) sourcesLists.innerHTML = '';
+      if (evidence) evidence.hidden = true;
+      if (evidenceLists) evidenceLists.innerHTML = '';
+      if (stages) {
+        stages.hidden = true;
+        stages.innerHTML = '';
       }
-      if (sources) {
-        sources.hidden = true;
-      }
-      if (sourcesLists) {
-        sourcesLists.innerHTML = '';
-      }
-      if (results) {
-        results.hidden = true;
-      }
-      if (createTicketButton) {
-        createTicketButton.hidden = true;
-      }
+      if (results) results.hidden = true;
+      if (createTicketButton) createTicketButton.hidden = true;
     }
 
     function openTicketModal() {
-      // Find the create ticket modal
       const ticketModal = document.getElementById('create-ticket-modal');
-      if (!ticketModal) {
-        return;
-      }
-
-      // Prefill subject with the query
+      if (!ticketModal) return;
       const subjectField = ticketModal.querySelector('#modal-ticket-subject');
-      if (subjectField && lastQuery) {
-        subjectField.value = lastQuery;
-      }
-
-      // Prefill description with the query and answer
+      if (subjectField && lastQuery) subjectField.value = lastQuery;
       const descriptionField = ticketModal.querySelector('#modal-ticket-description');
       if (descriptionField) {
         let description = '';
-        if (lastQuery) {
-          description += `Original Question:\n${lastQuery}\n\n`;
-        }
-        if (lastAnswer) {
-          description += `Agent Response:\n${lastAnswer}`;
-        }
-        if (description) {
-          descriptionField.value = description;
-        }
+        if (lastQuery) description += `Original Question:\n${lastQuery}\n\n`;
+        if (lastAnswer) description += `Agent Response:\n${lastAnswer}`;
+        if (description) descriptionField.value = description;
       }
-
-      // Open the modal
       ticketModal.hidden = false;
       ticketModal.setAttribute('aria-hidden', 'false');
-      
-      // Focus the subject field if empty, otherwise description
-      if (subjectField && !subjectField.value) {
-        subjectField.focus();
-      } else if (descriptionField) {
-        descriptionField.focus();
+      if (subjectField && !subjectField.value) subjectField.focus();
+      else if (descriptionField) descriptionField.focus();
+    }
+
+    async function fetchSavedSearches() {
+      if (!savedLibrary) return;
+      try {
+        const response = await fetch('/api/agent/saved-searches');
+        if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
+        const records = await response.json();
+        savedLibrary.innerHTML = '';
+        if (!Array.isArray(records) || !records.length) {
+          savedLibrary.textContent = 'No saved searches yet.';
+          return;
+        }
+        records.forEach((record) => {
+          const row = document.createElement('div');
+          row.className = 'agent-panel__saved-item';
+          const openButton = document.createElement('button');
+          openButton.type = 'button';
+          openButton.className = 'button button--ghost';
+          openButton.textContent = `${record.name}${record.is_shared ? ' (shared)' : ''}`;
+          openButton.addEventListener('click', () => {
+            input.value = record.query || '';
+            filterInputs.forEach((checkbox) => { checkbox.checked = !record.source_filters || record.source_filters.includes(checkbox.value); });
+          });
+          const deleteButton = document.createElement('button');
+          deleteButton.type = 'button';
+          deleteButton.className = 'button button--ghost';
+          deleteButton.textContent = 'Delete';
+          deleteButton.addEventListener('click', async () => {
+            await fetch(`/api/agent/saved-searches/${record.id}`, { method: 'DELETE' });
+            await fetchSavedSearches();
+          });
+          row.appendChild(openButton);
+          row.appendChild(deleteButton);
+          savedLibrary.appendChild(row);
+        });
+      } catch (error) {
+        savedLibrary.textContent = 'Unable to load saved searches.';
+      }
+    }
+
+    async function saveCurrentSearch() {
+      const query = input.value.trim();
+      const name = saveNameInput && saveNameInput.value ? saveNameInput.value.trim() : '';
+      if (!query || !name) {
+        if (status) status.textContent = 'Enter a query and saved-search name first.';
+        return;
+      }
+      try {
+        const response = await fetch('/api/agent/saved-searches', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            query,
+            source_filters: selectedSourceFilters()
+          })
+        });
+        if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
+        if (status) status.textContent = 'Search saved.';
+        if (saveNameInput) saveNameInput.value = '';
+        await fetchSavedSearches();
+      } catch (error) {
+        if (status) status.textContent = 'Unable to save search.';
       }
     }
 
     async function handleSubmit(event) {
       event.preventDefault();
+      if (activeQueryController) return;
       const query = input.value.trim();
       if (!query) {
-        if (status) {
-          status.textContent = 'Please enter a question for the agent.';
-        }
+        if (status) status.textContent = 'Please enter a question for the agent.';
+        return;
+      }
+      const sourceFilters = selectedSourceFilters();
+      if (!sourceFilters.length) {
+        if (status) status.textContent = 'Select at least one source filter.';
         return;
       }
 
       setBusy(true);
       resetResults();
-      if (status) {
-        status.textContent = 'Contacting the agent…';
-      }
-
+      if (status) status.textContent = 'Contacting the agent…';
       lastQuery = query;
       lastAnswer = '';
 
+      const controller = new AbortController();
+      activeQueryController = controller;
       try {
-        const response = await fetch('/api/agent/query', {
+        const response = await fetch('/api/agent/query/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query }),
+          body: JSON.stringify({ query, source_filters: sourceFilters }),
+          signal: controller.signal,
         });
 
         if (!response.ok) {
@@ -487,18 +565,51 @@
           throw new Error(text || `Request failed with status ${response.status}`);
         }
 
-        const payload = await response.json();
-        if (status) {
-          status.textContent = formatStatus(payload) || defaultStatus;
+        if (!response.body) throw new Error('Streaming is not supported by this browser.');
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let payload = null;
+        while (true) {
+          const { value, done } = await reader.read();
+          buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+          const frames = buffer.split('\n\n');
+          buffer = frames.pop() || '';
+          frames.forEach((frame) => {
+            const data = frame.split('\n').filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).join('');
+            if (!data) return;
+            const item = JSON.parse(data);
+            if (item.event === 'started' && status) status.textContent = 'Searching authorised sources…';
+            if (item.event === 'stage' && stages) {
+              stages.hidden = false;
+              const row = document.createElement('li');
+              row.textContent = `${item.name}: ${item.status || 'complete'}`;
+              stages.appendChild(row);
+            }
+            if (item.event === 'answer_delta' && item.text) {
+              lastAnswer += item.text;
+              renderSimpleText(answerBody, lastAnswer);
+              if (answer) answer.hidden = false;
+              if (results) results.hidden = false;
+              if (status) status.textContent = 'Generating answer…';
+            }
+            if (item.event === 'result') payload = item;
+            if (item.event === 'error') throw new Error(item.message || 'Agent request failed');
+          });
+          if (done) break;
         }
+        if (!payload) throw new Error('The agent stream ended without a result.');
+        if (status) status.textContent = formatStatus(payload) || defaultStatus;
+        if (stages) renderStages(stages, payload.stages);
 
         if (payload && typeof payload === 'object') {
           if (payload.answer) {
             lastAnswer = payload.answer;
             renderSimpleText(answerBody, payload.answer);
-            if (answer) {
-              answer.hidden = false;
-            }
+            renderAnswerMeta(answerMeta, payload);
+            if (answer) answer.hidden = false;
+            qualityResponseId = payload.quality_response_id || null;
+            if (feedback) feedback.hidden = !qualityResponseId;
           } else if (answer) {
             answer.hidden = true;
           }
@@ -512,40 +623,67 @@
             }
           }
 
-          // Show create ticket button if no relevant sources found or explicitly suggested
-          if (createTicketButton) {
-            const shouldShowButton = payload.has_relevant_sources === false || 
-                                   (payload.answer && (
-                                     payload.answer.toLowerCase().includes('create a support ticket') ||
-                                     payload.answer.toLowerCase().includes('contact support') ||
-                                     payload.answer.toLowerCase().includes("don't have")
-                                   ));
-            if (shouldShowButton) {
-              createTicketButton.hidden = false;
+          if (payload.evidence) {
+            renderSources(evidenceLists, payload.evidence);
+            if (evidence && evidenceLists && !evidenceLists.hidden && evidenceLists.children.length > 0) {
+              evidence.hidden = false;
+            } else if (evidence) {
+              evidence.hidden = true;
             }
+          }
+
+          if (createTicketButton) {
+            const shouldShowButton = payload.has_relevant_sources === false
+              || (payload.answer && (
+                payload.answer.toLowerCase().includes('create a support ticket')
+                || payload.answer.toLowerCase().includes('contact support')
+                || payload.answer.toLowerCase().includes("don't have")
+              ));
+            if (shouldShowButton) createTicketButton.hidden = false;
           }
 
           if (results) {
             const answerVisible = answer && !answer.hidden;
             const sourcesVisible = sources && !sources.hidden;
+            const evidenceVisible = evidence && !evidence.hidden;
             const ticketButtonVisible = createTicketButton && !createTicketButton.hidden;
-            results.hidden = !(answerVisible || sourcesVisible || ticketButtonVisible);
+            results.hidden = !(answerVisible || sourcesVisible || evidenceVisible || ticketButtonVisible);
           }
         }
       } catch (error) {
-        if (status) {
-          status.textContent = 'Unable to contact the agent. Please try again later.';
-        }
+        if (error && error.name === 'AbortError') return;
+        if (status) status.textContent = 'Unable to contact the agent. Please try again later.';
         resetResults();
       } finally {
+        activeQueryController = null;
         setBusy(false);
       }
     }
 
     form.addEventListener('submit', handleSubmit);
-    
-    if (createTicketButton) {
-      createTicketButton.addEventListener('click', openTicketModal);
-    }
+    window.addEventListener('pagehide', () => {
+      if (activeQueryController) activeQueryController.abort();
+    });
+    panel.querySelectorAll('[data-agent-rating]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        if (!qualityResponseId) return;
+        if (feedbackStatus) feedbackStatus.textContent = 'Saving…';
+        try {
+          const response = await fetch('/api/agent/feedback', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({response_id: qualityResponseId, rating: button.dataset.agentRating,
+              reason: feedbackReason ? feedbackReason.value || null : null,
+              comment: feedbackComment ? feedbackComment.value.trim() || null : null})
+          });
+          if (!response.ok) throw new Error('feedback failed');
+          if (feedbackStatus) feedbackStatus.textContent = 'Thank you — feedback saved.';
+        } catch (error) {
+          if (feedbackStatus) feedbackStatus.textContent = 'Unable to save feedback.';
+        }
+      });
+    });
+    if (createTicketButton) createTicketButton.addEventListener('click', openTicketModal);
+    if (saveSearchButton) saveSearchButton.addEventListener('click', saveCurrentSearch);
+    fetchSavedSearches();
   });
 })();

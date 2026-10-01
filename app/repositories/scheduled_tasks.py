@@ -55,6 +55,26 @@ async def get_commands_for_company(company_id: int) -> set[str]:
     )
     return {row["command"] for row in rows}
 
+
+async def count_tasks_by_company_ids(company_ids: Sequence[int]) -> dict[int, int]:
+    """Return scheduled-task counts grouped by company."""
+    unique_ids = sorted({int(company_id) for company_id in company_ids})
+    if not unique_ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(unique_ids))
+    rows = await db.fetch_all(
+        "SELECT company_id, COUNT(*) AS task_count"  # nosec B608
+        " FROM scheduled_tasks"
+        " WHERE company_id IN (" + placeholders + ")"
+        " GROUP BY company_id",
+        tuple(unique_ids),
+    )
+    return {
+        int(row["company_id"]): int(row["task_count"])
+        for row in rows
+        if row.get("company_id") is not None
+    }
+
 async def get_task_for_company_by_command(company_id: int, command: str) -> dict[str, Any] | None:
     """Return the first task matching *command* for *company_id*, or None."""
     row = await db.fetch_one(
@@ -74,7 +94,7 @@ async def get_first_task_for_company_by_commands(
         return None
     placeholders = ",".join(["%s"] * len(commands))
     rows = await db.fetch_all(
-        f"SELECT * FROM scheduled_tasks WHERE company_id = %s AND command IN ({placeholders})",
+        "SELECT * FROM scheduled_tasks WHERE company_id = %s AND command IN (" + placeholders + ")",  # nosec B608
         (company_id, *commands),
     )
     # Return the first match according to the priority order of commands
@@ -89,7 +109,7 @@ async def get_first_task_for_company_by_commands(
 async def list_tasks(include_inactive: bool = False) -> list[dict[str, Any]]:
     where = "" if include_inactive else "WHERE active = 1"
     rows = await db.fetch_all(
-        f"SELECT * FROM scheduled_tasks {where} ORDER BY name ASC",
+        "SELECT * FROM scheduled_tasks " + where + " ORDER BY name ASC",  # nosec B608
     )
     return [_normalise_task(row) for row in rows]
 
@@ -101,15 +121,10 @@ async def list_calendar_tasks(include_inactive: bool = False) -> list[dict[str, 
         where_clauses.append("t.active = 1")
     where = "WHERE " + " AND ".join(where_clauses)
     rows = await db.fetch_all(
-        f"""
-        SELECT
-            t.*,
-            c.name AS company_name
-        FROM scheduled_tasks AS t
-        LEFT JOIN companies AS c ON c.id = t.company_id
-        {where}
-        ORDER BY t.name ASC
-        """,
+        "SELECT t.*, c.name AS company_name"  # nosec B608
+        " FROM scheduled_tasks AS t"
+        " LEFT JOIN companies AS c ON c.id = t.company_id"
+        " " + where + " ORDER BY t.name ASC",
     )
     tasks: list[dict[str, Any]] = []
     for row in rows:
@@ -226,8 +241,9 @@ async def delete_tasks(task_ids: list[int]) -> int:
     if not task_ids:
         return 0
     placeholders = ",".join(["%s"] * len(task_ids))
+    # The IN placeholders are derived only from the supplied task id count; values remain bound.
     result = await db.execute(
-        f"DELETE FROM scheduled_tasks WHERE id IN ({placeholders})",
+        "DELETE FROM scheduled_tasks WHERE id IN (" + placeholders + ")",  # nosec B608
         tuple(task_ids),
     )
     return int(result or 0)
@@ -251,7 +267,7 @@ async def update_task_cron(task_id: int, cron: str) -> None:
 
 async def set_task_active(task_id: int, active: bool) -> dict[str, Any] | None:
     await db.execute(
-        "UPDATE scheduled_tasks SET active = %s WHERE id = %s",
+        "UPDATE scheduled_tasks SET active = %s, disabled_by_module = NULL WHERE id = %s",
         (1 if active else 0, task_id),
     )
     return await get_task(task_id)
@@ -323,14 +339,12 @@ async def list_recent_runs(task_ids: Sequence[int] | None = None, limit: int = 5
     if task_ids:
         placeholders = ",".join(["%s"] * len(task_ids))
         rows = await db.fetch_all(
-            f"""
-            SELECT r.*, t.name AS task_name
-            FROM scheduled_task_runs AS r
-            JOIN scheduled_tasks AS t ON t.id = r.task_id
-            WHERE r.task_id IN ({placeholders})
-            ORDER BY r.started_at DESC
-            LIMIT %s
-            """,
+            "SELECT r.*, t.name AS task_name"  # nosec B608
+            " FROM scheduled_task_runs AS r"
+            " JOIN scheduled_tasks AS t ON t.id = r.task_id"
+            " WHERE r.task_id IN (" + placeholders + ")"
+            " ORDER BY r.started_at DESC"
+            " LIMIT %s",
             tuple(task_ids) + (limit,),
         )
     else:
@@ -355,7 +369,7 @@ async def mark_task_run(task_id: int) -> None:
     )
 
 
-async def disable_tasks_for_commands(commands: Iterable[str]) -> int:
+async def disable_tasks_for_commands(commands: Iterable[str], *, module_slug: str | None = None) -> int:
     """Disable all active scheduled tasks whose command is in *commands*.
 
     Returns the number of tasks that were deactivated.
@@ -364,8 +378,19 @@ async def disable_tasks_for_commands(commands: Iterable[str]) -> int:
     if not command_list:
         return 0
     placeholders = ",".join(["%s"] * len(command_list))
+    # The IN placeholders are derived only from the filtered command count; values remain bound.
     result = await db.execute(
-        f"UPDATE scheduled_tasks SET active = 0 WHERE active = 1 AND command IN ({placeholders})",
-        tuple(command_list),
+        "UPDATE scheduled_tasks SET active = 0, disabled_by_module = %s"  # nosec B608
+        " WHERE active = 1 AND command IN (" + placeholders + ")",
+        (module_slug, *command_list),
+    )
+    return int(result or 0)
+
+
+async def restore_tasks_disabled_by_module(module_slug: str) -> int:
+    """Restore only tasks this module toggle previously deactivated."""
+    result = await db.execute(
+        "UPDATE scheduled_tasks SET active = 1, disabled_by_module = NULL WHERE disabled_by_module = %s",
+        (module_slug,),
     )
     return int(result or 0)

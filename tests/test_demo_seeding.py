@@ -103,3 +103,24 @@ async def test_remove_demo_data_deletes_company_when_demo_exists(monkeypatch):
     assert result.get("removed") is True
     assert result.get("company_id") == 42
     delete_mock.assert_awaited_once_with(42)
+
+
+@pytest.mark.anyio
+async def test_remove_demo_data_binds_like_patterns_as_parameters(monkeypatch):
+    """Literal ``%`` in SQL breaks aiomysql's ``%s`` formatting, so prefixes must be bound."""
+    from app.services import demo_seeding as svc
+
+    db_mock = _make_db_mock(fetch_one_return={"id": 42, "name": "Demo Company", "is_demo": 1})
+    monkeypatch.setattr(svc, "db", db_mock)
+    company_repo_mock = MagicMock()
+    company_repo_mock.delete_company = AsyncMock()
+    monkeypatch.setattr(svc, "company_repo", company_repo_mock)
+
+    await svc.remove_demo_data()
+
+    like_calls = [call.args for call in db_mock.execute.await_args_list if "LIKE" in call.args[0]]
+    assert len(like_calls) == 3
+    for sql, params in like_calls:
+        assert "%" not in sql.replace("%s", "")
+        assert len(params) == sql.count("%s")
+        assert params[0].endswith("%")

@@ -141,3 +141,7 @@ async def test_hidden_statuses_remain_available_as_dashboard_filters(monkeypatch
         "open",
         "vendor_wait",
     ]
+    assert [
+        item["tech_status"]
+        for item in extra["ticket_status_configuration_definitions"]
+    ] == ["open", "vendor_wait"]

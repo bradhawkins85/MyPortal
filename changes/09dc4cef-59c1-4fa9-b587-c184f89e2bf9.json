@@ -1,0 +1,7 @@
+{
+  "guid": "09dc4cef-59c1-4fa9-b587-c184f89e2bf9",
+  "occurred_at": "2026-09-22T00:00Z",
+  "change_type": "Feature",
+  "summary": "Added a blue or green center dot to the sidebar MyPortal icon so users can identify the active deployment slot.",
+  "content_hash": "88a3b7b2b8fdcc8f3dc367969854626ad26f76e757dec45f674fe3b16cd0e8f2"
+}

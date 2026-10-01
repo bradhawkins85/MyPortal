@@ -1,0 +1,7 @@
+{
+  "guid": "4180f12a-6b77-473c-a8e3-6efa449eccab",
+  "occurred_at": "2026-09-15T00:00Z",
+  "change_type": "Fix",
+  "summary": "Verify Microsoft Authenticator MFA-fatigue remediation with retries while Microsoft Graph propagates policy changes.",
+  "content_hash": "c39f73484262fe46939a306dae82984ce4a2867a5bf4dc4de6d325026ef8ecb3"
+}

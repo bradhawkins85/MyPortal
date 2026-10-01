@@ -1,0 +1,7 @@
+{
+  "guid": "34ca09c0-c148-4f1c-9c3d-feb5fd510958",
+  "occurred_at": "2026-07-29T00:00Z",
+  "change_type": "Fix",
+  "summary": "Include unbilled ticket expenses, including expense-only tickets, in Generate Invoice scheduled task previews.",
+  "content_hash": "f57c33cdd8cc5754d28c23e2263fa6704e723119c2e18c9a7117d6a84da14959"
+}

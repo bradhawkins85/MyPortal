@@ -220,7 +220,7 @@ async def emit_notification(
                         ticket_reply_id = int(reply_id_value)
                         enable_tracking = True
                     except (TypeError, ValueError):
-                        pass
+                        ticket_reply_id = None
             
             try:
                 sent, event_metadata = await email_service.send_email(

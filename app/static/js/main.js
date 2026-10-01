@@ -1,7 +1,6 @@
 (function () {
   'use strict';
 
-  const TOAST_VARIANTS = ['info', 'success', 'warning', 'error'];
   const TOAST_CLASSES = [
     'notification-toast--info',
     'notification-toast--success',
@@ -182,20 +181,31 @@
     let socket = null;
     let reconnectAttempts = 0;
     let reconnectTimer = null;
-    let reloadTimer = null;
     let stop = false;
 
     const baseDelay = 1000;
     const maxDelay = 30000;
 
-    function resetReloadTimer() {
-      if (reloadTimer) {
-        window.clearTimeout(reloadTimer);
-        reloadTimer = null;
+    function shouldIgnoreRefresh(payload) {
+      const ticketDetail = document.querySelector('[data-admin-ticket-detail]');
+      if (!ticketDetail || !payload || typeof payload !== 'object') {
+        return false;
       }
+
+      const topics = Array.isArray(payload.topics) ? payload.topics : [];
+      const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+      const action = typeof data.action === 'string' ? data.action.trim().toLowerCase() : '';
+
+      return topics.includes('tickets') && (action === 'create' || action === 'created');
     }
 
     function handleRefreshMessage(payload) {
+      // A newly created ticket changes ticket lists, but not an already-open ticket.
+      // Reloading this page would discard an in-progress reply and selected attachments.
+      if (shouldIgnoreRefresh(payload)) {
+        return;
+      }
+
       const detail = {
         ...(payload && typeof payload === 'object' ? payload : {}),
         showToast(message, options) {
@@ -207,8 +217,15 @@
         detail,
         cancelable: true,
       });
-      const shouldReload = document.dispatchEvent(event);
-      if (!shouldReload) {
+      document.dispatchEvent(event);
+      if (!detail.requirePageReload) {
+        return;
+      }
+
+      if (window.MyPortalUpdates?.hasUnsavedWork()) {
+        toast.show('New data is available, but this page was not reloaded because it has unsaved work.', {
+          variant: 'warning', persist: false,
+        });
         return;
       }
 
@@ -219,8 +236,7 @@
 
       toast.show(message, { variant: 'info', persist: false });
 
-      resetReloadTimer();
-      reloadTimer = window.setTimeout(() => {
+      window.setTimeout(() => {
         window.location.reload();
       }, 1500);
     }
@@ -682,11 +698,16 @@
 
     refreshButton.addEventListener('click', () => {
       const callback = applyUpdate;
-      hideBanner();
 
       if (typeof callback === 'function') {
         try {
-          callback();
+          const dirty = window.MyPortalUpdates?.hasUnsavedWork();
+          if (dirty && !window.confirm('Reloading will discard unsaved changes and active uploads. Reload deliberately?')) {
+            showBanner('Update deferred while you finish or save your work.');
+            return;
+          }
+          callback({ discardUnsaved: Boolean(dirty) });
+          if (!dirty) hideBanner();
           return;
         } catch (error) {
           console.error('Failed to apply update via service worker', error);
@@ -713,7 +734,11 @@
 
       applyUpdate = event.detail.applyUpdate;
       const reason = typeof event.detail.reason === 'string' ? event.detail.reason : '';
-      showBanner(reason);
+      showBanner(`${reason}${event.detail.dirty ? ' Save or finish your current work before refreshing.' : ''}`);
+    });
+
+    window.addEventListener('pwa:update-blocked', (event) => {
+      showBanner(event.detail?.message || 'The update has been deferred.');
     });
   }
 

@@ -3,17 +3,21 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import EmailStr, TypeAdapter, ValidationError
 
 from app.api.dependencies.auth import get_current_user, require_helpdesk_technician, require_super_admin
 from app.api.dependencies.database import require_database
+from app.core.logging import log_error
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
+from app.repositories import company_addresses as company_addresses_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.repositories import staff as staff_repo
 from app.repositories import tray as tray_repo
 from app.schemas.assets import AssetResponse
 from app.schemas.companies import CompanyCreate, CompanyResponse, CompanyUpdate
+from app.schemas.company_addresses import CompanyAddressInput, CompanyAddressResponse
 from app.schemas.company_recurring_invoice_items import (
     RecurringInvoiceItemCreate,
     RecurringInvoiceItemResponse,
@@ -25,6 +29,7 @@ from app.services import company_id_lookup
 from app.services import m365 as m365_service
 
 router = APIRouter(prefix="/api/companies", tags=["Companies"])
+EMAIL_ADAPTER = TypeAdapter(EmailStr)
 
 
 @router.get("", response_model=list[CompanyResponse])
@@ -55,9 +60,13 @@ async def create_company(
             updated = await company_repo.get_company_by_id(company_id)
             if updated:
                 created = updated
-        except Exception:
+        except Exception as exc:
             # If lookup fails, still return the created company
-            pass
+            log_error(
+                "Post-create company ID lookup failed",
+                company_id=company_id,
+                error=str(exc),
+            )
 
     await audit_service.record(
         action="company.create",
@@ -83,6 +92,71 @@ async def get_company(
     return company
 
 
+async def _require_company(company_id: int) -> None:
+    if not await company_repo.get_company_by_id(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+
+@router.get("/{company_id}/addresses", response_model=list[CompanyAddressResponse])
+async def list_company_addresses(
+    company_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """List the delivery addresses available to a company's cart users."""
+    await _require_company(company_id)
+    return await company_addresses_repo.list_for_company(company_id)
+
+
+@router.post(
+    "/{company_id}/addresses",
+    response_model=CompanyAddressResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_company_address(
+    company_id: int,
+    payload: CompanyAddressInput,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Add a selectable delivery address to a company."""
+    await _require_company(company_id)
+    try:
+        return await company_addresses_repo.create(company_id, **payload.model_dump())
+    except Exception as exc:
+        if "Duplicate" in str(exc) or "UNIQUE constraint" in str(exc):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Address label already exists") from exc
+        raise
+
+
+@router.put("/{company_id}/addresses/{address_id}", response_model=CompanyAddressResponse)
+async def update_company_address(
+    company_id: int,
+    address_id: int,
+    payload: CompanyAddressInput,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Replace one of a company's delivery addresses."""
+    updated = await company_addresses_repo.update(company_id, address_id, **payload.model_dump())
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Address not found")
+    return updated
+
+
+@router.delete("/{company_id}/addresses/{address_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_company_address(
+    company_id: int,
+    address_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Delete one of a company's delivery addresses."""
+    if not await company_addresses_repo.delete(company_id, address_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Address not found")
+    return None
+
+
 @router.patch("/{company_id}", response_model=CompanyResponse)
 async def update_company(
     company_id: int,
@@ -103,6 +177,7 @@ async def update_company(
         not updated.get("tacticalrmm_client_id") or
         not updated.get("xero_id") or
         not updated.get("huntress_organization_id")
+        or not updated.get("huntress_sat_account_id")
     )
     
     final_record: dict[str, Any] = updated
@@ -113,9 +188,13 @@ async def update_company(
             refreshed = await company_repo.get_company_by_id(company_id)
             if refreshed:
                 final_record = refreshed
-        except Exception:
+        except Exception as exc:
             # If lookup fails, still return the updated company
-            pass
+            log_error(
+                "Post-update company ID lookup failed",
+                company_id=company_id,
+                error=str(exc),
+            )
 
     await audit_service.record(
         action="company.update",
@@ -215,7 +294,14 @@ async def list_company_staff_users(
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     users = await staff_repo.list_enabled_staff_users(company_id)
-    return [StaffRequesterOption.model_validate(user) for user in users]
+    requester_options: list[StaffRequesterOption] = []
+    for user in users:
+        try:
+            EMAIL_ADAPTER.validate_python(user.get("email"))
+        except ValidationError:
+            continue
+        requester_options.append(StaffRequesterOption.model_validate(user))
+    return requester_options
 
 
 
@@ -590,3 +676,23 @@ async def lookup_huntress_organization_id(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error looking up Huntress organisation ID: {str(exc)}"
         )
+
+
+@router.post("/{company_id}/lookup-huntress-sat-id")
+async def lookup_huntress_sat_account_id(
+    company_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Lookup a Managed SAT account ID by the company's name."""
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    company_name = company.get("name", "")
+    if not company_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company name is required")
+    sat_id = await company_id_lookup._lookup_huntress_sat_account_id(company_name)
+    if sat_id:
+        await company_repo.update_company(company_id, huntress_sat_account_id=sat_id)
+        return {"status": "found", "id": sat_id}
+    return {"status": "not_found", "id": None}

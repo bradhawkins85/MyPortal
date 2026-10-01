@@ -1,6 +1,28 @@
 {% extends "base.html" %}
 
-{% block header_title %}{{ 'Global invoices' if is_global_invoices else 'Invoices' }}{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">{{ 'Global invoices' if is_global_invoices else 'Invoices' }}</span>
+    <div class="page-header-toolbar">
+      {% if is_global_invoices %}<span class="tag">All companies</span>{% elif company %}<span class="tag">{{ company.name }}</span>{% endif %}
+      <label class="visually-hidden" for="{{ invoice_table_id }}-search">Search invoices</label>
+      <input
+        type="search"
+        id="{{ invoice_table_id }}-search"
+        class="form-input page-header-toolbar__search"
+        placeholder="Search invoices"
+        data-table-filter="{{ invoice_table_id }}-table"
+      />
+      <label class="visually-hidden" for="{{ invoice_table_id }}-status-filter">Filter by status</label>
+      <select id="{{ invoice_table_id }}-status-filter" class="form-input page-header-toolbar__select" data-table-column-filter="status" data-table-column-filter-table="{{ invoice_table_id }}-table">
+        <option value="">All statuses</option>
+        {% for status in status_options %}
+          <option value="{{ status }}">{{ status|replace('_', ' ')|title }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+{% endblock %}
 
 {% block header_actions %}
   {% from "macros/header.html" import page_header_actions %}
@@ -18,27 +40,6 @@
 {% block content %}
 <div class="admin-grid admin-grid--columns">
   <section class="card card--panel admin-grid__full">
-    <header class="card__header">
-      <div class="card__controls">
-        {% if is_global_invoices %}<span class="tag">All companies</span>{% elif company %}<span class="tag">{{ company.name }}</span>{% endif %}
-        <label class="visually-hidden" for="{{ invoice_table_id }}-search">Search invoices</label>
-        <input
-          type="search"
-          id="{{ invoice_table_id }}-search"
-          class="form-input"
-          placeholder="Search invoices"
-          aria-label="Search invoices"
-          data-table-filter="{{ invoice_table_id }}-table"
-        />
-        <label class="visually-hidden" for="{{ invoice_table_id }}-status-filter">Filter by status</label>
-        <select id="{{ invoice_table_id }}-status-filter" class="form-input" aria-label="Filter by status" data-table-column-filter="status" data-table-column-filter-table="{{ invoice_table_id }}-table">
-          <option value="">All statuses</option>
-          {% for status in status_options %}
-            <option value="{{ status }}">{{ status|replace('_', ' ')|title }}</option>
-          {% endfor %}
-        </select>
-      </div>
-    </header>
     <div class="invoice-summary">
       <div class="invoice-summary__item">
         <span class="invoice-summary__label">Total billed</span>
@@ -53,6 +54,42 @@
         <span class="invoice-summary__value invoice-summary__value--warning" data-invoice-open>{{ unpaid_count }}</span>
       </div>
     </div>
+    {% if is_global_invoices and can_sync_invoices_to_xero and module_enabled.get('xero', false) %}
+    <div class="card card--panel" style="margin-bottom: 1rem;">
+      <header class="card__header">
+        <div>
+          <h3 class="card__title">Batch billing dashboard</h3>
+          <p class="card__subtitle">{{ unsynced_invoice_count }} unsynced invoices · {{ approval_queue_count }} awaiting approval · {{ exception_queue_count }} exceptions</p>
+        </div>
+        <div class="card__controls">
+          <button type="button" class="button button--secondary button--small" data-xero-batch-sync>Push pending invoices</button>
+          <button type="button" class="button button--secondary button--small" data-xero-batch-retry {% if not exception_queue_count %}disabled aria-disabled="true"{% endif %}>Retry exceptions</button>
+        </div>
+      </header>
+      {% if exception_queue %}
+      <div class="table-wrapper">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Invoice #</th>
+              <th scope="col">Company</th>
+              <th scope="col">Exception</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for invoice in exception_queue %}
+            <tr>
+              <td><a href="/invoices/{{ invoice.id }}" class="link">{{ invoice.invoice_number }}</a></td>
+              <td>{{ invoice.company_name or 'Unknown company' }}</td>
+              <td>{{ invoice.xero_sync_error }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
     {% if has_invoices %}
     <div class="table-wrapper">
       <table class="table table--stack-mobile" id="{{ invoice_table_id }}-table" data-table data-table-id="{{ invoice_table_id }}" data-invoice-table>
@@ -64,7 +101,7 @@
             <th scope="col" data-sort="date" data-mobile-priority="essential">Created</th>
             <th scope="col" data-sort="date" data-mobile-priority="essential">Due date</th>
             <th scope="col" data-sort="string" data-mobile-priority="essential">Status</th>
-            {% if can_delete_invoices or can_sync_invoices_to_xero %}<th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>{% endif %}
+            {% if can_delete_invoices or (can_sync_invoices_to_xero and module_enabled.get('xero', false)) %}<th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>{% endif %}
           </tr>
         </thead>
         <tbody>
@@ -98,9 +135,9 @@
                 <span class="text-muted">No status</span>
               {% endif %}
             </td>
-            {% if can_delete_invoices or can_sync_invoices_to_xero %}
+            {% if can_delete_invoices or (can_sync_invoices_to_xero and module_enabled.get('xero', false)) %}
             <td class="table__actions">
-              {% if can_sync_invoices_to_xero %}
+              {% if can_sync_invoices_to_xero and module_enabled.get('xero', false) %}
                 <button
                   type="button"
                   class="button button--secondary button--small"
@@ -233,6 +270,34 @@
           }
         });
       });
+
+      async function runBatchSync(exceptionOnly) {
+        const response = await fetch('/api/invoices/xero/batch-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ exceptionOnly: exceptionOnly })
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          window.alert(payload.detail || 'Unable to run the Xero batch sync.');
+          return;
+        }
+        window.alert(`Batch sync complete: ${payload.syncedCount || 0} synced, ${payload.failedCount || 0} failed.`);
+        window.location.reload();
+      }
+
+      const batchSyncButton = document.querySelector('[data-xero-batch-sync]');
+      if (batchSyncButton) {
+        batchSyncButton.addEventListener('click', async () => {
+          await runBatchSync(false);
+        });
+      }
+      const batchRetryButton = document.querySelector('[data-xero-batch-retry]');
+      if (batchRetryButton) {
+        batchRetryButton.addEventListener('click', async () => {
+          await runBatchSync(true);
+        });
+      }
 
       document.querySelectorAll('[data-invoice-delete]').forEach((button) => {
         button.addEventListener('click', async () => {

@@ -4,14 +4,19 @@ import asyncio
 import json
 import os
 import re
+from contextlib import suppress
 from asyncio.subprocess import PIPE
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
+import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from app.services.cron_expression import parse as parse_cron_expression
 
+from app.core import module_capabilities
 from app.core.config import get_settings
 from app.core.database import db
 from app.core.logging import log_error, log_info
@@ -23,6 +28,7 @@ from app.services import company_id_lookup
 from app.services import imap as imap_service
 from app.services import invoice_generator as invoice_generator_service
 from app.services import m365 as m365_service
+from app.services import mac_vendors as mac_vendors_service
 from app.services import modules as modules_service
 from app.services import products as products_service
 from app.services import staff_importer
@@ -36,19 +42,33 @@ from app.services import tray_installer as tray_installer_service
 from app.services import unbill_time_entries as unbill_time_entries_service
 from app.services import value_templates
 from app.services import webhook_monitor
+from app.services import system_update_history
+from app.services.deployment_plan import build_deployment_plan
+from app.services.component_availability import get_component_availability, rag_available
 from app.services import xero as xero_service
 from app.services import service_status as service_status_service
 from app.services import ticket_shipment_tracking as shipment_watch_service
 from app.services import backup_jobs as backup_jobs_service
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
+from app.repositories import integration_modules as module_repo
+from app.repositories import websites as websites_repo
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SYSTEM_UPDATE_LOCK = asyncio.Lock()
 _OUTPUT_PREVIEW_LIMIT = 2000
 _SYSTEM_UPDATE_FLAG_PATH = _PROJECT_ROOT / "var" / "state" / "system_update.flag"
+_DOCKER_SYSTEM_UPDATE_MESSAGE = (
+    "This installation runs in Docker and is upgraded from GitHub releases. "
+    "Run 'sudo myportal-docker upgrade' on the Docker host, or enable automatic "
+    "upgrades with 'sudo myportal-docker auto-upgrade on'."
+)
+_SYSTEM_UPDATE_NOT_AVAILABLE_MESSAGE = (
+    "No GitHub update available; upgrade was not scheduled."
+)
 _DEFAULT_UPGRADE_MODE = "graceful"
 _VALID_UPGRADE_MODES = {"graceful", "rolling", "restart"}
+COMMANDS_BY_MODULE = module_capabilities.COMMANDS_BY_MODULE
 # Flag file that ``scripts/upgrade.sh`` writes when it pulls a
 # feature-pack-only diff.  The scheduler polls it on a short interval
 # and reloads each listed slug in-process so the running app picks up
@@ -57,6 +77,49 @@ _VALID_UPGRADE_MODES = {"graceful", "rolling", "restart"}
 _FEATURE_PACK_RELOAD_FLAG_PATH = (
     _PROJECT_ROOT / "var" / "state" / "feature_pack_reload.flag"
 )
+_FEATURE_PACK_RELOAD_RESULT_PATH = (
+    _PROJECT_ROOT / "var" / "state" / "feature_pack_reload.result"
+)
+_FEATURE_PACK_RELOAD_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9_.-]{1,160}\Z")
+_DEFAULT_CONTROL_CHECKOUTS = ("/opt/myportal", "/opt/myportal/control")
+_GIT_REVISION_RE = re.compile(r"[0-9a-f]{40,64}\Z")
+
+
+def _release_revision() -> str | None:
+    """Return the revision of an immutable release, or ``None`` for a checkout."""
+
+    if (_PROJECT_ROOT / ".git").exists():
+        return None
+    try:
+        value = (_PROJECT_ROOT / "version.txt").read_text(encoding="utf-8").strip()
+    except OSError:
+        value = ""
+    if _GIT_REVISION_RE.fullmatch(value):
+        return value
+    # scripts/upgrade.sh names each release directory after its revision.
+    name = _PROJECT_ROOT.resolve().name
+    return name if _GIT_REVISION_RE.fullmatch(name) else None
+
+
+def _git_context() -> tuple[Path, list[str]]:
+    """Return the directory and options for Git queries about this deployment.
+
+    A development checkout is queried directly. Immutable releases carry no
+    ``.git`` directory, so they query the root-owned control checkout named by
+    ``MYPORTAL_CONTROL_CHECKOUT`` (read-only; safe.directory is scoped to this
+    one command because the service account does not own that checkout).
+    """
+
+    if (_PROJECT_ROOT / ".git").exists():
+        return _PROJECT_ROOT, []
+    configured = os.getenv("MYPORTAL_CONTROL_CHECKOUT", "").strip()
+    # Older installations predate the setting; they were cloned into
+    # /opt/myportal, and the installation guide now uses /opt/myportal/control.
+    for control in (configured, *_DEFAULT_CONTROL_CHECKOUTS):
+        if control and (Path(control) / ".git").exists():
+            return Path(control), ["-c", f"safe.directory={control}"]
+    return _PROJECT_ROOT, []
+_FEATURE_PACK_SLUG_RE = re.compile(r"[a-z][a-z0-9_]*\Z")
 
 # Directory prefix used to detect changes that are isolated to a single
 # feature pack (see ``app/core/features.py``).  When every file in a
@@ -75,30 +138,9 @@ _FEATURE_PACKS_DIR_PREFIX = "app/features/"
 # full-restart upgrade path.
 _PACK_VERSION_RE = re.compile(r"""version\s*=\s*['"]([^'"]+)['"]""")
 
+
 # Mapping of module slug -> set of scheduled task commands that require that module.
 # Used to filter available commands in the UI and to disable tasks when a module is disabled.
-COMMANDS_BY_MODULE: dict[str, set[str]] = {
-    "m365": {
-        "sync_m365_data",
-        "sync_o365",
-        "sync_m365_email_domains",
-        "sync_m365_licenses",
-        "sync_m365_contacts",
-        "sync_m365_mailboxes",
-        "refresh_m365_consent_status",
-    },
-    "xero": {"sync_to_xero", "sync_to_xero_auto_send"},
-    "call-recordings": {
-        "sync_recordings",
-        "queue_transcriptions",
-        "process_transcription",
-    },
-    "unifi-talk": {"sync_unifi_talk_recordings"},
-    "tacticalrmm": {"push_tactical_companies", "pull_tactical_companies"},
-    "huntress": {"sync_huntress"},
-}
-
-
 def _normalise_upgrade_mode(value: str | None) -> str:
     if not value:
         return _DEFAULT_UPGRADE_MODE
@@ -127,6 +169,12 @@ def _normalise_cron_day_field(day_field: str) -> str:
     return ",".join(normalised_parts)
 
 
+def _is_rag_command(command: object) -> bool:
+    """Return True for scheduled commands owned by the RAG feature pack."""
+
+    return str(command or "").startswith("rag_")
+
+
 class SchedulerService:
     def __init__(self) -> None:
         settings = get_settings()
@@ -139,6 +187,13 @@ class SchedulerService:
             return
         self._scheduler.start()
         self._started = True
+        from app.services.website_check_worker import website_check_worker
+        self._scheduler.add_job(
+            website_check_worker.run_once, "interval",
+            seconds=get_settings().website_check_poll_seconds,
+            id="website-check-worker", max_instances=1, coalesce=True,
+            next_run_time=datetime.now(timezone.utc), replace_existing=True,
+        )
         await self._ensure_monitoring_jobs()
         self._start_refresh_task()
         log_info("Scheduler started")
@@ -158,7 +213,23 @@ class SchedulerService:
             if job.id and job.id.startswith("scheduled-task-"):
                 job.remove()
         tasks = await scheduled_tasks_repo.list_active_tasks()
+        module_rows = {
+            str(row.get("slug") or ""): row for row in await module_repo.list_modules()
+        }
+        availability = get_component_availability()
+        registered = 0
+        rag_enabled = rag_available()
         for task in tasks:
+            if not rag_enabled and _is_rag_command(task.get("command")):
+                continue
+            owners = module_capabilities.modules_for_command(str(task.get("command") or ""))
+            # Shared commands remain usable while at least one owner is both
+            # deployment-available and operationally enabled.
+            if owners and not any(
+                availability.module_enabled(module_rows.get(owner, {"slug": owner}))
+                for owner in owners
+            ):
+                continue
             trigger = self._build_trigger(task)
             if not trigger:
                 continue
@@ -171,7 +242,8 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
-        log_info("Scheduler tasks loaded", count=len(tasks))
+            registered += 1
+        log_info("Scheduler tasks loaded", count=registered)
         await self._ensure_monitoring_jobs()
 
     def _track_refresh_task(self, task: asyncio.Task[None]) -> None:
@@ -224,6 +296,16 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        if not self._scheduler.get_job("marketing-campaign-runner"):
+            self._scheduler.add_job(
+                self._run_marketing_campaign_runner,
+                "interval",
+                seconds=60,
+                id="marketing-campaign-runner",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
         if not self._scheduler.get_job("automation-runner"):
             self._scheduler.add_job(
                 self._run_automation_runner,
@@ -270,16 +352,6 @@ class SchedulerService:
                 "interval",
                 seconds=60,
                 id="ticket-shipment-watch-runner",
-                replace_existing=True,
-                coalesce=True,
-                max_instances=1,
-            )
-        # Run subscription renewal job daily at 02:00 (store timezone)
-        if not self._scheduler.get_job("subscription-renewals"):
-            self._scheduler.add_job(
-                self._run_subscription_renewals,
-                CronTrigger(hour=2, minute=0, timezone=self._scheduler.timezone),
-                id="subscription-renewals",
                 replace_existing=True,
                 coalesce=True,
                 max_instances=1,
@@ -374,7 +446,9 @@ class SchedulerService:
             if not lock_acquired:
                 log_info("Webhook cleanup already running on another worker, skipping")
                 return
-            await webhook_monitor.purge_completed_events()
+            from app.services import webhook_deletion_rules
+
+            await webhook_deletion_rules.run_scheduled_rules()
 
     async def _run_automation_runner(self) -> None:
         """Run automation processing with distributed lock to prevent duplicate execution."""
@@ -385,6 +459,17 @@ class SchedulerService:
                 )
                 return
             await automations_service.process_due_automations()
+
+    async def _run_marketing_campaign_runner(self) -> None:
+        """Send queued marketing campaign emails that are inside business hours."""
+        async with db.acquire_lock("marketing_campaign_runner", timeout=1) as lock_acquired:
+            if not lock_acquired:
+                return
+            from app.services import marketing_campaigns as marketing_campaigns_service
+
+            result = await marketing_campaigns_service.process_due_sends()
+            if any(result.values()):
+                log_info("Marketing campaign runner processed recipients", **result)
 
     async def _run_staff_workflow_due_runner(self) -> None:
         """Run due approved staff workflow executions with distributed lock."""
@@ -456,7 +541,7 @@ class SchedulerService:
                 log_error("Ticket shipment watch runner failed", error=str(exc))
 
     async def _run_subscription_renewals(self) -> None:
-        """Run subscription renewal invoice creation (T-60 job) with distributed lock."""
+        """Run subscription renewal reminders and invoicing with a distributed lock."""
         async with db.acquire_lock("subscription_renewals", timeout=5) as lock_acquired:
             if not lock_acquired:
                 log_info(
@@ -464,19 +549,23 @@ class SchedulerService:
                 )
                 return
 
-            from datetime import date
-
-            today = date.today()
-            log_info("Starting subscription renewal invoice creation", date=today)
+            settings = get_settings()
+            try:
+                today = datetime.now(
+                    ZoneInfo(str(settings.default_timezone or "UTC"))
+                ).date()
+            except Exception:  # pragma: no cover - defensive fallback
+                today = datetime.now(timezone.utc).date()
+            log_info("Starting subscription renewal processing", date=today)
 
             try:
                 result = await subscription_renewals.create_renewal_invoices_for_date(
                     today
                 )
-                log_info("Subscription renewal invoice creation completed", **result)
+                log_info("Subscription renewal processing completed", **result)
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error(
-                    "Subscription renewal invoice creation failed",
+                    "Subscription renewal processing failed",
                     date=today,
                     error=str(exc),
                 )
@@ -578,18 +667,16 @@ class SchedulerService:
 
     def _build_trigger(self, task: dict[str, Any]) -> CronTrigger | None:
         try:
-            fields = str(task["cron"]).strip().split()
-            if len(fields) != 5:
-                raise ValueError(
-                    f"Wrong number of fields; got {len(fields)}, expected 5"
-                )
-            minute, hour, day, month, day_of_week = fields
+            minute, hour, day, month, day_of_week, year = parse_cron_expression(
+                str(task["cron"])
+            )
             return CronTrigger(
                 minute=minute,
                 hour=hour,
                 day=_normalise_cron_day_field(day),
                 month=month,
                 day_of_week=day_of_week,
+                year=year,
                 timezone=self._scheduler.timezone,
             )
         except Exception as exc:  # pragma: no cover - defensive logging
@@ -619,6 +706,43 @@ class SchedulerService:
                 # Another worker is already executing this task, skip silently
                 return
 
+            if _is_rag_command(command) and not rag_available():
+                now = datetime.now(timezone.utc)
+                await scheduled_tasks_repo.record_task_run(
+                    int(task_id),
+                    status="skipped",
+                    started_at=now,
+                    finished_at=now,
+                    duration_ms=0,
+                    details="RAG feature pack is disabled",
+                )
+                return
+
+            # Admission is deliberately inside the execution lock.  A module
+            # can be toggled after scheduler refresh but must never race into
+            # dispatch.
+            for module_slug in module_capabilities.modules_for_command(
+                str(command or "")
+            ):
+                module = await module_repo.get_module(module_slug)
+                if not module or not module.get("enabled"):
+                    now = datetime.now(timezone.utc)
+                    await scheduled_tasks_repo.record_task_run(
+                        int(task_id),
+                        status="skipped",
+                        started_at=now,
+                        finished_at=now,
+                        duration_ms=0,
+                        details=f"Module '{module_slug}' is disabled",
+                    )
+                    log_info(
+                        "Scheduled task skipped: module disabled",
+                        task_id=task_id,
+                        command=command,
+                        module=module_slug,
+                    )
+                    return
+
             if not force_restart:
                 debounce_cutoff = datetime.now(timezone.utc) - timedelta(seconds=55)
                 try:
@@ -647,7 +771,11 @@ class SchedulerService:
             details: str | None = None
 
             try:
-                if command == "sync_staff":
+                if command == "update_mac_vendors":
+                    details = json.dumps(
+                        await mac_vendors_service.update_mac_vendors(), default=str
+                    )
+                elif command == "sync_staff":
                     company_id = task.get("company_id")
                     if company_id:
                         await staff_importer.import_contacts_for_company(
@@ -901,6 +1029,22 @@ class SchedulerService:
                     else:
                         status = "skipped"
                         details = "Company context required"
+                elif command == "process_subscription_renewals":
+                    if task.get("company_id") is not None:
+                        status = "skipped"
+                        details = "This task must target all companies"
+                    else:
+                        settings = get_settings()
+                        try:
+                            target_date = datetime.now(
+                                ZoneInfo(str(settings.default_timezone or "UTC"))
+                            ).date()
+                        except Exception:  # pragma: no cover - defensive fallback
+                            target_date = datetime.now(timezone.utc).date()
+                        result = await subscription_renewals.create_renewal_invoices_for_date(
+                            target_date
+                        )
+                        details = json.dumps(result, default=str)
                 elif command == "unbill_time_entries":
                     company_id = task.get("company_id")
                     result = await unbill_time_entries_service.unbill_time_entries(
@@ -970,9 +1114,14 @@ class SchedulerService:
                 elif command == "update_stock_feed":
                     await products_service.update_stock_feed()
                 elif command == "system_update":
-                    output = await self.run_system_update(force_restart=force_restart)
+                    if force_restart:
+                        output = await self.run_system_update(force_restart=True)
+                    else:
+                        output = await self.run_system_update(scheduled=True)
                     if output:
                         details = output
+                    if output == _SYSTEM_UPDATE_NOT_AVAILABLE_MESSAGE:
+                        status = "skipped"
                 elif command == "update_tray_icon_installer":
                     settings = get_settings()
                     updated_assets = (
@@ -1042,6 +1191,12 @@ class SchedulerService:
                                 job_id, status="failed", message=str(exc), finished=True
                             )
                             raise
+                elif command == "rag_index_incremental":
+                    from app.services import rag_outbox
+                    details = json.dumps(await rag_outbox.process_pending(), default=str)
+                elif command == "rag_index_reconcile":
+                    from app.services import rag_outbox
+                    details = json.dumps(await rag_outbox.reconcile(), default=str)
                 elif command == "rag_index_stop":
                     stopped = await rag_index_repo.request_all_active_job_stops()
                     details = json.dumps({"stop_requests": stopped}, default=str)
@@ -1218,6 +1373,7 @@ class SchedulerService:
                             result = await call_recordings_service.sync_recordings_from_filesystem(
                                 recordings_path,
                                 phone_system_type=phone_system_type,
+                                trusted_base=recordings_path,
                             )
                             details = json.dumps(result, default=str)
                             log_info("Call recordings synced", **result)
@@ -1346,11 +1502,6 @@ class SchedulerService:
                             plan_id = plan.get("id")
 
                             if plan_id:
-                                # Get distribution list for the plan
-                                _unused_distribution_list = (
-                                    await bcp_repo.list_distribution_list(plan_id)
-                                )
-
                                 # Create notification
                                 message = f"Upcoming BCP plan review scheduled for {item['review_date'].strftime('%Y-%m-%d %H:%M')}"
                                 if item.get("reason"):
@@ -1389,8 +1540,10 @@ class SchedulerService:
                     if company_id:
                         company_id_int = int(company_id)
                         try:
-                            results = await m365_service.check_enterprise_app_permissions(
-                                company_id_int
+                            results = (
+                                await m365_service.check_enterprise_app_permissions(
+                                    company_id_int
+                                )
                             )
                             all_ok = bool(results) and all(
                                 app.get("all_ok") for app in results
@@ -1454,6 +1607,20 @@ class SchedulerService:
                                 },
                                 default=str,
                             )
+                elif command in {"refresh_website_checks", "refresh_dns_records"}:
+                    company_id = task.get("company_id")
+                    due_window = started_at.astimezone(timezone.utc).strftime("%Y%m%d%H%M")
+                    counts = await websites_repo.enqueue_scheduled_scope(
+                        command=str(command),
+                        company_id=int(company_id) if company_id is not None else None,
+                        task_id=int(task_id),
+                        due_window=due_window,
+                    )
+                    details = json.dumps({
+                        "scope": "all_companies" if company_id is None else "company",
+                        "company_id": int(company_id) if company_id is not None else None,
+                        **counts,
+                    })
                 else:
                     status = "skipped"
                     details = "No handler registered for command"
@@ -1489,16 +1656,32 @@ class SchedulerService:
             raise ValueError(f"Task {task_id} not found")
         await self._run_task(task, force_restart=True)
 
-    async def run_system_update(self, *, force_restart: bool = False) -> str | None:
+    async def run_system_update(
+        self, *, force_restart: bool = False, scheduled: bool = False,
+        source: str | None = None,
+    ) -> str | None:
         """Public helper to execute the system update script.
 
         This wraps the private implementation so that other parts of the
         application can reuse the same update mechanism used by scheduled
-        tasks.
+        tasks.  ``source="web"`` is an administrator's "Update now" request,
+        which follows the scheduled rolling workflow so it is tracked in the
+        update history instead of being hot-reloaded or forcing a restart.
         """
-        return await self._run_system_update(force_restart=force_restart)
+        return await self._run_system_update(
+            force_restart=force_restart, scheduled=scheduled, source=source
+        )
 
-    async def _run_system_update(self, *, force_restart: bool = False) -> str | None:
+    async def _run_system_update(
+        self, *, force_restart: bool = False, scheduled: bool = False,
+        source: str | None = None,
+    ) -> str | None:
+        tracked = scheduled or source == "web"
+        if os.getenv("MYPORTAL_DEPLOYMENT", "").strip().lower() == "docker":
+            # Containers carry no Git checkout; releases are applied by
+            # scripts/myportal-docker.sh on the host.
+            log_info("System update skipped", reason="docker_deployment")
+            return _DOCKER_SYSTEM_UPDATE_MESSAGE
         async with _SYSTEM_UPDATE_LOCK:
             local_head = await self._get_git_ref("HEAD")
             remote_head = await self._get_remote_main_ref()
@@ -1508,7 +1691,6 @@ class SchedulerService:
                 )
 
             if local_head == remote_head:
-                message = "No GitHub update available; upgrade was not scheduled."
                 log_info(
                     "System update skipped",
                     reason="already_up_to_date",
@@ -1516,10 +1698,14 @@ class SchedulerService:
                     remote_head=remote_head,
                     requested_from_ui=force_restart,
                 )
-                return message
+                return _SYSTEM_UPDATE_NOT_AVAILABLE_MESSAGE
 
-            requested_mode = self._resolve_requested_upgrade_mode(
-                force_restart=force_restart
+            # Scheduled updates always use the immutable blue/green rolling
+            # coordinator. Manual callers retain their existing mode semantics.
+            requested_mode = (
+                "rolling"
+                if tracked
+                else self._resolve_requested_upgrade_mode(force_restart=force_restart)
             )
             changed_files: list[str] | None = None
             if not force_restart:
@@ -1535,7 +1721,7 @@ class SchedulerService:
             # This avoids dropping connections for routine pack-only
             # updates.  Any failure or ambiguity falls through to the
             # full-restart flag-file path below.
-            if not force_restart:
+            if not force_restart and not tracked:
                 hot_reload_message = await self._try_feature_pack_hot_reload(
                     local_head=local_head,
                     remote_head=remote_head,
@@ -1545,21 +1731,32 @@ class SchedulerService:
 
             self._ensure_update_flag_directory()
             timestamp = datetime.now(timezone.utc).isoformat()
+            history = system_update_history.create_pending(
+                requested_at=timestamp,
+                target_revision=remote_head,
+                source=source or ("scheduled" if scheduled else "manual"),
+                mode=requested_mode,
+            )
             requested_reason = (
                 "manual_restart_requested"
                 if force_restart
                 else self._classify_full_upgrade_reason(changed_files)
             )
+            deployment_plan = build_deployment_plan(
+                [("M", path) for path in (changed_files or [])]
+            ).to_dict()
             flag_payload = (
                 f"requested_at={timestamp}\n"
+                f"update_id={history['id']}\n"
                 f"requested_from_ui={str(force_restart).lower()}\n"
                 f"requested_mode={requested_mode}\n"
                 f"requested_reason={requested_reason}\n"
+                f"deployment_plan={json.dumps(deployment_plan, separators=(',', ':'), sort_keys=True)}\n"
                 f"local_head={local_head}\n"
                 f"remote_head={remote_head}\n"
             )
             _SYSTEM_UPDATE_FLAG_PATH.write_text(flag_payload, encoding="utf-8")
-            os.chmod(_SYSTEM_UPDATE_FLAG_PATH, 0o640)
+            os.chmod(_SYSTEM_UPDATE_FLAG_PATH, 0o600)
 
             log_info(
                 "System update scheduled",
@@ -1618,7 +1815,16 @@ class SchedulerService:
         loaded_versions: dict[str, str] = {
             state["slug"]: state["version"] for state in registry.list()
         }
+        from app.services.component_availability import get_component_availability
+
         for slug in slugs:
+            if not get_component_availability().feature_pack_available(slug):
+                log_info(
+                    "Feature pack hot-reload skipped",
+                    reason="pack_disabled_by_deployment",
+                    slug=slug,
+                )
+                return None
             if slug not in loaded_versions:
                 log_info(
                     "Feature pack hot-reload skipped",
@@ -1654,37 +1860,31 @@ class SchedulerService:
                     version=new_version,
                 )
 
-        # Fast-forward the working tree so the new pack code is on disk
-        # before we ask the registry to re-import it.  ``--ff-only``
-        # refuses to create a merge commit, matching the upgrade
-        # script's expectation that ``main`` advances linearly.
-        rc, _, stderr = await self._run_git("merge", "--ff-only", fetched_head)
-        if rc != 0:
-            log_error(
-                "Feature pack hot-reload aborted: fast-forward merge failed",
-                error=_truncate_output(stderr),
+        release_root = (
+            Path(os.getenv("MYPORTAL_RELEASE_ROOT", "/opt/myportal/releases"))
+            / fetched_head
+        )
+        if not release_root.is_dir():
+            # Preparation belongs to the release coordinator.  Never advance
+            # the control checkout merely to make code importable.
+            log_info(
+                "Feature pack hot-reload deferred to staged cutover",
+                reason="candidate_release_not_prepared",
+                revision=fetched_head,
             )
             return None
-
-        reloaded: list[str] = []
-        for slug in sorted(slugs):
-            try:
-                state = await registry.reload(slug)
-            except Exception as exc:
-                log_error(
-                    "Feature pack hot-reload failed; falling back to full restart",
-                    slug=slug,
-                    error=str(exc),
-                )
-                return None
-            if state.last_error:
-                log_error(
-                    "Feature pack hot-reload reported an error; falling back to full restart",
-                    slug=slug,
-                    error=state.last_error,
-                )
-                return None
-            reloaded.append(slug)
+        reloaded = sorted(slugs)
+        try:
+            await registry.reload_many_from_release(
+                reloaded, release_root, revision=fetched_head
+            )
+        except Exception as exc:
+            log_error(
+                "Feature pack transaction failed; scheduling staged cutover",
+                error=str(exc),
+                revision=fetched_head,
+            )
+            return None
 
         log_info(
             "Feature pack hot-reload completed",
@@ -1718,10 +1918,56 @@ class SchedulerService:
             )
             return
 
+        request_id = "legacy"
+        revision = "unknown"
+        release_path: Path | None = None
+        result_path = _FEATURE_PACK_RELOAD_RESULT_PATH
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict):
+            request_id = str(payload.get("request_id", ""))
+            revision = str(payload.get("revision", ""))
+            configured_release_root = Path(
+                os.getenv("MYPORTAL_RELEASE_ROOT", "/opt/myportal/releases")
+            ).resolve()
+            requested_release = Path(str(payload.get("release_path", ""))).resolve()
+            if (
+                not _FEATURE_PACK_RELOAD_REQUEST_ID_RE.fullmatch(request_id)
+                or not _GIT_REVISION_RE.fullmatch(revision)
+                or requested_release.parent != configured_release_root
+                or requested_release.name != revision
+            ):
+                log_error(
+                    "Rejected invalid feature pack reload request",
+                    path=str(_FEATURE_PACK_RELOAD_FLAG_PATH),
+                )
+                with suppress(OSError):
+                    _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
+                return
+            release_path = requested_release
+            # Never trust a flag-file supplied output path.  Keeping results
+            # beside the coordinator-owned flag prevents arbitrary file writes.
+            result_path = _FEATURE_PACK_RELOAD_FLAG_PATH.parent / (
+                f"feature_pack_reload.{request_id}.result"
+            )
+            raw_entries = payload.get("packs", [])
+        elif payload is None:
+            raw_entries = raw.splitlines()
+        else:
+            log_error(
+                "Rejected malformed feature pack reload request",
+                path=str(_FEATURE_PACK_RELOAD_FLAG_PATH),
+            )
+            with suppress(OSError):
+                _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
+            return
+
         slugs: list[str] = []
         seen: set[str] = set()
-        for raw_line in raw.splitlines():
-            slug = raw_line.strip()
+        for raw_line in raw_entries:
+            slug = str(raw_line).strip()
             if not slug or slug.startswith("#"):
                 continue
             if slug in seen:
@@ -1729,12 +1975,55 @@ class SchedulerService:
             seen.add(slug)
             slugs.append(slug)
 
-        if not slugs:
-            try:
+        if payload is not None and any(
+            not _FEATURE_PACK_SLUG_RE.fullmatch(slug) for slug in slugs
+        ):
+            log_error(
+                "Rejected invalid feature pack slug in reload request",
+                path=str(_FEATURE_PACK_RELOAD_FLAG_PATH),
+            )
+            with suppress(OSError):
                 _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
-            except OSError:
-                pass
             return
+
+        if not slugs:
+            with suppress(OSError):
+                _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
+            return
+
+        if payload is not None and result_path.is_file():
+            try:
+                existing_result = json.loads(result_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                existing_result = None
+            existing_status = (
+                existing_result.get("status")
+                if isinstance(existing_result, dict)
+                else None
+            )
+            existing_loaded = (
+                existing_result.get("loaded", {})
+                if isinstance(existing_result, dict)
+                else {}
+            )
+            terminal_result = existing_status == "failed" or (
+                existing_status == "succeeded"
+                and isinstance(existing_loaded, dict)
+                and set(existing_loaded) == set(slugs)
+                and all(existing_loaded.get(slug) == revision for slug in slugs)
+            )
+            if (
+                isinstance(existing_result, dict)
+                and existing_result.get("request_id") == request_id
+                and existing_result.get("revision") == revision
+                and terminal_result
+            ):
+                # The prior attempt reached a terminal result but was
+                # interrupted before clearing the request.  Do not activate
+                # hooks, jobs, or routes for the same request twice.
+                with suppress(OSError):
+                    _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
+                return
 
         try:
             from app.core.features import get_registry
@@ -1746,37 +2035,36 @@ class SchedulerService:
             # Registry not initialised yet; try again on the next tick.
             return
 
-        loaded = {state["slug"] for state in registry.list()}
         reloaded: list[str] = []
         failed: list[str] = []
-        for slug in slugs:
-            if slug not in loaded:
-                log_info(
-                    "Feature pack reload flag skipped slug",
-                    reason="pack_not_loaded",
-                    slug=slug,
+        try:
+            if release_path is None:
+                loaded = {state["slug"] for state in registry.list()}
+                for slug in slugs:
+                    if slug not in loaded:
+                        failed.append(slug)
+                        continue
+                    try:
+                        state = await registry.reload(slug)
+                    except Exception:
+                        failed.append(slug)
+                        continue
+                    if state.last_error:
+                        failed.append(slug)
+                    else:
+                        reloaded.append(slug)
+            else:
+                states = await registry.reload_many_from_release(
+                    slugs, release_path, revision=revision
                 )
-                failed.append(slug)
-                continue
-            try:
-                state = await registry.reload(slug)
-            except Exception as exc:
-                log_error(
-                    "Feature pack reload flag handler failed",
-                    slug=slug,
-                    error=str(exc),
-                )
-                failed.append(slug)
-                continue
-            if state.last_error:
-                log_error(
-                    "Feature pack reload flag handler reported error",
-                    slug=slug,
-                    error=state.last_error,
-                )
-                failed.append(slug)
-                continue
-            reloaded.append(slug)
+                reloaded = list(states)
+        except Exception as exc:
+            failed = list(slugs)
+            log_error(
+                "Feature pack reload transaction failed",
+                revision=revision,
+                error=str(exc),
+            )
 
         if reloaded:
             log_info(
@@ -1785,18 +2073,31 @@ class SchedulerService:
                 failed=failed,
             )
 
+        if payload is not None:
+            result = {
+                "request_id": request_id,
+                "revision": revision,
+                "status": "succeeded" if not failed else "failed",
+                "loaded": {slug: revision for slug in reloaded},
+                "failed": failed,
+            }
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary_result = result_path.with_suffix(result_path.suffix + ".tmp")
+            temporary_result.write_text(
+                json.dumps(result, sort_keys=True), encoding="utf-8"
+            )
+            os.replace(temporary_result, result_path)
+
         if not failed:
             try:
-                _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
-            except FileNotFoundError:
-                pass
+                _FEATURE_PACK_RELOAD_FLAG_PATH.unlink(missing_ok=True)
             except OSError as exc:
                 log_error(
                     "Failed to clear feature pack reload flag",
                     path=str(_FEATURE_PACK_RELOAD_FLAG_PATH),
                     error=str(exc),
                 )
-        else:
+        elif payload is None:
             # Leave only the failed slugs in the flag so the next tick
             # retries them.  Successful reloads are dropped.
             try:
@@ -1809,6 +2110,12 @@ class SchedulerService:
                     path=str(_FEATURE_PACK_RELOAD_FLAG_PATH),
                     error=str(exc),
                 )
+        else:
+            # A transactional request is terminal.  Its result tells the
+            # coordinator to perform a full cutover; retrying individual packs
+            # would violate all-or-nothing activation.
+            with suppress(OSError):
+                _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
 
     @staticmethod
     def _classify_feature_pack_changes(changed_files: list[str]) -> set[str] | None:
@@ -1837,12 +2144,14 @@ class SchedulerService:
         return slugs or None
 
     async def _run_git(self, *args: str) -> tuple[int, str, str]:
+        cwd, options = _git_context()
         process = await asyncio.create_subprocess_exec(
             "git",
+            *options,
             *args,
             stdout=PIPE,
             stderr=PIPE,
-            cwd=str(_PROJECT_ROOT),
+            cwd=str(cwd),
         )
         stdout, stderr = await process.communicate()
         return (
@@ -1898,41 +2207,30 @@ class SchedulerService:
 
     @staticmethod
     def _classify_full_upgrade_reason(changed_files: list[str] | None) -> str:
-        if not changed_files:
-            return "application_reload_required"
-
-        stripped = [path.strip() for path in changed_files if path and path.strip()]
-        if not stripped:
-            return "application_reload_required"
-
-        if any(path == "pyproject.toml" for path in stripped):
-            return "dependency_manifest_changed"
-        if any(path.startswith("migrations/") for path in stripped):
-            return "migrations_changed"
-        if any(path.startswith("deploy/") for path in stripped):
-            return "deployment_topology_changed"
-        if any(path.startswith("scripts/") for path in stripped):
-            return "upgrade_runtime_changed"
-        if any(path.startswith("app/") for path in stripped):
-            return "shared_app_code_changed"
-        return "application_reload_required"
+        plan = build_deployment_plan([("M", path) for path in (changed_files or [])])
+        return plan.reason
 
     def _ensure_update_flag_directory(self) -> None:
         _SYSTEM_UPDATE_FLAG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        try:
+        with suppress(OSError):
             os.chmod(_SYSTEM_UPDATE_FLAG_PATH.parent, 0o700)
-        except OSError:
-            # Best-effort permission hardening; failures are non-fatal for scheduling.
-            pass
 
     async def _get_git_ref(self, ref: str) -> str | None:
+        if ref == "HEAD":
+            # An immutable release is not a Git checkout; the revision it was
+            # exported from is recorded in version.txt by scripts/upgrade.sh.
+            release_revision = _release_revision()
+            if release_revision:
+                return release_revision
+        cwd, options = _git_context()
         process = await asyncio.create_subprocess_exec(
             "git",
+            *options,
             "rev-parse",
             ref,
             stdout=PIPE,
             stderr=PIPE,
-            cwd=str(_PROJECT_ROOT),
+            cwd=str(cwd),
         )
         stdout, stderr = await process.communicate()
         if process.returncode != 0:
@@ -1942,17 +2240,33 @@ class SchedulerService:
         return _truncate_output(stdout)
 
     async def _get_remote_main_ref(self) -> str | None:
-        process = await asyncio.create_subprocess_exec(
-            "git",
-            "ls-remote",
-            "--heads",
-            "origin",
-            "main",
-            stdout=PIPE,
-            stderr=PIPE,
-            cwd=str(_PROJECT_ROOT),
-        )
-        stdout, stderr = await process.communicate()
+        ref = await self._ls_remote_main_ref()
+        if ref:
+            return ref
+        # Immutable releases carry no .git directory, and the service account
+        # often cannot read the control checkout (for example when it lives
+        # under /root or /home, which the unit's ProtectHome hides). Ask the
+        # GitHub API for the head of main instead.
+        return await _github_main_ref()
+
+    async def _ls_remote_main_ref(self) -> str | None:
+        cwd, options = _git_context()
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "git",
+                *options,
+                "ls-remote",
+                "--heads",
+                "origin",
+                "main",
+                stdout=PIPE,
+                stderr=PIPE,
+                cwd=str(cwd),
+            )
+            stdout, stderr = await process.communicate()
+        except OSError as exc:
+            log_error("Failed to query GitHub for latest main ref", error=str(exc))
+            return None
         if process.returncode != 0:
             stderr_preview = _truncate_output(stderr)
             log_error(
@@ -1964,6 +2278,29 @@ class SchedulerService:
             return None
         first_line = response.splitlines()[0]
         return first_line.split()[0] if first_line.split() else None
+
+
+async def _github_main_ref() -> str | None:
+    """Return the head of ``main`` from the GitHub API, or ``None``."""
+
+    repo = os.getenv("MYPORTAL_REPO", "").strip() or "bradhawkins85/MyPortal"
+    api = (os.getenv("MYPORTAL_GITHUB_API", "").strip() or "https://api.github.com").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(
+                f"{api}/repos/{repo}/commits/main",
+                headers={"Accept": "application/vnd.github.sha"},
+            )
+            response.raise_for_status()
+    except httpx.HTTPError as exc:
+        log_error("Failed to query the GitHub API for latest main ref", error=str(exc))
+        return None
+    ref = response.text.strip()
+    if not _GIT_REVISION_RE.fullmatch(ref):
+        log_error("GitHub API returned an unexpected main ref", ref=_truncate_output(ref))
+        return None
+    log_info("Resolved latest main ref from the GitHub API", repo=repo, ref=ref)
+    return ref
 
 
 scheduler_service = SchedulerService()

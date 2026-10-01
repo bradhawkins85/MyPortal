@@ -30,26 +30,40 @@ the batch runners in ``cis_benchmark.py``.
 from __future__ import annotations
 
 import asyncio
+import copy
+import csv
+import io
 import re
-from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Union
+import secrets
+import string
+from datetime import datetime, timedelta, timezone
+from html import escape
+from typing import Any, Awaitable, Callable, Mapping, Union
+from urllib.parse import quote
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.core.logging import log_error, log_info
+from app.core.config import get_settings
+from app.repositories import companies as companies_repo
 from app.repositories import m365_best_practices as bp_repo
+from app.repositories import tickets as tickets_repo
+from app.services import hudu as hudu_service
+from app.services import tickets as tickets_service
 from app.services.cis_benchmark import (
     STATUS_FAIL,
     STATUS_PASS,
     STATUS_UNKNOWN,
     STATUS_NOT_APPLICABLE,
+    _fail,
     _check_admin_mfa,
     _check_audit_log_enabled,
     _check_global_admin_count,
     _check_guest_access_restricted,
     _check_legacy_auth_blocked,
     _check_mfa_conditional_access,
-    _check_monitor_app_credential_expiry,
     _check_monitor_ca_report_only_policies,
     _check_monitor_cloud_admin_accounts,
     _check_monitor_mfa_registration_policy,
@@ -62,6 +76,8 @@ from app.services.cis_benchmark import (
     _check_password_never_expires,
     _check_security_defaults,
     _check_sspr_enabled,
+    _pass,
+    _unknown,
     run_intune_ios_benchmarks,
     run_intune_macos_benchmarks,
     run_intune_windows_benchmarks,
@@ -69,15 +85,39 @@ from app.services.cis_benchmark import (
 from app.services.m365 import (
     M365Error,
     _acquire_exo_access_token,
+    _acquire_teams_access_tokens,
+    _acquire_scc_access_token,
+    _coerce_exo_bool,
     _exo_invoke_command,
+    _graph_delete,
     _graph_get,
     _graph_get_all,
     _graph_patch,
     _graph_post,
+    _graph_put,
+    _parse_client_secret_expires,
+    _post_app_role_assignment_with_retry,
+    _scc_invoke_command,
     acquire_access_token,
     acquire_delegated_token,
+    get_admin_m365_credentials,
+    get_company_admin_credentials,
+    get_effective_admin_credentials,
+    renew_admin_client_secret,
     try_grant_missing_permissions,
 )
+from app.services.m365_providers import (
+    ProviderCommandError,
+    invoke_teams_command,
+    provider_enabled,
+)
+
+# Assessment outcomes are deliberately more precise than the original
+# pass/fail/unknown trio.  Only PASS and FAIL are scoreable evidence.
+STATUS_NOT_LICENSED = "not_licensed"
+STATUS_UNSUPPORTED = "unsupported"
+STATUS_PERMISSION_MISSING = "permission_missing"
+STATUS_ASSESSMENT_FAILED = "assessment_failed"
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +150,7 @@ CAP_ENTRA_ID_P1 = "entra_id_p1"
 CAP_ENTRA_ID_P2 = "entra_id_p2"
 CAP_INTUNE = "intune"
 CAP_EXCHANGE_ONLINE = "exchange_online"
+CAP_EXCHANGE_ONLINE_P2 = "exchange_online_p2"
 CAP_SHAREPOINT_ONLINE = "sharepoint_online"
 CAP_TEAMS = "teams"
 CAP_TEAMS_AUDIO_CONF = "teams_audio_conferencing"
@@ -118,12 +159,16 @@ CAP_DEFENDER_O365_P2 = "defender_o365_p2"
 CAP_PURVIEW_DLP = "purview_dlp"
 CAP_INTUNE_LAPS = "intune_laps"
 
+_M365_FAILURE_TICKET_CATEGORY = "Microsoft 365"
+_M365_FAILURE_TICKET_MODULE = "m365_admin"
+
 # Friendly names used in the "not applicable" details message
 _CAPABILITY_FRIENDLY_NAMES: dict[str, str] = {
     CAP_ENTRA_ID_P1: "Microsoft Entra ID P1",
     CAP_ENTRA_ID_P2: "Microsoft Entra ID P2",
     CAP_INTUNE: "Microsoft Intune",
     CAP_EXCHANGE_ONLINE: "Exchange Online",
+    CAP_EXCHANGE_ONLINE_P2: "Exchange Online Plan 2",
     CAP_SHAREPOINT_ONLINE: "SharePoint Online",
     CAP_TEAMS: "Microsoft Teams",
     CAP_TEAMS_AUDIO_CONF: "Microsoft Teams Audio Conferencing",
@@ -146,8 +191,8 @@ _SERVICE_PLAN_TO_CAPABILITIES: dict[str, set[str]] = {
     "c1ec4a95-1f05-45b3-a911-aa3fa01094f5": {CAP_INTUNE, CAP_INTUNE_LAPS},
     # EXCHANGE_S_STANDARD (Exchange Online Plan 1)
     "9aaf7827-d63c-4b61-89c3-182f06f82e5c": {CAP_EXCHANGE_ONLINE},
-    # EXCHANGE_S_ENTERPRISE (Exchange Online Plan 2)
-    "efb87545-963c-4e0d-99df-69c6916d9eb0": {CAP_EXCHANGE_ONLINE},
+    # EXCHANGE_S_ENTERPRISE (Exchange Online Plan 2 – includes Plan 1 features)
+    "efb87545-963c-4e0d-99df-69c6916d9eb0": {CAP_EXCHANGE_ONLINE, CAP_EXCHANGE_ONLINE_P2},
     # EXCHANGE_S_FOUNDATION (bundled in many plans – also enables EXO)
     "113feb6c-3fe4-4440-bddc-54d774bf0318": {CAP_EXCHANGE_ONLINE},
     # SHAREPOINTSTANDARD (SharePoint Online Plan 1)
@@ -261,7 +306,210 @@ ExoRunner = Callable[[str, str], Awaitable[dict[str, Any]]]
 BestPracticeRunner = Union[GraphRunner, ExoRunner]
 
 # Keys that are implementation details and must not be exposed in the public catalog
-_INTERNAL_KEYS = frozenset({"source", "source_type", "remediation_cmdlet", "remediation_params", "remediation_url", "remediation_payload", "remediation_type", "remediation_mailbox_params"})
+_INTERNAL_KEYS = frozenset({"source", "source_type", "remediation_cmdlet", "remediation_params", "remediation_url", "remediation_payload", "remediation_type", "remediation_mailbox_params", "default_auto_remediate", "uses_company_id", "desired_settings"})
+
+# Controls in the same alternative group express different acceptable company
+# policies; they are alternatives, not cumulative recommendations.  Keeping the
+# target and desired value machine-readable also lets batch remediation reject a
+# contradictory plan before it makes the first write.
+_DEFAULT_POLICY_PROFILES: dict[str, str] = {
+    "teams_global_lobby": "strict_invited_users",
+}
+
+
+class PolicySelectionError(ValueError):
+    """Raised when enabled best practices request incompatible policy values."""
+
+
+def _validate_policy_selection(check_ids: set[str]) -> None:
+    """Reject enabled controls that require different values on one property."""
+    selected: dict[tuple[str, str], tuple[str, Any, str]] = {}
+    catalog = _catalog_map()
+    for check_id in check_ids:
+        bp = catalog.get(check_id) or {}
+        for desired in bp.get("desired_settings") or []:
+            key = (str(desired["resource"]), str(desired["property"]))
+            value = desired.get("value")
+            previous = selected.get(key)
+            if previous and previous[1] != value:
+                raise PolicySelectionError(
+                    "Conflicting policy controls: "
+                    f"{previous[0]} requires {key[0]}.{key[1]}={previous[1]!r}, "
+                    f"but {check_id} requires {value!r}. Select one policy profile."
+                )
+            selected[key] = (check_id, value, str(bp.get("policy_profile") or ""))
+
+_GLOBAL_ADMIN_ROLE_DEFINITION_ID = "62e90394-69f5-4237-9190-012177145e10"
+
+def _generate_emergency_admin_password(length: int = 32) -> str:
+    """Generate a CSPRNG-backed password satisfying Entra complexity rules."""
+    chars = [secrets.choice(string.ascii_uppercase), secrets.choice(string.ascii_lowercase),
+             secrets.choice(string.digits), secrets.choice("!@#$%^&*-_=+")]
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*-_=+"
+    chars.extend(secrets.choice(alphabet) for _ in range(length - len(chars)))
+    secrets.SystemRandom().shuffle(chars)
+    return "".join(chars)
+
+
+async def _resolve_myportal_pkce_credential_target(company_id: int) -> dict[str, Any] | None:
+    """Return the credential record MyPortal currently uses for PKCE/bootstrap flows."""
+    company_creds = await get_company_admin_credentials(company_id)
+    if company_creds and company_creds.get("client_id") and company_creds.get("client_secret"):
+        return {"scope": "company", "credentials": company_creds}
+
+    global_creds = await get_admin_m365_credentials()
+    if global_creds and global_creds.get("client_id") and global_creds.get("client_secret"):
+        return {"scope": "global", "credentials": global_creds}
+
+    effective = await get_effective_admin_credentials(company_id)
+    if effective and effective.get("client_id") and effective.get("client_secret"):
+        return {"scope": "environment", "credentials": effective}
+    return None
+
+
+async def _check_myportal_pkce_app_credential_expiry(
+    token: str, company_id: int
+) -> dict[str, Any]:
+    check_id = "bp_monitor_app_credential_expiry"
+    check_name = "No app registration credentials expiring within 30 days"
+    target = await _resolve_myportal_pkce_credential_target(company_id)
+    if not target:
+        return _unknown(
+            check_id,
+            check_name,
+            "MyPortal PKCE/bootstrap admin credentials are not configured.",
+        )
+
+    creds = target["credentials"]
+    client_id = str(creds.get("client_id") or "").strip()
+    if not client_id:
+        return _unknown(
+            check_id,
+            check_name,
+            "MyPortal PKCE/bootstrap app ID is not configured.",
+        )
+
+    app_id_filter = client_id.replace("'", "''")
+    try:
+        data = await _graph_get(
+            token,
+            "https://graph.microsoft.com/v1.0/applications"
+            f"?$filter=appId eq '{app_id_filter}'"
+            "&$select=id,appId,displayName,passwordCredentials,keyCredentials",
+        )
+    except M365Error as exc:
+        return _unknown(
+            check_id,
+            check_name,
+            f"Unable to retrieve the configured MyPortal PKCE app registration: {exc}",
+        )
+
+    app = next(iter(data.get("value") or []), None)
+    if not app:
+        return _unknown(
+            check_id,
+            check_name,
+            f"The configured MyPortal PKCE app registration ({client_id}) was not found.",
+        )
+
+    now = datetime.now(timezone.utc)
+    threshold = now + timedelta(days=30)
+    expiring: list[tuple[str, datetime]] = []
+    for cred_type, credentials in (
+        ("secret", app.get("passwordCredentials") or []),
+        ("certificate", app.get("keyCredentials") or []),
+    ):
+        for cred in credentials:
+            end_raw = cred.get("endDateTime")
+            if not end_raw:
+                continue
+            try:
+                end_dt = datetime.fromisoformat(str(end_raw).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+            if now <= end_dt <= threshold:
+                expiring.append((cred_type, end_dt))
+
+    app_name = str(app.get("displayName") or client_id)
+    if not expiring:
+        return _pass(
+            check_id,
+            check_name,
+            f"MyPortal PKCE app '{app_name}' ({client_id}) has no active credentials expiring within 30 days.",
+        )
+
+    earliest_type, earliest_expiry = min(expiring, key=lambda item: item[1])
+    active_expiry = _parse_client_secret_expires(creds.get("client_secret_expires_at"))
+    active_hint = (
+        f" Stored active credential expiry: {active_expiry.date().isoformat()}."
+        if active_expiry
+        else ""
+    )
+    return _fail(
+        check_id,
+        check_name,
+        f"MyPortal PKCE app '{app_name}' ({client_id}) has an expiring {earliest_type} "
+        f"credential on {earliest_expiry.date().isoformat()}.{active_hint}",
+    )
+
+async def _remediate_global_admin_count(graph_token: str, company_id: int) -> tuple[bool, str]:
+    """Create and document enough emergency administrators to reach the target of three."""
+    company = await companies_repo.get_company_by_id(company_id)
+    hudu_id = str((company or {}).get("hudu_id") or "").strip()
+    if not hudu_id:
+        return False, "Configure the company's Hudu ID before creating privileged accounts."
+    try:
+        await hudu_service.validate_configuration()
+    except hudu_service.HuduConfigurationError as exc:
+        return False, f"Hudu is not ready for password storage: {exc}"
+    roles = await _graph_get(graph_token, "https://graph.microsoft.com/v1.0/directoryRoles?$filter=displayName eq 'Global Administrator'&$select=id")
+    if not (role_values := roles.get("value") or []):
+        return False, "The Global Administrator directory role is not activated."
+    members = await _graph_get_all(graph_token, f"https://graph.microsoft.com/v1.0/directoryRoles/{role_values[0]['id']}/members?$select=id")
+    count = len(members)
+    if 3 <= count <= 4:
+        return True, "The tenant already meets the target of three Global Administrators."
+    if count > 4:
+        return False, "The tenant has more than four Global Administrators; remove excess assignments manually."
+    domains = await _graph_get(graph_token, "https://graph.microsoft.com/v1.0/domains?$select=id,isDefault,isVerified")
+    verified = [d for d in domains.get("value", []) if d.get("isVerified") and d.get("id")]
+    domain = next((d["id"] for d in verified if d.get("isDefault")), None) or (verified[0]["id"] if verified else None)
+    if not domain:
+        return False, "No verified Microsoft 365 domain is available for the new accounts."
+    created = 0
+    for slot in range(1, 4 - count):
+        suffix = secrets.token_hex(3)
+        alias, password = f"myportal-emergency-admin-{slot}-{suffix}", _generate_emergency_admin_password()
+        upn, user, assignment = f"{alias}@{domain}", None, None
+        try:
+            user = await _graph_post(graph_token, "https://graph.microsoft.com/v1.0/users", {
+                "accountEnabled": True, "displayName": f"MyPortal Emergency Administrator {slot}",
+                "mailNickname": alias, "userPrincipalName": upn,
+                "passwordProfile": {"forceChangePasswordNextSignIn": True, "password": password}})
+            assignment = await _post_app_role_assignment_with_retry(graph_token, "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments", {
+                "principalId": user["id"], "roleDefinitionId": _GLOBAL_ADMIN_ROLE_DEFINITION_ID, "directoryScopeId": "/"})
+            await hudu_service.create_asset_password(company_id=hudu_id, name=f"M365 Global Administrator – {upn}",
+                username=upn, password=password, url="https://admin.microsoft.com/",
+                description="Created automatically by MyPortal. Password change is required at first sign-in.")
+            created += 1
+        except Exception:
+            # Compensating cleanup prevents an undocumented privileged identity.
+            for resource in ([f"roleManagement/directory/roleAssignments/{assignment['id']}" if assignment and assignment.get("id") else None,
+                              f"users/{user['id']}" if user and user.get("id") else None]):
+                if resource:
+                    try:
+                        await _graph_delete(graph_token, f"https://graph.microsoft.com/v1.0/{resource}")
+                    except Exception as cleanup_exc:
+                        log_error(
+                            "Failed to clean up partially provisioned M365 emergency admin",
+                            company_id=company_id,
+                            resource=resource,
+                            error=str(cleanup_exc),
+                        )
+            raise
+    return True, f"Created {created} Global Administrator account(s) and stored each password separately in Hudu."
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +580,240 @@ async def _run_direct_send_remediation(exo_token: str, tenant_id: str) -> bool:
         return False
 
 
+_IT_BASELINE_RULE_NAME = "Allow External Forward - IT Contacts"
+
+
+def _it_baseline_config() -> tuple[list[dict[str, str]], str]:
+    settings = get_settings()
+    profiles = [
+        {"contact": "Hawkins IT", "group": "IT", "alias": "it",
+         "external": settings.m365_it_external_email_address.strip()},
+        {"contact": "Hawkins IT Support", "group": "IT Support", "alias": "itsupport",
+         "external": settings.m365_it_support_external_email_address.strip()},
+    ]
+    return profiles, settings.m365_it_recipient_address_contains_words.strip()
+
+
+def _exo_rows(response: dict[str, Any]) -> list[dict[str, Any]]:
+    return [row for row in (response.get("value") or []) if isinstance(row, dict)]
+
+
+def _smtp_value(value: Any) -> str:
+    return str(value or "").removeprefix("SMTP:").removeprefix("smtp:").strip().lower()
+
+
+def _exo_recipient_addresses(row: Mapping[str, Any]) -> set[str]:
+    """Return the normalized SMTP-style addresses present on an EXO recipient row."""
+    addresses = {
+        _smtp_value(row.get("PrimarySmtpAddress")),
+        _smtp_value(row.get("WindowsEmailAddress")),
+        _smtp_value(row.get("ExternalEmailAddress")),
+    }
+    raw_addresses = row.get("EmailAddresses")
+    if isinstance(raw_addresses, str):
+        addresses.add(_smtp_value(raw_addresses))
+    elif isinstance(raw_addresses, list):
+        addresses.update(_smtp_value(address) for address in raw_addresses)
+    return {address for address in addresses if address}
+
+
+def _find_conflicting_recipient(
+    recipients: list[dict[str, Any]],
+    *,
+    expected_name: str,
+    expected_addresses: set[str],
+    allowed_types: set[str],
+) -> dict[str, Any] | None:
+    """Find a non-baseline recipient that already owns the target name or address."""
+    expected_name_folded = expected_name.casefold()
+    expected_addresses_folded = {address.casefold() for address in expected_addresses if address}
+    for row in recipients:
+        recipient_type = str(row.get("RecipientTypeDetails") or row.get("RecipientType") or "").casefold()
+        if recipient_type in allowed_types:
+            continue
+        candidate_names = {
+            str(row.get("Name") or "").casefold(),
+            str(row.get("DisplayName") or "").casefold(),
+            str(row.get("Alias") or "").casefold(),
+        }
+        if expected_name_folded and expected_name_folded in candidate_names:
+            return row
+        if expected_addresses_folded and _exo_recipient_addresses(row) & expected_addresses_folded:
+            return row
+    return None
+
+
+async def _inspect_it_contact_baseline(exo_token: str, tenant_id: str) -> dict[str, Any]:
+    """Return desired baseline state, missing objects, and non-destructive conflicts."""
+    profiles, recipient_words = _it_baseline_config()
+    if not recipient_words or any(not profile["external"] for profile in profiles):
+        return {"error": "Configure both M365 IT external addresses and the recipient match value."}
+    if profiles[0]["external"].lower() == profiles[1]["external"].lower():
+        return {"error": "The IT and IT Support external email addresses must be different."}
+
+    domains = _exo_rows(await _exo_invoke_command(exo_token, tenant_id, "Get-AcceptedDomain"))
+    default = next((row for row in domains if _coerce_exo_bool(row.get("Default"))
+                    and str(row.get("DomainType") or "").lower() == "authoritative"), None)
+    domain = str((default or {}).get("DomainName") or (default or {}).get("Name") or "").strip()
+    if not domain or domain.lower().endswith(".onmicrosoft.com"):
+        return {"error": "The default authoritative domain is missing or is an onmicrosoft.com domain."}
+
+    contacts = _exo_rows(await _exo_invoke_command(exo_token, tenant_id, "Get-MailContact"))
+    groups = _exo_rows(await _exo_invoke_command(exo_token, tenant_id, "Get-DistributionGroup"))
+    recipients = _exo_rows(await _exo_invoke_command(exo_token, tenant_id, "Get-Recipient"))
+    rules = _exo_rows(await _exo_invoke_command(exo_token, tenant_id, "Get-TransportRule"))
+    missing: list[tuple[str, dict[str, str]]] = []
+    conflicts: list[str] = []
+    for profile in profiles:
+        contact = next((row for row in contacts if str(row.get("Name") or "").casefold() == profile["contact"].casefold()), None)
+        if contact is None:
+            conflict = _find_conflicting_recipient(
+                recipients,
+                expected_name=profile["contact"],
+                expected_addresses={profile["external"]},
+                allowed_types={"mailcontact"},
+            )
+            if conflict is not None:
+                conflicts.append(f'{profile["contact"]} mail contact conflicts with an existing Exchange recipient')
+            else:
+                missing.append(("contact", profile))
+        elif (_smtp_value(contact.get("ExternalEmailAddress")) != profile["external"].lower()
+              or not _coerce_exo_bool(contact.get("HiddenFromAddressListsEnabled"))):
+            conflicts.append(f'{profile["contact"]} mail contact differs from the configured baseline')
+        group = next((row for row in groups if str(row.get("Name") or "").casefold() == profile["group"].casefold()), None)
+        desired_smtp = f'{profile["alias"]}@{domain}'.lower()
+        if group is None:
+            conflict = _find_conflicting_recipient(
+                recipients,
+                expected_name=profile["group"],
+                expected_addresses={desired_smtp},
+                allowed_types={"mailuniversalsecuritygroup", "mailuniversaldistributiongroup", "groupmailbox"},
+            )
+            if conflict is not None:
+                conflicts.append(f'{profile["group"]} distribution group conflicts with an existing Exchange recipient')
+            else:
+                missing.append(("group", profile))
+        elif (_smtp_value(group.get("PrimarySmtpAddress")) != desired_smtp
+              or not _coerce_exo_bool(group.get("HiddenFromAddressListsEnabled"))
+              or _coerce_exo_bool(group.get("RequireSenderAuthenticationEnabled"))):
+            conflicts.append(f'{profile["group"]} distribution group differs from the configured baseline')
+        else:
+            members = _exo_rows(await _exo_invoke_command(
+                exo_token, tenant_id, "Get-DistributionGroupMember", {"Identity": profile["group"]}
+            ))
+            member_addresses = {
+                _smtp_value(row.get("PrimarySmtpAddress") or row.get("ExternalEmailAddress"))
+                for row in members
+            }
+            if member_addresses != {profile["external"].lower()}:
+                conflicts.append(f'{profile["group"]} distribution group membership differs from the configured baseline')
+
+    rule = next((row for row in rules if str(row.get("Name") or "").casefold() == _IT_BASELINE_RULE_NAME.casefold()), None)
+    desired_words = {recipient_words.casefold()}
+    if rule is None:
+        missing.append(("rule", {}))
+    else:
+        actual_words = rule.get("RecipientAddressContainsWords") or []
+        if isinstance(actual_words, str):
+            actual_words = [actual_words]
+        if ({str(word).casefold() for word in actual_words} != desired_words
+                or not _coerce_exo_bool(rule.get("StopRuleProcessing"))
+                or not _coerce_exo_bool(rule.get("Enabled"))):
+            conflicts.append(f'{_IT_BASELINE_RULE_NAME} transport rule differs from the configured baseline')
+    return {"profiles": profiles, "recipient_words": recipient_words, "domain": domain,
+            "missing": missing, "conflicts": conflicts}
+
+
+async def _check_it_contact_baseline(exo_token: str, tenant_id: str) -> dict[str, Any]:
+    check_id, check_name = "bp_it_contact_baseline", "IT contact forwarding baseline is configured"
+    try:
+        state = await _inspect_it_contact_baseline(exo_token, tenant_id)
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN, f"Unable to inspect Exchange Online: {exc}")
+    if state.get("error"):
+        return _result(check_id, check_name, STATUS_FAIL, state["error"])
+    if state["conflicts"]:
+        return _result(check_id, check_name, STATUS_FAIL, "; ".join(state["conflicts"]) + ". Existing objects are never overwritten.")
+    if state["missing"]:
+        labels = [kind for kind, _ in state["missing"]]
+        return _result(check_id, check_name, STATUS_FAIL, f"The baseline is incomplete ({', '.join(labels)} missing). Run remediation to create only missing objects.")
+    return _result(check_id, check_name, STATUS_PASS, "IT and IT Support contacts, groups, and external-forward transport rule match the configured baseline.")
+
+
+async def _remediate_it_contact_baseline(exo_token: str, tenant_id: str) -> tuple[bool, str]:
+    """Create missing baseline objects, refusing to modify any existing conflict."""
+    state = await _inspect_it_contact_baseline(exo_token, tenant_id)
+    if state.get("error"):
+        return False, state["error"]
+    if state["conflicts"]:
+        return False, "; ".join(state["conflicts"]) + ". Resolve the conflict manually; no changes were made."
+
+    async def _confirm_create_conflict(kind: str, profile: dict[str, str]) -> tuple[bool, str | None]:
+        refreshed_state = await _inspect_it_contact_baseline(exo_token, tenant_id)
+        if refreshed_state.get("error"):
+            return False, refreshed_state["error"]
+        if refreshed_state["conflicts"]:
+            return False, "; ".join(refreshed_state["conflicts"]) + ". Resolve the conflict manually; no changes were made."
+        if (kind, profile) in refreshed_state["missing"]:
+            label = (
+                profile.get("contact")
+                or profile.get("group")
+                or _IT_BASELINE_RULE_NAME
+            )
+            return False, (
+                f"Exchange Online reported a conflict while creating {label}, "
+                "but the baseline object is still missing. Resolve the conflict "
+                "manually; no changes were made."
+            )
+        return True, None
+
+    for kind, profile in state["missing"]:
+        if kind == "contact":
+            try:
+                await _exo_invoke_command(exo_token, tenant_id, "New-MailContact", {
+                    "Name": profile["contact"], "ExternalEmailAddress": profile["external"]
+                })
+            except M365Error as exc:
+                if exc.http_status != 409:
+                    raise
+                okay, message = await _confirm_create_conflict(kind, profile)
+                if not okay:
+                    return False, message
+            await _exo_invoke_command(exo_token, tenant_id, "Set-MailContact", {
+                "Identity": profile["contact"], "HiddenFromAddressListsEnabled": True
+            })
+        elif kind == "group":
+            try:
+                await _exo_invoke_command(exo_token, tenant_id, "New-DistributionGroup", {
+                    "Name": profile["group"], "Members": profile["external"],
+                    "PrimarySmtpAddress": f'{profile["alias"]}@{state["domain"]}',
+                    "RequireSenderAuthenticationEnabled": False,
+                })
+            except M365Error as exc:
+                if exc.http_status != 409:
+                    raise
+                okay, message = await _confirm_create_conflict(kind, profile)
+                if not okay:
+                    return False, message
+            await _exo_invoke_command(exo_token, tenant_id, "Set-DistributionGroup", {
+                "Identity": profile["group"], "HiddenFromAddressListsEnabled": True
+            })
+        elif kind == "rule":
+            try:
+                await _exo_invoke_command(exo_token, tenant_id, "New-TransportRule", {
+                    "Name": _IT_BASELINE_RULE_NAME, "Priority": 0, "Enabled": True,
+                    "RecipientAddressContainsWords": state["recipient_words"],
+                    "StopRuleProcessing": True,
+                })
+            except M365Error as exc:
+                if exc.http_status != 409:
+                    raise
+                okay, message = await _confirm_create_conflict(kind, profile)
+                if not okay:
+                    return False, message
+    return True, "Created the missing IT contact forwarding baseline objects."
+
+
 _REPORT_SETTINGS_URL = "https://graph.microsoft.com/v1.0/admin/reportSettings"
 _AUTHORIZATION_POLICY_URL = "https://graph.microsoft.com/v1.0/policies/authorizationPolicy"
 # guestUserRoleId: Guest user (most restrictive) – no directory read access
@@ -352,25 +834,25 @@ async def _check_concealed_names(token: str) -> dict[str, Any]:
     token carries ``Reports.Read.All``.
     """
     check_id = "bp_concealed_names"
-    check_name = "Display concealed user, group, and site names in all reports is enabled"
+    check_name = "Concealed user, group, and site names in all reports is disabled"
     try:
         data = await _graph_get(token, _REPORT_SETTINGS_URL)
         display_concealed = data.get("displayConcealedNames")
-        if display_concealed is True:
+        if display_concealed is False:
             return {
                 "check_id": check_id,
                 "check_name": check_name,
                 "status": STATUS_PASS,
                 "details": "Report settings are configured to display real user, group, and site names.",
             }
-        if display_concealed is False:
+        if display_concealed is True:
             return {
                 "check_id": check_id,
                 "check_name": check_name,
                 "status": STATUS_FAIL,
                 "details": (
                     "Report settings are configured to conceal user, group, and site names. "
-                    "Enable display of real names to improve report usability and auditability."
+                    "Disable name concealment to improve report usability and auditability."
                 ),
             }
         return {
@@ -420,8 +902,17 @@ _AUTH_METHODS_POLICY_URL = (
 )
 _DOMAINS_URL = "https://graph.microsoft.com/v1.0/domains"
 _DIRECTORY_ROLES_URL = "https://graph.microsoft.com/v1.0/directoryRoles"
+_DIRECTORY_ROLES_WITH_MEMBERS_URL = (
+    "https://graph.microsoft.com/v1.0/directoryRoles"
+    "?$select=id,displayName&$top=999"
+)
 _AUTHENTICATION_REQUIREMENTS_URL_TMPL = (
     "https://graph.microsoft.com/beta/users/{user_id}/authentication/requirements"
+)
+# Lowercased policy states considered actively configured for remediation gating.
+# Original Graph values: "enabled", "enabledForReportingButNotEnforced".
+_ACTIVE_CONDITIONAL_ACCESS_POLICY_STATES_LOWER = frozenset(
+    {"enabled", "enabledforreportingbutnotenforced"}
 )
 _USERS_LIST_URL = (
     "https://graph.microsoft.com/v1.0/users"
@@ -429,11 +920,12 @@ _USERS_LIST_URL = (
     ",accountEnabled,assignedLicenses"
     "&$top=999"
 )
+_GROUPS_URL = "https://graph.microsoft.com/v1.0/groups"
 _GROUPS_LIST_URL = (
-    "https://graph.microsoft.com/v1.0/groups"
-    "?$select=id,displayName,visibility,groupTypes,membershipRule"
+    _GROUPS_URL + "?$select=id,displayName,visibility,groupTypes,membershipRule"
     "&$top=999"
 )
+_GROUP_URL_TMPL = "https://graph.microsoft.com/v1.0/groups/{group_id}"
 _CA_POLICIES_URL = (
     "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies"
 )
@@ -455,12 +947,22 @@ _USER_REGISTRATION_DETAILS_URL = (
 _DEVICE_REG_POLICY_URL = (
     "https://graph.microsoft.com/beta/policies/deviceRegistrationPolicy"
 )
-_FORMS_SETTINGS_URL = "https://graph.microsoft.com/beta/admin/forms/settings"
+_FORMS_ADMIN_URL = "https://graph.microsoft.com/beta/admin/forms"
+_FORMS_PERMISSION_NAME = "OrgSettings-Forms.ReadWrite.All"
 _DIRECTORY_SETTINGS_URL = "https://graph.microsoft.com/beta/groupSettings"
 _SECURITY_DEFAULTS_URL = (
     "https://graph.microsoft.com/v1.0/policies/identitySecurityDefaultsEnforcementPolicy"
 )
 _SPO_SETTINGS_URL = "https://graph.microsoft.com/v1.0/admin/sharepoint/settings"
+_EWS_EXO_APP_ID = "00000002-0000-0ff1-ce00-000000000000"
+_EWS_FULL_ACCESS_AS_APP_ROLE = "e4a3c0d2-0003-4b45-8fd7-d8e34591ad28"
+_EWS_USAGE_REPORT_URL = (
+    "https://graph.microsoft.com/beta/reports/"
+    "getApiUsage(period='D30',serviceArea='Microsoft Exchange')"
+)
+_APP_ID_PATTERN = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
 
 # Well-known directory role template IDs used by several checks
 _ROLE_TEMPLATE_GLOBAL_ADMIN = "62e90394-69f5-4237-9190-012177145e10"
@@ -486,6 +988,67 @@ _MFA_FATIGUE_PROTECTION_KEYS: tuple[str, ...] = (
     "displayLocationInformationRequiredState",
 )
 
+# Graph no longer accepts numberMatchingRequiredState inside featureSettings
+# PATCH payloads for MicrosoftAuthenticator.  Automation can still enable the
+# app/location context prompts, but number matching must be turned on manually.
+_MFA_FATIGUE_PATCHABLE_KEYS: tuple[str, ...] = (
+    "displayAppInformationRequiredState",
+    "displayLocationInformationRequiredState",
+)
+_MFA_FATIGUE_MANUAL_ONLY_KEYS: tuple[str, ...] = ("numberMatchingRequiredState",)
+_MFA_FATIGUE_NUMBER_MATCHING_MANUAL_MESSAGE = (
+    "Microsoft Graph no longer supports toggling Microsoft Authenticator number "
+    "matching in featureSettings. Enable Number matching manually in Entra, "
+    "then re-evaluate the check."
+)
+_MFA_FATIGUE_NUMBER_MATCHING_PARTIAL_MESSAGE = (
+    "Supported Microsoft Authenticator app/location prompts were updated "
+    "automatically, but Microsoft Graph no longer supports toggling number "
+    "matching in featureSettings. Enable Number matching manually in Entra, "
+    "then re-evaluate the check."
+)
+
+_MFA_FATIGUE_REMEDIATION_PAYLOAD: dict[str, Any] = {
+    # Graph's update contract requires the concrete configuration type.  It
+    # can return 204 while silently retaining nested feature settings when the
+    # type discriminators are omitted, which makes the verification below
+    # report that app and location context are still disabled.
+    "@odata.type": (
+        "#microsoft.graph.microsoftAuthenticatorAuthenticationMethodConfiguration"
+    ),
+    "featureSettings": {
+        "@odata.type": "#microsoft.graph.microsoftAuthenticatorFeatureSettings",
+        **{
+            setting: {
+                "@odata.type": "#microsoft.graph.authenticationMethodFeatureConfiguration",
+                "state": "enabled",
+                "includeTarget": {
+                    "@odata.type": "#microsoft.graph.featureTarget",
+                    "targetType": "group",
+                    "id": "all_users",
+                },
+            }
+            for setting in _MFA_FATIGUE_PATCHABLE_KEYS
+        },
+    }
+}
+
+# Authentication-method policy updates can be eventually consistent.  Verify
+# this remediation before reporting success so the subsequent UI refresh does
+# not persist the stale pre-remediation state returned immediately after PATCH.
+_MFA_FATIGUE_VERIFICATION_ATTEMPTS = 3
+
+# SMS / Voice / Email authentication-method updates are also eventually
+# consistent. Verify that all weak methods are disabled before reporting
+# success so the UI does not immediately re-show a stale failure.
+_WEAK_AUTH_METHODS_VERIFICATION_ATTEMPTS = 3
+
+# Microsoft Forms settings updates can also be eventually consistent. Verify
+# remediation before reporting success so stale reads do not show a false fail.
+# Use more attempts than the default (5 × exponential back-off = up to ~15 s)
+# because the /beta/admin/forms/settings endpoint propagates slowly.
+_FORMS_PHISHING_VERIFICATION_ATTEMPTS = 5
+
 
 _PHISHING_RESISTANT_AUTH_STRENGTH_ID = "00000000-0000-0000-0000-000000000004"
 
@@ -510,15 +1073,424 @@ async def _safe_graph_get_all(token: str, url: str) -> list[dict[str, Any]] | No
         return None
 
 
-def _result(
-    check_id: str, check_name: str, status: str, details: str
+def _extract_app_ids(value: Any) -> list[str]:
+    """Return unique, lower-cased AppIDs found in *value*."""
+    text = ""
+    if isinstance(value, list):
+        text = ",".join(str(item or "") for item in value)
+    elif value is not None:
+        text = str(value)
+    seen: set[str] = set()
+    app_ids: list[str] = []
+    for match in _APP_ID_PATTERN.finditer(text):
+        app_id = match.group(0).lower()
+        if app_id not in seen:
+            seen.add(app_id)
+            app_ids.append(app_id)
+    return app_ids
+
+
+def _format_app_label(app_id: str, display_name: str | None, *, suffix: str | None = None) -> str:
+    label = (display_name or "").strip() or "Unknown application"
+    if suffix:
+        return f"{label} ({app_id}, {suffix})"
+    return f"{label} ({app_id})"
+
+
+def _format_ews_enabled(value: Any) -> str:
+    if value is None or str(value).strip() == "":
+        return "not explicitly set"
+    return "$true" if _coerce_exo_bool(value) else "$false"
+
+
+def _csv_row_value(row: Mapping[str, Any], *names: str) -> str:
+    normalised = {
+        re.sub(r"\s+", " ", str(key or "").strip().lower()): str(value or "").strip()
+        for key, value in row.items()
+    }
+    for name in names:
+        value = normalised.get(re.sub(r"\s+", " ", name.strip().lower()), "")
+        if value:
+            return value
+    return ""
+
+
+async def _download_graph_csv_report(access_token: str, url: str) -> list[dict[str, str]]:
+    headers = {
+        "Authorization": "Bearer " + access_token,
+        "Accept": "text/csv",
+    }
+    try:
+        async with monitored_client(httpx.AsyncClient, timeout=30, follow_redirects=False) as client:
+            response = await client.get(url, headers=headers)
+            if response.status_code in (301, 302, 303, 307, 308):
+                download_url = str(response.headers.get("Location") or "").strip()
+                if not download_url:
+                    raise M365Error("Microsoft Graph report export missing download URL")
+                csv_response = await client.get(download_url)
+            else:
+                csv_response = response
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Microsoft Graph report request timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Microsoft Graph report network error ({type(exc).__name__})"
+        ) from exc
+
+    if csv_response.status_code != 200:
+        raise M365Error(
+            f"Microsoft Graph report request failed ({csv_response.status_code})",
+            http_status=csv_response.status_code,
+        )
+
+    csv_text = csv_response.text
+    if "\x00" in csv_text:
+        for encoding in ("utf-16", "utf-16-le", "utf-16-be"):
+            try:
+                csv_text = csv_response.content.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+
+    rows: list[dict[str, str]] = []
+    reader = csv.DictReader(io.StringIO(csv_text))
+    for row in reader:
+        filtered = {str(key): str(value or "") for key, value in row.items() if key is not None}
+        if not filtered:
+            continue
+        if "sep=" in next(iter(filtered)).lower() and len(filtered) == 1:
+            continue
+        rows.append(filtered)
+    return rows
+
+
+async def _resolve_app_display_names(
+    graph_token: str, app_ids: list[str]
+) -> dict[str, str | None]:
+    resolved: dict[str, str | None] = {}
+    for app_id in app_ids:
+        try:
+            data = await _graph_get(
+                graph_token,
+                (
+                    "https://graph.microsoft.com/v1.0/servicePrincipals"
+                    f"?$filter=appId eq '{app_id}'&$select=appId,displayName"
+                ),
+            )
+        except M365Error:
+            resolved[app_id] = None
+            continue
+        rows = data.get("value") or []
+        row = rows[0] if rows and isinstance(rows[0], dict) else {}
+        name = str(row.get("displayName") or "").strip()
+        resolved[app_id] = name or None
+    return resolved
+
+
+async def _get_ews_permission_inventory(graph_token: str) -> tuple[list[dict[str, str]], list[str]]:
+    service_principals = await _graph_get(
+        graph_token,
+        (
+            "https://graph.microsoft.com/v1.0/servicePrincipals"
+            f"?$filter=appId eq '{_EWS_EXO_APP_ID}'&$select=id"
+        ),
+    )
+    exo_entries = service_principals.get("value") or []
+    exo_sp_id = str((exo_entries[0] or {}).get("id") or "").strip() if exo_entries else ""
+    if not exo_sp_id:
+        raise M365Error("Exchange Online service principal not found in tenant")
+
+    assignments = await _graph_get_all(
+        graph_token,
+        (
+            "https://graph.microsoft.com/v1.0/servicePrincipals/"
+            f"{exo_sp_id}/appRoleAssignedTo"
+            "?$select=appRoleId,principalId,principalType,principalDisplayName&$top=999"
+        ),
+    )
+    apps: list[dict[str, str]] = []
+    unresolved: list[str] = []
+    for assignment in assignments:
+        if str(assignment.get("principalType") or "").strip().lower() != "serviceprincipal":
+            continue
+        app_role_id = str(assignment.get("appRoleId") or "").strip().lower()
+        if app_role_id != _EWS_FULL_ACCESS_AS_APP_ROLE:
+            continue
+        principal_id = str(assignment.get("principalId") or "").strip()
+        fallback_name = str(assignment.get("principalDisplayName") or "").strip()
+        try:
+            principal = await _graph_get(
+                graph_token,
+                (
+                    "https://graph.microsoft.com/v1.0/servicePrincipals/"
+                    f"{principal_id}?$select=appId,displayName"
+                ),
+            )
+        except M365Error:
+            label = fallback_name or principal_id or "unknown service principal"
+            unresolved.append(label)
+            continue
+        app_id = str(principal.get("appId") or "").strip().lower()
+        display_name = str(principal.get("displayName") or fallback_name or "").strip()
+        if not app_id:
+            unresolved.append(display_name or principal_id or "unknown service principal")
+            continue
+        apps.append(
+            {
+                "app_id": app_id,
+                "display_name": display_name or "Unknown application",
+            }
+        )
+
+    seen: set[str] = set()
+    deduped: list[dict[str, str]] = []
+    for app in apps:
+        app_id = app["app_id"]
+        if app_id in seen:
+            continue
+        seen.add(app_id)
+        deduped.append(app)
+    deduped.sort(key=lambda item: ((item.get("display_name") or "").lower(), item["app_id"]))
+    return deduped, sorted(set(unresolved))
+
+
+async def _get_ews_usage_apps(
+    delegated_token: str,
+) -> list[dict[str, str | int]]:
+    rows = await _download_graph_csv_report(delegated_token, _EWS_USAGE_REPORT_URL)
+    usage_by_app: dict[str, dict[str, str | int]] = {}
+    for row in rows:
+        protocol = _csv_row_value(
+            row,
+            "Protocol",
+            "Protocol Name",
+            "API",
+            "Api",
+            "API Family",
+            "Feature",
+            "Workload",
+        )
+        if protocol:
+            if "ews" not in protocol.lower():
+                continue
+        elif not any("ews" in str(key or "").lower() for key in row):
+            continue
+        app_ids = _extract_app_ids(
+            _csv_row_value(row, "AppId", "Application Id", "ApplicationID", "Client Id")
+        )
+        if not app_ids:
+            continue
+        app_id = app_ids[0]
+        usage_raw = _csv_row_value(row, "Usage", "Calls", "Successful Requests", "Count")
+        try:
+            usage = int(float(usage_raw or "0"))
+        except ValueError:
+            usage = 0
+        last_seen = _csv_row_value(row, "Date", "Last Activity Date", "Report Refresh Date")
+        existing = usage_by_app.setdefault(
+            app_id,
+            {"app_id": app_id, "usage": 0, "last_seen": ""},
+        )
+        existing["usage"] = int(existing.get("usage") or 0) + max(usage, 0)
+        if last_seen and last_seen > str(existing.get("last_seen") or ""):
+            existing["last_seen"] = last_seen
+
+    return [
+        usage_by_app[app_id]
+        for app_id in sorted(usage_by_app)
+    ]
+
+
+async def _get_stored_best_practice_notes(company_id: int, check_id: str) -> str:
+    rows = await bp_repo.list_results(company_id)
+    row = next((item for item in rows if item.get("check_id") == check_id), None)
+    return str((row or {}).get("notes") or "")
+
+
+async def _collect_ews_dependency_state(
+    graph_token: str, company_id: int
 ) -> dict[str, Any]:
+    check_id = "bp_ews_required_apps_allowed"
+    exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+    config = await _exo_invoke_command(exo_token, tenant_id, "Get-OrganizationConfig")
+    org = _exo_first_value(config)
+    current_allowed = _extract_app_ids(org.get("EwsAllowedAppIDs"))
+    allowed_set = set(current_allowed)
+
+    permission_apps, unresolved_permission_apps = await _get_ews_permission_inventory(
+        graph_token
+    )
+
+    usage_apps: list[dict[str, str | int]] = []
+    usage_error: str | None = None
+    try:
+        delegated_token = await acquire_delegated_token(company_id)
+    except Exception:  # noqa: BLE001 - actionable state reported below
+        delegated_token = None
+    if not delegated_token:
+        usage_error = (
+            "EWS usage data is unavailable. Re-authorise portal access with a "
+            "Global Reader or Global Administrator account so the delegated "
+            "Reports.Read.All report can be queried."
+        )
+    else:
+        try:
+            usage_apps = await _get_ews_usage_apps(delegated_token)
+        except M365Error as exc:
+            usage_error = (
+                "EWS usage data could not be read from Microsoft 365 usage reports: "
+                f"{exc}"
+            )
+
+    notes = await _get_stored_best_practice_notes(company_id, check_id)
+    approved_note_ids = _extract_app_ids(notes)
+
+    permission_by_id = {app["app_id"]: dict(app) for app in permission_apps}
+    observed_ids = [str(app["app_id"]) for app in usage_apps if app.get("app_id")]
+
+    names_to_resolve = sorted(
+        (set(observed_ids) | set(approved_note_ids))
+        - set(permission_by_id)
+    )
+    resolved_names = await _resolve_app_display_names(graph_token, names_to_resolve)
+
+    observed_apps: list[dict[str, str]] = []
+    for app in usage_apps:
+        app_id = str(app["app_id"])
+        display_name = permission_by_id.get(app_id, {}).get("display_name") or resolved_names.get(app_id)
+        observed_apps.append(
+            {
+                "app_id": app_id,
+                "display_name": str(display_name or "Unknown application"),
+                "usage": str(app.get("usage") or 0),
+                "last_seen": str(app.get("last_seen") or ""),
+            }
+        )
+
+    approved_note_apps: list[dict[str, str]] = []
+    for app_id in approved_note_ids:
+        if app_id in {app["app_id"] for app in observed_apps}:
+            continue
+        display_name = permission_by_id.get(app_id, {}).get("display_name") or resolved_names.get(app_id)
+        approved_note_apps.append(
+            {
+                "app_id": app_id,
+                "display_name": str(display_name or "Unknown application"),
+            }
+        )
+
+    required_apps = observed_apps + approved_note_apps
+    missing_required_apps = [
+        app for app in required_apps if app["app_id"] not in allowed_set
+    ]
+    permission_only_apps = [
+        app
+        for app in permission_apps
+        if app["app_id"] not in {item["app_id"] for item in required_apps}
+    ]
+
     return {
+        "config": org,
+        "exo_token": exo_token,
+        "tenant_id": tenant_id,
+        "ews_enabled": org.get("EwsEnabled"),
+        "current_allowed": current_allowed,
+        "required_apps": required_apps,
+        "observed_apps": observed_apps,
+        "approved_note_apps": approved_note_apps,
+        "permission_only_apps": permission_only_apps,
+        "missing_required_apps": missing_required_apps,
+        "unresolved_permission_apps": unresolved_permission_apps,
+        "usage_error": usage_error,
+    }
+
+
+async def _get_directory_role_member_ids(token: str) -> set[str] | None:
+    """Return IDs for accounts assigned to any active directory role.
+
+    Unlicensed administrator accounts can look identical to shared mailboxes in
+    the Graph users response.  Enumerating active directory roles prevents the
+    shared-mailbox check (and, critically, its remediation) from treating those
+    privileged identities as mailboxes.  ``None`` is returned if role data is
+    incomplete so callers can fail closed rather than risk disabling an admin.
+    """
+    roles = await _safe_graph_get_all(token, _DIRECTORY_ROLES_WITH_MEMBERS_URL)
+    if roles is None:
+        return None
+
+    member_ids: set[str] = set()
+    for role in roles:
+        role_id = str(role.get("id") or "").strip()
+        if not role_id:
+            continue
+        members = await _safe_graph_get_all(
+            token,
+            f"https://graph.microsoft.com/v1.0/directoryRoles/{role_id}/"
+            "transitiveMembers/microsoft.graph.user"
+            "?$select=id&$top=999",
+        )
+        if members is None:
+            return None
+        member_ids.update(
+            str(member.get("id"))
+            for member in members
+            if member.get("id")
+        )
+    return member_ids
+
+
+def _result(
+    check_id: str, check_name: str, status: str, details: str,
+    affected_accounts: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    result = {
         "check_id": check_id,
         "check_name": check_name,
         "status": status,
         "details": details,
     }
+    if affected_accounts is not None:
+        result["affected_accounts"] = affected_accounts
+    return result
+
+
+def _account_finding(account: dict[str, Any], *, identity_key: str = "id") -> dict[str, str]:
+    """Build a safe, stable account reference for persistence and display."""
+    account_id = str(account.get(identity_key) or account.get("UserPrincipalName") or account.get("Identity") or "").strip()
+    label = str(
+        account.get("userPrincipalName") or account.get("UserPrincipalName")
+        or account.get("displayName") or account.get("DisplayName")
+        or account.get("Identity") or account_id
+    ).strip()
+    return {"id": account_id, "name": label}
+
+
+async def _apply_account_exclusions(
+    company_id: int, check_id: str, status: str, details: str,
+    affected_accounts: list[dict[str, str]],
+) -> tuple[str, str, list[dict[str, str]]]:
+    """Mark account findings excluded and calculate the effective check status."""
+    exclusions = await bp_repo.get_account_exclusions(company_id, check_id)
+    excluded_ids = {account_id for _, account_id in exclusions}
+    accounts = [
+        {**account, "excluded": str(account.get("id") or "") in excluded_ids}
+        for account in affected_accounts
+        if account.get("id") and account.get("name")
+    ]
+    active = [account for account in accounts if not account["excluded"]]
+    excluded_count = len(accounts) - len(active)
+    if accounts and not active:
+        return STATUS_PASS, f"All {len(accounts)} listed account finding(s) are excluded for this check.", accounts
+    if excluded_count:
+        names = ", ".join(account["name"] for account in active[:5])
+        suffix = "" if len(active) <= 5 else f" (and {len(active) - 5} more)"
+        details = (
+            f"{len(active)} account(s) require attention: {names}{suffix}. "
+            f"{excluded_count} account(s) excluded for this check."
+        )
+    return status, details, accounts
 
 
 def _manual_review_factory(
@@ -553,7 +1525,7 @@ async def _dns_txt_records(domain: str) -> list[str] | None:
     domain = domain.rstrip(".")
     url = f"https://dns.google/resolve?name={domain}&type=TXT"
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=10) as client:
             resp = await client.get(url, headers={"Accept": "application/dns-json"})
         if resp.status_code != 200:
             return None
@@ -727,27 +1699,44 @@ async def _check_sharepoint_sign_out_inactive_users(token: str) -> dict[str, Any
     settings = await _get_spo_settings(token)
     if settings is None:
         return _result(check_id, check_name, STATUS_UNKNOWN, _SPO_MISSING_PERM_MSG)
-    enabled = settings.get("idleSignOutEnabled")
-    if enabled is None:
+    # Graph exposes the SPO browser idle sign-out policy as the nested
+    # ``idleSessionSignOut`` object (isEnabled / warnAfterInSeconds /
+    # signOutAfterInSeconds).  Both timers are measured from the start of
+    # inactivity, so the sign-out timer alone is the effective session limit.
+    idle = settings.get("idleSessionSignOut")
+    if not isinstance(idle, dict) or idle.get("isEnabled") is None:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       "Unable to read idleSignOutEnabled from SharePoint tenant settings. "
-                       "Run: Get-SPOTenant | Select SignOutInactiveUsersAfter to verify manually.")
-    if not enabled:
+                       "Unable to read idleSessionSignOut from SharePoint tenant settings. "
+                       "Run: Get-SPOBrowserIdleSignOut to verify manually.")
+    if idle.get("isEnabled") is not True:
         return _result(check_id, check_name, STATUS_FAIL,
                        "Idle session sign-out is not enabled for SharePoint Online. "
-                       "Run: Set-SPOTenant -SignOutInactiveUsersAfter 01:00:00")
-    # CIS recommends the combined timeout (warn + sign-out) does not exceed 1 hour (3600 s).
-    warn_secs = settings.get("idleSignOutWarnAfterSeconds") or 0
-    signout_secs = settings.get("idleSignOutSignOutAfterSeconds") or 0
-    total_secs = int(warn_secs) + int(signout_secs)
-    if total_secs > 3600:
+                       "Run: Set-SPOBrowserIdleSignOut -Enabled $true "
+                       "-WarnAfter (New-TimeSpan -Minutes 45) -SignOutAfter (New-TimeSpan -Hours 1)")
+    try:
+        signout_secs = int(idle.get("signOutAfterInSeconds") or 0)
+    except (TypeError, ValueError):
+        signout_secs = 0
+    if signout_secs <= 0 or signout_secs > _SPO_IDLE_SIGN_OUT_MAX_SECONDS:
         return _result(check_id, check_name, STATUS_FAIL,
-                       f"Idle session sign-out is enabled but the total timeout "
-                       f"({total_secs // 60} min) exceeds the recommended 60 minutes. "
-                       "Run: Set-SPOTenant -SignOutInactiveUsersAfter 01:00:00")
+                       f"Idle session sign-out is enabled but users are signed out after "
+                       f"{signout_secs // 60} min, exceeding the recommended 60 minutes. "
+                       "Run: Set-SPOBrowserIdleSignOut -Enabled $true "
+                       "-WarnAfter (New-TimeSpan -Minutes 45) -SignOutAfter (New-TimeSpan -Hours 1)")
     return _result(check_id, check_name, STATUS_PASS,
-                   f"Idle session sign-out is enabled with a total timeout of "
-                   f"{total_secs // 60} min for SharePoint Online.")
+                   f"Idle session sign-out is enabled; inactive users are signed out after "
+                   f"{signout_secs // 60} min.")
+
+
+# CIS recommends signing inactive browser sessions out of SharePoint within 1 hour.
+_SPO_IDLE_SIGN_OUT_MAX_SECONDS = 3600
+_SPO_IDLE_SIGN_OUT_REMEDIATION_PAYLOAD: dict[str, Any] = {
+    "idleSessionSignOut": {
+        "isEnabled": True,
+        "warnAfterInSeconds": 2700,
+        "signOutAfterInSeconds": _SPO_IDLE_SIGN_OUT_MAX_SECONDS,
+    }
+}
 
 
 # URL for listing organisation-level directory settings (includes password
@@ -989,11 +1978,9 @@ async def _check_zap_teams_on(
 # Teams Service Administrator RBAC role on the service principal).
 
 _TEAMS_PERMISSION_HINT = (
-    " The service principal requires the Teams.ManageAsApp app role "
-    "and the Teams Service Administrator directory role. Re-run the "
-    "'Authorize portal access' flow to grant the required permissions, "
-    "or assign them manually in Microsoft Entra ID > Roles and "
-    "administrators > Teams Service Administrator."
+    " Grant Microsoft Graph Organization.Read.All and assign the service "
+    "principal the Teams Service Administrator role; do not add permissions "
+    "to the Skype and Teams Tenant Admin API."
 )
 
 # Checks that call Teams PowerShell cmdlets via the Exchange Online InvokeCommand
@@ -1025,6 +2012,27 @@ def _teams_ps_error_detail(exc: M365Error, cmdlet: str) -> str:
     return f"Unable to query {cmdlet}: {exc}"
 
 
+def _failure_status(exc: M365Error) -> str:
+    """Classify inability to assess separately from policy non-compliance."""
+    if getattr(exc, "http_status", None) in {401, 403}:
+        return STATUS_PERMISSION_MISSING
+    return STATUS_ASSESSMENT_FAILED
+
+
+async def _teams_invoke_command(
+    tokens: tuple[str, str], tenant_id: str, cmdlet: str,
+    parameters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    try:
+        return await invoke_teams_command(
+            tenant_id=tenant_id, graph_token=tokens[0], teams_token=tokens[1],
+            command=cmdlet, parameters=parameters,
+        )
+    except ProviderCommandError as exc:
+        status = 403 if exc.kind == "rbac_denied" else 400
+        raise M365Error(f"Teams provider {exc.kind}: {exc}", http_status=status) from exc
+
+
 async def _check_anon_dialin_cannot_start_meeting(
     exo_token: str, tenant_id: str
 ) -> dict[str, Any]:
@@ -1032,11 +2040,11 @@ async def _check_anon_dialin_cannot_start_meeting(
     check_id = "bp_anon_dialin_cannot_start_meeting"
     check_name = "Anonymous users and dial-in callers can't start a meeting"
     try:
-        data = await _exo_invoke_command(
+        data = await _teams_invoke_command(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
+        return _result(check_id, check_name, _failure_status(exc),
                        _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
@@ -1067,18 +2075,21 @@ async def _check_only_org_bypass_lobby(
     check_id = "bp_only_org_can_bypass_lobby"
     check_name = "Only people in my org can bypass the lobby"
     try:
-        data = await _exo_invoke_command(
+        data = await _teams_invoke_command(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
+        return _result(check_id, check_name, _failure_status(exc),
                        _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
                        "No Global Teams meeting policy returned.")
     admitted = str(cfg.get("AutoAdmittedUsers") or "").lower()
-    passing_values = {"everyoneincompany", "everyoneincompanyexcludingguests"}
+    # InvitedUsers is stricter than organisation-only admission, so it must
+    # also pass; otherwise this check and bp_invited_users_auto_admitted can
+    # never both be satisfied.
+    passing_values = {"everyoneincompany", "everyoneincompanyexcludingguests", "invitedusers"}
     if admitted in passing_values:
         return _result(check_id, check_name, STATUS_PASS,
                        f"AutoAdmittedUsers='{cfg.get('AutoAdmittedUsers')}'; only org members bypass the lobby.")
@@ -1094,11 +2105,11 @@ async def _check_invited_users_auto_admitted(
     check_id = "bp_invited_users_auto_admitted"
     check_name = "Only invited users should be automatically admitted to Teams meetings"
     try:
-        data = await _exo_invoke_command(
+        data = await _teams_invoke_command(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
+        return _result(check_id, check_name, _failure_status(exc),
                        _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
@@ -1120,11 +2131,11 @@ async def _check_external_participants_no_control(
     check_id = "bp_external_participants_no_control"
     check_name = "External participants can't give or request control"
     try:
-        data = await _exo_invoke_command(
+        data = await _teams_invoke_command(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
+        return _result(check_id, check_name, _failure_status(exc),
                        _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
@@ -1146,11 +2157,11 @@ async def _check_external_users_cannot_initiate(
     check_id = "bp_external_users_cannot_initiate"
     check_name = "External Teams users cannot initiate conversations"
     try:
-        data = await _exo_invoke_command(
+        data = await _teams_invoke_command(
             exo_token, tenant_id, "Get-CsTenantFederationConfiguration"
         )
     except M365Error as exc:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
+        return _result(check_id, check_name, _failure_status(exc),
                        _teams_ps_error_detail(exc, "Get-CsTenantFederationConfiguration"))
     cfg = _exo_first_value(data)
     if not cfg:
@@ -1183,11 +2194,11 @@ async def _check_teams_external_files_approved_storage(
     check_id = "bp_teams_external_files_approved_storage"
     check_name = "External file sharing in Teams is enabled for only approved cloud storage services"
     try:
-        data = await _exo_invoke_command(
+        data = await _teams_invoke_command(
             exo_token, tenant_id, "Get-CsTeamsClientConfiguration", {"Identity": "Global"}
         )
     except M365Error as exc:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
+        return _result(check_id, check_name, _failure_status(exc),
                        _teams_ps_error_detail(exc, "Get-CsTeamsClientConfiguration"))
     cfg = _exo_first_value(data)
     if not cfg:
@@ -1219,11 +2230,11 @@ async def _check_restrict_anon_users_join_meeting(
     check_id = "bp_restrict_anon_users_join_meeting"
     check_name = "Restrict anonymous users from joining meetings"
     try:
-        data = await _exo_invoke_command(
+        data = await _teams_invoke_command(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
+        return _result(check_id, check_name, _failure_status(exc),
                        _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
@@ -1245,11 +2256,11 @@ async def _check_restrict_anon_users_start_meeting(
     check_id = "bp_restrict_anon_users_start_meeting"
     check_name = "Restrict anonymous users from starting Teams meetings"
     try:
-        data = await _exo_invoke_command(
+        data = await _teams_invoke_command(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
+        return _result(check_id, check_name, _failure_status(exc),
                        _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
@@ -1264,31 +2275,56 @@ async def _check_restrict_anon_users_start_meeting(
                    "Run: Set-CsTeamsMeetingPolicy -Identity Global -AllowAnonymousUsersToStartMeeting $false")
 
 
+def _dialin_lobby_check_factory(check_id: str, check_name: str) -> BestPracticeRunner:
+    """Build a Teams check verifying PSTN callers cannot bypass the lobby."""
+
+    async def _check(tokens: tuple[str, str], tenant_id: str) -> dict[str, Any]:
+        try:
+            data = await _teams_invoke_command(
+                tokens, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
+            )
+        except M365Error as exc:
+            return _result(check_id, check_name, _failure_status(exc),
+                           _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
+        cfg = _exo_first_value(data)
+        if not cfg:
+            return _result(check_id, check_name, STATUS_UNKNOWN,
+                           "No Global Teams meeting policy returned.")
+        bypass = cfg.get("AllowPSTNUsersToBypassLobby")
+        if bypass is False:
+            return _result(check_id, check_name, STATUS_PASS,
+                           "AllowPSTNUsersToBypassLobby=False; dial-in callers wait in the lobby.")
+        return _result(check_id, check_name, STATUS_FAIL,
+                       f"AllowPSTNUsersToBypassLobby={bypass}; dial-in callers can bypass the lobby. "
+                       "Run: Set-CsTeamsMeetingPolicy -Identity Global -AllowPSTNUsersToBypassLobby $false")
+
+    return _check
+
+
 # ---------------------------------------------------------------------------
 # DNS checks (SPF / DMARC via DNS-over-HTTPS)
 # ---------------------------------------------------------------------------
 
 
-async def _check_spf_records_published(token: str) -> dict[str, Any]:
+async def _check_spf_records_published(
+    _token: str, email_domains: list[str]
+) -> dict[str, Any]:
     check_id = "bp_spf_records_published"
     check_name = "SPF records are published for all Exchange Online domains"
-    domains_data = await _safe_graph_get_all(token, _DOMAINS_URL)
-    if domains_data is None:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
-                       "Unable to enumerate accepted domains from Microsoft Graph.")
-    exchange_domains = [
-        d.get("id") or d.get("name") or ""
-        for d in domains_data
-        if isinstance(d, dict)
-        and d.get("isVerified") is True
-        and not str(d.get("id") or "").endswith(".onmicrosoft.com")
-    ]
-    if not exchange_domains:
+    configured_domains = sorted(
+        {
+            str(domain).strip().lower()
+            for domain in email_domains
+            if str(domain).strip()
+        }
+    )
+    if not configured_domains:
         return _result(check_id, check_name, STATUS_PASS,
-                       "No custom verified domains found; SPF records are not required.")
+                       "No Email domains are configured for this company in MyPortal; "
+                       "SPF records are not required.")
     missing: list[str] = []
     errored: list[str] = []
-    for domain in exchange_domains:
+    for domain in configured_domains:
         records = await _dns_txt_records(domain)
         if records is None:
             errored.append(domain)
@@ -1302,7 +2338,8 @@ async def _check_spf_records_published(token: str) -> dict[str, Any]:
                        "verify SPF records manually: " + ", ".join(errored[:5]))
     if not missing:
         return _result(check_id, check_name, STATUS_PASS,
-                       f"SPF records found for all {len(exchange_domains)} verified domain(s).")
+                       f"SPF records found for all {len(configured_domains)} "
+                       "MyPortal Email domain(s).")
     suffix = f" (DNS errors for {len(errored)} domain(s))" if errored else ""
     return _result(check_id, check_name, STATUS_FAIL,
                    f"SPF TXT record missing for {len(missing)} domain(s): "
@@ -1310,26 +2347,25 @@ async def _check_spf_records_published(token: str) -> dict[str, Any]:
                    + ". Publish: v=spf1 include:spf.protection.outlook.com -all")
 
 
-async def _check_dmarc_records_published(token: str) -> dict[str, Any]:
+async def _check_dmarc_records_published(
+    _token: str, email_domains: list[str]
+) -> dict[str, Any]:
     check_id = "bp_dmarc_records_published"
-    check_name = "DMARC records for all Exchange Online domains are published"
-    domains_data = await _safe_graph_get_all(token, _DOMAINS_URL)
-    if domains_data is None:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
-                       "Unable to enumerate accepted domains from Microsoft Graph.")
-    exchange_domains = [
-        d.get("id") or d.get("name") or ""
-        for d in domains_data
-        if isinstance(d, dict)
-        and d.get("isVerified") is True
-        and not str(d.get("id") or "").endswith(".onmicrosoft.com")
-    ]
-    if not exchange_domains:
+    check_name = "DMARC records for all MyPortal Email domains are published"
+    configured_domains = sorted(
+        {
+            str(domain).strip().lower()
+            for domain in email_domains
+            if str(domain).strip()
+        }
+    )
+    if not configured_domains:
         return _result(check_id, check_name, STATUS_PASS,
-                       "No custom verified domains found; DMARC records are not required.")
+                       "No Email domains are configured for this company in MyPortal; "
+                       "DMARC records are not required.")
     missing: list[str] = []
     errored: list[str] = []
-    for domain in exchange_domains:
+    for domain in configured_domains:
         records = await _dns_txt_records(f"_dmarc.{domain}")
         if records is None:
             errored.append(domain)
@@ -1342,13 +2378,17 @@ async def _check_dmarc_records_published(token: str) -> dict[str, Any]:
                        f"DNS lookup failed for {len(errored)} domain(s); "
                        "verify DMARC records manually: " + ", ".join(errored[:5]))
     if not missing:
-        return _result(check_id, check_name, STATUS_PASS,
-                       f"DMARC records found for all {len(exchange_domains)} verified domain(s).")
+        return _result(
+            check_id,
+            check_name,
+            STATUS_PASS,
+            f"DMARC records found for all {len(configured_domains)} MyPortal Email domain(s).",
+        )
     suffix = f" (DNS errors for {len(errored)} domain(s))" if errored else ""
     return _result(check_id, check_name, STATUS_FAIL,
                    f"DMARC TXT record missing for {len(missing)} domain(s): "
                    + ", ".join(missing[:5]) + suffix
-                   + ". Publish _dmarc.<domain> TXT: v=DMARC1; p=quarantine; rua=mailto:dmarc@<domain>")
+                   + ". Publish _dmarc.<domain> TXT and use the company-specific DMARC reporting address shown in MyPortal")
 
 
 # ---------------------------------------------------------------------------
@@ -1365,7 +2405,7 @@ async def _check_per_user_mfa_disabled(token: str) -> dict[str, Any]:
             check_id, check_name, STATUS_UNKNOWN,
             "Unable to enumerate users to inspect per-user MFA state.",
         )
-    enabled_users: list[str] = []
+    enabled_users: list[dict[str, str]] = []
     inspected = 0
     # Limit to a reasonable sample to avoid O(n) Graph calls on large tenants
     for user in users[:200]:
@@ -1379,9 +2419,7 @@ async def _check_per_user_mfa_disabled(token: str) -> dict[str, Any]:
         inspected += 1
         state = str(data.get("perUserMfaState") or "").lower()
         if state and state != "disabled":
-            enabled_users.append(
-                user.get("userPrincipalName") or user.get("displayName") or user_id
-            )
+            enabled_users.append(_account_finding(user))
     if inspected == 0:
         return _result(
             check_id, check_name, STATUS_UNKNOWN,
@@ -1392,12 +2430,13 @@ async def _check_per_user_mfa_disabled(token: str) -> dict[str, Any]:
             check_id, check_name, STATUS_PASS,
             f"Per-user MFA is disabled across {inspected} sampled accounts.",
         )
-    sample = ", ".join(enabled_users[:5])
+    sample = ", ".join(account["name"] for account in enabled_users[:5])
     suffix = "" if len(enabled_users) <= 5 else f" (and {len(enabled_users) - 5} more)"
     return _result(
         check_id, check_name, STATUS_FAIL,
         f"Per-user MFA is still enabled on {len(enabled_users)} accounts: {sample}{suffix}. "
         "Migrate these users to Conditional Access-driven MFA and disable per-user MFA.",
+        enabled_users,
     )
 
 
@@ -1585,7 +2624,7 @@ async def _check_admin_accounts_cloud_only(token: str) -> dict[str, Any]:
             check_id, check_name, STATUS_UNKNOWN,
             "No privileged role members found to inspect.",
         )
-    synced: list[str] = []
+    synced: list[dict[str, str]] = []
     for uid in admin_ids:
         data = await _safe_graph_get(
             token,
@@ -1593,7 +2632,7 @@ async def _check_admin_accounts_cloud_only(token: str) -> dict[str, Any]:
             "?$select=userPrincipalName,onPremisesSyncEnabled",
         )
         if data and data.get("onPremisesSyncEnabled"):
-            synced.append(data.get("userPrincipalName") or uid)
+            synced.append({"id": uid, "name": data.get("userPrincipalName") or uid})
     if not synced:
         return _result(
             check_id, check_name, STATUS_PASS,
@@ -1601,7 +2640,8 @@ async def _check_admin_accounts_cloud_only(token: str) -> dict[str, Any]:
         )
     return _result(
         check_id, check_name, STATUS_FAIL,
-        f"{len(synced)} admin account(s) are synced from on-premises AD: " + ", ".join(synced[:5]),
+        f"{len(synced)} admin account(s) are synced from on-premises AD: "
+        + ", ".join(account["name"] for account in synced[:5]), synced,
     )
 
 
@@ -1614,7 +2654,7 @@ async def _check_admin_accounts_reduced_license(token: str) -> dict[str, Any]:
             check_id, check_name, STATUS_UNKNOWN,
             "Unable to enumerate directory role memberships.",
         )
-    overlicensed: list[str] = []
+    overlicensed: list[dict[str, str]] = []
     for uid in admin_ids:
         data = await _safe_graph_get(
             token,
@@ -1631,7 +2671,7 @@ async def _check_admin_accounts_reduced_license(token: str) -> dict[str, Any]:
         # both make clear this is an indicative finding and admins should
         # confirm before removing licenses.
         if len(skus) > 1:
-            overlicensed.append(data.get("userPrincipalName") or uid)
+            overlicensed.append({"id": uid, "name": data.get("userPrincipalName") or uid})
     if not overlicensed:
         return _result(
             check_id, check_name, STATUS_PASS,
@@ -1641,7 +2681,8 @@ async def _check_admin_accounts_reduced_license(token: str) -> dict[str, Any]:
         check_id, check_name, STATUS_FAIL,
         f"Heuristic: {len(overlicensed)} admin account(s) hold multiple license SKUs and "
         "may be candidates for license reduction (manual verification recommended – some "
-        "accounts may legitimately require multiple SKUs): " + ", ".join(overlicensed[:5]),
+        "accounts may legitimately require multiple SKUs): "
+        + ", ".join(account["name"] for account in overlicensed[:5]), overlicensed,
     )
 
 
@@ -1654,12 +2695,12 @@ async def _check_all_members_mfa_capable(token: str) -> dict[str, Any]:
             check_id, check_name, STATUS_UNKNOWN,
             "Unable to read authentication-methods user registration details report.",
         )
-    not_capable: list[str] = []
+    not_capable: list[dict[str, str]] = []
     for row in rows:
         if str(row.get("userType") or "").lower() != "member":
             continue
         if not row.get("isMfaCapable"):
-            not_capable.append(row.get("userPrincipalName") or row.get("id") or "?")
+            not_capable.append(_account_finding(row))
     if not not_capable:
         return _result(
             check_id, check_name, STATUS_PASS,
@@ -1667,7 +2708,8 @@ async def _check_all_members_mfa_capable(token: str) -> dict[str, Any]:
         )
     return _result(
         check_id, check_name, STATUS_FAIL,
-        f"{len(not_capable)} member user(s) are not MFA capable: " + ", ".join(not_capable[:5]),
+        f"{len(not_capable)} member user(s) are not MFA capable: "
+        + ", ".join(account["name"] for account in not_capable[:5]), not_capable,
     )
 
 
@@ -1895,9 +2937,11 @@ async def _check_only_managed_public_groups(token: str) -> dict[str, Any]:
         return _result(check_id, check_name, STATUS_PASS, "No public Microsoft 365 groups exist.")
     names = ", ".join(g.get("displayName") or "?" for g in public[:5])
     suffix = "" if len(public) <= 5 else f" (and {len(public) - 5} more)"
+    affected_accounts = [_account_finding(group) for group in public]
     return _result(
         check_id, check_name, STATUS_FAIL,
         f"{len(public)} public Microsoft 365 group(s) exist – review and convert unapproved ones to Private: {names}{suffix}.",
+        affected_accounts=affected_accounts,
     )
 
 
@@ -2049,15 +3093,187 @@ async def _check_authenticator_mfa_fatigue(token: str) -> dict[str, Any]:
     )
     if data is None:
         return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to read Microsoft Authenticator policy.")
-    fs = data.get("featureSettings") or {}
-    missing = [
-        k for k in _MFA_FATIGUE_PROTECTION_KEYS
-        if str(((fs.get(k) or {}).get("state")) or "").lower() != "enabled"
-    ]
+    missing = _get_authenticator_mfa_fatigue_missing_settings(data)
     if not missing:
         return _result(check_id, check_name, STATUS_PASS, "All MFA-fatigue protections are enabled.")
     return _result(check_id, check_name, STATUS_FAIL,
                    "Disabled MFA-fatigue protections: " + ", ".join(missing))
+
+
+def _get_authenticator_mfa_fatigue_missing_settings(data: dict[str, Any]) -> list[str]:
+    """Return the Authenticator MFA-fatigue protections that are not enabled."""
+    fs = data.get("featureSettings") or {}
+    return [
+        k for k in _MFA_FATIGUE_PROTECTION_KEYS
+        if str(((fs.get(k) or {}).get("state")) or "").lower() != "enabled"
+    ]
+
+
+async def _check_ews_required_apps_allowed(
+    graph_token: str, company_id: int
+) -> dict[str, Any]:
+    check_id = "bp_ews_required_apps_allowed"
+    check_name = "Exchange Web Services is enabled only for confirmed required applications"
+    try:
+        state = await _collect_ews_dependency_state(graph_token, company_id)
+    except M365Error as exc:
+        return _result(
+            check_id,
+            check_name,
+            STATUS_UNKNOWN,
+            f"Unable to inspect EWS configuration and dependencies: {exc}",
+        )
+
+    current_allowed = state["current_allowed"]
+    observed_apps = state["observed_apps"]
+    approved_note_apps = state["approved_note_apps"]
+    permission_only_apps = state["permission_only_apps"]
+    missing_required_apps = state["missing_required_apps"]
+    unresolved_permission_apps = state["unresolved_permission_apps"]
+    usage_error = state["usage_error"]
+
+    allowed_suffix = (
+        f": {', '.join(current_allowed[:5])}"
+        + ("…" if len(current_allowed) > 5 else "")
+        if current_allowed
+        else "."
+    )
+    details_parts = [
+        "Current configuration: "
+        f"EwsEnabled is {_format_ews_enabled(state['ews_enabled'])}; "
+        f"EwsAllowedAppIDs contains {len(current_allowed)} AppID(s){allowed_suffix}"
+    ]
+    if observed_apps:
+        details_parts.append(
+            "Observed EWS usage: "
+            + ", ".join(
+                _format_app_label(
+                    app["app_id"],
+                    app.get("display_name"),
+                    suffix=f"usage={app.get('usage') or '0'}"
+                    + (
+                        f", last seen {app['last_seen']}"
+                        if app.get("last_seen")
+                        else ""
+                    ),
+                )
+                for app in observed_apps[:5]
+            )
+            + ("." if len(observed_apps) <= 5 else f" (and {len(observed_apps) - 5} more).")
+        )
+    elif usage_error:
+        details_parts.append(
+            "Observed EWS usage could not be confirmed because Microsoft 365 usage "
+            "report data was unavailable."
+        )
+    else:
+        details_parts.append("Observed EWS usage: none confirmed in the available usage report data.")
+    if approved_note_apps:
+        details_parts.append(
+            "Approved from notes for infrequent or manually confirmed use: "
+            + ", ".join(
+                _format_app_label(app["app_id"], app.get("display_name"))
+                for app in approved_note_apps[:5]
+            )
+            + ("." if len(approved_note_apps) <= 5 else f" (and {len(approved_note_apps) - 5} more).")
+        )
+    if permission_only_apps:
+        details_parts.append(
+            "EWS application permissions only (review before allowing): "
+            + ", ".join(
+                _format_app_label(app["app_id"], app.get("display_name"))
+                for app in permission_only_apps[:5]
+            )
+            + ("." if len(permission_only_apps) <= 5 else f" (and {len(permission_only_apps) - 5} more).")
+        )
+    if unresolved_permission_apps:
+        details_parts.append(
+            "Unresolved applications with EWS-related permissions require review: "
+            + ", ".join(unresolved_permission_apps[:5])
+            + ("." if len(unresolved_permission_apps) <= 5 else f" (and {len(unresolved_permission_apps) - 5} more).")
+        )
+    if missing_required_apps:
+        details_parts.append(
+            "Required AppIDs missing from EwsAllowedAppIDs: "
+            + ", ".join(
+                _format_app_label(app["app_id"], app.get("display_name"))
+                for app in missing_required_apps[:5]
+            )
+            + ("." if len(missing_required_apps) <= 5 else f" (and {len(missing_required_apps) - 5} more).")
+        )
+    if usage_error:
+        details_parts.append(usage_error)
+    if permission_only_apps or usage_error:
+        details_parts.append(
+            "Add reviewed AppIDs to the check notes if you need remediation to include infrequently used applications."
+        )
+
+    required_apps = state["required_apps"]
+    if required_apps and (
+        state["ews_enabled"] is not True or bool(missing_required_apps)
+    ):
+        status = STATUS_FAIL
+    elif usage_error or unresolved_permission_apps:
+        status = STATUS_UNKNOWN
+    else:
+        status = STATUS_PASS
+
+    observed_ids = {app["app_id"] for app in observed_apps}
+    affected_accounts = [
+        {
+            "id": app["app_id"],
+            "name": _format_app_label(
+                app["app_id"],
+                app.get("display_name"),
+                suffix=(
+                    "observed EWS usage"
+                    if app["app_id"] in observed_ids
+                    else "approved in notes"
+                ),
+            ),
+        }
+        for app in missing_required_apps
+    ]
+    return _result(
+        check_id,
+        check_name,
+        status,
+        " ".join(details_parts),
+        affected_accounts=affected_accounts or None,
+    )
+
+
+async def _remediate_authenticator_mfa_fatigue(token: str) -> tuple[bool, str]:
+    """Apply and verify Authenticator protections despite Graph propagation lag."""
+    url = (
+        f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/"
+        "MicrosoftAuthenticator"
+    )
+    current = await _safe_graph_get(token, url)
+    if current is None:
+        return False, "Unable to read Microsoft Authenticator policy."
+    missing = _get_authenticator_mfa_fatigue_missing_settings(current)
+    if missing and set(missing).issubset(_MFA_FATIGUE_MANUAL_ONLY_KEYS):
+        return False, _MFA_FATIGUE_NUMBER_MATCHING_MANUAL_MESSAGE
+    await _graph_patch(token, url, _MFA_FATIGUE_REMEDIATION_PAYLOAD)
+
+    latest_details = "Microsoft Graph did not return the updated policy."
+    for attempt in range(1, _MFA_FATIGUE_VERIFICATION_ATTEMPTS + 1):
+        data = await _safe_graph_get(token, url)
+        if data is None:
+            if attempt < _MFA_FATIGUE_VERIFICATION_ATTEMPTS:
+                await asyncio.sleep(_retry_backoff_seconds(attempt))
+            continue
+        missing = _get_authenticator_mfa_fatigue_missing_settings(data)
+        if not missing:
+            return True, ""
+        latest_details = "Disabled MFA-fatigue protections: " + ", ".join(missing)
+        if set(missing).issubset(_MFA_FATIGUE_MANUAL_ONLY_KEYS):
+            return False, _MFA_FATIGUE_NUMBER_MATCHING_PARTIAL_MESSAGE
+        if attempt < _MFA_FATIGUE_VERIFICATION_ATTEMPTS:
+            await asyncio.sleep(_retry_backoff_seconds(attempt))
+
+    return False, f"Microsoft Graph did not confirm the updated policy: {latest_details}"
 
 
 async def _check_weak_auth_methods_disabled(token: str) -> dict[str, Any]:
@@ -2079,15 +3295,157 @@ async def _check_weak_auth_methods_disabled(token: str) -> dict[str, Any]:
                    "Weak methods still enabled: " + ", ".join(issues))
 
 
+_WEAK_AUTH_METHOD_ODATA_TYPES = {
+    "Sms": "#microsoft.graph.smsAuthenticationMethodConfiguration",
+    "Voice": "#microsoft.graph.voiceAuthenticationMethodConfiguration",
+    "Email": "#microsoft.graph.emailAuthenticationMethodConfiguration",
+}
+
+
+async def _remediate_weak_auth_methods_disabled(token: str) -> tuple[bool, str]:
+    weak_methods = ("Sms", "Voice", "Email")
+    for method in weak_methods:
+        # Graph requires the concrete configuration type on PATCH; without it
+        # the update can be rejected or silently ignored.
+        await _graph_patch(
+            token,
+            f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/{method}",
+            {
+                "@odata.type": _WEAK_AUTH_METHOD_ODATA_TYPES[method],
+                "state": "disabled",
+            },
+        )
+
+    latest_details = "Microsoft Graph did not return the updated authentication method policy."
+    for attempt in range(1, _WEAK_AUTH_METHODS_VERIFICATION_ATTEMPTS + 1):
+        remaining: list[str] = []
+        unreadable: list[str] = []
+        for method in weak_methods:
+            data = await _safe_graph_get(
+                token,
+                f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/{method}",
+            )
+            if data is None:
+                unreadable.append(method)
+                continue
+            if str(data.get("state") or "").lower() != "disabled":
+                remaining.append(method)
+
+        if not remaining and not unreadable:
+            return True, ""
+
+        if remaining:
+            latest_details = "Weak methods still enabled: " + ", ".join(remaining)
+        else:
+            latest_details = (
+                "Unable to confirm weak authentication method state for: "
+                + ", ".join(unreadable)
+            )
+
+        if attempt < _WEAK_AUTH_METHODS_VERIFICATION_ATTEMPTS:
+            await asyncio.sleep(_retry_backoff_seconds(attempt))
+
+    return False, (
+        "Microsoft Graph did not confirm the updated weak authentication "
+        f"method state: {latest_details}"
+    )
+
+
+def _forms_permission_guidance(action: str) -> str:
+    return (
+        f"The enterprise app is missing the {_FORMS_PERMISSION_NAME} application "
+        f"permission required to {action} via /beta/admin/forms. Ensure tenant "
+        "admin consent has been granted, then on the M365 settings page click "
+        "'Authorize portal access' to re-grant the required permissions."
+    )
+
+
+def _parse_forms_phishing_setting(data: dict[str, Any]) -> tuple[bool | None, str | None]:
+    settings = data.get("settings")
+    if not isinstance(settings, dict):
+        return None, "Microsoft Graph did not return a Forms settings object."
+    if "isInOrgFormsPhishingScanEnabled" not in settings:
+        return (
+            None,
+            "Microsoft Graph did not return the isInOrgFormsPhishingScanEnabled Forms setting.",
+        )
+    value = settings["isInOrgFormsPhishingScanEnabled"]
+    if isinstance(value, bool):
+        return value, None
+    return (
+        None,
+        "Microsoft Graph returned a non-boolean isInOrgFormsPhishingScanEnabled Forms setting.",
+    )
+
+
 async def _check_internal_phishing_forms(token: str) -> dict[str, Any]:
     check_id = "bp_internal_phishing_forms"
     check_name = "Internal phishing protection for Microsoft Forms is enabled"
-    data = await _safe_graph_get(token, _FORMS_SETTINGS_URL)
-    if data is None:
-        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to read Microsoft Forms settings.")
-    if data.get("internalPhishingProtectionEnabled"):
+    try:
+        data = await _graph_get(token, _FORMS_ADMIN_URL)
+    except M365Error as exc:
+        if exc.http_status == 403:
+            return _result(
+                check_id,
+                check_name,
+                STATUS_UNKNOWN,
+                _forms_permission_guidance("read Microsoft Forms settings"),
+            )
+        return _result(
+            check_id,
+            check_name,
+            STATUS_UNKNOWN,
+            f"Unable to query Microsoft Forms settings: {exc}",
+        )
+
+    enabled, parse_error = _parse_forms_phishing_setting(data)
+    if enabled is True:
         return _result(check_id, check_name, STATUS_PASS, "Internal phishing protection for Forms is enabled.")
-    return _result(check_id, check_name, STATUS_FAIL, "Internal phishing protection for Forms is disabled.")
+    if enabled is False:
+        return _result(check_id, check_name, STATUS_FAIL, "Internal phishing protection for Forms is disabled.")
+    return _result(
+        check_id,
+        check_name,
+        STATUS_UNKNOWN,
+        parse_error or "Unable to determine the Microsoft Forms phishing protection setting.",
+    )
+
+
+async def _remediate_internal_phishing_forms(token: str) -> tuple[bool, str]:
+    """Enable Forms internal phishing protection and verify Graph reflects it."""
+    await _graph_patch(
+        token,
+        _FORMS_ADMIN_URL,
+        {"settings": {"isInOrgFormsPhishingScanEnabled": True}},
+    )
+
+    latest_details = ""
+    for attempt in range(1, _FORMS_PHISHING_VERIFICATION_ATTEMPTS + 1):
+        try:
+            data = await _graph_get(token, _FORMS_ADMIN_URL)
+        except M365Error as exc:
+            if exc.http_status == 403:
+                return False, _forms_permission_guidance("verify Microsoft Forms settings")
+            latest_details = f"Unable to read Microsoft Forms settings after the update: {exc}"
+        else:
+            enabled, parse_error = _parse_forms_phishing_setting(data)
+            if enabled is True:
+                return True, ""
+            if enabled is False:
+                latest_details = "Internal phishing protection for Forms is disabled."
+            else:
+                latest_details = (
+                    parse_error
+                    or "Microsoft Graph did not return the updated Forms phishing protection setting."
+                )
+        if attempt < _FORMS_PHISHING_VERIFICATION_ATTEMPTS:
+            await asyncio.sleep(_retry_backoff_seconds(attempt))
+
+    return (
+        False,
+        "Microsoft Graph did not confirm the updated Forms phishing protection setting: "
+        f"{latest_details}",
+    )
 
 
 async def _check_laps_enabled(token: str) -> dict[str, Any]:
@@ -2103,39 +3461,185 @@ async def _check_laps_enabled(token: str) -> dict[str, Any]:
                    "LAPS is not enabled; enable it under Devices → All Devices → Device Settings → Enable Local Admin Password Solution.")
 
 
-async def _check_two_emergency_access_accounts(token: str) -> dict[str, Any]:
-    check_id = "bp_two_emergency_access_accounts"
-    check_name = "Two emergency access (break-glass) accounts are defined"
-    roles = await _safe_graph_get_all(token, _DIRECTORY_ROLES_URL)
-    if roles is None:
-        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to enumerate directory roles.")
-    ga_role_id: str | None = None
-    for role in roles:
-        if str(role.get("roleTemplateId") or "").lower() == _ROLE_TEMPLATE_GLOBAL_ADMIN.lower():
-            ga_role_id = role.get("id")
-            break
-    if not ga_role_id:
-        return _result(check_id, check_name, STATUS_UNKNOWN, "Global Administrator role is not currently activated in this tenant.")
-    members = await _safe_graph_get_all(
-        token, f"https://graph.microsoft.com/v1.0/directoryRoles/{ga_role_id}/members"
-    )
-    if members is None:
-        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to enumerate Global Administrator members.")
-    cloud_only = 0
-    for m in members:
-        data = await _safe_graph_get(
-            token, f"https://graph.microsoft.com/v1.0/users/{m.get('id')}"
-            "?$select=onPremisesSyncEnabled,accountEnabled"
-        )
-        if data and not data.get("onPremisesSyncEnabled") and data.get("accountEnabled"):
-            cloud_only += 1
-    if cloud_only >= 2:
-        return _result(check_id, check_name, STATUS_PASS,
-                       f"At least two cloud-only Global Administrator accounts are defined ({cloud_only} found). "
-                       "Verify that two of these are dedicated break-glass accounts excluded from MFA enforcement per the tenant runbook.")
+# Name used when creating (and identifying) the MyPortal-managed protection alert policy.
+_BREAK_GLASS_ALERT_POLICY_NAME = "MyPortal – Break Glass Account Sign-In Alert"
+
+
+async def _check_break_glass_alert_policy(scc_token: str, tenant_id: str) -> dict[str, Any]:
+    """Check whether a protection alert policy exists for break-glass account sign-ins.
+
+    Uses ``Get-ProtectionAlert`` via the Security & Compliance PowerShell REST API
+    to look for the MyPortal-managed alert policy.  Returns PASS if the policy is
+    present and enabled, FAIL if it is absent or disabled, and UNKNOWN if the query
+    cannot be completed.
+
+    **Licensing requirement:** The ``UserLoggedIn`` alert operation requires
+    **Exchange Online Plan 2** (included in Microsoft 365 E3 and E5).
+    Microsoft 365 Business Premium and lower plans include only Exchange Online Plan 1
+    and do not support the ``UserLoggedIn`` audit event.  This check is automatically
+    marked *Not applicable* for tenants without Exchange Online Plan 2.
+    """
+    check_id = "bp_break_glass_alert_policy"
+    check_name = "Break-glass account sign-in alert policy is configured"
+    try:
+        data = await _scc_invoke_command(scc_token, tenant_id, "Get-ProtectionAlert")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query protection alert policies: {exc}")
+    policies = data.get("value") or []
+    for policy in policies:
+        if not isinstance(policy, dict):
+            continue
+        if str(policy.get("Name") or "").strip() == _BREAK_GLASS_ALERT_POLICY_NAME:
+            if policy.get("Disabled") is True:
+                return _result(check_id, check_name, STATUS_FAIL,
+                               f"Protection alert policy '{_BREAK_GLASS_ALERT_POLICY_NAME}' exists "
+                               "but is disabled. Enable it to receive break-glass sign-in alerts.")
+            return _result(check_id, check_name, STATUS_PASS,
+                           f"Protection alert policy '{_BREAK_GLASS_ALERT_POLICY_NAME}' is present "
+                           "and active. Technicians will be notified by email when a break-glass "
+                           "account signs in.")
     return _result(check_id, check_name, STATUS_FAIL,
-                   f"Only {cloud_only} cloud-only Global Administrator account(s) found. "
-                   "Create at least two dedicated break-glass accounts.")
+                   f"No protection alert policy named '{_BREAK_GLASS_ALERT_POLICY_NAME}' was found. "
+                   "Use the automated remediation to create it, or create it manually in the "
+                   "Microsoft Defender portal (Policies & rules → Alert policy).")
+
+
+async def _remediate_break_glass_alert_policy(
+    graph_token: str, scc_token: str, tenant_id: str
+) -> tuple[bool, str]:
+    """Create a protection alert policy that emails technicians when a break-glass account signs in.
+
+    Steps:
+    1. Check whether the policy already exists; if so, ensure it is enabled.
+    2. Discover MyPortal-managed break-glass account UPNs from the Global Administrator role.
+    3. Create ``New-ProtectionAlert`` scoped to those accounts via the SCC REST API.
+
+    Returns ``(True, message)`` on success and ``(False, message)`` on failure.
+
+    **Licensing requirement:** ``New-ProtectionAlert`` with ``Operation: UserLoggedIn`` requires
+    **Exchange Online Plan 2** (included in Microsoft 365 E3 and E5).
+    Microsoft 365 Business Premium and lower plans include only Exchange Online Plan 1
+    and do not support the ``UserLoggedIn`` audit event.  This remediation will only be
+    called when the tenant has been detected as holding Exchange Online Plan 2 (the catalog
+    entry carries ``requires_licenses: [CAP_EXCHANGE_ONLINE_P2]``).
+    """
+    # 1. Check whether the policy already exists.
+    try:
+        existing = await _scc_invoke_command(scc_token, tenant_id, "Get-ProtectionAlert")
+    except M365Error as exc:
+        return False, f"Unable to query existing alert policies: {exc}"
+
+    for policy in (existing.get("value") or []):
+        if not isinstance(policy, dict):
+            continue
+        if str(policy.get("Name") or "").strip() == _BREAK_GLASS_ALERT_POLICY_NAME:
+            if policy.get("Disabled") is True:
+                # Re-enable the existing policy instead of creating a duplicate.
+                try:
+                    await _scc_invoke_command(
+                        scc_token, tenant_id, "Set-ProtectionAlert",
+                        {"Identity": _BREAK_GLASS_ALERT_POLICY_NAME, "Disabled": False},
+                    )
+                    return True, (
+                        f"Protection alert policy '{_BREAK_GLASS_ALERT_POLICY_NAME}' was already "
+                        "present but disabled – it has been re-enabled."
+                    )
+                except M365Error as exc:
+                    return False, f"Unable to re-enable alert policy: {exc}"
+            return True, (
+                f"Protection alert policy '{_BREAK_GLASS_ALERT_POLICY_NAME}' already exists "
+                "and is enabled; no changes were made."
+            )
+
+    # 2. Find MyPortal-managed break-glass account UPNs via Graph.
+    try:
+        roles = await _graph_get(
+            graph_token,
+            "https://graph.microsoft.com/v1.0/directoryRoles"
+            "?$filter=displayName eq 'Global Administrator'&$select=id",
+        )
+    except M365Error as exc:
+        return False, f"Unable to enumerate directory roles: {exc}"
+
+    role_values = roles.get("value") or []
+    if not role_values:
+        return False, "The Global Administrator directory role is not activated in this tenant."
+
+    try:
+        members = await _graph_get_all(
+            graph_token,
+            f"https://graph.microsoft.com/v1.0/directoryRoles/{role_values[0]['id']}/members"
+            "?$select=id,userPrincipalName,onPremisesSyncEnabled,accountEnabled",
+        )
+    except M365Error as exc:
+        return False, f"Unable to enumerate Global Administrator members: {exc}"
+
+    break_glass_upns = [
+        str(m.get("userPrincipalName") or "")
+        for m in (members or [])
+        if isinstance(m, dict)
+        and "myportal-emergency-admin" in str(m.get("userPrincipalName") or "").lower()
+        and m.get("accountEnabled")
+        and not m.get("onPremisesSyncEnabled")
+    ]
+
+    if not break_glass_upns:
+        return False, (
+            "No MyPortal-managed break-glass accounts (UPN containing 'myportal-emergency-admin') "
+            "were found in the Global Administrator role. Run the 'Maintain 2–4 Global "
+            "Administrators' remediation first to create them, then re-run this remediation."
+        )
+
+    # 3. Build the alert filter and create the policy.
+    # The filter expression matches any of the discovered break-glass accounts.
+    filter_parts = " OR ".join(f"User:{upn}" for upn in break_glass_upns)
+
+    try:
+        await _scc_invoke_command(
+            scc_token, tenant_id, "New-ProtectionAlert",
+            {
+                "Name": _BREAK_GLASS_ALERT_POLICY_NAME,
+                "Operation": ["UserLoggedIn"],
+                "Category": "AccessGovernance",
+                "Severity": "High",
+                "Disabled": False,
+                "Filter": filter_parts,
+                "NotifyUser": ["TenantAdmins"],
+                "AggregationType": "None",
+                "Comment": (
+                    "Created by MyPortal. Sends an email to all tenant admins whenever "
+                    "a MyPortal-managed break-glass (emergency access) Global Administrator "
+                    "account signs in. Review any sign-in immediately."
+                ),
+            },
+        )
+    except M365Error as exc:
+        error_str = str(exc)
+        # Provide a specific, actionable message when the operation is unavailable due to
+        # licensing.  The UserLoggedIn alert operation requires Exchange Online Plan 2
+        # (included in Microsoft 365 E3 and E5).  Microsoft 365 Business Premium and lower
+        # plans include only Exchange Online Plan 1 and do not support this operation.
+        if any(
+            phrase in error_str.lower()
+            for phrase in ("not available", "invalid operation", "unsupported", "not supported")
+        ):
+            return False, (
+                f"Unable to create protection alert policy: {exc} – "
+                "The 'UserLoggedIn' (User logged in) operation is not available on this tenant. "
+                "This operation requires Exchange Online Plan 2 (included in Microsoft 365 E3 and E5). "
+                "Microsoft 365 Business Premium and lower plans include only Exchange Online Plan 1 "
+                "and do not support this alert operation. "
+                "An upgrade to Microsoft 365 E3 or E5 is required to use this alert type."
+            )
+        return False, f"Unable to create protection alert policy: {exc}"
+
+    accounts_list = ", ".join(break_glass_upns)
+    return True, (
+        f"Protection alert policy '{_BREAK_GLASS_ALERT_POLICY_NAME}' created successfully. "
+        f"Monitoring sign-ins for: {accounts_list}. "
+        "Tenant admins will receive an email alert whenever one of these accounts signs in."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2247,6 +3751,25 @@ async def _check_customer_lockbox(
                    "Set-OrganizationConfig -CustomerLockBoxEnabled $true.")
 
 
+async def _check_organization_customization(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_organization_customization"
+    check_name = "Ensure organization customization is enabled"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-OrganizationConfig")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-OrganizationConfig: {exc}")
+    cfg = _exo_first_value(data)
+    if cfg.get("IsDehydrated") is False:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "Organization customization is enabled (IsDehydrated is False).")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "Organization customization is not enabled (IsDehydrated is True); "
+                   "run Enable-OrganizationCustomization to enable it.")
+
+
 async def _check_smtp_auth_disabled(
     exo_token: str, tenant_id: str
 ) -> dict[str, Any]:
@@ -2312,26 +3835,42 @@ async def _check_automatic_email_forwarding(
 
 
 async def _check_dkim_enabled_all_domains(
-    exo_token: str, tenant_id: str
+    exo_token: str, tenant_id: str, email_domains: list[str]
 ) -> dict[str, Any]:
     check_id = "bp_dkim_enabled_all_domains"
-    check_name = "DKIM is enabled for all Exchange Online domains"
+    check_name = "DKIM is enabled for all MyPortal Email domains"
+    configured_domains = {
+        str(domain).strip().lower() for domain in email_domains if str(domain).strip()
+    }
+    if not configured_domains:
+        return _result(
+            check_id,
+            check_name,
+            STATUS_NOT_APPLICABLE,
+            "No Email domains are configured for this company in MyPortal.",
+        )
     try:
         data = await _exo_invoke_command(exo_token, tenant_id, "Get-DkimSigningConfig")
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
                        f"Unable to query Get-DkimSigningConfig: {exc}")
     rows = data.get("value") or []
-    disabled = [
-        r.get("Domain") or r.get("Identity") or "?"
+    configs = {
+        str(r.get("Domain") or r.get("Identity") or "").strip().lower(): r
         for r in rows
-        if isinstance(r, dict) and r.get("Enabled") is not True
-    ]
+        if isinstance(r, dict) and (r.get("Domain") or r.get("Identity"))
+    }
+    disabled = sorted(
+        domain
+        for domain in configured_domains
+        if domain not in configs or configs[domain].get("Enabled") is not True
+    )
     if not disabled:
         return _result(check_id, check_name, STATUS_PASS,
-                       f"DKIM is enabled for all {len(rows)} configured domains.")
+                       f"DKIM is enabled for all {len(configured_domains)} MyPortal Email domains.")
     return _result(check_id, check_name, STATUS_FAIL,
-                   f"DKIM is disabled on {len(disabled)} domain(s): " + ", ".join(disabled[:5]))
+                   f"DKIM is disabled or unavailable on {len(disabled)} MyPortal Email domain(s): "
+                   + ", ".join(disabled[:5]))
 
 
 async def _check_third_party_storage_owa(
@@ -2354,7 +3893,7 @@ async def _check_third_party_storage_owa(
         return _result(check_id, check_name, STATUS_PASS,
                        "Additional storage providers are restricted in all OWA mailbox policies.")
     return _result(check_id, check_name, STATUS_FAIL,
-                   f"OWA policies allowing third-party storage: " + ", ".join(bad))
+                   "OWA policies allowing third-party storage: " + ", ".join(bad))
 
 
 async def _check_outlook_addins_disabled(
@@ -2439,19 +3978,29 @@ async def _check_shared_mailbox_signin_blocked(token: str) -> dict[str, Any]:
     users = await _safe_graph_get_all(token, _USERS_LIST_URL)
     if users is None:
         return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to enumerate users.")
+    admin_ids = await _get_directory_role_member_ids(token)
+    if admin_ids is None:
+        return _result(
+            check_id,
+            check_name,
+            STATUS_UNKNOWN,
+            "Unable to enumerate administrator role members; no accounts were evaluated.",
+        )
     candidates = [
         u for u in users
         if (u.get("userType") or "").lower() == "member"
         and not (u.get("assignedLicenses") or [])
         and u.get("accountEnabled") is True
+        and str(u.get("id") or "") not in admin_ids
     ]
     if not candidates:
         return _result(check_id, check_name, STATUS_PASS,
-                       "No unlicensed member accounts are sign-in enabled (likely no shared mailbox is sign-in enabled).")
+                       "No non-admin unlicensed member accounts are sign-in enabled (likely no shared mailbox is sign-in enabled).")
     return _result(check_id, check_name, STATUS_FAIL,
-                   f"{len(candidates)} unlicensed member account(s) appear to be sign-in enabled (likely shared mailboxes). "
+                   f"{len(candidates)} non-admin unlicensed member account(s) appear to be sign-in enabled (likely shared mailboxes). "
                    "Disable each via Update-MgUser -UserId <id> -AccountEnabled:$false. "
-                   "First sample: " + ", ".join((u.get("userPrincipalName") or u.get("id") or "?") for u in candidates[:5]))
+                   "First sample: " + ", ".join((u.get("userPrincipalName") or u.get("id") or "?") for u in candidates[:5]),
+                   [_account_finding(user) for user in candidates])
 
 
 async def _check_mailbox_audit_actions(
@@ -2468,22 +4017,22 @@ async def _check_mailbox_audit_actions(
         return _result(check_id, check_name, STATUS_UNKNOWN,
                        f"Unable to query Get-Mailbox: {exc}")
     rows = data.get("value") or []
-    bad: list[str] = []
+    bad: list[dict[str, str]] = []
     required_owner = {"MailboxLogin", "HardDelete", "SoftDelete", "Update"}
     for r in rows:
         if not isinstance(r, dict):
             continue
         if r.get("AuditEnabled") is not True:
-            bad.append(r.get("UserPrincipalName") or r.get("Identity") or "?")
+            bad.append(_account_finding(r, identity_key="UserPrincipalName"))
             continue
         owner = set(r.get("AuditOwner") or [])
         if not required_owner.issubset(owner):
-            bad.append(r.get("UserPrincipalName") or r.get("Identity") or "?")
+            bad.append(_account_finding(r, identity_key="UserPrincipalName"))
     if not bad:
         return _result(check_id, check_name, STATUS_PASS,
                        f"Audit actions properly configured on {len(rows)} sampled mailboxes.")
     return _result(check_id, check_name, STATUS_FAIL,
-                   f"{len(bad)} mailbox(es) lack the recommended audit actions: " + ", ".join(bad[:5]))
+                   f"{len(bad)} mailbox(es) lack the recommended audit actions: " + ", ".join(a["name"] for a in bad[:5]), bad)
 
 
 async def _check_antiphish_impersonated_domain_protection(
@@ -2500,7 +4049,8 @@ async def _check_antiphish_impersonated_domain_protection(
     enabled = [
         r.get("Name") or r.get("Identity") or "?"
         for r in rows
-        if isinstance(r, dict) and r.get("EnableTargetedDomainsProtection") is True
+        if isinstance(r, dict)
+        and _coerce_exo_bool(r.get("EnableTargetedDomainsProtection"))
     ]
     if enabled:
         return _result(check_id, check_name, STATUS_PASS,
@@ -2525,7 +4075,8 @@ async def _check_antiphish_impersonated_user_protection(
     enabled = [
         r.get("Name") or r.get("Identity") or "?"
         for r in rows
-        if isinstance(r, dict) and r.get("EnableTargetedUserProtection") is True
+        if isinstance(r, dict)
+        and _coerce_exo_bool(r.get("EnableTargetedUserProtection"))
     ]
     if enabled:
         return _result(check_id, check_name, STATUS_PASS,
@@ -2602,7 +4153,8 @@ async def _check_antiphish_domain_impersonation_safety_tip(
     enabled = [
         r.get("Name") or r.get("Identity") or "?"
         for r in rows
-        if isinstance(r, dict) and r.get("EnableSimilarDomainsSafetyTips") is True
+        if isinstance(r, dict)
+        and _coerce_exo_bool(r.get("EnableSimilarDomainsSafetyTips"))
     ]
     if enabled:
         return _result(check_id, check_name, STATUS_PASS,
@@ -2627,7 +4179,8 @@ async def _check_antiphish_user_impersonation_safety_tip(
     enabled = [
         r.get("Name") or r.get("Identity") or "?"
         for r in rows
-        if isinstance(r, dict) and r.get("EnableSimilarUsersSafetyTips") is True
+        if isinstance(r, dict)
+        and _coerce_exo_bool(r.get("EnableSimilarUsersSafetyTips"))
     ]
     if enabled:
         return _result(check_id, check_name, STATUS_PASS,
@@ -2652,7 +4205,8 @@ async def _check_antiphish_unusual_characters_safety_tip(
     enabled = [
         r.get("Name") or r.get("Identity") or "?"
         for r in rows
-        if isinstance(r, dict) and r.get("EnableUnusualCharactersSafetyTips") is True
+        if isinstance(r, dict)
+        and _coerce_exo_bool(r.get("EnableUnusualCharactersSafetyTips"))
     ]
     if enabled:
         return _result(check_id, check_name, STATUS_PASS,
@@ -2681,7 +4235,7 @@ async def _check_mailbox_auditing_enabled_all_users(
         return _result(check_id, check_name, STATUS_UNKNOWN,
                        "No user mailboxes found to evaluate.")
     not_audited = [
-        r.get("UserPrincipalName") or r.get("Identity") or "?"
+        _account_finding(r, identity_key="UserPrincipalName")
         for r in rows
         if isinstance(r, dict) and r.get("AuditEnabled") is not True
     ]
@@ -2690,8 +4244,8 @@ async def _check_mailbox_auditing_enabled_all_users(
                        f"Mailbox auditing (AuditEnabled) is enabled on all {len(rows)} user mailbox(es).")
     return _result(check_id, check_name, STATUS_FAIL,
                    f"{len(not_audited)} user mailbox(es) do not have AuditEnabled set to True: "
-                   + ", ".join(not_audited[:5])
-                   + ("…" if len(not_audited) > 5 else ""))
+                   + ", ".join(a["name"] for a in not_audited[:5])
+                   + ("…" if len(not_audited) > 5 else ""), not_audited)
 
 
 async def _check_block_users_message_limit(
@@ -2742,48 +4296,63 @@ async def _check_quarantine_notification_enabled(
 ) -> dict[str, Any]:
     """Check that end-user spam/quarantine notifications are enabled with a daily frequency.
 
-    Calls ``Get-HostedContentFilterPolicy`` and inspects every policy for the
-    ``EnableEndUserSpamNotifications`` and ``EndUserSpamNotificationFrequency``
-    properties.  Exchange Online supports notification frequencies of 1, 2, or
-    3 days; the CIS recommendation (and the intent of a ≤ 4-hour notification
-    window) is to set the shortest available interval of 1 day so users are
-    alerted to quarantined mail as promptly as possible.
+    Quarantine notifications are now controlled by the global quarantine
+    policy.  The similarly named hosted content filter policy properties are
+    deprecated and Exchange Online rejects attempts to update them.
     """
     check_id = "bp_quarantine_notification_enabled"
     check_name = "End-user spam quarantine notifications are enabled with a daily frequency"
     try:
-        data = await _exo_invoke_command(exo_token, tenant_id, "Get-HostedContentFilterPolicy")
+        data = await _exo_invoke_command(
+            exo_token,
+            tenant_id,
+            "Get-QuarantinePolicy",
+        )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-HostedContentFilterPolicy: {exc}")
+                       f"Unable to query the global quarantine policy: {exc}")
     rows = data.get("value") or []
     if not rows:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       "No hosted content filter policies returned.")
-    failing: list[str] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        enabled = row.get("EnableEndUserSpamNotifications")
-        frequency = row.get("EndUserSpamNotificationFrequency")
-        name = row.get("Name") or row.get("Identity") or "Default"
-        if enabled is not True:
-            failing.append(f"{name} (notifications disabled)")
-        elif frequency is not None:
-            try:
-                if int(frequency) > 1:
-                    failing.append(f"{name} (frequency={frequency} days; should be 1)")
-            except (ValueError, TypeError):
-                failing.append(f"{name} (frequency={frequency!r} is not a recognised value)")
-    if not failing:
-        return _result(check_id, check_name, STATUS_PASS,
-                       f"All {len(rows)} hosted content filter "
-                       f"{'policy' if len(rows) == 1 else 'policies'} have end-user "
-                       "quarantine notifications enabled with a daily frequency.")
-    return _result(check_id, check_name, STATUS_FAIL,
-                   f"{len(failing)} {'policy does' if len(failing) == 1 else 'policies do'} "
-                   "not meet the quarantine notification requirement: "
-                   + "; ".join(failing[:5]))
+                       "No global quarantine policy was returned.")
+    policy = _select_global_quarantine_policy(rows)
+    if not policy:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No global quarantine policy was returned.")
+    if policy.get("ESNEnabled") is not True:
+        return _result(check_id, check_name, STATUS_FAIL,
+                       "The global quarantine policy has notifications disabled.")
+    frequency = str(policy.get("EndUserSpamNotificationFrequency") or "").strip()
+    if frequency not in {"1", "1.00:00:00", "24:00:00"}:
+        return _result(check_id, check_name, STATUS_FAIL,
+                       f"The global quarantine notification frequency is {frequency!r}; "
+                       "it should be one day.")
+    return _result(check_id, check_name, STATUS_PASS,
+                   "The global quarantine policy has notifications enabled with a daily frequency.")
+
+
+def _select_global_quarantine_policy(rows: list[Any]) -> dict[str, Any] | None:
+    """Select the best global quarantine policy row from Get-QuarantinePolicy results."""
+    policies = [row for row in rows if isinstance(row, dict)]
+    if not policies:
+        return None
+
+    typed_matches = [
+        row for row in policies
+        if str(row.get("QuarantinePolicyType") or "").strip().lower() == "globalquarantinepolicy"
+    ]
+    if typed_matches:
+        built_in = next((row for row in typed_matches if row.get("IsBuiltInPolicy") is True), None)
+        return built_in or typed_matches[0]
+
+    name_matches = [
+        row for row in policies
+        if str(row.get("Identity") or row.get("Name") or "").strip().lower() == "globalquarantinepolicy"
+    ]
+    if name_matches:
+        return name_matches[0]
+
+    return None
 
 
 _BEST_PRACTICES: list[dict[str, Any]] = [
@@ -2799,8 +4368,10 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "Properties → Manage security defaults → Enable."
         ),
         "source": _check_security_defaults,
+        "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "security_defaults",
         "is_cis_benchmark": True,
     },
     {
@@ -2816,7 +4387,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_legacy_auth_blocked,
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "conditional_access_policy",
         "is_cis_benchmark": True,
         "requires_licenses": [CAP_ENTRA_ID_P1],
     },
@@ -2833,7 +4405,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_mfa_conditional_access,
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "conditional_access_policy",
         "is_cis_benchmark": True,
         "requires_licenses": [CAP_ENTRA_ID_P1],
     },
@@ -2849,7 +4422,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_admin_mfa,
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "conditional_access_policy",
         "is_cis_benchmark": True,
         "requires_licenses": [CAP_ENTRA_ID_P1],
     },
@@ -2857,16 +4431,17 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "id": "bp_global_admin_count",
         "name": "Maintain 2–4 Global Administrators",
         "description": (
-            "Microsoft recommends between two and four Global Administrators "
+            "Maintain between two and four Global Administrators, aiming for three, "
             "to balance availability and minimise blast radius."
         ),
         "remediation": (
-            "Adjust Global Administrator role assignments via Azure AD → "
-            "Roles and administrators → Global Administrator."
+            "Create enough emergency Global Administrator accounts to reach the target of three "
+            "and store each generated credential as a separate Hudu password."
         ),
         "source": _check_global_admin_count,
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "global_admin_accounts",
         "is_cis_benchmark": True,
     },
     {
@@ -2901,11 +4476,9 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": True,
         "remediation_url": _AUTHORIZATION_POLICY_URL,
-        "remediation_payload": {
-            "defaultUserRolePermissions": {
-                "allowedToUseSspr": True,
-            },
-        },
+        # allowedToUseSSPR is a top-level authorizationPolicy property;
+        # nesting it under defaultUserRolePermissions is rejected by Graph.
+        "remediation_payload": {"allowedToUseSSPR": True},
         "is_cis_benchmark": True,
     },
     {
@@ -2922,7 +4495,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_password_never_expires,
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "domain_password_never_expire",
         "is_cis_benchmark": True,
     },
     {
@@ -2966,6 +4540,25 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "has_remediation": True,
         "remediation_cmdlet": "Set-OrganizationConfig",
         "remediation_params": {"RejectDirectSend": True},
+        "default_enabled": True,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_it_contact_baseline",
+        "name": "Configure IT contact forwarding baseline",
+        "description": (
+            "Provide IT and IT Support contacts in the GAL that forward to the "
+            "separate MSP addresses configured globally for MyPortal."
+        ),
+        "remediation": (
+            "Create the two hidden mail contacts and distribution groups, plus "
+            "the external-forward transport rule. Existing objects with different "
+            "values must be corrected manually and are never overwritten."
+        ),
+        "source": _check_it_contact_baseline,
+        "source_type": "exo",
+        "has_remediation": True,
+        "remediation_type": "it_contact_baseline_exo",
         "default_enabled": True,
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
@@ -3083,9 +4676,12 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "secrets → create a new secret/certificate and update dependent "
             "services before the existing one expires."
         ),
-        "source": _check_monitor_app_credential_expiry,
+        "source": _check_myportal_pkce_app_credential_expiry,
         "default_enabled": True,
-        "has_remediation": False,
+        "default_auto_remediate": True,
+        "has_remediation": True,
+        "uses_company_id": True,
+        "remediation_type": "renew_myportal_pkce_admin_secret",
     },
     {
         "id": "bp_monitor_cloud_admin_accounts",
@@ -3137,25 +4733,25 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
     },
     {
         "id": "bp_concealed_names",
-        "name": "Display concealed user, group, and site names in all reports is enabled",
+        "name": "Concealed user, group, and site names in all reports is disabled",
         "description": (
             "Microsoft 365 usage reports should display real user, group, and site "
             "names so that administrators can accurately audit activity and identify "
-            "issues.  When concealed names are enabled, obfuscated identifiers are "
-            "shown instead, which reduces the usefulness of usage reports."
+            "issues.  When the 'Display concealed names' setting is enabled, obfuscated "
+            "identifiers are shown instead, which reduces the usefulness of usage reports."
         ),
         "remediation": (
             "Run the PowerShell command: "
-            "Update-MgAdminReportSetting -DisplayConcealedNames $true\n"
+            "Update-MgAdminReportSetting -DisplayConcealedNames $false\n"
             "Or via the Microsoft 365 admin center: Settings → Org settings → "
-            "Services → Reports → enable 'Display concealed user, group, and site names'."
+            "Services → Reports → disable 'Display concealed user, group, and site names'."
         ),
         "source": _check_concealed_names,
         "source_type": "graph",
         "default_enabled": True,
         "has_remediation": True,
         "remediation_url": _REPORT_SETTINGS_URL,
-        "remediation_payload": {"displayConcealedNames": True},
+        "remediation_payload": {"displayConcealedNames": False},
     },
     # ------------------------------------------------------------------
     # Identity & Conditional Access (Microsoft Graph)
@@ -3176,7 +4772,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_per_user_mfa_disabled,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "disable_per_user_mfa",
     },
     {
         "id": "bp_dynamic_group_for_guests",
@@ -3194,7 +4791,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_dynamic_group_for_guests,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "create_dynamic_guest_group",
         "requires_licenses": [CAP_ENTRA_ID_P1],
     },
     {
@@ -3401,7 +4999,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_password_expiry_never_expire,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "domain_password_never_expire",
     },
     {
         "id": "bp_email_otp_disabled",
@@ -3421,7 +5020,10 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_url": (
             f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/Email"
         ),
-        "remediation_payload": {"state": "disabled"},
+        "remediation_payload": {
+            "@odata.type": "#microsoft.graph.emailAuthenticationMethodConfiguration",
+            "state": "disabled",
+        },
     },
     {
         "id": "bp_user_consent_apps_disallowed",
@@ -3500,7 +5102,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_only_managed_public_groups,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "foreach_public_group_graph",
     },
     {
         "id": "bp_pim_used_to_manage_roles",
@@ -3553,7 +5156,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_security_defaults_appropriate,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "security_defaults",
     },
     {
         "id": "bp_signin_freq_intune_enrollment",
@@ -3586,7 +5190,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_signin_freq_admin_browser,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "conditional_access_policy",
         "requires_licenses": [CAP_ENTRA_ID_P1],
     },
     {
@@ -3606,7 +5211,13 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "has_remediation": True,
         "remediation_url": _AUTH_METHODS_POLICY_URL,
         "remediation_payload": {
-            "systemCredentialPreferences": {"state": "enabled"}
+            "systemCredentialPreferences": {
+                "@odata.type": "#microsoft.graph.systemCredentialPreferences",
+                "state": "enabled",
+                # Graph rejects enabling the feature without a target.
+                "includeTargets": [{"id": "all_users", "targetType": "group"}],
+                "excludeTargets": [],
+            }
         },
     },
     {
@@ -3624,7 +5235,12 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_authenticator_mfa_fatigue,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_url": (
+            f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/"
+            "MicrosoftAuthenticator"
+        ),
+        "remediation_payload": _MFA_FATIGUE_REMEDIATION_PAYLOAD,
     },
     {
         "id": "bp_weak_auth_methods_disabled",
@@ -3640,7 +5256,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_weak_auth_methods_disabled,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
     },
     {
         "id": "bp_internal_phishing_forms",
@@ -3657,8 +5273,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "graph",
         "default_enabled": True,
         "has_remediation": True,
-        "remediation_url": _FORMS_SETTINGS_URL,
-        "remediation_payload": {"internalPhishingProtectionEnabled": True},
+        "remediation_url": _FORMS_ADMIN_URL,
+        "remediation_payload": {"settings": {"isInOrgFormsPhishingScanEnabled": True}},
     },
     {
         "id": "bp_laps_enabled",
@@ -3675,26 +5291,43 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_laps_enabled,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "laps_enabled",
         "requires_licenses": [CAP_ENTRA_ID_P1, CAP_INTUNE_LAPS],
     },
     {
-        "id": "bp_two_emergency_access_accounts",
-        "name": "Two emergency access (break-glass) accounts are defined",
+        "id": "bp_break_glass_alert_policy",
+        "name": "Break-glass account sign-in alert policy is configured",
         "description": (
-            "Maintain at least two cloud-only Global Administrator accounts "
-            "with strong, well-protected credentials so admins can recover "
-            "access if MFA, identity-provider, or federation fails."
+            "An alert policy should be in place so that technicians are notified by email "
+            "whenever a break-glass (emergency access) Global Administrator account signs in. "
+            "Unexpected use of these accounts may indicate a security incident. "
+            "Alert policies are evaluated against the unified audit log via the Microsoft Defender portal "
+            "and require Exchange Online with the unified audit log enabled "
+            "(see 'Enable unified audit log' and 'UnifiedAuditLogIngestionEnabled' checks). "
+            "The 'User logged in' (UserLoggedIn) operation used by this policy relies on "
+            "Exchange Online mailbox audit logging, which requires Exchange Online Plan 2 "
+            "(included in Microsoft 365 E3 and E5). "
+            "Microsoft 365 Business Premium and lower plans include only Exchange Online Plan 1 "
+            "and do not support this alert operation."
         ),
         "remediation": (
-            "Create two cloud-only GA accounts (e.g. emergency1@<tenant>.onmicrosoft.com, "
-            "emergency2@…), exclude them from all CA policies (storing credentials "
-            "in physical safes), and document the recovery runbook."
+            "In the Microsoft Defender portal go to Policies & rules → Alert policy → New alert policy. "
+            "Set Operation to 'User logged in' (requires Exchange Online Plan 2, included in Microsoft 365 E3/E5), "
+            "Category to 'Access governance', Severity to 'High', "
+            "scope the policy to your break-glass account UPNs, and add your on-call technicians "
+            "as notification recipients. Alternatively use the automated remediation to create the "
+            "policy automatically for MyPortal-managed break-glass accounts. "
+            "Note: Microsoft 365 Business Premium and lower plans include only Exchange Online Plan 1 "
+            "and do not support the 'User logged in' operation; an upgrade to Microsoft 365 E3 or E5 "
+            "is required to use this alert type."
         ),
-        "source": _check_two_emergency_access_accounts,
-        "source_type": "graph",
+        "source": _check_break_glass_alert_policy,
+        "source_type": "scc",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "break_glass_alert_policy",
+        "requires_licenses": [CAP_EXCHANGE_ONLINE_P2],
     },
     # ------------------------------------------------------------------
     # Exchange Online (real auto-detection via EXO REST)
@@ -3713,7 +5346,12 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_audit_bypass_disabled_mailboxes,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "foreach_exo_policy",
+        "remediation_get_cmdlet": "Get-MailboxAuditBypassAssociation",
+        "remediation_get_params": {"ResultSize": "Unlimited"},
+        "remediation_cmdlet": "Set-MailboxAuditBypassAssociation",
+        "remediation_params": {"AuditBypassEnabled": False},
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
@@ -3744,6 +5382,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": True,
+        "remediation_type": "audit_log_search_exo",
         "remediation_cmdlet": "Set-AdminAuditLogConfig",
         "remediation_params": {"UnifiedAuditLogIngestionEnabled": True},
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
@@ -3762,7 +5401,14 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_mailbox_audit_actions,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "foreach_mailbox_exo",
+        "remediation_mailbox_params": {
+            "AuditEnabled": True,
+            "AuditOwner": {
+                "Add": ["MailboxLogin", "HardDelete", "SoftDelete", "Update"]
+            },
+        },
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
@@ -3808,6 +5454,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": True,
+        "remediation_type": "foreach_exo_policy",
+        "remediation_get_cmdlet": "Get-HostedOutboundSpamFilterPolicy",
         "remediation_cmdlet": "Set-HostedOutboundSpamFilterPolicy",
         "remediation_params": {"ActionWhenThresholdReached": "BlockUser"},
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
@@ -3833,6 +5481,28 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
+        "id": "bp_ews_required_apps_allowed",
+        "name": "Exchange Web Services is enabled only for confirmed required applications",
+        "description": (
+            "EWS retirement requires tenants that still depend on Exchange Web "
+            "Services to explicitly enable EWS and restrict access to approved "
+            "application IDs only."
+        ),
+        "remediation": (
+            "Review observed EWS usage, add any infrequently used but approved "
+            "AppIDs to the check notes, then enable EWS with "
+            "Set-OrganizationConfig -EwsEnabled $true -EwsAllowedAppIDs "
+            "<existing + approved app IDs>."
+        ),
+        "source": _check_ews_required_apps_allowed,
+        "source_type": "graph",
+        "uses_company_id": True,
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_type": "ews_dependency_allow_list",
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
         "id": "bp_customer_lockbox",
         "name": "Ensure the customer lockbox feature is enabled",
         "description": (
@@ -3844,13 +5514,39 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "remediation": (
             "Set-OrganizationConfig -CustomerLockBoxEnabled $true "
-            "(requires Compliance Administrator or Global Administrator role)"
+            "(run manually as a Global Administrator in Exchange Online PowerShell)"
         ),
         "source": _check_customer_lockbox,
         "source_type": "exo",
         "default_enabled": True,
+        # CustomerLockBoxEnabled is protected by an interactive administrator
+        # authorization check.  App-only Exchange.ManageAsApp tokens receive
+        # 403 even when their service principal has Exchange or Compliance
+        # Administrator, so exposing automated remediation is misleading.  Do
+        # not grant the integration app Global Administrator to bypass this
+        # safeguard; direct an administrator to the manual command instead.
         "has_remediation": False,
         "is_cis_benchmark": True,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_organization_customization",
+        "name": "Ensure organization customization is enabled",
+        "description": (
+            "Exchange Online tenants start in a dehydrated (uncustomised) state to "
+            "reduce resource usage. Many Exchange Online and Security & Compliance "
+            "cmdlets — including transport rules, journaling, data loss prevention, "
+            "and custom retention policies — require organisation customisation to be "
+            "enabled before they can be configured. Running Enable-OrganizationCustomization "
+            "is a prerequisite for applying security and compliance controls to the tenant."
+        ),
+        "remediation": "Enable-OrganizationCustomization",
+        "source": _check_organization_customization,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_cmdlet": "Enable-OrganizationCustomization",
+        "remediation_params": {},
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
@@ -3896,7 +5592,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
     },
     {
         "id": "bp_dkim_enabled_all_domains",
-        "name": "DKIM is enabled for all Exchange Online domains",
+        "name": "DKIM is enabled for all MyPortal Email domains",
         "description": (
             "DKIM signs outbound mail with a tenant-controlled key, allowing "
             "recipients to verify authenticity and reject spoofed messages."
@@ -3908,8 +5604,10 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_dkim_enabled_all_domains,
         "source_type": "exo",
+        "uses_company_email_domains": True,
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "dkim_enabled_exo",
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
@@ -3926,7 +5624,10 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_third_party_storage_owa,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "foreach_owa_mailbox_policy_exo",
+        "remediation_cmdlet": "Set-OwaMailboxPolicy",
+        "remediation_params": {"AdditionalStorageProvidersAvailable": False},
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
@@ -3945,6 +5646,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": True,
+        # Set-OwaMailboxPolicy requires -Identity, so apply it to every policy.
+        "remediation_type": "foreach_owa_mailbox_policy_exo",
         "remediation_cmdlet": "Set-OwaMailboxPolicy",
         "remediation_params": {"WebPartsFrameworkEnabled": False},
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
@@ -3994,7 +5697,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "name": "Sign-in to shared mailboxes is blocked",
         "description": (
             "Shared mailboxes should be sign-in disabled so attackers cannot "
-            "log in to them directly even if they obtain credentials."
+            "log in to them directly even if they obtain credentials. Unlicensed "
+            "accounts assigned to administrator roles are excluded."
         ),
         "remediation": (
             "For each shared mailbox: "
@@ -4066,6 +5770,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_params": {
             "Identity": "Office365 AntiPhish Default",
             "TargetedDomainProtectionAction": "Quarantine",
+            "Confirm": False,
         },
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
@@ -4089,6 +5794,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_params": {
             "Identity": "Office365 AntiPhish Default",
             "TargetedUserProtectionAction": "Quarantine",
+            "Confirm": False,
         },
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
@@ -4101,17 +5807,19 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "to a protected domain, helping users identify spoofed senders."
         ),
         "remediation": (
-            "Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+            "For each anti-phishing policy with domain impersonation protection enabled:\n"
+            "Set-AntiPhishPolicy -Identity <name> "
             "-EnableSimilarDomainsSafetyTips $true"
         ),
         "source": _check_antiphish_domain_impersonation_safety_tip,
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": True,
+        "remediation_type": "matching_antiphish_policy_exo",
         "remediation_cmdlet": "Set-AntiPhishPolicy",
         "remediation_params": {
-            "Identity": "Office365 AntiPhish Default",
             "EnableSimilarDomainsSafetyTips": True,
+            "Confirm": False,
         },
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
@@ -4124,17 +5832,19 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "similar to a protected user, reducing the risk of impersonation attacks."
         ),
         "remediation": (
-            "Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+            "For each anti-phishing policy with user impersonation protection enabled:\n"
+            "Set-AntiPhishPolicy -Identity <name> "
             "-EnableSimilarUsersSafetyTips $true"
         ),
         "source": _check_antiphish_user_impersonation_safety_tip,
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": True,
+        "remediation_type": "matching_antiphish_policy_exo",
         "remediation_cmdlet": "Set-AntiPhishPolicy",
         "remediation_params": {
-            "Identity": "Office365 AntiPhish Default",
             "EnableSimilarUsersSafetyTips": True,
+            "Confirm": False,
         },
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
@@ -4158,6 +5868,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_params": {
             "Identity": "Office365 AntiPhish Default",
             "EnableUnusualCharactersSafetyTips": True,
+            "Confirm": False,
         },
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
@@ -4173,19 +5884,18 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "notification window."
         ),
         "remediation": (
-            "For each hosted content filter policy:\n"
-            "Set-HostedContentFilterPolicy -Identity <name> "
-            "-EnableEndUserSpamNotifications $true "
-            "-EndUserSpamNotificationFrequency 1"
+            "Set-QuarantinePolicy -Identity GlobalQuarantinePolicy "
+            "-ESNEnabled $true -EndUserSpamNotificationFrequency 1.00:00:00"
         ),
         "source": _check_quarantine_notification_enabled,
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": True,
-        "remediation_cmdlet": "Set-HostedContentFilterPolicy",
+        "remediation_type": "global_quarantine_policy_exo",
+        "remediation_cmdlet": "Set-QuarantinePolicy",
         "remediation_params": {
-            "EnableEndUserSpamNotifications": True,
-            "EndUserSpamNotificationFrequency": 1,
+            "ESNEnabled": True,
+            "EndUserSpamNotificationFrequency": "1.00:00:00",
         },
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
@@ -4206,7 +5916,9 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_external_content_sharing_restricted,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_url": _SPO_SETTINGS_URL,
+        "remediation_payload": {"sharingCapability": "existingExternalUserSharingOnly"},
         "requires_licenses": [CAP_SHAREPOINT_ONLINE],
     },
     {
@@ -4257,7 +5969,9 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": True,
         "remediation_url": _SPO_SETTINGS_URL,
-        "remediation_payload": {"oneDriveSharingCapability": "existingExternalUserSharingOnly"},
+        # Graph has no OneDrive-specific sharing property; OneDrive sharing can
+        # never be more permissive than the tenant-wide sharingCapability.
+        "remediation_payload": {"sharingCapability": "existingExternalUserSharingOnly"},
         "requires_licenses": [CAP_SHAREPOINT_ONLINE],
     },
     {
@@ -4320,12 +6034,14 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_sharepoint_sign_out_inactive_users,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_url": _SPO_SETTINGS_URL,
+        "remediation_payload": _SPO_IDLE_SIGN_OUT_REMEDIATION_PAYLOAD,
         "requires_licenses": [CAP_SHAREPOINT_ONLINE],
         "is_cis_benchmark": True,
     },
     # ------------------------------------------------------------------
-    # Microsoft Teams (manual-review pending Teams PowerShell client)
+    # Microsoft Teams (evaluated and remediated via the Teams provider)
     # ------------------------------------------------------------------
     {
         "id": "bp_anon_dialin_cannot_start_meeting",
@@ -4340,11 +6056,11 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "-AllowPSTNUsersToBypassLobby $false"
         ),
         "source": _check_anon_dialin_cannot_start_meeting,
-        "source_type": "exo",
+        "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS],
-        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_only_org_can_bypass_lobby",
@@ -4355,11 +6071,14 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "remediation": "Set-CsTeamsMeetingPolicy -Identity Global -AutoAdmittedUsers EveryoneInCompany",
         "source": _check_only_org_bypass_lobby,
-        "source_type": "exo",
-        "default_enabled": True,
-        "has_remediation": False,
+        "source_type": "teams",
+        "default_enabled": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS],
-        "requires_teams_manage_as_app": True,
+        "alternative_group": "teams_global_lobby",
+        "policy_profile": "organisation_only",
+        "desired_settings": [{"resource": "teams:meetingPolicy:Global", "property": "AutoAdmittedUsers", "value": "EveryoneInCompany"}],
     },
     {
         "id": "bp_invited_users_auto_admitted",
@@ -4371,11 +6090,14 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "remediation": "Set-CsTeamsMeetingPolicy -Identity Global -AutoAdmittedUsers InvitedUsers",
         "source": _check_invited_users_auto_admitted,
-        "source_type": "exo",
+        "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS],
-        "requires_teams_manage_as_app": True,
+        "alternative_group": "teams_global_lobby",
+        "policy_profile": "strict_invited_users",
+        "desired_settings": [{"resource": "teams:meetingPolicy:Global", "property": "AutoAdmittedUsers", "value": "InvitedUsers"}],
     },
     {
         "id": "bp_dialin_cannot_bypass_lobby",
@@ -4385,14 +6107,14 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "preventing unauthorised drop-ins via PSTN."
         ),
         "remediation": "Set-CsTeamsMeetingPolicy -Identity Global -AllowPSTNUsersToBypassLobby $false",
-        "source": _manual_review_factory(
+        "source": _dialin_lobby_check_factory(
             "bp_dialin_cannot_bypass_lobby",
             "Users dialing in can't bypass the lobby",
-            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | Select AllowPSTNUsersToBypassLobby",
         ),
-        "source_type": "graph",
+        "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS, CAP_TEAMS_AUDIO_CONF],
     },
     {
@@ -4407,15 +6129,14 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "Set-CsTeamsMeetingPolicy -Identity Global "
             "-AllowPSTNUsersToBypassLobby $false"
         ),
-        "source": _manual_review_factory(
+        "source": _dialin_lobby_check_factory(
             "bp_restrict_dialin_bypass_lobby",
             "Restrict dial-in users from bypassing a meeting lobby",
-            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | "
-            "Select AllowPSTNUsersToBypassLobby",
         ),
-        "source_type": "graph",
+        "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS, CAP_TEAMS_AUDIO_CONF],
         "is_cis_benchmark": True,
     },
@@ -4428,11 +6149,11 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "remediation": "Set-CsTeamsMeetingPolicy -Identity Global -AllowExternalParticipantGiveRequestControl $false",
         "source": _check_external_participants_no_control,
-        "source_type": "exo",
+        "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS],
-        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_external_users_cannot_initiate",
@@ -4446,11 +6167,11 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "(or restrict via -AllowedDomains to a managed list)"
         ),
         "source": _check_external_users_cannot_initiate,
-        "source_type": "exo",
+        "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS],
-        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_teams_external_files_approved_storage",
@@ -4465,11 +6186,11 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "-AllowShareFile $false -AllowEgnyte $false"
         ),
         "source": _check_teams_external_files_approved_storage,
-        "source_type": "exo",
+        "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS],
-        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_restrict_anon_users_join_meeting",
@@ -4484,11 +6205,11 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "-AllowAnonymousUsersToJoinMeeting $false"
         ),
         "source": _check_restrict_anon_users_join_meeting,
-        "source_type": "exo",
+        "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS],
-        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_restrict_anon_users_start_meeting",
@@ -4504,11 +6225,11 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "-AllowAnonymousUsersToStartMeeting $false"
         ),
         "source": _check_restrict_anon_users_start_meeting,
-        "source_type": "exo",
+        "source_type": "teams",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "teams_policy",
         "requires_licenses": [CAP_TEAMS],
-        "requires_teams_manage_as_app": True,
         "is_cis_benchmark": True,
     },
     # ------------------------------------------------------------------
@@ -4530,7 +6251,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_safe_links_office_apps,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "safe_links_policy_exo",
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
     {
@@ -4586,7 +6308,11 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_zap_teams_on,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "foreach_exo_policy",
+        "remediation_get_cmdlet": "Get-TeamsProtectionPolicy",
+        "remediation_cmdlet": "Set-TeamsProtectionPolicy",
+        "remediation_params": {"ZapEnabled": True},
         "requires_licenses": [CAP_DEFENDER_O365_P2, CAP_TEAMS],
     },
     # ------------------------------------------------------------------
@@ -4605,23 +6331,25 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_spf_records_published,
         "source_type": "graph",
+        "uses_company_email_domains": True,
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
         "id": "bp_dmarc_records_published",
-        "name": "DMARC records for all Exchange Online domains are published",
+        "name": "DMARC records for all MyPortal Email domains are published",
         "description": (
             "DMARC policies tell receivers what to do with mail that fails "
             "SPF/DKIM and provides aggregate reporting on spoof attempts."
         ),
         "remediation": (
             "At your DNS registrar publish a TXT record at _dmarc.<domain>: "
-            "v=DMARC1; p=quarantine; rua=mailto:dmarc@<domain>"
+            "v=DMARC1; p=quarantine; rua=<copy the company-specific value from DMARC Reporting>"
         ),
         "source": _check_dmarc_records_published,
         "source_type": "graph",
+        "uses_company_email_domains": True,
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
@@ -4924,12 +6652,188 @@ _CIS_GROUP_RUNNERS: dict[str, Callable[..., Any]] = {
     "intune_macos": run_intune_macos_benchmarks,
 }
 
+_BATCH_REMEDIATION_SCOPES: dict[str, str] = {
+    "m365": "Microsoft 365",
+    "intune_windows": "CIS Intune Benchmark – Windows",
+    "intune_ios": "CIS Intune Benchmark – iOS / iPadOS",
+    "intune_macos": "CIS Intune Benchmark – macOS",
+}
+
+_CRITICAL_RISK_CHECK_IDS = frozenset(
+    {
+        "bp_block_legacy_auth",
+        "bp_disable_direct_send",
+        "bp_per_user_mfa_disabled",
+        "bp_smtp_auth_disabled",
+        "bp_automatic_email_forwarding",
+        "bp_weak_auth_methods_disabled",
+        "bp_authenticator_mfa_fatigue",
+        "bp_internal_phishing_forms",
+    }
+)
+_RISK_SCORE_BY_SEVERITY = {
+    "low": 20,
+    "medium": 45,
+    "high": 70,
+    "critical": 90,
+}
+_STATUS_PRIORITY_ORDER = {
+    STATUS_FAIL: 0,
+    STATUS_UNKNOWN: 1,
+    STATUS_PERMISSION_MISSING: 1,
+    STATUS_ASSESSMENT_FAILED: 1,
+    STATUS_UNSUPPORTED: 2,
+    STATUS_NOT_LICENSED: 2,
+    STATUS_PASS: 2,
+    STATUS_NOT_APPLICABLE: 3,
+}
+_REGRESSION_NOTICE = (
+    "Regression detected: this check changed from pass to fail since the last successful evaluation."
+)
+
+
+def _benchmark_category_label(bp: Mapping[str, Any]) -> str:
+    return _BATCH_REMEDIATION_SCOPES.get(str(bp.get("cis_group") or "").strip(), "Microsoft 365")
+
+
+def _batch_scope_for_bp(bp: Mapping[str, Any]) -> str:
+    cis_group = str(bp.get("cis_group") or "").strip()
+    return cis_group if cis_group in _BATCH_REMEDIATION_SCOPES else "m365"
+
+
+def _risk_severity_for_bp(bp: Mapping[str, Any]) -> str:
+    check_id = str(bp.get("id") or "")
+    if check_id in _CRITICAL_RISK_CHECK_IDS:
+        return "critical"
+    if check_id.startswith("bp_monitor_"):
+        return "low"
+    if str(bp.get("cis_group") or "").startswith("intune_"):
+        return "medium"
+    if bp.get("has_remediation"):
+        return "high"
+    return "medium"
+
+
+def _business_impact_for_bp(bp: Mapping[str, Any], severity: str) -> str:
+    check_id = str(bp.get("id") or "")
+    if check_id.startswith("bp_monitor_"):
+        return "Monitoring gap can delay detection, escalation, and executive reporting."
+    if str(bp.get("cis_group") or "").startswith("intune_"):
+        return "Endpoint compliance drift can expand device access and policy exposure."
+    if severity == "critical":
+        return "Control failure can enable tenant compromise, account takeover, or high-impact email abuse."
+    if severity == "high":
+        return "Control gap weakens identity, messaging, or data-protection safeguards across the tenant."
+    return "Configuration drift increases operational risk and should be prioritised during the next change window."
+
+
+def _remediation_runbook_for_bp(bp: Mapping[str, Any]) -> list[str]:
+    runbook = [
+        f"Confirm the failure is in scope for this company and {_benchmark_category_label(bp)}.",
+    ]
+    if bp.get("has_remediation"):
+        runbook.append(
+            "Review prerequisites, approvals, and any maintenance-window impact before using automated remediation."
+        )
+    check_id = str(bp.get("id") or "")
+    policy_text = " ".join(
+        (check_id, str(bp.get("name") or ""), str(bp.get("description") or ""))
+    ).lower()
+    if "conditional access" in policy_text or "admin" in policy_text or "break-glass" in policy_text:
+        runbook.extend(
+            [
+                "Preview affected users, applications, locations, and sign-in impact before applying the change.",
+                "Preserve and verify emergency-access account exclusions; never remove the last tested recovery path.",
+                "Record a recovery operator and rollback procedure before enabling the policy.",
+            ]
+        )
+    remediation = str(bp.get("remediation") or "").strip()
+    if remediation:
+        runbook.append(remediation)
+    runbook.append(
+        "Re-run the check after the change and document the outcome in the related ticket or note."
+    )
+    return runbook
+
+
+def _rollback_guidance_for_bp(bp: Mapping[str, Any]) -> str:
+    if str(bp.get("cis_group") or "").startswith("intune_"):
+        target = "Intune policy or compliance profile"
+    elif bp.get("source_type") == "exo":
+        target = "Exchange Online setting or policy"
+    elif bp.get("source_type") == "scc":
+        target = "Purview / Compliance policy"
+    else:
+        target = "Microsoft 365 or Entra policy"
+    return (
+        f"Capture the current {target} values before remediation. If the change causes user impact, "
+        "restore the prior configuration from the recorded baseline or change ticket, then re-run the "
+        "check to confirm the rollback."
+    )
+
+
+def _posture_metadata_for_bp(bp: Mapping[str, Any]) -> dict[str, Any]:
+    severity = _risk_severity_for_bp(bp)
+    return {
+        "risk_severity": severity,
+        "risk_score": _RISK_SCORE_BY_SEVERITY[severity],
+        "business_impact": _business_impact_for_bp(bp, severity),
+        "benchmark_category": _benchmark_category_label(bp),
+        "batch_scope": _batch_scope_for_bp(bp),
+        "remediation_runbook": _remediation_runbook_for_bp(bp),
+        "rollback_guidance": _rollback_guidance_for_bp(bp),
+    }
+
+
+def _is_regression(previous_status: str | None, status: str) -> bool:
+    return previous_status == STATUS_PASS and status == STATUS_FAIL
+
+
+def _with_regression_notice(details: str, *, previous_status: str | None, status: str) -> str:
+    if not _is_regression(previous_status, status):
+        return details
+    if _REGRESSION_NOTICE in details:
+        return details
+    return f"{_REGRESSION_NOTICE} {details}".strip()
+
+
+def _sort_results_by_priority(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        results,
+        key=lambda item: (
+            _STATUS_PRIORITY_ORDER.get(str(item.get("status") or ""), 4),
+            -int(item.get("risk_score") or 0),
+            str(item.get("check_name") or ""),
+        ),
+    )
+
+
+def get_batch_remediation_scopes(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    scopes: list[dict[str, Any]] = []
+    for scope_id, label in _BATCH_REMEDIATION_SCOPES.items():
+        pending = sum(
+            1
+            for result in results
+            if str(result.get("batch_scope") or "m365") == scope_id
+            and result.get("status") == STATUS_FAIL
+            and result.get("has_remediation")
+        )
+        if pending:
+            scopes.append({"id": scope_id, "label": label, "pending_count": pending})
+    return scopes
+
 
 def _enrich_catalog_entry(bp: dict[str, Any]) -> dict[str, Any]:
     """Return a public-facing copy of a catalog entry with internal keys
     stripped and license requirements rendered as a human-friendly string.
     """
     entry = {k: v for k, v in bp.items() if k not in _INTERNAL_KEYS}
+    entry.update(_posture_metadata_for_bp(bp))
+    alternative_group = str(bp.get("alternative_group") or "")
+    if alternative_group:
+        entry["selected_policy_profile"] = (
+            bp.get("policy_profile") == _DEFAULT_POLICY_PROFILES.get(alternative_group)
+        )
     requires = bp.get("requires_licenses") or []
     if requires:
         entry["requires_licenses_display"] = _format_missing_licenses(requires)
@@ -4986,13 +6890,24 @@ async def get_auto_remediate_check_ids() -> set[str]:
     auto_remediate: set[str] = set()
     for bp in _BEST_PRACTICES:
         check_id = bp["id"]
-        if (
-            bp.get("has_remediation")
-            and check_id in settings
-            and settings[check_id].get("auto_remediate")
-        ):
+        auto_remediate_enabled = (
+            settings[check_id].get("auto_remediate")
+            if check_id in settings
+            else bool(bp.get("default_auto_remediate", False))
+        )
+        if bp.get("has_remediation") and auto_remediate_enabled:
             auto_remediate.add(check_id)
     return auto_remediate
+
+
+async def get_create_ticket_on_fail_check_ids() -> set[str]:
+    """Return the set of check_ids that should create tickets on pass→fail."""
+    settings = await bp_repo.get_settings_map()
+    return {
+        bp["id"]
+        for bp in _BEST_PRACTICES
+        if bp["id"] in settings and settings[bp["id"]].get("create_ticket_on_fail")
+    }
 
 
 async def reset_enabled_results_to_unknown(company_id: int) -> int:
@@ -5024,6 +6939,7 @@ async def list_settings_with_catalog(company_id: int | None = None) -> list[dict
     Each item contains the catalog metadata plus:
     - ``enabled`` boolean (global on/off, defaulting to ``default_enabled``)
     - ``auto_remediate`` boolean (auto-remediation after each evaluation)
+    - ``create_ticket_on_fail`` boolean (ticket created on pass→fail)
     - ``excluded`` boolean (per-company exclusion; only set when ``company_id`` is given)
     """
     settings = await bp_repo.get_settings_map()
@@ -5034,8 +6950,15 @@ async def list_settings_with_catalog(company_id: int | None = None) -> list[dict
     for bp in _BEST_PRACTICES:
         entry = _enrich_catalog_entry(bp)
         row = settings.get(bp["id"])
-        entry["enabled"] = row["enabled"] if row else bool(bp.get("default_enabled", True))
-        entry["auto_remediate"] = row["auto_remediate"] if row else False
+        entry["enabled"] = row.get("enabled") if row else bool(bp.get("default_enabled", True))
+        entry["auto_remediate"] = (
+            row.get("auto_remediate", False)
+            if row
+            else bool(bp.get("default_auto_remediate", False))
+        )
+        entry["create_ticket_on_fail"] = (
+            row.get("create_ticket_on_fail", False) if row else False
+        )
         entry["excluded"] = bp["id"] in excluded_ids
         out.append(entry)
     return out
@@ -5044,6 +6967,7 @@ async def list_settings_with_catalog(company_id: int | None = None) -> list[dict
 async def set_enabled_checks(
     enabled_check_ids: set[str],
     auto_remediate_check_ids: set[str] | None = None,
+    create_ticket_on_fail_check_ids: set[str] | None = None,
 ) -> None:
     """Persist the global enabled and auto-remediate flags for every catalog check.
 
@@ -5051,12 +6975,15 @@ async def set_enabled_checks(
     ``auto_remediate_check_ids`` controls which checks trigger automated
     remediation immediately after evaluation (only honoured for checks that
     declare ``has_remediation: True`` in the catalog).
+    ``create_ticket_on_fail_check_ids`` controls which checks create a ticket
+    when their status changes from pass to fail.
 
     For checks toggled off, any previously-stored per-company results are
     cleared so they no longer appear on company pages.
     """
     catalog = _catalog_map()
     enabled_filtered = {cid for cid in enabled_check_ids if cid in catalog}
+    _validate_policy_selection(enabled_filtered)
     auto_remediate_filtered: set[str] = set()
     if auto_remediate_check_ids is not None:
         auto_remediate_filtered = {
@@ -5064,14 +6991,28 @@ async def set_enabled_checks(
             for cid in auto_remediate_check_ids
             if cid in catalog and catalog[cid].get("has_remediation")
         }
+    create_ticket_filtered: set[str] = set()
+    if create_ticket_on_fail_check_ids is not None:
+        create_ticket_filtered = {
+            cid for cid in create_ticket_on_fail_check_ids if cid in catalog
+        }
+    else:
+        existing_settings = await bp_repo.get_settings_map()
+        create_ticket_filtered = {
+            cid
+            for cid, row in existing_settings.items()
+            if cid in catalog and row.get("create_ticket_on_fail")
+        }
     for bp in _BEST_PRACTICES:
         check_id = bp["id"]
         is_enabled = check_id in enabled_filtered
         is_auto_remediate = check_id in auto_remediate_filtered
+        should_create_ticket = check_id in create_ticket_filtered
         await bp_repo.upsert_setting(
             check_id=check_id,
             enabled=is_enabled,
             auto_remediate=is_auto_remediate,
+            create_ticket_on_fail=should_create_ticket,
         )
         if not is_enabled:
             await bp_repo.delete_result_for_check(check_id)
@@ -5079,7 +7020,177 @@ async def set_enabled_checks(
         "M365 Best Practice settings updated",
         enabled_count=len(enabled_filtered),
         auto_remediate_count=len(auto_remediate_filtered),
+        create_ticket_on_fail_count=len(create_ticket_filtered),
         total=len(_BEST_PRACTICES),
+    )
+
+
+def build_failure_ticket_external_reference(company_id: int, check_id: str) -> str:
+    return f"m365-best-practice:{company_id}:{check_id}"
+
+
+def build_failure_ticket_subject(
+    check_name: str, *, regression_detected: bool = False
+) -> str:
+    prefix = "M365 posture regression" if regression_detected else "M365 best practice failed"
+    return f"{prefix}: {check_name}"[:255]
+
+
+def _format_run_timestamp(run_at: datetime) -> str:
+    return run_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def build_failure_ticket_description(
+    *,
+    company_name: str,
+    check_id: str,
+    check_name: str,
+    details: str,
+    run_at: datetime | None,
+    created_automatically: bool,
+    regression_detected: bool = False,
+    requester_name: str | None = None,
+    requester_email: str | None = None,
+) -> str:
+    bp = _catalog_map().get(check_id, {"id": check_id})
+    posture = _posture_metadata_for_bp(bp)
+    if regression_detected:
+        intro = (
+            "This ticket was created automatically because an M365 best-practice "
+            "check regressed from <strong>Pass</strong> to <strong>Fail</strong>."
+        )
+    elif created_automatically:
+        intro = (
+            "This ticket was created automatically because an M365 best-practice "
+            "check failed and requires review."
+        )
+    else:
+        intro = "A portal user requested technician assistance for a failed M365 best-practice check."
+    metadata_lines = [f"<strong>Company:</strong> {escape(company_name)}"]
+    if requester_name:
+        metadata_lines.append(f"<strong>Requester:</strong> {escape(requester_name)}")
+    if requester_email:
+        metadata_lines.append(f"<strong>Requester email:</strong> {escape(requester_email)}")
+    metadata_lines.extend(
+        [
+            f"<strong>Check:</strong> {escape(check_name)}",
+            f"<strong>Check ID:</strong> {escape(check_id)}",
+        ]
+    )
+    if posture:
+        metadata_lines.extend(
+            [
+                f"<strong>Benchmark category:</strong> {escape(str(posture.get('benchmark_category') or 'Microsoft 365'))}",
+                (
+                    "<strong>Risk priority:</strong> "
+                    f"{escape(str(posture.get('risk_severity') or 'medium').title())} "
+                    f"({escape(str(posture.get('risk_score') or 0))}/100)"
+                ),
+                f"<strong>Business impact:</strong> {escape(str(posture.get('business_impact') or ''))}",
+            ]
+        )
+    if run_at is not None:
+        metadata_lines.append(
+            f"<strong>Evaluated at:</strong> {escape(_format_run_timestamp(run_at))}"
+        )
+    runbook = posture.get("remediation_runbook") or []
+    return (
+        f"<p>{intro}</p>"
+        f"<p>{'<br />'.join(metadata_lines)}</p>"
+        f"<h3>Failure details</h3><p>{escape(details or 'No details provided.')}</p>"
+        + (
+            "<h3>Recommended runbook</h3><ol>"
+            + "".join(f"<li>{escape(str(step))}</li>" for step in runbook)
+            + "</ol>"
+            if runbook
+            else ""
+        )
+        + (
+            f"<h3>Rollback guidance</h3><p>{escape(str(posture.get('rollback_guidance') or ''))}</p>"
+            if posture.get("rollback_guidance")
+            else ""
+        )
+    )
+
+
+async def _maybe_create_ticket_on_fail(
+    *,
+    company_id: int,
+    check_id: str,
+    check_name: str,
+    status: str,
+    details: str,
+    run_at: datetime,
+    previous_status: str | None,
+    create_ticket_on_fail_ids: set[str],
+) -> None:
+    if (
+        status != STATUS_FAIL
+        or previous_status != STATUS_PASS
+        or check_id not in create_ticket_on_fail_ids
+    ):
+        return
+
+    external_reference = build_failure_ticket_external_reference(company_id, check_id)
+    existing_ticket = await tickets_repo.find_open_ticket_by_external_reference(
+        external_reference
+    )
+    if existing_ticket:
+        log_info(
+            "M365 best practice failure ticket already open",
+            company_id=company_id,
+            check_id=check_id,
+            ticket_id=existing_ticket.get("id"),
+        )
+        return
+
+    company = await companies_repo.get_company_by_id(company_id)
+    company_name = (
+        str(company.get("name") or f"Company {company_id}")
+        if company
+        else f"Company {company_id}"
+    )
+    description = build_failure_ticket_description(
+        company_name=company_name,
+        check_id=check_id,
+        check_name=check_name,
+        details=details,
+        run_at=run_at,
+        created_automatically=True,
+        regression_detected=_is_regression(previous_status, status),
+    )
+    try:
+        ticket = await tickets_service.create_ticket(
+            subject=build_failure_ticket_subject(
+                check_name,
+                regression_detected=_is_regression(previous_status, status),
+            ),
+            description=description,
+            requester_id=None,
+            company_id=company_id,
+            assigned_user_id=None,
+            priority="normal",
+            status=await tickets_service.resolve_status_or_default(None),
+            category=_M365_FAILURE_TICKET_CATEGORY,
+            module_slug=_M365_FAILURE_TICKET_MODULE,
+            external_reference=external_reference,
+            trigger_automations=True,
+            send_creation_notification=False,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        log_error(
+            "Failed to create M365 best practice failure ticket",
+            company_id=company_id,
+            check_id=check_id,
+            error=str(exc),
+        )
+        return
+
+    log_info(
+        "M365 best practice failure ticket created",
+        company_id=company_id,
+        check_id=check_id,
+        ticket_id=ticket.get("id"),
     )
 
 
@@ -5101,6 +7212,11 @@ async def save_company_exclusions(company_id: int, excluded_check_ids: set[str])
         company_id=company_id,
         excluded_count=len(filtered),
     )
+
+
+async def get_company_exclusions(company_id: int) -> set[str]:
+    """Return the check IDs excluded for one company."""
+    return await bp_repo.get_company_exclusions(company_id)
 
 
 # ---------------------------------------------------------------------------
@@ -5265,7 +7381,11 @@ async def _call_check_with_retry(
     raise M365Error(f"Best practice check '{check_id}' produced no result")
 
 
-async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
+async def run_best_practices(
+    company_id: int,
+    *,
+    previous_statuses: Mapping[str, str | None] | None = None,
+) -> list[dict[str, Any]]:
     """Run all globally-enabled best-practice checks for ``company_id``.
 
     Returns the list of result dicts (one per check) and persists each result
@@ -5276,12 +7396,16 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
     - has ``auto_remediate`` enabled globally (and ``has_remediation: True``)
 
     will have automated remediation triggered immediately.
+    Callers that reset stored results before running checks should pass
+    ``previous_statuses`` captured before that reset so pass→fail ticket
+    detection uses the pre-run state.
 
     Graph-based checks receive the Graph access token; Exchange-Online-based
     checks (``source_type == "exo"``) receive the EXO token and tenant ID
     acquired once lazily.  CIS Intune checks (``cis_group`` set) are run via
     their batch runner once per group and results cached for the run.
     """
+    previous_statuses = dict(previous_statuses or {})
     # Best-practice Graph checks are designed around application permissions.
     # Always use an app-only token to avoid reusing a cached delegated token
     # that may not carry equivalent privileges (e.g. AuditLog.Read.All).
@@ -5333,6 +7457,7 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
 
     enabled = await get_enabled_check_ids()
     auto_remediate_ids = await get_auto_remediate_check_ids()
+    create_ticket_on_fail_ids = await get_create_ticket_on_fail_check_ids()
     try:
         excluded = await bp_repo.get_company_exclusions(company_id)
     except Exception as exc:  # noqa: BLE001 – exclusion lookup must never break the runner
@@ -5352,6 +7477,12 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
     # EXO token/tenant – acquired lazily on first EXO check
     exo_token: str | None = None
     exo_tenant_id: str | None = None
+    teams_tokens: tuple[str, str] | None = None
+    teams_tenant_id: str | None = None
+
+    # SCC token/tenant – acquired lazily on first SCC (Security & Compliance) check
+    scc_token: str | None = None
+    scc_tenant_id: str | None = None
 
     # Cache for CIS batch group results: group_name → {check_id: result_dict}
     cis_group_cache: dict[str, dict[str, dict[str, Any]]] = {}
@@ -5362,23 +7493,20 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
         if check_id not in enabled or check_id in excluded:
             continue
         check_name = bp["name"]
+        previous_status = previous_statuses.get(check_id)
         cis_group = bp.get("cis_group")
+        affected_accounts: list[dict[str, str]] = []
 
         # If the tenant lacks the licenses required to implement this check,
         # mark it as N/A and skip evaluation/auto-remediation entirely.
         missing = _missing_capabilities(bp.get("requires_licenses"), tenant_capabilities)
         if missing:
-            status = STATUS_NOT_APPLICABLE
+            status = STATUS_NOT_LICENSED
             details = (
                 "Not applicable – this check requires the following Microsoft 365 "
                 f"license(s) which the tenant does not have: "
                 f"{_format_missing_licenses(missing)}."
             )
-        elif bp.get("requires_teams_manage_as_app"):
-            # Teams PowerShell cmdlet checks require Teams.ManageAsApp which
-            # cannot be programmatically assigned to an app registration.
-            status = STATUS_NOT_APPLICABLE
-            details = _TEAMS_PS_NOT_APPLICABLE_DETAILS
         elif cis_group and cis_group in _CIS_GROUP_RUNNERS:
             # CIS batch check – run the group runner once and cache results
             if cis_group not in cis_group_cache:
@@ -5405,6 +7533,7 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
             if raw:
                 status = raw.get("status", STATUS_UNKNOWN)
                 details = raw.get("details") or ""
+                affected_accounts = raw.get("affected_accounts") or []
             else:
                 status = STATUS_UNKNOWN
                 details = "Check result not available from batch run."
@@ -5415,19 +7544,66 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
                 if source_type == "exo":
                     if exo_token is None:
                         exo_token, exo_tenant_id = await _acquire_exo_access_token(company_id)
+                    if bp.get("uses_company_email_domains"):
+                        email_domains = (
+                            await companies_repo.get_email_domains_for_company(company_id)
+                        )
+                        raw = await _call_check_with_retry(
+                            lambda r=runner: r(  # type: ignore[call-arg,misc]
+                                exo_token, exo_tenant_id, email_domains
+                            ),
+                            company_id=company_id,
+                            check_id=check_id,
+                        )
+                    else:
+                        raw = await _call_check_with_retry(
+                            lambda r=runner: r(exo_token, exo_tenant_id),  # type: ignore[call-arg,misc]
+                            company_id=company_id,
+                            check_id=check_id,
+                        )
+                elif source_type == "teams":
+                    if not provider_enabled(company_id, "teams"):
+                        raw = _result(check_id, check_name, STATUS_UNSUPPORTED,
+                            "Teams provider is not enabled for this company; the legacy Exchange route is not used.")
+                    else:
+                        if teams_tokens is None:
+                            graph_teams, resource_teams, teams_tenant_id = await _acquire_teams_access_tokens(company_id)
+                            teams_tokens = (graph_teams, resource_teams)
+                        raw = await _call_check_with_retry(
+                            lambda r=runner: r(teams_tokens, teams_tenant_id),
+                            company_id=company_id, check_id=check_id,
+                        )
+                elif source_type == "scc":
+                    if scc_token is None:
+                        scc_token, scc_tenant_id = await _acquire_scc_access_token(company_id)
                     raw = await _call_check_with_retry(
-                        lambda r=runner: r(exo_token, exo_tenant_id),  # type: ignore[call-arg,misc]
+                        lambda r=runner: r(scc_token, scc_tenant_id),  # type: ignore[call-arg,misc]
                         company_id=company_id,
                         check_id=check_id,
                     )
                 else:
-                    raw = await _call_check_with_retry(
-                        lambda r=runner: r(graph_token),  # type: ignore[call-arg,misc]
-                        company_id=company_id,
-                        check_id=check_id,
-                    )
+                    if bp.get("uses_company_id"):
+                        raw = await _call_check_with_retry(
+                            lambda r=runner: r(graph_token, company_id),  # type: ignore[call-arg,misc]
+                            company_id=company_id,
+                            check_id=check_id,
+                        )
+                    elif bp.get("uses_company_email_domains"):
+                        email_domains = await companies_repo.get_email_domains_for_company(company_id)
+                        raw = await _call_check_with_retry(
+                            lambda r=runner: r(graph_token, email_domains),  # type: ignore[call-arg,misc]
+                            company_id=company_id,
+                            check_id=check_id,
+                        )
+                    else:
+                        raw = await _call_check_with_retry(
+                            lambda r=runner: r(graph_token),  # type: ignore[call-arg,misc]
+                            company_id=company_id,
+                            check_id=check_id,
+                        )
                 status = raw.get("status", STATUS_UNKNOWN)
                 details = raw.get("details") or ""
+                affected_accounts = raw.get("affected_accounts") or []
             except M365Error as exc:
                 log_error(
                     "M365 best practice check failed",
@@ -5435,15 +7611,25 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
                     check_id=check_id,
                     error=str(exc),
                 )
-                status = STATUS_UNKNOWN
+                status = _failure_status(exc)
                 details = f"Unable to evaluate check: {exc}"
 
+        if affected_accounts:
+            status, details, affected_accounts = await _apply_account_exclusions(
+                company_id, check_id, status, details, affected_accounts
+            )
+        details = _with_regression_notice(
+            details,
+            previous_status=previous_status,
+            status=status,
+        )
         await bp_repo.upsert_result(
             company_id=company_id,
             check_id=check_id,
             check_name=check_name,
             status=status,
             details=details,
+            affected_accounts=affected_accounts,
             run_at=run_at,
         )
 
@@ -5455,8 +7641,33 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
                 check_id=check_id,
             )
             await remediate_check(company_id=company_id, check_id=check_id)
+            # Persist the tenant's post-remediation state immediately.  Disable
+            # auto-remediation for this verification run so a remediation that
+            # does not fully resolve the issue cannot recurse indefinitely.
+            refreshed = await run_single_check(
+                company_id=company_id,
+                check_id=check_id,
+                allow_auto_remediation=False,
+                previous_status=previous_status,
+                emit_ticket_on_fail=False,
+            )
+            status = refreshed["status"]
+            details = refreshed["details"]
+            run_at = refreshed["run_at"]
+            affected_accounts = refreshed.get("affected_accounts") or []
 
-        results.append({
+        await _maybe_create_ticket_on_fail(
+            company_id=company_id,
+            check_id=check_id,
+            check_name=check_name,
+            status=status,
+            details=details,
+            run_at=run_at,
+            previous_status=previous_status,
+            create_ticket_on_fail_ids=create_ticket_on_fail_ids,
+        )
+
+        result = {
             "check_id": check_id,
             "check_name": check_name,
             "status": status,
@@ -5464,17 +7675,28 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
             "run_at": run_at,
             "remediation": get_remediation(check_id) if status == STATUS_FAIL else None,
             "has_remediation": bool(bp.get("has_remediation")),
-        })
+            "affected_accounts": affected_accounts,
+            "regression_detected": _is_regression(previous_status, status),
+        }
+        result.update(_posture_metadata_for_bp(bp))
+        results.append(result)
 
     log_info(
         "M365 best practices run",
         company_id=company_id,
         check_count=len(results),
     )
-    return results
+    return _sort_results_by_priority(results)
 
 
-async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
+async def run_single_check(
+    company_id: int,
+    check_id: str,
+    *,
+    allow_auto_remediation: bool = True,
+    previous_status: str | None = None,
+    emit_ticket_on_fail: bool = True,
+) -> dict[str, Any]:
     """Run a single best-practice check by ``check_id`` for ``company_id``.
 
     Acquires the necessary access tokens, runs only the named check (including
@@ -5483,7 +7705,10 @@ async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
     returned by :func:`run_best_practices`.
 
     Raises :class:`ValueError` if ``check_id`` is unknown or not currently
-    enabled globally.
+    enabled globally.  ``allow_auto_remediation`` is disabled by post-remediation
+    verification runs to prevent an unresolved check from remediating recursively.
+    Callers that reset stored results before evaluation can pass ``previous_status``
+    explicitly so pass→fail ticket detection still uses the pre-reset state.
     """
     catalog = _catalog_map()
     bp = catalog.get(check_id)
@@ -5493,6 +7718,11 @@ async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
     enabled = await get_enabled_check_ids()
     if check_id not in enabled:
         raise ValueError(f"Best-practice check '{check_id}' is not enabled")
+    create_ticket_on_fail_ids = (
+        await get_create_ticket_on_fail_check_ids() if emit_ticket_on_fail else set()
+    )
+    if previous_status is None and check_id in create_ticket_on_fail_ids:
+        previous_status = await bp_repo.get_result_status(company_id, check_id)
 
     # Keep single-check runs consistent with full runs: execute checks with an
     # app-only token so permission-sensitive checks don't depend on delegated
@@ -5522,18 +7752,16 @@ async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
     tenant_capabilities = await detect_tenant_capabilities(graph_token)
     check_name = bp["name"]
     cis_group = bp.get("cis_group")
+    affected_accounts: list[dict[str, str]] = []
 
     missing = _missing_capabilities(bp.get("requires_licenses"), tenant_capabilities)
     if missing:
-        status = STATUS_NOT_APPLICABLE
+        status = STATUS_NOT_LICENSED
         details = (
             "Not applicable – this check requires the following Microsoft 365 "
             f"license(s) which the tenant does not have: "
             f"{_format_missing_licenses(missing)}."
         )
-    elif bp.get("requires_teams_manage_as_app"):
-        status = STATUS_NOT_APPLICABLE
-        details = _TEAMS_PS_NOT_APPLICABLE_DETAILS
     elif cis_group and cis_group in _CIS_GROUP_RUNNERS:
         batch_runner = _CIS_GROUP_RUNNERS.get(cis_group)
         if batch_runner:
@@ -5548,6 +7776,7 @@ async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
                 if raw:
                     status = raw.get("status", STATUS_UNKNOWN)
                     details = raw.get("details") or ""
+                    affected_accounts = raw.get("affected_accounts") or []
                 else:
                     status = STATUS_UNKNOWN
                     details = "Check result not available from batch run."
@@ -5569,19 +7798,65 @@ async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
         try:
             if source_type == "exo":
                 exo_token, exo_tenant_id = await _acquire_exo_access_token(company_id)
+                if bp.get("uses_company_email_domains"):
+                    email_domains = (
+                        await companies_repo.get_email_domains_for_company(company_id)
+                    )
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r(  # type: ignore[call-arg,misc]
+                            exo_token, exo_tenant_id, email_domains
+                        ),
+                        company_id=company_id,
+                        check_id=check_id,
+                    )
+                else:
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r(exo_token, exo_tenant_id),  # type: ignore[call-arg,misc]
+                        company_id=company_id,
+                        check_id=check_id,
+                    )
+            elif source_type == "teams":
+                if not provider_enabled(company_id, "teams"):
+                    raw = _result(
+                        check_id, check_name, STATUS_UNSUPPORTED,
+                        "Teams provider is not enabled for this company; the legacy Exchange route is not used.",
+                    )
+                else:
+                    graph_teams, resource_teams, teams_tid = await _acquire_teams_access_tokens(company_id)
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r((graph_teams, resource_teams), teams_tid),
+                        company_id=company_id, check_id=check_id,
+                    )
+            elif source_type == "scc":
+                scc_tok, scc_tid = await _acquire_scc_access_token(company_id)
                 raw = await _call_check_with_retry(
-                    lambda r=runner: r(exo_token, exo_tenant_id),  # type: ignore[call-arg,misc]
+                    lambda r=runner: r(scc_tok, scc_tid),  # type: ignore[call-arg,misc]
                     company_id=company_id,
                     check_id=check_id,
                 )
             else:
-                raw = await _call_check_with_retry(
-                    lambda r=runner: r(graph_token),  # type: ignore[call-arg,misc]
-                    company_id=company_id,
-                    check_id=check_id,
-                )
+                if bp.get("uses_company_id"):
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r(graph_token, company_id),  # type: ignore[call-arg,misc]
+                        company_id=company_id,
+                        check_id=check_id,
+                    )
+                elif bp.get("uses_company_email_domains"):
+                    email_domains = await companies_repo.get_email_domains_for_company(company_id)
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r(graph_token, email_domains),  # type: ignore[call-arg,misc]
+                        company_id=company_id,
+                        check_id=check_id,
+                    )
+                else:
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r(graph_token),  # type: ignore[call-arg,misc]
+                        company_id=company_id,
+                        check_id=check_id,
+                    )
             status = raw.get("status", STATUS_UNKNOWN)
             details = raw.get("details") or ""
+            affected_accounts = raw.get("affected_accounts") or []
         except M365Error as exc:
             log_error(
                 "M365 best practice check failed",
@@ -5589,19 +7864,31 @@ async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
                 check_id=check_id,
                 error=str(exc),
             )
-            status = STATUS_UNKNOWN
+            status = _failure_status(exc)
             details = f"Unable to evaluate check: {exc}"
 
+    if affected_accounts:
+        status, details, affected_accounts = await _apply_account_exclusions(
+            company_id, check_id, status, details, affected_accounts
+        )
+    details = _with_regression_notice(
+        details,
+        previous_status=previous_status,
+        status=status,
+    )
     await bp_repo.upsert_result(
         company_id=company_id,
         check_id=check_id,
         check_name=check_name,
         status=status,
         details=details,
+        affected_accounts=affected_accounts,
         run_at=run_at,
     )
 
-    auto_remediate_ids = await get_auto_remediate_check_ids()
+    auto_remediate_ids = (
+        await get_auto_remediate_check_ids() if allow_auto_remediation else set()
+    )
     if status == STATUS_FAIL and check_id in auto_remediate_ids:
         log_info(
             "M365 best practice auto-remediation triggered",
@@ -5609,13 +7896,32 @@ async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
             check_id=check_id,
         )
         await remediate_check(company_id=company_id, check_id=check_id)
+        return await run_single_check(
+            company_id=company_id,
+            check_id=check_id,
+            allow_auto_remediation=False,
+            previous_status=previous_status,
+            emit_ticket_on_fail=emit_ticket_on_fail,
+        )
+
+    if emit_ticket_on_fail:
+        await _maybe_create_ticket_on_fail(
+            company_id=company_id,
+            check_id=check_id,
+            check_name=check_name,
+            status=status,
+            details=details,
+            run_at=run_at,
+            previous_status=previous_status,
+            create_ticket_on_fail_ids=create_ticket_on_fail_ids,
+        )
 
     log_info(
         "M365 single best practice check run",
         company_id=company_id,
         check_id=check_id,
     )
-    return {
+    result = {
         "check_id": check_id,
         "check_name": check_name,
         "status": status,
@@ -5623,7 +7929,11 @@ async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
         "run_at": run_at,
         "remediation": get_remediation(check_id) if status == STATUS_FAIL else None,
         "has_remediation": bool(bp.get("has_remediation")),
+        "affected_accounts": affected_accounts,
+        "regression_detected": _is_regression(previous_status, status),
     }
+    result.update(_posture_metadata_for_bp(bp))
+    return result
 
 
 async def get_last_results(company_id: int) -> list[dict[str, Any]]:
@@ -5644,23 +7954,260 @@ async def get_last_results(company_id: int) -> list[dict[str, Any]]:
         check_id = row["check_id"]
         if check_id not in enabled or check_id in excluded:
             continue
-        bp_meta = catalog.get(check_id, {})
+        bp_meta = catalog.get(check_id, {"id": check_id})
         status = row.get("status") or STATUS_UNKNOWN
-        out.append({
+        result = {
             "check_id": check_id,
             "check_name": row.get("check_name") or bp_meta.get("name", check_id),
             "description": bp_meta.get("description", ""),
             "status": status,
             "details": row.get("details") or "",
+            "notes": row.get("notes") or "",
             "run_at": row.get("run_at"),
             "remediation": get_remediation(check_id) if status == STATUS_FAIL else None,
             "has_remediation": bool(bp_meta.get("has_remediation")),
             "remediation_status": row.get("remediation_status"),
             "remediated_at": row.get("remediated_at"),
+            "remediation_failure_reason": row.get("remediation_failure_reason"),
             "is_cis_benchmark": bool(bp_meta.get("is_cis_benchmark")),
             "cis_group": bp_meta.get("cis_group", ""),
-        })
-    return out
+            "affected_accounts": row.get("affected_accounts") or [],
+        }
+        result.update(_posture_metadata_for_bp(bp_meta))
+        result["regression_detected"] = str(result.get("details") or "").startswith(
+            _REGRESSION_NOTICE
+        )
+        out.append(result)
+    return _sort_results_by_priority(out)
+
+
+def _normalise_batch_scope(scope: str | None) -> str | None:
+    value = str(scope or "").strip().lower()
+    return value if value in _BATCH_REMEDIATION_SCOPES else None
+
+
+async def remediate_failed_checks_batch(company_id: int, *, scope: str) -> dict[str, Any]:
+    normalised_scope = _normalise_batch_scope(scope)
+    if normalised_scope is None:
+        raise ValueError("Invalid remediation batch scope")
+    results = await get_last_results(company_id)
+    candidates = [
+        result
+        for result in results
+        if str(result.get("batch_scope") or "m365") == normalised_scope
+        and result.get("status") == STATUS_FAIL
+        and result.get("has_remediation")
+    ]
+    # Validate the whole plan before executing anything.  This prevents two
+    # checks from alternating a shared setting and makes the operation atomic
+    # with respect to planning errors.
+    try:
+        _validate_policy_selection(
+            {str(candidate.get("check_id") or "") for candidate in candidates}
+        )
+    except ValueError as exc:
+        return {
+            "success": False,
+            "message": str(exc),
+            "scope": normalised_scope,
+            "scope_label": _BATCH_REMEDIATION_SCOPES[normalised_scope],
+            "total": len(candidates),
+            "succeeded": 0,
+            "failed": len(candidates),
+            "failures": [str(exc)],
+            "refresh_issues": [],
+        }
+    if not candidates:
+        return {
+            "success": True,
+            "message": f"No failed remediations are pending in {_BATCH_REMEDIATION_SCOPES[normalised_scope]}.",
+            "scope": normalised_scope,
+            "scope_label": _BATCH_REMEDIATION_SCOPES[normalised_scope],
+            "total": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "failures": [],
+        }
+    failures: list[str] = []
+    refresh_issues: list[str] = []
+    succeeded = 0
+    for candidate in candidates:
+        check_id = str(candidate.get("check_id") or "")
+        try:
+            outcome = await remediate_check(company_id=company_id, check_id=check_id)
+        except (ValueError, M365Error) as exc:
+            failures.append(f"{candidate.get('check_name') or check_id}: remediation failed ({exc})")
+            continue
+        remediation_succeeded = bool(outcome.get("success"))
+        if not remediation_succeeded:
+            failures.append(f"{candidate.get('check_name') or check_id}: {outcome.get('message') or 'Remediation failed'}")
+            continue
+
+        verified = None
+        verify_error: Exception | None = None
+        for attempt in range(1, _MAX_CHECK_ATTEMPTS + 1):
+            try:
+                verified = await run_single_check(
+                    company_id=company_id, check_id=check_id,
+                    allow_auto_remediation=False, previous_status=STATUS_FAIL,
+                    emit_ticket_on_fail=False,
+                )
+                verify_error = None
+            except (ValueError, M365Error) as exc:
+                verify_error = exc
+            if verified and verified.get("status") == STATUS_PASS:
+                break
+            if attempt < _MAX_CHECK_ATTEMPTS:
+                await asyncio.sleep(_retry_backoff_seconds(attempt))
+        if verified and verified.get("status") == STATUS_PASS:
+            succeeded += 1
+        else:
+            detail = (
+                f"verification read failed ({verify_error})" if verify_error
+                else f"verification returned {verified.get('status') if verified else 'no result'}"
+            )
+            failures.append(
+                f"{candidate.get('check_name') or check_id}: remediation was written but {detail}"
+            )
+    failed = len(failures)
+    scope_label = _BATCH_REMEDIATION_SCOPES[normalised_scope]
+    message = (
+        f"Batch remediation finished for {scope_label}: {succeeded} succeeded, {failed} failed."
+    )
+    if failed:
+        message = f"{message} Review per-check remediation status below for details."
+    elif refresh_issues:
+        message = (
+            f"{message} Verification warnings were recorded for {len(refresh_issues)} check(s); "
+            "review the latest evaluation details below."
+        )
+    log_info(
+        "M365 best practice batch remediation finished",
+        company_id=company_id,
+        scope=normalised_scope,
+        total=len(candidates),
+        succeeded=succeeded,
+        failed=failed,
+        refresh_warnings=len(refresh_issues),
+    )
+    return {
+        "success": failed == 0 and not refresh_issues,
+        "message": message,
+        "scope": normalised_scope,
+        "scope_label": scope_label,
+        "total": len(candidates),
+        "succeeded": succeeded,
+        "failed": failed,
+        "failures": failures,
+        "refresh_issues": refresh_issues,
+    }
+
+
+def get_secure_score_summary(results: list[dict[str, Any]]) -> dict[str, float] | None:
+    """Return the latest Microsoft Secure Score values from evaluated results."""
+    secure_score_result = next(
+        (
+            result
+            for result in results
+            if result.get("check_id") == "bp_monitor_secure_score"
+        ),
+        None,
+    )
+    if not secure_score_result:
+        return None
+
+    current, maximum, percentage = bp_repo._parse_secure_score(
+        secure_score_result.get("details")
+    )
+    if current is None or maximum is None or percentage is None:
+        return None
+    return {"current": current, "maximum": maximum, "percentage": percentage}
+
+
+async def get_daily_history(company_id: int) -> list[dict[str, Any]]:
+    """Return the company's daily best-practice and Secure Score snapshots."""
+    return await bp_repo.list_daily_history(company_id)
+
+
+async def set_account_exclusion(
+    *, company_id: int, check_id: str, account_id: str, account_name: str, excluded: bool
+) -> None:
+    """Persist an account exclusion after the route validates the current finding."""
+    await bp_repo.set_account_exclusion(
+        company_id=company_id, check_id=check_id, account_id=account_id,
+        account_name=account_name, excluded=excluded,
+    )
+
+
+async def set_result_notes(*, company_id: int, check_id: str, notes: str | None) -> bool:
+    """Persist the per-check technician/admin note for a company result."""
+    return await bp_repo.update_result_notes(
+        company_id=company_id,
+        check_id=check_id,
+        notes=notes,
+    )
+
+
+async def _remediate_ews_dependency_allow_list(
+    graph_token: str, company_id: int
+) -> tuple[bool, str]:
+    state = await _collect_ews_dependency_state(graph_token, company_id)
+    required_apps = state["required_apps"]
+    if not required_apps:
+        return (
+            False,
+            "No confirmed EWS dependency was found. Review observed usage and add any "
+            "approved infrequent AppIDs to the check notes before enabling EWS.",
+        )
+
+    exo_token = str(state["exo_token"])
+    tenant_id = str(state["tenant_id"])
+    current_allowed = list(state["current_allowed"])
+    required_ids = [app["app_id"] for app in required_apps]
+    merged_allowed = list(current_allowed)
+    merged_seen = set(current_allowed)
+    for app_id in required_ids:
+        if app_id not in merged_seen:
+            merged_seen.add(app_id)
+            merged_allowed.append(app_id)
+
+    missing_required = [
+        app_id for app_id in required_ids if app_id not in set(current_allowed)
+    ]
+    params: dict[str, Any] = {}
+    if state["ews_enabled"] is not True:
+        params["EwsEnabled"] = True
+    if missing_required:
+        params["EwsAllowedAppIDs"] = merged_allowed
+
+    if not params:
+        return (
+            True,
+            "EWS is already enabled for the confirmed required applications. "
+            "No remediation changes were needed.",
+        )
+
+    await _exo_invoke_command(exo_token, tenant_id, "Set-OrganizationConfig", params)
+    verified = await _exo_invoke_command(exo_token, tenant_id, "Get-OrganizationConfig")
+    verified_cfg = _exo_first_value(verified)
+    verified_allowed = set(_extract_app_ids(verified_cfg.get("EwsAllowedAppIDs")))
+    missing_after = [
+        app_id for app_id in required_ids if app_id not in verified_allowed
+    ]
+    if verified_cfg.get("EwsEnabled") is not True or missing_after:
+        return (
+            False,
+            "EWS remediation was submitted, but the updated configuration was not yet "
+            "fully visible when re-read. Wait a few minutes for Exchange Online "
+            "propagation, test the approved apps, then re-run the check.",
+        )
+
+    return (
+        True,
+        "Enabled EWS for the tenant and preserved the existing EwsAllowedAppIDs "
+        "while adding the confirmed required AppIDs. Test the approved applications "
+        "again after Exchange Online propagation completes.",
+    )
 
 
 async def _remediate_foreach_mailbox(
@@ -5674,6 +8221,8 @@ async def _remediate_foreach_mailbox(
 
     Fetches every user mailbox, then calls ``Set-Mailbox`` for each one that
     does not already satisfy every key/value pair in *mailbox_params*.
+    Multi-value ``{"Add": [...]}`` parameters are reduced to values missing
+    from the mailbox so remediation is safe to retry.
     Returns ``True`` if all required updates succeeded (or none were needed),
     ``False`` if at least one update failed.
     """
@@ -5699,13 +8248,25 @@ async def _remediate_foreach_mailbox(
         identity = mailbox.get("UserPrincipalName") or mailbox.get("Identity")
         if not identity:
             continue
-        # Skip mailboxes that already satisfy every required parameter value.
-        if all(mailbox.get(k) == v for k, v in mailbox_params.items()):
+        update_params: dict[str, Any] = {}
+        for key, desired in mailbox_params.items():
+            if isinstance(desired, dict) and set(desired) == {"Add"}:
+                existing = set(mailbox.get(key) or [])
+                missing = [value for value in desired["Add"] if value not in existing]
+                if missing:
+                    # The EXO REST API does not support the PowerShell hash-table
+                    # @{Add=...} syntax for array parameters.  Pass the full merged
+                    # list of values so the cmdlet receives a plain JSON array.
+                    update_params[key] = list(existing | set(desired["Add"]))
+            elif mailbox.get(key) != desired:
+                update_params[key] = desired
+
+        if not update_params:
             continue
         try:
             await _exo_invoke_command(
                 exo_token, tenant_id, "Set-Mailbox",
-                {"Identity": identity, **mailbox_params},
+                {"Identity": identity, **update_params},
             )
         except M365Error as exc:
             log_error(
@@ -5717,6 +8278,185 @@ async def _remediate_foreach_mailbox(
             )
             all_ok = False
     return all_ok
+
+
+async def _remediate_foreach_owa_mailbox_policy(
+    exo_token: str,
+    tenant_id: str,
+    company_id: int,
+    check_id: str,
+    policy_params: dict[str, Any],
+) -> bool:
+    """Apply the requested settings to every OWA mailbox policy.
+
+    Policies that already have the desired values are skipped, making the
+    operation safe to retry.  A failure on one policy does not prevent the
+    remaining policies from being remediated.
+    """
+    try:
+        data = await _exo_invoke_command(
+            exo_token, tenant_id, "Get-OwaMailboxPolicy"
+        )
+    except M365Error as exc:
+        log_error(
+            "M365 foreach-OWA-policy remediation – Get-OwaMailboxPolicy failed",
+            company_id=company_id,
+            check_id=check_id,
+            error=str(exc),
+        )
+        return False
+
+    all_ok = True
+    for policy in data.get("value") or []:
+        if not isinstance(policy, dict):
+            continue
+        identity = policy.get("Identity") or policy.get("Name")
+        already_compliant = all(
+            policy.get(key) == value for key, value in policy_params.items()
+        )
+        if not identity or already_compliant:
+            continue
+        try:
+            await _exo_invoke_command(
+                exo_token,
+                tenant_id,
+                "Set-OwaMailboxPolicy",
+                {"Identity": identity, **policy_params},
+            )
+        except M365Error as exc:
+            log_error(
+                "M365 foreach-OWA-policy remediation – Set-OwaMailboxPolicy failed",
+                company_id=company_id,
+                check_id=check_id,
+                identity=identity,
+                error=str(exc),
+            )
+            all_ok = False
+    return all_ok
+
+
+def _antiphish_policy_matches_remediation(check_id: str, row: dict[str, Any]) -> bool:
+    """Return whether an anti-phish policy is a valid remediation target."""
+    if check_id == "bp_antiphish_domain_impersonation_safety_tip":
+        return _coerce_exo_bool(row.get("EnableOrganizationDomainsProtection")) or _coerce_exo_bool(
+            row.get("EnableTargetedDomainsProtection")
+        )
+    if check_id == "bp_antiphish_user_impersonation_safety_tip":
+        return _coerce_exo_bool(row.get("EnableTargetedUserProtection"))
+    return False
+
+
+def _antiphish_remediation_prerequisite_message(check_id: str) -> str:
+    """Return an actionable failure message for unsupported anti-phish automation."""
+    if check_id == "bp_antiphish_domain_impersonation_safety_tip":
+        return (
+            "Automated remediation requires an anti-phishing policy with domain impersonation "
+            "protection enabled. Configure organization-domain or targeted-domain protection "
+            "first, then retry."
+        )
+    if check_id == "bp_antiphish_user_impersonation_safety_tip":
+        return (
+            "Automated remediation requires an anti-phishing policy with user impersonation "
+            "protection enabled. Configure targeted-user protection first, then retry."
+        )
+    return "Automated remediation is not available for this anti-phishing policy state."
+
+
+_DEFAULT_ANTIPHISH_POLICY = "Office365 AntiPhish Default"
+
+
+async def _enable_domain_impersonation_protection(
+    exo_token: str,
+    tenant_id: str,
+) -> None:
+    """Enable organization-domain impersonation protection on the default anti-phish policy."""
+    await _exo_invoke_command(
+        exo_token,
+        tenant_id,
+        "Set-AntiPhishPolicy",
+        {
+            "Identity": _DEFAULT_ANTIPHISH_POLICY,
+            "EnableOrganizationDomainsProtection": True,
+            "Confirm": False,
+        },
+    )
+
+
+async def _remediate_matching_antiphish_policies(
+    exo_token: str,
+    tenant_id: str,
+    check_id: str,
+    cmdlet: str,
+    base_params: dict[str, Any],
+) -> tuple[bool, str]:
+    """Apply an anti-phish remediation to each matching policy.
+
+    For domain-impersonation safety-tip remediations, if no policy currently
+    has domain impersonation protection enabled, the default policy
+    ("Office365 AntiPhish Default") is automatically configured with
+    EnableOrganizationDomainsProtection before the safety-tip setting is applied.
+    """
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-AntiPhishPolicy")
+    except M365Error as exc:
+        return False, f"Unable to query Get-AntiPhishPolicy: {exc}"
+
+    targets: list[str] = []
+    for row in data.get("value") or []:
+        if not isinstance(row, dict) or not _antiphish_policy_matches_remediation(check_id, row):
+            continue
+        identity = str(row.get("Identity") or row.get("Name") or "").strip()
+        if identity and identity not in targets:
+            targets.append(identity)
+
+    if not targets:
+        if check_id == "bp_antiphish_domain_impersonation_safety_tip":
+            await _enable_domain_impersonation_protection(exo_token, tenant_id)
+            targets.append(_DEFAULT_ANTIPHISH_POLICY)
+        else:
+            return False, _antiphish_remediation_prerequisite_message(check_id)
+
+    for identity in targets:
+        params = dict(base_params)
+        params["Identity"] = identity
+        try:
+            await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
+        except M365Error as exc:
+            return False, str(exc)
+    return True, ""
+
+
+async def _remediate_global_quarantine_policy(
+    exo_token: str,
+    tenant_id: str,
+    cmdlet: str,
+    base_params: dict[str, Any],
+) -> tuple[bool, str]:
+    """Apply remediation to the tenant's current global quarantine policy identity."""
+    try:
+        data = await _exo_invoke_command(
+            exo_token,
+            tenant_id,
+            "Get-QuarantinePolicy",
+        )
+    except M365Error as exc:
+        return False, f"Unable to query Get-QuarantinePolicy: {exc}"
+
+    rows = data.get("value") or []
+    policy = _select_global_quarantine_policy(rows)
+    if not policy:
+        return False, "Unable to determine the global quarantine policy identity."
+    identity = str(policy.get("Identity") or policy.get("Name") or "").strip()
+    if not identity:
+        return False, "Unable to determine the global quarantine policy identity."
+
+    params = dict(base_params)
+    params["Identity"] = identity
+    try:
+        await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
+    except M365Error as exc:
+        return False, str(exc)
+    return True, ""
 
 
 async def _remediate_foreach_user_graph(
@@ -5742,11 +8482,21 @@ async def _remediate_foreach_user_graph(
         )
         return False
 
+    admin_ids = await _get_directory_role_member_ids(graph_token)
+    if admin_ids is None:
+        log_error(
+            "M365 foreach-user-graph remediation – unable to enumerate administrator role members",
+            company_id=company_id,
+            check_id=check_id,
+        )
+        return False
+
     candidates = [
         u for u in users
         if (u.get("userType") or "").lower() == "member"
         and not (u.get("assignedLicenses") or [])
         and u.get("accountEnabled") is True
+        and str(u.get("id") or "") not in admin_ids
         and not u.get("onPremisesSyncEnabled")  # can't disable sign-in for on-prem-synced accounts via Graph
     ]
     all_ok = True
@@ -5769,6 +8519,798 @@ async def _remediate_foreach_user_graph(
     return all_ok
 
 
+async def _remediate_disable_per_user_mfa(
+    graph_token: str, company_id: int, check_id: str
+) -> tuple[bool, str]:
+    """Disable per-user MFA for enabled users when Conditional Access is available."""
+    policies = await _safe_graph_get_all(graph_token, _CA_POLICIES_URL)
+    if policies is None:
+        return False, "Unable to enumerate Conditional Access policies."
+
+    has_configured_ca = any(
+        str(policy.get("state") or "").strip().lower() in _ACTIVE_CONDITIONAL_ACCESS_POLICY_STATES_LOWER
+        for policy in policies
+    )
+    if not has_configured_ca:
+        return (
+            False,
+            "No active Conditional Access policy found. Configure Conditional Access before disabling per-user MFA.",
+        )
+
+    users = await _safe_graph_get_all(graph_token, _USERS_LIST_URL)
+    if users is None:
+        return False, "Unable to enumerate users for per-user MFA remediation."
+
+    all_ok = True
+    for user in users:
+        user_id = str(user.get("id") or "").strip()
+        if not user_id or not user.get("accountEnabled", False):
+            continue
+        requirement_url = _AUTHENTICATION_REQUIREMENTS_URL_TMPL.format(user_id=user_id)
+        data = await _safe_graph_get(graph_token, requirement_url)
+        if data is None:
+            log_error(
+                "M365 per-user MFA remediation – requirements lookup failed",
+                company_id=company_id,
+                check_id=check_id,
+                user_id=user_id,
+            )
+            all_ok = False
+            continue
+
+        state = str(data.get("perUserMfaState") or "").lower()
+        if not state or state == "disabled":
+            continue
+        try:
+            await _graph_patch(
+                graph_token,
+                requirement_url,
+                {"perUserMfaState": "disabled"},
+            )
+        except M365Error as exc:
+            log_error(
+                "M365 per-user MFA remediation – update failed",
+                company_id=company_id,
+                check_id=check_id,
+                user_id=user_id,
+                error=str(exc),
+            )
+            all_ok = False
+
+    if not all_ok:
+        return False, "One or more per-user MFA settings could not be disabled."
+    return True, ""
+
+
+async def _remediate_create_dynamic_guest_group(graph_token: str) -> bool:
+    """Create the standard dynamic security group that contains every guest.
+
+    Re-check immediately before creating the group so repeated or concurrent
+    remediation requests do not intentionally create duplicate groups.
+    """
+    current = await _check_dynamic_group_for_guests(graph_token)
+    if current["status"] == STATUS_PASS:
+        return True
+    if current["status"] == STATUS_UNKNOWN:
+        return False
+
+    await _graph_post(
+        graph_token,
+        _GROUPS_URL,
+        {
+            "displayName": "Guest Users",
+            "description": "Dynamic security group containing all guest users.",
+            "groupTypes": ["DynamicMembership"],
+            "mailEnabled": False,
+            "mailNickname": "GuestUsers",
+            "membershipRule": '(user.userType -eq "Guest")',
+            "membershipRuleProcessingState": "On",
+            "securityEnabled": True,
+        },
+    )
+    return True
+
+
+async def _remediate_foreach_public_group_graph(
+    graph_token: str, company_id: int, check_id: str
+) -> bool:
+    """Convert every non-excluded public Microsoft 365 group to Private."""
+    groups = await _safe_graph_get_all(graph_token, _GROUPS_LIST_URL)
+    if groups is None:
+        log_error(
+            "M365 foreach-public-group remediation – list groups failed",
+            company_id=company_id,
+            check_id=check_id,
+        )
+        return False
+
+    try:
+        exclusions = await bp_repo.get_account_exclusions(company_id, check_id)
+    except Exception as exc:  # noqa: BLE001 - exclusion lookup should fail closed
+        log_error(
+            "M365 foreach-public-group remediation – exclusion lookup failed",
+            company_id=company_id,
+            check_id=check_id,
+            error=str(exc),
+        )
+        return False
+    excluded_ids = {group_id for _, group_id in exclusions}
+
+    all_ok = True
+    for group in groups:
+        group_id = str(group.get("id") or "").strip()
+        if not group_id:
+            continue
+        if str(group.get("visibility") or "").lower() != "public":
+            continue
+        if "Unified" not in (group.get("groupTypes") or []):
+            continue
+        if group_id in excluded_ids:
+            continue
+        group_url = _GROUP_URL_TMPL.format(group_id=group_id)
+        try:
+            await _graph_patch(graph_token, group_url, {"visibility": "Private"})
+        except M365Error as exc:
+            log_error(
+                "M365 foreach-public-group remediation – PATCH group failed",
+                company_id=company_id,
+                check_id=check_id,
+                group_id=group_id,
+                error=str(exc),
+            )
+            all_ok = False
+    return all_ok
+
+
+# ---------------------------------------------------------------------------
+# Additional tenant-setting remediations
+# ---------------------------------------------------------------------------
+
+# Microsoft Graph represents "passwords never expire" on a domain as the
+# maximum signed 32-bit integer.
+_NEVER_EXPIRE_PASSWORD_DAYS = 2147483647
+
+
+async def _remediate_domain_password_never_expire(graph_token: str) -> tuple[bool, str]:
+    """Set every verified, cloud-managed domain's passwords to never expire."""
+    domains = await _graph_get_all(
+        graph_token,
+        f"{_DOMAINS_URL}?$select=id,isVerified,authenticationType,passwordValidityPeriodInDays",
+    )
+    updated: list[str] = []
+    federated: list[str] = []
+    failed: list[str] = []
+    for domain in domains:
+        domain_id = str(domain.get("id") or "").strip()
+        if not domain_id or not domain.get("isVerified", True):
+            continue
+        validity = domain.get("passwordValidityPeriodInDays")
+        if validity in (None, 0, _NEVER_EXPIRE_PASSWORD_DAYS):
+            continue
+        if str(domain.get("authenticationType") or "").lower() == "federated":
+            # Federated domains take their password policy from the identity
+            # provider; Graph rejects updates to them.
+            federated.append(domain_id)
+            continue
+        try:
+            await _graph_patch(
+                graph_token,
+                f"{_DOMAINS_URL}/{quote(domain_id, safe='')}",
+                {"passwordValidityPeriodInDays": _NEVER_EXPIRE_PASSWORD_DAYS},
+            )
+            updated.append(domain_id)
+        except M365Error as exc:
+            failed.append(f"{domain_id} ({exc})")
+    if failed:
+        return False, "Unable to update the password policy for: " + "; ".join(failed[:5])
+    if federated:
+        return False, (
+            "Passwords on federated domain(s) "
+            + ", ".join(federated[:5])
+            + " are governed by the federation provider; set them to never expire there."
+        )
+    if not updated:
+        return True, "All verified domains already have non-expiring passwords."
+    return True, "Set passwords to never expire for: " + ", ".join(updated) + "."
+
+
+async def _enabled_conditional_access_policies(graph_token: str) -> list[dict[str, Any]] | None:
+    policies = await _safe_graph_get_all(graph_token, _CA_POLICIES_URL)
+    if policies is None:
+        return None
+    return [p for p in policies if str(p.get("state") or "").lower() == "enabled"]
+
+
+async def _remediate_security_defaults(graph_token: str, check_id: str) -> tuple[bool, str]:
+    """Enable Security Defaults when there is no Conditional Access, disable it when there is.
+
+    Microsoft Entra ID does not allow Security Defaults and enabled Conditional
+    Access policies to coexist, so the correct remediation depends on which
+    identity baseline the tenant is using.
+    """
+    security_defaults = await _graph_get(graph_token, _SECURITY_DEFAULTS_URL)
+    enabled_ca = await _enabled_conditional_access_policies(graph_token)
+    if enabled_ca is None:
+        return False, "Unable to enumerate Conditional Access policies."
+    sd_enabled = bool(security_defaults.get("isEnabled"))
+    if enabled_ca:
+        names = ", ".join(str(p.get("displayName") or "?") for p in enabled_ca[:3])
+        if check_id == "bp_security_defaults":
+            return False, (
+                "Security Defaults cannot be enabled while Conditional Access policies are "
+                f"enabled ({names}). Complete the Conditional Access baseline instead: use the "
+                "'Block legacy authentication', 'Require MFA for all users' and 'Require MFA "
+                "for administrators' remediations."
+            )
+        if not sd_enabled:
+            return True, "Conditional Access is in use and Security Defaults are already disabled."
+        await _graph_patch(graph_token, _SECURITY_DEFAULTS_URL, {"isEnabled": False})
+        return True, (
+            f"Disabled Security Defaults because Conditional Access policies ({names}) "
+            "now provide the tenant's identity baseline."
+        )
+    if sd_enabled:
+        return True, "Security Defaults are already enabled."
+    await _graph_patch(graph_token, _SECURITY_DEFAULTS_URL, {"isEnabled": True})
+    return True, "Enabled Security Defaults for the tenant."
+
+
+# Directory Synchronization Accounts role; Microsoft's Conditional Access
+# templates exclude it so Entra Connect keeps working.
+_ROLE_TEMPLATE_DIRECTORY_SYNC = "d29b2b05-8046-44ba-8758-1e26182fcf32"
+# Microsoft's "Require MFA for administrators" template role set.
+_CA_ADMIN_ROLE_TEMPLATES: tuple[str, ...] = (
+    _ROLE_TEMPLATE_GLOBAL_ADMIN,
+    _ROLE_TEMPLATE_PRIVILEGED_ROLE_ADMIN,
+    _ROLE_TEMPLATE_SECURITY_ADMIN,
+    _ROLE_TEMPLATE_EXCHANGE_ADMIN,
+    _ROLE_TEMPLATE_BILLING_ADMIN,
+    "f28a1f50-f6e7-4571-818b-6a12f2af6b6c",  # SharePoint Administrator
+    "9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3",  # Application Administrator
+    "158c047a-c907-4556-b7ef-446551a6b5f7",  # Cloud Application Administrator
+    "b1be1c3e-b65d-4f19-8427-f6fa0d97feb9",  # Conditional Access Administrator
+    "729827e3-9c14-49f7-bb1b-9608f156bbb8",  # Helpdesk Administrator
+    "966707d0-3269-4727-9be2-8c3a10f19b9d",  # Password Administrator
+    "7be44c8a-adaf-4e2a-84d6-ab2649e08a13",  # Privileged Authentication Administrator
+    "fe930be7-5e62-47db-91af-98c3a49a38b1",  # User Administrator
+)
+_MYPORTAL_CA_POLICY_PREFIX = "MyPortal – "
+
+
+def _ca_policy_templates() -> dict[str, dict[str, Any]]:
+    """Conditional Access policies MyPortal can create, keyed by check ID.
+
+    Break-glass exclusions are added when the policy is created.
+    """
+    admin_roles = list(dict.fromkeys(_CA_ADMIN_ROLE_TEMPLATES))
+    return {
+        "bp_block_legacy_auth": {
+            "displayName": f"{_MYPORTAL_CA_POLICY_PREFIX}Block legacy authentication",
+            "conditions": {
+                "users": {"includeUsers": ["All"]},
+                "applications": {"includeApplications": ["All"]},
+                "clientAppTypes": ["exchangeActiveSync", "other"],
+            },
+            "grantControls": {"operator": "OR", "builtInControls": ["block"]},
+        },
+        "bp_mfa_for_all_users": {
+            "displayName": f"{_MYPORTAL_CA_POLICY_PREFIX}Require MFA for all users",
+            "conditions": {
+                "users": {
+                    "includeUsers": ["All"],
+                    "excludeRoles": [_ROLE_TEMPLATE_DIRECTORY_SYNC],
+                },
+                "applications": {"includeApplications": ["All"]},
+                "clientAppTypes": ["all"],
+            },
+            "grantControls": {"operator": "OR", "builtInControls": ["mfa"]},
+        },
+        "bp_admin_mfa": {
+            "displayName": f"{_MYPORTAL_CA_POLICY_PREFIX}Require MFA for administrators",
+            "conditions": {
+                "users": {"includeRoles": admin_roles},
+                "applications": {"includeApplications": ["All"]},
+                "clientAppTypes": ["all"],
+            },
+            "grantControls": {"operator": "OR", "builtInControls": ["mfa"]},
+        },
+        "bp_signin_freq_admin_browser_no_persist": {
+            "displayName": (
+                f"{_MYPORTAL_CA_POLICY_PREFIX}Admin sign-in frequency and "
+                "non-persistent browser sessions"
+            ),
+            "conditions": {
+                "users": {"includeRoles": admin_roles},
+                "applications": {"includeApplications": ["All"]},
+                "clientAppTypes": ["all"],
+            },
+            "sessionControls": {
+                "signInFrequency": {
+                    "isEnabled": True,
+                    "type": "hours",
+                    "value": _ADMIN_SIGNIN_FREQ_MAX_HOURS,
+                    "authenticationType": "primaryAndSecondaryAuthentication",
+                    "frequencyInterval": "timeBased",
+                },
+                "persistentBrowser": {"isEnabled": True, "mode": "never"},
+            },
+        },
+    }
+
+
+async def _myportal_break_glass_accounts(graph_token: str) -> list[dict[str, str]]:
+    """Return the enabled, cloud-only MyPortal emergency Global Administrators."""
+    roles = await _graph_get(
+        graph_token,
+        "https://graph.microsoft.com/v1.0/directoryRoles"
+        "?$filter=displayName eq 'Global Administrator'&$select=id",
+    )
+    role_values = roles.get("value") or []
+    if not role_values:
+        return []
+    members = await _graph_get_all(
+        graph_token,
+        f"https://graph.microsoft.com/v1.0/directoryRoles/{role_values[0]['id']}/members"
+        "?$select=id,userPrincipalName,onPremisesSyncEnabled,accountEnabled",
+    )
+    return [
+        {"id": str(m["id"]), "upn": str(m.get("userPrincipalName") or "")}
+        for m in members or []
+        if isinstance(m, dict)
+        and m.get("id")
+        and "myportal-emergency-admin" in str(m.get("userPrincipalName") or "").lower()
+        and m.get("accountEnabled")
+        and not m.get("onPremisesSyncEnabled")
+    ]
+
+
+async def _remediate_conditional_access_policy(
+    graph_token: str, check_id: str
+) -> tuple[bool, str]:
+    """Create (or re-enable) the MyPortal Conditional Access policy for a check.
+
+    Every policy excludes the MyPortal break-glass accounts so an error in the
+    policy can never lock the tenant out; remediation refuses to run until
+    those accounts exist.
+    """
+    template = _ca_policy_templates().get(check_id)
+    if template is None:
+        return False, "No Conditional Access template is defined for this check."
+
+    security_defaults = await _safe_graph_get(graph_token, _SECURITY_DEFAULTS_URL)
+    if security_defaults and security_defaults.get("isEnabled"):
+        return False, (
+            "Security Defaults are enabled, and Microsoft Entra ID does not allow "
+            "Conditional Access policies to be enabled alongside them. Security Defaults "
+            "already enforce MFA and block legacy authentication; disable them only once "
+            "you are ready to replace them with the Conditional Access baseline."
+        )
+
+    break_glass = await _myportal_break_glass_accounts(graph_token)
+    if not break_glass:
+        return False, (
+            "No MyPortal emergency access (break-glass) Global Administrator accounts were "
+            "found to exclude from the policy. Run the 'Maintain 2–4 Global Administrators' "
+            "remediation first so the tenant cannot be locked out, then retry."
+        )
+    exclude_ids = [account["id"] for account in break_glass]
+
+    policies = await _graph_get_all(graph_token, _CA_POLICIES_URL)
+    display_name = template["displayName"]
+    existing = next(
+        (p for p in policies if str(p.get("displayName") or "") == display_name), None
+    )
+    if existing:
+        state = str(existing.get("state") or "")
+        if state.lower() == "enabled":
+            return True, f"Conditional Access policy '{display_name}' is already enabled."
+        update: dict[str, Any] = {"state": "enabled"}
+        conditions = copy.deepcopy(existing.get("conditions") or {})
+        users = conditions.get("users") or {}
+        current_excludes = list(users.get("excludeUsers") or [])
+        if not set(exclude_ids) <= set(current_excludes):
+            # ``conditions`` is replaced as a whole on PATCH, so send the full
+            # existing object with the break-glass exclusions merged in.
+            users["excludeUsers"] = list(dict.fromkeys([*current_excludes, *exclude_ids]))
+            conditions["users"] = users
+            update["conditions"] = conditions
+        await _graph_patch(
+            graph_token,
+            f"{_CA_POLICIES_URL}/{quote(str(existing['id']), safe='')}",
+            update,
+        )
+        return True, f"Re-enabled Conditional Access policy '{display_name}'."
+
+    payload = copy.deepcopy(template)
+    payload["state"] = "enabled"
+    payload["conditions"]["users"]["excludeUsers"] = exclude_ids
+    await _graph_post(graph_token, _CA_POLICIES_URL, payload)
+    return True, (
+        f"Created Conditional Access policy '{display_name}', excluding the break-glass "
+        f"account(s): {', '.join(a['upn'] for a in break_glass)}."
+    )
+
+
+async def _remediate_laps_enabled(graph_token: str) -> tuple[bool, str]:
+    """Turn on Microsoft Entra LAPS in the tenant device registration policy.
+
+    ``deviceRegistrationPolicy`` only supports PUT, so the current values of the
+    other required properties are sent back unchanged.
+    """
+    policy = await _graph_get(graph_token, _DEVICE_REG_POLICY_URL)
+    if (policy.get("localAdminPassword") or {}).get("isEnabled") is True:
+        return True, "LAPS is already enabled at the tenant level."
+    payload = {
+        key: policy[key]
+        for key in (
+            "userDeviceQuota",
+            "multiFactorAuthConfiguration",
+            "azureADRegistration",
+            "azureADJoin",
+        )
+        if key in policy
+    }
+    payload["localAdminPassword"] = {"isEnabled": True}
+    await _graph_put(graph_token, _DEVICE_REG_POLICY_URL, payload)
+    return True, (
+        "Enabled Microsoft Entra LAPS for the tenant. Assign an Intune account protection "
+        "(LAPS) policy to devices so their local administrator passwords are rotated."
+    )
+
+
+def _exo_row_identity(row: Mapping[str, Any]) -> str:
+    return str(row.get("Identity") or row.get("Name") or "").strip()
+
+
+async def _remediate_foreach_exo_object(
+    exo_token: str,
+    tenant_id: str,
+    *,
+    get_cmdlet: str,
+    set_cmdlet: str,
+    desired: Mapping[str, Any],
+    get_params: dict[str, Any] | None = None,
+    skip: Callable[[Mapping[str, Any]], bool] | None = None,
+) -> tuple[bool, str]:
+    """Apply *desired* settings to every object returned by *get_cmdlet*.
+
+    Objects that already hold the desired values (or that *skip* rejects, such
+    as read-only preset policies) are left alone, so retries are harmless.
+    """
+    data = await _exo_invoke_command(exo_token, tenant_id, get_cmdlet, get_params)
+    updated: list[str] = []
+    failed: list[str] = []
+    for row in data.get("value") or []:
+        if not isinstance(row, dict) or (skip and skip(row)):
+            continue
+        identity = _exo_row_identity(row)
+        if not identity:
+            continue
+        if all(
+            _coerce_exo_bool(row.get(k)) is v if isinstance(v, bool)
+            else str(row.get(k) or "").lower() == str(v).lower()
+            for k, v in desired.items()
+        ):
+            continue
+        try:
+            await _exo_invoke_command(
+                exo_token,
+                tenant_id,
+                set_cmdlet,
+                {"Identity": identity, **desired},
+            )
+            updated.append(identity)
+        except M365Error as exc:
+            failed.append(f"{identity}: {exc}")
+    if failed:
+        return False, f"{set_cmdlet} failed for " + "; ".join(failed[:3])
+    if not updated:
+        return True, "All objects already had the required settings."
+    return True, f"Updated {len(updated)} object(s) with {set_cmdlet}: " + ", ".join(updated[:5])
+
+
+def _is_preset_security_policy(row: Mapping[str, Any]) -> bool:
+    """Built-in and preset (Standard/Strict) policies cannot be modified."""
+    if _coerce_exo_bool(row.get("IsBuiltInProtection")):
+        return True
+    return str(row.get("RecommendedPolicyType") or "").lower() in {"standard", "strict"}
+
+
+_MYPORTAL_SAFE_LINKS_POLICY = "MyPortal Safe Links"
+_SAFE_LINKS_REMEDIATION_SETTINGS: dict[str, Any] = {
+    "EnableSafeLinksForOffice": True,
+    "EnableSafeLinksForEmail": True,
+    "EnableSafeLinksForTeams": True,
+    "TrackClicks": True,
+    "AllowClickThrough": False,
+    "ScanUrls": True,
+    "EnableForInternalSenders": True,
+    "DeliverMessageAfterScan": True,
+}
+
+
+async def _remediate_safe_links_office_apps(exo_token: str, tenant_id: str) -> tuple[bool, str]:
+    """Create (or correct) a MyPortal Safe Links policy covering every accepted domain."""
+    policies = (await _exo_invoke_command(exo_token, tenant_id, "Get-SafeLinksPolicy")).get("value") or []
+    existing = next(
+        (p for p in policies if isinstance(p, dict)
+         and str(p.get("Name") or p.get("Identity") or "") == _MYPORTAL_SAFE_LINKS_POLICY),
+        None,
+    )
+    if existing:
+        await _exo_invoke_command(
+            exo_token, tenant_id, "Set-SafeLinksPolicy",
+            {"Identity": _MYPORTAL_SAFE_LINKS_POLICY, **_SAFE_LINKS_REMEDIATION_SETTINGS},
+        )
+    else:
+        await _exo_invoke_command(
+            exo_token, tenant_id, "New-SafeLinksPolicy",
+            {"Name": _MYPORTAL_SAFE_LINKS_POLICY, **_SAFE_LINKS_REMEDIATION_SETTINGS},
+        )
+
+    rules = (await _exo_invoke_command(exo_token, tenant_id, "Get-SafeLinksRule")).get("value") or []
+    rule = next(
+        (r for r in rules if isinstance(r, dict)
+         and str(r.get("Name") or r.get("Identity") or "") == _MYPORTAL_SAFE_LINKS_POLICY),
+        None,
+    )
+    if rule is None:
+        accepted = (await _exo_invoke_command(exo_token, tenant_id, "Get-AcceptedDomain")).get("value") or []
+        domains = sorted({
+            str(d.get("DomainName") or d.get("Name") or "").strip()
+            for d in accepted if isinstance(d, dict)
+        } - {""})
+        if not domains:
+            return False, "No accepted domains were returned to scope the Safe Links rule to."
+        await _exo_invoke_command(
+            exo_token, tenant_id, "New-SafeLinksRule",
+            {
+                "Name": _MYPORTAL_SAFE_LINKS_POLICY,
+                "SafeLinksPolicy": _MYPORTAL_SAFE_LINKS_POLICY,
+                "RecipientDomainIs": domains,
+            },
+        )
+    elif str(rule.get("State") or "").lower() == "disabled":
+        await _exo_invoke_command(
+            exo_token, tenant_id, "Enable-SafeLinksRule", {"Identity": _MYPORTAL_SAFE_LINKS_POLICY}
+        )
+    return True, (
+        f"Safe Links policy '{_MYPORTAL_SAFE_LINKS_POLICY}' now protects Office apps, email and "
+        "Teams with click tracking and no click-through for all accepted domains."
+    )
+
+
+async def _remediate_dkim_enabled(
+    exo_token: str, tenant_id: str, email_domains: list[str]
+) -> tuple[bool, str]:
+    """Enable DKIM signing for each MyPortal Email domain.
+
+    Exchange Online refuses to enable DKIM until the two selector CNAME records
+    are published, so for those domains the signing keys are created and the
+    required DNS records are reported instead.
+    """
+    domains = sorted({str(d).strip().lower() for d in email_domains if str(d).strip()})
+    if not domains:
+        return False, "No Email domains are configured for this company in MyPortal."
+    rows = (await _exo_invoke_command(exo_token, tenant_id, "Get-DkimSigningConfig")).get("value") or []
+    configs = {
+        str(r.get("Domain") or r.get("Identity") or "").strip().lower(): r
+        for r in rows if isinstance(r, dict)
+    }
+    enabled: list[str] = []
+    pending_dns: list[str] = []
+    failed: list[str] = []
+    for domain in domains:
+        cfg = configs.get(domain)
+        if cfg and cfg.get("Enabled") is True:
+            continue
+        try:
+            if cfg is None:
+                await _exo_invoke_command(
+                    exo_token, tenant_id, "New-DkimSigningConfig",
+                    {"DomainName": domain, "Enabled": True},
+                )
+            else:
+                await _exo_invoke_command(
+                    exo_token, tenant_id, "Set-DkimSigningConfig",
+                    {"Identity": domain, "Enabled": True},
+                )
+            enabled.append(domain)
+            continue
+        except M365Error as exc:
+            first_error = str(exc)
+        # Enabling failed – most often because the CNAMEs are not published.
+        # Make sure the keys exist so the CNAME targets can be reported.
+        if cfg is None:
+            try:
+                await _exo_invoke_command(
+                    exo_token, tenant_id, "New-DkimSigningConfig",
+                    {"DomainName": domain, "Enabled": False},
+                )
+            except M365Error:
+                failed.append(f"{domain} ({first_error})")
+                continue
+        try:
+            refreshed = _exo_first_value(await _exo_invoke_command(
+                exo_token, tenant_id, "Get-DkimSigningConfig", {"Identity": domain},
+            ))
+        except M365Error:
+            refreshed = cfg or {}
+        cname1 = str(refreshed.get("Selector1CNAME") or "").strip()
+        cname2 = str(refreshed.get("Selector2CNAME") or "").strip()
+        if cname1 and cname2:
+            pending_dns.append(
+                f"{domain}: selector1._domainkey CNAME {cname1}; selector2._domainkey CNAME {cname2}"
+            )
+        else:
+            failed.append(f"{domain} ({first_error})")
+    parts: list[str] = []
+    if enabled:
+        parts.append("Enabled DKIM for " + ", ".join(enabled) + ".")
+    if pending_dns:
+        parts.append(
+            "Publish these DNS records, then re-run the remediation: " + " | ".join(pending_dns) + "."
+        )
+    if failed:
+        parts.append("Unable to enable DKIM for " + "; ".join(failed[:5]) + ".")
+    if not parts:
+        return True, "DKIM is already enabled for every MyPortal Email domain."
+    return not (pending_dns or failed), " ".join(parts)
+
+
+async def _remediate_audit_log_search(exo_token: str, tenant_id: str) -> tuple[bool, str]:
+    """Enable unified audit log ingestion, hydrating the organization first if needed."""
+    params = {"UnifiedAuditLogIngestionEnabled": True}
+    try:
+        await _exo_invoke_command(exo_token, tenant_id, "Set-AdminAuditLogConfig", params)
+    except M365Error as exc:
+        detail = str(exc).lower()
+        if "enable-organizationcustomization" not in detail and "dehydrated" not in detail:
+            raise
+        # Dehydrated tenants must run Enable-OrganizationCustomization before
+        # the audit configuration can be changed.
+        await _exo_invoke_command(exo_token, tenant_id, "Enable-OrganizationCustomization", {})
+        await _exo_invoke_command(exo_token, tenant_id, "Set-AdminAuditLogConfig", params)
+        return True, (
+            "Enabled organization customization and unified audit log ingestion. "
+            "Audit search can take up to an hour to become available."
+        )
+    return True, "Enabled unified audit log ingestion. Audit search can take up to an hour to become available."
+
+
+# Teams remediations run the Set-Cs* cmdlet on the Global policy that the
+# matching check evaluates.
+_TEAMS_REMEDIATIONS: dict[str, tuple[str, dict[str, Any]]] = {
+    "bp_anon_dialin_cannot_start_meeting": (
+        "Set-CsTeamsMeetingPolicy",
+        {"Identity": "Global", "AllowAnonymousUsersToStartMeeting": False,
+         "AllowPSTNUsersToBypassLobby": False},
+    ),
+    "bp_only_org_can_bypass_lobby": (
+        "Set-CsTeamsMeetingPolicy",
+        {"Identity": "Global", "AutoAdmittedUsers": "EveryoneInCompany"},
+    ),
+    "bp_invited_users_auto_admitted": (
+        "Set-CsTeamsMeetingPolicy",
+        {"Identity": "Global", "AutoAdmittedUsers": "InvitedUsers"},
+    ),
+    "bp_dialin_cannot_bypass_lobby": (
+        "Set-CsTeamsMeetingPolicy",
+        {"Identity": "Global", "AllowPSTNUsersToBypassLobby": False},
+    ),
+    "bp_restrict_dialin_bypass_lobby": (
+        "Set-CsTeamsMeetingPolicy",
+        {"Identity": "Global", "AllowPSTNUsersToBypassLobby": False},
+    ),
+    "bp_external_participants_no_control": (
+        "Set-CsTeamsMeetingPolicy",
+        {"Identity": "Global", "AllowExternalParticipantGiveRequestControl": False},
+    ),
+    "bp_restrict_anon_users_join_meeting": (
+        "Set-CsTeamsMeetingPolicy",
+        {"Identity": "Global", "AllowAnonymousUsersToJoinMeeting": False},
+    ),
+    "bp_restrict_anon_users_start_meeting": (
+        "Set-CsTeamsMeetingPolicy",
+        {"Identity": "Global", "AllowAnonymousUsersToStartMeeting": False},
+    ),
+    "bp_external_users_cannot_initiate": (
+        "Set-CsTenantFederationConfiguration",
+        {"AllowFederatedUsers": False},
+    ),
+    "bp_teams_external_files_approved_storage": (
+        "Set-CsTeamsClientConfiguration",
+        {"Identity": "Global", "AllowDropBox": False, "AllowGoogleDrive": False,
+         "AllowBox": False, "AllowShareFile": False, "AllowEgnyte": False},
+    ),
+}
+
+
+async def _run_graph_remediation_with_permission_repair(
+    company_id: int,
+    check_id: str,
+    graph_token: str,
+    action: Callable[[str], Awaitable[tuple[bool, str]]],
+) -> tuple[bool, str]:
+    """Run a Graph remediation, repairing missing app permissions once on 403.
+
+    Remediations can depend on write permissions added to the app baseline
+    after a tenant was connected.  On 403 the stored delegated admin token is
+    used to grant any missing application permissions, then the action is
+    retried exactly once with a fresh app-only token.
+    """
+    try:
+        return await action(graph_token)
+    except M365Error as exc:
+        if exc.http_status != 403:
+            log_error(
+                "M365 best practice Graph remediation failed",
+                company_id=company_id,
+                check_id=check_id,
+                error=str(exc),
+            )
+            return False, str(exc)
+        original = exc
+    granted = False
+    try:
+        delegated_token = await acquire_delegated_token(company_id)
+        if delegated_token:
+            granted = await try_grant_missing_permissions(
+                company_id, access_token=delegated_token
+            )
+    except Exception as grant_exc:  # noqa: BLE001 – preserve original Graph error
+        log_error(
+            "M365 best practice Graph remediation permission repair failed",
+            company_id=company_id,
+            check_id=check_id,
+            error=str(grant_exc),
+        )
+    if not granted:
+        return False, (
+            f"{original} The app is missing a required Microsoft Graph permission; "
+            "click 'Authorize portal access' on the M365 settings page to grant it, then retry."
+        )
+    try:
+        graph_token = await acquire_access_token(company_id, force_client_credentials=True)
+        return await action(graph_token)
+    except M365Error as retry_exc:
+        log_error(
+            "M365 best practice Graph remediation failed after permission repair",
+            company_id=company_id,
+            check_id=check_id,
+            error=str(retry_exc),
+        )
+        return False, str(retry_exc)
+
+
+async def _run_teams_remediation(company_id: int, check_id: str) -> tuple[bool, str]:
+    """Apply the Teams policy change for *check_id* via the Teams provider."""
+    remediation = _TEAMS_REMEDIATIONS.get(check_id)
+    if remediation is None:
+        return False, "No Teams remediation is defined for this check."
+    if not provider_enabled(company_id, "teams"):
+        return False, (
+            "The Microsoft Teams provider is not enabled for this company, so Teams "
+            "settings cannot be changed automatically."
+        )
+    cmdlet, params = remediation
+    try:
+        graph_teams, resource_teams, tenant_id = await _acquire_teams_access_tokens(company_id)
+        await _teams_invoke_command((graph_teams, resource_teams), tenant_id, cmdlet, dict(params))
+    except M365Error as exc:
+        log_error(
+            "M365 best practice Teams remediation failed",
+            company_id=company_id,
+            check_id=check_id,
+            cmdlet=cmdlet,
+            error=str(exc),
+        )
+        if exc.http_status == 403:
+            return False, f"{exc}.{_TEAMS_PERMISSION_HINT}"
+        return False, str(exc)
+    return True, f"Applied {cmdlet} to the tenant's Global Teams configuration."
+
+
 async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     """Attempt automated remediation for a single best-practice check.
 
@@ -5777,7 +9319,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     database, and returns a result dict with ``success`` (bool) and ``message``
     (str) keys.
 
-    Supports four remediation patterns:
+    Supports nine remediation patterns:
 
     * ``source_type="exo"`` – executes a single cmdlet via the Exchange Online
       REST API using the ``remediation_cmdlet`` and ``remediation_params``
@@ -5786,11 +9328,37 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
       fetches all user mailboxes and calls ``Set-Mailbox`` on each one that does
       not already satisfy the required parameters using the
       ``remediation_mailbox_params`` catalog field.
+    * ``source_type="exo"`` with
+      ``remediation_type="foreach_owa_mailbox_policy_exo"`` – fetches every
+      OWA mailbox policy and applies the catalog's remediation parameters to
+      each policy that does not already satisfy them.
     * ``source_type="graph"`` – issues a ``PATCH`` request to Microsoft Graph
       using the ``remediation_url`` and ``remediation_payload`` catalog fields.
     * ``source_type="graph"`` with ``remediation_type="foreach_user_graph"`` –
       fetches all users and disables sign-in for each unlicensed member account
       that currently has ``accountEnabled=True``.
+    * ``source_type="graph"`` with ``remediation_type="disable_per_user_mfa"`` –
+      disables legacy per-user MFA states after confirming at least one enabled
+      Conditional Access policy exists.
+    * ``source_type="graph"`` with
+      ``remediation_type="create_dynamic_guest_group"`` – creates the standard
+      ``Guest Users`` dynamic security group if one does not already exist.
+    * ``source_type="graph"`` with
+      ``remediation_type="foreach_public_group_graph"`` – converts each
+      non-excluded public Microsoft 365 group to ``visibility=Private``.
+    * ``source_type="scc"`` with ``remediation_type="break_glass_alert_policy"`` –
+      creates (or re-enables) a Microsoft Purview protection alert policy that
+      emails tenant admins whenever a MyPortal-managed break-glass account signs in.
+    * ``source_type="exo"`` with ``remediation_type="foreach_exo_policy"`` –
+      applies ``remediation_params`` to every non-preset object returned by
+      ``remediation_get_cmdlet``; ``safe_links_policy_exo``, ``dkim_enabled_exo``
+      and ``audit_log_search_exo`` run their dedicated helpers.
+    * ``source_type="graph"`` with ``remediation_type`` ``security_defaults``,
+      ``conditional_access_policy``, ``domain_password_never_expire`` or
+      ``laps_enabled`` – dedicated Graph helpers, retried once after repairing
+      missing app permissions on 403.
+    * ``source_type="teams"`` – runs the ``_TEAMS_REMEDIATIONS`` cmdlet through
+      the Teams provider when it is enabled for the company.
     """
     bp = _catalog_map().get(check_id)
     if not bp or not bp.get("has_remediation"):
@@ -5801,8 +9369,69 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
 
     source_type = bp.get("source_type", "graph")
     remediated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    generic_failure_reason = "Check that the app has the required permissions."
+    outcome_message = ""
 
-    if source_type == "exo":
+    if bp.get("remediation_type") == "renew_myportal_pkce_admin_secret":
+        target = await _resolve_myportal_pkce_credential_target(company_id)
+        if not target:
+            outcome_message = "MyPortal PKCE/bootstrap admin credentials are not configured."
+            success = False
+        elif target["scope"] == "environment":
+            outcome_message = (
+                "MyPortal PKCE/bootstrap credentials are configured from environment variables, "
+                "so MyPortal cannot persist a rotated secret automatically. Store managed admin "
+                "credentials in MyPortal and retry."
+            )
+            success = False
+        else:
+            try:
+                renewal_result = await renew_admin_client_secret(
+                    company_id if target["scope"] == "company" else None
+                )
+                had_previous_key = bool(renewal_result.get("had_previous_key", False))
+                revoked_previous = bool(renewal_result.get("revoked_previous", False))
+                expires_at = renewal_result.get("expires_at")
+                expires_text = (
+                    expires_at.date().isoformat()
+                    if isinstance(expires_at, datetime)
+                    else "the configured lifetime window"
+                )
+                if not had_previous_key or revoked_previous:
+                    success = True
+                    outcome_message = (
+                        "Rotated the MyPortal PKCE/bootstrap credential and validated the replacement. "
+                        f"The new credential expires on {expires_text}."
+                    )
+                else:
+                    success = False
+                    outcome_message = (
+                        "MyPortal validated and activated a replacement PKCE/bootstrap credential, "
+                        "but could not retire the previous expiring credential. Authentication should "
+                        "continue to work; retry remediation after reviewing the logged Graph error."
+                    )
+            except M365Error as exc:
+                success = False
+                outcome_message = str(exc)
+
+        remediation_status = "success" if success else "failed"
+        remediation_failure_reason = None if success else outcome_message
+        await bp_repo.update_remediation_status(
+            company_id=company_id,
+            check_id=check_id,
+            remediation_status=remediation_status,
+            remediated_at=remediated_at,
+            remediation_failure_reason=remediation_failure_reason,
+        )
+        return {"success": success, "message": outcome_message}
+
+    if source_type == "teams":
+        success, outcome_message = await _run_teams_remediation(company_id, check_id)
+    elif source_type == "exo":
+        token_error_message = (
+            "Unable to acquire Exchange Online token. "
+            "Check that the app credentials are correct."
+        )
         try:
             exo_token, tenant_id = await _acquire_exo_access_token(company_id)
         except M365Error as exc:
@@ -5817,10 +9446,11 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 check_id=check_id,
                 remediation_status="failed",
                 remediated_at=remediated_at,
+                remediation_failure_reason=token_error_message,
             )
             return {
                 "success": False,
-                "message": "Unable to acquire Exchange Online token. Check that the app credentials are correct.",
+                "message": token_error_message,
             }
 
         if bp.get("remediation_type") == "foreach_mailbox_exo":
@@ -5828,13 +9458,32 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             success = await _remediate_foreach_mailbox(
                 exo_token, tenant_id, company_id, check_id, mailbox_params
             )
-        else:
+            if not success:
+                outcome_message = "One or more mailbox remediation updates failed."
+        elif bp.get("remediation_type") == "it_contact_baseline_exo":
+            try:
+                success, outcome_message = await _remediate_it_contact_baseline(
+                    exo_token, tenant_id
+                )
+            except M365Error as exc:
+                success = False
+                outcome_message = str(exc)
+        elif bp.get("remediation_type") == "foreach_owa_mailbox_policy_exo":
+            params = bp.get("remediation_params") or {}
+            success = await _remediate_foreach_owa_mailbox_policy(
+                exo_token, tenant_id, company_id, check_id, params
+            )
+            if not success:
+                outcome_message = "One or more OWA mailbox policy remediation updates failed."
+        elif bp.get("remediation_type") == "matching_antiphish_policy_exo":
             cmdlet = bp.get("remediation_cmdlet", "")
             params = bp.get("remediation_params") or {}
             try:
-                await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
-                success = True
+                success, outcome_message = await _remediate_matching_antiphish_policies(
+                    exo_token, tenant_id, check_id, cmdlet, params
+                )
             except M365Error as exc:
+                outcome_message = str(exc)
                 log_error(
                     "M365 best practice remediation command failed",
                     company_id=company_id,
@@ -5843,7 +9492,110 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                     error=str(exc),
                 )
                 success = False
+        elif bp.get("remediation_type") in {
+            "foreach_exo_policy",
+            "audit_log_search_exo",
+            "safe_links_policy_exo",
+            "dkim_enabled_exo",
+        }:
+            remediation_type = bp.get("remediation_type")
+            try:
+                if remediation_type == "foreach_exo_policy":
+                    success, outcome_message = await _remediate_foreach_exo_object(
+                        exo_token,
+                        tenant_id,
+                        get_cmdlet=bp["remediation_get_cmdlet"],
+                        get_params=bp.get("remediation_get_params"),
+                        set_cmdlet=bp["remediation_cmdlet"],
+                        desired=bp.get("remediation_params") or {},
+                        skip=_is_preset_security_policy,
+                    )
+                elif remediation_type == "audit_log_search_exo":
+                    success, outcome_message = await _remediate_audit_log_search(
+                        exo_token, tenant_id
+                    )
+                elif remediation_type == "safe_links_policy_exo":
+                    success, outcome_message = await _remediate_safe_links_office_apps(
+                        exo_token, tenant_id
+                    )
+                else:
+                    email_domains = await companies_repo.get_email_domains_for_company(
+                        company_id
+                    )
+                    success, outcome_message = await _remediate_dkim_enabled(
+                        exo_token, tenant_id, email_domains
+                    )
+            except M365Error as exc:
+                log_error(
+                    "M365 best practice remediation command failed",
+                    company_id=company_id,
+                    check_id=check_id,
+                    error=str(exc),
+                )
+                success = False
+                outcome_message = str(exc)
+        elif bp.get("remediation_type") == "global_quarantine_policy_exo":
+            cmdlet = bp.get("remediation_cmdlet", "")
+            params = bp.get("remediation_params") or {}
+            success, outcome_message = await _remediate_global_quarantine_policy(
+                exo_token, tenant_id, cmdlet, params
+            )
+        else:
+            cmdlet = bp.get("remediation_cmdlet", "")
+            params = bp.get("remediation_params") or {}
+            try:
+                await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
+                success = True
+            except M365Error as exc:
+                # Older enterprise-app registrations can be missing a newly
+                # required EXO application or directory role.  In particular,
+                # Customer Lockbox needs Compliance Administrator in addition
+                # to Exchange.ManageAsApp.  Repair permissions with the stored
+                # delegated admin token, then obtain a new EXO token and retry
+                # exactly once.  Never retry other failures or retry without a
+                # confirmed grant, which avoids masking licensing and policy
+                # errors as permission problems.
+                granted = False
+                if exc.http_status == 403:
+                    try:
+                        delegated_token = await acquire_delegated_token(company_id)
+                        if delegated_token:
+                            granted = await try_grant_missing_permissions(
+                                company_id, access_token=delegated_token
+                            )
+                    except Exception as grant_exc:  # noqa: BLE001 – preserve original EXO error
+                        log_error(
+                            "M365 best practice remediation permission repair failed",
+                            company_id=company_id,
+                            check_id=check_id,
+                            error=str(grant_exc),
+                        )
+
+                if granted:
+                    try:
+                        exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+                        await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
+                        success = True
+                    except M365Error as retry_exc:
+                        exc = retry_exc
+                        success = False
+                else:
+                    success = False
+
+                if not success:
+                    outcome_message = str(exc)
+                    log_error(
+                        "M365 best practice remediation command failed",
+                        company_id=company_id,
+                        check_id=check_id,
+                        cmdlet=cmdlet,
+                        error=str(exc),
+                    )
     elif source_type == "graph":
+        graph_token_error_message = (
+            "Unable to acquire Microsoft Graph token. "
+            "Check that the app credentials are correct."
+        )
         try:
             # Use an app-only (client credentials) token so that application
             # permissions such as SharePointTenantSettings.ReadWrite.All are
@@ -5867,37 +9619,282 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 check_id=check_id,
                 remediation_status="failed",
                 remediated_at=remediated_at,
+                remediation_failure_reason=graph_token_error_message,
             )
             return {
                 "success": False,
-                "message": "Unable to acquire Microsoft Graph token. Check that the app credentials are correct.",
+                "message": graph_token_error_message,
             }
-        if bp.get("remediation_type") == "foreach_user_graph":
-            success = await _remediate_foreach_user_graph(graph_token, company_id, check_id)
-        else:
-            remediation_url = bp.get("remediation_url", "")
-            remediation_payload = bp.get("remediation_payload") or {}
+        if bp.get("remediation_type") == "ews_dependency_allow_list":
             try:
-                await _graph_patch(graph_token, remediation_url, remediation_payload)
-                success = True
+                success, outcome_message = await _remediate_ews_dependency_allow_list(
+                    graph_token, company_id
+                )
             except M365Error as exc:
                 log_error(
-                    "M365 best practice Graph remediation failed",
+                    "M365 EWS dependency remediation failed",
                     company_id=company_id,
                     check_id=check_id,
-                    url=remediation_url,
                     error=str(exc),
                 )
                 success = False
+                outcome_message = str(exc)
+        elif bp.get("remediation_type") == "global_admin_accounts":
+            try:
+                success, outcome_message = await _remediate_global_admin_count(graph_token, company_id)
+            except Exception as exc:
+                log_error("M365 Global Administrator remediation failed", company_id=company_id,
+                          check_id=check_id, error=str(exc))
+                success = False
+                outcome_message = ("Account creation or secure Hudu synchronization failed; "
+                                   "the affected new account was rolled back.")
+        elif bp.get("remediation_type") == "disable_per_user_mfa":
+            success, outcome_message = await _remediate_disable_per_user_mfa(
+                graph_token, company_id, check_id
+            )
+        elif bp.get("remediation_type") == "foreach_user_graph":
+            success = await _remediate_foreach_user_graph(graph_token, company_id, check_id)
+            if not success:
+                outcome_message = "One or more user remediation updates failed."
+        elif bp.get("remediation_type") == "create_dynamic_guest_group":
+            try:
+                success = await _remediate_create_dynamic_guest_group(graph_token)
+            except M365Error as exc:
+                granted = False
+                if exc.http_status == 403:
+                    try:
+                        delegated_token = await acquire_delegated_token(company_id)
+                        if delegated_token:
+                            granted = await try_grant_missing_permissions(
+                                company_id, access_token=delegated_token
+                            )
+                    except Exception as grant_exc:  # noqa: BLE001 – preserve original Graph error
+                        log_error(
+                            "M365 best practice Graph remediation permission repair failed",
+                            company_id=company_id,
+                            check_id=check_id,
+                            error=str(grant_exc),
+                        )
+
+                if granted:
+                    try:
+                        graph_token = await acquire_access_token(
+                            company_id, force_client_credentials=True
+                        )
+                        success = await _remediate_create_dynamic_guest_group(graph_token)
+                    except Exception as retry_exc:  # noqa: BLE001 – normalize retry errors into remediation failure
+                        exc = (
+                            retry_exc
+                            if isinstance(retry_exc, M365Error)
+                            else M365Error(str(retry_exc))
+                        )
+                        success = False
+                else:
+                    success = False
+
+                if not success:
+                    log_error(
+                        "M365 best practice dynamic guest group remediation failed",
+                        company_id=company_id,
+                        check_id=check_id,
+                        error=str(exc),
+                    )
+                    outcome_message = str(exc)
+            if not success and not outcome_message:
+                outcome_message = "Unable to confirm whether the guest group remediation succeeded."
+        elif bp.get("remediation_type") == "foreach_public_group_graph":
+            success = await _remediate_foreach_public_group_graph(
+                graph_token, company_id, check_id
+            )
+            if not success:
+                outcome_message = "One or more public group remediation updates failed."
+            # Remediation status is persisted by the shared epilogue below.
+        elif check_id == "bp_authenticator_mfa_fatigue":
+            try:
+                success, outcome_message = await _remediate_authenticator_mfa_fatigue(
+                    graph_token
+                )
+            except M365Error as exc:
+                log_error(
+                    "M365 Authenticator MFA-fatigue remediation failed",
+                    company_id=company_id,
+                    check_id=check_id,
+                    error=str(exc),
+                )
+                success = False
+                outcome_message = str(exc)
+        elif check_id == "bp_internal_phishing_forms":
+            try:
+                success, outcome_message = await _remediate_internal_phishing_forms(
+                    graph_token
+                )
+            except M365Error as exc:
+                granted = False
+                success = False
+                outcome_message = (
+                    _forms_permission_guidance("update Microsoft Forms settings")
+                    if exc.http_status == 403
+                    else f"Microsoft Graph failed to update Microsoft Forms settings: {exc}"
+                )
+                permission_repair_error = ""
+                if exc.http_status == 403:
+                    try:
+                        delegated_token = await acquire_delegated_token(company_id)
+                        if delegated_token:
+                            granted = await try_grant_missing_permissions(
+                                company_id, access_token=delegated_token
+                            )
+                    except Exception as grant_exc:  # noqa: BLE001 – preserve original Graph error
+                        permission_repair_error = str(grant_exc)
+                        log_error(
+                            "M365 best practice Forms remediation permission repair failed",
+                            company_id=company_id,
+                            check_id=check_id,
+                            error=permission_repair_error,
+                        )
+                if granted:
+                    try:
+                        graph_token = await acquire_access_token(
+                            company_id, force_client_credentials=True
+                        )
+                        success, outcome_message = await _remediate_internal_phishing_forms(
+                            graph_token
+                        )
+                    except Exception as retry_exc:  # noqa: BLE001 – normalize retry errors into remediation failure
+                        success = False
+                        if (
+                            isinstance(retry_exc, M365Error)
+                            and retry_exc.http_status == 403
+                        ):
+                            outcome_message = _forms_permission_guidance(
+                                "update Microsoft Forms settings"
+                            )
+                        else:
+                            outcome_message = str(retry_exc)
+                        log_error(
+                            "M365 internal phishing Forms remediation failed after permission repair",
+                            company_id=company_id,
+                            check_id=check_id,
+                            error=outcome_message,
+                        )
+                else:
+                    if exc.http_status == 403 and permission_repair_error:
+                        outcome_message = (
+                            f"{outcome_message} Automatic permission repair also failed: "
+                            f"{permission_repair_error}"
+                        )
+                if not success:
+                    log_error(
+                        "M365 internal phishing Forms remediation failed",
+                        company_id=company_id,
+                        check_id=check_id,
+                        error=outcome_message,
+                    )
+        elif check_id == "bp_weak_auth_methods_disabled":
+            try:
+                success, outcome_message = await _remediate_weak_auth_methods_disabled(
+                    graph_token
+                )
+            except M365Error as exc:
+                log_error(
+                    "M365 weak authentication methods remediation failed",
+                    company_id=company_id,
+                    check_id=check_id,
+                    error=str(exc),
+                )
+                success = False
+                outcome_message = str(exc)
+        elif bp.get("remediation_type") in {
+            "security_defaults",
+            "conditional_access_policy",
+            "domain_password_never_expire",
+            "laps_enabled",
+        }:
+            remediation_type = bp.get("remediation_type")
+
+            async def _graph_action(token: str) -> tuple[bool, str]:
+                if remediation_type == "security_defaults":
+                    return await _remediate_security_defaults(token, check_id)
+                if remediation_type == "conditional_access_policy":
+                    return await _remediate_conditional_access_policy(token, check_id)
+                if remediation_type == "domain_password_never_expire":
+                    return await _remediate_domain_password_never_expire(token)
+                return await _remediate_laps_enabled(token)
+
+            success, outcome_message = await _run_graph_remediation_with_permission_repair(
+                company_id, check_id, graph_token, _graph_action
+            )
+        else:
+            remediation_url = bp.get("remediation_url", "")
+            remediation_payload = bp.get("remediation_payload") or {}
+
+            async def _patch_action(token: str) -> tuple[bool, str]:
+                await _graph_patch(token, remediation_url, remediation_payload)
+                return True, ""
+
+            success, outcome_message = await _run_graph_remediation_with_permission_repair(
+                company_id, check_id, graph_token, _patch_action
+            )
+    elif source_type == "scc":
+        scc_token_error_message = (
+            "Unable to acquire Security & Compliance token. "
+            "Check that the app credentials and permissions are correct."
+        )
+        try:
+            scc_tok, scc_tid = await _acquire_scc_access_token(company_id)
+        except M365Error as exc:
+            log_error(
+                "M365 best practice remediation – SCC token acquisition failed",
+                company_id=company_id,
+                check_id=check_id,
+                error=str(exc),
+            )
+            await bp_repo.update_remediation_status(
+                company_id=company_id,
+                check_id=check_id,
+                remediation_status="failed",
+                remediated_at=remediated_at,
+                remediation_failure_reason=scc_token_error_message,
+            )
+            return {
+                "success": False,
+                "message": scc_token_error_message,
+            }
+        if bp.get("remediation_type") == "break_glass_alert_policy":
+            try:
+                graph_token_scc = await acquire_access_token(
+                    company_id, force_client_credentials=True
+                )
+                success, outcome_message = await _remediate_break_glass_alert_policy(
+                    graph_token_scc, scc_tok, scc_tid
+                )
+            except Exception as exc:
+                log_error(
+                    "M365 break-glass alert policy remediation failed",
+                    company_id=company_id,
+                    check_id=check_id,
+                    error=str(exc),
+                )
+                success = False
+                outcome_message = str(exc)
+        else:
+            success = False
+            outcome_message = "Unknown SCC remediation type."
     else:
         success = False
+        outcome_message = "Unknown remediation source type."
 
     remediation_status = "success" if success else "failed"
+    remediation_failure_reason = (
+        None if remediation_status == "success"
+        else outcome_message or generic_failure_reason
+    )
     await bp_repo.update_remediation_status(
         company_id=company_id,
         check_id=check_id,
         remediation_status=remediation_status,
         remediated_at=remediated_at,
+        remediation_failure_reason=remediation_failure_reason,
     )
 
     log_info(
@@ -5911,13 +9908,18 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
         return {
             "success": True,
             "message": (
-                "Remediation command executed successfully. "
+                outcome_message
+                or "Remediation command executed successfully. "
                 "Re-evaluate the check to confirm the change took effect."
             ),
         }
     return {
         "success": False,
-        "message": "Remediation command failed. Check that the app has the required permissions.",
+        "message": (
+            f"Remediation command failed: {outcome_message}"
+            if outcome_message
+            else f"Remediation command failed. {generic_failure_reason}"
+        ),
     }
 
 
@@ -5934,12 +9936,16 @@ __all__ = [
     "list_settings_with_catalog",
     "get_enabled_check_ids",
     "get_auto_remediate_check_ids",
+    "get_create_ticket_on_fail_check_ids",
     "reset_enabled_results_to_unknown",
     "set_enabled_checks",
+    "get_company_exclusions",
     "save_company_exclusions",
     "run_best_practices",
     "run_single_check",
     "get_last_results",
+    "set_result_notes",
+    "get_secure_score_summary",
     "get_remediation",
     "remediate_check",
     "detect_tenant_capabilities",

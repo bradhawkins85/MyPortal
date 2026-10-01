@@ -96,3 +96,17 @@ def test_preview_unbill_tickets_scans_all_ticket_pages(monkeypatch):
     assert preview["totals"] == {"ticketCount": 2}
     assert [item["id"] for item in preview["items"]] == [1, 2]
     assert calls == [(1, 0), (1, 1), (1, 2)]
+
+
+def test_billed_ticket_query_includes_billed_time_markers():
+    query_source = (
+        Path(__file__).resolve().parents[1] / "app" / "repositories" / "tickets.py"
+    ).read_text()
+
+    function_source = query_source.split(
+        "async def list_billed_tickets_older_than", 1
+    )[1].split("async def clear_ticket_billing_fields", 1)[0]
+
+    assert "EXISTS" in function_source
+    assert "ticket_billed_time_entries" in function_source
+    assert "merged_into_ticket_id IS NULL" not in function_source

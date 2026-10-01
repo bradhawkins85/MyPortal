@@ -69,3 +69,20 @@ def test_adapt_params_for_mysql_preserves_question_in_comments():
     )
     assert "ticket_id = %s -- what about ?" in sql
     assert params == (11,)
+
+
+def test_adapt_sqlite_replaces_mysql_compound_unique_index_change():
+    db = Database()
+
+    sql = db._adapt_sql_for_sqlite(
+        """ALTER TABLE scheduled_invoices
+        DROP INDEX unique_customer_scheduled_date,
+        ADD UNIQUE KEY unique_customer_date_cycle
+        (customer_id, scheduled_for_date, renewal_cycle);"""
+    )
+
+    assert "DROP INDEX IF EXISTS unique_customer_scheduled_date;" in sql
+    assert (
+        "CREATE UNIQUE INDEX unique_customer_date_cycle ON scheduled_invoices "
+        "(customer_id, scheduled_for_date, renewal_cycle);"
+    ) in sql

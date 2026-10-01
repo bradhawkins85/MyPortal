@@ -8,14 +8,17 @@ import json
 import os
 import string
 import wave
+from importlib import import_module
 from defusedxml import ElementTree as DefusedET
 from defusedxml.common import DefusedXmlException
-from datetime import datetime, timedelta, timezone
+from html import unescape
+from html.parser import HTMLParser
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import asyncio
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Mapping
-from urllib.parse import urljoin, urlparse
+from typing import Any, Awaitable, Callable, Mapping, TypedDict
+from urllib.parse import urljoin
 
 import httpx
 from dotenv import load_dotenv
@@ -34,18 +37,71 @@ from app.repositories import integration_modules as module_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import webhook_events as webhook_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
-from app.services import call_recordings as call_recordings_service
-from app.services import email as email_service, webhook_monitor
-from app.services import unifi_talk as unifi_talk_service
+from app.services import module_dispatch
+from app.services.module_constants import ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS
 from app.services.realtime import RefreshNotifier, refresh_notifier
-from app.services import tickets as tickets_service
+from app.core.module_capabilities import COMMANDS_BY_MODULE, MODULE_CAPABILITIES
+from app.services.component_availability import (
+    AvailabilityConfigurationError,
+    get_component_availability,
+)
 
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+
+
+def _tickets_repo():
+    return import_module("app.repositories.tickets")
+
+
+def _call_recordings_service():
+    return import_module("app.services.call_recordings")
+
+
+def _email_service():
+    return import_module("app.services.email")
+
+
+def _webhook_monitor():
+    return import_module("app.services.webhook_monitor")
+
+
+def _unifi_talk_service():
+    return import_module("app.services.unifi_talk")
+
+
+def _tickets_service():
+    return import_module("app.services.tickets")
 
 _SMART_ATTACHMENT_POLL_ATTEMPTS = 5
 _SMART_ATTACHMENT_POLL_DELAY_SECONDS = 0.5
 
 _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+
+MODULE_RESULT_SUCCEEDED = "succeeded"
+
+
+class ModuleResult(TypedDict, total=False):
+    """Common result fields returned by :func:`trigger_module`."""
+
+    status: str
+    event_status: str
+    event_id: int
+    response: Any
+    last_error: str
+
+
+def module_result_status(result: Mapping[str, Any] | None) -> str:
+    """Return a module result status in its canonical, comparable form."""
+
+    if not isinstance(result, Mapping):
+        return ""
+    return str(result.get("status") or "").strip().lower()
+
+
+def module_result_succeeded(result: Mapping[str, Any] | None) -> bool:
+    """Whether a synchronous module invocation completed successfully."""
+
+    return module_result_status(result) == MODULE_RESULT_SUCCEEDED
 
 _TACTICALRMM_RATE_LIMIT_LOCK = asyncio.Lock()
 _TACTICALRMM_LAST_REQUEST_AT: float | None = None
@@ -377,6 +433,19 @@ async def acquire_xero_access_token() -> str:
         return await refresh_xero_access_token()
 
 
+async def renew_xero_access_token() -> str:
+    """Proactively rotate the Xero tokens, serialising against normal use.
+
+    Unlike :func:`acquire_xero_access_token`, this deliberately refreshes even
+    when the cached access token is still valid.  Xero rotates refresh tokens
+    on every successful exchange, so using the same lock as request-time token
+    acquisition prevents concurrent refreshes from persisting an obsolete
+    token.
+    """
+    async with _XERO_TOKEN_REFRESH_LOCK:
+        return await refresh_xero_access_token()
+
+
 def _get_xero_token_keepalive_interval_seconds() -> int:
     """Return how often the background Xero OAuth keepalive should run."""
     raw_value = str(os.getenv("XERO_TOKEN_KEEPALIVE_INTERVAL_SECONDS", "")).strip()
@@ -422,7 +491,10 @@ async def _xero_token_keepalive_once() -> bool:
     if not all(str(credentials.get(field) or "").strip() for field in required_fields):
         return False
 
-    await acquire_xero_access_token()
+    # Rotate the refresh token on every keepalive run rather than merely
+    # returning a still-valid cached access token.  This makes the scheduled
+    # task a genuine renewal and keeps an otherwise idle integration alive.
+    await renew_xero_access_token()
     return True
 
 
@@ -513,6 +585,40 @@ def _ensure_list(value: Any) -> list[str]:
     return result
 
 
+def _extract_ticket_reply_id(context: Any) -> int | None:
+    """Return the reply that caused a ticket notification, when available."""
+
+    if not isinstance(context, Mapping):
+        return None
+
+    candidates: list[Any] = []
+    metadata = context.get("metadata")
+    if isinstance(metadata, Mapping):
+        candidates.extend([metadata.get("reply_id"), metadata.get("ticket_reply_id")])
+
+    # System-authored replies (including shipment updates) are deliberately not
+    # treated as a ticket's latest technician reply, but the event still carries
+    # the triggering reply directly.
+    reply = context.get("reply")
+    if isinstance(reply, Mapping):
+        candidates.append(reply.get("id"))
+
+    ticket = context.get("ticket")
+    if isinstance(ticket, Mapping):
+        latest_reply = ticket.get("latest_reply")
+        if isinstance(latest_reply, Mapping):
+            candidates.append(latest_reply.get("id"))
+
+    for candidate in candidates:
+        try:
+            reply_id = int(candidate)
+        except (TypeError, ValueError):
+            continue
+        if reply_id > 0:
+            return reply_id
+    return None
+
+
 def _extract_ticket_id_from_email_payload(payload: Mapping[str, Any]) -> int | None:
     context = payload.get("context")
     candidates: list[Any] = [payload.get("ticket_id")]
@@ -539,14 +645,13 @@ async def _load_ticket_email_attachments(
     """Load ticket attachments for automation email modules when possible.
 
     Explicit payload attachments are respected by callers; this helper only supplies
-    attachments automatically when the automation context identifies a ticket. Reply
-    events can provide the attachments uploaded with that reply so the outgoing
-    email does not have to fall back to every attachment on the ticket.
+    attachments automatically for ticket reply events that include the files uploaded
+    with that reply. Other ticket automations, such as reminders, must not attach
+    every file already stored on the ticket.
     """
     ticket_id = _extract_ticket_id_from_email_payload(payload)
     context = payload.get("context")
 
-    from app.repositories import ticket_attachments as attachments_repo
     from app.services import ticket_attachments as attachments_service
 
     attachments: list[Mapping[str, Any]] = []
@@ -558,19 +663,7 @@ async def _load_ticket_email_attachments(
             ]
 
     if not attachments:
-        if ticket_id is None:
-            return []
-        try:
-            attachments = await attachments_repo.list_attachments(
-                ticket_id, access_levels=("open", "closed")
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.warning(
-                "Unable to load ticket attachments for automation email",
-                ticket_id=ticket_id,
-                error=str(exc),
-            )
-            return []
+        return []
 
     email_attachments: list[dict[str, Any]] = []
     for attachment in attachments:
@@ -597,6 +690,27 @@ async def _load_ticket_email_attachments(
             }
         )
     return email_attachments
+
+
+async def _embed_ticket_email_images(
+    payload: Mapping[str, Any], html_body: str
+) -> tuple[str, list[dict[str, Any]]]:
+    """Swap ticket image download URLs in ``html_body`` for inline ``cid:`` parts."""
+    ticket_id = _extract_ticket_id_from_email_payload(payload)
+    if not ticket_id:
+        return html_body, []
+
+    from app.services import ticket_attachments as attachments_service
+
+    try:
+        return await attachments_service.embed_ticket_images_for_email(ticket_id, html_body)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning(
+            "Unable to embed inline ticket images in automation email",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
+        return html_body, []
 
 
 def _attachments_for_smtp2go(attachments: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -648,6 +762,17 @@ def _parse_nullable_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_boolean(value: Any) -> bool:
+    """Coerce automation JSON/form-style values to a predictable boolean."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().casefold() in {"1", "true", "yes", "on", "enabled"}
 
 
 def _normalise_tool_names(value: Any) -> list[str]:
@@ -809,23 +934,6 @@ def _default_xero_settings() -> dict[str, Any]:
 
 DEFAULT_MODULES: list[dict[str, Any]] = [
     {
-        "slug": "plausible",
-        "name": "Plausible Analytics",
-        "description": "Privacy-first analytics integration for email tracking and authenticated user pageviews.",
-        "icon": "📊",
-        "settings": {
-            "base_url": "",
-            "site_domain": "",
-            "api_key": "",
-            "track_opens": True,
-            "track_clicks": True,
-            "send_to_plausible": False,
-            "track_pageviews": False,
-            "pepper": "",
-            "send_pii": False,
-        },
-    },
-    {
         "slug": "syncro",
         "name": "Syncro",
         "description": "Synchronise tickets and contacts from SyncroMSP.",
@@ -873,6 +981,25 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
             "track_clicks": True,
             "webhook_secret": str(os.getenv("SMTP2GO_WEBHOOK_SECRET", "")),
             "disable_webhook_signature_verification": False,
+            "manage_url": "/admin/modules/smtp2go",
+            "rate_limit_max_retries": 3,
+            "retry_backoff_seconds": 60,
+            "not_engaged_delay_seconds": 86400,
+            "ab_campaigns": [],
+        },
+    },
+    {
+        "slug": "m365-direct-delivery",
+        "name": "M365 Direct Delivery",
+        "description": "Create an explicit M365 Inbox draft item, or opt in to Exchange sendMail.",
+        "icon": "📨",
+        "settings": {
+            "company_id": 0,
+            "recipient_domains": [],
+            "fallback_to_smtp": True,
+            "track_read_status": True,
+            "delivery_mode": "inbox_item",
+            "sender_address": "",
         },
     },
     {
@@ -882,6 +1009,33 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "icon": "📥",
         "settings": {
             "manage_url": "/admin/modules/imap",
+        },
+    },
+    {
+        "slug": "receive-sms",
+        "name": "Receive SMS",
+        "description": "Create and update tickets from inbound SMS webhooks.",
+        "icon": "📱",
+        "settings": {},
+    },
+    {
+        "slug": "calls",
+        "name": "Calls",
+        "description": "Receive and review phone call webhook events.",
+        "icon": "☎️",
+        "settings": {},
+        "enabled": True,
+    },
+    {
+        "slug": "voice-monitor",
+        "name": "Voice Monitor",
+        "description": "Place bounded health-check calls to subscribed telephone numbers.",
+        "icon": "📞",
+        "settings": {
+            "provider_type": "disabled", "endpoint": "", "credentials_encrypted": "",
+            "caller_identity": "", "per_user_hourly_limit": 3, "per_company_hourly_limit": 10,
+            "recording_retention_days": 30, "worker_concurrency": 5,
+            "worker_lease_seconds": 300, "test_calls_enabled": False,
         },
     },
     {
@@ -987,6 +1141,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
             "recordings_path": "/var/lib/myportal/call_recordings",
             "phone_system_type": "generic",
         },
+        "enabled": True,
     },
     {
         "slug": "whisperx",
@@ -1012,7 +1167,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
     {
         "slug": "reprocess-ai",
         "name": "Reprocess AI",
-        "description": "Re-trigger AI processing to regenerate ticket summary and tags using the Ollama model.",
+        "description": "Re-trigger AI processing to regenerate ticket summary, tags, and resolution steps using the Ollama model.",
         "icon": "🔄",
         "settings": {},
         "enabled": True,  # Internal action module - no external configuration required
@@ -1049,7 +1204,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
             "Huntress EDR / ITDR / SAT / SIEM / SOC statistics for company reports. "
             "Credentials are read from environment variables (HUNTRESS_API_KEY, "
             "HUNTRESS_API_SECRET, and CURRICULA_API_KEY/CURRICULA_API_SECRET "
-            "for Managed SAT)."
+            "for Managed SAT OAuth2)."
         ),
         "icon": "🛡️",
         "settings": {},
@@ -1059,7 +1214,9 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "name": "Trello",
         "description": "Link companies to Trello boards. Cards created in Trello become tickets; ticket replies sync back as card comments.",
         "icon": "📋",
-        "settings": {},
+        # ``api_secret`` is the Trello application secret (trello.com/app-key)
+        # used to verify the X-Trello-Webhook signature on incoming events.
+        "settings": {"api_secret": str(os.getenv("TRELLO_API_SECRET", ""))},
         "enabled": True,  # Enabled by default so it appears as a trigger action when the module is configured
     },
     {
@@ -1099,6 +1256,14 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
 
 _ALWAYS_ON_TICKET_ACTION_MODULES: tuple[dict[str, Any], ...] = (
     {
+        "slug": "suggest-assets",
+        "name": "Suggest Assets",
+        "description": "Suggest Tactical RMM devices used by the ticket requester.",
+        "icon": "🖥️",
+        "settings": {},
+        "enabled": True,
+    },
+    {
         "slug": "create-ticket",
         "name": "Create Ticket",
         "description": "Create a new support ticket with customizable details.",
@@ -1110,6 +1275,14 @@ _ALWAYS_ON_TICKET_ACTION_MODULES: tuple[dict[str, Any], ...] = (
         "slug": "create-task",
         "name": "Create Task",
         "description": "Create a new task for a ticket.",
+        "icon": "✓",
+        "settings": {},
+        "enabled": True,
+    },
+    {
+        "slug": "assign-approval-configuration",
+        "name": "Assign Approval Configuration",
+        "description": "Assign a company-scoped change approval workflow to a matching ticket.",
         "icon": "✓",
         "settings": {},
         "enabled": True,
@@ -1131,6 +1304,14 @@ _ALWAYS_ON_TICKET_ACTION_MODULES: tuple[dict[str, Any], ...] = (
         "enabled": True,
     },
     {
+        "slug": "ai-rename-ticket",
+        "name": "AI Rename Ticket",
+        "description": "Use the current subject and initial problem description to create a more descriptive 3 to 12 word ticket subject.",
+        "icon": "✨",
+        "settings": {},
+        "enabled": True,
+    },
+    {
         "slug": "add-ticket-reply",
         "name": "Add Ticket Reply",
         "description": "Add a reply to an existing ticket. Supports public replies, internal notes, and optional time tracking with billable/non-billable hours.",
@@ -1147,9 +1328,7 @@ _ALWAYS_ON_TICKET_ACTION_MODULES: tuple[dict[str, Any], ...] = (
         "enabled": True,
     },
 )
-_ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS = {
-    module["slug"] for module in _ALWAYS_ON_TICKET_ACTION_MODULES
-}
+_ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS = ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS
 _ALWAYS_ON_TICKET_ACTION_MODULES_BY_SLUG = {
     module["slug"]: module for module in _ALWAYS_ON_TICKET_ACTION_MODULES
 }
@@ -1232,6 +1411,15 @@ _ENV_BACKED_MODULE_FIELDS: dict[str, tuple[str, ...]] = {
         "track_clicks",
         "webhook_secret",
         "disable_webhook_signature_verification",
+        "manage_url",
+        "rate_limit_max_retries",
+        "retry_backoff_seconds",
+        "not_engaged_delay_seconds",
+        "ab_campaigns",
+    ),
+    "m365-direct-delivery": (
+        "company_id", "recipient_domains", "fallback_to_smtp", "track_read_status",
+        "delivery_mode", "sender_address"
     ),
     "solidtime": (
         "base_url",
@@ -1423,6 +1611,25 @@ def _coerce_settings(
             else:
                 api_key = candidate
 
+        try:
+            rate_limit_max_retries = max(
+                0, int(merged.get("rate_limit_max_retries") or 3)
+            )
+        except (TypeError, ValueError):
+            rate_limit_max_retries = 3
+        try:
+            retry_backoff_seconds = max(
+                1, int(merged.get("retry_backoff_seconds") or 60)
+            )
+        except (TypeError, ValueError):
+            retry_backoff_seconds = 60
+        try:
+            not_engaged_delay_seconds = max(
+                0, int(merged.get("not_engaged_delay_seconds") or 86400)
+            )
+        except (TypeError, ValueError):
+            not_engaged_delay_seconds = 86400
+
         merged.update(
             {
                 "api_key": api_key,
@@ -1432,6 +1639,16 @@ def _coerce_settings(
                 "webhook_secret": str(merged.get("webhook_secret", "")).strip(),
                 "disable_webhook_signature_verification": _ensure_bool(
                     merged.get("disable_webhook_signature_verification"), False
+                ),
+                "manage_url": str(merged.get("manage_url") or "").strip()
+                or "/admin/modules/smtp2go",
+                "rate_limit_max_retries": rate_limit_max_retries,
+                "retry_backoff_seconds": retry_backoff_seconds,
+                "not_engaged_delay_seconds": not_engaged_delay_seconds,
+                "ab_campaigns": (
+                    merged.get("ab_campaigns")
+                    if isinstance(merged.get("ab_campaigns"), list)
+                    else []
                 ),
             }
         )
@@ -1450,11 +1667,21 @@ def _coerce_settings(
         _env = os.getenv("SMTP2GO_DISABLE_WEBHOOK_SIGNATURE_VERIFICATION", "").strip()
         if _env:
             merged["disable_webhook_signature_verification"] = _env.lower() not in (
-                "false",
-                "0",
-                "no",
-                "off",
+                "false", "0", "no", "off"
             )
+    elif slug == "m365-direct-delivery":
+        try:
+            company_id = int(merged.get("company_id") or 0)
+        except (TypeError, ValueError):
+            company_id = 0
+        merged.update({
+            "company_id": max(0, company_id),
+            "recipient_domains": [str(value).strip().lower().lstrip("@") for value in _ensure_list(merged.get("recipient_domains")) if str(value).strip()],
+            "fallback_to_smtp": _ensure_bool(merged.get("fallback_to_smtp"), True),
+            "track_read_status": _ensure_bool(merged.get("track_read_status"), True),
+            "delivery_mode": (merged.get("delivery_mode") if merged.get("delivery_mode") in ("inbox_item", "send_mail") else "inbox_item"),
+            "sender_address": str(merged.get("sender_address") or "").strip(),
+        })
     elif slug == "syncro":
         base_url = str(merged.get("base_url") or "").strip().rstrip("/")
         api_key_override = payload.get("api_key") if payload else None
@@ -1596,46 +1823,6 @@ def _coerce_settings(
         _env = os.getenv("APPRISE_TITLE", "").strip()
         if _env:
             merged["title"] = _env
-    elif slug == "plausible":
-        overrides = payload or {}
-        api_key_override = overrides.get("api_key")
-        if api_key_override is None:
-            api_key = str(merged.get("api_key") or "").strip()
-        else:
-            candidate = str(api_key_override or "").strip()
-            if not candidate and existing_settings and existing_settings.get("api_key"):
-                api_key = str(existing_settings.get("api_key") or "").strip()
-            else:
-                api_key = candidate
-
-        # Handle pepper field similarly to api_key (preserve existing if not provided)
-        pepper_override = overrides.get("pepper")
-        if pepper_override is None:
-            pepper = str(merged.get("pepper") or "").strip()
-        else:
-            candidate = str(pepper_override or "").strip()
-            if not candidate and existing_settings and existing_settings.get("pepper"):
-                pepper = str(existing_settings.get("pepper") or "").strip()
-            else:
-                pepper = candidate
-
-        base_url_value = str(merged.get("base_url", "")).strip()
-        base_url = base_url_value.rstrip("/") if base_url_value else ""
-        merged.update(
-            {
-                "base_url": base_url,
-                "site_domain": str(merged.get("site_domain", "")).strip(),
-                "api_key": api_key,
-                "track_opens": _ensure_bool(merged.get("track_opens"), True),
-                "track_clicks": _ensure_bool(merged.get("track_clicks"), True),
-                "send_to_plausible": _ensure_bool(
-                    merged.get("send_to_plausible"), False
-                ),
-                "track_pageviews": _ensure_bool(merged.get("track_pageviews"), False),
-                "pepper": pepper,
-                "send_pii": _ensure_bool(merged.get("send_pii"), False),
-            }
-        )
     elif slug == "imap":
         manage_url = (
             str(merged.get("manage_url") or "").strip() or "/admin/modules/imap"
@@ -2200,12 +2387,12 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "xero": ("client_secret", "refresh_token", "access_token", "webhook_key"),
         "sms-gateway": ("authorization",),
         "unifi-talk": ("password",),
-        "plausible": ("api_key", "pepper"),
         "smtp2go": ("api_key", "webhook_secret"),
         "m365-admin": ("client_secret",),
         "password-pusher": ("api_key",),
         "hudu": ("api_key",),
         "solidtime": ("api_token", "webhook_secret"),
+        "trello": ("api_secret",),
     }
     targets = fields_to_redact.get(slug)
     if not targets:
@@ -2235,11 +2422,18 @@ async def ensure_default_modules() -> None:
         )
         return
     existing_by_slug = {module["slug"]: module for module in existing}
+    availability = get_component_availability()
     for default in DEFAULT_MODULES:
         current = existing_by_slug.get(default["slug"])
         # Use the enabled value from DEFAULT_MODULES if specified, otherwise default to False
         default_enabled = default.get("enabled", False)
         if not current:
+            # Deployment exclusions are catalogue exclusions, not persisted
+            # configuration.  Do not create a row which misleadingly appears
+            # installable; removing the exclusion on a later start creates it
+            # with the normal defaults.
+            if not availability.module_available(default["slug"]):
+                continue
             await module_repo.upsert_module(
                 slug=default["slug"],
                 name=default["name"],
@@ -2256,21 +2450,43 @@ async def ensure_default_modules() -> None:
             updates["description"] = default["description"]
         if current.get("icon") != default["icon"]:
             updates["icon"] = default["icon"]
-        # If the default specifies enabled=True and the module is currently disabled,
-        # enable it (for internal action modules that should always be available)
-        if default_enabled and not current.get("enabled", False):
-            updates["enabled"] = True
+        # Never overwrite an existing enabled flag.  Migration-created rows and
+        # operator toggles are authoritative; defaults apply only to new rows.
         if updates:
             await module_repo.update_module(default["slug"], **updates)
 
 
 async def list_modules() -> list[dict[str, Any]]:
     modules = await module_repo.list_modules()
-    return [
-        _redact_module_settings(_resolve_module_for_runtime(module))
+    availability = get_component_availability()
+    result = [
+        _redact_module_settings(
+            {**_resolve_module_for_runtime(module), "enabled": availability.module_enabled(module)}
+        )
         for module in modules
-        if not _is_always_on_ticket_action_module(str(module.get("slug") or ""))
+        if isinstance(module.get("slug"), str)
+        and bool(module.get("slug"))
+        and not _is_always_on_ticket_action_module(module["slug"])
+        and availability.module_available(module["slug"])
     ]
+    return result
+
+
+def llm_module_ready(module: Mapping[str, Any] | None) -> bool:
+    """Return True when the LLM (``ollama``) module is enabled and configured."""
+
+    if not module or not module.get("enabled"):
+        return False
+    settings = module.get("settings")
+    if not isinstance(settings, Mapping):
+        return False
+    return bool(str(settings.get("base_url") or "").strip())
+
+
+async def llm_available() -> bool:
+    """Return True when LLM-backed features such as AI search can run."""
+
+    return llm_module_ready(await get_module("ollama", redact=False))
 
 
 async def get_module_settings(slug: str) -> dict[str, Any] | None:
@@ -2291,7 +2507,6 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "ollama-mcp",  # Ollama MCP - inbound query surface, not an action module
     "call-recordings",  # Call Recordings - configuration only, not an action module
     "unifi-talk",  # Unifi Talk - SFTP import module, not an action module
-    "plausible",  # Plausible - email tracking config only
     "m365-admin",  # M365 Admin - configuration only, not an action module
     "hudu",  # Hudu - documentation/password management, not a trigger action module
     "huntress",  # Huntress - report data ingester, not a trigger action module
@@ -2352,14 +2567,33 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             {"name": "tasks", "label": "Tasks (JSON array)", "type": "json"},
         ],
     },
+    "assign-approval-configuration": {
+        "fields": [
+            {"name": "approval_guid", "label": "Approval GUID", "type": "string", "required": True},
+            {"name": "ticket_id", "label": "Ticket ID", "type": "string"},
+        ],
+    },
     "update-ticket": {
         "fields": [
             {"name": "ticket_id", "label": "Ticket ID", "type": "string"},
+            {"name": "subject", "label": "Subject", "type": "string"},
+            {"name": "description", "label": "Description", "type": "string"},
             {"name": "status", "label": "Status", "type": "string"},
             {"name": "priority", "label": "Priority", "type": "string"},
             {"name": "assigned_user_id", "label": "Assigned user ID", "type": "string"},
             {"name": "requester_id", "label": "Requester ID", "type": "string"},
+            {"name": "requester_staff_id", "label": "Requester staff ID", "type": "string"},
+            {"name": "company_id", "label": "Company ID", "type": "string"},
             {"name": "category", "label": "Category", "type": "string"},
+            {"name": "external_reference", "label": "External reference", "type": "string"},
+            {"name": "review_date", "label": "Review date (YYYY-MM-DD)", "type": "string"},
+            {"name": "module_slug", "label": "Module slug", "type": "string"},
+            {"name": "ticket_number", "label": "Ticket number", "type": "string"},
+            {"name": "xero_invoice_number", "label": "Xero invoice number", "type": "string"},
+            {"name": "shipment_tracking_url", "label": "Shipping tracking URL", "type": "string"},
+            {"name": "shipment_poll_interval_seconds", "label": "Shipment poll interval (seconds)", "type": "integer"},
+            {"name": "shipment_monitoring_enabled", "label": "Shipment monitoring enabled", "type": "boolean"},
+            {"name": "shipment_public_comments_enabled", "label": "Shipment public comments enabled", "type": "boolean"},
         ],
     },
     "update-ticket-description": {
@@ -2378,6 +2612,16 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    "ai-rename-ticket": {
+        "fields": [
+            {
+                "name": "ticket_id",
+                "label": "Ticket ID",
+                "type": "string",
+                "placeholder": "{{ticket.id}}",
+            },
+        ],
+    },
     "reprocess-ai": {
         "fields": [
             {
@@ -2388,6 +2632,7 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             },
             {"name": "refresh_summary", "label": "Refresh summary", "type": "boolean"},
             {"name": "refresh_tags", "label": "Refresh tags", "type": "boolean"},
+            {"name": "refresh_resolution", "label": "Refresh resolution steps", "type": "boolean"},
         ],
     },
     "add-ticket-reply": {
@@ -2554,18 +2799,19 @@ async def list_trigger_action_modules() -> list[dict[str, Any]]:
     in the trigger actions menu.
     """
     modules = await module_repo.list_modules()
+    availability = get_component_availability()
     actionable_by_slug: dict[str, dict[str, Any]] = {}
     for module in modules:
         module_slug = _normalise_slug(str(module.get("slug") or ""))
-        if module_slug in _NON_TRIGGERABLE_MODULE_SLUGS or not module.get(
-            "enabled", False
-        ):
+        if module_slug in _NON_TRIGGERABLE_MODULE_SLUGS or not availability.module_enabled(module):
             continue
         redacted = _redact_module_settings(module)
         redacted["payload_schema"] = get_action_payload_schema(module_slug)
         actionable_by_slug[module_slug] = redacted
     for module in _ALWAYS_ON_TICKET_ACTION_MODULES:
         module_slug = module["slug"]
+        if not availability.module_available(module_slug):
+            continue
         internal_module = dict(module)
         internal_module["payload_schema"] = get_action_payload_schema(module_slug)
         actionable_by_slug[module_slug] = internal_module
@@ -2576,10 +2822,13 @@ async def list_trigger_action_modules() -> list[dict[str, Any]]:
 
 
 async def get_module(slug: str, *, redact: bool = True) -> dict[str, Any] | None:
+    if not get_component_availability().module_available(slug):
+        return None
     module = await module_repo.get_module(slug)
     if not module:
         return None
     resolved = _resolve_module_for_runtime(module)
+    resolved["enabled"] = get_component_availability().module_enabled(resolved)
     return _redact_module_settings(resolved) if redact else resolved
 
 
@@ -2590,6 +2839,14 @@ async def update_module(
     settings: Mapping[str, Any] | None = None,
     notifier: RefreshNotifier | None = None,
 ) -> dict[str, Any] | None:
+    if enabled is True and not get_component_availability().module_available(slug):
+        raise AvailabilityConfigurationError(
+            f"Module '{slug}' is disabled by deployment configuration and cannot be enabled"
+        )
+    capabilities = MODULE_CAPABILITIES.get(slug)
+    if capabilities and capabilities.always_on:
+        # Internal action modules are catalogue entries, not kill switches.
+        enabled = True
     existing = await module_repo.get_module(slug)
     coerced = (
         _coerce_settings(slug, settings, existing) if settings is not None else None
@@ -2598,16 +2855,124 @@ async def update_module(
     if updated:
         # When a module is disabled, deactivate any scheduled tasks that belong to it.
         if enabled is False:
-            from app.services.scheduler import (
-                COMMANDS_BY_MODULE,
-            )  # local import to avoid circular dependency
-
             module_commands = COMMANDS_BY_MODULE.get(slug, set())
             if module_commands:
-                await scheduled_tasks_repo.disable_tasks_for_commands(module_commands)
+                await scheduled_tasks_repo.disable_tasks_for_commands(module_commands, module_slug=slug)
+        elif enabled is True:
+            await scheduled_tasks_repo.restore_tasks_disabled_by_module(slug)
         resolved_notifier = notifier or refresh_notifier
         await resolved_notifier.broadcast_refresh(reason=f"modules:updated:{slug}")
-    return _redact_module_settings(updated) if updated else None
+    if not updated:
+        return None
+    resolved = _resolve_module_for_runtime(updated)
+    resolved["enabled"] = get_component_availability().module_enabled(resolved)
+    return _redact_module_settings(resolved)
+
+
+def _normalise_logged_username(value: Any) -> str:
+    username = str(value or "").strip().casefold()
+    if "\\" in username:
+        username = username.rsplit("\\", 1)[-1]
+    if "@" in username:
+        username = username.split("@", 1)[0]
+    return username
+
+
+async def _invoke_suggest_assets(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Find imported assets whose logged-in user matches the requester."""
+    del settings, event_future
+    ticket_id = _extract_ticket_id_from_email_payload(payload)
+    if not ticket_id:
+        return {"status": "skipped", "reason": "Ticket context is required"}
+    requester = await db.fetch_one(
+        """
+        SELECT t.company_id, c.tacticalrmm_client_id,
+               COALESCE(rs.email, u.email) AS email,
+               COALESCE(rs.first_name, es.first_name) AS first_name,
+               COALESCE(rs.last_name, es.last_name) AS last_name
+        FROM tickets t
+        INNER JOIN companies c ON c.id = t.company_id
+        LEFT JOIN users u ON u.id = t.requester_id
+        LEFT JOIN staff rs ON rs.id = t.requester_staff_id
+        LEFT JOIN staff es ON es.company_id = t.company_id AND es.email = u.email
+        WHERE t.id = %s
+        LIMIT 1
+        """,
+        (ticket_id,),
+    )
+    if not requester:
+        return {"status": "skipped", "reason": "Ticket requester could not be resolved"}
+
+    email = str(requester.get("email") or "").strip()
+    first = str(requester.get("first_name") or "").strip()
+    last = str(requester.get("last_name") or "").strip()
+    candidates = []
+    for candidate in (email.split("@", 1)[0], f"{first}.{last}", first):
+        normalised = _normalise_logged_username(candidate)
+        if normalised and normalised not in candidates:
+            candidates.append(normalised)
+
+    suggestions: list[tuple[int, str]] = []
+    seen_asset_ids: set[int] = set()
+
+    # Imported assets already contain the last logged-in user. Search those
+    # records first so suggestions do not depend on a live integration request.
+    assets = await db.fetch_all(
+        "SELECT id, last_user FROM assets WHERE company_id = %s",
+        (requester["company_id"],),
+    )
+    for candidate in candidates:
+        matches = [
+            asset
+            for asset in (assets or [])
+            if _normalise_logged_username(asset.get("last_user")) == candidate
+        ]
+        if matches:
+            for asset in matches:
+                asset_id = int(asset["id"])
+                if asset_id not in seen_asset_ids:
+                    suggestions.append((asset_id, candidate))
+                    seen_asset_ids.add(asset_id)
+            break
+
+    # Merge live Tactical RMM matches with cached matches when the company has
+    # an integration mapping, catching devices whose imported user is stale.
+    tactical_client_id = requester.get("tacticalrmm_client_id")
+    if tactical_client_id:
+        tacticalrmm = import_module("app.services.tacticalrmm")
+
+        agents = await tacticalrmm.fetch_agents(str(tactical_client_id))
+        matched_agents: list[tuple[Mapping[str, Any], str]] = []
+        for candidate in candidates:
+            matched_agents = [
+                (agent, candidate)
+                for agent in agents
+                if _normalise_logged_username(tacticalrmm.extract_agent_details(agent).get("last_user"))
+                == candidate
+            ]
+            if matched_agents:
+                break
+
+        for agent, matched_username in matched_agents:
+            agent_id = str(agent.get("agent_id") or agent.get("id") or agent.get("pk") or "").strip()
+            if not agent_id:
+                continue
+            asset = await db.fetch_one(
+                "SELECT id FROM assets WHERE company_id = %s AND tactical_asset_id = %s",
+                (requester["company_id"], agent_id),
+            )
+            if asset:
+                asset_id = int(asset["id"])
+                if asset_id not in seen_asset_ids:
+                    suggestions.append((asset_id, matched_username))
+                    seen_asset_ids.add(asset_id)
+    await _tickets_repo().replace_ticket_suggested_assets(ticket_id, suggestions)
+    return {"status": "ok", "ticket_id": ticket_id, "suggested": len(suggestions)}
 
 
 async def trigger_module(
@@ -2617,6 +2982,13 @@ async def trigger_module(
     background: bool = True,
     on_complete: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
+    # Check the deployment policy before looking up internal/always-on actions
+    # or persistent state.  This guarantees no handler code is reached and
+    # gives every direct dispatcher the same safe result.
+    if not get_component_availability().module_available(slug):
+        from app.services.component_availability import deployment_disabled_result
+
+        return deployment_disabled_result(slug)
     module = _get_always_on_ticket_action_module(slug)
     if not module:
         module = await module_repo.get_module(slug)
@@ -2626,6 +2998,7 @@ async def trigger_module(
             return {"status": "skipped", "reason": "Module disabled", "module": slug}
     settings = _resolve_module_settings_for_runtime(slug, module)
     handler_map: dict[str, Callable[..., Awaitable[dict[str, Any]]]] = {
+        "suggest-assets": _invoke_suggest_assets,
         "syncro": _validate_syncro,
         "ollama": _invoke_ollama,
         "smtp": _invoke_smtp,
@@ -2639,11 +3012,12 @@ async def trigger_module(
         "sms-gateway": _invoke_sms_gateway,
         "create-ticket": _invoke_create_ticket,
         "create-task": _invoke_create_task,
+        "assign-approval-configuration": _invoke_assign_approval_configuration,
         "call-recordings": _validate_call_recordings,
         "unifi-talk": _invoke_unifi_talk,
-        "plausible": _validate_plausible,
         "update-ticket": _invoke_update_ticket,
         "update-ticket-description": _invoke_update_ticket_description,
+        "ai-rename-ticket": _invoke_ai_rename_ticket,
         "reprocess-ai": _invoke_reprocess_ai,
         "add-ticket-reply": _invoke_add_ticket_reply,
         "smart-attachment-removal": _invoke_smart_attachment_removal,
@@ -2807,7 +3181,7 @@ def _build_event_result(
     event_id = event.get("id")
     if event_id is not None:
         result["event_id"] = int(event_id)
-    status = str(event.get("status") or "pending")
+    status = str(event.get("status") or "pending").strip().lower()
     result["status"] = status
     result["event_status"] = status
     if event.get("response_status") is not None:
@@ -2893,6 +3267,8 @@ async def _invoke_ollama(
     *,
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
+    on_delta = payload.get("on_delta")
+    streaming = callable(on_delta)
     provider = (
         str(payload.get("provider") or settings.get("provider") or "ollama")
         .strip()
@@ -2925,7 +3301,7 @@ async def _invoke_ollama(
     request_headers = {"Content-Type": "application/json"}
     if provider == "ollama":
         endpoint = urljoin(f"{base_url}/", "api/generate")
-        body: dict[str, Any] = {"model": model, "prompt": prompt, "stream": False}
+        body: dict[str, Any] = {"model": model, "prompt": prompt, "stream": streaming}
         payload_format = payload.get("format")
         if payload_format is not None:
             body["format"] = payload_format
@@ -2934,7 +3310,7 @@ async def _invoke_ollama(
         messages = payload.get("messages")
         if not isinstance(messages, list) or not messages:
             messages = [{"role": "user", "content": prompt}]
-        body = {"model": model, "messages": messages, "stream": False}
+        body = {"model": model, "messages": messages, "stream": streaming}
         if payload.get("temperature") is not None:
             body["temperature"] = payload.get("temperature")
         if payload.get("max_tokens") is not None:
@@ -2947,7 +3323,7 @@ async def _invoke_ollama(
         if api_key:
             request_headers["Authorization"] = f"Bearer {api_key}"
 
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name=f"module.ollama.{provider}.generate",
         target_url=endpoint,
         payload={"request_body": body},
@@ -2970,8 +3346,40 @@ async def _invoke_ollama(
     }
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-            response = await client.post(endpoint, json=body, headers=request_headers)
-        response.raise_for_status()
+            if not streaming:
+                response = await client.post(endpoint, json=body, headers=request_headers)
+                response.raise_for_status()
+                response_body = response.text
+            else:
+                chunks: list[str] = []
+                async with client.stream(
+                    "POST", endpoint, json=body, headers=request_headers
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        data = line.removeprefix("data:").strip()
+                        if not data or data == "[DONE]":
+                            continue
+                        try:
+                            item = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        if provider == "ollama":
+                            delta = item.get("response") or ""
+                        else:
+                            choices = item.get("choices") or []
+                            delta = (
+                                (choices[0].get("delta") or {}).get("content") or ""
+                                if choices
+                                else ""
+                            )
+                        if delta:
+                            chunks.append(str(delta))
+                            await on_delta(str(delta))
+                complete_text = "".join(chunks)
+                response_body = json.dumps(
+                    {"response": complete_text, "message": complete_text}
+                )
     except httpx.HTTPStatusError as exc:
         response_body = exc.response.text if exc.response is not None else None
         updated_event = await _record_failure(
@@ -3006,7 +3414,6 @@ async def _invoke_ollama(
             extra={"model": model, "endpoint": endpoint, "provider": provider},
         )
 
-    response_body = response.text
     updated_event = await _record_success(
         event_id,
         attempt_number=attempt_number,
@@ -3060,40 +3467,15 @@ async def _invoke_smtp(
     )
     if attachments is None:
         attachments = await _load_ticket_email_attachments(payload)
+    html_body, inline_images = await _embed_ticket_email_images(payload, html_body)
+    if inline_images:
+        attachments = [*(attachments or []), *inline_images]
 
     # Extract ticket reply ID from context if present, to enable email tracking
-    enable_tracking = False
-    ticket_reply_id: int | None = None
-    context = payload.get("context")
-    if isinstance(context, Mapping):
-        # Check if this is a ticket reply notification
-        # Try metadata first (for direct notification events)
-        metadata = context.get("metadata")
-        if isinstance(metadata, Mapping):
-            # Look for reply_id or ticket_reply_id in metadata
-            reply_id_value = metadata.get("reply_id") or metadata.get("ticket_reply_id")
-            if reply_id_value is not None:
-                try:
-                    ticket_reply_id = int(reply_id_value)
-                    enable_tracking = True
-                except (TypeError, ValueError):
-                    pass
+    ticket_reply_id = _extract_ticket_reply_id(payload.get("context"))
+    enable_tracking = ticket_reply_id is not None
 
-        # If not found in metadata, check ticket.latest_reply.id (for automation events)
-        if ticket_reply_id is None:
-            ticket = context.get("ticket")
-            if isinstance(ticket, Mapping):
-                latest_reply = ticket.get("latest_reply")
-                if isinstance(latest_reply, Mapping):
-                    reply_id_value = latest_reply.get("id")
-                    if reply_id_value is not None:
-                        try:
-                            ticket_reply_id = int(reply_id_value)
-                            enable_tracking = True
-                        except (TypeError, ValueError):
-                            pass
-
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.smtp.send",
         target_url="smtp://send",
         payload={
@@ -3116,7 +3498,7 @@ async def _invoke_smtp(
         event_future.set_result(event_id)
     attempt_number = 1
     try:
-        sent, email_event_metadata = await email_service.send_email(
+        sent, email_event_metadata = await _email_service().send_email(
             subject=subject,
             recipients=recipients,
             html_body=html_body,
@@ -3214,7 +3596,7 @@ async def _invoke_smtp2go(
             "sender": "noreply@example.com"
         }
     """
-    from app.services import smtp2go
+    smtp2go = import_module("app.services.smtp2go")
 
     # Check if using template
     template_type = payload.get("template")
@@ -3282,6 +3664,7 @@ async def _invoke_smtp2go(
         attachments = _attachments_for_smtp2go(
             await _load_ticket_email_attachments(payload)
         )
+    html_body, inline_images = await _embed_ticket_email_images(payload, html_body)
     template_id = str(payload.get("template_id") or "").strip() or None
     template_data = (
         payload.get("template_data")
@@ -3306,31 +3689,9 @@ async def _invoke_smtp2go(
                     custom_headers_dict[header_name] = header_value
 
     enable_tracking = _ensure_bool(settings.get("enable_tracking"), True)
-    ticket_reply_id: int | None = None
-    context = payload.get("context")
-    if isinstance(context, Mapping):
-        metadata = context.get("metadata")
-        if isinstance(metadata, Mapping):
-            reply_id_value = metadata.get("reply_id") or metadata.get("ticket_reply_id")
-            if reply_id_value is not None:
-                try:
-                    ticket_reply_id = int(reply_id_value)
-                except (TypeError, ValueError):
-                    ticket_reply_id = None
+    ticket_reply_id = _extract_ticket_reply_id(payload.get("context"))
 
-        if ticket_reply_id is None:
-            ticket = context.get("ticket")
-            if isinstance(ticket, Mapping):
-                latest_reply = ticket.get("latest_reply")
-                if isinstance(latest_reply, Mapping):
-                    reply_id_value = latest_reply.get("id")
-                    if reply_id_value is not None:
-                        try:
-                            ticket_reply_id = int(reply_id_value)
-                        except (TypeError, ValueError):
-                            ticket_reply_id = None
-
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.smtp2go.send",
         target_url="smtp2go://send",
         payload={
@@ -3368,6 +3729,7 @@ async def _invoke_smtp2go(
             bcc=bcc,
             custom_headers=custom_headers_dict,
             attachments=attachments,
+            inlines=inline_images or None,
             template_id=template_id,
             template_data=template_data,
             tracking_id=tracking_id,
@@ -3402,7 +3764,7 @@ async def _invoke_smtp2go(
         # stamped when the 'processed' webhook arrives per recipient.
         if ticket_reply_id:
             try:
-                from app.services import email_recipients as _email_recipients
+                _email_recipients = import_module("app.services.email_recipients")
 
                 await _email_recipients.record_recipients(
                     reply_id=ticket_reply_id,
@@ -3488,7 +3850,7 @@ async def _invoke_tacticalrmm(
             headers[str(key)] = str(value)
     request_body = payload.get("body")
     url = urljoin(f"{base_url}/", endpoint_path)
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.tacticalrmm.invoke",
         target_url=url,
         payload={
@@ -3769,7 +4131,7 @@ async def _invoke_ntfy(
         "title": title,
         "headers": headers,
     }
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.ntfy.publish",
         target_url=url,
         payload=event_payload,
@@ -3834,6 +4196,61 @@ async def _invoke_ntfy(
     )
 
 
+class _SMSHTMLTextParser(HTMLParser):
+    """Convert rich-text editor HTML into SMS-friendly plain text."""
+
+    _BLOCK_TAGS = frozenset({
+        "address", "article", "aside", "blockquote", "div", "footer", "h1",
+        "h2", "h3", "h4", "h5", "h6", "header", "li", "p", "section", "tr",
+    })
+    _SKIP_TAGS = frozenset({"script", "style"})
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag_name = tag.lower()
+        if tag_name in self._SKIP_TAGS:
+            self._skip_depth += 1
+        elif self._skip_depth == 0 and tag_name == "br":
+            self._append_newline()
+
+    def handle_endtag(self, tag: str) -> None:
+        tag_name = tag.lower()
+        if tag_name in self._SKIP_TAGS:
+            if self._skip_depth > 0:
+                self._skip_depth -= 1
+        elif self._skip_depth == 0 and tag_name in self._BLOCK_TAGS:
+            self._append_newline()
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth == 0:
+            self._parts.append(data)
+
+    def _append_newline(self) -> None:
+        if self._parts and not self._parts[-1].endswith("\n"):
+            self._parts.append("\n")
+
+    def get_text(self) -> str:
+        text = "".join(self._parts).replace("\xa0", " ")
+        lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines()]
+        result: list[str] = []
+        for line in lines:
+            if line or (result and result[-1]):
+                result.append(line)
+        return "\n".join(result).strip()
+
+
+def _sms_plain_text(value: Any) -> str:
+    """Return plain text while preserving rich-text paragraph line breaks."""
+    parser = _SMSHTMLTextParser()
+    parser.feed(unescape(str(value or "")))
+    parser.close()
+    return parser.get_text()
+
+
 async def _invoke_sms_gateway(
     settings: Mapping[str, Any],
     payload: Mapping[str, Any],
@@ -3851,7 +4268,7 @@ async def _invoke_sms_gateway(
     # Extract message and phone numbers from payload
     # Accepts both "phoneNumbers" (camelCase) and "phone_numbers" (snake_case)
     # for flexibility, but always outputs "phoneNumbers" in the request body
-    message = str(payload.get("message") or "")
+    message = _sms_plain_text(payload.get("message"))
     phone_numbers = payload.get("phoneNumbers") or payload.get("phone_numbers") or []
 
     if not isinstance(phone_numbers, list):
@@ -3870,7 +4287,7 @@ async def _invoke_sms_gateway(
     }
 
     # Create webhook event for monitoring
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.sms-gateway.send",
         target_url=gateway_url,
         payload=request_body,
@@ -3957,7 +4374,7 @@ async def _invoke_apprise(
     title_value = payload.get("title") or settings.get("title") or "MyPortal"
     title = str(title_value).strip() or "MyPortal"
 
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.apprise.notify",
         target_url="apprise://",
         payload={"title": title, "message": message, "url_count": len(urls)},
@@ -4086,13 +4503,8 @@ async def _invoke_create_ticket(
     if external_reference is not None:
         external_reference = str(external_reference).strip() or None
 
-    try:
-        existing = await tickets_repo.get_ticket(ticket_id_int)
-    except RuntimeError:
-        existing = None
-
     # Create webhook event for tracking
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.create-ticket.create",
         target_url="internal://tickets",
         payload={
@@ -4129,7 +4541,7 @@ async def _invoke_create_ticket(
         initial_reply_author_id = (
             requester_id if (requester_id and description) else None
         )
-        ticket = await tickets_service.create_ticket(
+        ticket = await _tickets_service().create_ticket(
             subject=subject,
             description=description,
             requester_id=requester_id,
@@ -4305,7 +4717,7 @@ async def _invoke_create_task(
         payload_summary.update(tasks_to_create[0])
 
     # Create webhook event for tracking
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.create-task.create",
         target_url=target_url,
         payload=payload_summary,
@@ -4425,6 +4837,38 @@ async def _invoke_create_task(
     return _build_event_result(updated_event, extra=extra)
 
 
+async def _invoke_assign_approval_configuration(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Attach a reusable approval configuration to an automation ticket context."""
+    from app.repositories import approval_matrix as approval_matrix_repo
+
+    context = payload.get("context") if isinstance(payload.get("context"), Mapping) else {}
+    ticket_value = payload.get("ticket_id") or context.get("ticket_id")
+    approval_guid = str(payload.get("approval_guid") or "").strip()
+    try:
+        ticket_id = int(ticket_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("ticket_id must be a valid integer") from exc
+    if not approval_guid:
+        raise ValueError("approval_guid is required")
+    workflow = await approval_matrix_repo.assign_to_ticket_by_guid(
+        ticket_id=ticket_id,
+        approval_guid=approval_guid,
+        assigned_by_user_id=None,
+    )
+    return {
+        "status": "ok",
+        "ticket_id": ticket_id,
+        "approval_guid": approval_guid,
+        "workflow_id": workflow.get("id"),
+        "pending_count": workflow.get("pending_count", 0),
+    }
+
+
 async def _invoke_chatgpt_mcp(
     settings: Mapping[str, Any],
     payload: Mapping[str, Any],
@@ -4464,62 +4908,6 @@ async def _validate_syncro(
         "base_url": base_url,
         "has_api_key": bool(api_key),
         "rate_limit_per_minute": rate_limit,
-    }
-
-
-async def _validate_plausible(
-    settings: Mapping[str, Any],
-    payload: Mapping[str, Any],
-    *,
-    event_future: asyncio.Future[int | None] | None = None,
-) -> dict[str, Any]:
-    base_url = str(settings.get("base_url") or "").strip().rstrip("/")
-    site_domain = str(settings.get("site_domain") or "").strip()
-    api_key = str(settings.get("api_key") or "").strip()
-    track_opens = _ensure_bool(settings.get("track_opens"), True)
-    track_clicks = _ensure_bool(settings.get("track_clicks"), True)
-    send_to_plausible = _ensure_bool(settings.get("send_to_plausible"), False)
-    track_pageviews = _ensure_bool(settings.get("track_pageviews"), False)
-    pepper = str(settings.get("pepper") or "").strip()
-    env_pepper = str(os.getenv("PLAUSIBLE_PEPPER", "") or "").strip()
-    if not pepper and env_pepper:
-        pepper = env_pepper
-    send_pii = _ensure_bool(settings.get("send_pii"), False)
-
-    if send_to_plausible or track_pageviews:
-        if not base_url:
-            raise ValueError("Plausible base URL is not configured")
-        parsed = urlparse(base_url)
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            raise ValueError(
-                "Plausible base URL must include http/https and a hostname"
-            )
-        if not site_domain:
-            raise ValueError("Plausible site domain is not configured")
-
-        # Warn if pageview tracking is enabled without a pepper
-        if track_pageviews and not pepper:
-            logger.warning(
-                "Plausible pageview tracking enabled without pepper - using default (not secure)"
-            )
-
-        # Warn if PII is enabled (should only be for self-hosted, compliant instances)
-        if send_pii:
-            logger.warning(
-                "Plausible configured to send PII - ensure this is a self-hosted, compliant instance"
-            )
-
-    return {
-        "status": "ok",
-        "base_url": base_url,
-        "site_domain": site_domain,
-        "has_api_key": bool(api_key),
-        "track_opens": track_opens,
-        "track_clicks": track_clicks,
-        "send_to_plausible": send_to_plausible,
-        "track_pageviews": track_pageviews,
-        "has_pepper": bool(pepper),
-        "send_pii": send_pii,
     }
 
 
@@ -4571,9 +4959,10 @@ async def _validate_call_recordings(
         }
 
     try:
-        sync_result = await call_recordings_service.sync_recordings_from_filesystem(
+        sync_result = await _call_recordings_service().sync_recordings_from_filesystem(
             recordings_path,
             phone_system_type=phone_system_type,
+            trusted_base=configured_path or None,
         )
         return {
             **sync_result,
@@ -4651,7 +5040,7 @@ async def _invoke_unifi_talk(
             remote_path=remote_path,
             local_path=local_path,
         )
-        download_result = await unifi_talk_service.download_recordings_from_sftp(
+        download_result = await _unifi_talk_service().download_recordings_from_sftp(
             remote_host=remote_host,
             remote_path=remote_path,
             username=username,
@@ -4666,8 +5055,9 @@ async def _invoke_unifi_talk(
                 f"Downloaded {download_result['downloaded']} recordings, syncing to database",
                 local_path=local_path,
             )
-            sync_result = await call_recordings_service.sync_recordings_from_filesystem(
-                local_path
+            sync_result = await _call_recordings_service().sync_recordings_from_filesystem(
+                local_path,
+                trusted_base=local_path,
             )
 
             return {
@@ -5337,12 +5727,13 @@ async def _invoke_update_ticket(
 ) -> dict[str, Any]:
     """Update ticket fields from automation payload.
 
-    Accepts a JSON payload with ticket_id and any combination of:
-    status, priority, assigned_user_id, requester_id, company_id, category.
+    Accepts a JSON payload with ``ticket_id`` and any editable ticket field.  Shipment
+    tracking settings are handled as ticket fields even though they are persisted in
+    the related shipment-watch record.
 
     The ticket_id can be provided directly or via context.ticket.id or context.ticket_id.
     """
-    from app.repositories import tickets as tickets_repo
+    tickets_repo = import_module("app.repositories.tickets")
 
     raw_context = payload.get("context")
     context = raw_context if isinstance(raw_context, Mapping) else {}
@@ -5365,11 +5756,13 @@ async def _invoke_update_ticket(
         raise ValueError("ticket_id must be a valid integer")
 
     # Check ticket exists
-    existing = await tickets_repo.get_ticket(ticket_id_int)
+    existing = await _tickets_repo().get_ticket(ticket_id_int)
     if not existing:
         raise ValueError(f"Ticket {ticket_id_int} not found")
 
-    # Build update dict from allowed fields
+    # Build update dict from explicitly supported columns.  Do not pass arbitrary
+    # payload keys to the repository: update_ticket constructs column assignments and
+    # therefore relies on this boundary to prevent SQL identifier injection.
     update_fields: dict[str, Any] = {}
 
     # Status
@@ -5431,7 +5824,56 @@ async def _invoke_update_ticket(
         else:
             update_fields["category"] = str(category_value).strip() or None
 
-    if not update_fields:
+    nullable_text_fields = (
+        "description",
+        "module_slug",
+        "external_reference",
+        "ticket_number",
+        "xero_invoice_number",
+    )
+    for field in nullable_text_fields:
+        if field in payload:
+            value = payload.get(field)
+            update_fields[field] = None if value is None else str(value).strip() or None
+
+    if "subject" in payload:
+        subject = str(payload.get("subject") or "").strip()
+        if not subject:
+            raise ValueError("subject cannot be empty")
+        update_fields["subject"] = subject
+
+    for field in ("requester_staff_id",):
+        if field in payload:
+            value = payload.get(field)
+            parsed = _parse_nullable_int(value)
+            if value is None or value == "" or str(value).lower() == "null":
+                update_fields[field] = None
+            elif parsed is None:
+                raise ValueError(f"{field} must be a valid integer or null")
+            else:
+                update_fields[field] = parsed
+
+    if "review_date" in payload:
+        raw_review_date = payload.get("review_date")
+        if raw_review_date is None or str(raw_review_date).strip() == "":
+            update_fields["review_date"] = None
+        else:
+            try:
+                update_fields["review_date"] = date.fromisoformat(
+                    str(raw_review_date).strip()[:10]
+                )
+            except ValueError as exc:
+                raise ValueError("review_date must be a valid ISO date (YYYY-MM-DD)") from exc
+
+    shipment_keys = {
+        "shipment_tracking_url",
+        "shipment_poll_interval_seconds",
+        "shipment_monitoring_enabled",
+        "shipment_public_comments_enabled",
+    }
+    shipment_requested = any(key in payload for key in shipment_keys)
+
+    if not update_fields and not shipment_requested:
         return {
             "status": "skipped",
             "reason": "No update fields provided",
@@ -5439,7 +5881,7 @@ async def _invoke_update_ticket(
         }
 
     # Create webhook event for tracking
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.update-ticket.update",
         target_url=f"internal://tickets/{ticket_id_int}",
         payload={"ticket_id": ticket_id_int, **update_fields},
@@ -5455,12 +5897,54 @@ async def _invoke_update_ticket(
 
     attempt_number = 1
     try:
-        updated_ticket = await tickets_repo.update_ticket(
-            ticket_id_int, **update_fields
-        )
+        if update_fields:
+            await _tickets_repo().update_ticket(ticket_id_int, **update_fields)
+
+        shipment_updated_fields: list[str] = []
+        if shipment_requested:
+            shipment_tracking = import_module("app.services.ticket_shipment_tracking")
+
+            current_watch = await shipment_tracking.get_watch_for_ticket(ticket_id_int)
+            tracking_url = payload.get("shipment_tracking_url")
+            if tracking_url is None:
+                tracking_url = (current_watch or {}).get("tracking_url")
+            tracking_url = str(tracking_url or "").strip()
+            if not tracking_url:
+                raise ValueError(
+                    "shipment_tracking_url is required when the ticket has no shipment watch"
+                )
+
+            raw_interval = payload.get(
+                "shipment_poll_interval_seconds",
+                (current_watch or {}).get("poll_interval_seconds", 900),
+            )
+            try:
+                poll_interval = max(0, min(86_400, int(raw_interval)))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "shipment_poll_interval_seconds must be a whole number"
+                ) from exc
+            active = payload.get(
+                "shipment_monitoring_enabled",
+                (current_watch or {}).get("active", poll_interval > 0),
+            )
+            public_comments = payload.get(
+                "shipment_public_comments_enabled",
+                (current_watch or {}).get("public_comments_enabled", True),
+            )
+            await shipment_tracking.upsert_watch(
+                ticket_id=ticket_id_int,
+                tracking_url=tracking_url,
+                poll_interval_seconds=poll_interval,
+                active=_coerce_boolean(active),
+                public_comments_enabled=_coerce_boolean(public_comments),
+            )
+            shipment_updated_fields = [
+                key for key in shipment_keys if key in payload
+            ]
 
         # Emit ticket updated event
-        await tickets_service.emit_ticket_updated_event(
+        await _tickets_service().emit_ticket_updated_event(
             ticket_id_int,
             actor_type="automation",
             trigger_automations=False,
@@ -5484,11 +5968,25 @@ async def _invoke_update_ticket(
             extra={"ticket_id": ticket_id_int},
         )
 
+    updated_field_names = [*update_fields.keys(), *shipment_updated_fields]
     previous_values = {field: existing.get(field) for field in update_fields.keys()}
+    if shipment_requested:
+        shipment_previous_keys = {
+            "shipment_tracking_url": "tracking_url",
+            "shipment_poll_interval_seconds": "poll_interval_seconds",
+            "shipment_monitoring_enabled": "active",
+            "shipment_public_comments_enabled": "public_comments_enabled",
+        }
+        previous_values.update(
+            {
+                field: (current_watch or {}).get(shipment_previous_keys[field])
+                for field in shipment_updated_fields
+            }
+        )
     response_body = json.dumps(
         {
             "ticket_id": ticket_id_int,
-            "updated_fields": list(update_fields.keys()),
+            "updated_fields": updated_field_names,
             "previous_values": previous_values,
         }
     )
@@ -5502,7 +6000,7 @@ async def _invoke_update_ticket(
         updated_event,
         extra={
             "ticket_id": ticket_id_int,
-            "updated_fields": list(update_fields.keys()),
+            "updated_fields": updated_field_names,
             "previous_values": previous_values,
         },
     )
@@ -5547,16 +6045,16 @@ async def _invoke_update_ticket_description(
     if description is not None:
         description = str(description)
 
-    from app.repositories import tickets as tickets_repo
+    tickets_repo = import_module("app.repositories.tickets")
 
     try:
-        existing = await tickets_repo.get_ticket(ticket_id_int)
+        existing = await _tickets_repo().get_ticket(ticket_id_int)
     except RuntimeError:
         existing = None
     previous_description = existing.get("description") if existing else None
 
     # Create webhook event for tracking
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.update-ticket-description.update",
         target_url=f"internal://tickets/{ticket_id_int}/description",
         payload={
@@ -5581,7 +6079,7 @@ async def _invoke_update_ticket_description(
 
     attempt_number = 1
     try:
-        updated_ticket = await tickets_service.update_ticket_description(
+        updated_ticket = await _tickets_service().update_ticket_description(
             ticket_id_int, description
         )
         if not updated_ticket:
@@ -5625,6 +6123,119 @@ async def _invoke_update_ticket_description(
     )
 
 
+def _extract_ai_ticket_subject(payload: Any) -> str | None:
+    """Return a clean AI-generated subject only when it is 3 to 12 words."""
+
+    if isinstance(payload, Mapping):
+        candidate = payload.get("subject")
+        if candidate is None:
+            candidate = (
+                payload.get("response") or payload.get("message") or payload.get("text")
+            )
+    else:
+        candidate = payload
+    if not isinstance(candidate, str):
+        return None
+    text = candidate.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE)
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        parsed = None
+    if isinstance(parsed, Mapping):
+        text = str(parsed.get("subject") or "").strip()
+    elif isinstance(parsed, str):
+        text = parsed.strip()
+    text = re.sub(r"^(?:subject|title)\s*:\s*", "", text, flags=re.IGNORECASE)
+    text = text.strip().strip("\"'`").strip()
+    words = text.split()
+    return text if 3 <= len(words) <= 12 else None
+
+
+async def _invoke_ai_rename_ticket(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Generate and persist a concise, descriptive ticket subject with AI."""
+
+    context = (
+        payload.get("context") if isinstance(payload.get("context"), Mapping) else {}
+    )
+    context_ticket = (
+        context.get("ticket") if isinstance(context.get("ticket"), Mapping) else {}
+    )
+    raw_ticket_id = (
+        payload.get("ticket_id") or context_ticket.get("id") or context.get("ticket_id")
+    )
+    try:
+        ticket_id = int(raw_ticket_id)
+    except (TypeError, ValueError):
+        raise ValueError("ticket_id is required and must be a valid integer")
+    ticket = await _tickets_repo().get_ticket(ticket_id)
+    if not ticket:
+        raise ValueError(f"Ticket {ticket_id} not found")
+
+    current_subject = str(ticket.get("subject") or "").strip()
+    initial_description = str(ticket.get("description") or "").strip()
+    if not current_subject and not initial_description:
+        return {
+            "status": "skipped",
+            "reason": "Ticket has no subject or description",
+            "ticket_id": ticket_id,
+        }
+
+    ollama_module = await module_repo.get_module("ollama")
+    if not ollama_module or not ollama_module.get("enabled"):
+        raise ValueError("Ollama AI module is not configured or enabled")
+    ollama_settings = _resolve_module_settings_for_runtime("ollama", ollama_module)
+    prompt = (
+        "Create a more descriptive support ticket subject using the current subject "
+        "and initial problem description below. Return only the new subject, with no "
+        "quotes, label, explanation, analysis, or punctuation-only words. The subject must be "
+        "between 3 and 12 words long.\n\n"
+        f"Current subject: {current_subject}\n"
+        f"Initial problem description: {initial_description}"
+    )
+    ai_result = await _invoke_ollama(
+        ollama_settings,
+        # Reasoning-capable llama.cpp models consume completion tokens while
+        # thinking before placing the final answer in message.content. Sixty
+        # tokens routinely ended with finish_reason="length" and empty content,
+        # even though the HTTP request itself succeeded.
+        {"prompt": prompt, "temperature": 0.2, "max_tokens": 512},
+        event_future=event_future,
+    )
+    if not module_result_succeeded(ai_result):
+        return {**ai_result, "ticket_id": ticket_id}
+    new_subject = _extract_ai_ticket_subject(ai_result.get("response"))
+    if not new_subject:
+        return {
+            **ai_result,
+            "status": "error",
+            "error": (
+                "AI returned no usable subject. The generated subject must contain "
+                "between 3 and 12 words."
+            ),
+            "ticket_id": ticket_id,
+        }
+
+    await _tickets_repo().update_ticket(ticket_id, subject=new_subject)
+    await _tickets_service().emit_ticket_updated_event(
+        ticket_id, actor_type="automation", trigger_automations=False
+    )
+    return {
+        **ai_result,
+        "ticket_id": ticket_id,
+        "ticket_number": ticket.get("ticket_number"),
+        "subject": new_subject,
+        "previous_values": {"subject": current_subject},
+        "updated_fields": ["subject"],
+    }
+
+
 async def _invoke_reprocess_ai(
     settings: Mapping[str, Any],
     payload: Mapping[str, Any],
@@ -5633,12 +6244,13 @@ async def _invoke_reprocess_ai(
 ) -> dict[str, Any]:
     """Re-trigger AI processing for a ticket.
 
-    This will regenerate the AI summary and tags using the Ollama model.
+    This will regenerate the AI summary, tags, and resolution steps using the Ollama model.
     The ticket_id can be provided directly or via context.ticket.id or context.ticket_id.
 
     Optional parameters:
     - refresh_summary: bool (default: True) - Whether to refresh the AI summary
     - refresh_tags: bool (default: True) - Whether to refresh the AI tags
+    - refresh_resolution: bool (default: False) - Whether to rebuild resolution steps
     """
     raw_context = payload.get("context")
     context = raw_context if isinstance(raw_context, Mapping) else {}
@@ -5663,22 +6275,30 @@ async def _invoke_reprocess_ai(
     # Check options
     refresh_summary = _ensure_bool(payload.get("refresh_summary"), True)
     refresh_tags = _ensure_bool(payload.get("refresh_tags"), True)
+    # Resolution generation is independently opt-in.  Keep accepting the
+    # earlier internal name so saved automations created during the short-lived
+    # rollout of that field continue to work.
+    raw_refresh_resolution = payload.get("refresh_resolution")
+    if raw_refresh_resolution is None:
+        raw_refresh_resolution = payload.get("refresh_resolution_steps")
+    refresh_resolution = _ensure_bool(raw_refresh_resolution, False)
 
-    if not refresh_summary and not refresh_tags:
+    if not refresh_summary and not refresh_tags and not refresh_resolution:
         return {
             "status": "skipped",
-            "reason": "No AI processing requested (both refresh_summary and refresh_tags are false)",
+            "reason": "No AI processing requested (all refresh options are false)",
             "ticket_id": ticket_id_int,
         }
 
     # Create webhook event for tracking
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.reprocess-ai.process",
         target_url=f"internal://tickets/{ticket_id_int}/ai",
         payload={
             "ticket_id": ticket_id_int,
             "refresh_summary": refresh_summary,
             "refresh_tags": refresh_tags,
+            "refresh_resolution": refresh_resolution,
         },
         headers={"X-Module": "reprocess-ai"},
         max_attempts=1,
@@ -5694,11 +6314,14 @@ async def _invoke_reprocess_ai(
     processed = []
     try:
         if refresh_summary:
-            await tickets_service.refresh_ticket_ai_summary(ticket_id_int)
+            await _tickets_service().refresh_ticket_ai_summary(ticket_id_int)
             processed.append("summary")
         if refresh_tags:
-            await tickets_service.refresh_ticket_ai_tags(ticket_id_int)
+            await _tickets_service().refresh_ticket_ai_tags(ticket_id_int)
             processed.append("tags")
+        if refresh_resolution:
+            await _tickets_service().refresh_ticket_resolution_steps(ticket_id_int)
+            processed.append("resolution_steps")
     except Exception as exc:
         logger.error(
             "AI reprocessing failed",
@@ -5754,7 +6377,7 @@ async def _invoke_add_ticket_reply(
     - labour_type_id: Optional - Labour type for billing
     - send_notification: Optional (default: false) - Whether to send email notification
     """
-    from app.repositories import tickets as tickets_repo
+    tickets_repo = import_module("app.repositories.tickets")
 
     raw_context = payload.get("context")
     context = raw_context if isinstance(raw_context, Mapping) else {}
@@ -5798,7 +6421,7 @@ async def _invoke_add_ticket_reply(
     send_notification = _ensure_bool(payload.get("send_notification"), False)
 
     # Create webhook event for tracking
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.add-ticket-reply.create",
         target_url=f"internal://tickets/{ticket_id_int}/replies",
         payload={
@@ -5822,12 +6445,12 @@ async def _invoke_add_ticket_reply(
     attempt_number = 1
     try:
         # Check ticket exists
-        existing = await tickets_repo.get_ticket(ticket_id_int)
+        existing = await _tickets_repo().get_ticket(ticket_id_int)
         if not existing:
             raise ValueError(f"Ticket {ticket_id_int} not found")
 
         # Create the reply
-        reply = await tickets_repo.create_reply(
+        reply = await _tickets_repo().create_reply(
             ticket_id=ticket_id_int,
             author_id=author_id,
             body=body_str,
@@ -5838,7 +6461,7 @@ async def _invoke_add_ticket_reply(
         )
 
         # Emit ticket updated event
-        await tickets_service.emit_ticket_updated_event(
+        await _tickets_service().emit_ticket_updated_event(
             ticket_id_int,
             actor_type="automation",
             trigger_automations=False,
@@ -5980,12 +6603,12 @@ async def _invoke_smart_attachment_removal(
 ) -> dict[str, Any]:
     """Remove duplicate ticket attachments by comparing content hashes."""
 
-    from app.repositories import tickets as tickets_repo
+    tickets_repo = import_module("app.repositories.tickets")
     from app.repositories import ticket_attachments as attachments_repo
     from app.services import ticket_attachments as attachments_service
 
     ticket_id = _resolve_ticket_id_from_payload(payload)
-    existing = await tickets_repo.get_ticket(ticket_id)
+    existing = await _tickets_repo().get_ticket(ticket_id)
     if not existing:
         raise ValueError(f"Ticket {ticket_id} not found")
 
@@ -6346,7 +6969,7 @@ async def _invoke_whisperx(
     WhisperX ``/asr`` endpoint, and (when *add_note* is true) posts the
     resulting transcription as an internal note on the ticket.
     """
-    from app.repositories import tickets as tickets_repo
+    tickets_repo = import_module("app.repositories.tickets")
     from app.repositories import ticket_attachments as attachments_repo
     from app.services import ticket_attachments as attachments_service
 
@@ -6382,7 +7005,7 @@ async def _invoke_whisperx(
     target_url = f"{base_url}/asr"
 
     # -- create webhook event for tracking --------------------------------
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.whisperx.transcribe",
         target_url=target_url,
         payload={
@@ -6403,7 +7026,7 @@ async def _invoke_whisperx(
     attempt_number = 1
     try:
         # -- verify ticket exists -----------------------------------------
-        existing = await tickets_repo.get_ticket(ticket_id_int)
+        existing = await _tickets_repo().get_ticket(ticket_id_int)
         if not existing:
             raise ValueError(f"Ticket {ticket_id_int} not found")
 
@@ -6551,7 +7174,7 @@ async def _invoke_whisperx(
                     f"**Transcription of {t['filename']}:**\n\n{t['transcription']}"
                 )
             note_body = "\n\n---\n\n".join(parts)
-            reply = await tickets_repo.create_reply(
+            reply = await _tickets_repo().create_reply(
                 ticket_id=ticket_id_int,
                 author_id=None,
                 body=note_body,
@@ -6559,7 +7182,7 @@ async def _invoke_whisperx(
             )
             reply_id = reply.get("id") if reply else None
 
-            await tickets_service.emit_ticket_updated_event(
+            await _tickets_service().emit_ticket_updated_event(
                 ticket_id_int,
                 actor_type="automation",
                 trigger_automations=False,
@@ -6702,7 +7325,7 @@ async def _invoke_password_pusher(
     elif api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    event = await webhook_monitor.create_manual_event(
+    event = await _webhook_monitor().create_manual_event(
         name="module.password-pusher.push",
         target_url=target_url,
         payload={
@@ -6926,7 +7549,7 @@ async def _resolve_trello_company_for_action(
     # covers payloads that render only ``{{ticket.external_reference}}`` into
     # ``card_id`` without carrying the full ticket context.
     try:
-        from app.services import trello as trello_service
+        trello_service = import_module("app.services.trello")
 
         ticket = await trello_service.find_ticket_for_card(card_id)
     except Exception as exc:  # pragma: no cover - defensive lookup fallback
@@ -6948,9 +7571,9 @@ async def _resolve_company_from_ticket_id(
     if ticket_id <= 0:
         return None
     try:
-        from app.repositories import tickets as tickets_repo
+        tickets_repo = import_module("app.repositories.tickets")
 
-        ticket = await tickets_repo.get_ticket(ticket_id)
+        ticket = await _tickets_repo().get_ticket(ticket_id)
     except Exception as exc:  # pragma: no cover - defensive lookup fallback
         logger.debug("Trello company lookup by ticket {} failed: {}", ticket_id, exc)
         return None
@@ -6989,6 +7612,9 @@ async def _invoke_solidtime_reconcile(
     if event_future and not event_future.done():
         event_future.set_result(None)
 
-    from app.services.solidtime import reconcile_once
+    reconcile_once = import_module("app.services.solidtime").reconcile_once
 
     return await reconcile_once()
+
+
+module_dispatch.register_trigger_module_handler(trigger_module)

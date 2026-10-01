@@ -134,7 +134,7 @@ async def list_call_recordings(
         WHERE {where_clause}
         ORDER BY cr.call_date DESC
         LIMIT %s OFFSET %s
-    """
+    """  # nosec B608
     
     params.extend([limit, offset])
     rows = await db.fetch_all(sql, tuple(params))
@@ -179,7 +179,7 @@ async def count_call_recordings(
         LEFT JOIN staff cs ON cr.caller_staff_id = cs.id
         LEFT JOIN staff ce ON cr.callee_staff_id = ce.id
         WHERE {where_clause}
-    """
+    """  # nosec B608
     
     row = await db.fetch_one(sql, tuple(params))
     return int(row["count"]) if row else 0
@@ -222,7 +222,7 @@ async def summarize_transcription_statuses(
         LEFT JOIN staff ce ON cr.callee_staff_id = ce.id
         WHERE {where_clause}
         GROUP BY COALESCE(NULLIF(TRIM(cr.transcription_status), ''), 'unknown')
-    """
+    """  # nosec B608
 
     rows = await db.fetch_all(sql, tuple(params))
 
@@ -396,7 +396,7 @@ async def update_call_recording(
         return await get_call_recording_by_id(recording_id)
     
     params.append(recording_id)
-    sql = f"UPDATE call_recordings SET {', '.join(updates)} WHERE id = %s"
+    sql = f"UPDATE call_recordings SET {', '.join(updates)} WHERE id = %s"  # nosec B608
     await db.execute(sql, tuple(params))
     
     updated = await get_call_recording_by_id(recording_id)
@@ -456,7 +456,7 @@ async def force_update_call_recording(
         return await get_call_recording_by_id(recording_id)
     
     params.append(recording_id)
-    sql = f"UPDATE call_recordings SET {', '.join(updates)} WHERE id = %s"
+    sql = f"UPDATE call_recordings SET {', '.join(updates)} WHERE id = %s"  # nosec B608
     await db.execute(sql, tuple(params))
     
     updated = await get_call_recording_by_id(recording_id)

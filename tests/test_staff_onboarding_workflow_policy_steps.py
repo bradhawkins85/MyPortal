@@ -3,10 +3,12 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import ValidationError
 
 from app.services import staff_onboarding_workflows as workflows
 from app.features.staff import handlers as staff_handlers
 from app.features.staff.handlers import _normalise_workflow_config
+from app.schemas.staff_onboarding_workflows import WorkflowStepDefinition
 
 
 @pytest.fixture
@@ -30,6 +32,11 @@ def _mock_staff_custom_fields(monkeypatch):
         workflows.user_repo,
         "get_user_by_id",
         AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "list_external_checkpoints_for_execution_ids",
+        AsyncMock(return_value={}),
     )
 
 
@@ -79,6 +86,55 @@ def test_normalise_workflow_steps_preserves_hudu_password_label_config():
     assert steps[0]["_workflow_step_name"] == "Push password to Hudu"
     assert steps[0]["name"] == "${vars.staff.full_name} - M365 Password"
     assert steps[0]["type"] == "hudu_push_password"
+
+
+def test_myportal_credential_is_available_in_both_catalogs_with_form_help():
+    assert any(s["type"] == "create_myportal_credential" for s in staff_handlers._ONBOARDING_STEP_CATALOG)
+    assert any(s["type"] == "create_myportal_credential" for s in staff_handlers._OFFBOARDING_STEP_CATALOG)
+    fields = staff_handlers._WORKFLOW_STEP_FORM_SCHEMA["create_myportal_credential"]["fields"]
+    assert {field["name"] for field in fields} >= {
+        "credential_name", "username", "credential_class", "secret_source",
+        "owner", "asset_id", "ticket_id", "expires_on", "review_on",
+        "credential_output_var",
+    }
+
+
+def test_myportal_credential_rejects_literal_secret_in_policy():
+    with pytest.raises(ValidationError, match="literal passwords are not allowed"):
+        WorkflowStepDefinition(
+            key="create_myportal_credential",
+            name="Store account",
+            config={"type": "create_myportal_credential", "secret_source": "not-a-variable"},
+        )
+
+
+@pytest.mark.anyio
+async def test_myportal_credential_step_returns_only_non_secret_metadata(monkeypatch):
+    from app.services import workflow_vault
+
+    create = AsyncMock(return_value={"credential_id": 71, "credential_version": 1})
+    monkeypatch.setattr(workflow_vault, "create_for_staff_workflow", create)
+    result = await workflows._execute_policy_step(
+        step={
+            "type": "create_myportal_credential",
+            "credential_name": "New account",
+            "credential_class": "user",
+            "secret_source": "resolved-secret",
+            "credential_output_var": "new_credential_id",
+        },
+        company_id=9,
+        staff={"id": 4},
+        policy_config={},
+        vars_map={},
+        execution_id=22,
+        step_name="store-vault",
+    )
+    assert result == {
+        "credential_id": 71,
+        "credential_version": 1,
+        "new_credential_id": 71,
+    }
+    assert create.await_args.kwargs["plaintext"] == "resolved-secret"
 
 
 def test_normalise_workflow_steps_uses_offboarding_steps_for_offboarding_direction():
@@ -514,6 +570,43 @@ async def test_execute_policy_step_adds_user_to_teams_groups(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_execute_policy_step_removes_user_from_all_teams_groups_when_ids_blank(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-1"})
+    )
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
+    monkeypatch.setattr(
+        workflows.m365_service,
+        "_graph_get_all",
+        AsyncMock(
+            return_value=[
+                {"id": "group-a", "groupTypes": []},
+                {"id": "group-dynamic", "groupTypes": ["DynamicMembership"]},
+                {"id": "group-b", "groupTypes": ["Unified"]},
+            ]
+        ),
+    )
+    graph_delete = AsyncMock(return_value={})
+    monkeypatch.setattr(workflows.m365_service, "_graph_delete", graph_delete)
+
+    result = await workflows._execute_policy_step(
+        step={"type": "m365_remove_teams_group_member", "group_ids_csv": ""},
+        company_id=9,
+        staff={"id": 703, "email": "old.user@example.com"},
+        policy_config={},
+        vars_map={},
+    )
+
+    assert result["operation"] == "remove"
+    assert result["group_ids"] == ["group-a", "group-b"]
+    assert graph_delete.await_count == 2
+
+
+@pytest.mark.anyio
 async def test_execute_policy_step_removes_user_from_sharepoint_sites(monkeypatch):
     monkeypatch.setattr(
         workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-2"})
@@ -548,6 +641,51 @@ async def test_execute_policy_step_removes_user_from_sharepoint_sites(monkeypatc
 
     assert result["operation"] == "remove"
     assert result["site_ids"] == ["site-a"]
+    graph_delete.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_execute_policy_step_removes_user_from_all_sharepoint_sites_when_ids_blank(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-2"})
+    )
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
+
+    graph_get_all = AsyncMock(return_value=[{"id": "site-a"}, {"id": "site-b"}])
+    monkeypatch.setattr(workflows.m365_service, "_graph_get_all", graph_get_all)
+
+    async def fake_graph_get(_token: str, url: str):
+        if "/sites/site-a/permissions" in url:
+            return {
+                "value": [
+                    {
+                        "id": "perm-1",
+                        "grantedToIdentitiesV2": [{"user": {"id": "user-2"}}],
+                    }
+                ]
+            }
+        return {"value": [{"id": "perm-2", "grantedToIdentitiesV2": []}]}
+
+    monkeypatch.setattr(
+        workflows.m365_service, "_graph_get", AsyncMock(side_effect=fake_graph_get)
+    )
+    graph_delete = AsyncMock(return_value={})
+    monkeypatch.setattr(workflows.m365_service, "_graph_delete", graph_delete)
+
+    result = await workflows._execute_policy_step(
+        step={"type": "m365_remove_sharepoint_site_member", "site_ids_csv": ""},
+        company_id=9,
+        staff={"id": 704, "email": "offboard.user@example.com"},
+        policy_config={},
+        vars_map={},
+    )
+
+    assert result["operation"] == "remove"
+    assert result["site_ids"] == ["site-a", "site-b"]
     graph_delete.assert_awaited_once()
 
 
@@ -1030,3 +1168,107 @@ async def test_confirm_webhook_checkpoint_marks_wait_step_success_before_resume(
     assert append_log.await_args.kwargs["step_name"] == "Pause for webhook"
     assert append_log.await_args.kwargs["status"] == "success"
     resume.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_create_ticket_step_uses_requester_and_returns_ticket_number(monkeypatch):
+    monkeypatch.setattr(
+        workflows.tickets_service,
+        "resolve_status_or_default",
+        AsyncMock(return_value="open"),
+    )
+    create_ticket = AsyncMock(return_value={"id": 123, "ticket_number": "HD-123"})
+    monkeypatch.setattr(workflows.tickets_service, "create_ticket", create_ticket)
+
+    result = await workflows._execute_policy_step(
+        step={
+            "type": "create_ticket",
+            "subject": "Onboard ${vars.staff.full_name}",
+            "description": "Started",
+            "priority": "high",
+            "assigned_user_id": "44",
+        },
+        company_id=9,
+        staff={"id": 5, "requested_by_user_id": 17},
+        policy_config={},
+        vars_map={"staff.full_name": "Jane Starter"},
+        step_name="Create Ticket",
+    )
+
+    assert result == {"ticket_id": 123, "ticket_number": "HD-123"}
+    create_ticket.assert_awaited_once()
+    assert create_ticket.await_args.kwargs["requester_id"] == 17
+    assert create_ticket.await_args.kwargs["initial_reply_author_id"] == 17
+    assert create_ticket.await_args.kwargs["assigned_user_id"] == 44
+
+
+@pytest.mark.anyio
+async def test_update_and_reply_ticket_steps_use_created_ticket_variable(monkeypatch):
+    ticket = {
+        "id": 123,
+        "ticket_number": "HD-123",
+        "assigned_user_id": 44,
+    }
+    monkeypatch.setattr(
+        workflows.tickets_repo,
+        "get_ticket_by_number_or_id",
+        AsyncMock(return_value=ticket),
+    )
+    monkeypatch.setattr(
+        workflows.tickets_service,
+        "resolve_status_or_default",
+        AsyncMock(return_value="in_progress"),
+    )
+    update_ticket = AsyncMock(return_value={**ticket, "status": "in_progress"})
+    monkeypatch.setattr(workflows.tickets_repo, "update_ticket", update_ticket)
+    emit_updated = AsyncMock()
+    monkeypatch.setattr(
+        workflows.tickets_service, "emit_ticket_updated_event", emit_updated
+    )
+    create_reply = AsyncMock(return_value={"id": 77, "is_internal": True})
+    monkeypatch.setattr(workflows.tickets_repo, "create_reply", create_reply)
+    emit_replied = AsyncMock()
+    monkeypatch.setattr(
+        workflows.tickets_service, "emit_ticket_replied_event", emit_replied
+    )
+
+    update_result = await workflows._execute_policy_step(
+        step={
+            "type": "update_ticket",
+            "ticket_number": "${vars.ticket_number}",
+            "status": "In Progress",
+            "priority": "high",
+        },
+        company_id=9,
+        staff={"id": 5},
+        policy_config={},
+        vars_map={"ticket_number": "HD-123"},
+    )
+    reply_result = await workflows._execute_policy_step(
+        step={
+            "type": "reply_ticket",
+            "ticket_number": "${vars.ticket_number}",
+            "body": "Done",
+            "is_internal": True,
+        },
+        company_id=9,
+        staff={"id": 5},
+        policy_config={},
+        vars_map={"ticket_number": "HD-123"},
+    )
+
+    assert update_result["updated"] == {"status": "in_progress", "priority": "high"}
+    update_ticket.assert_awaited_once_with(123, status="in_progress", priority="high")
+    assert reply_result == {
+        "ticket_id": 123,
+        "ticket_number": "HD-123",
+        "reply_id": 77,
+        "is_internal": True,
+    }
+    create_reply.assert_awaited_once_with(
+        ticket_id=123,
+        author_id=44,
+        body="Done",
+        is_internal=True,
+        author_display_name=None,
+    )

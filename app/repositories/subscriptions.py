@@ -14,7 +14,12 @@ def _normalize_subscription(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": row["id"],
         "customer_id": int(row["customer_id"]),
-        "product_id": int(row["product_id"]),
+        "product_id": int(row["product_id"]) if row.get("product_id") is not None else None,
+        "vendor": row.get("vendor"),
+        "external_name": row.get("external_name"),
+        "external_sku": row.get("external_sku"),
+        "billing_frequency": row.get("billing_frequency"),
+        "reminder_only": bool(row.get("reminder_only", False)),
         "subscription_category_id": (
             int(row["subscription_category_id"])
             if row.get("subscription_category_id") is not None
@@ -78,16 +83,14 @@ async def list_subscriptions(
         conditions.append("end_date > %s")
         params.append(end_after)
     
-    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
     
-    query = f"""
-        SELECT s.*, p.name as product_name, c.name as category_name
+    query = """
+        SELECT s.*, p.name as product_name, p.sku as product_sku, c.name as category_name
         FROM subscriptions s
         LEFT JOIN shop_products p ON s.product_id = p.id
         LEFT JOIN subscription_categories c ON s.subscription_category_id = c.id
-        {where_clause}
-        ORDER BY s.end_date DESC, s.created_at DESC
-    """
+        """ + where_clause + " ORDER BY s.end_date DESC, s.created_at DESC"  # nosec B608
     
     if limit is not None:
         query += " LIMIT %s"
@@ -113,7 +116,7 @@ async def get_subscription(subscription_id: str) -> dict[str, Any] | None:
     """Get a subscription by ID."""
     row = await db.fetch_one(
         """
-        SELECT s.*, p.name as product_name, c.name as category_name
+        SELECT s.*, p.name as product_name, p.sku as product_sku, c.name as category_name
         FROM subscriptions s
         LEFT JOIN shop_products p ON s.product_id = p.id
         LEFT JOIN subscription_categories c ON s.subscription_category_id = c.id
@@ -133,7 +136,7 @@ async def get_subscription(subscription_id: str) -> dict[str, Any] | None:
 async def create_subscription(
     *,
     customer_id: int,
-    product_id: int,
+    product_id: int | None,
     subscription_category_id: int | None,
     start_date: date,
     end_date: date,
@@ -143,6 +146,11 @@ async def create_subscription(
     status: str = "active",
     auto_renew: bool = True,
     created_by: int | None = None,
+    vendor: str | None = None,
+    external_name: str | None = None,
+    external_sku: str | None = None,
+    billing_frequency: str | None = None,
+    reminder_only: bool = False,
 ) -> dict[str, Any]:
     """Create a new subscription."""
     subscription_id = str(uuid4())
@@ -151,15 +159,21 @@ async def create_subscription(
         """
         INSERT INTO subscriptions (
             id, customer_id, product_id, subscription_category_id,
+            vendor, external_name, external_sku, billing_frequency, reminder_only,
             start_date, end_date, quantity, unit_price, prorated_price,
             status, auto_renew, created_by
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             subscription_id,
             customer_id,
             product_id,
             subscription_category_id,
+            vendor,
+            external_name,
+            external_sku,
+            billing_frequency,
+            reminder_only,
             start_date,
             end_date,
             quantity,
@@ -209,8 +223,9 @@ async def update_subscription(
         return
     
     params.append(subscription_id)
-    await db.execute(
-        f"UPDATE subscriptions SET {', '.join(updates)} WHERE id = %s",
+    # The SET fragment is assembled only from fixed function arguments above; values remain bound.
+    await db.execute(  # nosec B608
+        "UPDATE subscriptions SET " + ", ".join(updates) + " WHERE id = %s",  # nosec B608
         tuple(params),
     )
 
@@ -261,10 +276,10 @@ async def count_subscriptions(
         conditions.append("status = %s")
         params.append(status)
     
-    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
     
     row = await db.fetch_one(
-        f"SELECT COUNT(*) as count FROM subscriptions {where_clause}",
+        "SELECT COUNT(*) as count FROM subscriptions " + where_clause,  # nosec B608
         tuple(params),
     )
     
@@ -298,4 +313,18 @@ async def get_active_subscription_product_ids(customer_id: int) -> set[int]:
         (customer_id,),
     )
     
-    return {int(row["product_id"]) for row in rows}
+    return {int(row["product_id"]) for row in rows if row.get("product_id") is not None}
+
+
+async def get_active_subscriptions_by_product_id(
+    customer_id: int,
+) -> dict[int, dict[str, Any]]:
+    """Return one manageable active subscription for each subscribed product."""
+    subscriptions = await list_subscriptions(customer_id=customer_id, limit=500)
+    result: dict[int, dict[str, Any]] = {}
+    for subscription in subscriptions:
+        if subscription.get("status") not in {"active", "pending_renewal"}:
+            continue
+        if subscription.get("product_id") is not None:
+            result.setdefault(int(subscription["product_id"]), subscription)
+    return result

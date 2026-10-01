@@ -1,0 +1,7 @@
+{
+  "guid": "34eb143b-d2f5-46cb-b555-0256aec8020c",
+  "occurred_at": "2026-09-29T00:00Z",
+  "change_type": "Fix",
+  "summary": "Disabling the RAG Index feature pack now stops relationship workers and RAG scheduled tasks entirely, and AI Search (/search) is hidden unless the LLM module is enabled and configured.",
+  "content_hash": "e56f69e465348c712535a9e551a9b3963104386d2d0bbeacdc5cc5f0aa7196f6"
+}

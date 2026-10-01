@@ -334,26 +334,46 @@
         const tbody = document.getElementById('permissions-tbody');
         if (!tbody) return;
 
+        tbody.replaceChildren();
+
         if (permissions.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="3" class="table__empty">No permissions set. Super admins have full access.</td></tr>';
+          const row = document.createElement('tr');
+          const cell = document.createElement('td');
+          cell.colSpan = 3;
+          cell.className = 'table__empty';
+          cell.textContent = 'No permissions set. Super admins have full access.';
+          row.appendChild(cell);
+          tbody.appendChild(row);
           return;
         }
 
-        tbody.innerHTML = permissions.map(perm => {
+        permissions.forEach(perm => {
           const name = perm.user_id ? getUserName(perm.user_id) : getCompanyName(perm.company_id);
           const type = perm.user_id ? 'User' : 'Company';
-          return `
-            <tr>
-              <td>${type}: ${name}</td>
-              <td><span class="tag">${perm.permission_level}</span></td>
-              <td>
-                <button type="button" class="button button--small button--danger" onclick="deletePermission(${perm.id})">
-                  Remove
-                </button>
-              </td>
-            </tr>
-          `;
-        }).join('');
+
+          const row = document.createElement('tr');
+          const nameCell = document.createElement('td');
+          nameCell.textContent = `${type}: ${name}`;
+
+          const permissionCell = document.createElement('td');
+          const permissionTag = document.createElement('span');
+          permissionTag.className = 'tag';
+          permissionTag.textContent = perm.permission_level;
+          permissionCell.appendChild(permissionTag);
+
+          const actionsCell = document.createElement('td');
+          const removeButton = document.createElement('button');
+          removeButton.type = 'button';
+          removeButton.className = 'button button--small button--danger';
+          removeButton.textContent = 'Remove';
+          removeButton.addEventListener('click', () => deletePermission(perm.id));
+          actionsCell.appendChild(removeButton);
+
+          row.appendChild(nameCell);
+          row.appendChild(permissionCell);
+          row.appendChild(actionsCell);
+          tbody.appendChild(row);
+        });
       }
 
       function getUserName(userId) {

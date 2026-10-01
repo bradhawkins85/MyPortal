@@ -1,0 +1,7 @@
+{
+  "guid": "7f0363e1-bf41-4db4-82c0-d61cd4d08b9c",
+  "occurred_at": "2026-07-31T00:00Z",
+  "change_type": "Fix",
+  "summary": "Corrected Huntress SAT OAuth authentication to use the Curricula Client Credentials flow.",
+  "content_hash": "e543ed3d854dd2482034fbc7b98a76937c315be4b6671880a350846ba8fd1473"
+}

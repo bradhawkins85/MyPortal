@@ -14,6 +14,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
 from app.repositories import companies as company_repo
@@ -22,6 +24,7 @@ from app.repositories import licenses as license_repo
 from app.repositories import staff as staff_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.repositories import staff_onboarding_workflows as workflow_repo
+from app.repositories import tickets as tickets_repo
 from app.repositories import users as user_repo
 from app.services import audit as audit_service
 from app.services import email as email_service
@@ -32,6 +35,7 @@ from app.services import system_variables
 from app.services import webhook_monitor
 from app.services import tickets as tickets_service
 from app.security.api_keys import hash_api_key
+from app.security.encryption import decrypt_secret, encrypt_secret
 
 STATE_REQUESTED = "requested"
 STATE_AWAITING_APPROVAL = "awaiting_approval"
@@ -53,7 +57,7 @@ STATE_OFFBOARDING_FAILED = "offboarding_failed"
 DIRECTION_ONBOARDING = "onboarding"
 DIRECTION_OFFBOARDING = "offboarding"
 _VAR_PATTERN = re.compile(r"\$\{vars\.([a-zA-Z0-9_.-]+)\}")
-_SECRET_KEY_TOKENS = ("password", "secret", "token", "key")
+_SECRET_KEY_TOKENS = ("password", "secret", "token", "key", "verification_code")
 
 
 def _default_workflow_key(direction: str) -> str:
@@ -436,6 +440,22 @@ async def resolve_approver_user_ids(
     return sorted(designated_ids | permission_based_ids | company_admin_ids)
 
 
+def requested_by_details(user: dict[str, Any] | None) -> tuple[str | None, str | None]:
+    """Return the (name, email) snapshot stored against a staff request."""
+    if not user:
+        return None, None
+    email = str(user.get("email") or "").strip() or None
+    name = " ".join(
+        part
+        for part in (
+            str(user.get("first_name") or "").strip(),
+            str(user.get("last_name") or "").strip(),
+        )
+        if part
+    ) or email
+    return name, email
+
+
 async def notify_staff_approval_requested(
     *,
     company_id: int,
@@ -502,6 +522,31 @@ async def notify_staff_approval_requested(
                 error=str(exc),
             )
     return approver_ids
+
+
+def _coerce_positive_int(value: Any) -> int | None:
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+async def _resolve_workflow_ticket(
+    step: dict[str, Any], vars_map: dict[str, Any]
+) -> dict[str, Any]:
+    ticket_ref = (
+        _resolve_template_value(step.get("ticket_id"), vars_map=vars_map)
+        or _resolve_template_value(step.get("ticket_number"), vars_map=vars_map)
+        or vars_map.get("ticket_id")
+        or vars_map.get("ticket_number")
+    )
+    ticket = await tickets_repo.get_ticket_by_number_or_id(str(ticket_ref or ""))
+    if not ticket:
+        raise WorkflowStepError(
+            "Ticket step requires an existing ticket_id or ticket_number"
+        )
+    return dict(ticket)
 
 
 async def _create_failure_ticket(
@@ -804,10 +849,12 @@ def _resolve_template_value(raw: Any, *, vars_map: dict[str, Any]) -> Any:
     if isinstance(raw, str):
         exact_match = _VAR_PATTERN.fullmatch(raw.strip())
         if exact_match:
-            return vars_map.get(exact_match.group(1))
+            path = exact_match.group(1)
+            return vars_map.get(path) if path in vars_map else _get_nested_value(vars_map, path)
 
         def _replace(match: re.Match[str]) -> str:
-            value = vars_map.get(match.group(1))
+            path = match.group(1)
+            value = vars_map.get(path) if path in vars_map else _get_nested_value(vars_map, path)
             if value is None:
                 return ""
             return str(value)
@@ -1221,6 +1268,8 @@ async def _execute_policy_step(
             staff=staff,
             step_config=step,
             vars_map=vars_map,
+            execution_id=execution_id,
+            step_name=step_name or "m365_export_onedrive",
         )
 
     if step_type in {"http_get", "http_post"}:
@@ -1286,7 +1335,9 @@ async def _execute_policy_step(
                 "webhook_status": event.get("status"),
             }
         timeout_seconds = max(1, int(step.get("timeout_seconds") or 30))
-        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+        async with monitored_client(
+            httpx.AsyncClient, timeout=timeout_seconds
+        ) as client:
             response = await client.request(
                 method,
                 url,
@@ -1399,13 +1450,24 @@ async def _execute_policy_step(
             or _resolve_template_value(step.get("group_ids_csv"), vars_map=vars_map)
             or _resolve_template_value(step.get("group_id"), vars_map=vars_map)
         )
-        if not group_ids:
+        if not group_ids and step_type == "m365_add_teams_group_member":
             raise WorkflowStepError(f"{step_type} requires one or more group IDs")
         m365_user_id = await _resolve_step_user_id()
         encoded_user_id = quote(m365_user_id, safe="")
         access_token = await m365_service.acquire_access_token(
             company_id, force_client_credentials=True
         )
+        if not group_ids:
+            memberships = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/memberOf/microsoft.graph.group?$select=id,groupTypes",
+            )
+            group_ids = [
+                str(item.get("id")).strip()
+                for item in memberships
+                if item.get("id")
+                and "DynamicMembership" not in (item.get("groupTypes") or [])
+            ]
         changed_group_ids: list[str] = []
         for group_id in group_ids:
             if step_type == "m365_add_teams_group_member":
@@ -1439,10 +1501,9 @@ async def _execute_policy_step(
             or _resolve_template_value(step.get("site_ids_csv"), vars_map=vars_map)
             or _resolve_template_value(step.get("site_id"), vars_map=vars_map)
         )
-        if not site_ids:
+        if not site_ids and step_type == "m365_add_sharepoint_site_member":
             raise WorkflowStepError(f"{step_type} requires one or more site IDs")
         m365_user_id = await _resolve_step_user_id()
-        encoded_user_id = quote(m365_user_id, safe="")
         access_token = await m365_service.acquire_access_token(
             company_id, force_client_credentials=True
         )
@@ -1456,12 +1517,19 @@ async def _execute_policy_step(
         )
         if site_role not in {"read", "write"}:
             raise WorkflowStepError("site_role must be either 'read' or 'write'")
+        if not site_ids:
+            sites = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                "https://graph.microsoft.com/v1.0/sites?search=*&$select=id&$top=200",
+            )
+            site_ids = [str(site.get("id")).strip() for site in sites if site.get("id")]
         changed_site_ids: list[str] = []
         for site_id in site_ids:
+            encoded_site_id = quote(site_id, safe="")
             if step_type == "m365_add_sharepoint_site_member":
                 await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
                     access_token,
-                    f"https://graph.microsoft.com/v1.0/sites/{site_id}/permissions",
+                    f"https://graph.microsoft.com/v1.0/sites/{encoded_site_id}/permissions",
                     {
                         "roles": [site_role],
                         "grantedToIdentitiesV2": [
@@ -1472,7 +1540,7 @@ async def _execute_policy_step(
             else:
                 permissions = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
                     access_token,
-                    f"https://graph.microsoft.com/v1.0/sites/{site_id}/permissions",
+                    f"https://graph.microsoft.com/v1.0/sites/{encoded_site_id}/permissions",
                 )
                 for permission in permissions.get("value") or []:
                     permission_id = str(permission.get("id") or "").strip()
@@ -1634,11 +1702,7 @@ async def _execute_policy_step(
         )
         revoked_sessions = False
         if bool(step.get("revoke_sign_in_sessions", True)):
-            await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
-                access_token,
-                f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/revokeSignInSessions",
-                {},
-            )
+            await m365_service.revoke_sign_in_sessions(access_token, user_id)
             revoked_sessions = True
         return {
             "m365_user_id": user_id,
@@ -1654,20 +1718,82 @@ async def _execute_policy_step(
         description = str(
             _resolve_template_value(step.get("description"), vars_map=vars_map) or ""
         ).strip()
-        status_value = await tickets_service.resolve_status_or_default(None)
+        requester_id = _coerce_positive_int(staff.get("requested_by_user_id"))
+        assigned_user_id = _coerce_positive_int(
+            _resolve_template_value(step.get("assigned_user_id"), vars_map=vars_map)
+        )
+        status_value = await tickets_service.resolve_status_or_default(
+            _resolve_template_value(step.get("status"), vars_map=vars_map)
+        )
         ticket = await tickets_service.create_ticket(
             subject=subject,
             description=description or subject,
-            requester_id=None,
+            requester_id=requester_id,
             company_id=company_id,
-            assigned_user_id=None,
-            priority=str(step.get("priority") or "normal"),
+            assigned_user_id=assigned_user_id,
+            priority=str(
+                _resolve_template_value(step.get("priority"), vars_map=vars_map)
+                or "normal"
+            ),
             status=status_value,
             category=str(step.get("category") or "staff-onboarding"),
             module_slug=str(step.get("module_slug") or "m365"),
-            external_reference=f"staff-workflow:{staff.get('id')}:{step.get('name')}",
+            external_reference=f"staff-workflow:{staff.get('id')}:{step_name or step.get('name')}",
+            initial_reply_author_id=requester_id,
         )
-        return {"ticket_id": ticket.get("id")}
+        ticket_number = ticket.get("ticket_number") or ticket.get("id")
+        return {"ticket_id": ticket.get("id"), "ticket_number": ticket_number}
+
+    if step_type == "update_ticket":
+        ticket = await _resolve_workflow_ticket(step, vars_map)
+        update_fields: dict[str, Any] = {}
+        if step.get("status") not in (None, ""):
+            update_fields["status"] = await tickets_service.resolve_status_or_default(
+                _resolve_template_value(step.get("status"), vars_map=vars_map)
+            )
+        if step.get("priority") not in (None, ""):
+            update_fields["priority"] = str(
+                _resolve_template_value(step.get("priority"), vars_map=vars_map) or ""
+            ).strip()
+        if not update_fields:
+            raise WorkflowStepError("update_ticket requires status or priority")
+        updated = await tickets_repo.update_ticket(int(ticket["id"]), **update_fields)
+        await tickets_service.emit_ticket_updated_event(
+            updated or int(ticket["id"]), actor_type="system"
+        )
+        return {
+            "ticket_id": int(ticket["id"]),
+            "ticket_number": ticket.get("ticket_number") or ticket.get("id"),
+            "updated": update_fields,
+        }
+
+    if step_type == "reply_ticket":
+        ticket = await _resolve_workflow_ticket(step, vars_map)
+        body = str(
+            _resolve_template_value(step.get("body"), vars_map=vars_map) or ""
+        ).strip()
+        if not body:
+            raise WorkflowStepError("reply_ticket requires body")
+        author_id = _coerce_positive_int(ticket.get("assigned_user_id"))
+        reply = await tickets_repo.create_reply(
+            ticket_id=int(ticket["id"]),
+            author_id=author_id,
+            body=body,
+            is_internal=bool(step.get("is_internal") or step.get("internal_note")),
+            author_display_name="System" if author_id is None else None,
+        )
+        await tickets_service.emit_ticket_replied_event(
+            ticket, actor_type="technician" if author_id else "system", reply=reply
+        )
+        await tickets_service.emit_ticket_updated_event(
+            ticket, actor_type="technician" if author_id else "system", reply=reply
+        )
+        return {
+            "ticket_id": int(ticket["id"]),
+            "ticket_number": ticket.get("ticket_number") or ticket.get("id"),
+            "reply_id": reply.get("id"),
+            "is_internal": bool(reply.get("is_internal")),
+        }
 
     if step_type == "conditional_pause":
         left = _resolve_template_value(step.get("if"), vars_map=vars_map)
@@ -1768,6 +1894,74 @@ async def _execute_policy_step(
             or "generated_password"
         )
         return {"generated_password": generated, var_name: generated}
+
+    if step_type == "create_myportal_credential":
+        from app.services import workflow_vault
+
+        if execution_id is None or not step_name:
+            raise WorkflowStepError("Create MyPortal credential requires workflow execution context")
+        secret_value = str(step.get("secret_source") or "")
+        if not secret_value:
+            raise WorkflowStepError("Create MyPortal credential requires an approved prior-step secret")
+        def _optional_id(field: str) -> int | None:
+            raw = step.get(field)
+            if raw in (None, ""):
+                return None
+            try:
+                return int(raw)
+            except (TypeError, ValueError) as exc:
+                raise WorkflowStepError(f"{field} must be a numeric ID") from exc
+        try:
+            result = await workflow_vault.create_for_staff_workflow(
+                company_id=company_id,
+                staff_id=int(staff["id"]),
+                execution_id=execution_id,
+                step_identity=step_name,
+                name=str(step.get("credential_name") or ""),
+                username=str(step.get("username") or "").strip() or None,
+                credential_class=str(step.get("credential_class") or "other").strip().lower(),
+                plaintext=secret_value,
+                owner=str(step.get("owner") or "").strip() or None,
+                expires_on=step.get("expires_on"),
+                review_on=step.get("review_on"),
+                asset_id=_optional_id("asset_id"),
+                ticket_id=_optional_id("ticket_id"),
+            )
+        except workflow_vault.WorkflowVaultError as exc:
+            raise WorkflowStepError(str(exc)) from exc
+        output_var = str(step.get("credential_output_var") or "credential_id").strip()
+        return {
+            "credential_id": result["credential_id"],
+            "credential_version": result["credential_version"],
+            output_var: result["credential_id"],
+        }
+
+    if step_type == "share_myportal_credential":
+        from app.services import workflow_credential_shares
+
+        if execution_id is None or not step_name:
+            raise WorkflowStepError("Share MyPortal credential requires workflow execution context")
+        try:
+            result = await workflow_credential_shares.create_for_staff_workflow(
+                company_id=company_id,
+                workflow_staff_id=int(staff["id"]),
+                execution_id=execution_id,
+                step_identity=step_name,
+                credential_id=step.get("credential_id"),
+                selector_type=str(step.get("selector_type") or ""),
+                staff_id=step.get("staff_id"),
+                job_title=step.get("job_title"),
+                recipient_email=step.get("recipient_email"),
+                permissions=step.get("permissions"),
+                reason=str(step.get("reason") or ""),
+                expires_at=step.get("expires_at"),
+                verification_code=step.get("verification_code"),
+                grantor_user_id=staff.get("requested_by_user_id"),
+            )
+        except workflow_credential_shares.WorkflowCredentialShareError as exc:
+            raise WorkflowStepError(str(exc)) from exc
+        output_var = str(step.get("output_var") or "credential_share").strip()
+        return {output_var: result, "grant_id": result["grant_id"], "url": result["url"]}
 
     if step_type == "create_user":
         # Resolve UPN/email: prefer the configured user_principal_name template (which
@@ -1911,21 +2105,35 @@ async def _execute_policy_step(
         # Resolve subscribed SKU IDs from the tenant by matching part numbers.
         skus_response = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
             access_token,
-            "https://graph.microsoft.com/v1.0/subscribedSkus?$select=skuId,skuPartNumber",
+            "https://graph.microsoft.com/v1.0/subscribedSkus?$select=skuId,skuPartNumber,consumedUnits,prepaidUnits",
         )
         sku_map = {
-            str(entry.get("skuPartNumber") or "").upper(): str(entry.get("skuId") or "")
+            str(entry.get("skuPartNumber") or "").upper(): entry
             for entry in (skus_response.get("value") or [])
             if entry.get("skuId")
         }
+        user_payload = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+            access_token,
+            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}?$select=usageLocation",
+        )
+        if not str(user_payload.get("usageLocation") or "").strip():
+            raise WorkflowStepError(
+                "assign_licenses: set the user's usageLocation before assigning a license"
+            )
         add_licenses = []
         for part_number in sku_part_numbers:
-            sku_id = sku_map.get(part_number.upper())
-            if not sku_id:
+            sku = sku_map.get(part_number.upper())
+            if not sku:
                 raise WorkflowStepError(
                     f"assign_licenses: SKU part number not found in tenant: {part_number}"
                 )
-            add_licenses.append({"skuId": sku_id})
+            enabled = int((sku.get("prepaidUnits") or {}).get("enabled") or 0)
+            consumed = int(sku.get("consumedUnits") or 0)
+            if enabled <= consumed:
+                raise WorkflowStepError(
+                    f"assign_licenses: no available licenses for SKU: {part_number}"
+                )
+            add_licenses.append({"skuId": str(sku["skuId"])})
         remove_first = bool(step.get("remove_existing_licenses", False))
         remove_licenses: list[str] = []
         if remove_first:
@@ -1969,6 +2177,21 @@ async def _execute_policy_step(
         access_token = await m365_service.acquire_access_token(
             company_id, force_client_credentials=True
         )
+        # Validate every target before the first write, avoiding a partially
+        # applied group set when a later group is immutable or role-assignable.
+        for group_id in group_ids:
+            group = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                f"https://graph.microsoft.com/v1.0/groups/{quote(group_id, safe='')}?$select=id,groupTypes,isAssignableToRole",
+            )
+            if "DynamicMembership" in (group.get("groupTypes") or []):
+                raise WorkflowStepError(
+                    f"add_to_groups: {group_id} uses dynamic membership and cannot be changed manually"
+                )
+            if bool(group.get("isAssignableToRole")):
+                raise WorkflowStepError(
+                    f"add_to_groups: {group_id} is role-assignable; use a separately reviewed privileged workflow"
+                )
         added_group_ids: list[str] = []
         for group_id in group_ids:
             await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
@@ -2025,7 +2248,7 @@ async def _execute_policy_step(
             "@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{encoded_manager_id}"
         }
         headers = {"Authorization": f"Bearer {access_token}"}
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             ref_response = await client.put(ref_url, headers=headers, json=ref_payload)
         if ref_response.status_code not in (200, 204):
             raise WorkflowStepError(
@@ -2360,7 +2583,7 @@ async def _graph_patch(
     access_token: str, url: str, payload: dict[str, Any]
 ) -> dict[str, Any]:
     headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         response = await client.patch(url, headers=headers, json=payload)
     if response.status_code not in (200, 204):
         log_error(
@@ -2427,7 +2650,7 @@ async def _graph_post_for_location(
     access_token: str, url: str, payload: dict[str, Any]
 ) -> tuple[dict[str, Any], str | None]:
     headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         response = await client.post(url, headers=headers, json=payload)
     if response.status_code not in (200, 201, 202, 204):
         log_error(
@@ -2446,14 +2669,32 @@ async def _graph_post_for_location(
 
 
 async def _wait_for_graph_copy(
-    access_token: str, monitor_url: str, *, timeout_seconds: int
+    access_token: str,
+    monitor_url: str,
+    *,
+    timeout_seconds: int,
+    company_id: int | None = None,
 ) -> dict[str, Any]:
+    _validate_copy_monitor_url(monitor_url)
     deadline = datetime.now(timezone.utc) + timedelta(seconds=max(1, timeout_seconds))
     headers = {"Authorization": f"Bearer {access_token}"}
     last_payload: dict[str, Any] = {}
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         while datetime.now(timezone.utc) < deadline:
             response = await client.get(monitor_url, headers=headers)
+            if response.status_code == 401 and company_id is not None:
+                access_token = await m365_service.acquire_access_token(
+                    company_id, force_client_credentials=True
+                )
+                headers = {"Authorization": f"Bearer {access_token}"}
+                response = await client.get(monitor_url, headers=headers)
+            if response.status_code in {429, 503}:
+                retry_after = min(
+                    60,
+                    max(1, int(response.headers.get("Retry-After", "5") or 5)),
+                )
+                await asyncio.sleep(retry_after)
+                continue
             if response.status_code >= 400:
                 raise WorkflowStepError(
                     f"OneDrive export copy monitor failed ({response.status_code})",
@@ -2477,6 +2718,20 @@ async def _wait_for_graph_copy(
         "OneDrive export copy did not complete before timeout",
         request_payload={"monitor_url": monitor_url, "last_payload": last_payload},
     )
+
+
+def _validate_copy_monitor_url(monitor_url: str) -> None:
+    """Reject operation URLs which could exfiltrate the Graph bearer token."""
+
+    parsed = urlparse(str(monitor_url or ""))
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme != "https" or not (
+        hostname == "graph.microsoft.com" or hostname.endswith(".sharepoint.com")
+    ):
+        raise WorkflowStepError(
+            "OneDrive copy returned an untrusted or invalid monitor URL",
+            request_payload={"monitor_url": monitor_url},
+        )
 
 
 def _onedrive_export_permission_message(exc: M365Error | WorkflowStepError) -> str:
@@ -2544,9 +2799,30 @@ async def _run_export_onedrive_step(
     staff: dict[str, Any],
     step_config: dict[str, Any] | None = None,
     vars_map: dict[str, Any] | None = None,
+    execution_id: int | None = None,
+    step_name: str = "m365_export_onedrive",
 ) -> dict[str, Any]:
+    """Copy a OneDrive root and return only verifiable protection/export claims.
+
+    Progress records are deliberately written independently of the step's success log so a
+    retry can reuse the destination folder and outstanding Graph operation URLs.
+    """
+
     _vars = vars_map or {}
     _step = step_config or {}
+    persisted = _vars.get("onedrive_export_state")
+    state: dict[str, Any] = dict(persisted) if isinstance(persisted, dict) else {}
+
+    async def persist() -> None:
+        if execution_id is not None:
+            await workflow_repo.append_step_log(
+                execution_id=execution_id,
+                step_name=f"{step_name}:export_state",
+                status="progress",
+                attempt=1,
+                response_payload={"onedrive_export_state": state},
+            )
+
     destination_drive_id = str(
         _resolve_template_value(_step.get("destination_drive_id"), vars_map=_vars) or ""
     ).strip()
@@ -2570,18 +2846,11 @@ async def _run_export_onedrive_step(
         )
 
     conflict_behavior = (
-        str(
-            _resolve_template_value(
-                _step.get("folder_conflict_behavior"), vars_map=_vars
-            )
-            or "fail"
-        )
-        .strip()
-        .lower()
+        str(_step.get("folder_conflict_behavior") or "fail").strip().lower()
     )
-    if conflict_behavior not in {"fail", "rename", "replace"}:
+    if conflict_behavior not in {"fail", "rename"}:
         raise WorkflowStepError(
-            "folder_conflict_behavior must be fail, rename, or replace"
+            "folder_conflict_behavior must be fail or rename; replace is unsafe for resumable exports"
         )
 
     access_token = await m365_service.acquire_access_token(
@@ -2594,120 +2863,186 @@ async def _run_export_onedrive_step(
         raise WorkflowStepError("Unable to resolve user UPN for OneDrive export")
     encoded_user_id = quote(user_id, safe="")
     safe_folder_name = user_upn.replace("/", "_").replace("\\", "_")
+    encoded_drive = quote(destination_drive_id, safe="")
+    if state and (
+        str(state.get("destination_drive_id") or destination_drive_id)
+        != destination_drive_id
+        or str(state.get("m365_user_id") or user_id) != user_id
+    ):
+        raise WorkflowStepError(
+            "Persisted OneDrive export state belongs to a different source or destination"
+        )
 
+    # These reads validate both resources and the app's effective source/destination access.
     source_root = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
         access_token,
         f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/drive/root?$select=id,name,webUrl",
     )
     source_root_id = str(source_root.get("id") or "root").strip() or "root"
-
-    encoded_destination_drive_id = quote(destination_drive_id, safe="")
-    destination_children_url = (
-        f"https://graph.microsoft.com/v1.0/drives/{encoded_destination_drive_id}/root/children"
-        if destination_parent_item_id.lower() == "root"
-        else f"https://graph.microsoft.com/v1.0/drives/{encoded_destination_drive_id}/items/{quote(destination_parent_item_id, safe='')}/children"
+    destination_drive = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+        access_token,
+        f"https://graph.microsoft.com/v1.0/drives/{encoded_drive}?$select=id,driveType,webUrl,sharePointIds",
     )
-    try:
-        destination_folder = (
-            await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
+    if (
+        str(destination_drive.get("driveType") or "documentLibrary")
+        != "documentLibrary"
+    ):
+        raise WorkflowStepError(
+            "OneDrive export destination must be a SharePoint document library"
+        )
+    if destination_parent_item_id.lower() != "root":
+        await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+            access_token,
+            f"https://graph.microsoft.com/v1.0/drives/{encoded_drive}/items/{quote(destination_parent_item_id, safe='')}?$select=id,folder",
+        )
+
+    destination_folder_id = str(state.get("destination_folder_id") or "").strip()
+    destination_folder: dict[str, Any]
+    if destination_folder_id:
+        destination_folder = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+            access_token,
+            f"https://graph.microsoft.com/v1.0/drives/{encoded_drive}/items/{quote(destination_folder_id, safe='')}?$select=id,name,webUrl,folder",
+        )
+        if str(destination_folder.get("name") or "") != safe_folder_name:
+            raise WorkflowStepError(
+                "Persisted OneDrive export destination no longer matches this user"
+            )
+    else:
+        children_url = (
+            f"https://graph.microsoft.com/v1.0/drives/{encoded_drive}/root/children"
+            if destination_parent_item_id.lower() == "root"
+            else f"https://graph.microsoft.com/v1.0/drives/{encoded_drive}/items/{quote(destination_parent_item_id, safe='')}/children"
+        )
+        try:
+            destination_folder = await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
                 access_token,
-                destination_children_url,
+                children_url,
                 {
                     "name": safe_folder_name,
                     "folder": {},
                     "@microsoft.graph.conflictBehavior": conflict_behavior,
                 },
             )
+        except M365Error as exc:
+            _raise_onedrive_export_graph_error(
+                exc, operation="create_destination_folder"
+            )
+        destination_folder_id = str(destination_folder.get("id") or "").strip()
+        if not destination_folder_id:
+            raise WorkflowStepError(
+                "Graph did not return an ID for the OneDrive export destination folder"
+            )
+        state.update(
+            {
+                "destination_drive_id": destination_drive_id,
+                "destination_folder_id": destination_folder_id,
+                "m365_user_id": user_id,
+            }
         )
-    except M365Error as exc:
-        _raise_onedrive_export_graph_error(exc, operation="create_destination_folder")
-    destination_folder_id = str(destination_folder.get("id") or "").strip()
-    if not destination_folder_id:
-        raise WorkflowStepError(
-            "Graph did not return an ID for the OneDrive export destination folder"
-        )
+        await persist()
 
     source_children = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
         access_token,
         f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/drive/items/{quote(source_root_id, safe='')}/children",
     )
-
-    monitor_urls: list[str] = []
+    operations = state.setdefault("operations", {})
     copied_items: list[dict[str, str]] = []
     for child in source_children:
-        child_id = str(child.get("id") or "").strip()
-        child_name = str(child.get("name") or "").strip()
+        child_id, child_name = (
+            str(child.get("id") or "").strip(),
+            str(child.get("name") or "").strip(),
+        )
         if not child_id:
             continue
-        copy_payload = {
-            "parentReference": {
-                "driveId": destination_drive_id,
-                "id": destination_folder_id,
-            },
-            "name": child_name or None,
-        }
-        copy_payload = {
-            key: value for key, value in copy_payload.items() if value is not None
-        }
+        copied_items.append({"id": child_id, "name": child_name})
+        operation = operations.get(child_id)
+        if isinstance(operation, dict) and operation.get("monitor_url"):
+            continue
         try:
             _, monitor_url = await _graph_post_for_location(
                 access_token,
                 f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/drive/items/{quote(child_id, safe='')}/copy",
-                copy_payload,
+                {
+                    "parentReference": {
+                        "driveId": destination_drive_id,
+                        "id": destination_folder_id,
+                    },
+                    "name": child_name,
+                },
             )
         except WorkflowStepError as exc:
             _raise_onedrive_export_graph_error(exc, operation="copy_source_item")
-        if monitor_url:
-            monitor_urls.append(monitor_url)
-        copied_items.append({"id": child_id, "name": child_name})
+        if not monitor_url:
+            operations[child_id] = {"name": child_name, "status": "missing_monitor_url"}
+            await persist()
+            raise WorkflowStepError(
+                f"OneDrive copy for {child_name or child_id} was accepted without a monitor URL",
+                request_payload={"source_item_id": child_id},
+            )
+        _validate_copy_monitor_url(monitor_url)
+        operations[child_id] = {
+            "name": child_name,
+            "monitor_url": monitor_url,
+            "status": "in_progress",
+        }
+        await persist()
 
-    monitor_payloads: list[dict[str, Any]] = []
-    if monitor_urls and bool(_step.get("wait_for_completion", True)):
+    wait = bool(_step.get("wait_for_completion", True))
+    if wait:
         timeout_seconds = int(_step.get("copy_timeout_seconds") or 3600)
-        for monitor_url in monitor_urls:
-            monitor_payloads.append(
-                await _wait_for_graph_copy(
-                    access_token, monitor_url, timeout_seconds=timeout_seconds
-                )
-            )
-
-    read_only_applied = False
-    if bool(_step.get("mark_source_read_only", True)):
-        try:
-            await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
+        for child_id, operation in operations.items():
+            if operation.get("status") == "completed":
+                continue
+            payload = await _wait_for_graph_copy(
                 access_token,
-                f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/drive/items/{quote(source_root_id, safe='')}/invite",
-                {
-                    "requireSignIn": True,
-                    "sendInvitation": False,
-                    "roles": ["read"],
-                    "recipients": [{"email": user_upn}],
-                    "retainInheritedPermissions": False,
-                },
+                str(operation["monitor_url"]),
+                timeout_seconds=timeout_seconds,
+                company_id=company_id,
             )
-            read_only_applied = True
-        except M365Error as exc:
-            log_warning(
-                "Offboarding Export OneDrive: unable to mark source read-only",
-                user_id=user_id,
-                user_upn=user_upn,
-                http_status=exc.http_status,
-                error=str(exc),
-            )
+            operation.update({"status": "completed", "monitor_payload": payload})
+            await persist()
 
-    completed_count = sum(
-        1
-        for payload in monitor_payloads
-        if str(payload.get("status") or "").strip().lower()
-        in {"completed", "complete", "succeeded"}
+    destination_items = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
+        access_token,
+        f"https://graph.microsoft.com/v1.0/drives/{encoded_drive}/items/{quote(destination_folder_id, safe='')}/children?$select=id,name",
     )
-    copy_status = (
-        "completed"
-        if monitor_payloads and completed_count == len(monitor_payloads)
-        else ("accepted" if monitor_urls else "submitted")
+    destination_names = {str(item.get("name") or "") for item in destination_items}
+    missing_names = sorted(
+        item["name"] for item in copied_items if item["name"] not in destination_names
     )
+    operations_complete = all(
+        op.get("status") == "completed" for op in operations.values()
+    )
+    inventory_verified = not missing_names and (not copied_items or operations_complete)
+    copy_status = "completed" if inventory_verified else "in_progress"
 
-    return {
+    protection_operation = (
+        str(_step.get("source_protection_operation") or "none").strip().lower()
+    )
+    protection_applied = False
+    protection_status = "not_requested"
+    if protection_operation == "disable_account":
+        await _graph_patch(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}",
+            {"accountEnabled": False},
+        )
+        protection_applied, protection_status = True, "applied"
+    elif protection_operation != "none":
+        protection_status = "unsupported"
+    # A read sharing invitation is intentionally never used as evidence that an owner lost write access.
+    if bool(_step.get("require_source_protection")) and not protection_applied:
+        raise WorkflowStepError(
+            "Configured source protection was not applied; destructive steps remain blocked",
+            request_payload={"source_protection_operation": protection_operation},
+        )
+    if wait and not inventory_verified:
+        raise WorkflowStepError(
+            "OneDrive export inventory verification is incomplete",
+            request_payload={"missing_destination_items": missing_names},
+        )
+
+    result = {
         "company_id": int(company_id),
         "staff_id": int(staff["id"]),
         "m365_user_id": user_id,
@@ -2717,12 +3052,25 @@ async def _run_export_onedrive_step(
         "destination_folder_id": destination_folder_id,
         "destination_folder_name": safe_folder_name,
         "destination_folder_web_url": destination_folder.get("webUrl"),
-        "copy_monitor_urls": monitor_urls,
+        "copy_monitor_urls": [
+            str(op.get("monitor_url"))
+            for op in operations.values()
+            if op.get("monitor_url")
+        ],
+        "copy_operations": list(operations.values()),
         "copy_status": copy_status,
         "source_items_submitted": len(copied_items),
         "source_items": copied_items,
-        "source_marked_read_only": read_only_applied,
+        "missing_destination_items": missing_names,
+        "inventory_verified": inventory_verified,
+        "source_protection_operation": protection_operation,
+        "source_protection_status": protection_status,
+        "source_protection_applied": protection_applied,
+        "source_marked_read_only": False,
+        "export_verified": inventory_verified,
+        "onedrive_export_state": state,
     }
+    return result
 
 
 async def _run_offboarding_step(
@@ -2821,10 +3169,8 @@ async def _run_offboarding_step(
     mailbox_rules_disabled_count = 0
 
     if disable_sign_in:
-        await _graph_patch(
-            access_token,
-            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}",
-            {"accountEnabled": False},
+        await m365_service.set_user_account_enabled(
+            access_token, user_id, enabled=False
         )
         steps_executed.append("disable_sign_in")
 
@@ -3104,7 +3450,7 @@ async def _execute_policy_steps(
                 if isinstance(parsed_grant, list):
                     grant_emails = [str(e) for e in parsed_grant if e]
             except (json.JSONDecodeError, TypeError):
-                pass
+                grant_emails = []
         vars_map["offboarding.out_of_office_message"] = ooo_message
         vars_map["offboarding.email_forward_to"] = forward_to
         vars_map["offboarding.mailbox_grant_emails"] = grant_emails
@@ -3112,6 +3458,21 @@ async def _execute_policy_steps(
     secret_vars: set[str] = set()
 
     for item in prior_logs:
+        if str(item.get("status")) == "progress" and str(
+            item.get("step_name") or ""
+        ).endswith(":export_state"):
+            progress_payload = item.get("response_payload")
+            if isinstance(progress_payload, str):
+                try:
+                    progress_payload = json.loads(progress_payload)
+                except (TypeError, json.JSONDecodeError):
+                    progress_payload = {}
+            if isinstance(progress_payload, dict) and isinstance(
+                progress_payload.get("onedrive_export_state"), dict
+            ):
+                vars_map["onedrive_export_state"] = progress_payload[
+                    "onedrive_export_state"
+                ]
         if str(item.get("status")) != "success":
             continue
         response_payload = item.get("response_payload")
@@ -3128,6 +3489,10 @@ async def _execute_policy_steps(
                 vars_map[str(key)] = value
             for name in patch.get("secret_vars") or []:
                 secret_vars.add(str(name))
+
+    await _apply_webhook_callback_values(
+        execution_id=execution_id, vars_map=vars_map, secret_vars=secret_vars
+    )
 
     for index, step in enumerate(steps):
         step_name = str(
@@ -3218,6 +3583,36 @@ async def _execute_policy_steps(
         )
         step_failure_policy = _resolve_step_failure_policy(step)
         try:
+            effective_precheck_step = (
+                resolved_step if isinstance(resolved_step, dict) else step
+            )
+            step_secret_vars = set(secret_vars)
+            if str(effective_precheck_step.get("type") or "").strip().lower() in {
+                "generate_password",
+                "generate_kid_friendly_password",
+            }:
+                generated_output = str(
+                    effective_precheck_step.get("output_var") or "generated_password"
+                ).strip()
+                if generated_output:
+                    step_secret_vars.add(generated_output)
+            if str(effective_precheck_step.get("type") or "").strip().lower() == "share_myportal_credential":
+                # A standing portal URL is harmless, but treating every share URL
+                # as sensitive prevents external bearer URLs entering logs/tickets.
+                step_secret_vars.update({"url", "verification_code"})
+            if bool(effective_precheck_step.get("depends_on_onedrive_export")):
+                exception = effective_precheck_step.get("export_exception")
+                exception_authorized = isinstance(exception, dict) and bool(
+                    exception.get("authorized_by") and exception.get("reason")
+                )
+                if (
+                    not bool(vars_map.get("export_verified"))
+                    and not exception_authorized
+                ):
+                    raise WorkflowStepError(
+                        "Destructive step is blocked until the OneDrive export is verified or an authorized exception is recorded",
+                        request_payload={"dependency": "verified_onedrive_export"},
+                    )
             response_payload = await _attempt_step(
                 execution_id=execution_id,
                 step_name=step_name,
@@ -3236,6 +3631,7 @@ async def _execute_policy_steps(
                     execution_id=execution_id,
                     step_name=step_name,
                 ),
+                secret_vars=step_secret_vars,
             )
         except WorkflowStepError as exc:
             if step_failure_policy["mode"] == "continue":
@@ -3278,6 +3674,15 @@ async def _execute_policy_steps(
         )
         context_patch: dict[str, Any] = {"vars": {}, "secret_vars": []}
         effective_step = resolved_step if isinstance(resolved_step, dict) else step
+        if str(effective_step.get("type") or "").strip().lower() in {
+            "generate_password",
+            "generate_kid_friendly_password",
+        }:
+            generated_output = str(
+                effective_step.get("output_var") or "generated_password"
+            ).strip()
+            if generated_output:
+                secret_vars.add(generated_output)
         output_var = str(effective_step.get("output_var") or "").strip()
         if output_var:
             vars_map[output_var] = step_outputs
@@ -3373,21 +3778,22 @@ async def run_staff_onboarding_workflow(
         raise ValueError("Staff not found")
     onboarding_status = str(staff.get("onboarding_status") or "").strip().lower()
 
-    # Look up the specific policy for this workflow key, or fall back to the default.
+    # An execution naming a workflow must match that specifically configured policy;
+    # silently substituting another policy could run steps the company did not choose.
     if workflow_key:
         policy = await workflow_repo.get_company_workflow_policy_by_key(
             company_id, workflow_key, direction
-        ) or await workflow_repo.get_company_workflow_policy(
-            company_id,
-            default_workflow_key=_default_workflow_key(direction),
-            direction=direction,
         )
+        if not policy:
+            return {"state": "skipped", "reason": "workflow_not_configured"}
     else:
         policy = await workflow_repo.get_company_workflow_policy(
             company_id,
             default_workflow_key=_default_workflow_key(direction),
             direction=direction,
         )
+    if not policy.get("is_configured", True):
+        return {"state": "skipped", "reason": "workflow_not_configured"}
     if not policy.get("is_enabled", True):
         return {"state": "skipped", "reason": "workflow_disabled"}
 
@@ -3439,7 +3845,6 @@ async def run_staff_onboarding_workflow(
     resolved_workflow_key = str(
         policy.get("workflow_key") or _default_workflow_key(direction)
     )
-    max_retries = max(0, int(policy.get("max_retries") or 0))
     policy_config = (
         policy.get("config") if isinstance(policy.get("config"), dict) else {}
     )
@@ -3480,6 +3885,7 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
     staff_id: int,
     execution_id: int,
     initiated_by_user_id: int | None,
+    forced_failure: WorkflowStepError | None = None,
 ) -> dict[str, Any]:
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
@@ -3496,17 +3902,19 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
     if exec_workflow_key:
         policy = await workflow_repo.get_company_workflow_policy_by_key(
             company_id, exec_workflow_key, direction
-        ) or await workflow_repo.get_company_workflow_policy(
-            company_id,
-            default_workflow_key=_default_workflow_key(direction),
-            direction=direction,
         )
+        if not policy:
+            return {"state": "skipped", "reason": "workflow_not_configured"}
     else:
         policy = await workflow_repo.get_company_workflow_policy(
             company_id,
             default_workflow_key=_default_workflow_key(direction),
             direction=direction,
         )
+    if not policy.get("is_configured", True):
+        return {"state": "skipped", "reason": "workflow_not_configured"}
+    if not policy.get("is_enabled", True):
+        return {"state": "skipped", "reason": "workflow_disabled"}
     workflow_key = str(policy.get("workflow_key") or _default_workflow_key(direction))
     max_retries = max(0, int(policy.get("max_retries") or 0))
     policy_config = (
@@ -3571,6 +3979,8 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
         )
 
     try:
+        if forced_failure is not None:
+            raise forced_failure
         execution_result = await _execute_policy_steps(
             execution_id=execution_id,
             company_id=company_id,
@@ -3933,15 +4343,18 @@ async def enqueue_staff_onboarding_workflow(
     policies = await workflow_repo.list_company_workflow_policies(
         company_id, direction=direction, enabled_only=True
     )
-    # If no policies configured, fall back to a single default policy
+    # A workflow must be explicitly configured for this company and direction.
+    # Do not manufacture an execution from the repository's compatibility
+    # fallback when a company has never set up a workflow.
     if not policies:
-        policies = [
-            await workflow_repo.get_company_workflow_policy(
-                company_id,
-                default_workflow_key=_default_workflow_key(direction),
-                direction=direction,
-            )
-        ]
+        log_info(
+            "Skipped queuing unconfigured staff workflow",
+            company_id=company_id,
+            staff_id=staff_id,
+            initiated_by_user_id=initiated_by_user_id,
+            direction=direction,
+        )
+        return
 
     queued_state = (
         STATE_OFFBOARDING_APPROVED
@@ -4306,6 +4719,280 @@ async def confirm_external_checkpoint_and_resume(
     )
 
 
+WEBHOOK_OUTCOME_SUCCESS = "success"
+WEBHOOK_OUTCOME_FAILED = "failed"
+_WEBHOOK_VALUE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$")
+_WEBHOOK_RESERVED_VAR_NAMES = frozenset(
+    {
+        "company_id",
+        "company_name",
+        "staff_id",
+        "staff_email",
+        "staff_first_name",
+        "staff_last_name",
+        "staff_full_name",
+        "staff_custom_fields",
+        "requestor_email",
+    }
+)
+_WEBHOOK_RESERVED_VAR_PREFIXES = (
+    "staff.",
+    "staff_custom_fields.",
+    "custom_fields.",
+    "system.",
+    "now.",
+    "offboarding.",
+)
+_WEBHOOK_MAX_VALUES = 50
+_WEBHOOK_MAX_VALUES_BYTES = 32_768
+
+
+def _validate_webhook_value_name(name: Any) -> str:
+    text = str(name or "").strip()
+    if not _WEBHOOK_VALUE_NAME_PATTERN.fullmatch(text):
+        raise ValueError(
+            f"Invalid value name '{text}': use 1-64 letters, numbers, '_', '-' or '.'"
+        )
+    lowered = text.lower()
+    if lowered in _WEBHOOK_RESERVED_VAR_NAMES or lowered.startswith(
+        _WEBHOOK_RESERVED_VAR_PREFIXES
+    ):
+        raise ValueError(f"Value name '{text}' is reserved by the workflow")
+    return text
+
+
+def _normalise_webhook_values(
+    values: dict[str, Any] | None,
+    secret_values: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Validate callback values and split them into plain and secret sets.
+
+    Names that look sensitive (password, token, secret...) are treated as
+    secret even when sent in ``values`` so they never land in logs unredacted.
+    """
+    plain: dict[str, Any] = {}
+    secret: dict[str, str] = {}
+    for raw_name, value in (values or {}).items():
+        name = _validate_webhook_value_name(raw_name)
+        if _is_secret_var(name):
+            secret[name] = value if isinstance(value, str) else json.dumps(value)
+        else:
+            plain[name] = value
+    for raw_name, value in (secret_values or {}).items():
+        name = _validate_webhook_value_name(raw_name)
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"Secret value '{name}' must be a string")
+        plain.pop(name, None)
+        secret[name] = value or ""
+    if len(plain) + len(secret) > _WEBHOOK_MAX_VALUES:
+        raise ValueError(f"No more than {_WEBHOOK_MAX_VALUES} values may be supplied")
+    encoded_size = len(json.dumps(plain, default=str)) + sum(
+        len(item) for item in secret.values()
+    )
+    if encoded_size > _WEBHOOK_MAX_VALUES_BYTES:
+        raise ValueError("Callback values are too large")
+    return plain, secret
+
+
+async def _apply_webhook_callback_values(
+    *,
+    execution_id: int,
+    vars_map: dict[str, Any],
+    secret_vars: set[str],
+) -> None:
+    """Load values returned by external scripts via Pause For Webhook callbacks."""
+    checkpoints = (
+        await workflow_repo.list_external_checkpoints_for_execution_ids([execution_id])
+    ).get(execution_id, [])
+    for checkpoint in checkpoints:
+        if str(checkpoint.get("status") or "") != "confirmed":
+            continue
+        raw_payload = checkpoint.get("callback_payload_json")
+        if isinstance(raw_payload, str):
+            try:
+                raw_payload = json.loads(raw_payload)
+            except (TypeError, json.JSONDecodeError):
+                continue
+        if not isinstance(raw_payload, dict):
+            continue
+        plain_values = raw_payload.get("values")
+        if isinstance(plain_values, dict):
+            for name, value in plain_values.items():
+                vars_map[str(name)] = value
+        encrypted_values = raw_payload.get("secret_values_encrypted")
+        if isinstance(encrypted_values, dict):
+            for name, ciphertext in encrypted_values.items():
+                try:
+                    vars_map[str(name)] = decrypt_secret(str(ciphertext))
+                except Exception as exc:  # noqa: BLE001
+                    log_warning(
+                        "Unable to decrypt workflow webhook secret value",
+                        execution_id=execution_id,
+                        name=str(name),
+                        error=str(exc),
+                    )
+                    continue
+                secret_vars.add(str(name))
+
+
+def _workflow_webhook_url(webhook_public_id: str) -> str:
+    settings = get_settings()
+    base_url = (
+        str(settings.public_base_url or settings.portal_url or "").strip().rstrip("/")
+    )
+    webhook_path = f"/api/staff/workflow-webhooks/{webhook_public_id}"
+    return f"{base_url}{webhook_path}" if base_url else webhook_path
+
+
+def _verify_webhook_post_key(checkpoint: dict[str, Any], post_key: str) -> None:
+    expected_hash = str(checkpoint.get("webhook_post_key_hash") or "")
+    if not expected_hash or not secrets.compare_digest(
+        expected_hash, hash_api_key(post_key)
+    ):
+        raise PermissionError("Invalid webhook POST key")
+
+
+def _staff_detail_for_external_script(
+    staff: dict[str, Any], custom_fields: dict[str, Any]
+) -> dict[str, Any]:
+    detail: dict[str, Any] = {
+        "id": int(staff.get("id") or 0),
+        "companyId": int(staff.get("company_id") or 0),
+        "firstName": staff.get("first_name"),
+        "lastName": staff.get("last_name"),
+        "email": staff.get("email"),
+        "mobilePhone": staff.get("mobile_phone"),
+        "dateOnboarded": _serialise_dt(staff.get("date_onboarded")),
+        "dateOffboarded": _serialise_dt(staff.get("date_offboarded")),
+        "street": staff.get("street"),
+        "city": staff.get("city"),
+        "state": staff.get("state"),
+        "postcode": staff.get("postcode"),
+        "country": staff.get("country"),
+        "department": staff.get("department"),
+        "jobTitle": staff.get("job_title"),
+        "orgCompany": staff.get("org_company"),
+        "managerName": staff.get("manager_name"),
+        "accountAction": staff.get("account_action"),
+        "requestNotes": staff.get("request_notes"),
+        "requestedAt": _serialise_dt(staff.get("requested_at")),
+        "requestedByUserId": _coerce_positive_int(staff.get("requested_by_user_id")),
+        "requestedByName": staff.get("requested_by_name"),
+        "requestedByEmail": staff.get("requested_by_email"),
+        "approvedAt": _serialise_dt(staff.get("approved_at")),
+        "customFields": dict(custom_fields or {}),
+    }
+    if str(staff.get("offboarding_out_of_office") or "").strip() or staff.get(
+        "offboarding_email_forward_to"
+    ) or staff.get("offboarding_mailbox_grant_emails"):
+        grant_emails: list[str] = []
+        raw_grant = staff.get("offboarding_mailbox_grant_emails")
+        if isinstance(raw_grant, str) and raw_grant.strip():
+            try:
+                parsed_grant = json.loads(raw_grant)
+            except (TypeError, json.JSONDecodeError):
+                parsed_grant = []
+            if isinstance(parsed_grant, list):
+                grant_emails = [str(item) for item in parsed_grant if item]
+        elif isinstance(raw_grant, list):
+            grant_emails = [str(item) for item in raw_grant if item]
+        detail["offboarding"] = {
+            "outOfOfficeMessage": staff.get("offboarding_out_of_office"),
+            "emailForwardTo": staff.get("offboarding_email_forward_to"),
+            "mailboxGrantEmails": grant_emails,
+        }
+    return detail
+
+
+async def _with_requested_by_details(staff: dict[str, Any]) -> dict[str, Any]:
+    """Fill the requester name/email snapshot for rows created before it existed."""
+    if staff.get("requested_by_name") and staff.get("requested_by_email"):
+        return staff
+    requester_id = _coerce_positive_int(staff.get("requested_by_user_id"))
+    if requester_id is None:
+        return staff
+    name, email = requested_by_details(await user_repo.get_user_by_id(requester_id))
+    return {
+        **staff,
+        "requested_by_name": staff.get("requested_by_name") or name,
+        "requested_by_email": staff.get("requested_by_email") or email,
+    }
+
+
+async def list_pending_webhook_checkpoints(
+    *,
+    webhook_public_id: str,
+    post_key: str,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """List workflows paused on a Pause For Webhook step for an external script.
+
+    Authenticated by the same per-step POST key used to resume the workflow, so a
+    script can only see the workflows it is allowed to resume.
+    """
+    checkpoints = await workflow_repo.list_pending_external_checkpoints_by_webhook_id(
+        webhook_public_id,
+        waiting_states=(STATE_WAITING_EXTERNAL, STATE_OFFBOARDING_WAITING_EXTERNAL),
+        limit=limit,
+    )
+    if not checkpoints:
+        return []
+    for checkpoint in checkpoints:
+        _verify_webhook_post_key(checkpoint, post_key)
+
+    staff_ids_by_company: dict[int, list[int]] = {}
+    for checkpoint in checkpoints:
+        staff_ids_by_company.setdefault(int(checkpoint["company_id"]), []).append(
+            int(checkpoint["staff_id"])
+        )
+    custom_fields_by_staff: dict[int, dict[str, Any]] = {}
+    for company_id, staff_ids in staff_ids_by_company.items():
+        custom_fields_by_staff.update(
+            await staff_custom_fields_repo.get_all_staff_field_values(
+                company_id, staff_ids
+            )
+        )
+    company_names: dict[int, str | None] = {}
+    for company_id in staff_ids_by_company:
+        company = await company_repo.get_company_by_id(company_id)
+        company_names[company_id] = (company or {}).get("name")
+
+    webhook_url = _workflow_webhook_url(webhook_public_id)
+    items: list[dict[str, Any]] = []
+    for checkpoint in checkpoints:
+        staff_id = int(checkpoint["staff_id"])
+        staff = await staff_repo.get_staff_by_id(staff_id)
+        if not staff:
+            continue
+        staff = await _with_requested_by_details(staff)
+        company_id = int(checkpoint["company_id"])
+        items.append(
+            {
+                "executionId": int(checkpoint["execution_id"]),
+                "companyId": company_id,
+                "companyName": company_names.get(company_id),
+                "staffId": staff_id,
+                "direction": str(
+                    checkpoint.get("execution_direction") or DIRECTION_ONBOARDING
+                ),
+                "workflowKey": checkpoint.get("execution_workflow_key"),
+                "state": checkpoint.get("execution_state"),
+                "stepName": _external_checkpoint_step_name(
+                    {"current_step": checkpoint.get("execution_current_step")}
+                ),
+                "pausedAt": _serialise_dt(checkpoint.get("created_at")),
+                "requestedAt": _serialise_dt(checkpoint.get("execution_requested_at")),
+                "requestedByName": staff.get("requested_by_name"),
+                "requestedByEmail": staff.get("requested_by_email"),
+                "resumeUrl": webhook_url,
+                "staff": _staff_detail_for_external_script(
+                    staff, custom_fields_by_staff.get(staff_id, {})
+                ),
+            }
+        )
+    return items
+
+
 async def confirm_webhook_checkpoint_and_resume(
     *,
     webhook_public_id: str,
@@ -4314,7 +5001,15 @@ async def confirm_webhook_checkpoint_and_resume(
     callback_payload: dict[str, Any] | None,
     company_id: int | None = None,
     staff_id: int | None = None,
+    values: dict[str, Any] | None = None,
+    secret_values: dict[str, Any] | None = None,
+    outcome: str = WEBHOOK_OUTCOME_SUCCESS,
+    error_message: str | None = None,
 ) -> dict[str, Any]:
+    outcome = str(outcome or WEBHOOK_OUTCOME_SUCCESS).strip().lower()
+    if outcome not in {WEBHOOK_OUTCOME_SUCCESS, WEBHOOK_OUTCOME_FAILED}:
+        raise ValueError("outcome must be 'success' or 'failed'")
+    plain_values, secret_value_map = _normalise_webhook_values(values, secret_values)
     checkpoint = await workflow_repo.get_pending_external_checkpoint_by_webhook_id(
         webhook_public_id=webhook_public_id,
         company_id=company_id,
@@ -4322,21 +5017,30 @@ async def confirm_webhook_checkpoint_and_resume(
     )
     if not checkpoint:
         raise ValueError("Invalid or already completed webhook URL")
-    expected_hash = str(checkpoint.get("webhook_post_key_hash") or "")
-    if not expected_hash or not secrets.compare_digest(
-        expected_hash, hash_api_key(post_key)
-    ):
-        raise ValueError("Invalid webhook POST key")
+    try:
+        _verify_webhook_post_key(checkpoint, post_key)
+    except PermissionError as exc:
+        raise ValueError(str(exc)) from exc
     company_id = int(checkpoint["company_id"])
     staff_id = int(checkpoint["staff_id"])
     execution_id = int(checkpoint["execution_id"])
+    stored_payload: dict[str, Any] = {
+        "payload": callback_payload or {},
+        "outcome": outcome,
+        "values": plain_values,
+        "secret_values_encrypted": {
+            name: encrypt_secret(value) for name, value in secret_value_map.items()
+        },
+    }
+    if error_message:
+        stored_payload["error"] = error_message
     await workflow_repo.confirm_external_checkpoint(
         int(checkpoint["id"]),
         source=source[:128],
         callback_timestamp=_utc_now_naive(),
         proof_reference_id=webhook_public_id,
         payload_hash=None,
-        callback_payload=callback_payload or {},
+        callback_payload=stored_payload,
         confirmed_by_api_key_id=None,
     )
     await audit_service.log_action(
@@ -4348,21 +5052,54 @@ async def confirm_webhook_checkpoint_and_resume(
             "company_id": company_id,
             "execution_id": execution_id,
             "webhook_public_id": webhook_public_id,
+            "outcome": outcome,
+            "value_names": sorted([*plain_values, *secret_value_map]),
         },
     )
     execution = await workflow_repo.get_execution_by_id(execution_id) or {
         "id": execution_id
     }
-    await _mark_external_checkpoint_step_success(
-        execution_record=execution,
-        source=source,
-        response_payload={"webhook_public_id": webhook_public_id},
-    )
+    step_response = {
+        "webhook_public_id": webhook_public_id,
+        "outcome": outcome,
+        "values": {
+            **plain_values,
+            **{name: "***redacted***" for name in secret_value_map},
+        },
+    }
+    forced_failure: WorkflowStepError | None = None
+    if outcome == WEBHOOK_OUTCOME_FAILED:
+        step_name = _external_checkpoint_step_name(execution)
+        error_text = (
+            str(error_message or "").strip()
+            or "External script reported failure via workflow webhook"
+        )
+        await workflow_repo.append_step_log(
+            execution_id=execution_id,
+            step_name=step_name,
+            status="failed",
+            attempt=1,
+            request_payload={"source": source, "current_step": execution.get("current_step")},
+            response_payload=step_response,
+            error_message=error_text,
+        )
+        forced_failure = WorkflowStepError(
+            error_text,
+            step_name=step_name,
+            request_payload={"source": source, "outcome": outcome},
+        )
+    else:
+        await _mark_external_checkpoint_step_success(
+            execution_record=execution,
+            source=source,
+            response_payload=step_response,
+        )
     result = await resume_staff_onboarding_workflow_after_external_confirmation(
         company_id=company_id,
         staff_id=staff_id,
         execution_id=execution_id,
         initiated_by_user_id=None,
+        forced_failure=forced_failure,
     )
     result.setdefault("company_id", company_id)
     result.setdefault("staff_id", staff_id)

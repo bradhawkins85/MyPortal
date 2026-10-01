@@ -96,13 +96,6 @@ async def tracking_pixel(
             referrer=referrer,
         )
         
-        # Optionally send to Plausible (if configured)
-        await email_tracking.send_event_to_plausible(
-            event_type='open',
-            tracking_id=tracking_id,
-            user_agent=user_agent,
-            ip_address=ip_address,
-        )
     except Exception as exc:
         # Log error but still return the pixel
         logger.error(
@@ -175,14 +168,6 @@ async def tracking_click(
             referrer=referrer,
         )
         
-        # Optionally send to Plausible (if configured)
-        await email_tracking.send_event_to_plausible(
-            event_type='click',
-            tracking_id=tid,
-            event_url=destination_url,
-            user_agent=user_agent,
-            ip_address=ip_address,
-        )
     except Exception as exc:
         # Log error but still redirect
         logger.error(
@@ -208,7 +193,16 @@ async def tracking_status(
         
     Returns:
         Dict with tracking status
+
+    Tracking ids belong to ticket reply emails, so open counts are only
+    disclosed to helpdesk staff (super admins and helpdesk technicians).
     """
+    # Avoid an import cycle with app.api.routes.tickets at module load time.
+    from app.api.routes.tickets import _has_helpdesk_permission
+
+    if not await _has_helpdesk_permission(current_user):
+        raise HTTPException(status_code=403, detail="Helpdesk technician privileges required")
+
     status = await email_tracking.get_tracking_status(tracking_id)
     
     if not status:
@@ -309,6 +303,14 @@ async def list_reply_recipients(
         # Don't leak ticket existence to unauthorised callers.
         raise HTTPException(status_code=404, detail="Reply not found")
 
+    try:
+        await email_recipients.refresh_m365_read_status(reply_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        # A read-status refresh failure must not hide the recorded
+        # delivery information from the popup.
+        logger.opt(exception=True).warning(
+            "Failed to refresh M365 read status", reply_id=reply_id, error=str(exc)
+        )
     rows = await email_recipients.get_recipients_for_reply(reply_id)
 
     formatted: list[dict[str, object]] = []
@@ -335,6 +337,9 @@ async def list_reply_recipients(
                 "last_event_at": _iso(row.get("last_event_at")),
                 "last_event_type": row.get("last_event_type"),
                 "last_event_detail": row.get("last_event_detail"),
+                "m365_operation": row.get("m365_operation"),
+                "m365_state": row.get("m365_state"),
+                "m365_read_state": row.get("m365_read_state"),
             }
         )
 

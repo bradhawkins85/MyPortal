@@ -21,7 +21,7 @@ def test_hash_allows_passwords_longer_than_bcrypt_limit():
     password = "A" * 100
     hashed = hash_password(password)
 
-    assert hashed.startswith("bcrypt_sha256$")
+    assert hashed.startswith("pbkdf2_sha256$")
     assert verify_password(password, hashed)
 
 
@@ -38,5 +38,13 @@ def test_verify_password_rejects_incorrect_password():
 
 def test_verify_password_accepts_legacy_bcrypt_hashes():
     legacy_hash = bcrypt.hashpw(b"legacy-secret", bcrypt.gensalt()).decode()
+    assert verify_password("legacy-secret", legacy_hash)
+    assert not verify_password("legacy-secret-wrong", legacy_hash)
+
+
+def test_verify_password_accepts_legacy_custom_bcrypt_sha256_hashes():
+    digest = passwords.sha256(b"legacy-secret").digest()
+    stored = bcrypt.hashpw(digest, bcrypt.gensalt()).decode()
+    legacy_hash = f"bcrypt_sha256${stored}"
     assert verify_password("legacy-secret", legacy_hash)
     assert not verify_password("legacy-secret-wrong", legacy_hash)

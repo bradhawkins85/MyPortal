@@ -1,0 +1,7 @@
+{
+  "guid": "1a0d2cc9-4dee-4009-88cc-6f241f91b229",
+  "occurred_at": "2026-09-27T05:28Z",
+  "change_type": "Feature",
+  "summary": "Redesigned the Edit rack item and Edit reservation dialogs with image type cards, a live faceplate and item summary, port link counts, and a mini-rack showing the item's position.",
+  "content_hash": "2d92183ddb78724c38b30eac548da864776d6af3f0c6de9780d0be8ff107cc78"
+}

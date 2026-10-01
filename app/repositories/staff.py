@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timezone
-from typing import Any, Iterable, List, Sequence
+from typing import Any, Iterable, List
 
 from app.core.database import db
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
@@ -128,7 +128,7 @@ async def count_staff(
         conditions.append("NOT (LOWER(SUBSTR(email, 1, 8)) = 'package_')")
     where_clause = " AND ".join(conditions)
     row = await db.fetch_one(
-        f"SELECT COUNT(*) AS count FROM staff WHERE {where_clause}",
+        f"SELECT COUNT(*) AS count FROM staff WHERE {where_clause}",  # nosec B608
         tuple(params),
     )
     return int(row["count"]) if row else 0
@@ -248,7 +248,7 @@ async def list_staff(
         WHERE {where}
         ORDER BY s.updated_at ASC, s.id ASC
         LIMIT %s
-        """.format(
+        """.format(  # nosec B608
             where=where_clause,
             portal_last_login_select=portal_last_login_select,
             portal_last_login_join=portal_last_login_join,
@@ -283,6 +283,7 @@ async def list_enabled_staff_users(company_id: int) -> List[dict[str, Any]]:
             COALESCE(NULLIF(u.email, ''), s.email) AS email,
             COALESCE(NULLIF(u.first_name, ''), s.first_name) AS first_name,
             COALESCE(NULLIF(u.last_name, ''), s.last_name) AS last_name,
+            s.mobile_phone AS mobile_phone,
             s.company_id AS company_id,
             s.created_at AS created_at,
             s.updated_at AS updated_at,
@@ -375,6 +376,18 @@ async def list_staff_with_users(company_id: int) -> list[dict[str, Any]]:
             entry["user_id"] = None
         results.append(entry)
     return results
+
+
+async def link_portal_user(staff_id: int, company_id: int, user_id: int) -> bool:
+    """Create the explicit staff identity link after an approved access assignment."""
+    changed = await db.execute_rowcount(
+        "UPDATE staff SET portal_user_id = %s WHERE id = %s AND company_id = %s "
+        "AND enabled = 1 AND (portal_user_id IS NULL OR portal_user_id = %s) "
+        "AND NOT EXISTS (SELECT 1 FROM staff duplicate WHERE duplicate.company_id = %s "
+        "AND duplicate.portal_user_id = %s AND duplicate.enabled = 1 AND duplicate.id <> %s)",
+        (user_id, staff_id, company_id, user_id, company_id, user_id, staff_id),
+    )
+    return changed == 1
 
 
 async def list_all_staff(
@@ -515,6 +528,14 @@ async def get_staff_by_id(staff_id: int) -> dict[str, Any] | None:
     return mapped
 
 
+async def update_mobile_phone(staff_id: int, mobile_phone: str) -> None:
+    """Update only the mobile number on an existing staff record."""
+    await db.execute(
+        "UPDATE staff SET mobile_phone = %s WHERE id = %s",
+        (mobile_phone, staff_id),
+    )
+
+
 async def get_staff_by_company_and_email(
     company_id: int, email: str
 ) -> dict[str, Any] | None:
@@ -576,14 +597,29 @@ async def create_staff(
     onboarding_completed_at: datetime | None = None,
     approval_status: str = "pending",
     requested_by_user_id: int | None = None,
+    requested_by_name: str | None = None,
+    requested_by_email: str | None = None,
     requested_at: datetime | None = None,
     approved_by_user_id: int | None = None,
     approved_at: datetime | None = None,
     request_notes: str | None = None,
     approval_notes: str | None = None,
 ) -> dict[str, Any]:
+    # Requester snapshot columns are only written when supplied so staff can
+    # still be created by imports/syncs that never set them.
+    requested_by = {
+        column: value
+        for column, value in (
+            ("requested_by_name", requested_by_name),
+            ("requested_by_email", requested_by_email),
+        )
+        if value is not None
+    }
+    requested_by_columns = "".join(f",\n            {column}" for column in requested_by)
+    requested_by_placeholders = ", %s" * len(requested_by)
+    requested_by_values = list(requested_by.values())
     staff_id = await db.execute_returning_lastrowid(
-        """
+        f"""
         INSERT INTO staff (
             company_id,
             first_name,
@@ -616,9 +652,9 @@ async def create_staff(
             approved_by_user_id,
             approved_at,
             request_notes,
-            approval_notes
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
+            approval_notes{requested_by_columns}
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s{requested_by_placeholders})
+        """,  # nosec B608 - columns are fixed names
         (
             company_id,
             first_name,
@@ -652,6 +688,7 @@ async def create_staff(
             _coerce_datetime(approved_at),
             request_notes,
             approval_notes,
+            *requested_by_values,
         ),
     )
     if not staff_id:
@@ -690,6 +727,8 @@ async def update_staff(
     onboarding_completed_at: datetime | None = None,
     approval_status: str | None = None,
     requested_by_user_id: int | None = None,
+    requested_by_name: str | None = None,
+    requested_by_email: str | None = None,
     requested_at: datetime | None = None,
     approved_by_user_id: int | None = None,
     approved_at: datetime | None = None,
@@ -700,8 +739,18 @@ async def update_staff(
     offboarding_email_forward_to: str | None = None,
     offboarding_mailbox_grant_emails: str | None = None,
 ) -> dict[str, Any]:
+    # Only reference the requester snapshot columns when a value is supplied so
+    # routine updates (e.g. workflow status changes) never depend on them.
+    requested_by_clause = ""
+    requested_by_params: list[Any] = []
+    if requested_by_name is not None:
+        requested_by_clause += "            requested_by_name = %s,\n"
+        requested_by_params.append(requested_by_name)
+    if requested_by_email is not None:
+        requested_by_clause += "            requested_by_email = %s,\n"
+        requested_by_params.append(requested_by_email)
     await db.execute(
-        """
+        f"""
         UPDATE staff
         SET
             company_id = %s,
@@ -729,7 +778,7 @@ async def update_staff(
             onboarding_completed_at = COALESCE(%s, onboarding_completed_at),
             approval_status = COALESCE(%s, approval_status),
             requested_by_user_id = COALESCE(%s, requested_by_user_id),
-            requested_at = COALESCE(%s, requested_at),
+{requested_by_clause}            requested_at = COALESCE(%s, requested_at),
             approved_by_user_id = COALESCE(%s, approved_by_user_id),
             approved_at = COALESCE(%s, approved_at),
             request_notes = COALESCE(%s, request_notes),
@@ -739,7 +788,7 @@ async def update_staff(
             offboarding_email_forward_to = COALESCE(%s, offboarding_email_forward_to),
             offboarding_mailbox_grant_emails = COALESCE(%s, offboarding_mailbox_grant_emails)
         WHERE id = %s
-        """,
+        """,  # nosec B608 - clause is built from fixed column names
         (
             company_id,
             first_name,
@@ -770,6 +819,7 @@ async def update_staff(
             _coerce_datetime(onboarding_completed_at),
             approval_status,
             requested_by_user_id,
+            *requested_by_params,
             _coerce_datetime(requested_at),
             approved_by_user_id,
             _coerce_datetime(approved_at),
@@ -860,7 +910,7 @@ async def list_active_staff_for_offboarding(
         FROM staff AS s
         WHERE {where}
         ORDER BY s.last_name, s.first_name, s.email
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return _dedupe_by_normalized_email([dict(row) for row in rows])

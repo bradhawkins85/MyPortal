@@ -106,7 +106,7 @@ async def list_change_log_entries(
         {where}
         ORDER BY occurred_at_utc DESC
         LIMIT %s
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return [row for row in (_normalise_row(row) for row in rows) if row]

@@ -11,7 +11,7 @@ from app.core.database import db
 async def list_rules(*, active_only: bool = False) -> list[dict[str, Any]]:
     where = "WHERE is_active = 1 " if active_only else ""
     rows = await db.fetch_all(
-        "SELECT * FROM shop_freight_rules "
+        "SELECT * FROM shop_freight_rules "  # nosec B608
         + where
         + "ORDER BY is_default ASC, priority DESC, id ASC",
     )

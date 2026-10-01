@@ -5,7 +5,8 @@
 // If that directory cannot be created or written to (typical for the UI
 // agent running as a non-elevated user against C:\Program Files), the
 // logger falls back to the platform-standard location:
-//   - Windows: %ProgramData%\MyPortal\tray\logs\<name>.log
+//   - Windows: %LocalAppData%\MyPortal\tray\logs\<name>.log, then
+//     %ProgramData%\MyPortal\tray\logs\<name>.log
 //   - macOS:   /Library/Logs/MyPortal/tray/<name>.log
 //
 // Standard output is also used (captured by systemd / launchd / the
@@ -25,11 +26,11 @@ import (
 )
 
 var (
-	mu       sync.Mutex
-	writer   io.Writer = os.Stdout
-	logger             = log.New(os.Stdout, "", 0)
-	debug    bool
-	logPath  string
+	mu      sync.Mutex
+	writer  io.Writer = os.Stdout
+	logger            = log.New(os.Stdout, "", 0)
+	debug   bool
+	logPath string
 )
 
 // Init opens the platform log file in addition to stdout. Debug logging is
@@ -114,7 +115,7 @@ func enableDebugFromEnv() {
 
 // candidateLogDirs returns the preferred log directories in priority order:
 //  1. <executable directory>/logs
-//  2. Platform-standard fallback (writable by the running user's privilege).
+//  2. Platform-standard fallbacks (including a per-user writable directory).
 func candidateLogDirs() []string {
 	var dirs []string
 	if exe, err := os.Executable(); err == nil {
@@ -123,20 +124,24 @@ func candidateLogDirs() []string {
 		}
 		dirs = append(dirs, filepath.Join(filepath.Dir(exe), "logs"))
 	}
-	dirs = append(dirs, platformFallbackDir())
+	dirs = append(dirs, platformFallbackDirs()...)
 	return dirs
 }
 
-func platformFallbackDir() string {
+func platformFallbackDirs() []string {
 	switch runtime.GOOS {
 	case "windows":
+		var dirs []string
+		if localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); localAppData != "" {
+			dirs = append(dirs, filepath.Join(localAppData, "MyPortal", "tray", "logs"))
+		}
 		base := os.Getenv("ProgramData")
 		if base == "" {
 			base = `C:\ProgramData`
 		}
-		return filepath.Join(base, "MyPortal", "tray", "logs")
+		return append(dirs, filepath.Join(base, "MyPortal", "tray", "logs"))
 	default:
-		return "/Library/Logs/MyPortal/tray"
+		return []string{"/Library/Logs/MyPortal/tray"}
 	}
 }
 

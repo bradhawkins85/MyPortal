@@ -1,0 +1,7 @@
+{
+  "guid": "1ffb6c66-db6f-4113-90bc-c3436117994e",
+  "occurred_at": "2026-09-17T23:00Z",
+  "change_type": "Fix",
+  "summary": "Prevent Purview preflight failures from causing internal server errors during spam search and purge operations",
+  "content_hash": "31dc84cc89423cb6759a0a3d136af3ebf2bf671d6604711b45f0f0cd32b2fcf5"
+}

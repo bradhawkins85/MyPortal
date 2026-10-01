@@ -4,6 +4,14 @@ from typing import Any, Iterable
 
 from app.core.database import db
 
+_SQL_UPSERT_NOTIFICATION_PREFERENCES = (
+    "INSERT INTO notification_preferences "
+    "(user_id, event_type, channel_in_app, channel_email, channel_sms) VALUES "
+)
+_SQL_DELETE_NOTIFICATION_PREFERENCES_NOT_IN = (
+    "DELETE FROM notification_preferences WHERE user_id = %s AND event_type NOT IN "
+)
+
 
 def _coerce_bool(value: Any, *, default: bool = False) -> bool:
     if isinstance(value, bool):
@@ -79,10 +87,11 @@ async def upsert_preferences(user_id: int, preferences: Iterable[dict[str, Any]]
         params: list[Any] = []
         for row in prepared:
             params.extend(row)
+        # VALUES placeholders are derived only from the prepared row count; all user data stays bound.
         await db.execute(
-            f"""
-            INSERT INTO notification_preferences (user_id, event_type, channel_in_app, channel_email, channel_sms)
-            VALUES {values}
+            _SQL_UPSERT_NOTIFICATION_PREFERENCES
+            + values
+            + """
             ON DUPLICATE KEY UPDATE
                 channel_in_app = VALUES(channel_in_app),
                 channel_email = VALUES(channel_email),
@@ -96,11 +105,9 @@ async def upsert_preferences(user_id: int, preferences: Iterable[dict[str, Any]]
 
     if normalised_event_types:
         placeholders = ", ".join(["%s"] * len(normalised_event_types))
+        # The NOT IN placeholders are derived only from normalised event-type count; values remain bound.
         await db.execute(
-            f"""
-            DELETE FROM notification_preferences
-            WHERE user_id = %s AND event_type NOT IN ({placeholders})
-            """,
+            _SQL_DELETE_NOTIFICATION_PREFERENCES_NOT_IN + "(" + placeholders + ")",
             tuple([user_id] + normalised_event_types),
         )
     else:

@@ -213,3 +213,47 @@ async def test_offboarding_deny_requires_reason(monkeypatch):
 
     assert exc.value.status_code == 400
     assert "reason" in str(exc.value.detail).lower()
+
+
+@pytest.mark.anyio
+async def test_request_approval_reactivates_existing_staff_and_queues_workflow(monkeypatch):
+    from app.api.routes import staff
+    from app.schemas.staff import StaffApprovalDecision
+
+    request_record = {
+        "id": 31, "company_id": 4, "first_name": "Ada", "last_name": "Lovelace",
+        "email": "ada@example.com", "enabled": True, "status": "pending",
+        "custom_fields": {"Office": "London"},
+    }
+    existing_record = {
+        "id": 22, "company_id": 4, "first_name": "Ada", "last_name": "Lovelace",
+        "email": "ada@example.com", "enabled": False, "is_ex_staff": True,
+    }
+    monkeypatch.setattr(staff.staff_requests_repo, "get_request_by_id", AsyncMock(return_value=request_record))
+    monkeypatch.setattr(staff, "_require_staff_approval_access", AsyncMock())
+    monkeypatch.setattr(staff.staff_repo, "list_staff_by_email", AsyncMock(return_value=[existing_record]))
+    update_staff_mock = AsyncMock(return_value=existing_record)
+    monkeypatch.setattr(staff.staff_repo, "update_staff", update_staff_mock)
+    custom_fields_mock = AsyncMock()
+    monkeypatch.setattr(staff.staff_custom_fields_repo, "set_staff_field_values_by_name", custom_fields_mock)
+    enqueue_mock = AsyncMock()
+    monkeypatch.setattr(staff.staff_onboarding_workflow_service, "enqueue_staff_onboarding_workflow", enqueue_mock)
+    monkeypatch.setattr(
+        staff.staff_requests_repo, "update_request_status",
+        AsyncMock(return_value={**request_record, "status": "approved", "staff_id": 22}),
+    )
+    monkeypatch.setattr(staff.audit_service, "log_action", AsyncMock())
+
+    result = await staff.approve_staff_request_entry(
+        request_id=31, payload=StaffApprovalDecision(comment="Approved"),
+        _=None, current_user={"id": 99, "is_super_admin": True},
+    )
+
+    assert result.staff_id == 22
+    updated = update_staff_mock.await_args.kwargs
+    assert updated["enabled"] is True
+    assert updated["is_ex_staff"] is False
+    assert updated["onboarding_status"] == "approved"
+    assert updated["approval_status"] == "approved"
+    custom_fields_mock.assert_awaited_once_with(company_id=4, staff_id=22, values={"Office": "London"})
+    enqueue_mock.assert_awaited_once_with(company_id=4, staff_id=22, initiated_by_user_id=99)

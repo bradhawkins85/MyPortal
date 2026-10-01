@@ -28,6 +28,54 @@ list. The most useful ones:
 | `LOG_RETENTION` | `30 days` | How long rotated log files are kept. |
 | `LOG_COMPRESSION` | `gz` | Compression format for rotated files. Set empty to keep them uncompressed. |
 | `ERROR_LOG_PATH` | _unset_ | Optional second sink that receives **WARNING and above only**. Useful for tailing "just the bad stuff". Inherits the same rotation settings. |
+| `TRUSTED_PROXIES` | _unset_ | Comma-separated IP addresses/CIDRs of reverse proxies allowed to supply client-IP headers. The service startup wrapper applies the same boundary to Uvicorn access logs. |
+
+### Client IPs behind Traefik
+
+Traefik sends the original connection address in `X-Forwarded-For`. MyPortal
+deliberately ignores that header until the **direct Traefik peer** is trusted;
+otherwise an Internet client could spoof log, audit, allow-list, and rate-limit
+addresses. Set `TRUSTED_PROXIES` in `/etc/myportal.env` to the narrowest address
+or network that contains the Traefik-to-MyPortal connection, for example:
+
+```dotenv
+# Traefik is 172.20.0.5 on a dedicated Docker network
+TRUSTED_PROXIES=172.20.0.5
+
+# Or, if container addressing is dynamic, trust only that dedicated subnet
+# TRUSTED_PROXIES=172.20.0.0/24
+```
+
+Restart MyPortal after changing the environment. Deployments using
+`scripts/start_with_auto_update.sh` automatically pass this value to Uvicorn's
+`--forwarded-allow-ips`, which makes both MyPortal's structured `client_ip` and
+Uvicorn's console access address show the user IP. A custom Uvicorn command must
+set the equivalent options itself:
+
+```bash
+uvicorn app.main:app --proxy-headers --forwarded-allow-ips '172.20.0.0/24'
+```
+
+No Traefik middleware is required when Traefik accepts the user connection
+directly. If another proxy or CDN sits in front, configure Traefik's static
+entry-point `forwardedHeaders.trustedIPs` with only that upstream proxy's source
+ranges so Traefik accepts its forwarded address. Do not enable the insecure
+trust-all mode. For example:
+
+```yaml
+entryPoints:
+  websecure:
+    address: ":443"
+    forwardedHeaders:
+      trustedIPs:
+        - "192.0.2.10/32" # upstream load balancer; replace with its real range
+```
+
+For Traefik's own JSON access log, retain the `ClientHost` field (and optionally
+`ClientAddr`); `ClientHost` is the resolved client IP. Treat the Traefik trust
+list and MyPortal's list as two distinct hops: Traefik trusts only its upstream,
+while MyPortal trusts only Traefik. Never expose the MyPortal/Uvicorn port
+directly to untrusted networks.
 
 ### Context enrichment
 
@@ -39,7 +87,8 @@ tagged with:
 - `user_id` — populated by the authentication dependencies
   (`get_current_user` / `get_optional_user`) once the request is identified.
 - `route` — the matched route path, e.g. `/api/tickets/{ticket_id}`.
-- `client_ip` — the originating IP, honouring `X-Forwarded-For` when present.
+- `client_ip` — the originating IP, honouring `X-Forwarded-For` only when the
+  direct peer matches `TRUSTED_PROXIES`.
 
 These are all bound through `contextvars`, so they survive across
 `async`/`await` hops within the request and are cleared automatically when
@@ -57,6 +106,12 @@ the response is sent.
 ---
 
 ## Audit logs
+
+The normative event classification, required fields, action grammar, high-risk
+coverage matrix, and contributor checklist are maintained in
+[`docs/security/audit-logging-policy.md`](../../security/audit-logging-policy.md).
+This page describes operation of the logging system; where the two differ, the
+security policy is authoritative.
 
 The canonical recording API is **`app.services.audit.record(...)`**. Use it
 instead of `log_action` for any new code:
@@ -100,7 +155,7 @@ following are in use today; please reuse them when adding new audit calls:
 | --- | --- |
 | Users | `user.create`, `user.update`, `user.delete` |
 | Companies | `company.create`, `company.update`, `company.delete`, `company.archive`, `company.unarchive` |
-| Tickets | `ticket.create`, `ticket.update`, `ticket.status_change`, `ticket.assign`, `ticket.replied`, `ticket.deleted`, `ticket.watcher.add`, `ticket.watcher.remove` |
+| Tickets | `ticket.create`, `ticket.update`, `ticket.status_change`, `ticket.assign`, `ticket.reply`, `ticket.delete`, `ticket.watcher.add`, `ticket.watcher.remove` |
 | Billing | `invoice.create`, `invoice.update`, `invoice.delete` |
 | Knowledge base | `knowledge_base.article.create`, `knowledge_base.article.update`, `knowledge_base.article.delete` |
 | Automations | `automation.create`, `automation.update`, `automation.enable`, `automation.disable`, `automation.delete` |
@@ -133,7 +188,7 @@ following are in use today; please reuse them when adding new audit calls:
 
 ### Ticket reply body — never stored
 
-`ticket.replied` audit rows record only metadata (`reply_id`, `author_id`,
+`ticket.reply` audit rows record only metadata (`reply_id`, `author_id`,
 `channel` (public/internal), `is_billable`, `minutes_spent`, `length`,
 `word_count`). The body is **never** persisted to `audit_logs`, even if a
 caller accidentally adds it to `metadata`, because we register `"body"` as

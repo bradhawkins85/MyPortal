@@ -1,0 +1,7 @@
+{
+  "guid": "6fdbe054-8e6d-442a-9248-b4d1ed92e21e",
+  "occurred_at": "2026-09-21T00:00Z",
+  "change_type": "Fix",
+  "summary": "Enable and start the nginx frontend automatically after a blue/green backend passes deployment health checks.",
+  "content_hash": "f4b0c7e05be451a2bd01197b930f7afbe44eb0fb1810ec85f5d5fa92314612ca"
+}

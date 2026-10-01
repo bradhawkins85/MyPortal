@@ -5,7 +5,7 @@
 
 {% block header_actions %}
   {{ page_header_actions([
-    {"label": "New question", "type": "link", "variant": "primary", "href": "/admin/tray/ticket-questions/new"},
+    {"label": "+ Add question", "type": "link", "variant": "primary", "href": "/admin/tray/ticket-questions/new", "attrs": {"data-tq-create": ""}},
     {"label": "Configurations", "type": "link", "variant": "ghost", "href": "/admin/tray/configurations"},
     {"label": "Devices", "type": "link", "variant": "ghost", "href": "/admin/tray/devices"}
   ]) }}
@@ -21,73 +21,28 @@
     <div class="callout callout--danger admin-grid__full"><p>{{ error_message }}</p></div>
   {% endif %}
 
-  <section class="card card--panel">
-    <header class="card__header">
-      <p class="card__lede">
-        Dynamic questions shown in the tray Submit Ticket dialog.
-        <strong>Global</strong> questions appear for every company.
-        <strong>Company-scoped</strong> questions appear only for the relevant company.
-        All global questions are shown first, then company questions, in sort-order.
+  <section class="card card--panel admin-grid__full" aria-labelledby="tq-card-title">
+    <header class="card__header card__header--stacked">
+      <h2 class="card__title" id="tq-card-title">Questions</h2>
+      <p class="card__subtitle">
+        Asked in the tray Submit Ticket dialog. Questions for every company are asked first,
+        then company questions, each in sort order. Answers are added to the ticket.
       </p>
     </header>
-    <div class="card__body card__body--table">
-      {% if questions %}
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Label</th><th>Scope</th><th>Type</th><th>Required</th>
-              <th>Order</th><th>Conditions</th><th>Status</th>
-              <th class="data-table__col--actions">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for q in questions %}
-              <tr>
-                <td><strong>{{ q.label }}</strong></td>
-                <td>
-                  {% if q.scope == 'global' %}
-                    <span class="status status--info">Global</span>
-                  {% else %}
-                    <span class="status status--warning">Company</span>
-                  {% endif %}
-                </td>
-                <td>{{ q.field_type | capitalize }}</td>
-                <td>
-                  {% if q.is_required %}
-                    <span class="status status--danger">Required</span>
-                  {% else %}
-                    <span class="status status--neutral">Optional</span>
-                  {% endif %}
-                </td>
-                <td>{{ q.sort_order }}</td>
-                <td>{{ q.conditions | length }}</td>
-                <td>
-                  {% if q.is_active %}
-                    <span class="status status--success">Active</span>
-                  {% else %}
-                    <span class="status status--neutral">Inactive</span>
-                  {% endif %}
-                </td>
-                <td class="data-table__col--actions">
-                  <a href="/admin/tray/ticket-questions/{{ q.id }}/edit" class="button button--small">Edit</a>
-                  <form method="post" action="/admin/tray/ticket-questions/{{ q.id }}/delete" class="inline-form">
-                    {% include "partials/csrf.html" %}
-                    <button type="submit" class="button button--small button--danger" data-confirm="Delete this question?">Delete</button>
-                  </form>
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <div class="empty-state">
-          <h2 class="empty-state__title">No questions yet</h2>
-          <p>Questions added here will appear dynamically in the tray Submit Ticket dialog. Create global questions for all companies, or company-specific questions under each company's tray settings.</p>
-          <p><a class="button button--primary" href="/admin/tray/ticket-questions/new">Create question</a></p>
-        </div>
-      {% endif %}
+    <div class="card__body card__body--stacked">
+      {% set tq_questions = questions %}
+      {% set tq_parents = questions %}
+      {% set tq_base_url = "/admin/tray/ticket-questions" %}
+      {% set tq_companies = companies %}
+      {% set tq_company = none %}
+      {% include "admin/tray/_ticket_question_editor.html" %}
     </div>
   </section>
 
 </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/tray_ticket_questions_admin.js') }}" defer></script>
 {% endblock %}

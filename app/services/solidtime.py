@@ -36,7 +36,6 @@ from urllib.parse import urlparse
 
 import nh3
 import httpx
-from loguru import logger
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
@@ -45,7 +44,7 @@ from app.repositories import companies as company_repo
 from app.repositories import solidtime_links as links_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as user_repo
-from app.services import modules as modules_service
+from app.services import module_runtime as modules_service
 from app.services import rate_limit_store
 from app.services import webhook_monitor
 from app.services.redis import get_redis_client
@@ -1467,6 +1466,14 @@ def schedule_ticket_sync(ticket_id: int) -> None:
         settings_snapshot: Mapping[str, Any] | None = None
         try:
             settings_snapshot = await _load_module_settings()
+            if settings_snapshot is not None and not bool(
+                settings_snapshot.get("enabled")
+            ):
+                log_info(
+                    "Solidtime ticket sync not scheduled because module is disabled",
+                    ticket_id=ticket_id,
+                )
+                return
             result = await sync_ticket_to_project(int(ticket_id))
             reason = _ticket_sync_outcome_reason(
                 settings=settings_snapshot, sync_result=result
@@ -1543,7 +1550,7 @@ def schedule_reply_sync(reply_id: int) -> None:
         try:
             await sync_reply_to_time_entry(int(reply_id))
         except SolidtimeConfigurationError:
-            pass
+            return
         except SolidtimeAPIError as exc:
             log_warning(
                 "Solidtime reply sync failed",
@@ -1705,7 +1712,7 @@ async def reconcile_once() -> dict[str, Any]:
                 await sync_ticket_to_project(ticket_id)
                 summary["tickets_pushed"] += 1
             except SolidtimeConfigurationError:
-                pass
+                break
             except SolidtimeAPIError as exc:
                 summary["status"] = "error"
                 summary["errors"] += 1

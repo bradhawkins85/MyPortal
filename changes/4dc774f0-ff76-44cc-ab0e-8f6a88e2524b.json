@@ -1,0 +1,7 @@
+{
+  "guid": "4dc774f0-ff76-44cc-ab0e-8f6a88e2524b",
+  "occurred_at": "2026-09-07T00:00Z",
+  "change_type": "Fix",
+  "summary": "Ensured quote magic links use HTTPS and the configured public base URL.",
+  "content_hash": "8b337da37d9db0c2bd19de8313c8af882d7254bd99b25a2df7cd945bc5c165b8"
+}

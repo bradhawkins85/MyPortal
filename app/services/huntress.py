@@ -22,6 +22,8 @@ from typing import Any, Mapping
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
@@ -37,6 +39,13 @@ REQUEST_TIMEOUT = 30.0
 # Huntress publishes a 60 req/min limit; keep a small buffer between calls.
 _REQUEST_INTERVAL_SECONDS = 1.1
 _request_lock = asyncio.Lock()
+
+CURRICULA_READ_SCOPES = (
+    "account:read",
+    "assignments:read",
+    "assignments:learner-activity",
+    "learners:read",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +70,6 @@ def _get_credentials() -> dict[str, str] | None:
     return {"api_key": api_key, "api_secret": api_secret, "base_url": base_url}
 
 
-
 def _get_curricula_credentials() -> dict[str, str] | None:
     settings = get_settings()
     api_key = (settings.curricula_api_key or "").strip()
@@ -69,7 +77,14 @@ def _get_curricula_credentials() -> dict[str, str] | None:
     base_url = (settings.curricula_base_url or "").strip().rstrip("/")
     if not api_key or not api_secret or not base_url:
         return None
-    return {"api_key": api_key, "api_secret": api_secret, "base_url": base_url}
+    oauth_base_url = base_url.removesuffix("/api/v1")
+    return {
+        "api_key": api_key,
+        "api_secret": api_secret,
+        "base_url": base_url,
+        "auth_url": f"{oauth_base_url}/oauth/authorize",
+        "token_url": f"{oauth_base_url}/oauth/token",
+    }
 
 
 def credentials_status() -> dict[str, bool]:
@@ -83,9 +98,7 @@ def credentials_status() -> dict[str, bool]:
         "curricula_api_secret_present": bool(
             (settings.curricula_api_secret or "").strip()
         ),
-        "curricula_base_url_present": bool(
-            (settings.curricula_base_url or "").strip()
-        ),
+        "curricula_base_url_present": bool((settings.curricula_base_url or "").strip()),
     }
 
 
@@ -98,12 +111,64 @@ async def is_module_enabled() -> bool:
 
 
 def _client(credentials: Mapping[str, str]) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
+    return monitored_client(httpx.AsyncClient,
         base_url=credentials["base_url"],
         auth=(credentials["api_key"], credentials["api_secret"]),
         timeout=REQUEST_TIMEOUT,
         headers={"Accept": "application/json"},
     )
+
+
+def _oauth_token_client() -> httpx.AsyncClient:
+    return monitored_client(httpx.AsyncClient, timeout=REQUEST_TIMEOUT)
+
+
+def _bearer_client(
+    credentials: Mapping[str, str], access_token: str
+) -> httpx.AsyncClient:
+    return monitored_client(httpx.AsyncClient,
+        base_url=credentials["base_url"],
+        timeout=REQUEST_TIMEOUT,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {access_token}",
+        },
+    )
+
+
+async def _curricula_oauth_client(
+    credentials: Mapping[str, str],
+) -> httpx.AsyncClient:
+    """Exchange the Managed SAT client credentials and return a bearer client."""
+    async with _oauth_token_client() as token_client:
+        response = await token_client.post(
+            credentials["token_url"],
+            data={
+                "grant_type": "client_credentials",
+                "scope": " ".join(CURRICULA_READ_SCOPES),
+            },
+            auth=(credentials["api_key"], credentials["api_secret"]),
+            headers={"Accept": "application/json"},
+        )
+    if response.status_code >= 400:
+        log_error(
+            "Huntress Managed SAT OAuth token request failed",
+            status_code=response.status_code,
+            url=_redact_url(str(response.request.url)),
+        )
+        response.raise_for_status()
+    try:
+        token_payload = response.json()
+    except ValueError as exc:
+        raise HuntressConfigurationError(
+            "Huntress Managed SAT OAuth token response was not valid JSON."
+        ) from exc
+    access_token = str(token_payload.get("access_token") or "").strip()
+    if not access_token:
+        raise HuntressConfigurationError(
+            "Huntress Managed SAT OAuth token response did not contain an access_token."
+        )
+    return _bearer_client(credentials, access_token)
 
 
 async def _get_json(
@@ -188,9 +253,37 @@ async def list_organizations() -> list[dict[str, Any]]:
     return organisations
 
 
+async def list_sat_accounts() -> list[dict[str, Any]]:
+    """Return Managed SAT accounts available to the Curricula API client."""
+    credentials = _get_curricula_credentials()
+    if not credentials:
+        raise HuntressConfigurationError(
+            "Curricula credentials are not configured (set CURRICULA_API_KEY and "
+            "CURRICULA_API_SECRET)."
+        )
+
+    accounts: list[dict[str, Any]] = []
+    async with await _curricula_oauth_client(credentials) as client:
+        page = 1
+        for _ in range(50):
+            payload = await _get_json(
+                client, "/accounts", {"page[number]": page, "page[size]": 100}
+            )
+            chunk = _extract_list(payload, key="accounts")
+            if not chunk:
+                break
+            accounts.extend(
+                _jsonapi_attrs(row) for row in chunk if isinstance(row, Mapping)
+            )
+            if len(chunk) < 100:
+                break
+            page += 1
+    return accounts
 
 
-async def get_latest_summary_report(org_id: str, report_type: str = "monthly_summary") -> dict[str, Any] | None:
+async def get_latest_summary_report(
+    org_id: str, report_type: str = "monthly_summary"
+) -> dict[str, Any] | None:
     """Return the most recent summary report for an organisation."""
     credentials = _get_credentials()
     if not credentials:
@@ -215,13 +308,40 @@ async def get_latest_summary_report(org_id: str, report_type: str = "monthly_sum
 
 
 async def get_edr_summary(org_id: str) -> dict[str, int]:
-    """Return EDR counters from the latest Huntress summary report."""
+    """Return EDR counters from the incident, signal, and summary endpoints.
+
+    EDR data is not part of every monthly summary response.  Querying the
+    product endpoints directly also means a company sync works before its
+    first monthly report has been generated. Huntress's incident-report API
+    accepts ``sent`` for active reports, but does not accept ``resolved`` as a
+    status filter. Resolved incidents are therefore read from the supported
+    monthly-summary counter instead of sending an invalid filtered request.
+    """
+    credentials = _get_credentials()
+    if not credentials:
+        raise HuntressConfigurationError("Huntress credentials are not configured.")
+
+    async with _client(credentials) as client:
+        active, signals = await asyncio.gather(
+            _get_json(
+                client,
+                "/incident_reports",
+                {"organization_id": org_id, "status": "sent", "limit": 1},
+                allow_not_found=True,
+            ),
+            _get_json(
+                client,
+                "/signals",
+                {"organization_id": org_id, "limit": 1},
+                allow_not_found=True,
+            ),
+        )
     report = await get_latest_summary_report(org_id)
-    payload = report if isinstance(report, Mapping) else {}
+    report_payload = report if isinstance(report, Mapping) else {}
     return {
-        "active_incidents": _coerce_int(payload.get("incidents_reported")),
-        "resolved_incidents": _coerce_int(payload.get("incidents_resolved")),
-        "signals_investigated": _coerce_int(payload.get("signals_investigated")),
+        "active_incidents": _extract_total(active, "incident_reports"),
+        "resolved_incidents": _coerce_int(report_payload.get("incidents_resolved")),
+        "signals_investigated": _extract_total(signals, "signals"),
     }
 
 
@@ -229,14 +349,18 @@ async def get_itdr_summary(org_id: str) -> dict[str, int]:
     """Return ITDR investigations completed from the latest summary report."""
     report = await get_latest_summary_report(org_id)
     payload = report if isinstance(report, Mapping) else {}
-    return {"signals_investigated": _coerce_int(payload.get("itdr_investigations_completed"))}
+    return {
+        "signals_investigated": _coerce_int(
+            payload.get("itdr_investigations_completed")
+        )
+    }
 
 
 async def get_sat_summary(org_id: str) -> dict[str, Any] | None:
     """Return Huntress Managed SAT learner and progress rollups for an account.
 
     Curricula/Huntress Managed SAT uses the JSON:API REST API at
-    ``https://mycurricula.com/api/v1`` with client-credentials API clients. The
+    ``https://dev.curricula.com/api/v1`` with client-credentials API clients. The
     useful billing/reporting metric exposed by third-party reconciliation docs
     is the active learner count; where assignment progress is returned, we also
     calculate average completion and score from the learner rows.
@@ -252,9 +376,7 @@ async def get_sat_summary(org_id: str) -> dict[str, Any] | None:
     }
     completions = [float(row.get("completion_percent") or 0) for row in rows]
     scores = [
-        float(row.get("score") or 0)
-        for row in rows
-        if row.get("score") is not None
+        float(row.get("score") or 0) for row in rows if row.get("score") is not None
     ]
     return {
         "enrolled_learners": len(learner_ids) or len(rows),
@@ -289,7 +411,7 @@ async def get_sat_learner_breakdown(org_id: str) -> list[dict[str, Any]] | None:
             "CURRICULA_API_SECRET)."
         )
 
-    async with _client(credentials) as client:
+    async with await _curricula_oauth_client(credentials) as client:
         payload = await _get_json(
             client,
             f"/accounts/{org_id}/learners",
@@ -303,16 +425,31 @@ async def get_sat_learner_breakdown(org_id: str) -> list[dict[str, Any]] | None:
 
 
 async def get_siem_data_volume(org_id: str, days: int = 30) -> dict[str, Any] | None:
-    """Return SIEM log-volume counters from the latest Huntress summary report."""
-    report = await get_latest_summary_report(org_id)
-    payload = report if isinstance(report, Mapping) else {}
-    total_logs = _coerce_int(payload.get("siem_total_logs") or payload.get("siem_ingested_logs"))
-    if total_logs <= 0:
+    """Return SIEM log-volume counters from the product usage endpoint."""
+    credentials = _get_credentials()
+    if not credentials:
+        raise HuntressConfigurationError("Huntress credentials are not configured.")
+    async with _client(credentials) as client:
+        payload = await _get_json(
+            client,
+            "/siem/usage",
+            {"organization_id": org_id, "days": days},
+            allow_not_found=True,
+        )
+    if payload is None:
+        return None
+    data = payload if isinstance(payload, Mapping) else {}
+    total_bytes = _coerce_int(
+        data.get("total_bytes")
+        or data.get("data_collected_bytes")
+        or data.get("bytes_ingested")
+    )
+    if total_bytes <= 0:
         return None
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
     return {
-        "data_collected_bytes_30d": total_logs,
+        "data_collected_bytes_30d": total_bytes,
         "window_start": start.replace(tzinfo=None),
         "window_end": end.replace(tzinfo=None),
     }
@@ -341,9 +478,11 @@ async def refresh_company(company: Mapping[str, Any]) -> dict[str, Any]:
     """
 
     company_id_raw = company.get("id")
-    org_id = (company.get("huntress_organization_id") or "").strip() if isinstance(
-        company.get("huntress_organization_id"), str
-    ) else company.get("huntress_organization_id")
+    org_id = (
+        (company.get("huntress_organization_id") or "").strip()
+        if isinstance(company.get("huntress_organization_id"), str)
+        else company.get("huntress_organization_id")
+    )
     if company_id_raw is None or not org_id:
         return {
             "company_id": company_id_raw,
@@ -352,18 +491,32 @@ async def refresh_company(company: Mapping[str, Any]) -> dict[str, Any]:
         }
     company_id = int(company_id_raw)
     org_id = str(org_id)
+    sat_id_raw = company.get("huntress_sat_account_id")
+    sat_id = (
+        sat_id_raw.strip() if isinstance(sat_id_raw, str) else sat_id_raw
+    ) or None
     snapshot_at = datetime.utcnow()
     summary: dict[str, Any] = {
         "company_id": company_id,
         "huntress_organization_id": org_id,
+        "huntress_sat_account_id": str(sat_id) if sat_id else None,
         "errors": {},
     }
 
     async def _safe(name: str, coro):
         try:
             return await coro
-        except HuntressConfigurationError:
-            raise
+        except HuntressConfigurationError as exc:
+            # Huntress and Managed SAT use separate credentials.  Missing SAT
+            # credentials must not abort an otherwise valid EDR sync (and vice
+            # versa); expose the product-level failure in the task details.
+            log_info(
+                "Huntress sync step skipped because it is not configured",
+                company_id=company_id,
+                step=name,
+            )
+            summary["errors"][name] = str(exc)
+            return None
         except Exception as exc:  # noqa: BLE001 - log and continue
             log_error(
                 "Huntress sync step failed",
@@ -394,7 +547,7 @@ async def refresh_company(company: Mapping[str, Any]) -> dict[str, Any]:
         )
         summary["itdr"] = itdr
 
-    sat = await _safe("sat", get_sat_summary(org_id))
+    sat = await _safe("sat", get_sat_summary(str(sat_id))) if sat_id else None
     if sat is not None:
         await huntress_repo.upsert_sat_stats(
             company_id,
@@ -407,13 +560,29 @@ async def refresh_company(company: Mapping[str, Any]) -> dict[str, Any]:
             snapshot_at=snapshot_at,
         )
         summary["sat"] = sat
+    elif sat_id and "sat" not in summary["errors"]:
+        summary["errors"]["sat"] = (
+            "Managed SAT account was not accessible with the configured Curricula "
+            "API credentials (the learners endpoint returned 404). Confirm that "
+            "huntress_sat_account_id identifies an account visible to the parent "
+            "Curricula API client."
+        )
 
-    sat_rows = await _safe("sat_learners", get_sat_learner_breakdown(org_id))
+    sat_rows = (
+        await _safe("sat_learners", get_sat_learner_breakdown(str(sat_id)))
+        if sat_id
+        else None
+    )
     if sat_rows is not None:
         await huntress_repo.replace_sat_learner_progress(
             company_id, sat_rows, snapshot_at=snapshot_at
         )
         summary["sat_learner_rows"] = len(sat_rows)
+    elif sat_id and "sat_learners" not in summary["errors"]:
+        summary["errors"]["sat_learners"] = (
+            "Managed SAT learners were not accessible with the configured Curricula "
+            "API credentials (the learners endpoint returned 404)."
+        )
 
     siem = await _safe("siem", get_siem_data_volume(org_id, days=30))
     if siem is not None:
@@ -471,7 +640,11 @@ async def refresh_all_companies() -> dict[str, Any]:
                 skipped += 1
         except HuntressConfigurationError as exc:
             log_error("Huntress credentials missing during refresh", error=str(exc))
-            return {"status": "skipped", "reason": "credentials_missing", "companies": results}
+            return {
+                "status": "skipped",
+                "reason": "credentials_missing",
+                "companies": results,
+            }
         except Exception as exc:  # noqa: BLE001
             log_error(
                 "Huntress refresh raised an unexpected error",
@@ -517,7 +690,6 @@ def _extract_list(payload: Any, *, key: str) -> list[Any]:
             if isinstance(value, list):
                 return [item for item in value if isinstance(item, (dict, list))]
     return []
-
 
 
 def _jsonapi_attrs(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -567,11 +739,20 @@ def _normalise_sat_learner(row: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "status": _first_value(data, "status", "state", "enrollment_status"),
         "completion_percent": _coerce_float(completion),
-        "score": _coerce_float(_first_value(data, "score", "average_score", "quiz_score")),
-        "click_rate": _coerce_float(_first_value(data, "click_rate", "phishing_click_rate")),
-        "compromise_rate": _coerce_float(_first_value(data, "compromise_rate", "phishing_compromise_rate")),
-        "report_rate": _coerce_float(_first_value(data, "report_rate", "phishing_report_rate")),
+        "score": _coerce_float(
+            _first_value(data, "score", "average_score", "quiz_score")
+        ),
+        "click_rate": _coerce_float(
+            _first_value(data, "click_rate", "phishing_click_rate")
+        ),
+        "compromise_rate": _coerce_float(
+            _first_value(data, "compromise_rate", "phishing_compromise_rate")
+        ),
+        "report_rate": _coerce_float(
+            _first_value(data, "report_rate", "phishing_report_rate")
+        ),
     }
+
 
 def _extract_next_page_token(payload: Any) -> str | None:
     """Return the ``next_page_token`` from a Huntress paginated response, or ``None``."""
@@ -631,6 +812,7 @@ __all__ = [
     "get_soc_event_count",
     "is_module_enabled",
     "list_organizations",
+    "list_sat_accounts",
     "refresh_all_companies",
     "refresh_company",
 ]

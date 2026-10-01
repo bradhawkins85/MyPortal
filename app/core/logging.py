@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from importlib import import_module
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
 from datetime import date, datetime, time, timezone
@@ -98,7 +99,7 @@ def _infer_feature_from_record(record: dict[str, Any]) -> str:
 
 
 def configure_logging() -> None:
-    from app.core.config import get_settings
+    get_settings = import_module("app.core.config").get_settings
 
     logger.remove()
     console_log_format = (
@@ -133,7 +134,7 @@ def configure_logging() -> None:
     log_level = settings.log_level or ("DEBUG" if settings.verbose_logging else "INFO")
 
     logger.add(sink=lambda msg: print(msg, end=""), format=_format_console_record, level=log_level)
-    _configure_uvicorn_access_logging(verbose=settings.verbose_logging)
+    _configure_uvicorn_logging(log_level=log_level, verbose=settings.verbose_logging)
 
     app_log_path = getattr(settings, "app_log_path", None)
     if app_log_path:
@@ -215,6 +216,19 @@ class _UvicornHeartbeatAccessFilter(logging.Filter):
         return TRAY_HEARTBEAT_PATH not in rendered
 
 
+class _UvicornQuerySecretFilter(logging.Filter):
+    """Redact secret query-string values (``?token=``) from access logs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        # uvicorn.access args: (client_addr, method, full_path, http_version, status)
+        if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str) and "?" in args[2]:
+            from app.core.log_redaction import redact_url_query
+
+            record.args = args[:2] + (redact_url_query(args[2]),) + args[3:]
+        return True
+
+
 def _configure_uvicorn_access_logging(*, verbose: bool) -> None:
     """Apply endpoint-specific filtering to uvicorn's own access logger."""
 
@@ -222,10 +236,19 @@ def _configure_uvicorn_access_logging(*, verbose: bool) -> None:
     access_logger.filters = [
         existing
         for existing in access_logger.filters
-        if not isinstance(existing, _UvicornHeartbeatAccessFilter)
+        if not isinstance(existing, (_UvicornHeartbeatAccessFilter, _UvicornQuerySecretFilter))
     ]
+    access_logger.addFilter(_UvicornQuerySecretFilter())
     if not verbose:
         access_logger.addFilter(_UvicornHeartbeatAccessFilter())
+
+
+def _configure_uvicorn_logging(*, log_level: str, verbose: bool) -> None:
+    """Keep Uvicorn and its WebSocket implementation at the configured level."""
+
+    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access", "websockets.server"):
+        logging.getLogger(logger_name).setLevel(log_level)
+    _configure_uvicorn_access_logging(verbose=verbose)
 
 
 def _coerce_optional(value: Any) -> Any:

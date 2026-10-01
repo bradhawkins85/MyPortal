@@ -15,7 +15,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services import m365 as m365_service
-from app.services.m365 import M365Error, _graph_get
+from app.services.m365 import (
+    M365Error,
+    _graph_get,
+    _graph_object_id,
+    _graph_path_segment,
+    _validate_graph_url,
+)
 
 
 @pytest.fixture
@@ -84,6 +90,43 @@ async def test_graph_get_without_extra_headers_still_works():
     # Only the Authorization header should be present (no ConsistencyLevel)
     assert "ConsistencyLevel" not in captured_headers
     assert captured_headers.get("Authorization") == "Bearer fake-token"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://user@graph.microsoft.com/v1.0/users",
+        "https://graph.microsoft.com/v1.0",
+        "https://graph.microsoft.com/v1.0/",
+        "https://graph.microsoft.com/v1.0//users",
+        "https://graph.microsoft.com/v1.0/users#fragment",
+        "https://graph.microsoft.com/v1.0/users/../groups",
+    ],
+    ids=[
+        "embedded credentials",
+        "missing resource path",
+        "empty resource path segment",
+        "double slash",
+        "fragment",
+        "relative path segment",
+    ],
+)
+def test_graph_validate_url_rejects_unsafe_components(url: str):
+    """_validate_graph_url rejects Graph URLs with unsafe authority/path parts."""
+    with pytest.raises(M365Error):
+        _validate_graph_url(url)
+
+
+def test_graph_path_segment_encodes_path_separators():
+    """_graph_path_segment neutralizes path separators in dynamic IDs."""
+    assert _graph_path_segment("user/../../mailFolders") == "user%2F..%2F..%2FmailFolders"
+
+
+def test_graph_object_id_rejects_non_guid_values():
+    """_graph_object_id only accepts directory object GUIDs."""
+    with pytest.raises(M365Error):
+        _graph_object_id("user/../../owners")
+
 
 
 # ---------------------------------------------------------------------------

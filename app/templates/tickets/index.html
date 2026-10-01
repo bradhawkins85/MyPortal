@@ -1,6 +1,34 @@
 {% extends "base.html" %}
 
-{% block header_title %}Tickets{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Tickets</span>
+    <div class="page-header-toolbar">
+      <form method="get" class="page-header-toolbar__group" autocomplete="off" data-ticket-status-filter-form>
+        <label class="visually-hidden" for="tickets-status-filter">Status</label>
+        <select id="tickets-status-filter" name="status" class="form-input page-header-toolbar__select" data-ticket-status-filter>
+          <option value="">All statuses</option>
+          {% for option in status_options %}
+            <option value="{{ option.value }}" {% if status_filter and status_filter == option.value %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+        {% if filters_active %}
+          <a class="button button--ghost button--compact" href="{{ request.url.path }}">Clear</a>
+        {% endif %}
+      </form>
+      <label class="visually-hidden" for="tickets-quick-filter">Filter tickets</label>
+      <input
+        id="tickets-quick-filter"
+        type="search"
+        class="form-input page-header-toolbar__search"
+        placeholder="Quick filter tickets"
+        name="q"
+        value="{{ search_term or '' }}"
+        data-table-filter="tickets-table" data-ticket-search-debounce
+      />
+    </div>
+  </div>
+{% endblock %}
 {% from "macros/header.html" import page_header_actions %}
 {% from "macros/counters.html" import counter_strip %}
 
@@ -25,35 +53,6 @@
   {% endif %}
 
   <section class="card card--panel">
-    <header class="card__header">
-      <div class="card__controls tickets-toolbar">
-        <form method="get" class="tickets-toolbar__form" autocomplete="off" data-ticket-status-filter-form>
-          <div class="tickets-toolbar__field">
-            <label class="form-label" for="tickets-status-filter">Status</label>
-            <select id="tickets-status-filter" name="status" class="form-input" data-ticket-status-filter>
-              <option value="">All statuses</option>
-              {% for option in status_options %}
-                <option value="{{ option.value }}" {% if status_filter and status_filter == option.value %}selected{% endif %}>{{ option.label }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          {% if filters_active %}
-            <div class="tickets-toolbar__actions">
-              <a class="button button--ghost" href="{{ request.url.path }}">Clear</a>
-            </div>
-          {% endif %}
-        </form>
-        <input
-          type="search"
-          class="form-input tickets-toolbar__search"
-          placeholder="Quick filter tickets"
-          name="q"
-          value="{{ search_term or '' }}"
-          aria-label="Filter tickets"
-          data-table-filter="tickets-table" data-ticket-search-debounce
-        />
-      </div>
-    </header>
     <div class="table-skeleton" data-ticket-table-skeleton hidden>Loading tickets…</div>
     {% if filters_active and not tickets %}
       <div class="alert alert--info" role="status">No tickets match the selected filters. Try adjusting the status or search keywords.</div>
@@ -261,6 +260,7 @@
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/purify.min.js') }}" defer></script>
   <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>
   <script>
     // Initialize modal for ticket creation

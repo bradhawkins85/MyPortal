@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block title %}Deploy signature{% endblock %}
+{% block header_title %}Deploy signature{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Back to template", "type": "link", "href": "/m365/signatures/" ~ template_record.id ~ "/edit"},
+    {"label": "All signatures", "type": "link", "href": "/m365/signatures"}
+  ]) }}
+{% endblock %}
+
+{% block styles %}
+<style>
+  .sig-deploy-mailboxes { max-height:24rem; overflow:auto; border:1px solid var(--color-border); border-radius:var(--radius-md); }
+  .sig-deploy-mailbox { display:flex; gap:var(--space-2); align-items:flex-start; padding:var(--space-3); border-bottom:1px solid var(--color-border); }
+  .sig-deploy-mailbox:last-child { border-bottom:0; }
+  .sig-deploy-mailbox span { min-width:0; overflow-wrap:anywhere; }
+  .sig-deploy-tools { display:flex; align-items:center; gap:var(--space-2); margin-bottom:var(--space-2); flex-wrap:wrap; }
+  .sig-deploy-options { display:grid; gap:var(--space-2); margin:var(--space-3) 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+  {% set is_published = template_record.status == 'published' %}
+
+  {% if roaming.error %}
+    <div class="alert alert--warning" role="status">
+      Could not read the Exchange Online organization configuration: {{ roaming.error }}.
+      Deployment needs the <strong>Exchange.ManageAsApp</strong> permission and the Exchange Administrator role.
+    </div>
+  {% elif roaming.postponed is sameas false %}
+    <div class="alert alert--warning" role="status">
+      <p><strong>Roaming signatures are active in this tenant.</strong> While they are active, Exchange ignores signatures set by MyPortal, so deployed signatures will not appear in Outlook.</p>
+      <form method="post" action="/m365/signatures/{{ template_record.id }}/deploy/postpone-roaming" onsubmit="return confirm('Turn on PostponeRoamingSignaturesUntilLater for the whole organization? Users will stop syncing signatures they created themselves in Outlook.');">
+        {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+        <button type="submit" class="button button--small">Let MyPortal manage signatures (postpone roaming signatures)</button>
+      </form>
+    </div>
+  {% elif roaming.postponed %}
+    <div class="alert alert--info" role="status">Exchange-managed signatures are enabled for this tenant (roaming signatures postponed).</div>
+  {% endif %}
+
+  {% if outcomes %}
+    <section class="card card--panel" aria-labelledby="deploy-results-heading">
+      <header class="card__header"><h2 class="card__title" id="deploy-results-heading">Deployment results</h2></header>
+      <div class="card__body">
+        <ul class="list">
+          {% for result in outcomes %}
+            <li>
+              <strong>{{ result.mailbox }}</strong> —
+              {% if result.success %}
+                signature applied
+                {% if result.missing_tokens %}<br><small class="text-muted">Empty variables: {{ result.missing_tokens|join(', ') }}</small>{% endif %}
+              {% else %}
+                <span class="text-danger">failed: {{ result.error }}</span>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+        <p class="form-help">Outlook on the web and the new Outlook use the deployed signature. Changes can take up to a few hours to appear. Classic Outlook for Windows and Mac keep their own locally stored signatures.</p>
+      </div>
+    </section>
+  {% endif %}
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">{{ template_record.name }} <code>{{ template_record.slug }}</code></h2>
+        <p class="card__subtitle">Each mailbox receives the signature rendered with its matching staff record, then applied through Exchange Online. Existing mailbox signatures are replaced.</p>
+      </div>
+    </header>
+    <div class="card__body">
+      {% if not is_published %}
+        <div class="alert alert--warning" role="status">Publish this template before deploying it.</div>
+      {% endif %}
+      <form method="post" action="/m365/signatures/{{ template_record.id }}/deploy" id="signature-deploy-form">
+        {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+        <div class="sig-deploy-tools">
+          <input class="input" id="deploy-filter" type="search" placeholder="Filter mailboxes" aria-label="Filter mailboxes">
+          <button class="button button--ghost button--small" type="button" id="deploy-select-all">Select all</button>
+        </div>
+        <div class="sig-deploy-mailboxes">
+          {% for target in targets %}
+            <label class="sig-deploy-mailbox" data-deploy-row>
+              <input type="checkbox" name="mailboxes" value="{{ target.user_principal_name }}"
+                {% if target.user_principal_name in (submitted.mailboxes or []) %}checked{% endif %}
+                {% if not target.staff_id or not is_published %}disabled{% endif %}>
+              <span>
+                <strong>{{ target.display_name }}</strong><br>
+                <small class="text-muted">{{ target.user_principal_name }}</small><br>
+                {% if target.staff_id %}
+                  <small>Staff record: {{ target.staff_label }}</small>
+                {% else %}
+                  <small class="text-danger">No matching staff record — add a staff member with this email to deploy.</small>
+                {% endif %}
+              </span>
+            </label>
+          {% else %}
+            <p class="table__empty">No synced user mailboxes are available for this company's email domains.</p>
+          {% endfor %}
+        </div>
+        <div class="sig-deploy-options">
+          <label><input type="checkbox" name="auto_add_new" {% if submitted.auto_add_new is not defined or submitted.auto_add_new %}checked{% endif %}> Add the signature to new messages</label>
+          <label><input type="checkbox" name="auto_add_reply" {% if submitted.auto_add_reply is not defined or submitted.auto_add_reply %}checked{% endif %}> Add the signature to replies and forwards</label>
+        </div>
+        <p class="form-help">Up to {{ max_mailboxes }} mailboxes per deployment.</p>
+        <button class="button button--primary" type="submit" {% if not is_published or not targets %}disabled{% endif %}>Deploy to selected mailboxes</button>
+      </form>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const maxMailboxes = {{ max_mailboxes|tojson }};
+  document.getElementById('deploy-filter')?.addEventListener('input', event => {
+    const query = event.target.value.toLocaleLowerCase();
+    document.querySelectorAll('[data-deploy-row]').forEach(row => { row.hidden = !row.textContent.toLocaleLowerCase().includes(query); });
+  });
+  document.getElementById('deploy-select-all')?.addEventListener('click', () => {
+    const visible = [...document.querySelectorAll('[data-deploy-row]:not([hidden]) input:not(:disabled)')];
+    const shouldSelect = visible.some(input => !input.checked);
+    visible.forEach(input => { input.checked = shouldSelect; });
+  });
+  document.getElementById('signature-deploy-form')?.addEventListener('submit', event => {
+    const selected = document.querySelectorAll('input[name="mailboxes"]:checked').length;
+    if (!selected) { event.preventDefault(); window.alert('Select at least one mailbox.'); return; }
+    if (selected > maxMailboxes) { event.preventDefault(); window.alert(`Select at most ${maxMailboxes} mailboxes.`); return; }
+    if (!window.confirm(`Replace the signature in ${selected} mailbox(es)?`)) event.preventDefault();
+  });
+})();
+</script>
+{% endblock %}

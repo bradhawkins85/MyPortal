@@ -67,9 +67,6 @@ async def list_accessible_companies(user: Mapping[str, Any]) -> list[dict[str, A
 
 
 async def _list_all_companies_safely() -> list[dict[str, Any]]:
-    # Preserve the historical guarded second read used by existing tests while
-    # centralising all-company enumeration for privileged access paths.
-    companies = await company_repo.list_companies()
     try:
         companies = await company_repo.list_companies()
     except RuntimeError as exc:
@@ -85,12 +82,21 @@ async def first_accessible_company_id(user: Mapping[str, Any]) -> int | None:
 
     try:
         raw_company = user.get("company_id")
-        if raw_company is not None:
-            return int(raw_company)
+        preferred = int(raw_company) if raw_company is not None else None
     except (TypeError, ValueError):
-        pass
+        preferred = None
 
     companies = await list_accessible_companies(user)
+    # Only honour the stored default company when the user can actually
+    # access it; otherwise a stale or tampered value would open a session in
+    # another tenant.
+    if preferred is not None:
+        for company in companies:
+            try:
+                if int(company.get("company_id")) == preferred:
+                    return preferred
+            except (TypeError, ValueError):
+                continue
     for company in companies:
         company_id = company.get("company_id")
         try:
@@ -131,4 +137,3 @@ def _build_super_admin_membership(company: Mapping[str, Any]) -> dict[str, Any]:
         base[flag] = True
 
     return base
-

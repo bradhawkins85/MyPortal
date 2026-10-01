@@ -279,7 +279,9 @@ async def test_webhook_start_incident_success():
     mock_request = AsyncMock(spec=Request)
     mock_request.body = AsyncMock(return_value=json.dumps(payload).encode("utf-8"))
     
-    with patch("app.repositories.bcp.get_plan_by_company", return_value=mock_plan):
+    with patch("app.api.dependencies.api_keys._lookup_api_key", AsyncMock(return_value={"id": 1})), \
+            patch("app.services.webhook_monitor.log_incoming_webhook", AsyncMock()), \
+            patch("app.repositories.bcp.get_plan_by_company", return_value=mock_plan):
         with patch("app.repositories.bcp.get_active_incident", return_value=None):
             with patch("app.repositories.bcp.create_incident", return_value=mock_incident):
                 with patch("app.repositories.bcp.initialize_checklist_ticks"):
@@ -316,12 +318,35 @@ async def test_webhook_start_incident_already_active():
     mock_request = AsyncMock(spec=Request)
     mock_request.body = AsyncMock(return_value=json.dumps(payload).encode("utf-8"))
     
-    with patch("app.repositories.bcp.get_plan_by_company", return_value=mock_plan):
+    with patch("app.api.dependencies.api_keys._lookup_api_key", AsyncMock(return_value={"id": 1})), \
+            patch("app.services.webhook_monitor.log_incoming_webhook", AsyncMock()), \
+            patch("app.repositories.bcp.get_plan_by_company", return_value=mock_plan):
         with patch("app.repositories.bcp.get_active_incident", return_value=mock_active_incident):
             result = await webhook_start_incident(mock_request)
             
             assert result["status"] == "already_active"
             assert result["incident_id"] == 1
+
+
+@pytest.mark.anyio
+async def test_webhook_start_incident_rejects_invalid_api_key():
+    """An unknown API key must not be able to start an incident."""
+    from app.api.routes.bcp import webhook_start_incident
+    from fastapi import HTTPException, Request
+    import json
+
+    payload = {"company_id": 1, "api_key": "not-a-real-key"}
+    mock_request = AsyncMock(spec=Request)
+    mock_request.body = AsyncMock(return_value=json.dumps(payload).encode("utf-8"))
+
+    with patch("app.repositories.api_keys.get_api_key_record", AsyncMock(return_value=None)), \
+            patch("app.services.webhook_monitor.log_incoming_webhook", AsyncMock()), \
+            patch("app.repositories.bcp.create_incident", AsyncMock()) as create_incident:
+        with pytest.raises(HTTPException) as exc_info:
+            await webhook_start_incident(mock_request)
+
+    assert exc_info.value.status_code == 403
+    create_incident.assert_not_called()
 
 
 @pytest.mark.anyio

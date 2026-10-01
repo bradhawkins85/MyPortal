@@ -159,8 +159,9 @@
       // Show the edit form
       document.getElementById('edit-category-form').style.display = 'block';
       
-      // Set the form action
-      document.getElementById('edit-form').action = '/shop/admin/category/' + categoryId + '/update';
+      // Set the form action with an encoded id to avoid DOM-to-HTML reinterpretation
+      const safeCategoryId = encodeURIComponent(String(categoryId ?? ''));
+      document.getElementById('edit-form').action = '/shop/admin/category/' + safeCategoryId + '/update';
       
       // Populate the form fields
       document.getElementById('edit-category-name').value = categoryName;

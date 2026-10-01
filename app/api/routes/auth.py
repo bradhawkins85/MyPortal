@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
 import re
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from html import escape
+from io import BytesIO
 from typing import Any
 
 import pyotp
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+import qrcode
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from loguru import logger
 
@@ -29,25 +34,37 @@ from app.schemas.auth import (
     ImpersonationRequest,
     LoginRequest,
     LoginResponse,
+    PasskeyBeginRegistrationRequest,
+    PasskeyChallengeResponse,
+    PasskeyCredentialRequest,
+    PasskeyDeleteRequest,
+    PasskeyFinishRegistrationRequest,
+    PasskeyItem,
+    PasskeyListResponse,
+    PasskeyRenameRequest,
     PasswordChangeRequest,
     PasswordResetConfirm,
     PasswordResetRequest,
     PasswordResetStatus,
+    RegistrationPendingResponse,
     RegistrationRequest,
     SessionInfo,
     SessionResponse,
     TOTPAuthenticator,
     TOTPListResponse,
     TOTPSetupResponse,
+    TOTPDeleteRequest,
     TOTPVerifyRequest,
 )
 from app.schemas.users import UserResponse
-from app.security.passwords import verify_password
+from app.security.passwords import get_dummy_password_hash, verify_password
 from app.security.session import SessionData, ensure_datetime, session_manager
 from app.services import company_access
+from app.services import audit as audit_service
 from app.services import impersonation as impersonation_service
 from app.services import message_templates as message_templates_service
 from app.services import email as email_service
+from app.services import passkeys as passkeys_service
 from app.services import staff_access as staff_access_service
 
 
@@ -55,7 +72,67 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 settings = get_settings()
 LOGIN_RATE_LIMIT_WINDOW = 300  # 5 minutes
 LOGIN_RATE_LIMIT_ATTEMPTS = 5
+# Per-account failed sign-in limit, independent of the client address.
+ACCOUNT_LOCKOUT_WINDOW = 900  # 15 minutes
+ACCOUNT_LOCKOUT_ATTEMPTS = 10
+_ACCOUNT_LOCKOUT_PREFIX = "account:"
 
+
+def _account_lockout_identifier(email: str) -> str:
+    return f"{_ACCOUNT_LOCKOUT_PREFIX}{str(email or '').strip().lower()}"
+
+
+async def _record_account_login_failure(account_identifier: str) -> None:
+    # register_login_attempt increments the counter; the limit it reports is
+    # enforced by the check at the start of the next sign-in.
+    await auth_repo.register_login_attempt(
+        account_identifier,
+        window_seconds=ACCOUNT_LOCKOUT_WINDOW,
+        max_attempts=ACCOUNT_LOCKOUT_ATTEMPTS,
+    )
+
+
+def _totp_qr_code_data_uri(provisioning_uri: str) -> str:
+    """Render a provisioning URI locally so it is never sent to a third party."""
+    image = qrcode.make(provisioning_uri)
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+def _matching_totp_step(
+    secret: str,
+    code: str | None,
+    last_used_step: int | None,
+    *,
+    at: float | None = None,
+) -> int | None:
+    """Return the time-step *code* is valid for, or ``None``.
+
+    Accepts the current step and one either side (clock drift), but never a
+    step at or before *last_used_step*, so an accepted code cannot be
+    replayed while it is still inside its validity window.
+    """
+    candidate = str(code or "").strip()
+    if not candidate:
+        return None
+    totp = pyotp.TOTP(secret)
+    current = int(at if at is not None else time.time()) // totp.interval
+    floor = int(last_used_step) if last_used_step is not None else None
+    for step in (current - 1, current, current + 1):
+        if floor is not None and step <= floor:
+            continue
+        if hmac.compare_digest(totp.generate_otp(step), candidate):
+            return step
+    return None
+
+
+async def _verify_and_claim_totp(devices: list[dict[str, Any]], code: str | None) -> bool:
+    for device in devices:
+        step = _matching_totp_step(device["secret"], code, device.get("last_used_step"))
+        if step is not None and await auth_repo.claim_totp_step(int(device["id"]), step):
+            return True
+    return False
 
 
 def _html_to_text(html: str) -> str:
@@ -197,7 +274,7 @@ def _log_login_failure(request: Request, email: str, reason: str) -> None:
     )
 
 
-def _log_login_success(request: Request, user: dict[str, Any]) -> None:
+def _log_login_success(request: Request, user: dict[str, Any], *, auth_method: str = "password") -> None:
     email = str(user.get("email", "")).lower()
     ip = _client_ip(request)
     user_id = user.get("id")
@@ -207,112 +284,297 @@ def _log_login_success(request: Request, user: dict[str, Any]) -> None:
         user_id=user_id,
         ip=ip,
         user_agent=_user_agent(request),
+        auth_method=auth_method,
     )
 
 
-@router.post(
-    "/register",
-    response_model=None,
-    status_code=status.HTTP_201_CREATED,
-    summary="Register a new account",
-)
-async def register(
-    payload: RegistrationRequest,
+def _build_passkey_item(record: dict[str, Any]) -> PasskeyItem:
+    return PasskeyItem(
+        id=int(record["id"]),
+        name=str(record.get("display_name") or "Passkey"),
+        created_at=ensure_datetime(record.get("created_at")),
+        last_used_at=(
+            ensure_datetime(record.get("last_used_at"))
+            if record.get("last_used_at")
+            else None
+        ),
+        transports=passkeys_service.parse_transports(record.get("transports")),
+        credential_device_type=record.get("credential_device_type"),
+        credential_backed_up=bool(record.get("credential_backed_up")),
+    )
+
+
+def _passkey_summary(record: dict[str, Any]) -> dict[str, Any]:
+    return _build_passkey_item(record).model_dump(mode="json")
+
+
+def _passkey_login_cookie_name() -> str:
+    return f"{settings.session_cookie_name}_passkey_login"
+
+
+def _passkey_request_origin(request: Request) -> str:
+    """Use the browser Origin when present, otherwise the request's own origin."""
+    return request.headers.get("origin") or f"{request.url.scheme}://{request.url.netloc}"
+
+
+def _request_is_secure(request: Request) -> bool:
+    if settings.environment.lower() == "production":
+        return True
+    scheme = (request.url.scheme or "").lower()
+    return scheme == "https"
+
+
+def _set_passkey_login_cookie(response: Response, request: Request, token: str) -> None:
+    # Keep the sink guarded as well as its callers.  Besides providing defence
+    # in depth, this makes the request-cookie-to-response-cookie trust boundary
+    # explicit for static analysis.
+    if not passkeys_service.is_valid_browser_binding_token(token):
+        raise ValueError("Invalid passkey browser binding token")
+    response.set_cookie(
+        _passkey_login_cookie_name(),
+        token,
+        httponly=True,
+        secure=_request_is_secure(request),
+        max_age=passkeys_service.PASSKEY_CHALLENGE_TTL_SECONDS,
+        samesite="lax",
+    )
+
+
+def _validated_passkey_login_cookie(request: Request) -> str | None:
+    token = request.cookies.get(_passkey_login_cookie_name())
+    if not passkeys_service.is_valid_browser_binding_token(token):
+        return None
+    return token
+
+
+def _new_passkey_login_binding() -> str:
+    token = passkeys_service.generate_browser_binding_token()
+    if not passkeys_service.is_valid_browser_binding_token(token):
+        raise RuntimeError("Passkey browser binding token generation failed")
+    return token
+
+
+def _get_passkey_credential_id(credential: dict[str, Any]) -> str:
+    credential_id = credential.get("id")
+    if not isinstance(credential_id, str) or not credential_id.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Credential identifier is required")
+    return credential_id.strip()
+
+
+def _require_password_reauthentication(current_user: dict[str, Any], current_password: str) -> None:
+    stored_hash = current_user.get("password_hash")
+    if not stored_hash or not verify_password(current_password, stored_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+
+
+async def _ensure_passkey_user_handle(current_user: dict[str, Any]) -> str:
+    existing = str(current_user.get("passkey_user_handle") or "").strip()
+    if existing:
+        return existing
+    handle = passkeys_service.generate_user_handle()
+    await user_repo.update_user(int(current_user["id"]), passkey_user_handle=handle)
+    current_user["passkey_user_handle"] = handle
+    return handle
+
+
+async def _complete_login_response(
+    *,
     request: Request,
-    _: None = Depends(require_database),
+    user: dict[str, Any],
+    auth_method: str,
+    passkey_record: dict[str, Any] | None = None,
+    totp_devices: list[dict[str, Any]] | None = None,
 ) -> Response:
-    existing_users = await user_repo.count_users()
-    is_first_user = existing_users == 0
+    if totp_devices is None:
+        totp_devices = await auth_repo.get_totp_authenticators(user["id"])
+    requires_totp_enrollment = not bool(totp_devices)
+    login_timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
+    user = await user_repo.record_login(user["id"], login_timestamp)
+    active_company_id = await _determine_active_company_id(user)
+    session = await session_manager.create_session(
+        user["id"], request, active_company_id=active_company_id
+    )
+    if active_company_id is not None:
+        user["company_id"] = active_company_id
+    response_model = _build_login_response(
+        user,
+        session,
+        requires_totp_enrollment=requires_totp_enrollment,
+        redirect="/security/2fa" if requires_totp_enrollment else None,
+    )
+    response = JSONResponse(content=response_model.model_dump(mode="json"))
+    session_manager.apply_session_cookies(response, session, request)
+    _log_login_success(request, user, auth_method=auth_method)
+    await audit_service.record(
+        action="auth.login.succeed",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="user",
+        entity_id=int(user["id"]),
+        metadata={"authentication_method": auth_method, "outcome": "success"},
+    )
+    if passkey_record is not None:
+        await audit_service.record(
+            action="auth.passkey.authenticate",
+            user_id=int(user["id"]),
+            entity_type="user_passkey",
+            entity_id=int(passkey_record["id"]),
+            metadata={
+                "credential_id_hash": passkeys_service.credential_id_hash(str(passkey_record["credential_id"])),
+                "outcome": "success",
+            },
+            request=request,
+        )
+    return response
 
-    existing_user = await user_repo.get_user_by_email(payload.email)
-    if existing_user:
-        if int(existing_user.get("force_password_change") or 0) == 1:
-            return JSONResponse(
-                content={
-                    "detail": (
-                        "An account already exists for this email. "
-                        "Send a password reset link to finish setting it up."
-                    ),
-                    "account_setup_reset_available": True,
-                },
-                status_code=status.HTTP_409_CONFLICT,
+
+async def _resolve_first_user_company_id(requested_company_id: int | None) -> int:
+    """Return the company for the initial super administrator.
+
+    ``users.company_id`` is mandatory, but a freshly installed portal gives the
+    first user no way to know a company identifier, so the field is optional on
+    the registration form. Fall back to the first existing company (normally
+    the demo company seeded at startup) and create one when none exists yet.
+    """
+
+    if requested_company_id is not None:
+        if not await company_repo.get_company_by_id(requested_company_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Company {requested_company_id} does not exist",
             )
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+        return requested_company_id
 
-    matched_company_id: int | None = None
+    companies = await company_repo.list_companies(include_archived=True)
+    if companies:
+        return int(min(int(company["id"]) for company in companies))
+    company = await company_repo.create_company(name="Default Company")
+    return int(company["id"])
+
+
+REGISTRATION_PENDING_DETAIL = (
+    "Thanks. Check your email for a link to finish setting up your account "
+    "before signing in."
+)
+
+
+def _registration_restricted() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Registration is restricted to approved company domains or existing staff records",
+    )
+
+
+async def _match_registration_company(
+    email: str,
+) -> tuple[int, dict[str, Any] | None]:
+    """Return the company (and any staff record) a self-registration joins.
+
+    Raises 403 when the email matches neither an enabled staff record nor an
+    approved company domain. This depends only on the address, never on
+    whether an account already exists for it.
+    """
+    staff_matches = await staff_repo.list_staff_by_email(email)
+    active_staff_matches = [staff for staff in staff_matches if bool(staff.get("enabled", True))]
     matched_staff: dict[str, Any] | None = None
-    if not is_first_user:
-        staff_matches = await staff_repo.list_staff_by_email(payload.email)
-        active_staff_matches = [staff for staff in staff_matches if bool(staff.get("enabled", True))]
-        if active_staff_matches:
-            matched_staff = active_staff_matches[0]
-            raw_staff_company_id = matched_staff.get("company_id")
-            try:
-                matched_company_id = int(raw_staff_company_id) if raw_staff_company_id is not None else None
-            except (TypeError, ValueError):
-                matched_company_id = None
+    matched_company_id: int | None = None
+    if active_staff_matches:
+        matched_staff = active_staff_matches[0]
+        raw_staff_company_id = matched_staff.get("company_id")
+        try:
+            matched_company_id = int(raw_staff_company_id) if raw_staff_company_id is not None else None
+        except (TypeError, ValueError):
+            matched_company_id = None
 
-        if matched_company_id is None:
-            domain = payload.email.split("@")[-1].strip().lower()
-            matched = await company_repo.get_company_by_email_domain(domain)
-            if not matched:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Registration is restricted to approved company domains or existing staff records",
-                )
+    if matched_company_id is None:
+        domain = email.split("@")[-1].strip().lower()
+        matched = await company_repo.get_company_by_email_domain(domain)
+        if not matched or matched.get("id") is None:
+            raise _registration_restricted()
+        try:
+            matched_company_id = int(matched["id"])
+        except (TypeError, ValueError) as exc:
+            log_error(
+                "Failed to coerce matched company identifier during registration",
+                error=str(exc),
+            )
+            raise _registration_restricted() from exc
 
-            raw_company_id = matched.get("id")
-            if raw_company_id is None:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Registration is restricted to approved company domains or existing staff records",
-                )
+    return matched_company_id, matched_staff
 
-            try:
-                matched_company_id = int(raw_company_id)
-            except (TypeError, ValueError) as exc:
-                log_error(
-                    "Failed to coerce matched company identifier during registration",
-                    error=str(exc),
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Registration is restricted to approved company domains or existing staff records",
-                ) from exc
 
+async def _notify_existing_account_registration(user: dict[str, Any]) -> None:
+    """Tell an existing account holder someone tried to register their email.
+
+    An invited account that has not been set up yet gets a password link to
+    finish setup (what the sign-up form used to offer inline); anyone else
+    gets a notice pointing at sign-in and password reset.
+    """
+    try:
+        if int(user.get("force_password_change") or 0) == 1:
+            await _issue_password_reset_email(user)
+            return
+        base_url = str(settings.portal_url).rstrip("/") if settings.portal_url else ""
+        login_link = f"{base_url}/login" if base_url else "/login"
+        forgot_link = f"{base_url}/forgot-password" if base_url else "/forgot-password"
+        name = user.get("first_name") or "there"
+        text_body = (
+            f"Hello {name},\n\n"
+            f"Someone tried to create a new {settings.app_name} account with this email "
+            "address, but you already have one.\n\n"
+            f"Sign in: {login_link}\n"
+            f"Forgotten your password? Reset it here: {forgot_link}\n\n"
+            "If this wasn't you, you can ignore this email."
+        )
+        html_body = (
+            f"<p>Hello {escape(name)},</p>"
+            f"<p>Someone tried to create a new {escape(settings.app_name)} account with this "
+            "email address, but you already have one.</p>"
+            f"<p><a href=\"{escape(login_link)}\">Sign in</a> or "
+            f"<a href=\"{escape(forgot_link)}\">reset your password</a>.</p>"
+            "<p>If this wasn't you, you can ignore this email.</p>"
+        )
+        await email_service.send_email(
+            subject=f"You already have a {settings.app_name} account",
+            recipients=[user["email"]],
+            text_body=text_body,
+            html_body=html_body,
+        )
+    except Exception as exc:  # pragma: no cover - background task, log and continue
+        logger.error(
+            "Failed to notify existing account about a registration attempt",
+            user_id=user.get("id"),
+            error=str(exc),
+        )
+
+
+async def _send_signup_verification_email_safely(user: dict[str, Any], token: str) -> None:
+    try:
+        await _send_signup_verification_email(user, token)
+    except Exception as exc:  # pragma: no cover - background task, log and continue
+        logger.error("Failed to send signup verification email", user_id=user.get("id"), error=str(exc))
+
+
+def _registration_pending_response(background_tasks: BackgroundTasks) -> JSONResponse:
+    return JSONResponse(
+        content={"detail": REGISTRATION_PENDING_DETAIL, "verification_required": True},
+        status_code=status.HTTP_202_ACCEPTED,
+        background=background_tasks,
+    )
+
+
+async def _register_first_user(payload: RegistrationRequest, request: Request) -> Response:
+    first_user_company_id = await _resolve_first_user_company_id(payload.company_id)
     created = await user_repo.create_user(
         email=payload.email,
         password=payload.password,
-        first_name=payload.first_name or (matched_staff or {}).get("first_name"),
-        last_name=payload.last_name or (matched_staff or {}).get("last_name"),
-        mobile_phone=payload.mobile_phone or (matched_staff or {}).get("mobile_phone"),
-        company_id=payload.company_id if is_first_user else matched_company_id,
-        is_super_admin=is_first_user,
+        first_name=payload.first_name,
+        last_name=payload.last_name,
+        mobile_phone=payload.mobile_phone,
+        company_id=first_user_company_id,
+        is_super_admin=True,
     )
-
-    if matched_company_id is not None:
-        await user_company_repo.assign_user_to_company(
-            user_id=created["id"],
-            company_id=matched_company_id,
-        )
-
     await staff_access_service.apply_pending_access_for_user(created)
-
-    if not is_first_user:
-        await user_repo.update_user(created["id"], is_active=0, email_verified_at=None)
-        token = secrets.token_hex(32)
-        expires_at = datetime.utcnow() + timedelta(hours=24)
-        await auth_repo.create_account_verification_token(
-            user_id=created["id"], token=token, expires_at=expires_at
-        )
-        await _send_signup_verification_email(created, token)
-        return JSONResponse(
-            content={
-                "detail": "Account created. Check your email to verify your signup before signing in.",
-                "verification_required": True,
-            },
-            status_code=status.HTTP_202_ACCEPTED,
-        )
 
     active_company_id = await _determine_active_company_id(created)
     session = await session_manager.create_session(
@@ -333,6 +595,70 @@ async def register(
     session_manager.apply_session_cookies(response, session, request)
     return response
 
+
+@router.post(
+    "/register",
+    response_model=LoginResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Register a new account",
+    responses={
+        status.HTTP_202_ACCEPTED: {
+            "model": RegistrationPendingResponse,
+            "description": (
+                "Registration accepted; next steps were emailed. The same response "
+                "is returned whether or not the email already has an account."
+            ),
+        },
+    },
+)
+async def register(
+    payload: RegistrationRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    _: None = Depends(require_database),
+) -> Response:
+    # Only one request may create the initial super administrator. Serialise
+    # the bootstrap on a database lock and re-check inside it; a request that
+    # loses the race continues as an ordinary self-registration.
+    if await user_repo.count_users() == 0:
+        async with auth_repo.first_user_registration_lock():
+            if await user_repo.count_users() == 0:
+                return await _register_first_user(payload, request)
+
+    matched_company_id, matched_staff = await _match_registration_company(payload.email)
+
+    # Do not reveal whether the email already has an account: respond exactly
+    # as for a new signup and email the existing account holder instead. The
+    # password hash keeps the work (and timing) the same as creating a user.
+    existing_user = await user_repo.get_user_by_email(payload.email)
+    if existing_user:
+        verify_password(payload.password, get_dummy_password_hash())
+        background_tasks.add_task(_notify_existing_account_registration, existing_user)
+        return _registration_pending_response(background_tasks)
+
+    created = await user_repo.create_user(
+        email=payload.email,
+        password=payload.password,
+        first_name=payload.first_name or (matched_staff or {}).get("first_name"),
+        last_name=payload.last_name or (matched_staff or {}).get("last_name"),
+        mobile_phone=payload.mobile_phone or (matched_staff or {}).get("mobile_phone"),
+        company_id=matched_company_id,
+        is_super_admin=False,
+    )
+    await user_company_repo.assign_user_to_company(
+        user_id=created["id"],
+        company_id=matched_company_id,
+    )
+    await staff_access_service.apply_pending_access_for_user(created)
+
+    await user_repo.update_user(created["id"], is_active=0, email_verified_at=None)
+    token = secrets.token_hex(32)
+    expires_at = datetime.utcnow() + timedelta(hours=24)
+    await auth_repo.create_account_verification_token(
+        user_id=created["id"], token=token, expires_at=expires_at
+    )
+    background_tasks.add_task(_send_signup_verification_email_safely, created, token)
+    return _registration_pending_response(background_tasks)
 
 
 @router.get(
@@ -359,8 +685,13 @@ async def verify_email(token: str, _: None = Depends(require_database)) -> Respo
     if expires_at and datetime.utcnow() > ensure_datetime(expires_at):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification link")
 
+    # Only a never-verified signup reaches this point (a verified account
+    # returned above), so the link can complete signup but can never
+    # re-enable an account an administrator deactivated after verification.
+    # Deactivation also retires outstanding links for unverified accounts.
     await user_repo.update_user(record["user_id"], is_active=1, email_verified_at=datetime.utcnow())
     await auth_repo.mark_account_verification_token_used(token)
+    await auth_repo.invalidate_account_verification_tokens_for_user(int(record["user_id"]))
     return RedirectResponse(url="/login?verified=1", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -386,53 +717,90 @@ async def login(
         _log_login_failure(request, payload.email, "rate_limited")
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many login attempts")
 
+    # The per-IP limit above does not stop guessing spread across many
+    # addresses, so failures are also counted per account (keyed on the
+    # email alone, whether or not it is registered). A locked account gets
+    # the same generic error as a wrong password.
+    account_identifier = _account_lockout_identifier(payload.email)
+    failures = await auth_repo.get_login_attempt_count(
+        account_identifier, window_seconds=ACCOUNT_LOCKOUT_WINDOW
+    )
+    if failures >= ACCOUNT_LOCKOUT_ATTEMPTS:
+        verify_password(payload.password, get_dummy_password_hash())
+        _log_login_failure(request, payload.email, "account_locked")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
     user = await user_repo.get_user_by_email(payload.email)
-    if not user or not verify_password(payload.password, user["password_hash"]):
+    # Always run one password check, against a dummy hash for unknown
+    # accounts, so response timing does not reveal which emails exist.
+    stored_hash = (user or {}).get("password_hash") or get_dummy_password_hash()
+    password_ok = verify_password(payload.password, stored_hash)
+    if not user or not user.get("password_hash") or not password_ok:
+        await _record_account_login_failure(account_identifier)
         _log_login_failure(request, payload.email, "invalid_credentials")
+        # Do not create database audit rows for arbitrary unknown identifiers:
+        # that would provide an attacker with an unbounded audit-log write
+        # primitive.  Identified accounts are useful, attributable signals.
+        if user:
+            await audit_service.record(
+                action="auth.login.fail",
+                request=request,
+                user_id=int(user["id"]),
+                entity_type="user",
+                entity_id=int(user["id"]),
+                metadata={
+                    "authentication_method": "password",
+                    "outcome": "failure",
+                    "reason": "invalid_credentials",
+                    "identifier_hash": _hash_email(payload.email.lower()),
+                },
+            )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     if int(user.get("is_active", 1)) != 1:
         _log_login_failure(request, payload.email, "account_disabled")
+        await audit_service.record(
+            action="auth.login.fail",
+            request=request,
+            user_id=int(user["id"]),
+            entity_type="user",
+            entity_id=int(user["id"]),
+            metadata={"authentication_method": "password", "outcome": "failure", "reason": "account_disabled"},
+        )
         detail = "Please verify your email address before signing in." if not user.get("email_verified_at") else "Account is disabled"
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
 
     totp_devices = await auth_repo.get_totp_authenticators(user["id"])
-    requires_totp_enrollment = not bool(totp_devices)
     if totp_devices:
         if not payload.totp_code:
             _log_login_failure(request, payload.email, "totp_required")
+            await audit_service.record(
+                action="auth.login.fail", request=request, user_id=int(user["id"]),
+                entity_type="user", entity_id=int(user["id"]),
+                metadata={"authentication_method": "password_totp", "outcome": "failure", "reason": "totp_required"},
+            )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="TOTP code required")
-        verified = False
-        for device in totp_devices:
-            totp = pyotp.TOTP(device["secret"])
-            if totp.verify(payload.totp_code, valid_window=1):
-                verified = True
-                break
+        verified = await _verify_and_claim_totp(totp_devices, payload.totp_code)
         if not verified:
+            # Count wrong codes toward the account lockout so TOTP guessing
+            # with a known password is bounded too.
+            await _record_account_login_failure(account_identifier)
             _log_login_failure(request, payload.email, "invalid_totp")
+            await audit_service.record(
+                action="auth.login.fail", request=request, user_id=int(user["id"]),
+                entity_type="user", entity_id=int(user["id"]),
+                metadata={"authentication_method": "password_totp", "outcome": "failure", "reason": "invalid_totp"},
+            )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid TOTP code")
 
+    await auth_repo.clear_login_attempts(account_identifier)
     await auth_repo.clear_login_attempts(identifier)
-
-    login_timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
-    user = await user_repo.record_login(user["id"], login_timestamp)
-
-    active_company_id = await _determine_active_company_id(user)
-    session = await session_manager.create_session(
-        user["id"], request, active_company_id=active_company_id
+    return await _complete_login_response(
+        request=request,
+        user=user,
+        auth_method="password",
+        totp_devices=totp_devices,
     )
-    if active_company_id is not None:
-        user["company_id"] = active_company_id
-    response_model = _build_login_response(
-        user,
-        session,
-        requires_totp_enrollment=requires_totp_enrollment,
-        redirect="/security/2fa" if requires_totp_enrollment else None,
-    )
-    response = JSONResponse(content=response_model.model_dump(mode="json"))
-    session_manager.apply_session_cookies(response, session, request)
-    _log_login_success(request, user)
-    return response
 
 
 @router.post(
@@ -534,13 +902,27 @@ async def exit_impersonation(
     summary="Invalidate the current session",
 )
 async def logout(
+    request: Request,
     response: Response,
     session: SessionData = Depends(get_current_session),
 ) -> Response:
     await session_manager.revoke_session(session)
-    session_manager.clear_session_cookies(response)
-    response.status_code = status.HTTP_204_NO_CONTENT
-    return response
+    await audit_service.record(
+        action="auth.session.terminate",
+        request=request,
+        user_id=int(session.user_id),
+        entity_type="session",
+        entity_id=int(session.id),
+        metadata={"reason": "logout", "outcome": "success"},
+    )
+    accept_header = request.headers.get("accept", "").lower()
+    if "text/html" in accept_header or "application/xhtml+xml" in accept_header:
+        logout_response = RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    else:
+        response.status_code = status.HTTP_204_NO_CONTENT
+        logout_response = response
+    session_manager.clear_session_cookies(logout_response)
+    return logout_response
 
 
 @router.get(
@@ -555,19 +937,7 @@ async def get_session(
     return _build_login_response(current_user, session)
 
 
-@router.post(
-    "/password/forgot",
-    response_model=PasswordResetStatus,
-    summary="Request a password reset email",
-)
-async def password_forgot(
-    payload: PasswordResetRequest,
-    _: None = Depends(require_database),
-) -> PasswordResetStatus:
-    user = await user_repo.get_user_by_email(payload.email)
-    if not user:
-        return PasswordResetStatus(detail="If the email is registered, reset instructions have been sent.")
-
+async def _issue_password_reset_email(user: dict[str, Any]) -> None:
     token = secrets.token_hex(32)
     expires_at = datetime.utcnow() + timedelta(hours=1)
     await auth_repo.create_password_reset_token(
@@ -613,7 +983,37 @@ async def password_forgot(
             error=str(exc),
         )
 
-    return PasswordResetStatus(detail="If the email is registered, reset instructions have been sent.")
+
+async def _process_password_reset_request(email: str) -> None:
+    """Look up the account and send a reset link, off the request path."""
+    try:
+        user = await user_repo.get_user_by_email(email)
+        if user:
+            await _issue_password_reset_email(user)
+    except Exception as exc:  # pragma: no cover - background task, log and continue
+        logger.error("Failed to process password reset request", error=str(exc))
+
+
+PASSWORD_RESET_REQUESTED_DETAIL = "If the email is registered, reset instructions have been sent."
+
+
+@router.post(
+    "/password/forgot",
+    response_model=PasswordResetStatus,
+    summary="Request a password reset email",
+)
+async def password_forgot(
+    payload: PasswordResetRequest,
+    background_tasks: BackgroundTasks,
+    _: None = Depends(require_database),
+) -> Response:
+    # The lookup, token and email all happen after the response is sent, so
+    # neither the body nor the timing shows whether the email is registered.
+    background_tasks.add_task(_process_password_reset_request, payload.email)
+    return JSONResponse(
+        content=PasswordResetStatus(detail=PASSWORD_RESET_REQUESTED_DETAIL).model_dump(mode="json"),
+        background=background_tasks,
+    )
 
 
 @router.post(
@@ -623,6 +1023,7 @@ async def password_forgot(
 )
 async def password_reset(
     payload: PasswordResetConfirm,
+    request: Request,
     _: None = Depends(require_database),
 ) -> PasswordResetStatus:
     record = await auth_repo.get_password_reset_token(payload.token)
@@ -637,6 +1038,18 @@ async def password_reset(
 
     await user_repo.set_user_password(record["user_id"], payload.password)
     await auth_repo.mark_password_reset_token_used(payload.token)
+    # A reset is how users recover from a compromised account, so end every
+    # existing session and retire any other outstanding reset links.
+    await auth_repo.invalidate_password_reset_tokens_for_user(int(record["user_id"]))
+    await auth_repo.deactivate_sessions_for_user(int(record["user_id"]))
+    await audit_service.record(
+        action="auth.password.reset",
+        request=request,
+        user_id=int(record["user_id"]),
+        entity_type="user",
+        entity_id=int(record["user_id"]),
+        metadata={"outcome": "success"},
+    )
     return PasswordResetStatus(detail="Password reset successful.")
 
 
@@ -647,6 +1060,7 @@ async def password_reset(
 )
 async def change_password(
     payload: PasswordChangeRequest,
+    request: Request,
     current_user: dict = Depends(get_current_user),
 ) -> PasswordResetStatus:
     stored_hash = current_user.get("password_hash")
@@ -660,6 +1074,20 @@ async def change_password(
         )
 
     await user_repo.set_user_password(current_user["id"], payload.new_password)
+    session = getattr(request.state, "session", None)
+    await auth_repo.deactivate_sessions_for_user(
+        int(current_user["id"]),
+        except_session_id=getattr(session, "id", None),
+    )
+    await auth_repo.invalidate_password_reset_tokens_for_user(int(current_user["id"]))
+    await audit_service.record(
+        action="auth.password.change",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="user",
+        entity_id=int(current_user["id"]),
+        metadata={"outcome": "success"},
+    )
     return PasswordResetStatus(detail="Password updated successfully.")
 
 
@@ -683,6 +1111,7 @@ async def list_totp_devices(
     summary="Begin TOTP enrolment",
 )
 async def setup_totp(
+    request: Request,
     session: SessionData = Depends(get_current_session),
     current_user: dict = Depends(get_current_user),
 ) -> TOTPSetupResponse:
@@ -690,7 +1119,19 @@ async def setup_totp(
     totp = pyotp.TOTP(secret)
     provisioning_uri = totp.provisioning_uri(name=current_user["email"], issuer_name=settings.app_name)
     await session_manager.store_pending_totp_secret(session, secret)
-    return TOTPSetupResponse(secret=secret, otpauth_url=provisioning_uri)
+    await audit_service.record(
+        action="auth.mfa.enroll",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="user",
+        entity_id=int(current_user["id"]),
+        metadata={"method": "totp", "stage": "begin"},
+    )
+    return TOTPSetupResponse(
+        secret=secret,
+        otpauth_url=provisioning_uri,
+        qr_code_data_uri=_totp_qr_code_data_uri(provisioning_uri),
+    )
 
 
 @router.post(
@@ -700,6 +1141,7 @@ async def setup_totp(
 )
 async def verify_totp(
     payload: TOTPVerifyRequest,
+    request: Request,
     session: SessionData = Depends(get_current_session),
     current_user: dict = Depends(get_current_user),
 ) -> TOTPAuthenticator:
@@ -707,15 +1149,36 @@ async def verify_totp(
     if not secret:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No pending TOTP secret")
 
-    totp = pyotp.TOTP(secret)
-    if not totp.verify(payload.code, valid_window=1):
+    if await auth_repo.user_has_totp_authenticator(int(current_user["id"])):
+        _require_password_reauthentication(current_user, payload.current_password or "")
+
+    enrolment_step = _matching_totp_step(secret, payload.code, None)
+    if enrolment_step is None:
+        await audit_service.record(
+            action="auth.mfa.verify",
+            request=request,
+            user_id=int(current_user["id"]),
+            entity_type="user",
+            entity_id=int(current_user["id"]),
+            metadata={"method": "totp", "outcome": "failure"},
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid TOTP code")
 
     name = payload.name or "Authenticator"
+    # Record the enrolment code's step so it cannot also be used to sign in.
     authenticator = await auth_repo.create_totp_authenticator(
-        user_id=current_user["id"], name=name, secret=secret
+        user_id=current_user["id"], name=name, secret=secret, last_used_step=enrolment_step
     )
     await session_manager.clear_pending_totp_secret(session)
+    await audit_service.record_create(
+        action="auth.mfa.verify",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="totp_authenticator",
+        entity_id=int(authenticator["id"]),
+        after={"name": authenticator["name"], "method": "totp"},
+        metadata={"outcome": "success"},
+    )
     return TOTPAuthenticator(id=authenticator["id"], name=authenticator["name"])
 
 
@@ -726,12 +1189,331 @@ async def verify_totp(
 )
 async def delete_totp(
     authenticator_id: int,
+    payload: TOTPDeleteRequest,
+    request: Request,
     current_user: dict = Depends(get_current_user),
 ) -> Response:
+    _require_password_reauthentication(current_user, payload.current_password)
     if await auth_repo.count_totp_authenticators(current_user["id"]) <= 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="At least one authenticator is required for every account",
         )
+    devices = await auth_repo.get_totp_authenticators(current_user["id"])
+    existing = next((item for item in devices if int(item["id"]) == authenticator_id), None)
+    if existing is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Authenticator not found")
     await auth_repo.delete_totp_authenticator(current_user["id"], authenticator_id)
+    await audit_service.record_delete(
+        action="auth.mfa.remove",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="totp_authenticator",
+        entity_id=authenticator_id,
+        before={"name": existing.get("name"), "method": "totp"},
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/passkeys",
+    response_model=PasskeyListResponse,
+    summary="List registered passkeys",
+)
+async def list_passkeys(
+    current_user: dict = Depends(get_current_user),
+) -> PasskeyListResponse:
+    items = await auth_repo.list_passkeys_for_user(int(current_user["id"]))
+    return PasskeyListResponse(items=[_build_passkey_item(item) for item in items])
+
+
+@router.post(
+    "/passkeys/register/options",
+    response_model=PasskeyChallengeResponse,
+    summary="Begin passkey registration",
+)
+async def begin_passkey_registration(
+    payload: PasskeyBeginRegistrationRequest,
+    request: Request,
+    session: SessionData = Depends(get_current_session),
+    current_user: dict = Depends(get_current_user),
+    _: None = Depends(require_database),
+) -> PasskeyChallengeResponse:
+    _require_password_reauthentication(current_user, payload.current_password)
+    handle = await _ensure_passkey_user_handle(current_user)
+    existing = await auth_repo.list_passkeys_for_user(int(current_user["id"]))
+    try:
+        options = passkeys_service.registration_options(
+            user=current_user, user_handle=handle, existing_credentials=existing,
+            origin=_passkey_request_origin(request),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Passkeys are not configured for this portal address") from exc
+    await auth_repo.create_passkey_challenge(
+        challenge_id=options["challenge_id"],
+        ceremony="registration",
+        challenge=options["challenge"],
+        user_id=int(current_user["id"]),
+        session_id=int(session.id),
+        expires_at=options["expires_at"],
+    )
+    return PasskeyChallengeResponse(
+        challenge_id=options["challenge_id"],
+        public_key=options["public_key"],
+        expires_at=options["expires_at"],
+    )
+
+
+@router.post(
+    "/passkeys/register/verify",
+    response_model=PasskeyItem,
+    summary="Finish passkey registration",
+)
+async def finish_passkey_registration(
+    payload: PasskeyFinishRegistrationRequest,
+    request: Request,
+    session: SessionData = Depends(get_current_session),
+    current_user: dict = Depends(get_current_user),
+    _: None = Depends(require_database),
+) -> PasskeyItem:
+    challenge = await auth_repo.get_passkey_challenge(payload.challenge_id)
+    if not challenge:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Passkey registration has expired")
+    consumed = await auth_repo.consume_passkey_challenge(
+        challenge_id=payload.challenge_id,
+        ceremony="registration",
+        user_id=int(current_user["id"]),
+        session_id=int(session.id),
+    )
+    if not consumed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Passkey registration has expired")
+    try:
+        verified = passkeys_service.verify_registration(
+            credential=payload.credential,
+            expected_challenge=str(challenge["challenge"]),
+            origin=_passkey_request_origin(request),
+        )
+        credential_id = _get_passkey_credential_id(payload.credential)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await audit_service.record(
+            action="auth.passkey.register",
+            user_id=int(current_user["id"]),
+            metadata={"reason": "verification_failed", "outcome": "failure"},
+            request=request,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passkey registration could not be verified",
+        ) from exc
+    existing = await auth_repo.get_passkey_by_credential_id(credential_id)
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This passkey is already registered")
+    try:
+        created = await auth_repo.create_passkey(
+            user_id=int(current_user["id"]),
+            credential_id=credential_id,
+            public_key=verified.credential_public_key,
+            sign_count=int(verified.sign_count),
+            transports=passkeys_service.parse_transports(payload.credential.get("response", {}).get("transports")),
+            aaguid=str(verified.aaguid or ""),
+            credential_device_type=getattr(verified.credential_device_type, "value", None),
+            credential_backed_up=bool(verified.credential_backed_up),
+            display_name=payload.name.strip(),
+        )
+    except Exception as exc:
+        if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This passkey is already registered") from exc
+        raise
+    await audit_service.record_create(
+        action="auth.passkey.register",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="user_passkey",
+        entity_id=int(created["id"]),
+        after=_passkey_summary(created),
+        metadata={"credential_id_hash": passkeys_service.credential_id_hash(credential_id), "outcome": "success"},
+    )
+    return _build_passkey_item(created)
+
+
+@router.patch(
+    "/passkeys/{passkey_id}",
+    response_model=PasskeyItem,
+    summary="Rename a passkey",
+)
+async def rename_passkey(
+    passkey_id: int,
+    payload: PasskeyRenameRequest,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+) -> PasskeyItem:
+    existing = await auth_repo.get_passkey_by_id(int(current_user["id"]), passkey_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Passkey not found")
+    updated = await auth_repo.update_passkey_name(int(current_user["id"]), passkey_id, payload.name.strip())
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Passkey not found")
+    await audit_service.record(
+        action="auth.passkey.rename",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="user_passkey",
+        entity_id=passkey_id,
+        before=_passkey_summary(existing),
+        after=_passkey_summary(updated),
+        metadata={"credential_id_hash": passkeys_service.credential_id_hash(str(updated["credential_id"]))},
+    )
+    return _build_passkey_item(updated)
+
+
+@router.delete(
+    "/passkeys/{passkey_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove a passkey",
+)
+async def delete_passkey(
+    passkey_id: int,
+    payload: PasskeyDeleteRequest,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+) -> Response:
+    existing = await auth_repo.get_passkey_by_id(int(current_user["id"]), passkey_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Passkey not found")
+    _require_password_reauthentication(current_user, payload.current_password)
+    if await auth_repo.count_passkeys(int(current_user["id"])) <= 1:
+        has_fallback = bool(current_user.get("password_hash")) and bool(current_user.get("email"))
+        if not has_fallback:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You must keep another sign-in or recovery method before removing your final passkey",
+            )
+    await auth_repo.delete_passkey(int(current_user["id"]), passkey_id)
+    await audit_service.record_delete(
+        action="auth.passkey.remove",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="user_passkey",
+        entity_id=passkey_id,
+        before=_passkey_summary(existing),
+        metadata={"credential_id_hash": passkeys_service.credential_id_hash(str(existing["credential_id"]))},
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/passkeys/authenticate/options",
+    response_model=PasskeyChallengeResponse,
+    summary="Begin passkey authentication",
+)
+async def begin_passkey_authentication(
+    request: Request,
+    _: None = Depends(require_database),
+) -> Response:
+    browser_binding = _validated_passkey_login_cookie(request) or _new_passkey_login_binding()
+    try:
+        options = passkeys_service.authentication_options(origin=_passkey_request_origin(request))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Passkeys are not configured for this portal address") from exc
+    await auth_repo.create_passkey_challenge(
+        challenge_id=options["challenge_id"],
+        ceremony="authentication",
+        challenge=options["challenge"],
+        browser_binding_hash=passkeys_service.browser_binding_hash(browser_binding),
+        expires_at=options["expires_at"],
+    )
+    response = JSONResponse(
+        content=PasskeyChallengeResponse(
+            challenge_id=options["challenge_id"],
+            public_key=options["public_key"],
+            expires_at=options["expires_at"],
+        ).model_dump(mode="json")
+    )
+    _set_passkey_login_cookie(response, request, browser_binding)
+    return response
+
+
+@router.post(
+    "/passkeys/authenticate/verify",
+    response_model=LoginResponse,
+    summary="Finish passkey authentication",
+)
+async def finish_passkey_authentication(
+    payload: PasskeyCredentialRequest,
+    request: Request,
+    _: None = Depends(require_database),
+) -> Response:
+    browser_binding = _validated_passkey_login_cookie(request)
+    failure_detail = "Passkey sign-in failed. Use another sign-in option and try again."
+    if not browser_binding:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail)
+    challenge = await auth_repo.get_passkey_challenge(payload.challenge_id)
+    if not challenge:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail)
+    consumed = await auth_repo.consume_passkey_challenge(
+        challenge_id=payload.challenge_id,
+        ceremony="authentication",
+        browser_binding_hash=passkeys_service.browser_binding_hash(browser_binding),
+    )
+    if not consumed:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail)
+    try:
+        credential_id = _get_passkey_credential_id(payload.credential)
+    except HTTPException:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail) from None
+    passkey = await auth_repo.get_passkey_by_credential_id(credential_id)
+    if not passkey:
+        await audit_service.record(
+            action="auth.passkey.authenticate",
+            user_id=None,
+            metadata={"reason": "credential_not_found", "credential_id_hash": passkeys_service.credential_id_hash(credential_id), "outcome": "failure"},
+            request=request,
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail)
+    user = await user_repo.get_user_by_id(int(passkey["user_id"]))
+    if not user or int(user.get("is_active", 1)) != 1:
+        await audit_service.record(
+            action="auth.passkey.authenticate",
+            user_id=int(passkey["user_id"]),
+            entity_type="user_passkey",
+            entity_id=int(passkey["id"]),
+            metadata={"reason": "account_ineligible", "credential_id_hash": passkeys_service.credential_id_hash(credential_id), "outcome": "failure"},
+            request=request,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Passkey sign-in is not available for this account.",
+        )
+    try:
+        verified = passkeys_service.verify_authentication(
+            credential=payload.credential,
+            expected_challenge=str(challenge["challenge"]),
+            public_key=passkeys_service.base64url_to_bytes_safe(str(passkey.get("public_key") or "")),
+            sign_count=int(passkey.get("sign_count") or 0),
+            origin=_passkey_request_origin(request),
+        )
+    except Exception as exc:
+        await audit_service.record(
+            action="auth.passkey.authenticate",
+            user_id=int(user["id"]),
+            entity_type="user_passkey",
+            entity_id=int(passkey["id"]),
+            metadata={"reason": "verification_failed", "credential_id_hash": passkeys_service.credential_id_hash(credential_id), "outcome": "failure"},
+            request=request,
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail) from exc
+    await auth_repo.update_passkey_after_authentication(
+        passkey_id=int(passkey["id"]),
+        sign_count=int(verified.new_sign_count),
+        credential_device_type=getattr(verified.credential_device_type, "value", None),
+        credential_backed_up=bool(verified.credential_backed_up),
+        last_used_at=datetime.utcnow(),
+    )
+    return await _complete_login_response(
+        request=request,
+        user=user,
+        auth_method="passkey",
+        passkey_record=passkey,
+    )

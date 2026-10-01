@@ -8,11 +8,15 @@ import re
 import socket
 import time
 from abc import ABC, abstractmethod
+from html.parser import HTMLParser
 from datetime import datetime, timezone
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
 import httpx
+
+from app.services.monitored_http import monitored_client
+from app.services.outbound_url_guard import redirect_guard_hooks
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.database import db
@@ -125,10 +129,18 @@ def _is_missing_scalar(value: Any) -> bool:
     return value in (None, "")
 
 
-def _is_delivered_in_full(snapshot_payload: Mapping[str, Any] | None) -> bool:
+def _normalised_snapshot_status(snapshot_payload: Mapping[str, Any] | None) -> str:
     if not snapshot_payload:
-        return False
-    return str(snapshot_payload.get("status") or "").strip().casefold() == DELIVERED_IN_FULL_STATUS
+        return ""
+    return str(snapshot_payload.get("status") or "").strip().casefold()
+
+
+def _is_delivered_in_full(snapshot_payload: Mapping[str, Any] | None) -> bool:
+    return _normalised_snapshot_status(snapshot_payload) == DELIVERED_IN_FULL_STATUS
+
+
+def _is_in_transit(snapshot_payload: Mapping[str, Any] | None) -> bool:
+    return _normalised_snapshot_status(snapshot_payload) == "in transit"
 
 
 def _snapshot_payload(snapshot: CanonicalShipmentSnapshot | Mapping[str, Any] | None) -> dict[str, Any] | None:
@@ -178,11 +190,38 @@ def _extract_consignment_id(url: str, fallback_text: str = "") -> str | None:
     return None
 
 
+class _HTMLTextExtractor(HTMLParser):
+    """Extract visible text from HTML, skipping script and style blocks."""
+
+    _SKIP_TAGS = frozenset({"script", "style"})
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._parts: list[str] = []
+        self._skip_depth: int = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:  # type: ignore[override]  # mypy: parent uses untyped signature
+        if tag.lower() in self._SKIP_TAGS:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        # Guard against going negative on malformed HTML with unmatched
+        # closing tags (e.g. </script> with no preceding <script>).
+        if tag.lower() in self._SKIP_TAGS and self._skip_depth > 0:
+            self._skip_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth == 0:
+            self._parts.append(data)
+
+    def get_text(self) -> str:
+        return " ".join(self._parts)
+
+
 def _extract_visible_text(html_text: str, *, limit: int = 14_000) -> str:
-    text = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", html_text)
-    text = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", text)
-    text = re.sub(r"(?is)<[^>]+>", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
+    extractor = _HTMLTextExtractor()
+    extractor.feed(html_text)
+    text = re.sub(r"\s+", " ", extractor.get_text()).strip()
     return text[:limit]
 
 
@@ -239,7 +278,7 @@ def _extract_json_object(raw_text: str) -> dict[str, Any] | None:
         parsed = json.loads(text)
         return parsed if isinstance(parsed, dict) else None
     except json.JSONDecodeError:
-        pass
+        parsed = None
 
     fence_start = text.find("```")
     if fence_start != -1:
@@ -268,6 +307,17 @@ def _extract_json_object(raw_text: str) -> dict[str, Any] | None:
     return None
 
 
+_STARTRACK_DOMAINS: tuple[str, ...] = ("startrack.com.au",)
+
+
+def _host_matches_domains(hostname: str | None, domains: tuple[str, ...]) -> bool:
+    """Exact host or proper subdomain match (``evil-startrack.com`` does not match)."""
+    host = (hostname or "").strip().lower().rstrip(".")
+    if not host:
+        return False
+    return any(host == domain or host.endswith("." + domain) for domain in domains)
+
+
 def _validate_tracking_url(url: str) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
@@ -293,11 +343,37 @@ def _validate_tracking_url(url: str) -> str:
     return url.strip()
 
 
-async def _fetch_with_retries(url: str, *, timeout_seconds: float = 15.0, retries: int = 3) -> str:
+async def _fetch_with_retries(
+    url: str,
+    *,
+    allowed_domains: tuple[str, ...] = _STARTRACK_DOMAINS,
+    timeout_seconds: float = 15.0,
+    retries: int = 3,
+) -> str:
+    """Fetch a carrier tracking page.
+
+    The stored URL is re-validated at fetch time (it may have been saved before
+    the current rules existed) and every request, including each redirect hop,
+    must stay on the carrier's own domains and resolve to a public address
+    (enforced by the request event hook, which also covers the first request).
+    """
+    if not _host_matches_domains(urlparse(url).hostname, allowed_domains):
+        raise ValueError("Tracking URL host is not a supported carrier domain")
+
+    def _carrier_hop_check(hop_url: httpx.URL) -> None:
+        if hop_url.scheme not in {"http", "https"} or not _host_matches_domains(hop_url.host, allowed_domains):
+            raise ValueError("Tracking URL redirected outside the carrier domain")
+
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
-            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+            async with monitored_client(
+                httpx.AsyncClient,
+                timeout=timeout_seconds,
+                follow_redirects=True,
+                max_redirects=5,
+                event_hooks=redirect_guard_hooks(allow_private=False, extra_check=_carrier_hop_check),
+            ) as client:
                 response = await client.get(url, headers={"User-Agent": "MyPortal/1.0 (ticket-shipment-watch)"})
             response.raise_for_status()
             return response.text
@@ -313,11 +389,10 @@ class StarTrackProviderAdapter(ProviderAdapter):
     slug = "startrack"
 
     def can_handle(self, url: str) -> bool:
-        host = (urlparse(url).hostname or "").lower()
-        return "startrack" in host
+        return _host_matches_domains(urlparse(url).hostname, _STARTRACK_DOMAINS)
 
     async def fetch(self, url: str) -> dict[str, Any]:
-        html_text = await _fetch_with_retries(url)
+        html_text = await _fetch_with_retries(url, allowed_domains=_STARTRACK_DOMAINS)
         essential_text = _extract_startrack_essential_fields(html_text)
         return {
             "url": url,
@@ -466,6 +541,7 @@ async def _extract_snapshot_with_llm(
     text_excerpt: str,
     html_excerpt: str,
 ) -> CanonicalShipmentSnapshot | None:
+    _ = html_excerpt
     prompt = (
         "Extract shipping-tracking details into strict JSON."
         " Return only a JSON object with these keys exactly:"
@@ -671,16 +747,14 @@ async def process_due_shipment_watches(*, limit: int = 200) -> dict[str, int]:
                     await shipment_watch_repo.disable_watch(ticket_id)
 
                 first_success = previous_hash is None
-                has_update = changed_now or first_success
+                missing_public_update = refreshed.get("last_posted_update_at") is None
+                has_update = changed_now or first_success or (missing_public_update and _is_in_transit(snapshot_payload))
                 if not has_update:
                     continue
                 # `changed` tracks detected shipment updates, while `posted`
-                # only tracks the subset that are emitted as public ticket
-                # comments.
+                # tracks the updates added to the ticket as either public or
+                # private comments.
                 changed += 1
-
-                if not refreshed["public_comments_enabled"]:
-                    continue
 
                 reply_external_ref = f"shipment-watch:{provider.slug}:{current_hash[:32]}"
                 reply_body = _render_ticket_reply(snapshot_payload, refreshed)
@@ -688,7 +762,7 @@ async def process_due_shipment_watches(*, limit: int = 200) -> dict[str, int]:
                     ticket_id=ticket_id,
                     author_id=None,
                     body=reply_body,
-                    is_internal=False,
+                    is_internal=not bool(refreshed["public_comments_enabled"]),
                     external_reference=reply_external_ref[:128],
                 )
                 await shipment_watch_repo.update_watch_check_state(

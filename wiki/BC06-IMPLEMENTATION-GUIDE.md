@@ -51,6 +51,11 @@ Payload:
 }
 ```
 
+`api_key` must be an enabled, unexpired portal API key (created under
+Admin > API keys); it may alternatively be sent in the `X-API-Key` header.
+Any endpoint or IP restrictions on the key are enforced. Unknown keys are
+rejected with `403`, and a missing key with `401`.
+
 Response (success):
 ```json
 {

@@ -82,7 +82,7 @@ Migrations are applied automatically at startup and are idempotent.
 | `/api/tray/enrol` | POST | Install token in JSON body | Exchange the install token for a per-device `auth_token` |
 | `/api/tray/config` | GET | Bearer auth_token | Resolved menu + branding + env-var allowlist + chat toggle |
 | `/api/tray/heartbeat` | POST | Bearer auth_token | Liveness ping; updates console user, IP, agent version |
-| `/ws/tray/{device_uid}` | WS | Bearer/`X-Tray-Token`/`?token=` | Bidirectional command channel |
+| `/ws/tray/{device_uid}` | WS | Bearer/`X-Tray-Token` header | Bidirectional command channel |
 | `/api/tray/{device_uid}/chat/start` | POST | Authenticated technician | Create a Matrix room and push `chat_open` |
 | `/api/tray/admin/install-tokens` | GET / POST | Super admin | List / create install tokens |
 | `/api/tray/admin/install-tokens/{id}/revoke` | POST | Super admin | Revoke an install token |
@@ -260,6 +260,23 @@ If you need advanced nesting, you can still use the **Advanced JSON** toggle to 
 ---
 
 ## 6. RMM deployment
+
+### Tactical RMM ticket URL Action
+
+MyPortal can open its ticket form directly from a Tactical RMM agent and link
+the resulting ticket to that agent's synced asset. First import the Tactical
+RMM assets so that the `TrayAgentID` agent custom field contains the enrolled
+MyPortal tray device UID. Then add a URL Action under **Settings → Global
+Settings → URL Actions** with this pattern (replace the hostname):
+
+```text
+https://portal.example.com/api/tray/ticket-form/url-action?TrayAgentID={{agent.TrayAgentID}}
+```
+
+The variable name is case-sensitive. Tactical RMM URL-encodes the custom-field
+value. MyPortal accepts only an active tray device that is linked to an asset,
+then redirects the browser to a short-lived encrypted MyPortal ticket form.
+The URL Action never exposes the internal asset or device database ID.
 
 ### Windows (PowerShell)
 

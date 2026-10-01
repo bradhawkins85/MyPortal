@@ -1,0 +1,7 @@
+{
+  "guid": "7d620222-23a9-4612-8c08-7e90d31162c6",
+  "occurred_at": "2026-09-15T00:00Z",
+  "change_type": "Feature",
+  "summary": "Add automated remediation that creates the Guest Users dynamic Entra ID security group for the Microsoft 365 best-practice check.",
+  "content_hash": "e358206420159fa534f34a0d5ffe49c20b7a25dd0d399e88107f514758ccc992"
+}

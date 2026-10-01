@@ -1,0 +1,7 @@
+{
+  "guid": "c565253d-701d-4bda-9193-55048a193465",
+  "occurred_at": "2026-10-01T00:00Z",
+  "change_type": "Security",
+  "summary": "Update tray chat transitive dependencies to patched versions.",
+  "content_hash": "4acbebeb52363c937d786db65dbb393fc39d3cca8eaedad7fd045a5743c71a0c"
+}

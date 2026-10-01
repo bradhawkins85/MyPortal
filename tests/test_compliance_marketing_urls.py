@@ -68,8 +68,8 @@ def test_build_essential8_help_url_replaces_placeholder():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_compliance_page_no_longer_sets_per_control_help(monkeypatch):
-    request = _make_request("/compliance")
+async def test_essential8_legacy_page_no_longer_sets_per_control_help(monkeypatch):
+    request = _make_request("/compliance/essential8")
     captured: dict[str, object] = {}
 
     async def fake_render_template(template_name, request_obj, user_obj, *, extra):
@@ -121,7 +121,7 @@ async def test_compliance_page_no_longer_sets_per_control_help(monkeypatch):
         lambda: SimpleNamespace(_render_template=fake_render_template),
     )
 
-    await compliance_routes.compliance_page(request)
+    await compliance_routes.essential8_legacy_page(request)
 
     record = captured["extra"]["compliance_records"][0]
     assert record["show_compliance_help"] is False
@@ -188,6 +188,26 @@ async def test_control_requirements_page_sets_help_per_requirement(monkeypatch):
         compliance_routes.essential8_repo,
         "get_per_maturity_statuses_for_company",
         AsyncMock(return_value={1: {"ml1": "in_progress", "ml2": "not_started", "ml3": "not_started"}}),
+    )
+    monkeypatch.setattr(
+        compliance_routes.essential8_repo,
+        "list_requirement_evidence_map",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        compliance_routes.essential8_repo,
+        "get_requirement_reminder_summary",
+        AsyncMock(return_value={"pending_approval_count": 0, "reminder_due_count": 0, "overdue_count": 0}),
+    )
+    monkeypatch.setattr(
+        compliance_routes.essential8_repo,
+        "get_requirement_trend",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        compliance_routes.users_repo,
+        "list_users_for_company",
+        AsyncMock(return_value=[{"id": 7, "email": "owner@example.com"}]),
     )
     monkeypatch.setattr(
         compliance_routes,
@@ -295,7 +315,7 @@ async def test_marketing_update_help_links_replaces_mappings(monkeypatch):
     )
     monkeypatch.setattr(
         marketing_routes.essential8_repo,
-        "replace_requirement_marketing_page_links",
+        "replace_requirement_recommendations",
         fake_replace,
     )
 
@@ -304,7 +324,27 @@ async def test_marketing_update_help_links_replaces_mappings(monkeypatch):
     )
 
     assert response.status_code == 303
-    assert captured["mappings"] == {101: 7, 102: None}
+    assert captured["mappings"] == {
+        101: {"marketing_page_id": 7, "recommendation_name": "", "external_url": ""},
+        102: {"marketing_page_id": None, "recommendation_name": "", "external_url": ""},
+    }
+
+
+@pytest.mark.anyio("asyncio")
+async def test_marketing_update_accepts_external_product_link(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(marketing_routes, "_require_marketing_access", AsyncMock(return_value=({"id": 1, "is_super_admin": True}, None)))
+    monkeypatch.setattr(marketing_routes.marketing_repo, "list_pages", AsyncMock(return_value=[]))
+    monkeypatch.setattr(marketing_routes.essential8_repo, "list_essential8_requirements", AsyncMock(return_value=[{"id": 101}]))
+    monkeypatch.setattr(marketing_routes.essential8_repo, "replace_requirement_recommendations", AsyncMock(side_effect=lambda value: captured.update(value)))
+
+    await marketing_routes.admin_marketing_update_essential8_help_links(MockFormRequest({
+        "recommendation_name_101": "Managed patching",
+        "external_url_101": "https://example.com/patching",
+    }))
+
+    assert captured[101]["recommendation_name"] == "Managed patching"
+    assert captured[101]["external_url"] == "https://example.com/patching"
 
 @pytest.mark.anyio("asyncio")
 async def test_submit_requirement_ticket_creates_e8_ticket(monkeypatch):

@@ -128,3 +128,69 @@ def test_quote_pdf_omits_unreadable_private_upload_instead_of_showing_alt_text(m
     assert 'class="product-image-card"' not in html
     assert 'alt="MeetingBar"' not in html
     assert "https://portal.example/uploads/shop/missing.png" not in html
+
+
+def test_quote_pdf_shows_current_stock_status_and_out_of_stock_warning():
+    html = _build_quote_pdf_html(
+        request=_request(),
+        company={"name": "Example Co"},
+        quote={"quote_number": "Q-4", "name": "Stock check"},
+        items=[
+            {
+                "product_name": "Available Dock",
+                "sku": "DOCK-AVAILABLE",
+                "quantity": 1,
+                "price": Decimal("199.00"),
+                "stock": 4,
+            },
+            {
+                "product_name": "Unavailable Dock",
+                "sku": "DOCK-UNAVAILABLE",
+                "quantity": 1,
+                "price": Decimal("249.00"),
+                "stock": 0,
+            },
+            {
+                "product_name": "Oversubscribed Dock",
+                "sku": "DOCK-LOW",
+                "quantity": 3,
+                "price": Decimal("249.00"),
+                "stock": 2,
+            },
+        ],
+        include_line_images=False,
+    )
+
+    assert "Stock status" in html
+    assert html.count("In stock") == 2
+    assert html.count("Out of stock") == 2
+    assert html.count("Insufficient stock") == 2
+    assert html.count("Confirm availability before placing an order.") == 4
+
+
+def test_quote_pdf_includes_estimated_freight_as_last_line_item_and_in_total():
+    html = _build_quote_pdf_html(
+        request=_request(),
+        company={"name": "Example Co"},
+        quote={"quote_number": "Q-5", "name": "Freight quote"},
+        items=[
+            {
+                "product_name": "Laptop",
+                "sku": "LAP-1",
+                "quantity": 2,
+                "price": Decimal("100.00"),
+                "stock": 2,
+            }
+        ],
+        include_line_images=False,
+        freight_amount=Decimal("15.50"),
+    )
+
+    product_position = html.index("<strong>Laptop</strong>")
+    freight_position = html.index("<strong>Freight (estimate)</strong>")
+    tbody_end = html.index("</tbody>")
+
+    assert product_position < freight_position < tbody_end
+    assert "Estimated only; freight will be adjusted accordingly on the final invoice." in html
+    assert html.count("$15.50") == 2
+    assert "<span>$215.50</span>" in html

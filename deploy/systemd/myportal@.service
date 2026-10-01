@@ -12,32 +12,38 @@
 #   systemctl enable --now myportal@blue.service
 #   systemctl enable --now myportal@green.service
 #
-# Set MYPORTAL_INSTANCE_PORT in /etc/myportal.<instance>.env to override
-# the default port mapping below.  Each instance file should also pin
-# APP_INSTANCE_ID (read by app/services/singleton_jobs.py) so log lines
-# clearly identify which instance fired each job.
+# Each instance file may pin APP_INSTANCE_ID (read by
+# app/services/singleton_jobs.py) so log lines clearly identify which instance
+# fired each job. Ports are intentionally fixed because the deployment
+# coordinator and nginx use this same blue/green mapping for direct readiness
+# checks and cutover.
+#
+# Uvicorn listens on 127.0.0.1 only, so the slots are reachable solely through
+# nginx (and fail2ban's view of its access log). When nginx runs on another
+# host, set MYPORTAL_BIND_HOST in /etc/myportal.env (for example 0.0.0.0) and
+# firewall ports 8001/8002 to the proxy. The address must still accept
+# loopback connections because upgrade.sh checks /readyz on 127.0.0.1.
 
 [Unit]
 Description=MyPortal customer portal (%i instance)
-After=network-online.target mysql.service redis.service
+After=network-online.target mariadb.service mysql.service redis.service
 Wants=network-online.target
+# A slot has no release until the deployment coordinator first assigns one.
+# Skip it rather than letting Restart=always retry a missing release forever.
+ConditionPathExists=/opt/myportal/instances/%i
 
 [Service]
-Type=notify
+# Uvicorn does not send sd_notify(3) readiness messages. The deployment
+# coordinator performs its own /readyz check before routing traffic, so using
+# Type=notify would leave systemd waiting until TimeoutStartSec and then kill a
+# healthy process.
+Type=simple
 User=myportal
 Group=myportal
-WorkingDirectory=/opt/myportal
 EnvironmentFile=/etc/myportal.env
 EnvironmentFile=-/etc/myportal.%i.env
-# Default port mapping: blue=8001, green=8002.  Override by setting
-# MYPORTAL_INSTANCE_PORT in /etc/myportal.<instance>.env.
-Environment=MYPORTAL_INSTANCE_PORT=8000
 Environment=APP_INSTANCE_ID=%i
-ExecStart=/opt/myportal/scripts/start_with_auto_update.sh \
-    /opt/myportal/.venv/bin/uvicorn app.main:app \
-    --host 127.0.0.1 \
-    --port ${MYPORTAL_INSTANCE_PORT} \
-    --workers 2
+ExecStart=/bin/sh -ec 'case %i in blue) port=8001;; green) port=8002;; *) echo "Invalid MyPortal instance %i; use myportal@blue.service or myportal@green.service (one .service suffix)." >&2; exit 64;; esac; host="$${MYPORTAL_BIND_HOST:-127.0.0.1}"; release=$$(readlink -f /opt/myportal/instances/%i); test -n "$$release"; cd "$$release"; exec "$$release/.venv/bin/python" -m uvicorn app.main:app --host "$$host" --port "$$port" --workers 2'
 # Graceful reload: SIGHUP causes uvicorn to gracefully restart workers
 # without dropping accepted connections.
 ExecReload=/bin/kill -s HUP $MAINPID
@@ -45,9 +51,30 @@ Restart=always
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
+# ProtectSystem=full (read-only /usr, /boot, /efi and /etc) rather than strict:
+# the application also writes caches and logs under /var (for example the
+# WeasyPrint/fontconfig cache and /var/log/myportal), which strict would block.
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/opt/myportal
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+# MemoryDenyWriteExecute is intentionally not set: cffi (WeasyPrint) and the
+# optional PowerShell (.NET JIT) fallback need writable executable memory.
+# Release immutability is enforced by ownership and read-only filesystem modes.
+# Do not bind-mount the release tree read-only: upload paths inside each release
+# are symlinks into the writable shared tree and must remain writable.
+ReadOnlyPaths=/opt/myportal/instances
+ReadWritePaths=/opt/myportal/shared
 
 [Install]
 WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+{
+  "guid": "60be8645-c248-4e17-aa70-b2c3270c2665",
+  "occurred_at": "2026-07-31T00:00Z",
+  "change_type": "Fix",
+  "summary": "Derive Curricula authorization and token endpoints from the configured SAT API base URL.",
+  "content_hash": "31e45c04ff7ffd49b5c9df6e4867463d566b00cb2f0eca6cef2f15de7b1de1ec"
+}

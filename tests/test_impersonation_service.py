@@ -235,6 +235,11 @@ async def test_end_impersonation_restores_original_session(monkeypatch):
     monkeypatch.setattr(impersonation_service.audit_service, "log_action", fake_log_action)
     monkeypatch.setattr(impersonation_service, "log_info", lambda *args, **kwargs: None)
 
+    async def fake_rotate_session_token(session_id, token):
+        calls["rotate"] = (session_id, token)
+
+    monkeypatch.setattr(impersonation_service.auth_repo, "rotate_session_token", fake_rotate_session_token)
+
     restored_user, restored_session = await impersonation_service.end_impersonation(
         request=None,
         session=impersonated_session,
@@ -242,6 +247,9 @@ async def test_end_impersonation_restores_original_session(monkeypatch):
 
     assert restored_user["email"] == "admin@example.com"
     assert restored_session.id == 22
+    # The browser gets a freshly issued raw token, never the stored digest.
+    assert calls["rotate"] == (22, restored_session.session_token)
+    assert restored_session.session_token != "original"
     assert calls["deactivate"] == [50]
     assert calls["log"]["entity_id"] == 42
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+import math
 from time import monotonic
 from typing import Any
 from urllib.parse import urlparse
@@ -509,7 +510,10 @@ async def get_contacts(customer_id: str | int) -> list[dict[str, Any]]:
 
 
 async def get_customer(customer_id: str | int) -> dict[str, Any] | None:
-    payload = await _request("GET", f"/customers/{customer_id}")
+    customer_id_value = _coerce_int_id(customer_id)
+    if customer_id_value is None:
+        raise SyncroAPIError(f"Invalid Syncro customer ID: {customer_id!r}. Must be a positive integer.")
+    payload = await _request("GET", f"/customers/{customer_id_value}")
     if not payload:
         return None
     if isinstance(payload, dict) and "customer" in payload:
@@ -684,7 +688,7 @@ def _parse_numeric_value(value: Any) -> float | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):
-        if isinstance(value, float) and (value != value):  # NaN check
+        if isinstance(value, float) and math.isnan(value):  # NaN check
             return None
         return float(value)
     text = str(value).strip()

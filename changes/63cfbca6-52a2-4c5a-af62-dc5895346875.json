@@ -1,0 +1,7 @@
+{
+  "guid": "63cfbca6-52a2-4c5a-af62-dc5895346875",
+  "occurred_at": "2026-09-30T10:40Z",
+  "change_type": "Feature",
+  "summary": "Redesign Message templates around a searchable list with format filters, usage stats, copyable template tokens and a delete confirmation, and a new editor with Plain text / HTML format cards, click-to-insert variables, a live preview, save in place and warnings when a template MyPortal relies on is renamed or deleted",
+  "content_hash": "f1595ba4552e6cf7e50a71e946b5f935485a4d8df4b5822dc4fde5941a0bfa71"
+}

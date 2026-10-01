@@ -1,0 +1,7 @@
+{
+  "guid": "81728cac-ee0e-4611-a27f-48b4fb0b7929",
+  "occurred_at": "2026-08-20T00:00Z",
+  "change_type": "Fix",
+  "summary": "Prevent the Windows MSI build from hanging on an interactive root certificate trust prompt.",
+  "content_hash": "31f3890e9d3c944ff867fee3b20ab78c1582d2a4873d0004ac67e296be0eaafb"
+}

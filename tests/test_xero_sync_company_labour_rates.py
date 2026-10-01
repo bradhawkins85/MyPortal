@@ -1,6 +1,6 @@
 """Tests for syncing stored MyPortal invoices to Xero."""
 import json
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -31,6 +31,7 @@ async def test_sync_company_uploads_unsynchronised_invoice_lines_to_xero():
         "id": 1,
         "name": "Test Company",
         "xero_id": "xero-test-123",
+        "invoice_due_days": 21,
     }
     invoice = {
         "id": 10,
@@ -111,7 +112,7 @@ async def test_sync_company_uploads_unsynchronised_invoice_lines_to_xero():
         invoice_payload = call_args[1]["json"]["Invoices"][0]
         assert invoice_payload["Contact"]["ContactID"] == "xero-test-123"
         assert "Reference" not in invoice_payload
-        assert invoice_payload["DueDate"] == "2026-04-01"
+        assert invoice_payload["DueDate"] == (date.today() + timedelta(days=21)).isoformat()
         assert invoice_payload["LineItems"] == [
             {
                 "Description": "Managed services",

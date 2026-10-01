@@ -1,0 +1,7 @@
+{
+  "guid": "97a7518d-9492-4368-a016-627b98b57338",
+  "occurred_at": "2026-09-29T09:55Z",
+  "change_type": "Fix",
+  "summary": "Stop tracking files the server generates (version.txt, tray installer metadata) and stop rewriting committed change log files, so the control checkout stays clean for updates",
+  "content_hash": ""
+}

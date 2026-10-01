@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.core.config import get_settings
-from app.core.logging import log_error, log_info
+from app.core.logging import log_error
 from app.repositories import chat as chat_repo
 from app.services import matrix as matrix_service
 from app.services import chat_ticket_sync

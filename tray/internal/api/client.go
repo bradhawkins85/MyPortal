@@ -4,11 +4,13 @@ package api
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -124,7 +126,101 @@ type ConfigResponse struct {
 	// "browser": always open in the default system browser (legacy behaviour).
 	// "shell": require the dedicated chat shell; log a warning if absent rather
 	// than falling back to the browser.
-	ChatClientMode string `json:"chat_client_mode,omitempty"`
+	ChatClientMode             string   `json:"chat_client_mode,omitempty"`
+	NetworkScannerEnabled      bool     `json:"network_scanner_enabled"`
+	NetworkScanIntervalMinutes int      `json:"network_scan_interval_minutes"`
+	NetworkScanWANCIDRs        []string `json:"network_scan_wan_cidrs"`
+	NetworkScanLocalCIDRs      []string `json:"network_scan_local_cidrs"`
+}
+
+type NetworkHost struct {
+	IPAddress  string `json:"ip_address"`
+	MACAddress string `json:"mac_address,omitempty"`
+	Hostname   string `json:"hostname,omitempty"`
+	Vendor     string `json:"vendor,omitempty"`
+	OSDetails  string `json:"os_details,omitempty"`
+	OpenPorts  string `json:"open_ports,omitempty"`
+}
+
+// GetWANIP obtains the public address using the whoami-compatible source
+// configured by the portal. The source is called by this agent so it observes
+// the WAN address of the network being scanned.
+func (c *Client) GetWANIP(ctx context.Context) (string, error) {
+	resp, err := c.get(ctx, "/api/tray/wan-ip")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("WAN IP lookup: HTTP %d", resp.StatusCode)
+	}
+	var out struct {
+		WANIP       string `json:"wan_ip"`
+		SourceURL   string `json:"source_url"`
+		SourceField string `json:"source_field"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	if out.SourceURL != "" {
+		return c.getWANIPFromSource(ctx, out.SourceURL, out.SourceField)
+	}
+	if net.ParseIP(out.WANIP) == nil {
+		return "", fmt.Errorf("WAN IP lookup returned an invalid address")
+	}
+	return out.WANIP, nil
+}
+
+func (c *Client) getWANIPFromSource(ctx context.Context, sourceURL, sourceField string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("WAN IP source request: %w", err)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("WAN IP source request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("WAN IP source: HTTP %d", resp.StatusCode)
+	}
+
+	scanner := bufio.NewScanner(io.LimitReader(resp.Body, 1<<20))
+	for scanner.Scan() {
+		name, value, found := strings.Cut(scanner.Text(), ":")
+		if !found || !strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(sourceField)) {
+			continue
+		}
+		// Forwarded fields can contain a comma-separated proxy chain. The first
+		// valid address is the original client and therefore the scanner WAN IP.
+		for _, candidate := range strings.Split(value, ",") {
+			candidate = strings.TrimSpace(candidate)
+			if net.ParseIP(candidate) != nil {
+				return candidate, nil
+			}
+		}
+		return "", fmt.Errorf("WAN IP source field %q did not contain a valid address", sourceField)
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("read WAN IP source: %w", err)
+	}
+	return "", fmt.Errorf("WAN IP source field %q was not found", sourceField)
+}
+
+func (c *Client) UploadNetworkScan(ctx context.Context, wanIP string, subnets []string, hosts []NetworkHost) error {
+	body, err := json.Marshal(map[string]interface{}{"wan_ip": wanIP, "subnets": subnets, "hosts": hosts})
+	if err != nil {
+		return err
+	}
+	resp, err := c.post(ctx, "/api/tray/network-scan", body, true)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("network scan upload: HTTP %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // GetConfig fetches the resolved menu configuration for this device.
@@ -149,6 +245,184 @@ type HeartbeatRequest struct {
 	ConsoleUser  string `json:"console_user,omitempty"`
 	AgentVersion string `json:"agent_version,omitempty"`
 	LastIP       string `json:"last_ip,omitempty"`
+}
+
+// DefenderPolicy is the effective Defender configuration for this device.
+// A disabled policy is also returned when the company has not opted in.
+type DefenderPolicy struct {
+	Enabled       bool                   `json:"enabled"`
+	Exclusions    []DefenderExclusion    `json:"exclusions"`
+	ScheduledScan *DefenderScheduledScan `json:"scheduled_scan,omitempty"`
+}
+
+// DefenderScheduledScan is the company's scheduled scan policy. A nil or
+// empty Type means MyPortal does not manage the endpoint's scan schedule.
+type DefenderScheduledScan struct {
+	Type string `json:"type"`
+	// Day is 0 (Monday) to 6 (Sunday), matching the portal's policy form.
+	Day  *int   `json:"day"`
+	Time string `json:"time"`
+}
+
+// DefenderPolicyResult reports how the endpoint reconciled the portal policy
+// so administrators can see settings that Tamper Protection or another
+// management system prevented the agent from applying.
+type DefenderPolicyResult struct {
+	Status           string               `json:"status"`
+	EvaluatedAt      time.Time            `json:"evaluated_at"`
+	TamperProtection DefenderTamperState  `json:"tamper_protection"`
+	Items            []DefenderPolicyItem `json:"items"`
+}
+
+// DefenderTamperState describes local controls that can block preference
+// changes. ProtectsExclusions is nil when Defender does not report it.
+type DefenderTamperState struct {
+	Enabled                 bool   `json:"enabled"`
+	Source                  string `json:"source,omitempty"`
+	ProtectsExclusions      *bool  `json:"protects_exclusions"`
+	LocalAdminMergeDisabled bool   `json:"local_admin_merge_disabled"`
+	ScheduleManagedByPolicy bool   `json:"schedule_managed_by_policy"`
+}
+
+// DefenderPolicyItem is the outcome for one policy setting.
+type DefenderPolicyItem struct {
+	Setting string `json:"setting"`
+	Value   string `json:"value"`
+	Action  string `json:"action"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+// DefenderExclusion is an exclusion selected by an administrator for this
+// endpoint, its company, or all managed endpoints.
+type DefenderExclusion struct {
+	Type  string `json:"exclusion_type"`
+	Value string `json:"value"`
+}
+
+// DefenderStatus is the protection state collected by the Windows service.
+type DefenderStatus struct {
+	AntivirusEnabled          bool                   `json:"antivirus_enabled"`
+	RealtimeProtectionEnabled bool                   `json:"realtime_protection_enabled"`
+	TamperProtectionEnabled   bool                   `json:"tamper_protection_enabled"`
+	FirewallDomainEnabled     *bool                  `json:"firewall_domain_enabled"`
+	FirewallPrivateEnabled    *bool                  `json:"firewall_private_enabled"`
+	FirewallPublicEnabled     *bool                  `json:"firewall_public_enabled"`
+	SignaturesUpdatedAt       *time.Time             `json:"signatures_updated_at,omitempty"`
+	LastScanAt                *time.Time             `json:"last_scan_at,omitempty"`
+	ScanHistory               []DefenderScan         `json:"scan_history"`
+	HealthStatus              string                 `json:"health_status"`
+	Details                   map[string]interface{} `json:"details"`
+	Detections                []DefenderDetection    `json:"detections"`
+	PolicyResult              *DefenderPolicyResult  `json:"policy_result,omitempty"`
+}
+
+// DefenderDetection describes a threat recorded in Defender's protection history.
+type DefenderDetection struct {
+	DetectionUID  string                 `json:"detection_uid"`
+	ThreatName    string                 `json:"threat_name"`
+	Severity      string                 `json:"severity"`
+	Status        string                 `json:"status"`
+	DetectedAt    time.Time              `json:"detected_at"`
+	InfectedFiles []string               `json:"infected_files"`
+	Details       map[string]interface{} `json:"details"`
+}
+
+// DefenderScan describes a recent scan reported by Microsoft Defender.
+type DefenderScan struct {
+	ScanType        string     `json:"scan_type"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	DurationSeconds *int64     `json:"duration_seconds,omitempty"`
+	Status          string     `json:"status"`
+}
+
+// DefenderCommand is an action queued by an administrator for this endpoint.
+type DefenderCommand struct {
+	ID           int64  `json:"id"`
+	CommandType  string `json:"command_type"`
+	DetectionUID string `json:"detection_uid,omitempty"`
+}
+
+type defenderCommandsResponse struct {
+	Commands []DefenderCommand `json:"commands"`
+}
+
+// GetDefenderCommands claims pending actions for this endpoint.
+func (c *Client) GetDefenderCommands(ctx context.Context) ([]DefenderCommand, error) {
+	resp, err := c.get(ctx, "/api/tray/defender/commands")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("defender commands: HTTP %d", resp.StatusCode)
+	}
+	var out defenderCommandsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Commands, nil
+}
+
+// ReportDefenderCommandResult records the outcome of a claimed endpoint action.
+func (c *Client) ReportDefenderCommandResult(ctx context.Context, commandID int64, status string, result map[string]interface{}) error {
+	body, err := json.Marshal(map[string]interface{}{"status": status, "result": result})
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/api/tray/defender/commands/%d/result", commandID)
+	resp, err := c.post(ctx, path, body, true)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("defender command result: HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// GetDefenderPolicy checks whether Defender processing is enabled for this
+// specific device. Company-disabled and individually excluded devices both
+// produce a disabled policy, so callers must not run local Defender scripts.
+func (c *Client) GetDefenderPolicy(ctx context.Context) (*DefenderPolicy, error) {
+	resp, err := c.get(ctx, "/api/tray/defender/policy")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return &DefenderPolicy{Enabled: false}, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("defender policy: HTTP %d", resp.StatusCode)
+	}
+	var out DefenderPolicy
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ReportDefenderStatus uploads the latest endpoint protection state.
+func (c *Client) ReportDefenderStatus(ctx context.Context, status DefenderStatus) error {
+	body, err := json.Marshal(status)
+	if err != nil {
+		return err
+	}
+	resp, err := c.post(ctx, "/api/tray/defender/status", body, true)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("defender status: HTTP %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // Heartbeat sends a liveness ping and updates device facts on the server.

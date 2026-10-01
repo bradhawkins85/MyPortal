@@ -641,7 +641,11 @@ async def test_portal_tickets_page_loads_default_view(monkeypatch):
     monkeypatch.setattr(main.tickets_repo, "list_tickets_for_user", AsyncMock(return_value=listed_tickets))
     monkeypatch.setattr(main.tickets_repo, "count_tickets_for_user", AsyncMock(return_value=1))
     monkeypatch.setattr(main.tickets_service, "list_status_definitions", AsyncMock(return_value=statuses))
-    monkeypatch.setattr(main.ticket_views_repo, "get_default_view", AsyncMock(return_value=default_view))
+    monkeypatch.setattr(
+        portal_routes.ticket_views_repo,
+        "get_default_view",
+        AsyncMock(return_value=default_view),
+    )
     
     async def fake_require_auth(request_obj, key, **kwargs):
         assert key == "menu.tickets"
@@ -665,10 +669,61 @@ async def test_portal_tickets_page_loads_default_view(monkeypatch):
     assert response.status_code == status.HTTP_200_OK
     
     # Verify that the default view was loaded
-    main.ticket_views_repo.get_default_view.assert_awaited_once_with(10)
+    portal_routes.ticket_views_repo.get_default_view.assert_awaited_once_with(10)
     
     # Verify that filters from default view were applied
     extra = captured["extra"]
     assert extra["status_filter"] == "open,pending"
     assert extra["search_term"] == "urgent"
     assert extra["filters_active"] is True
+
+
+@pytest.mark.anyio("asyncio")
+async def test_portal_tickets_page_ignores_default_view_load_errors(monkeypatch):
+    request = _make_request()
+    request.state.active_company_id = 30
+    user = {"id": 10, "company_id": 30}
+
+    statuses = [
+        TicketStatusDefinition(tech_status="open", tech_label="Open", public_status="Open"),
+        TicketStatusDefinition(tech_status="closed", tech_label="Closed", public_status="Closed"),
+    ]
+
+    monkeypatch.setattr(
+        main.company_access,
+        "list_accessible_companies",
+        AsyncMock(return_value=[{"company_id": 30, "company_name": "Test Co"}]),
+    )
+    monkeypatch.setattr(main.tickets_repo, "list_tickets_for_user", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.tickets_repo, "count_tickets_for_user", AsyncMock(return_value=0))
+    monkeypatch.setattr(main.tickets_service, "list_status_definitions", AsyncMock(return_value=statuses))
+    monkeypatch.setattr(
+        portal_routes.ticket_views_repo,
+        "get_default_view",
+        AsyncMock(side_effect=RuntimeError("db unavailable")),
+    )
+
+    async def fake_require_auth(request_obj, key, **kwargs):
+        assert key == "menu.tickets"
+        return user, None
+
+    monkeypatch.setattr(main, "_require_menu_page_access", fake_require_auth)
+
+    captured: dict[str, Any] = {}
+
+    async def fake_render_template(template_name, request_obj, user_obj, *, extra):
+        captured["template"] = template_name
+        captured["extra"] = extra
+        return HTMLResponse("OK")
+
+    monkeypatch.setattr(main, "_render_template", fake_render_template)
+
+    response = await portal_routes.portal_tickets_page(request)
+
+    assert isinstance(response, HTMLResponse)
+    assert response.status_code == status.HTTP_200_OK
+    portal_routes.ticket_views_repo.get_default_view.assert_awaited_once_with(10)
+    assert captured["template"] == "tickets/index.html"
+    assert captured["extra"]["status_filter"] is None
+    assert captured["extra"]["search_term"] == ""
+    assert captured["extra"]["filters_active"] is False

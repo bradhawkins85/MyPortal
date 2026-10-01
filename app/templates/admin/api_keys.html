@@ -1,7 +1,63 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}<span class="header__title-text">{{ title | default('API credentials') }}</span>{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">{{ title | default('API credentials') }}</span>
+    <div class="page-header-toolbar">
+      <form method="get" class="page-header-toolbar__group" action="/admin/api-keys">
+        <label class="visually-hidden" for="filter-search">Search</label>
+        <input
+          class="form-input page-header-toolbar__search"
+          type="search"
+          id="filter-search"
+          name="search"
+          value="{{ filters.search }}"
+          placeholder="Description or prefix"
+        />
+        <label class="visually-hidden" for="filter-order">Sort by</label>
+        <select class="form-input page-header-toolbar__select" id="filter-order" name="order_by" onchange="this.form.submit()">
+          {% for option in order_options %}
+            <option value="{{ option.value }}" {% if option.value == filters.order_by %}selected{% endif %}>
+              Sort: {{ option.label }}
+            </option>
+          {% endfor %}
+        </select>
+        <label class="visually-hidden" for="filter-direction">Direction</label>
+        <select class="form-input page-header-toolbar__select" id="filter-direction" name="order_direction" onchange="this.form.submit()">
+          {% for option in direction_options %}
+            <option value="{{ option.value }}" {% if option.value == filters.order_direction %}selected{% endif %}>
+              {{ option.label }}
+            </option>
+          {% endfor %}
+        </select>
+        <label class="page-header-toolbar__check" for="filter-include-expired">
+          <input
+            type="checkbox"
+            id="filter-include-expired"
+            name="include_expired"
+            value="1"
+            onchange="this.form.submit()"
+            {% if filters.include_expired %}checked{% endif %}
+          />
+          <span>Include expired</span>
+        </label>
+        <button type="submit" class="button button--ghost button--compact">Apply</button>
+        <a class="button button--ghost button--compact" href="/admin/api-keys">Reset</a>
+      </form>
+      <div class="page-header-toolbar__group">
+        <label class="visually-hidden" for="api-keys-quick-filter">Quick filter rows</label>
+        <input
+          id="api-keys-quick-filter"
+          type="search"
+          class="form-input page-header-toolbar__search"
+          placeholder="Quick filter rows"
+          data-table-filter="api-keys-table"
+        />
+      </div>
+    </div>
+  </div>
+{% endblock %}
 
 {% block header_actions %}
   {{ page_header_actions([
@@ -32,55 +88,6 @@
           <span class="stat__value">{{ api_key_stats.total }}</span>
         </div>
       </div>
-      <form method="get" class="filter-grid">
-        <div class="form-field">
-          <label class="form-label" for="filter-search">Search</label>
-          <input
-            class="form-input"
-            type="search"
-            id="filter-search"
-            name="search"
-            value="{{ filters.search }}"
-            placeholder="Description or prefix"
-          />
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="filter-order">Sort by</label>
-          <select class="form-input" id="filter-order" name="order_by">
-            {% for option in order_options %}
-              <option value="{{ option.value }}" {% if option.value == filters.order_by %}selected{% endif %}>
-                {{ option.label }}
-              </option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="filter-direction">Direction</label>
-          <select class="form-input" id="filter-direction" name="order_direction">
-            {% for option in direction_options %}
-              <option value="{{ option.value }}" {% if option.value == filters.order_direction %}selected{% endif %}>
-                {{ option.label }}
-              </option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-field form-field--checkbox">
-          <label class="form-checkbox" for="filter-include-expired">
-            <input
-              type="checkbox"
-              id="filter-include-expired"
-              name="include_expired"
-              value="1"
-              {% if filters.include_expired %}checked{% endif %}
-            />
-            <span>Include expired keys</span>
-          </label>
-        </div>
-        <div class="form-actions form-actions--inline">
-          <button type="submit" class="button">Apply</button>
-          <a class="button button--ghost" href="/admin/api-keys">Reset</a>
-        </div>
-      </form>
     </header>
 
     {% if new_api_key %}
@@ -129,15 +136,6 @@
       </section>
     {% endif %}
 
-    <div class="table-toolbar">
-      <input
-        type="search"
-        class="form-input"
-        placeholder="Quick filter rows"
-        aria-label="Filter API keys"
-        data-table-filter="api-keys-table"
-      />
-    </div>
 
     <div class="table-wrapper">
       <table class="table" id="api-keys-table" data-table data-table-id="api-keys">

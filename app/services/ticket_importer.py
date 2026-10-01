@@ -124,7 +124,7 @@ _HTML_NEWLINE_TAGS = re.compile(
     r"<\s*(?:br\s*/?|/(?:p|div|li|tr|table|thead|tbody|tfoot|section|article|header|footer|h[1-6]))\b[^>]*>",
     flags=re.IGNORECASE,
 )
-_HTML_TAGS = re.compile(r"<\s*/?\s*[a-zA-Z][^>]*>")
+_HTML_TAGS = re.compile(r"<\s*/?[a-zA-Z][^><]*>")
 
 
 def _clean_text(value: Any) -> str | None:
@@ -136,7 +136,7 @@ def _clean_text(value: Any) -> str | None:
     normalised = unescape(text.replace("\r\n", "\n")).replace("\xa0", " ")
     normalised = _HTML_NEWLINE_TAGS.sub("\n", normalised)
     normalised = _HTML_TAGS.sub("", normalised)
-    normalised = re.sub(r"[\t ]*\n[\t ]*", "\n", normalised)
+    normalised = "\n".join(line.strip(" \t") for line in normalised.split("\n"))
     normalised = re.sub(r"\n{2,}", "\n", normalised)
     normalised = normalised.strip()
     return normalised or None
@@ -1194,7 +1194,7 @@ def _extract_numeric_ticket_id(ticket: dict[str, Any]) -> int | None:
                 try:
                     return int(digits)
                 except (ValueError, TypeError):
-                    pass
+                    return None
 
     # Fall back to the Syncro ID if number parsing fails
     syncro_id = ticket.get("id")
@@ -1202,7 +1202,7 @@ def _extract_numeric_ticket_id(ticket: dict[str, Any]) -> int | None:
         try:
             return int(syncro_id)
         except (ValueError, TypeError):
-            pass
+            return None
 
     return None
 
@@ -1723,7 +1723,6 @@ async def _resolve_company_id(ticket: dict[str, Any]) -> int | None:
         return int(created_id)
     except (TypeError, ValueError):
         return None
-    return None
 
 
 async def _upsert_ticket_metadata_note(
@@ -2180,6 +2179,7 @@ async def import_from_request(
         except (TypeError, ValueError):  # pragma: no cover - defensive casting
             return None
 
+    event: dict[str, Any] | None = None
     try:
         event = await webhook_monitor.create_manual_event(
             name="syncro.ticket.import",
@@ -2194,7 +2194,6 @@ async def import_from_request(
             mode=mode_lower,
             error=str(exc),
         )
-        event = None
     else:
         event_id = _coerce_event_id(event.get("id")) if event else None
         using_monitor = event_id is not None
@@ -2206,6 +2205,7 @@ async def import_from_request(
         )
 
     if event_id is None:
+        fallback_event: dict[str, Any] | None = None
         try:
             fallback_event = await webhook_events_repo.create_event(
                 name="syncro.ticket.import",
@@ -2220,7 +2220,6 @@ async def import_from_request(
                 mode=mode_lower,
                 error=str(fallback_exc),
             )
-            fallback_event = None
         else:
             fallback_raw_id = fallback_event.get("id") if fallback_event else None
             event_id = _coerce_event_id(fallback_raw_id)

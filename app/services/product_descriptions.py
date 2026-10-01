@@ -133,11 +133,10 @@ async def improve_product_description(product_id: int) -> dict[str, Any] | None:
             {"prompt": _PROMPT.format(description=original), "format": "json"},
             background=False,
         )
-        status = str(response.get("status") or "") if isinstance(response, Mapping) else ""
-        if status not in {"skipped", "error"}:
+        if modules_service.module_result_succeeded(response):
             description_html, features = _parse_ai_payload(response.get("response") if isinstance(response, Mapping) else response)
     except ValueError:
-        pass
+        description_html = None
     except Exception as exc:  # pragma: no cover - external AI/network failures
         log_error("Product description AI refresh failed; using local formatting", product_id=product_id, error=str(exc))
 
