@@ -546,6 +546,16 @@ class Settings(BaseSettings):
         le=3600,
         description="Seconds a relationship queue claim remains valid without a heartbeat.",
     )
+    rag_kb_review_supporting_threshold: int = Field(
+        default=3,
+        validation_alias="RAG_KB_REVIEW_SUPPORTING_THRESHOLD",
+        ge=1,
+        le=100,
+        description=(
+            "Tickets that must link a KB article as SUPPORTING while a different "
+            "document fixed them before the article is flagged for review."
+        ),
+    )
     swagger_ui_url: str = Field(default="/docs", validation_alias="SWAGGER_UI_URL")
     public_base_url: str | None = Field(
         default=None,

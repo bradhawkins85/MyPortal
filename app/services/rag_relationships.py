@@ -551,3 +551,47 @@ async def load_evidence_for_document(
             -float(r.get("relevance_score") or 0),
         ),
     )
+
+
+_KB_REVIEW_EXAMPLE_TICKETS = 5
+
+
+async def kb_articles_needing_update(
+    *, threshold: int | None = None
+) -> dict[int, dict[str, Any]]:
+    """Flag KB articles that keep supporting tickets someone else had to fix.
+
+    An article that the relationship graph repeatedly links to tickets as
+    SUPPORTING, while each of those tickets has a DIRECT_MATCH with a different
+    document, was relevant but did not resolve the issue. That usually means
+    the article is incomplete or out of date. Returns a mapping of article id
+    to ``{"ticket_count", "tickets"}`` for articles at or above the threshold.
+    """
+    if not rag_available():
+        return {}
+    minimum = int(threshold or get_settings().rag_kb_review_supporting_threshold)
+    try:
+        rows = await rel_repo.list_kb_supporting_on_tickets_fixed_elsewhere()
+    except Exception as exc:  # pragma: no cover - defensive for partial installs
+        logger.warning("KB review signal from relationship graph unavailable: {}", exc)
+        return {}
+    grouped: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        try:
+            article_id = int(row.get("article_id"))
+        except (TypeError, ValueError):
+            continue
+        entry = grouped.setdefault(article_id, {"ticket_ids": set(), "tickets": []})
+        ticket_id = str(row.get("ticket_id") or "")
+        if not ticket_id or ticket_id in entry["ticket_ids"]:
+            continue
+        entry["ticket_ids"].add(ticket_id)
+        if len(entry["tickets"]) < _KB_REVIEW_EXAMPLE_TICKETS:
+            entry["tickets"].append(
+                {"id": ticket_id, "title": str(row.get("ticket_title") or "")}
+            )
+    return {
+        article_id: {"ticket_count": len(entry["ticket_ids"]), "tickets": entry["tickets"]}
+        for article_id, entry in grouped.items()
+        if len(entry["ticket_ids"]) >= minimum
+    }

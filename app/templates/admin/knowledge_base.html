@@ -21,6 +21,7 @@
         {% if kb_status_counts.in_review %}<button type="button" class="kb-cat__filter" data-kb-status-filter="in_review" aria-pressed="false">In review<span class="kb-cat__filter-count">{{ kb_status_counts.in_review }}</span></button>{% endif %}
         {% if kb_status_counts.retired %}<button type="button" class="kb-cat__filter" data-kb-status-filter="retired" aria-pressed="false">Retired<span class="kb-cat__filter-count">{{ kb_status_counts.retired }}</span></button>{% endif %}
         {% if kb_status_counts.overdue %}<button type="button" class="kb-cat__filter" data-kb-status-filter="overdue" aria-pressed="false">Review overdue<span class="kb-cat__filter-count">{{ kb_status_counts.overdue }}</span></button>{% endif %}
+        {% if kb_status_counts.needs_update %}<button type="button" class="kb-cat__filter" data-kb-status-filter="needs-update" aria-pressed="false" title="Articles that keep supporting tickets a different fix resolved">Needs update<span class="kb-cat__filter-count">{{ kb_status_counts.needs_update }}</span></button>{% endif %}
       </div>
       <input type="hidden" data-table-column-filter="status" data-table-column-filter-table="kb-admin-table" data-kb-status-input />
     </div>
@@ -83,7 +84,7 @@
                 {% if article.summary %}<span class="kb-admin__summary">{{ article.summary }}</span>{% endif %}
               </a>
             </td>
-            <td data-label="Status" data-column-key="status" data-value="{{ lifecycle }}{% if article.review_overdue %} overdue{% endif %}">
+            <td data-label="Status" data-column-key="status" data-value="{{ lifecycle }}{% if article.review_overdue %} overdue{% endif %}{% if article.needs_update %} needs-update{% endif %}">
               <span class="status {{ status_label[1] }}">{{ status_label[0] }}</span>
             </td>
             <td data-label="Visibility" data-column-key="scope" data-value="{{ article.permission_scope }}">
@@ -91,6 +92,10 @@
             </td>
             <td data-label="Review due" data-column-key="review" data-value="{{ article.review_due_at_iso or '' }}">
               {% if article.review_due_at_iso %}<span class="{{ 'kb-cat__overdue' if article.review_overdue else '' }}">{{ article.review_due_at_iso[:10] }}</span>{% else %}<span class="text-muted">—</span>{% endif %}
+              {% if article.needs_update %}
+                {% set ticket_titles = article.needs_update.tickets | map(attribute='title') | select | join('; ') %}
+                <span class="kb-cat__needs-update" title="Cited as supporting on {{ article.needs_update.ticket_count }} tickets that a different fix resolved{% if ticket_titles %}: {{ ticket_titles }}{% endif %}">Needs update · {{ article.needs_update.ticket_count }} tickets</span>
+              {% endif %}
             </td>
             <td data-label="Tags" data-column-key="ai-tags" data-value="{{ all_tags | join(', ') }}" class="u-hide-tablet">
               {% if all_tags %}
