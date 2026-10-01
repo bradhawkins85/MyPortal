@@ -181,7 +181,7 @@ def build_default_sidebar_preferences() -> dict[str, Any]:
             groups.append({"id": group_id, "label": label, "icon": icon, "items": list(items)})
     return {
         "version": SIDEBAR_LAYOUT_VERSION,
-        "navigation_style": "sidebar",
+        "navigation_style": "top",
         "order": order,
         "hidden": [],
         "groups": groups,
@@ -203,13 +203,13 @@ def _coerce_preferences(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {
             "version": SIDEBAR_LAYOUT_VERSION,
-            "navigation_style": "sidebar",
+            "navigation_style": "top",
             "order": [],
             "hidden": [],
             "groups": [],
         }
 
-    navigation_style = "top" if payload.get("navigation_style") == "top" else "sidebar"
+    navigation_style = "sidebar" if payload.get("navigation_style") == "sidebar" else "top"
 
     order_values = payload.get("order") if isinstance(payload.get("order"), list) else []
     hidden_values = payload.get("hidden") if isinstance(payload.get("hidden"), list) else []

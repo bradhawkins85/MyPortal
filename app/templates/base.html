@@ -1284,7 +1284,7 @@
         const SIDEBAR_GROUP_KEY_PREFIX = '__group__:';
         const enabledModules = {{ module_enabled | default({}) | tojson }};
         const sidebarItemRegistry = new Map();
-        let activeSidebarPreferences = { navigation_style: 'sidebar', order: [], hidden: [], groups: [] };
+        let activeSidebarPreferences = { navigation_style: 'top', order: [], hidden: [], groups: [] };
         const sidebarDefaultPreferences = {{ (sidebar_default_preferences() if sidebar_default_preferences is defined else {'order': [], 'hidden': [], 'groups': []}) | tojson }};
 
         // Shared with the profile page editor so both render the same glyphs.
@@ -1467,7 +1467,7 @@
             return;
           }
           activeSidebarPreferences = {
-            navigation_style: preferences?.navigation_style === 'top' ? 'top' : 'sidebar',
+            navigation_style: preferences?.navigation_style === 'sidebar' ? 'sidebar' : 'top',
             order: Array.isArray(preferences?.order) ? preferences.order : [],
             hidden: Array.isArray(preferences?.hidden) ? preferences.hidden : [],
             groups: Array.isArray(preferences?.groups) ? preferences.groups : [],
