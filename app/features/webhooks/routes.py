@@ -48,8 +48,13 @@ async def admin_webhooks(
         serialised_rule["next_run_at"] = main_module._to_iso(rule.get("next_run_at"))
         serialised_rule["last_run_at"] = main_module._to_iso(rule.get("last_run_at"))
         prepared_rules.append(serialised_rule)
+    status_counts = {
+        state: await webhook_events_repo.count_events_by_status(state)
+        for state in ("failed", "pending", "in_progress", "succeeded")
+    }
     extra = {
-        "title": "Webhook delivery queue",
+        "title": "Webhooks",
+        "webhook_status_counts": status_counts,
         "events": prepared_events,
         "webhook_search": q,
         "webhook_status": status_filter or "",

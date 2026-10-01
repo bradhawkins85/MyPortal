@@ -1,345 +1,404 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+{% from "macros/tables.html" import table_column_picker, empty_state %}
 
-{% block header_title %}
-  <div class="header-title-menu">
-    <span class="header-title-menu__label">Webhook Monitor</span>
-    <details class="header-title-menu__dropdown" data-header-menu>
-      <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
-        Actions
-        <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
-          <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
-        </svg>
-        <span class="visually-hidden">Toggle actions menu</span>
-      </summary>
-      <ul class="header-title-menu__list" role="menu">
-        <li class="header-title-menu__item" role="none">
-          <button type="button" class="header-title-menu__link" role="menuitem" data-deletion-rule-new>New deletion rule</button>
-        </li>
-        <li class="header-title-menu__item" role="none">
-          <button
-            type="button"
-            class="header-title-menu__link header-title-menu__link--danger"
-            role="menuitem"
-            data-webhook-delete-status="failed"
-          >
-            Delete all failed
-          </button>
-        </li>
-        <li class="header-title-menu__item" role="none">
-          <button
-            type="button"
-            class="header-title-menu__link header-title-menu__link--danger"
-            role="menuitem"
-            data-webhook-delete-status="succeeded"
-          >
-            Delete all succeeded
-          </button>
-        </li>
-      </ul>
-    </details>
-  </div>
+{% block title %}Webhooks{% endblock %}
+{% block header_title %}Webhooks{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "New deletion rule", "variant": "primary", "attrs": {"data-deletion-rule-new": true, "aria-haspopup": "dialog", "aria-controls": "webhook-deletion-rule-modal"}},
+    {"label": "Delete all failed", "variant": "danger", "attrs": {"data-webhook-delete-status": "failed"}},
+    {"label": "Delete all succeeded", "variant": "danger", "attrs": {"data-webhook-delete-status": "succeeded"}},
+  ], menu_id="webhook-page-actions") }}
 {% endblock %}
 
 {% block content %}
-<section class="card card--panel" aria-labelledby="deletion-rules-title">
-  <header class="card__header">
-    <div><h2 id="deletion-rules-title">Deletion rules</h2>
-      <p class="card__subtitle">Rules remove matching monitor entries and their stored attempts. Event rules run after delivery; scheduled rules run on their cron schedule.</p></div>
-  </header>
-  <div class="table-wrapper">
-    <table class="table" id="webhook-deletion-rules-table" data-table data-table-id="webhook-deletion-rules">
-      <thead><tr><th data-sort="string">Name</th><th data-sort="string">Execution</th><th data-sort="string">Conditions</th><th data-sort="string">Status</th><th class="table__actions">Actions</th></tr></thead>
-      <tbody>
-      {% for rule in deletion_rules %}
-        <tr data-rule='{{ rule|tojson }}'>
-          <td>{{ rule.name }}</td><td>{{ rule.execution_type }}{% if rule.cron_expression %} · {{ rule.cron_expression }}{% endif %}</td>
-          <td>{{ rule.conditions|length }} condition{% if rule.conditions|length != 1 %}s{% endif %}</td>
-          <td><span class="status status--{{ 'success' if rule.enabled else 'neutral' }}">{{ 'Enabled' if rule.enabled else 'Disabled' }}</span></td>
-          <td class="table__actions"><button class="button button--ghost" type="button" data-deletion-rule-edit>Edit</button><button class="button button--danger" type="button" data-deletion-rule-delete>Delete</button></td>
-        </tr>
-      {% else %}<tr><td colspan="5" class="table__empty">No deletion rules configured.</td></tr>{% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <form class="form-grid" data-retention-form>
-    <h3>Final retention rule</h3>
-    <label><input type="checkbox" name="enabled" {% if retention.enabled %}checked{% endif %}> Delete old entries</label>
-    <label>Delete after <input class="form-input" type="number" name="retentionValue" min="0" max="5256000" value="{{ retention.retention_value }}" required></label>
-    <label class="form-label">Time unit
-      <select class="form-input" name="retentionUnit">
-        <option value="immediately" {% if retention.retention_unit == 'immediately' %}selected{% endif %}>Immediately</option>
-        <option value="minutes" {% if retention.retention_unit == 'minutes' %}selected{% endif %}>Minutes</option>
-        <option value="hours" {% if retention.retention_unit == 'hours' %}selected{% endif %}>Hours</option>
-        <option value="days" {% if retention.retention_unit == 'days' %}selected{% endif %}>Days</option>
-      </select>
-    </label>
-    <p class="text-muted">Runs last and uses the entry creation timestamp (UTC), regardless of delivery updates. “Immediately” removes every remaining entry on the next cleanup run.</p>
-    <button class="button button--primary" type="submit">Save retention</button>
-  </form>
-</section>
+{% set whm_status_labels = {'pending': 'Pending', 'in_progress': 'In progress', 'succeeded': 'Succeeded', 'failed': 'Failed'} %}
+{% set whm_status_variants = {'pending': 'warning', 'in_progress': 'processing', 'succeeded': 'success', 'failed': 'error'} %}
+{% set whm_operator_labels = {
+  'equals': 'is', 'not_equals': 'is not', 'contains': 'contains', 'not_contains': "doesn't contain",
+  'starts_with': 'starts with', 'ends_with': 'ends with', 'is_empty': 'is empty', 'is_not_empty': 'is not empty',
+  'greater_than': 'is greater than', 'less_than': 'is less than',
+} %}
+{% set counts = webhook_status_counts or {} %}
+{% set limit_query = "&event_limit=" ~ webhook_event_limit %}
 
-<div class="modal" id="webhook-deletion-rule-modal" role="dialog" aria-modal="true" hidden>
- <div class="modal__content" role="document"><button type="button" class="modal__close" data-modal-close><span class="visually-hidden">Close</span></button>
-  <h2 class="modal__title">Deletion rule</h2>
-  <form data-deletion-rule-form><input type="hidden" name="id">
-   <label class="form-label">Name<input class="form-input" name="name" maxlength="150" required></label>
-   <label class="form-label">Execution<select class="form-input" name="executionType"><option value="event">After a webhook event</option><option value="scheduled">On a schedule</option></select></label>
-   <label class="form-label">Cron schedule<input class="form-input" name="cronExpression" placeholder="0 2 * * *"></label>
-   <label><input type="checkbox" name="enabled" checked> Enabled</label>
-   <fieldset><legend>All conditions must match</legend><div data-rule-conditions></div><button class="button button--ghost" type="button" data-add-condition>Add condition</button></fieldset>
-   <p class="text-muted">Fields may be top-level (for example <code>status</code>) or nested (for example <code>payload.customer.id</code>).</p>
-   <button class="button button--primary" type="submit">Save rule</button>
-  </form>
- </div>
-</div>
-<section class="card card--panel">
-  <header class="card__header">
-    <div class="card__controls">
-      <form class="card__controls" method="get" action="/admin/webhooks">
-        <input
-          type="search"
-          class="form-input"
-          name="q"
-          value="{{ webhook_search or '' }}"
-          placeholder="Search all loaded webhook events"
-          aria-label="Search webhook event history"
-        />
-        <select class="form-input" name="event_limit" aria-label="How many webhook events to load">
+{{ counter_strip([
+  {"label": "Failed", "value": counts.get('failed', 0), "variant": "danger", "href": "/admin/webhooks?status=failed" ~ limit_query, "title": "Open the dead-letter queue"},
+  {"label": "Pending", "value": counts.get('pending', 0), "variant": "warning", "href": "/admin/webhooks?status=pending" ~ limit_query, "title": "Show events waiting to be delivered"},
+  {"label": "In progress", "value": counts.get('in_progress', 0), "variant": "info", "href": "/admin/webhooks?status=in_progress" ~ limit_query, "title": "Show events being delivered now"},
+  {"label": "Succeeded", "value": counts.get('succeeded', 0), "variant": "success", "href": "/admin/webhooks?status=succeeded" ~ limit_query, "title": "Show delivered events"},
+], total=(counts.values() | sum), total_label="In queue", class="whm-stats") }}
+
+<section class="card card--panel whm-log" aria-labelledby="webhook-log-title">
+  <header class="card__header card__header--stacked">
+    <div>
+      <h2 class="card__title" id="webhook-log-title">{{ 'Dead-letter queue' if webhook_status == 'failed' else 'Delivery log' }}</h2>
+      {% if webhook_status == 'failed' %}
+        <p class="card__subtitle">Showing {{ events|length }} failed webhook event{{ 's' if events|length != 1 }}{% if webhook_search %} matching “{{ webhook_search }}”{% endif %}. Inspect attempts, retry failures and track recovery from one place.</p>
+      {% else %}
+        <p class="card__subtitle">Showing the latest {{ events|length }} {{ whm_status_labels.get(webhook_status, '')|lower ~ ' ' if webhook_status }}webhook event{{ 's' if events|length != 1 }}{% if webhook_search %} matching “{{ webhook_search }}”{% endif %}. Increase the history window to search farther back.</p>
+      {% endif %}
+    </div>
+  </header>
+
+  <div class="table-toolbar whm-toolbar" data-table-toolbar data-table-toolbar-for="webhooks-table">
+    <form class="table-toolbar__filters" method="get" action="/admin/webhooks" role="search" aria-label="Search webhook history">
+      <div class="table-toolbar__field table-toolbar__field--search">
+        <label for="webhook-search">Search history</label>
+        <input type="search" class="form-input" id="webhook-search" name="q" value="{{ webhook_search or '' }}" placeholder="Name, URL, error or payload text" />
+      </div>
+      <div class="table-toolbar__field">
+        <label for="webhook-status">Queue state</label>
+        <select class="form-input" id="webhook-status" name="status" data-whm-autosubmit>
+          <option value="" {% if not webhook_status %}selected{% endif %}>All states</option>
+          <option value="failed" {% if webhook_status == 'failed' %}selected{% endif %}>Dead-letter queue (failed)</option>
+          <option value="pending" {% if webhook_status == 'pending' %}selected{% endif %}>Pending</option>
+          <option value="in_progress" {% if webhook_status == 'in_progress' %}selected{% endif %}>In progress</option>
+          <option value="succeeded" {% if webhook_status == 'succeeded' %}selected{% endif %}>Succeeded</option>
+        </select>
+      </div>
+      <div class="table-toolbar__field table-toolbar__field--narrow">
+        <label for="webhook-event-limit">History window</label>
+        <select class="form-input" id="webhook-event-limit" name="event_limit" data-whm-autosubmit>
           {% for option in webhook_event_limit_options %}
-            <option value="{{ option }}" {% if option == webhook_event_limit %}selected{% endif %}>
-              Latest {{ option }} events
-            </option>
+            <option value="{{ option }}" {% if option == webhook_event_limit %}selected{% endif %}>Latest {{ '{:,}'.format(option) }}</option>
           {% endfor %}
         </select>
-        <select class="form-input" name="status" aria-label="Server-side webhook status filter">
-          <option value="" {% if not webhook_status %}selected{% endif %}>All queue states</option>
-          <option value="failed" {% if webhook_status == 'failed' %}selected{% endif %}>Dead-letter queue</option>
-          <option value="pending" {% if webhook_status == 'pending' %}selected{% endif %}>Pending only</option>
-          <option value="in_progress" {% if webhook_status == 'in_progress' %}selected{% endif %}>In progress only</option>
-          <option value="succeeded" {% if webhook_status == 'succeeded' %}selected{% endif %}>Succeeded only</option>
-        </select>
-        <button type="submit" class="button button--primary">Search history</button>
+      </div>
+      <div class="whm-toolbar__buttons">
+        <button type="submit" class="button button--ghost">Search history</button>
         {% if webhook_search or webhook_status %}
           <a class="button button--ghost" href="/admin/webhooks?event_limit={{ webhook_event_limit }}">Clear</a>
         {% endif %}
-      </form>
-      <input
-        type="search"
-        class="form-input"
-        placeholder="Filter loaded webhook events"
-        aria-label="Filter loaded webhook events"
-        data-table-filter="webhooks-table"
-      />
-      <select
-        class="form-input"
-        aria-label="Filter webhooks by direction"
-        data-table-column-filter="direction"
-        data-table-column-filter-table="webhooks-table"
-      >
+      </div>
+    </form>
+    <div class="table-toolbar__menus">
+      <label class="visually-hidden" for="webhook-direction-filter">Direction</label>
+      <select class="form-input whm-toolbar__direction" id="webhook-direction-filter" data-table-column-filter="direction" data-table-column-filter-table="webhooks-table">
         <option value="">All directions</option>
         <option value="incoming">Incoming</option>
         <option value="outgoing">Outgoing</option>
       </select>
-      <input
-        type="search"
-        class="form-input"
-        placeholder="Name"
-        aria-label="Filter webhooks by name"
-        data-table-column-filter="name"
-        data-table-column-filter-table="webhooks-table"
-      />
-      <input
-        type="search"
-        class="form-input"
-        placeholder="Target"
-        aria-label="Filter webhooks by target"
-        data-table-column-filter="target"
-        data-table-column-filter-table="webhooks-table"
-      />
-      <select
-        class="form-input"
-        aria-label="Filter webhooks by status"
-        data-table-column-filter="status"
-        data-table-column-filter-table="webhooks-table"
-      >
-        <option value="">All statuses</option>
-        <option value="pending">Pending</option>
-        <option value="in_progress">In progress</option>
-        <option value="succeeded">Succeeded</option>
-        <option value="failed">Failed</option>
-      </select>
-      <input
-        type="search"
-        class="form-input"
-        placeholder="Attempts"
-        aria-label="Filter webhooks by attempts"
-        data-table-column-filter="attempts"
-        data-table-column-filter-table="webhooks-table"
-      />
-      <input
-        type="search"
-        class="form-input"
-        placeholder="Last error"
-        aria-label="Filter webhooks by last error"
-        data-table-column-filter="last_error"
-        data-table-column-filter-table="webhooks-table"
-      />
+      {{ table_column_picker("webhooks", [
+        {"key": "direction", "label": "Direction", "default_visible": false},
+        {"key": "name", "label": "Event"},
+        {"key": "target", "label": "Target"},
+        {"key": "status", "label": "Status"},
+        {"key": "attempts", "label": "Attempts"},
+        {"key": "next_attempt", "label": "Next attempt", "default_visible": false},
+        {"key": "last_error", "label": "Last error"},
+        {"key": "updated", "label": "Updated"},
+      ]) }}
     </div>
-  </header>
-  {% if webhook_status == 'failed' %}
-    <p class="card__subtitle">Dead-letter queue view: showing {{ events|length }} failed webhook events{% if webhook_search %} matching “{{ webhook_search }}”{% endif %}. Inspect attempts, replay failures, and track recovery from one place.</p>
-  {% else %}
-    <p class="card__subtitle">Showing {{ events|length }} loaded webhook events{% if webhook_search %} matching “{{ webhook_search }}”{% endif %}. Increase the history window to search farther back.</p>
-  {% endif %}
-  <div class="table-wrapper">
-    <table class="table" id="webhooks-table" data-table data-table-id="webhooks">
-      <thead>
-        <tr>
-          <th scope="col" data-sort="string" data-column-key="direction">Direction</th>
-          <th scope="col" data-sort="string" data-column-key="name">Name</th>
-          <th scope="col" data-sort="string" class="table__col--truncate" data-column-key="target">Target</th>
-          <th scope="col" data-sort="string" data-column-key="status">Status</th>
-          <th scope="col" data-sort="number" data-column-key="attempts">Attempts</th>
-          <th scope="col" data-sort="date" data-column-key="next_attempt">Next attempt</th>
-          <th scope="col" data-sort="string" data-column-key="last_error">Last error</th>
-          <th scope="col" data-sort="date" data-column-key="updated">Updated</th>
-          <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for event in events %}
-          <tr
-            data-event-id="{{ event.id }}"
-            data-event-name="{{ event.name }}"
-            data-event-target="{{ event.target_url or '' }}"
-            data-event-status="{{ event.status }}"
-            data-event-direction="{{ event.direction or 'outgoing' }}"
-          >
-            <td data-label="Direction" data-value="{{ event.direction or 'outgoing' }}" data-column-key="direction">
-              {% if event.direction == 'incoming' %}
-                <span class="badge badge--info">⬇ Incoming</span>
-              {% else %}
-                <span class="badge badge--primary">⬆ Outgoing</span>
-              {% endif %}
-            </td>
-            <td data-label="Name" data-value="{{ event.name }}" data-column-key="name">{{ event.name }}</td>
-            <td data-label="Target" class="table__col--truncate" title="{{ event.target_url or '' }}" data-value="{{ event.target_url or '' }}" data-column-key="target">{{ event.target_url }}</td>
-            <td data-label="Status" data-value="{{ event.status }}" data-column-key="status">{{ event.status }}</td>
-            <td data-label="Attempts" data-value="{{ event.attempt_count }}" data-column-key="attempts">
-              {{ event.attempt_count }}/{{ event.max_attempts }}
-            </td>
-            <td data-label="Next attempt" data-value="{{ event.next_attempt_iso or '' }}" data-column-key="next_attempt">
-              {% if event.next_attempt_iso %}
-                <span data-utc="{{ event.next_attempt_iso }}"></span>
-              {% else %}
-                <span class="text-muted">—</span>
-              {% endif %}
-            </td>
-            <td data-label="Last error" data-value="{{ event.last_error or '' }}" data-column-key="last_error">{{ event.last_error or '—' }}</td>
-            <td data-label="Updated" data-value="{{ event.updated_iso or '' }}" data-column-key="updated">
-              {% if event.updated_iso %}
-                <span data-utc="{{ event.updated_iso }}"></span>
-              {% endif %}
-            </td>
-            <td class="table__actions" data-column-key="actions">
-              <details class="header-title-menu__dropdown" data-header-menu>
-                <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
-                  Actions
-                  <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
-                    <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
-                  </svg>
-                  <span class="visually-hidden">Toggle row actions menu</span>
-                </summary>
-                <ul class="header-title-menu__list" role="menu">
-                  <li class="header-title-menu__item" role="none">
-                    <button type="button" class="header-title-menu__link" role="menuitem" data-webhook-attempts>
-                      View attempts
-                    </button>
-                  </li>
-                  <li class="header-title-menu__item" role="none">
-                    <button
-                      type="button"
-                      class="header-title-menu__link"
-                      role="menuitem"
-                      data-webhook-retry
-                    >
-                      Retry
-                    </button>
-                  </li>
-                  <li class="header-title-menu__item" role="none">
-                    <button
-                      type="button"
-                      class="header-title-menu__link header-title-menu__link--danger"
-                      role="menuitem"
-                      data-webhook-delete
-                      {% if event.status == 'in_progress' %}disabled{% endif %}
-                    >
-                      Delete
-                    </button>
-                  </li>
-                </ul>
-              </details>
-            </td>
-          </tr>
-        {% else %}
-          <tr>
-            <td colspan="9" class="table__empty">No webhook activity recorded.</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
   </div>
-  <div class="table-pagination" data-pagination="webhooks-table">
-    <div class="table-pagination__group">
-      <button
-        type="button"
-        class="button button--ghost table-pagination__button"
-        data-page-prev
-        disabled
-      >
-        Previous
-      </button>
-      <button
-        type="button"
-        class="button button--ghost table-pagination__button"
-        data-page-next
-      >
-        Next
-      </button>
+
+  {% if events %}
+    <div class="table-wrapper">
+      <table class="table whm-table" id="webhooks-table" data-table data-table-id="webhooks" data-table-paginate aria-labelledby="webhook-log-title">
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string" data-column-key="direction">Direction</th>
+            <th scope="col" data-sort="string" data-column-key="name" data-mobile-priority="essential">Event</th>
+            <th scope="col" data-sort="string" class="table__col--truncate" data-column-key="target">Target</th>
+            <th scope="col" data-sort="string" data-column-key="status" data-mobile-priority="essential">Status</th>
+            <th scope="col" data-sort="number" data-column-key="attempts">Attempts</th>
+            <th scope="col" data-sort="date" data-column-key="next_attempt">Next attempt</th>
+            <th scope="col" data-sort="string" data-column-key="last_error">Last error</th>
+            <th scope="col" data-sort="date" data-column-key="updated">Updated</th>
+            <th scope="col" class="table__actions" data-column-key="actions" data-mobile-priority="essential"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for event in events %}
+            {% set direction = event.direction or 'outgoing' %}
+            <tr
+              data-event-id="{{ event.id }}"
+              data-event-name="{{ event.name }}"
+              data-event-target="{{ event.target_url or '' }}"
+              data-event-status="{{ event.status }}"
+              data-event-direction="{{ direction }}"
+            >
+              <td data-label="Direction" data-value="{{ direction }}" data-column-key="direction">
+                <span class="whm-direction whm-direction--{{ direction }}">{{ 'Incoming' if direction == 'incoming' else 'Outgoing' }}</span>
+              </td>
+              <td data-label="Event" data-value="{{ event.name }}" data-column-key="name">
+                <span class="whm-event">
+                  <span class="whm-direction whm-direction--{{ direction }} whm-direction--icon" title="{{ 'Incoming' if direction == 'incoming' else 'Outgoing' }}"><span class="visually-hidden">{{ 'Incoming' if direction == 'incoming' else 'Outgoing' }}</span></span>
+                  <button type="button" class="button-link whm-event__name" data-webhook-attempts aria-haspopup="dialog" aria-controls="webhook-attempts-modal" title="View delivery attempts">{{ event.name }}</button>
+                  <span class="whm-event__id">#{{ event.id }}</span>
+                </span>
+              </td>
+              <td data-label="Target" class="table__col--truncate" title="{{ event.target_url or '' }}" data-value="{{ event.target_url or '' }}" data-column-key="target">
+                <span class="whm-mono">{{ event.target_url or '—' }}</span>
+              </td>
+              <td data-label="Status" data-value="{{ event.status }}" data-column-key="status">
+                <span class="status status--{{ whm_status_variants.get(event.status, 'neutral') }}">{{ whm_status_labels.get(event.status, event.status) }}</span>
+                {% if event.next_attempt_iso and event.status == 'pending' %}
+                  <span class="whm-next">Next try <span data-utc="{{ event.next_attempt_iso }}"></span></span>
+                {% endif %}
+              </td>
+              <td data-label="Attempts" data-value="{{ event.attempt_count }}" data-column-key="attempts">
+                <span class="whm-attempts{% if event.max_attempts and event.attempt_count >= event.max_attempts %} whm-attempts--exhausted{% endif %}">{{ event.attempt_count }} of {{ event.max_attempts }}</span>
+              </td>
+              <td data-label="Next attempt" data-value="{{ event.next_attempt_iso or '' }}" data-column-key="next_attempt">
+                {% if event.next_attempt_iso and event.status in ('pending', 'failed') %}
+                  <span data-utc="{{ event.next_attempt_iso }}"></span>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td data-label="Last error" data-value="{{ event.last_error or '' }}" data-column-key="last_error">
+                {% if event.last_error %}
+                  <span class="whm-error" title="{{ event.last_error }}">{{ event.last_error | truncate(90) }}</span>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td data-label="Updated" data-value="{{ event.updated_iso or '' }}" data-column-key="updated">
+                {% if event.updated_iso %}<span data-utc="{{ event.updated_iso }}"></span>{% endif %}
+              </td>
+              <td class="table__actions" data-column-key="actions">
+                <div class="whm-row-actions">
+                  <button type="button" class="button button--ghost button--small" data-webhook-retry>
+                    {{ 'Resend' if event.status == 'succeeded' else 'Retry' }}<span class="visually-hidden"> {{ event.name }}</span>
+                  </button>
+                  <button type="button" class="button button--danger button--small" data-webhook-delete {% if event.status == 'in_progress' %}disabled title="Delivery is in progress"{% endif %}>
+                    Delete<span class="visually-hidden"> {{ event.name }}</span>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
-    <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+    <div class="table-pagination" data-pagination="webhooks-table">
+      <div class="table-pagination__group">
+        <button type="button" class="button button--ghost button--small table-pagination__button" data-page-prev disabled>Previous</button>
+        <button type="button" class="button button--ghost button--small table-pagination__button" data-page-next>Next</button>
+      </div>
+      <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+    </div>
+  {% endif %}
+  <div class="whm-empty" data-webhook-empty {% if events %}hidden{% endif %}>
+    {% if webhook_search or webhook_status %}
+      {{ empty_state("No webhook events match", "Try a different search or queue state, or increase the history window to search farther back.") }}
+    {% else %}
+      {{ empty_state("No webhook activity recorded", "Outgoing deliveries and captured incoming webhooks appear here as they happen.") }}
+    {% endif %}
   </div>
 </section>
 
-<div class="modal" id="webhook-attempts-modal" role="dialog" aria-modal="true" hidden>
-  <div class="modal__content" role="document">
-    <button type="button" class="modal__close" data-modal-close>
-      <span class="visually-hidden">Close webhook attempts</span>
-    </button>
-    <h2 class="modal__title" id="webhook-attempts-title">Webhook attempts</h2>
-    <div class="modal__body">
-      <p id="webhook-attempts-description" class="modal__subtitle text-muted">
-        Review the latest delivery attempts for the selected webhook event.
-      </p>
-      <div class="modal__controls">
-        <input
-          type="search"
-          class="form-input"
-          placeholder="Filter attempts"
-          aria-label="Filter webhook attempts"
-          data-table-filter="webhook-attempts-table"
-        />
+<section class="card card--panel whm-cleanup" aria-labelledby="webhook-cleanup-title">
+  <header class="card__header card__header--stacked">
+    <div>
+      <h2 class="card__title" id="webhook-cleanup-title">Automatic cleanup</h2>
+      <p class="card__subtitle">Deletion rules remove matching entries and their stored attempts first. The retention rule runs last and sweeps up whatever is left.</p>
+    </div>
+  </header>
+  <div class="card__body whm-cleanup__body">
+    <div class="whm-cleanup__heading">
+      <h3 class="scf-panel__title">Deletion rules</h3>
+      {% if deletion_rules %}
+        <button type="button" class="button button--ghost button--small" data-deletion-rule-new aria-haspopup="dialog" aria-controls="webhook-deletion-rule-modal">Add rule</button>
+      {% endif %}
+    </div>
+    {% if deletion_rules %}
+      <ul class="scf-list whm-rules" id="webhook-deletion-rules">
+        {% for rule in deletion_rules %}
+          <li class="scf-item{% if not rule.enabled %} scf-item--inactive{% endif %}" data-deletion-rule data-rule='{{ rule|tojson }}'>
+            <div class="scf-item__main">
+              <div class="scf-item__heading">
+                <span class="scf-item__label whm-rule__name">{{ rule.name }}</span>
+              </div>
+              <ul class="scf-item__chips" aria-label="Rule details">
+                {% if rule.enabled %}
+                  <li class="scf-chip sif-chip--optional">Enabled</li>
+                {% else %}
+                  <li class="scf-chip scf-chip--muted">Disabled</li>
+                {% endif %}
+                {% if rule.execution_type == 'scheduled' %}
+                  <li class="scf-chip scf-chip--logic">Scheduled · <code>{{ rule.cron_expression or 'no schedule' }}</code> UTC</li>
+                  {% if rule.enabled and rule.next_run_at %}<li class="scf-chip">Next run <span data-utc="{{ rule.next_run_at }}"></span></li>{% endif %}
+                  {% if rule.last_run_at %}<li class="scf-chip scf-chip--muted">Last run <span data-utc="{{ rule.last_run_at }}"></span></li>{% endif %}
+                {% else %}
+                  <li class="scf-chip scf-chip--logic">After each webhook event</li>
+                {% endif %}
+              </ul>
+              <p class="scf-item__help whm-rule__summary">Deletes entries where {% for condition in rule.conditions %}{% if not loop.first %} and {% endif %}<code>{{ condition.field }}</code> {{ whm_operator_labels.get(condition.operator, condition.operator) }}{% if condition.operator not in ('is_empty', 'is_not_empty') %} “{{ condition.value if condition.value is not none else '' }}”{% endif %}{% endfor %}.</p>
+            </div>
+            <div class="scf-item__actions">
+              <button type="button" class="button button--ghost button--small" data-deletion-rule-edit aria-haspopup="dialog" aria-controls="webhook-deletion-rule-modal">Edit<span class="visually-hidden"> {{ rule.name }}</span></button>
+              <button type="button" class="button button--danger button--small" data-deletion-rule-delete>Delete<span class="visually-hidden"> {{ rule.name }}</span></button>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <div class="scf-empty">
+        <p class="scf-empty__title">No deletion rules yet</p>
+        <p class="text-muted">Add a rule to clear out noise automatically, for example successful health-check pings or events for a retired endpoint.</p>
+        <button type="button" class="button button--ghost button--small" data-deletion-rule-new aria-haspopup="dialog" aria-controls="webhook-deletion-rule-modal">Add a rule</button>
       </div>
+    {% endif %}
+
+    <form class="whm-retention" data-retention-form novalidate aria-labelledby="webhook-retention-title">
+      <div class="whm-cleanup__heading">
+        <h3 class="scf-panel__title" id="webhook-retention-title">Final retention</h3>
+        <label class="scf-switch">
+          <input type="checkbox" name="enabled" data-retention-enabled {% if retention.enabled %}checked{% endif %} />
+          <span class="scf-switch__track" aria-hidden="true"></span>
+          <span>Delete old entries</span>
+        </label>
+      </div>
+      <div class="whm-retention__fields" data-retention-fields>
+        <div class="form-field">
+          <label class="form-label" for="webhook-retention-value">Delete entries older than</label>
+          <input class="form-input" id="webhook-retention-value" type="number" name="retentionValue" min="0" max="5256000" value="{{ retention.retention_value }}" required data-retention-value />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="webhook-retention-unit">Unit</label>
+          <select class="form-input" id="webhook-retention-unit" name="retentionUnit" data-retention-unit>
+            <option value="minutes" {% if retention.retention_unit == 'minutes' %}selected{% endif %}>Minutes</option>
+            <option value="hours" {% if retention.retention_unit == 'hours' %}selected{% endif %}>Hours</option>
+            <option value="days" {% if retention.retention_unit == 'days' %}selected{% endif %}>Days</option>
+            <option value="immediately" {% if retention.retention_unit == 'immediately' %}selected{% endif %}>Immediately (delete everything)</option>
+          </select>
+        </div>
+        <button class="button whm-retention__save" type="submit" data-retention-save>Save retention</button>
+      </div>
+      <p class="scf-sentence" data-retention-summary role="status" aria-live="polite">
+        {% if not retention.enabled %}
+          Old entries are kept until a deletion rule or a manual delete removes them.
+        {% elif retention.retention_unit == 'immediately' %}
+          Every remaining entry is deleted on the next cleanup run.
+        {% else %}
+          Entries created more than {{ retention.retention_value }} {{ retention.retention_unit }} ago are deleted on each cleanup run.
+        {% endif %}
+      </p>
+      <p class="form-help">Age is measured from when the entry was created (UTC), so retries and delivery updates don't extend it.</p>
+      <p class="scf-error" data-retention-error hidden></p>
+    </form>
+  </div>
+</section>
+
+<datalist id="webhook-rule-fields">
+  <option value="status"></option>
+  <option value="direction"></option>
+  <option value="name"></option>
+  <option value="target_url"></option>
+  <option value="source_url"></option>
+  <option value="response_status"></option>
+  <option value="attempt_count"></option>
+  <option value="last_error"></option>
+  <option value="payload."></option>
+  <option value="metadata."></option>
+</datalist>
+
+<div class="modal scf-modal" id="webhook-deletion-rule-modal" role="dialog" aria-modal="true" aria-labelledby="webhook-rule-modal-title" aria-hidden="true" hidden>
+  <form class="modal__panel modal__panel--wide scf-editor whm-rule-editor" data-deletion-rule-form novalidate>
+    <input type="hidden" name="id" />
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="scf-preview__eyebrow">Deletion rule</p>
+        <h2 class="modal__title" id="webhook-rule-modal-title" data-rule-title>New deletion rule</h2>
+        <p class="scf-editor__subtitle">Choose when the rule runs and which webhook entries it removes.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close deletion rule editor"></button>
+    </header>
+
+    <div class="modal__body scf-editor__body">
+      <div class="scf-editor__main whm-rule-editor__main">
+        <section class="whm-section" aria-labelledby="webhook-rule-basics">
+          <h3 class="visually-hidden" id="webhook-rule-basics">Name</h3>
+          <div class="form-field">
+            <label class="form-label" for="webhook-rule-name">Rule name</label>
+            <input class="form-input" id="webhook-rule-name" name="name" maxlength="150" required placeholder="e.g. Drop successful health checks" data-initial-focus />
+            <p class="scf-error" data-rule-error="name" hidden></p>
+          </div>
+          <label class="scf-switch">
+            <input type="checkbox" name="enabled" checked />
+            <span class="scf-switch__track" aria-hidden="true"></span>
+            <span>Rule is enabled</span>
+          </label>
+        </section>
+
+        <section class="whm-section" aria-labelledby="webhook-rule-when">
+          <h3 class="scf-panel__title" id="webhook-rule-when">When it runs</h3>
+          <div class="scf-choice-list" role="radiogroup" aria-labelledby="webhook-rule-when">
+            <label class="scf-choice">
+              <input type="radio" name="executionType" value="event" checked data-rule-execution />
+              <span><strong>After each webhook event</strong><span class="text-muted">Checks every event as soon as its delivery finishes.</span></span>
+            </label>
+            <label class="scf-choice">
+              <input type="radio" name="executionType" value="scheduled" data-rule-execution />
+              <span><strong>On a schedule</strong><span class="text-muted">Sweeps the latest 5,000 entries on a cron schedule.</span></span>
+            </label>
+          </div>
+          <div class="form-field" data-rule-cron-field hidden>
+            <label class="form-label" for="webhook-rule-cron">Cron schedule (UTC)</label>
+            <div class="whm-presets" role="group" aria-label="Common schedules">
+              <button type="button" class="sig-var" data-cron-preset="0 * * * *">Every hour</button>
+              <button type="button" class="sig-var" data-cron-preset="0 2 * * *">Daily at 02:00</button>
+              <button type="button" class="sig-var" data-cron-preset="0 3 * * 0">Sundays at 03:00</button>
+            </div>
+            <input class="form-input scf-mono" id="webhook-rule-cron" name="cronExpression" placeholder="0 2 * * *" autocomplete="off" spellcheck="false" />
+            <p class="form-help">Minute, hour, day of month, month, day of week.</p>
+            <p class="scf-error" data-rule-error="cron" hidden></p>
+          </div>
+        </section>
+
+        <section class="whm-section" aria-labelledby="webhook-rule-conditions">
+          <div class="whm-cleanup__heading">
+            <h3 class="scf-panel__title" id="webhook-rule-conditions">Delete entries where</h3>
+            <span class="form-help">All conditions must match</span>
+          </div>
+          <ol class="whm-conditions" data-rule-conditions></ol>
+          <button class="button button--ghost button--small" type="button" data-add-condition>Add condition</button>
+          <p class="form-help">Fields can be top-level, like <code>status</code>, or nested, like <code>payload.customer.id</code>. Text comparisons ignore case.</p>
+          <p class="scf-error" data-rule-error="conditions" hidden></p>
+        </section>
+      </div>
+
+      <aside class="scf-preview whm-rule-preview" aria-label="Rule summary">
+        <p class="scf-preview__eyebrow">What this rule does</p>
+        <p class="scf-sentence" data-rule-summary></p>
+        <p class="form-help">Matching entries and their stored delivery attempts are deleted permanently.</p>
+      </aside>
+    </div>
+
+    <footer class="modal__footer scf-editor__footer">
+      <p class="scf-error" data-rule-error="form" hidden></p>
+      <span class="scf-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button" data-rule-save>Save rule</button>
+    </footer>
+  </form>
+</div>
+
+<div class="modal scf-modal" id="webhook-attempts-modal" role="dialog" aria-modal="true" aria-labelledby="webhook-attempts-title" aria-hidden="true" hidden>
+  <div class="modal__panel modal__panel--wide scf-editor whm-attempts-panel">
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="scf-preview__eyebrow">Delivery attempts</p>
+        <h2 class="modal__title" id="webhook-attempts-title">Webhook attempts</h2>
+        <p id="webhook-attempts-description" class="scf-editor__subtitle">Review the latest delivery attempts for the selected webhook event.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close webhook attempts"></button>
+    </header>
+    <div class="modal__body">
       <div class="table-wrapper">
-        <table class="table" id="webhook-attempts-table" data-table data-table-id="webhook-attempts">
+        <table class="table" id="webhook-attempts-table" data-table-column-filters-disabled aria-labelledby="webhook-attempts-title">
           <thead>
             <tr>
-              <th scope="col" data-sort="date">Attempted</th>
-              <th scope="col" data-sort="number">Status</th>
-              <th scope="col" data-sort="number">Duration (ms)</th>
-              <th scope="col" data-sort="string">Response</th>
-              <th scope="col" data-sort="string">Error</th>
-              <th scope="col" class="table__actions">Details</th>
+              <th scope="col">Attempted</th>
+              <th scope="col">Result</th>
+              <th scope="col">HTTP</th>
+              <th scope="col">Duration</th>
+              <th scope="col">Error</th>
+              <th scope="col" class="table__actions"><span class="visually-hidden">Details</span></th>
             </tr>
           </thead>
           <tbody id="webhook-attempts-body">
@@ -351,9 +410,7 @@
       </div>
       <div class="attempt-details" id="webhook-attempt-details">
         <h3 class="attempt-details__title">Attempt details</h3>
-        <p class="text-muted" data-attempt-placeholder>
-          Choose a delivery attempt to review the recorded request and response payloads.
-        </p>
+        <p class="text-muted" data-attempt-placeholder>Choose a delivery attempt to review the recorded request and response payloads.</p>
         <div class="attempt-details__grid" data-attempt-details hidden>
           <section class="attempt-details__section" aria-labelledby="attempt-request-heading">
             <h4 id="attempt-request-heading">Request</h4>
@@ -380,6 +437,11 @@
         </div>
       </div>
     </div>
+    <footer class="modal__footer scf-editor__footer">
+      <span class="scf-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-modal-close>Close</button>
+      <button type="button" class="button" data-webhook-modal-retry>Retry delivery</button>
+    </footer>
   </div>
 </div>
 {% endblock %}
