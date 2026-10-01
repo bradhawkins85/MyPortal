@@ -246,6 +246,9 @@ class Settings(BaseSettings):
     quote_expiry_days: int = Field(
         default=7, validation_alias="QUOTE_EXPIRY_DAYS", ge=1
     )
+    trello_api_secret: str | None = Field(
+        default=None, validation_alias="TRELLO_API_SECRET"
+    )
     trello_webhook_secret: str | None = Field(
         default=None, validation_alias="TRELLO_WEBHOOK_SECRET"
     )

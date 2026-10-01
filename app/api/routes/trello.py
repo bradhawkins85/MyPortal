@@ -342,10 +342,15 @@ def _build_public_callback_url(request: Request) -> str:
 def _verify_trello_webhook_signature(request: Request, raw_body: bytes) -> bool:
     """Validate Trello's ``X-Trello-Webhook`` HMAC signature for POST events."""
     settings = get_settings()
-    secret = str(getattr(settings, "trello_webhook_secret", None) or "").strip()
+    secret = str(
+        getattr(settings, "trello_webhook_secret", None)
+        or getattr(settings, "trello_api_secret", None)
+        or ""
+    ).strip()
     if not secret:
         logger.error(
-            "Rejecting Trello webhook because TRELLO_WEBHOOK_SECRET is not configured"
+            "Rejecting Trello webhook because neither TRELLO_WEBHOOK_SECRET nor "
+            "TRELLO_API_SECRET is configured"
         )
         return False
 
