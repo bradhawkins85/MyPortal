@@ -285,6 +285,118 @@ html {
   border-color: rgba(56, 189, 248, 0.3);
 }
 
+.role-switcher[hidden] {
+  display: none;
+}
+
+/* Compact role switcher: an icon button that pops down the role list. */
+.role-switcher__compact {
+  display: none;
+  position: relative;
+}
+
+.role-switcher--icon {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.role-switcher--icon .company-switcher__label,
+.role-switcher--icon .company-switcher__field {
+  display: none;
+}
+
+.role-switcher--icon .role-switcher__compact {
+  display: block;
+}
+
+.role-switcher__toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  padding: 0;
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-sm);
+  background: var(--hf-bg-sunken);
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.role-switcher__toggle svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  fill: currentColor;
+}
+
+.role-switcher__toggle:hover,
+.role-switcher__toggle[aria-expanded='true'] {
+  border-color: rgba(125, 211, 252, 0.65);
+  color: #f8fafc;
+}
+
+.role-switcher__toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.35);
+}
+
+/* Flags that the portal is currently being viewed as another role. */
+.role-switcher__toggle--active::after {
+  content: '';
+  position: absolute;
+  top: 0.2rem;
+  right: 0.2rem;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--hf-accent, #38bdf8);
+}
+
+.role-switcher__popover {
+  list-style: none;
+  margin: var(--space-gap-tight) 0 0;
+  padding: var(--space-gap-tight);
+  max-height: 18rem;
+  overflow-y: auto;
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-sm);
+  background: var(--hf-bg-sunken);
+  box-shadow: 0 12px 28px rgba(8, 13, 20, 0.35);
+}
+
+.role-switcher__popover[hidden] {
+  display: none;
+}
+
+.role-switcher__popover button {
+  display: block;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 0;
+  border-radius: var(--hf-radius-sm);
+  background: transparent;
+  color: #cbd5e1;
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.role-switcher__popover button:hover,
+.role-switcher__popover button:focus-visible {
+  outline: none;
+  background: rgba(56, 189, 248, 0.15);
+  color: #f8fafc;
+}
+
+.role-switcher__popover button[aria-checked='true'] {
+  color: #f8fafc;
+  font-weight: 600;
+}
+
 .menu {
   list-style: none;
   margin: 0;
@@ -519,6 +631,10 @@ html {
   color: var(--hf-muted);
 }
 
+.navigation-style--modes {
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+}
+
 body.navigation--top .layout {
   flex-direction: column;
   overflow: visible;
@@ -571,6 +687,19 @@ body.navigation--top .company-switcher__label {
 body.navigation--top .company-switcher__select {
   min-height: 2.35rem;
   padding-block: var(--space-gap-tight);
+}
+
+body.navigation--top .role-switcher--icon {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+body.navigation--top .role-switcher__popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 1300;
+  min-width: 14rem;
 }
 
 body.navigation--top .menu {

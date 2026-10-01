@@ -142,3 +142,31 @@ def test_profile_reset_button_resets_immediately():
     assert "window.MyPortalSidebarMenu.reset()" in profile_script
     assert "requestSidebarPreferences('DELETE')" in base_template
     assert '@router.delete("/me/sidebar-preferences"' in users_routes
+
+
+def test_role_switcher_display_defaults_to_full_and_accepts_known_modes():
+    from app.repositories.sidebar_preferences import build_default_sidebar_preferences
+
+    assert build_default_sidebar_preferences()["role_switcher_display"] == "full"
+    assert _coerce_preferences({})["role_switcher_display"] == "full"
+    assert _coerce_preferences(None)["role_switcher_display"] == "full"
+    assert _coerce_preferences({"role_switcher_display": "bogus"})["role_switcher_display"] == "full"
+    assert _coerce_preferences({"role_switcher_display": "icon"})["role_switcher_display"] == "icon"
+    assert _coerce_preferences({"role_switcher_display": "hidden"})["role_switcher_display"] == "hidden"
+
+
+def test_profile_menu_offers_role_switcher_modes_to_super_admins_only():
+    from pathlib import Path
+
+    template = Path("app/templates/admin/profile.html").read_text()
+    toggle_index = template.index('name="role-switcher-display"')
+    guard_index = template.rindex("{% if role_switcher_allowed", 0, toggle_index)
+    assert "{% endif %}" not in template[guard_index:toggle_index]
+    for mode in ("full", "icon", "hidden"):
+        assert f'name="role-switcher-display" value="{mode}"' in template
+
+    base = Path("app/templates/base.html").read_text()
+    assert "data-role-switcher-container" in base
+    assert "data-role-switcher-toggle" in base
+    assert "data-role-switcher-popover" in base
+    assert "role_switcher_display" in base

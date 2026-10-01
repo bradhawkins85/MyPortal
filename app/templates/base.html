@@ -82,7 +82,7 @@
         </div>
         {% endif %}
         {% if role_switcher_allowed | default(false) %}
-        <div class="company-switcher role-switcher">
+        <div class="company-switcher role-switcher" data-role-switcher-container{% if selected_role_id %} data-role-switcher-active{% endif %}>
           <form action="/switch-role" method="post" data-role-switcher>
             {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
             {% set role_return_url = request.url.path %}
@@ -96,6 +96,20 @@
                   <option value="{{ role.id }}" {% if role.id == selected_role_id %}selected{% endif %}>{{ role.name }}</option>
                 {% endfor %}
               </select>
+            </div>
+            <div class="role-switcher__compact" data-role-switcher-compact>
+              {% set ns_role = namespace(name='Super Admin mode') %}
+              {% for role in role_switcher_roles %}{% if role.id == selected_role_id %}{% set ns_role.name = role.name %}{% endif %}{% endfor %}
+              <button type="button" class="role-switcher__toggle{% if selected_role_id %} role-switcher__toggle--active{% endif %}" aria-haspopup="true" aria-expanded="false" aria-controls="role-switcher-popover" title="View as role: {{ ns_role.name }}" data-role-switcher-toggle>
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-3.3 0-8 1.7-8 5v1h10.3a6 6 0 0 1-.3-2 6 6 0 0 1 1-3.3c-1-.5-2-.7-3-.7zm6 0-1.2 2.5-2.8.4 2 2-.5 2.8L18 21.4l2.5 1.3-.5-2.8 2-2-2.8-.4z"/></svg>
+                <span class="visually-hidden">View as role: {{ ns_role.name }}</span>
+              </button>
+              <ul id="role-switcher-popover" class="role-switcher__popover" role="menu" aria-label="View portal as role" hidden data-role-switcher-popover>
+                <li role="none"><button type="button" role="menuitemradio" aria-checked="{{ 'false' if selected_role_id else 'true' }}" data-role-value="super_admin">Super Admin mode</button></li>
+                {% for role in role_switcher_roles %}
+                  <li role="none"><button type="button" role="menuitemradio" aria-checked="{{ 'true' if role.id == selected_role_id else 'false' }}" data-role-value="{{ role.id }}">{{ role.name }}</button></li>
+                {% endfor %}
+              </ul>
             </div>
           </form>
         </div>
@@ -1150,14 +1164,63 @@
 
         const roleForm = document.querySelector('[data-role-switcher]');
         const roleSelect = roleForm ? roleForm.querySelector('select[name="roleId"]') : null;
+        const submitRoleForm = () => {
+          if (typeof roleForm.requestSubmit === 'function') {
+            roleForm.requestSubmit();
+          } else {
+            roleForm.submit();
+          }
+        };
         if (roleForm && roleSelect) {
-          roleSelect.addEventListener('change', function () {
-            if (typeof roleForm.requestSubmit === 'function') {
-              roleForm.requestSubmit();
-            } else {
-              roleForm.submit();
-            }
-          });
+          roleSelect.addEventListener('change', submitRoleForm);
+
+          // Compact mode: an icon button that pops down the role list.
+          const roleToggle = roleForm.querySelector('[data-role-switcher-toggle]');
+          const rolePopover = roleForm.querySelector('[data-role-switcher-popover]');
+          if (roleToggle && rolePopover) {
+            const roleOptions = () => Array.from(rolePopover.querySelectorAll('[data-role-value]'));
+            const setRolePopoverOpen = (open, { focus = false } = {}) => {
+              rolePopover.hidden = !open;
+              roleToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+              if (open && focus) {
+                const options = roleOptions();
+                (options.find((option) => option.getAttribute('aria-checked') === 'true') || options[0])?.focus();
+              }
+            };
+            roleToggle.addEventListener('click', () => setRolePopoverOpen(rolePopover.hidden, { focus: true }));
+            rolePopover.addEventListener('click', (event) => {
+              const option = event.target.closest('[data-role-value]');
+              if (!option) {
+                return;
+              }
+              roleSelect.value = option.dataset.roleValue;
+              setRolePopoverOpen(false);
+              submitRoleForm();
+            });
+            rolePopover.addEventListener('keydown', (event) => {
+              const options = roleOptions();
+              const index = options.indexOf(document.activeElement);
+              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                const step = event.key === 'ArrowDown' ? 1 : -1;
+                options[(index + step + options.length) % options.length]?.focus();
+              } else if (event.key === 'Home' || event.key === 'End') {
+                event.preventDefault();
+                options[event.key === 'Home' ? 0 : options.length - 1]?.focus();
+              }
+            });
+            roleForm.addEventListener('keydown', (event) => {
+              if (event.key === 'Escape' && !rolePopover.hidden) {
+                setRolePopoverOpen(false);
+                roleToggle.focus();
+              }
+            });
+            document.addEventListener('click', (event) => {
+              if (!rolePopover.hidden && !roleForm.contains(event.target)) {
+                setRolePopoverOpen(false);
+              }
+            });
+          }
         }
 
         const layout = document.querySelector('[data-layout]');
@@ -1284,7 +1347,7 @@
         const SIDEBAR_GROUP_KEY_PREFIX = '__group__:';
         const enabledModules = {{ module_enabled | default({}) | tojson }};
         const sidebarItemRegistry = new Map();
-        let activeSidebarPreferences = { navigation_style: 'top', order: [], hidden: [], groups: [] };
+        let activeSidebarPreferences = { navigation_style: 'top', role_switcher_display: 'full', order: [], hidden: [], groups: [] };
         const sidebarDefaultPreferences = {{ (sidebar_default_preferences() if sidebar_default_preferences is defined else {'order': [], 'hidden': [], 'groups': []}) | tojson }};
 
         // Shared with the profile page editor so both render the same glyphs.
@@ -1468,11 +1531,25 @@
           }
           activeSidebarPreferences = {
             navigation_style: preferences?.navigation_style === 'sidebar' ? 'sidebar' : 'top',
+            role_switcher_display: ['full', 'icon', 'hidden'].includes(preferences?.role_switcher_display)
+              ? preferences.role_switcher_display
+              : 'full',
             order: Array.isArray(preferences?.order) ? preferences.order : [],
             hidden: Array.isArray(preferences?.hidden) ? preferences.hidden : [],
             groups: Array.isArray(preferences?.groups) ? preferences.groups : [],
           };
           document.body.classList.toggle('navigation--top', activeSidebarPreferences.navigation_style === 'top');
+          const roleSwitcherContainer = document.querySelector('[data-role-switcher-container]');
+          if (roleSwitcherContainer) {
+            // While viewing as another role a hidden switcher falls back to the
+            // icon so the super admin can always switch back.
+            let roleSwitcherDisplay = activeSidebarPreferences.role_switcher_display;
+            if (roleSwitcherDisplay === 'hidden' && roleSwitcherContainer.hasAttribute('data-role-switcher-active')) {
+              roleSwitcherDisplay = 'icon';
+            }
+            roleSwitcherContainer.hidden = roleSwitcherDisplay === 'hidden';
+            roleSwitcherContainer.classList.toggle('role-switcher--icon', roleSwitcherDisplay === 'icon');
+          }
           sidebarMenuRoot.querySelectorAll(':scope > .menu__item--custom-group').forEach((group) => group.remove());
           sidebarItemRegistry.forEach((element) => {
             element.classList.remove('menu__custom-group-child');

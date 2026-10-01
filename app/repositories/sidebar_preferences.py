@@ -169,6 +169,9 @@ _DEFAULT_LAYOUT: tuple[tuple[str, ...] | tuple[str, str, str, tuple[str, ...]], 
 )
 
 
+ROLE_SWITCHER_DISPLAY_MODES = ("full", "icon", "hidden")
+
+
 def build_default_sidebar_preferences() -> dict[str, Any]:
     """Return a fresh copy of the default, logically grouped left menu."""
 
@@ -182,6 +185,7 @@ def build_default_sidebar_preferences() -> dict[str, Any]:
     return {
         "version": SIDEBAR_LAYOUT_VERSION,
         "navigation_style": "top",
+        "role_switcher_display": "full",
         "order": order,
         "hidden": [],
         "groups": groups,
@@ -204,12 +208,18 @@ def _coerce_preferences(payload: Any) -> dict[str, Any]:
         return {
             "version": SIDEBAR_LAYOUT_VERSION,
             "navigation_style": "top",
+            "role_switcher_display": "full",
             "order": [],
             "hidden": [],
             "groups": [],
         }
 
     navigation_style = "sidebar" if payload.get("navigation_style") == "sidebar" else "top"
+    # Only super admins see the role switcher: a full selector, a compact icon
+    # drop-down, or hidden entirely.
+    role_switcher_display = payload.get("role_switcher_display")
+    if role_switcher_display not in ROLE_SWITCHER_DISPLAY_MODES:
+        role_switcher_display = "full"
 
     order_values = payload.get("order") if isinstance(payload.get("order"), list) else []
     hidden_values = payload.get("hidden") if isinstance(payload.get("hidden"), list) else []
@@ -274,6 +284,7 @@ def _coerce_preferences(payload: Any) -> dict[str, Any]:
     return {
         "version": SIDEBAR_LAYOUT_VERSION,
         "navigation_style": navigation_style,
+        "role_switcher_display": role_switcher_display,
         "order": order,
         "hidden": hidden,
         "groups": groups,
