@@ -1954,13 +1954,13 @@ def _exo_error_detail(response: httpx.Response) -> str:
 
 
 async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
-    """Acquire an app-only access token for the Security & Compliance PowerShell REST API.
+    """Acquire an access token for the Security & Compliance PowerShell REST API.
 
-    Uses the ``client_credentials`` grant with the Microsoft Purview/Compliance
-    scope (``https://ps.compliance.protection.outlook.com/.default``).  The
-    provisioned app must have application permissions that allow reading and
-    writing protection alert policies (e.g. Compliance Administrator role or
-    ``ComplianceManager.ReadWrite.All``).
+    Prefers a delegated (user) token via the stored refresh token so that
+    Purview can resolve the user's organizational unit without requiring the
+    app to be registered as an Exchange service principal.  Falls back to
+    app-only ``client_credentials`` when no refresh token is available or the
+    delegated grant fails.
 
     :returns: A tuple of ``(access_token, tenant_id)``.
     """
@@ -1970,13 +1970,50 @@ async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
 
     tenant_id = str(creds.get("tenant_id") or "").strip()
     client_id = str(creds.get("client_id") or "").strip()
+    client_secret = creds.get("client_secret") or ""
 
+    # Prefer a delegated (user) token so Purview resolves the orgUnit from
+    # the user's identity rather than requiring an Exchange-registered
+    # service principal for the app.
+    refresh_token = creds.get("refresh_token")
+    if refresh_token:
+        try:
+            access_token, _, _ = await _exchange_token(
+                tenant_id=tenant_id,
+                client_id=client_id,
+                client_secret=client_secret,
+                refresh_token=refresh_token,
+                scope=_SCC_SCOPE,
+            )
+            log_info(
+                "SCC access token acquired via delegated (refresh_token) grant",
+                company_id=company_id,
+                tenant_id=tenant_id,
+            )
+            return access_token, tenant_id
+        except M365Error as exc:
+            # If the delegated grant fails (expired/revoked refresh token,
+            # missing delegated permission, etc.) fall back to app-only.
+            log_info(
+                "SCC delegated token failed; falling back to client_credentials",
+                company_id=company_id,
+                tenant_id=tenant_id,
+                failure_kind=getattr(exc, "failure_kind", None),
+                error=str(exc),
+            )
+
+    # Fallback: app-only client_credentials
     access_token, _, _ = await _exchange_token(
         tenant_id=tenant_id,
         client_id=client_id,
-        client_secret=creds.get("client_secret") or "",
+        client_secret=client_secret,
         refresh_token=None,
         scope=_SCC_SCOPE,
+    )
+    log_info(
+        "SCC access token acquired via client_credentials grant",
+        company_id=company_id,
+        tenant_id=tenant_id,
     )
     return access_token, tenant_id
 
@@ -2018,10 +2055,10 @@ async def _scc_invoke_command(
     POSTs to the Security & Compliance admin API. When *organization* is
     supplied, its initial ``*.onmicrosoft.com`` domain is used in both the URL
     route and the routing header, matching ``Connect-IPPSSession -Organization``.
-    Other callers continue to use *tenant_id*. The request uses an app-only
-    Security & Compliance access token. The app must have a
-    Compliance Administrator (or Global Administrator) role assigned so that
-    cmdlets such as ``Get-ProtectionAlert`` and ``New-ProtectionAlert`` succeed.
+    Other callers continue to use *tenant_id*. The request uses a Security &
+    Compliance access token (delegated or app-only) that carries a Compliance
+    Administrator (or Global Administrator) role so that cmdlets such as
+    ``Get-ProtectionAlert`` and ``New-ProtectionAlert`` succeed.
 
     An ``X-AnchorMailbox`` header is included when the ``appid`` claim can be
     decoded from *scc_token*. Compliance-search callers must supply the tenant's
