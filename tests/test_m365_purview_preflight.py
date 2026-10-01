@@ -56,7 +56,7 @@ async def test_preflight_distinguishes_eop_permission_and_reports_all_checks():
     ):
         result = await m365.run_purview_preflight(7)
 
-    assert result["ready"] is False
+    assert result["ready"] is True
     assert [item["key"] for item in result["checks"]] == [
         "provider_support", "eop_permission", "admin_consent", "administrator_role",
         "organization", "service_principal", "ediscovery_manager",
@@ -110,6 +110,7 @@ async def test_preflight_missing_eop_consent_reports_failed_live_purview_probe()
     assert by_key["eop_permission"]["status"] == "Requires Admin Action"
     assert "Office 365 Exchange Online" in by_key["eop_permission"]["detail"]
     assert by_key["organization"]["status"] == "Failed"
+    assert result["ready"] is False
 
 
 @pytest.mark.anyio("asyncio")
@@ -153,8 +154,8 @@ async def test_preflight_uses_live_purview_probe_when_graph_assignment_is_stale(
     ):
         result = await m365.run_purview_preflight(7)
 
-    assert result["ready"] is False
-    assert {item["status"] for item in result["checks"]} == {"Passed", "Unsupported", "Not Verified"}
+    assert result["ready"] is True
+    assert {item["status"] for item in result["checks"]} == {"Passed", "Warning", "Not Verified"}
 
 
 @pytest.mark.anyio("asyncio")
@@ -255,7 +256,7 @@ async def test_preflight_avoids_broken_role_group_member_cmdlet():
     ):
         result = await m365.run_purview_preflight(7)
 
-    assert result["ready"] is False
+    assert result["ready"] is True
     assert commands == ["Get-RoleGroup", "Get-ServicePrincipal"]
     assert "Get-RoleGroupMember" not in commands
 

@@ -19,6 +19,64 @@ MESSAGE_TEMPLATE_CONTENT_TYPES: tuple[tuple[str, str], ...] = (
 )
 
 
+_COMMON_VARIABLES: tuple[tuple[str, str], ...] = (
+    ("app.name", "Portal name"),
+    ("portal.url", "Portal address"),
+    ("portal.login_url", "Sign-in link"),
+    ("user.first_name", "First name"),
+    ("user.name", "Full name"),
+    ("user.email", "Email"),
+    ("company.name", "Company"),
+)
+
+_RENEWAL_VARIABLES: tuple[tuple[str, str], ...] = (
+    ("recipient.name", "Billing contact"),
+    ("company.name", "Company"),
+    ("renewal.date", "Renewal date"),
+    ("renewal.items_table", "Items table"),
+)
+
+# Templates MyPortal looks up by slug. Editing them changes a built-in email;
+# renaming or deleting them makes MyPortal fall back to its default wording.
+SYSTEM_TEMPLATE_USES: dict[str, dict[str, Any]] = {
+    "signup_verification": {
+        "label": "Sign-up verification email",
+        "variables": _COMMON_VARIABLES + (("verification.link", "Verification link"),),
+    },
+    "staff_invitation": {
+        "label": "Staff invitation email",
+        "variables": _COMMON_VARIABLES + (("invitation.link", "Invitation link"),),
+    },
+    "subscription-renewal-reminder": {
+        "label": "Annual renewal reminder",
+        "variables": _RENEWAL_VARIABLES,
+    },
+    "monthly-subscription-renewal-reminder": {
+        "label": "Monthly renewal reminder",
+        "variables": _RENEWAL_VARIABLES,
+    },
+    "third-party-annual-subscription-renewal-reminder": {
+        "label": "Third-party annual renewal reminder",
+        "variables": _RENEWAL_VARIABLES,
+    },
+    "third-party-monthly-subscription-renewal-reminder": {
+        "label": "Third-party monthly renewal reminder",
+        "variables": _RENEWAL_VARIABLES,
+    },
+}
+
+
+def _variable_options(variables: tuple[tuple[str, str], ...]) -> list[dict[str, str]]:
+    return [{"token": "{{ " + path + " }}", "label": label} for path, label in variables]
+
+
+def _system_uses_payload() -> dict[str, dict[str, Any]]:
+    return {
+        slug: {"label": use["label"], "variables": _variable_options(use["variables"])}
+        for slug, use in SYSTEM_TEMPLATE_USES.items()
+    }
+
+
 def _main():
     from app import main as main_module
 
@@ -65,6 +123,8 @@ async def admin_message_templates(
         prepared = dict(record)
         prepared["created_at_iso"] = main_module._to_iso(record.get("created_at"))
         prepared["updated_at_iso"] = main_module._to_iso(record.get("updated_at"))
+        use = SYSTEM_TEMPLATE_USES.get(str(record.get("slug") or ""))
+        prepared["system_use"] = use["label"] if use else None
         templates_payload.append(prepared)
 
     extra = {
@@ -75,6 +135,12 @@ async def admin_message_templates(
             "content_type": content_type_value or "",
         },
         "content_type_options": _content_type_options(),
+        "template_counts": {
+            "total": len(templates_payload),
+            "html": sum(1 for item in templates_payload if item.get("content_type") == "text/html"),
+            "text": sum(1 for item in templates_payload if item.get("content_type") != "text/html"),
+            "system": sum(1 for item in templates_payload if item.get("system_use")),
+        },
     }
 
     return await main_module._render_template(
@@ -95,12 +161,11 @@ async def admin_message_templates_new(request: Request):
     extra = {
         "title": "New message template",
         "page_title": "New message template",
-        "form_heading": "New template",
-        "submit_label": "Save template",
-        "show_reset_button": True,
         "template": {},
         "content_type_options": _content_type_options(),
         "default_content_type": "text/plain",
+        "common_variables": _variable_options(_COMMON_VARIABLES),
+        "system_uses": _system_uses_payload(),
     }
 
     return await main_module._render_template(
@@ -130,12 +195,11 @@ async def admin_message_templates_edit(request: Request, template_id: int):
     extra = {
         "title": f"Edit {template_record.get('name') or 'template'}",
         "page_title": "Edit message template",
-        "form_heading": "Edit template",
-        "submit_label": "Update template",
-        "show_reset_button": False,
         "template": template_record,
         "content_type_options": _content_type_options(),
         "default_content_type": template_record.get("content_type") or "text/plain",
+        "common_variables": _variable_options(_COMMON_VARIABLES),
+        "system_uses": _system_uses_payload(),
     }
 
     return await main_module._render_template(
@@ -148,6 +212,7 @@ async def admin_message_templates_edit(request: Request, template_id: int):
 
 __all__ = [
     "MESSAGE_TEMPLATE_CONTENT_TYPES",
+    "SYSTEM_TEMPLATE_USES",
     "admin_message_templates",
     "admin_message_templates_edit",
     "admin_message_templates_new",

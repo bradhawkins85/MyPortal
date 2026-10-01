@@ -12,14 +12,17 @@ setting is surfaced to the operator alongside each deployment.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from typing import Any
 
+from app.repositories import companies as companies_repo
 from app.repositories import staff as staff_repo
 from app.services import m365 as m365_service
 from app.services import m365_out_of_office as oof_service
 from app.services import m365_signatures as signatures_service
 
 MAX_DEPLOY_MAILBOXES = 200
+MAX_CLASSIC_OUTLOOK_ADDRESSES = 20
 _DEPLOY_CONCURRENCY = 4
 
 
@@ -177,10 +180,89 @@ async def deploy_template(
     return list(await asyncio.gather(*(_deploy(mailbox) for mailbox in requested)))
 
 
+def classic_outlook_signature_name(address: str) -> str:
+    """Stable Outlook signature name, so re-syncs overwrite the same files."""
+    return f"MyPortal ({address})"
+
+
+async def render_classic_outlook_signatures(
+    company_id: int, addresses: list[str]
+) -> dict[str, Any]:
+    """Render the company's active signature for Outlook accounts on a tray device.
+
+    Only addresses on the company's email domains that match an active staff
+    record are rendered; every other address is reported in ``skipped`` with a
+    reason so the agent can log why it left that account untouched.
+    """
+    domains = {
+        domain.casefold()
+        for domain in await companies_repo.get_email_domains_for_company(company_id)
+    }
+    requested: list[str] = []
+    seen: set[str] = set()
+    for address in addresses[:MAX_CLASSIC_OUTLOOK_ADDRESSES]:
+        value = str(address or "").strip()
+        if value and value.casefold() not in seen:
+            seen.add(value.casefold())
+            requested.append(value)
+
+    skipped: dict[str, str] = {}
+    template = await signatures_service.get_primary_template(company_id)
+    if not template:
+        return {
+            "template_slug": None,
+            "signatures": [],
+            "skipped": {address: "No active signature template" for address in requested},
+        }
+
+    signatures: list[dict[str, str]] = []
+    for address in requested:
+        _, separator, domain = address.rpartition("@")
+        if not separator or domain.casefold() not in domains:
+            skipped[address] = "Address is not on a company email domain"
+            continue
+        staff = await staff_repo.get_staff_by_company_and_email(company_id, address)
+        if not staff or not staff.get("enabled", True) or staff.get("is_ex_staff"):
+            skipped[address] = "No active staff record matches this address"
+            continue
+        try:
+            rendered = await signatures_service.render_preview(
+                company_id,
+                html_content=str(template.get("html_content") or ""),
+                text_content=str(template.get("text_content") or ""),
+                staff_id=int(staff["id"]),
+            )
+        except (TypeError, ValueError) as exc:
+            skipped[address] = f"Signature could not be rendered: {exc}"
+            continue
+        digest = hashlib.sha256(
+            "\x00".join(
+                (str(template.get("id")), address.casefold(), rendered["html"], rendered["text"])
+            ).encode("utf-8")
+        ).hexdigest()
+        signatures.append(
+            {
+                "address": address,
+                "name": classic_outlook_signature_name(address),
+                "html": rendered["html"],
+                "text": rendered["text"],
+                "hash": digest,
+            }
+        )
+    return {
+        "template_slug": template.get("slug"),
+        "signatures": signatures,
+        "skipped": skipped,
+    }
+
+
 __all__ = [
+    "MAX_CLASSIC_OUTLOOK_ADDRESSES",
     "MAX_DEPLOY_MAILBOXES",
+    "classic_outlook_signature_name",
     "deploy_template",
     "get_roaming_signature_status",
     "list_deployment_targets",
     "postpone_roaming_signatures",
+    "render_classic_outlook_signatures",
 ]

@@ -457,3 +457,44 @@ def test_spam_purge_discloses_limits_retention_and_unknown_counts():
     assert "Holds and retention" in source
     assert "Remaining:" in source and "Unknown" in source
     assert "does not guarantee every match was removed" in source
+
+
+@pytest.mark.anyio("asyncio")
+async def test_preflight_ready_allows_search_to_start(monkeypatch):
+    request = {"id": 7, "company_id": 2, "search_status": "draft"}
+    monkeypatch.setattr(service.purge_repo, "get_request", AsyncMock(return_value=request))
+    update = AsyncMock()
+    monkeypatch.setattr(service.purge_repo, "update_request", update)
+    monkeypatch.setattr(
+        service.m365_service, "run_purview_preflight",
+        AsyncMock(return_value={"ready": True, "checks": [
+            {"label": "Microsoft-supported execution route", "status": "Warning"},
+        ]}),
+    )
+    started = []
+    monkeypatch.setattr(service, "_start_task", lambda *args, **kwargs: started.append(args))
+
+    await service.start_search(7, 2)
+
+    assert started == [(7, "search")]
+    assert update.await_args.args[1]["search_status"] == "queued"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_preflight_error_lists_only_blocking_checks(monkeypatch):
+    monkeypatch.setattr(
+        service.m365_service, "run_purview_preflight",
+        AsyncMock(return_value={"ready": False, "checks": [
+            {"label": "Microsoft-supported execution route", "status": "Warning"},
+            {"label": "Purview compliance organization availability", "status": "Failed"},
+            {"label": "Purview search authorization", "status": "Not Verified"},
+        ]}),
+    )
+
+    with pytest.raises(M365Error) as exc_info:
+        await service._require_purview_preflight(2)
+
+    message = str(exc_info.value)
+    assert "Purview compliance organization availability" in message
+    assert "execution route" not in message
+    assert "search authorization" not in message

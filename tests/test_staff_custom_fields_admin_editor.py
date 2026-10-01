@@ -13,7 +13,7 @@ TEMPLATE = Path("app/templates/admin/company_edit.html")
 
 
 def _staff_custom_fields_section(template: str) -> str:
-    start = template.index('<h2 class="card__title">Staff custom fields</h2>')
+    start = template.index('<h2 class="card__title" id="ce-staff-custom-fields-title">Staff custom fields</h2>')
     end = template.index("data-scf-delete-form", start)
     return template[start:end]
 
@@ -103,10 +103,10 @@ def test_staff_custom_fields_use_list_and_modal_editor():
     assert "static/js/staff_custom_fields_admin.js" in template
 
 
-def test_staff_custom_field_modal_is_outside_collapsible_panel():
+def test_staff_custom_field_modal_is_outside_the_section():
     template = TEMPLATE.read_text()
     panel_start = template.index("data-staff-custom-fields-panel")
-    panel_end = template.index("</details>", panel_start)
+    panel_end = template.index("</section>\n\n      {% set scf_editor_fields", panel_start)
     modal = template.index('id="staff-custom-field-modal"')
 
     assert modal > panel_end

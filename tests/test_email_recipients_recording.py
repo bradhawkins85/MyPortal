@@ -1,5 +1,7 @@
 """Tests for app.services.email_recipients.record_recipients."""
 
+from types import SimpleNamespace
+
 import pytest
 
 
@@ -112,6 +114,42 @@ async def test_record_recipients_handles_no_addresses(monkeypatch):
         to=[],
     )
     assert inserted == 0
+
+
+@pytest.mark.asyncio
+async def test_record_recipients_excludes_outbound_audit_bcc(monkeypatch):
+    """The compliance copy must not appear as an engaged ticket recipient."""
+    from app.services import email_recipients
+    from app.core import database
+
+    execute_calls = []
+
+    monkeypatch.setattr(
+        email_recipients,
+        "get_settings",
+        lambda: SimpleNamespace(outbound_audit_bcc="Audit@Example.com"),
+    )
+
+    async def mock_fetch_one(*args, **kwargs):
+        return None
+
+    async def mock_execute(query, params):
+        execute_calls.append(params)
+        return 1
+
+    monkeypatch.setattr(database.db, "fetch_one", mock_fetch_one)
+    monkeypatch.setattr(database.db, "execute", mock_execute)
+
+    inserted = await email_recipients.record_recipients(
+        reply_id=42,
+        tracking_id="track-1",
+        smtp2go_message_id="smtp-1",
+        to=["customer@example.com"],
+        bcc=["Audit mailbox <audit@example.com>"],
+    )
+
+    assert inserted == 1
+    assert [call["email"] for call in execute_calls] == ["customer@example.com"]
 
 
 @pytest.mark.asyncio

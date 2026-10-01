@@ -128,6 +128,29 @@ async def list_company_compliance(
     return [_build_compliance_record(row) for row in rows]
 
 
+async def company_has_recorded_progress(company_id: int) -> bool:
+    """Return True when a company has Essential 8 work worth keeping.
+
+    Untouched ``not_started`` rows created when a company first opened the
+    Essential 8 page do not count as records.
+    """
+    row = await db.fetch_one(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM company_essential8_compliance
+              WHERE company_id = %(company_id)s
+                AND (status <> 'not_started' OR COALESCE(evidence, '') <> '' OR COALESCE(notes, '') <> ''))
+          + (SELECT COUNT(*) FROM company_essential8_requirement_compliance
+              WHERE company_id = %(company_id)s
+                AND (status <> 'not_started' OR COALESCE(evidence, '') <> '' OR COALESCE(notes, '') <> ''))
+          + (SELECT COUNT(*) FROM company_essential8_requirement_evidence
+              WHERE company_id = %(company_id)s) AS total
+        """,
+        {"company_id": company_id},
+    )
+    return bool(row and int(row.get("total") or 0) > 0)
+
+
 async def get_company_compliance(
     company_id: int,
     control_id: int,

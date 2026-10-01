@@ -1,0 +1,7 @@
+{
+  "guid": "7d6eeddf-f354-468f-8456-e53ca7a413f5",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "Fix",
+  "summary": "Exclude the configured outbound audit BCC mailbox from ticket reply email delivery and read statuses.",
+  "content_hash": "a2f5bda47a859b31020053484d995f07f454fa6481642c299a8c47a8c2909ae7"
+}

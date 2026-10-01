@@ -29,6 +29,23 @@
       <div class="alert alert--info" role="status">
         <strong>Lifecycle:</strong> Draft templates are editable but inactive. Published means available for MyPortal use. A published template becomes scheduled or active according to its dates in <strong>{{ schedule_timezone }}</strong>. <strong>Outlook deployment:</strong> choose Deploy on a published template to apply it to selected mailboxes through Exchange Online. Deployment is a one-off push; redeploy after editing a template.
       </div>
+      <div class="card card--panel">
+        <div class="card__body">
+          <strong>Classic Outlook (tray agent):</strong>
+          {% if classic_outlook_enabled %}
+            Enabled — the MyPortal tray agent on Windows devices writes the current primary template into Classic Outlook for each signed-in user's company mailboxes and makes it the default, re-checking hourly.
+          {% else %}
+            Disabled — Classic Outlook signatures on devices are not managed.
+          {% endif %}
+          {% if can_write %}
+            <form method="post" action="/m365/signatures/classic-outlook" style="display:inline;">
+              {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+              <input type="hidden" name="enabled" value="{{ '0' if classic_outlook_enabled else '1' }}" />
+              <button type="submit" class="button button--small {{ 'button--ghost' if classic_outlook_enabled else '' }}">{{ 'Disable' if classic_outlook_enabled else 'Enable' }}</button>
+            </form>
+          {% endif %}
+        </div>
+      </div>
       {% if current_primary %}
         <div class="card card--panel">
           <div class="card__body">
@@ -157,7 +174,7 @@
       <ul class="list">
         <li>HTML and TXT variants are stored separately so administrators can publish rich and plain-text versions independently.</li>
         <li>Preview uses live staff, company, custom-variable, and automation-token data before publication.</li>
-        <li>Deployed signatures are used by Outlook on the web and the new Outlook. Classic Outlook for Windows and Mac keeps locally stored signatures.</li>
+        <li>Deployed signatures are used by Outlook on the web and the new Outlook. Classic Outlook for Windows keeps signatures on each device; enable Classic Outlook sync above so the MyPortal tray agent keeps them up to date. Outlook for Mac is not managed.</li>
         <li>If roaming signatures are active in the tenant, Exchange ignores deployed signatures; the Deploy page shows this and can switch the tenant to Exchange-managed signatures.</li>
         <li>Deploying replaces each selected mailbox's current signature.</li>
       </ul>

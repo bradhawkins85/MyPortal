@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
 
 {% block header_title %}Roles{% endblock %}
 
@@ -10,211 +11,335 @@
 {% endblock %}
 
 {% block content %}
-<div class="admin-grid">
-  <section class="card card--panel admin-grid__full">
-    <header class="card__header">
-      <input
-        type="search"
-        class="form-input"
-        placeholder="Filter roles"
-        aria-label="Filter roles"
-        data-table-filter="roles-table"
-      />
-    </header>
-    <div class="table-wrapper">
-      <table class="table" id="roles-table" data-table data-table-id="roles">
-        <thead>
-          <tr>
-            <th scope="col" data-sort="string" data-column-key="name">Name</th>
-            <th scope="col" data-sort="string" data-column-key="description">Description</th>
-            <th scope="col" data-sort="string" data-column-key="permissions">Permissions</th>
-            <th scope="col" data-sort="string" data-column-key="system">System</th>
-            <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for role in roles %}
-            <tr
-              data-role-id="{{ role.id }}"
-              data-role-name="{{ role.name }}"
-              data-role-description="{{ role.description or '' }}"
-              data-role-permissions='{{ role.permissions | tojson }}'
-              data-role-system="{{ 'true' if role.is_system else 'false' }}"
-            >
-              <td data-label="Name" data-column-key="name">{{ role.name }}</td>
-              <td data-label="Description" data-column-key="description">{{ role.description or '—' }}</td>
-              <td data-label="Permissions" data-column-key="permissions">
-                {% if role.permissions %}
-                  <span class="tag-list">
-                    {% for perm, level in role.permissions.items() %}
-                      <span class="tag">{{ perm }}: {{ 'Yes' if perm == 'menu.admin.technician' else ('Read/Write' if level == 'write' else 'Read Only') }}</span>
-                    {% endfor %}
-                  </span>
-                {% else %}
-                  <span class="text-muted">None</span>
-                {% endif %}
-              </td>
-              <td data-label="System" data-column-key="system">{{ 'Yes' if role.is_system else 'No' }}</td>
-              <td class="table__actions" data-column-key="actions">
-                <div class="table__action-buttons">
-                  <button type="button" class="button button--ghost" data-role-edit aria-haspopup="dialog" aria-controls="role-modal">Edit</button>
-                  <button type="button" class="button button--ghost" data-role-clone aria-haspopup="dialog" aria-controls="role-modal">Clone</button>
-                  {% if not role.is_system %}
-                    <button type="button" class="button button--danger" data-role-delete>Delete</button>
-                  {% endif %}
-                </div>
-              </td>
-            </tr>
-          {% else %}
-            <tr>
-              <td colspan="5" class="table__empty">No roles have been defined yet.</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
+{# Access level wording. Tickets read as Own / All and Technician is a Yes / No switch. #}
+{% set role_level_labels = {
+  'default': {'none': 'No access', 'read': 'Read only', 'write': 'Read & write'},
+  'menu.tickets': {'none': 'No access', 'read': 'Own', 'write': 'All'},
+  'menu.admin.technician': {'none': 'No', 'write': 'Yes'},
+} %}
+{% set role_labels_by_key = {} %}
+{% set role_groups = [] %}
+{% set role_perms_by_group = {} %}
+{% for permission in menu_permission_catalogue %}
+  {% set _ = role_labels_by_key.update({permission.key: permission.label}) %}
+  {% if permission.group not in role_perms_by_group %}
+    {% set _ = role_groups.append(permission.group) %}
+    {% set _ = role_perms_by_group.update({permission.group: []}) %}
+  {% endif %}
+  {% set _ = role_perms_by_group[permission.group].append(permission) %}
+{% endfor %}
+{% set role_group_by_key = {} %}
+{% for permission in menu_permission_catalogue %}{% set _ = role_group_by_key.update({permission.key: permission.group}) %}{% endfor %}
 
-  <div class="modal" id="role-modal" role="dialog" aria-modal="true" aria-labelledby="role-modal-title" aria-describedby="role-modal-subtitle" aria-hidden="true" hidden>
-    <div class="modal__content" role="document">
-      <header class="modal__header">
-        <div>
-          <h2 class="modal__title" id="role-modal-title">Create role</h2>
-          <p class="modal__subtitle" id="role-modal-subtitle">Create a least-privilege permission set for company members.</p>
-        </div>
-        <button type="button" class="modal__close" data-modal-close aria-label="Close role form"></button>
-      </header>
-    <form id="role-form" class="form" autocomplete="off">
-      <input type="hidden" name="role_id" id="role-id" />
+{% set custom_count = roles | rejectattr('is_system') | list | length %}
+{% set unassigned_count = roles | selectattr('member_count', 'equalto', 0) | list | length %}
+{{ counter_strip([
+  {'label': 'Custom', 'value': custom_count, 'variant': 'info'},
+  {'label': 'System', 'value': (roles | length) - custom_count, 'variant': 'neutral'},
+  {'label': 'Not assigned', 'value': unassigned_count, 'variant': 'warning' if unassigned_count else 'neutral', 'title': 'Roles no company member currently holds'},
+], total=roles | length, total_label='Roles') }}
+
+<section class="card card--panel rol" aria-labelledby="rol-title" data-role-root>
+  <header class="card__header card__header--stacked">
+    <div>
+      <h2 class="card__title" id="rol-title">Role catalogue</h2>
+      <p class="card__subtitle">Reusable permission sets for company members. Changes apply to everyone holding the role as soon as you save.</p>
+    </div>
+  </header>
+  <div class="card__body card__body--stacked">
+    {% if roles %}
+      <div class="scf-toolbar">
+        <input type="search" class="form-input scf-toolbar__search" placeholder="Search roles or permissions" aria-label="Search roles" data-role-search />
+        <label class="visually-hidden" for="rol-filter">Show</label>
+        <select class="form-input rol__filter" id="rol-filter" data-role-filter>
+          <option value="">All roles</option>
+          <option value="custom">Custom roles</option>
+          <option value="system">System roles</option>
+          <option value="unassigned">Not assigned</option>
+        </select>
+      </div>
+
+      <ul class="scf-list rol__list" data-role-list>
+        {% for role in roles %}
+          {% set perms = role.permissions or {} %}
+          {% set write_count = perms.values() | select('equalto', 'write') | list | length %}
+          {% set read_count = perms.values() | select('equalto', 'read') | list | length %}
+          {% set granted_groups = [] %}
+          {% for key in perms %}
+            {% set group = role_group_by_key.get(key) %}
+            {% if group and group not in granted_groups %}{% set _ = granted_groups.append(group) %}{% endif %}
+          {% endfor %}
+          <li
+            class="scf-item rol-item"
+            data-role-item
+            data-role-id="{{ role.id }}"
+            data-role-kind="{{ 'system' if role.is_system else 'custom' }}"
+            data-role-members="{{ role.member_count }}"
+            data-search-text="{{ role.name }} {{ role.description or '' }} {% for key in perms %}{{ role_labels_by_key.get(key, key) }} {% endfor %}{{ granted_groups | join(' ') }}"
+          >
+            <span class="rol-item__icon{% if role.is_system %} rol-item__icon--system{% endif %}" aria-hidden="true">{{ (role.name[:1]) | upper }}</span>
+            <div class="scf-item__main">
+              <div class="scf-item__heading">
+                <button type="button" class="scf-item__label" data-role-edit="{{ role.id }}" aria-haspopup="dialog" aria-controls="role-modal">{{ role.name }}</button>
+                {% if role.is_system %}<span class="scf-chip rol-chip--system">System</span>{% endif %}
+              </div>
+              {% if role.description %}<p class="scf-item__help">{{ role.description }}</p>{% endif %}
+              <ul class="scf-item__chips" aria-label="Role summary">
+                <li class="scf-chip{% if not role.member_count %} scf-chip--muted{% endif %}">
+                  {% if role.member_count %}{{ role.member_count }} member{{ 's' if role.member_count != 1 }}{% else %}Not assigned{% endif %}
+                </li>
+                {% if perms %}
+                  {% if write_count %}<li class="scf-chip rol-chip--write">{{ write_count }} read &amp; write</li>{% endif %}
+                  {% if read_count %}<li class="scf-chip rol-chip--read">{{ read_count }} read only</li>{% endif %}
+                  {% if perms.get('menu.admin.technician') == 'write' %}<li class="scf-chip rol-chip--elevated">Technician</li>{% endif %}
+                  {% for group in granted_groups[:4] %}<li class="scf-chip scf-chip--logic">{{ group }}</li>{% endfor %}
+                  {% if granted_groups | length > 4 %}<li class="scf-chip" title="{{ granted_groups[4:] | join(', ') }}">+{{ granted_groups | length - 4 }} more</li>{% endif %}
+                {% else %}
+                  <li class="scf-chip scf-chip--muted">No menu access</li>
+                {% endif %}
+              </ul>
+            </div>
+            <div class="scf-item__actions">
+              <button type="button" class="button button--ghost button--small" data-role-edit="{{ role.id }}" aria-haspopup="dialog" aria-controls="role-modal">Edit<span class="visually-hidden"> {{ role.name }}</span></button>
+              <button type="button" class="button button--ghost button--small" data-role-clone="{{ role.id }}" aria-haspopup="dialog" aria-controls="role-modal">Clone<span class="visually-hidden"> {{ role.name }}</span></button>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="scf-empty scf-empty--search" data-role-no-results hidden>No roles match.</p>
+    {% else %}
+      <div class="scf-empty">
+        <p class="scf-empty__title">No roles yet</p>
+        <p class="text-muted">Create a role for each kind of company member, such as Staff, Finance or Company administrator, and grant only the menus they need.</p>
+        <button type="button" class="button" data-role-create aria-haspopup="dialog" aria-controls="role-modal">+ Add your first role</button>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card card--panel" id="role-content" aria-labelledby="role-content-title">
+  <header class="card__header card__header--stacked">
+    <div>
+      <h2 class="card__title" id="role-content-title">What a role can see</h2>
+      <p class="card__subtitle">Check which published articles, runbooks and assets a role reaches at one company. Only titles are shown; restricted content never appears in the simulated customer view.</p>
+    </div>
+  </header>
+  <div class="card__body card__body--stacked">
+    <form method="get" action="#role-content" class="rol-content__form">
       <div class="form-field">
-        <label class="form-label" for="role-name">Role name</label>
-        <input class="form-input" id="role-name" name="name" required minlength="2" maxlength="100" />
+        <label class="form-label" for="overview-company">Company</label>
+        <select class="form-input" id="overview-company" name="company_id" required>
+          <option value="">Select company</option>
+          {% for company in companies %}<option value="{{ company.id }}" {% if company.id == overview_company_id %}selected{% endif %}>{{ company.name }}</option>{% endfor %}
+        </select>
       </div>
       <div class="form-field">
-        <label class="form-label" for="role-description">Description</label>
-        <textarea class="form-input form-input--textarea" id="role-description" name="description" rows="3"></textarea>
+        <label class="form-label" for="overview-role">Role</label>
+        <select class="form-input" id="overview-role" name="role_id" required>
+          <option value="">Select role</option>
+          {% for role in roles %}<option value="{{ role.id }}" {% if role.id == overview_role_id %}selected{% endif %}>{{ role.name }}</option>{% endfor %}
+        </select>
       </div>
-      <div class="form-field">
-        <label class="form-label">Menu permissions</label>
-        <div class="table-wrapper permissions-table-wrapper">
-          <table class="table permissions-table" data-table data-table-id="role-menu-permissions">
-            <thead>
-              <tr>
-                <th scope="col" data-sort="string">Menu item</th>
-                <th scope="col" data-sort="string">Group</th>
-                <th scope="col">Access level</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for permission in menu_permission_catalogue %}
-                <tr>
-                  <td data-label="Menu item">
-                    <strong>{{ permission.label }}</strong>
-                    <span class="form-help">{{ permission.description }}</span>
-                    <code>{{ permission.key }}</code>
-                  </td>
-                  <td data-label="Group">{{ permission.group }}</td>
-                  <td data-label="Access level">
-                    {% set is_ticket_permission = permission.key == 'menu.tickets' %}
-                    {% set is_boolean_permission = permission.key == 'menu.admin.technician' %}
-                    <div class="permission-level" role="radiogroup" aria-label="{{ permission.label }} access level">
-                      <label>
-                        <input type="radio" name="permission_level_{{ loop.index }}" value="none" data-permission-level data-permission-key="{{ permission.key }}" checked />
-                        <span>{{ 'No' if is_boolean_permission else 'No Access' }}</span>
-                      </label>
-                      {% if not is_boolean_permission %}
-                        <label>
-                          <input type="radio" name="permission_level_{{ loop.index }}" value="read" data-permission-level data-permission-key="{{ permission.key }}" />
-                          <span>{{ 'Own' if is_ticket_permission else 'Read Only' }}</span>
-                        </label>
-                      {% endif %}
-                      <label>
-                        <input type="radio" name="permission_level_{{ loop.index }}" value="write" data-permission-level data-permission-key="{{ permission.key }}" />
-                        <span>{{ 'All' if is_ticket_permission else ('Yes' if is_boolean_permission else 'Read/Write') }}</span>
-                      </label>
-                    </div>
-                  </td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        <p class="form-help" id="role-permissions-help">Choose No Access to hide a menu and block direct pages, APIs, downloads, and workflow actions; Read Only/Own permits retrieval only; Read/Write/All permits the feature actions allowed by record and company scope. View as role uses this same effective decision without the viewing administrator’s bypass. The Technician permission is a Yes/No setting.</p>
-      </div>
-      <div class="form-actions">
-        <button type="button" class="button button--ghost" data-role-reset>Clear form</button>
-        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
-        <button type="submit" class="button" data-role-submit>Save role</button>
-      </div>
-      <p class="form-hint">System roles cannot be deleted and their names are fixed to retain portal integrity.</p>
+      <button class="button button--secondary" type="submit">Check content</button>
     </form>
+    {% if overview_company_id and overview_role_id %}
+      {% set visible_count = published_content_overview | selectattr('allowed') | selectattr('published') | list | length %}
+      <p class="form-help" role="status">{{ visible_count }} of {{ published_content_overview | length }} record{{ 's' if published_content_overview | length != 1 }} visible to this role.</p>
+      <div class="table-wrapper">
+        <table class="table" data-table data-table-id="role-content-overview">
+          <thead>
+            <tr>
+              <th scope="col" data-sort="string">Type</th>
+              <th scope="col" data-sort="string">Record</th>
+              <th scope="col" data-sort="string">Publication</th>
+              <th scope="col" data-sort="string">Effective access</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in published_content_overview %}
+              <tr>
+                <td data-label="Type">{{ item.type }}</td>
+                <td data-label="Record">{{ item.title }}</td>
+                <td data-label="Publication"><span class="status status--{{ 'success' if item.published else 'neutral' }}">{{ 'Published' if item.published else 'Unpublished' }}</span></td>
+                <td data-label="Effective access"><span class="status status--{{ 'success' if item.allowed and item.published else 'warning' }}">{{ 'Visible' if item.allowed and item.published else 'Role restricted' }}</span></td>
+              </tr>
+            {% else %}
+              <tr><td colspan="4" class="table__empty">No company content records found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+<details class="card card--panel card-collapsible" data-roles-admin-menu>
+  <summary class="card__header card__header--collapsible">
+    <div>
+      <h2 class="card__title">How roles work</h2>
+      <p class="card__subtitle">Access levels, system roles and least-privilege tips.</p>
+    </div>
+    <span class="card__toggle-icon" aria-hidden="true"></span>
+  </summary>
+  <div class="card-collapsible__content">
+    <div class="card__body card__body--stacked">
+      <p>
+        A role is a reusable permission set applied to company memberships. Each menu gets one access level.
+        <strong>No access</strong> hides the menu and blocks its pages, APIs, downloads and workflow actions.
+        <strong>Read only</strong> permits retrieval only. <strong>Read &amp; write</strong> permits the actions the feature allows within
+        record and company scope. View as role uses the same decision without the viewing administrator's bypass.
+      </p>
+      <p>
+        Tickets use <strong>No access</strong>, <strong>Own</strong> and <strong>All</strong>: Own opens <code>/tickets</code> for the user's tickets,
+        while All opens <code>/tickets</code> for company tickets; technicians continue to use <code>/admin/tickets</code> for all customers.
+        The Technician permission is a <strong>No</strong> / <strong>Yes</strong> switch.
+      </p>
+      <p>
+        System roles keep their names and can't be deleted, so baseline access policies stay intact; their permissions can still be tuned.
+        A custom role can only be deleted once no company member holds it. Review roles regularly and record significant changes in your compliance records.
+      </p>
     </div>
   </div>
+</details>
 
-  <section class="card card--panel admin-grid__full">
-    <header class="card__header"><div><h2 class="card__title">Published content for this role</h2><p class="card__subtitle">Metadata-only overview; restricted content is never included in the simulated customer view.</p></div></header>
-    <div class="card__body card__body--stacked">
-      <form method="get" class="form-inline">
-        <label class="form-label" for="overview-company">Company</label><select class="form-input" id="overview-company" name="company_id" required><option value="">Select company</option>{% for company in companies %}<option value="{{ company.id }}" {% if company.id == overview_company_id %}selected{% endif %}>{{ company.name }}</option>{% endfor %}</select>
-        <label class="form-label" for="overview-role">Role</label><select class="form-input" id="overview-role" name="role_id" required><option value="">Select role</option>{% for role in roles %}<option value="{{ role.id }}" {% if role.id == overview_role_id %}selected{% endif %}>{{ role.name }}</option>{% endfor %}</select>
-        <button class="button" type="submit">Review content</button>
-      </form>
-      {% if overview_company_id and overview_role_id %}<div class="table-wrapper"><table class="table" data-table data-table-id="role-content-overview"><thead><tr><th data-sort="string">Type</th><th data-sort="string">Record</th><th data-sort="string">Publication</th><th data-sort="string">Effective access</th></tr></thead><tbody>{% for item in published_content_overview %}<tr><td>{{ item.type }}</td><td>{{ item.title }}</td><td><span class="status status--{{ 'success' if item.published else 'neutral' }}">{{ 'Published' if item.published else 'Unpublished' }}</span></td><td><span class="status status--{{ 'success' if item.allowed and item.published else 'warning' }}">{{ 'Visible' if item.allowed and item.published else 'Role restricted' }}</span></td></tr>{% else %}<tr><td colspan="4" class="table__empty">No company content records found.</td></tr>{% endfor %}</tbody></table></div>{% endif %}
-    </div>
-  </section>
+{% set role_editor_roles = [] %}
+{% for role in roles %}
+  {% set _ = role_editor_roles.append({
+    'id': role.id,
+    'name': role.name,
+    'description': role.description or '',
+    'permissions': role.permissions or {},
+    'isSystem': true if role.is_system else false,
+    'members': role.member_count,
+  }) %}
+{% endfor %}
+{% set role_editor_catalogue = [] %}
+{% for permission in menu_permission_catalogue %}
+  {% set _ = role_editor_catalogue.append({'key': permission.key, 'label': permission.label, 'group': permission.group, 'levels': permission.levels}) %}
+{% endfor %}
+<script type="application/json" id="role-editor-data">{{ {'roles': role_editor_roles, 'catalogue': role_editor_catalogue, 'levelLabels': role_level_labels} | tojson }}</script>
 
-  <details class="card card--panel card-collapsible admin-grid__full" data-roles-admin-menu>
-    <summary class="card__header card__header--collapsible">
+<div class="modal scf-modal" id="role-modal" role="dialog" aria-modal="true" aria-labelledby="role-modal-title" aria-describedby="role-modal-subtitle" aria-hidden="true" hidden>
+  <form id="role-form" class="modal__panel modal__panel--wide scf-editor rol-editor" autocomplete="off" novalidate data-role-form>
+    <header class="modal__header scf-editor__header">
       <div>
-        <h2 class="card__title">Roles administration menu</h2>
-        <p class="card__subtitle">Understand how the administration menu supports secure, least-privilege access control.</p>
+        <p class="scf-preview__eyebrow" data-role-eyebrow>New role</p>
+        <h2 class="modal__title" id="role-modal-title" data-role-title>Add role</h2>
+        <p class="scf-editor__subtitle" id="role-modal-subtitle" data-role-subtitle>Name the role, then grant only the menus its members need.</p>
       </div>
-      <span class="card__toggle-icon" aria-hidden="true"></span>
-    </summary>
-    <div class="card-collapsible__content">
-      <div class="card__body card__body--stacked">
-      <p>
-        The Roles administration menu is the central hub for defining reusable permission sets that can be applied to any
-        company membership. Super administrators can review every existing role in the table above, inspect its granted
-        permissions, and revoke obsolete definitions while retaining system-protected defaults that safeguard mandatory
-        access policies.
-      </p>
-      <p>
-        When you open the menu from the navigation sidebar, the role catalogue is available with modal workflows for creating, editing, and cloning roles. Use the search filter
-        to quickly locate a role, select <strong>Edit</strong> to update it, or select <strong>Clone</strong> to start
-        from an existing permission set. Choose explicit menu permission levels when creating or refining roles. All
-        changes take effect immediately across the portal to keep member privileges aligned with the latest security
-        requirements.
-      </p>
-      <p>
-        System roles are identified in the table and are intentionally immutable to preserve baseline security for
-        critical workflows. Custom roles, however, can be updated or deleted as your governance model evolves. Regularly
-        review the menu to confirm roles still match business needs, and document significant adjustments in your
-        compliance records.
-      </p>
-      <h3>Assignable menu permissions</h3>
-      <p>
-        Most left-menu items are available in the permission catalogue with three levels: <strong>No Access</strong>,
-        <strong>Read Only</strong>, and <strong>Read/Write</strong>. The Technician administration permission is a two-state <strong>No</strong>/<strong>Yes</strong> control. Tickets use the same stored levels with labels
-        <strong>No Access</strong>, <strong>Own</strong>, and <strong>All</strong>: Own opens <code>/tickets</code> for the user's tickets, while All opens <code>/tickets</code> for company tickets; technicians continue to use <code>/admin/tickets</code> for all customers. Use Read Only for mailbox visibility without
-        mailbox actions, and No Access to hide sensitive menus such as Office 365 configuration.
-      </p>
-      <dl class="definition-list">
-        {% for permission in menu_permission_catalogue %}
-        <div class="definition-list__item">
-          <dt><code>{{ permission.key }}</code></dt>
-          <dd>{{ permission.label }} — {{ permission.description }}</dd>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close role editor"></button>
+    </header>
+
+    <nav class="scf-tabs" role="tablist" aria-label="Role settings">
+      <button type="button" class="scf-tab is-active" role="tab" id="role-tab-details" aria-controls="role-panel-details" aria-selected="true" data-role-tab="details">Details<span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="role-tab-access" aria-controls="role-panel-access" aria-selected="false" tabindex="-1" data-role-tab="access">Menu access<span class="scf-tab__count" data-role-access-count></span><span class="scf-tab__dot" aria-hidden="true"></span></button>
+    </nav>
+
+    <div class="modal__body scf-editor__body">
+      <div class="scf-editor__main">
+        <section class="scf-panel" id="role-panel-details" role="tabpanel" aria-labelledby="role-tab-details" data-role-panel="details">
+          <div class="scf-grid">
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="role-name">Role name <span class="scf-required" aria-hidden="true">*</span></label>
+              <input class="form-input" id="role-name" name="name" required minlength="2" maxlength="100" placeholder="e.g. Finance" data-role-input="name" />
+              <p class="form-help" data-role-name-help>Shown when assigning company members. 2 to 100 characters.</p>
+              <p class="scf-error" data-role-error="name" hidden></p>
+            </div>
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="role-description">Description <span class="scf-optional">optional</span></label>
+              <textarea class="form-input form-input--textarea" id="role-description" name="description" rows="3" maxlength="500" placeholder="Who should hold this role and why" data-role-input="description"></textarea>
+              <p class="form-help scf-counter" data-role-description-counter>0 / 500</p>
+            </div>
+            <div class="form-field scf-grid__full">
+              <span class="form-label">Start from</span>
+              <div class="rol-presets" role="group" aria-label="Quick access presets">
+                <button type="button" class="sig-var rol-preset" data-role-preset="none">No access</button>
+                <button type="button" class="sig-var rol-preset" data-role-preset="read">Read only everywhere</button>
+                <button type="button" class="sig-var rol-preset" data-role-preset="write">Full access</button>
+              </div>
+              <p class="form-help">Sets every menu at once. Fine-tune individual menus on the Menu access tab.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="scf-panel" id="role-panel-access" role="tabpanel" aria-labelledby="role-tab-access" data-role-panel="access" hidden>
+          <div class="scf-toolbar rol-access__toolbar">
+            <input type="search" class="form-input scf-toolbar__search" placeholder="Search menus" aria-label="Search menus" data-role-perm-search />
+            <label class="scf-switch">
+              <input type="checkbox" data-role-granted-only />
+              <span class="scf-switch__track" aria-hidden="true"></span>
+              <span>Only show granted</span>
+            </label>
+          </div>
+          <div class="rol-groups">
+            {% for group in role_groups %}
+              {% set group_index = loop.index %}
+              <section class="rol-group" data-role-group="{{ group }}" aria-labelledby="role-group-{{ group_index }}">
+                <div class="rol-group__head">
+                  <h3 class="scf-group__title" id="role-group-{{ group_index }}">{{ group }} <span class="rol-group__count" data-role-group-count></span></h3>
+                  <div class="rol-group__set" role="group" aria-label="Set every {{ group }} menu">
+                    <span class="rol-group__set-label" aria-hidden="true">Set all</span>
+                    <button type="button" class="button-link" data-role-group-set="none">None</button>
+                    <button type="button" class="button-link" data-role-group-set="read">Read</button>
+                    <button type="button" class="button-link" data-role-group-set="write">Write</button>
+                  </div>
+                </div>
+                <ul class="scf-list rol-perms">
+                  {% for permission in role_perms_by_group[group] %}
+                    {% set perm_id = 'role-perm-' ~ group_index ~ '-' ~ loop.index %}
+                    {% set labels = role_level_labels.get(permission.key, role_level_labels['default']) %}
+                    <li class="rol-perm" data-role-perm="{{ permission.key }}" data-search-text="{{ permission.label }} {{ permission.description }} {{ permission.key }} {{ group }}">
+                      <div class="rol-perm__text">
+                        <span class="rol-perm__label" id="{{ perm_id }}">{{ permission.label }}</span>
+                        <span class="scf-item__help">{{ permission.description }}</span>
+                        <code class="scf-item__key">{{ permission.key }}</code>
+                      </div>
+                      <div class="rol-level" role="radiogroup" aria-labelledby="{{ perm_id }}">
+                        {% for level in permission.levels %}
+                          <label class="rol-level__option rol-level__option--{{ level }}">
+                            <input type="radio" name="{{ perm_id }}" value="{{ level }}" data-permission-level data-permission-key="{{ permission.key }}" {% if level == 'none' %}checked{% endif %} />
+                            <span>{{ labels[level] }}</span>
+                          </label>
+                        {% endfor %}
+                      </div>
+                    </li>
+                  {% endfor %}
+                </ul>
+              </section>
+            {% endfor %}
+          </div>
+          <p class="scf-empty scf-empty--search" data-role-perm-no-results hidden>No menus match.</p>
+        </section>
+      </div>
+
+      <aside class="scf-preview rol-preview" aria-label="Access summary">
+        <p class="scf-preview__eyebrow">What members get</p>
+        <div class="scf-preview__card">
+          <p class="rol-preview__name" data-role-preview-name>New role</p>
+          <p class="rol-preview__members text-muted" data-role-preview-members></p>
+          <dl class="rol-preview__counts">
+            <div><dt>Read &amp; write</dt><dd data-role-preview-count="write">0</dd></div>
+            <div><dt>Read only</dt><dd data-role-preview-count="read">0</dd></div>
+            <div><dt>Hidden</dt><dd data-role-preview-count="none">{{ menu_permission_catalogue | length }}</dd></div>
+          </dl>
         </div>
-        {% endfor %}
-      </dl>
-      </div>
+        <ul class="scf-preview__rules" data-role-preview-rules></ul>
+      </aside>
     </div>
-  </details>
+
+    <footer class="modal__footer scf-editor__footer">
+      <button type="button" class="button button--danger" data-role-delete hidden>Delete role</button>
+      <span class="scf-editor__spacer"></span>
+      <p class="rol-editor__status" role="alert" data-role-status hidden></p>
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button" data-role-submit>Create role</button>
+    </footer>
+  </form>
 </div>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
-  <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/admin_roles.js') }}" defer></script>
 {% endblock %}

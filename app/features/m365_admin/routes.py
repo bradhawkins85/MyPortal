@@ -8,6 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from pydantic import ValidationError
 
+from app.repositories import companies as companies_repo
 from app.repositories import m365_spam_purge as purge_repo
 from app.schemas.m365_spam_purge import SpamPurgeRequestCreate
 from app.schemas.m365_out_of_office import OutOfOfficeCreate, OutOfOfficeDisable
@@ -234,6 +235,10 @@ async def signatures_page(request: Request):
         return redirect
     templates = await signatures_service.list_templates(company_id)
     current_primary = await signatures_service.get_primary_template(company_id)
+    company = await companies_repo.get_company_by_id(company_id) or {}
+    can_write = await _main()._has_menu_page_access(
+        request, user, "menu.m365.signatures", write=True
+    )
     return await _main()._render_template(
         "m365/signatures.html",
         request,
@@ -244,8 +249,35 @@ async def signatures_page(request: Request):
             "schedule_timezone": signatures_service.get_schedule_timezone_name(),
             "schedule_today": signatures_service.current_schedule_date(),
             "templates": templates,
+            "classic_outlook_enabled": bool(company.get("classic_outlook_signatures_enabled")),
+            "can_write": can_write,
         },
     )
+
+
+@router.post("/m365/signatures/classic-outlook")
+async def set_classic_outlook_signatures(request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    enabled = (await request.form()).get("enabled") == "1"
+    await companies_repo.update_company(
+        company_id, classic_outlook_signatures_enabled=1 if enabled else 0
+    )
+    await audit_service.record(
+        action="m365.signatures.classic_outlook",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="company",
+        entity_id=company_id,
+        after={"classic_outlook_signatures_enabled": enabled},
+    )
+    message = (
+        "Classic Outlook signature sync enabled. Tray agents apply the active template within an hour."
+        if enabled
+        else "Classic Outlook signature sync disabled. Existing signatures on devices are left in place."
+    )
+    return flash_redirect("/m365/signatures", message, "success")
 
 
 @router.get("/m365/signatures/new", response_class=HTMLResponse)

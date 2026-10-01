@@ -298,8 +298,65 @@ Every authenticated page follows a strict three-zone shell:
 - **Page header** (`layout__header`): Sticky top-of-page bar. Contains title on
   the left, page-level actions on the right (rendered via the
   `page_header_actions` Jinja macro from `templates/macros/header.html`).
+  List pages also put their list controls here, and record pages put the
+  record name and status here (see **Page header bar** below).
 - **Content area** (`layout__content`): Vertically scrollable. Starts with an
   optional KPI stat strip, then one or more `.card.card--panel` sections.
+
+### Page header bar
+
+The header bar is the page's toolbar, not just its title. Anything that
+controls the whole page goes up there so the content area can give its full
+width to the stat strip and the main table or cards.
+
+**Reference implementations:** the ticket list (`app/templates/admin/tickets.html`)
+and the admin ticket detail page (`app/templates/admin/ticket_detail.html`).
+
+**List pages** put every list control in `{% block header_title %}` inside a
+`.header-title-menu`, in this order:
+
+```
+[Title] [Saved view ▾] [Save] [Update] [Delete]  [Quick search] [Limit ▾]
+        [Group by ▾] [Columns ▾] [Stats ▾]  Showing X of Y     [New ▾] [Tools ▾]
+```
+
+- Keep the title short (one or two words). Wrap the controls in a flex row
+  (`.ticket-header-toolbar` is the reference) that wraps onto a second line
+  before the primary action and tools menu do.
+- Inputs and selects carry a `.visually-hidden` `<label>`, and use the
+  placeholder or first option for the visible hint. Buttons use
+  `button--compact`.
+- The "Showing X of Y" count is a muted text span with `data-table-info` and
+  `aria-live="polite"`, not a row above the table.
+- The content area then starts with a full-width `counter_strip`, followed
+  by the table. Don't put filter panels or sidebars beside the stat strip.
+- Scripts that drive these controls look them up with
+  `document.querySelector`, not inside the content container, because the
+  header renders outside it.
+
+**Record pages** (one ticket, company, asset…) make the record itself the
+header:
+
+```
+[Record name]                          [Back to list] [External links] [Actions ▾]
+[status pill] muted meta · meta
+```
+
+- The record name replaces the generic page title (`Ticket detail` becomes
+  the ticket subject). Its status pill sits under it with no "SLA:" or
+  "Status:" prefix. Supporting meta (paused timers, due dates) follows as
+  muted text, with dates in `<span data-utc>`.
+- Don't repeat the name, status or navigation in a second header inside the
+  content area.
+- "Back to …" and links to external systems (Hudu, Solidtime) are ghost
+  buttons directly left of the Actions menu.
+- Everything else goes in the Actions menu, rendered with
+  `page_header_overflow` from `templates/macros/header.html`. Destructive
+  items (Delete) and one-off operations (Bill Now) live there, last, with
+  `variant: "danger"` for destructive ones and a `window.confirm` (or
+  `data-confirm`) that says what will happen. Don't give them their own card.
+- Below 1100 px the header actions may wrap; the record name truncates with
+  an ellipsis and keeps a `title` attribute with the full text.
 
 ### Responsive breakpoints
 
@@ -422,7 +479,8 @@ the status-pill names. Emits `.stat-strip` / `.stat` markup.
 
 ### Tables
 
-Every data table follows the shape:
+Every data table follows the shape below. On a page whose main content is
+that table, the toolbar lives in the header bar (see **Page header bar**):
 
 ```
 [ search ] [ filter ] [ filter ] … [ Columns ▾ ] [ Bulk actions ▾ ]
@@ -446,20 +504,81 @@ column grid for multi-field screens.
 
 ### Modals
 
+**Reference implementation:** the *Staff custom fields* editor
+(`#staff-custom-field-modal` in `app/templates/admin/company_edit.html`, driven
+by `app/static/js/staff_custom_fields_admin.js`). The Add staff member editor in
+`app/templates/staff/index.html` follows the same pattern.
+
+Every popup modal is a `<div>`, not a `<dialog>`. The shared handler in
+`app/static/js/main.js` closes open modals on Escape, backdrop click and any
+`[data-modal-close]` control by setting `hidden`. `docs/design_audit_scan.py`
+flags `<dialog class="modal">` as non-conforming, so convert any existing
+`<dialog>` modals when you touch the page.
+
+The rack management page (`app/templates/infrastructure/racks.html`) still
+uses an older native `<dialog class="dialog">` component. Follow its layout
+principles, but build new modals with the `.modal` pattern below.
+
 ```html
-<dialog class="modal" id="my-modal">
-  <div class="modal__content">
-    <button class="modal__close" aria-label="Close">×</button>
-    <h2 class="modal__title">Title</h2>
+<div
+  class="modal"
+  id="thing-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="thing-modal-title"
+  hidden
+>
+  <form class="modal__panel" method="post" action="/route" novalidate>
+    {% include "partials/csrf.html" %}
+
+    <header class="modal__header">
+      <div>
+        <h2 class="modal__title" id="thing-modal-title">Add thing</h2>
+        <p class="text-muted">One sentence saying what saving will do.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close thing editor"></button>
+    </header>
+
     <div class="modal__body">
-      <!-- form or content -->
+      <div class="form-field">
+        <label class="form-label" for="thing-name">Name</label>
+        <input id="thing-name" name="name" class="form-input" />
+      </div>
     </div>
-  </div>
-</dialog>
+
+    <footer class="modal__footer">
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button button--primary">Save thing</button>
+    </footer>
+  </form>
+</div>
 ```
 
-Prefer `<dialog>` over `<div role="dialog">`. The overlay and panel are styled
-separately — the `<dialog>` itself provides the backdrop via `.modal` rules.
+Add `.modal__panel--wide` for multi-section editors. A short confirmation or
+read-only modal with no form may use a single `.modal__content` wrapper in
+place of the panel, keeping the same outer attributes, close button and title.
+
+The trigger carries a `data-<name>-modal-open` attribute and points at the
+modal with `aria-controls` and `aria-haspopup="dialog"`.
+
+Rules:
+
+- The outer element is a `<div class="modal">` with `role="dialog"`,
+  `aria-modal="true"`, `aria-labelledby` and the `hidden` attribute. Never
+  hide a modal with `style="display:none"`.
+- `hidden` already removes a closed modal from the accessibility tree, so
+  `aria-hidden` is not required. If a page sets `aria-hidden="true"`, its JS
+  must switch it to `false` on open, or screen readers will skip the modal.
+- The `id` of the `.modal__title` heading matches `aria-labelledby`.
+- The `.modal__close` button carries `data-modal-close` and an `aria-label`
+  naming what it closes.
+- Forms in modals include `{% include "partials/csrf.html" %}`. Put fields
+  in `.modal__body` and actions in `.modal__footer`: ghost Cancel, then the
+  primary submit. Destructive confirmations use `button--danger`.
+- Use `.form-grid` for pairs of related fields (priority and status, start and
+  end date).
+- Never nest a modal inside a host page `<form>`; the modal's form is
+  self-contained.
 
 ## Do's and Don'ts
 
@@ -468,12 +587,18 @@ separately — the `<dialog>` itself provides the backdrop via `.modal` rules.
 - ✅ Use `var(--color-…)` and `var(--space-…)` tokens; never hard-code hex or px
   values in new CSS rules.
 - ✅ Put page-level actions in the `page_header_actions` macro (top-right header).
+- ✅ Put a list page's saved views, search, limit, grouping, columns, stats
+  picker and result count in the header bar so the stat strip and table get
+  the full width.
+- ✅ On record pages, show the record name and status pill in the header bar,
+  with Back and external links directly left of the Actions menu.
 - ✅ Use `.card.card--panel` as the content container; let the sidebar and header
   handle navigation and identity.
 - ✅ Use `<span data-utc="…">` for all displayed timestamps.
 - ✅ Render status with `.status.status--<variant>` pills.
 - ✅ Use the `data_table` / `table_toolbar` macros for every data table.
-- ✅ Use `<dialog class="modal">` for all overlay dialogs.
+- ✅ Use the `<div class="modal" role="dialog" … hidden>` pattern for all
+  overlay dialogs (see Modals above).
 - ✅ Ensure every interactive element has a visible focus style (the default
   ring uses `rgba(148,163,184,0.35)` — keep it or strengthen it).
 
@@ -481,6 +606,11 @@ separately — the `<dialog>` itself provides the backdrop via `.modal` rules.
 
 - ❌ Don't repeat the page title inside the first card — it already lives in the
   header.
+- ❌ Don't give destructive or one-off record operations (Delete, Bill Now)
+  their own card or button in the content area; put them in the Actions menu
+  with a confirmation.
+- ❌ Don't place filter or saved-view panels beside the stat strip; they belong
+  in the header bar.
 - ❌ Don't use hard-coded colours (`#38bdf8`, `rgba(…)`) in new component CSS;
   reference the token instead.
 - ❌ Don't add a new `box-shadow` depth value that isn't in the Elevation table.

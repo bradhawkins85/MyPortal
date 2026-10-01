@@ -171,7 +171,7 @@ def _render(monkeypatch, template: str, *disabled: str, **context) -> str:
 PROFILE_CARDS = {
     "outlook_contacts": "Outlook contacts</h2>",
     "click_to_call": "Click to call</h2>",
-    "notification_contact": "Notification Contact</h2>",
+    "notification_contact": 'id="mobile-number"',
     "email_signature": "Email signature</h2>",
 }
 

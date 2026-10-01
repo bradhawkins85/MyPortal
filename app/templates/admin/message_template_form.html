@@ -10,121 +10,166 @@
 {% endblock %}
 
 {% block header_actions %}
-  {{ page_header_actions([
-    {"label": "Back to templates", "type": "link", "href": "/admin/message-templates"}
-  ]) }}
+  {% set mt_actions = [] %}
+  {% if template.id %}
+    {% set _ = mt_actions.append({"label": "Duplicate", "type": "button", "attrs": {"data-mt-duplicate": ""}}) %}
+  {% endif %}
+  {% set _ = mt_actions.append({"label": "Back to templates", "type": "link", "href": "/admin/message-templates", "attrs": {"data-mt-leave": ""}}) %}
+  {{ page_header_actions(mt_actions) }}
 {% endblock %}
 
 {% block content %}
-  <section class="card card--panel" aria-labelledby="message-template-form-heading">
-    <header class="card__header card__header--actions">
+  {% set current_type = template.content_type or default_content_type %}
+  {% set system_use = system_uses.get(template.slug or '') %}
+  <form
+    id="message-template-form"
+    class="card card--panel scf-editor sig-editor mt-editor"
+    autocomplete="off"
+    novalidate
+    data-mt-editor
+    data-mt-id="{{ template.id or '' }}"
+    data-mt-saved-slug="{{ template.slug or '' }}"
+  >
+    <header class="modal__header scf-editor__header sig-editor__header">
       <div>
-        <h2 class="card__title" id="message-template-form-heading" data-template-form-title>{{ form_heading }}</h2>
-        <p class="card__subtitle">
-          Provide a unique slug, friendly name, and body content. You can reuse templates anywhere template variables are supported.
-        </p>
+        <h2 class="card__title" data-mt-title>{{ template.name or 'New template' }}</h2>
+        <p class="card__subtitle">Write the message once, then reuse it anywhere MyPortal supports variables.</p>
       </div>
-      {% if show_reset_button %}
-        <button type="button" class="button button--ghost" data-template-reset>
-          Clear form
-        </button>
-      {% endif %}
+      <p class="mt-editor__system" data-mt-system-banner {% if not system_use %}hidden{% endif %}>
+        MyPortal sends this as the <strong data-mt-system-label>{{ system_use.label | lower if system_use else '' }}</strong>.
+      </p>
     </header>
-    <form id="message-template-form" class="form" autocomplete="off" novalidate>
-      <input type="hidden" id="message-template-id" name="template_id" value="{{ template.id or '' }}" />
-      <div class="form-field">
-        <label class="form-label" for="message-template-slug">Slug</label>
-        <input
-          class="form-input"
-          id="message-template-slug"
-          name="slug"
-          maxlength="120"
-          pattern="^[a-z0-9](?:[a-z0-9._\-]{0,118}[a-z0-9])?$"
-          required
-          placeholder="welcome.email"
-          aria-describedby="message-template-slug-help"
-          value="{{ template.slug or '' }}"
-        />
-        <p class="form-help" id="message-template-slug-help">
-          Lowercase letters, numbers, dots, underscores, and hyphens only.
-        </p>
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="message-template-name">Name</label>
-        <input
-          class="form-input"
-          id="message-template-name"
-          name="name"
-          maxlength="255"
-          required
-          value="{{ template.name or '' }}"
-        />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="message-template-description">Description</label>
-        <textarea
-          class="form-input form-input--textarea"
-          id="message-template-description"
-          name="description"
-          rows="3"
-        >{{ template.description or '' }}</textarea>
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="message-template-content-type">Content type</label>
-        <select class="form-input" id="message-template-content-type" name="content_type">
-          {% for option in content_type_options %}
-            <option value="{{ option.value }}" {% if option.value == (template.content_type or default_content_type) %}selected{% endif %}>{{ option.label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="message-template-content">Content</label>
-        <textarea
-          class="form-input form-input--textarea"
-          id="message-template-content"
-          name="content"
-          rows="12"
-          required
-          aria-describedby="message-template-content-help"
-        >{{ template.content or '' }}</textarea>
-        <div id="message-template-content-editor" style="display:none;"></div>
-        <p class="form-help" id="message-template-content-help">
-          Supports template variables like <code>{{ '{{ user.first_name }}' }}</code> and <code>{{ '{{ company.name }}' }}</code>.
-        </p>
-      </div>
-      <div class="form-actions">
-        <button type="submit" class="button button--primary" data-template-submit>{{ submit_label }}</button>
-        <a class="button button--ghost" href="/admin/message-templates">Cancel</a>
-      </div>
-    </form>
-  </section>
 
-  <details class="card card--panel card-collapsible">
-    <summary class="card__header card__header--collapsible">
-      <div>
-        <h2 class="card__title">Using template variables</h2>
-        <p class="card__subtitle">Reference automation context safely across email and notification templates.</p>
+    <nav class="scf-tabs" role="tablist" aria-label="Template settings" data-mt-tabs hidden>
+      <button type="button" class="scf-tab is-active" role="tab" id="mt-tab-content" aria-controls="mt-panel-content" aria-selected="true" data-mt-tab="content">Message<span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="mt-tab-details" aria-controls="mt-panel-details" aria-selected="false" tabindex="-1" data-mt-tab="details">Details<span class="scf-tab__dot" aria-hidden="true"></span></button>
+    </nav>
+
+    <div class="modal__body scf-editor__body sig-editor__body">
+      <div class="scf-editor__main">
+        <section class="scf-panel sig-panel" id="mt-panel-content" role="tabpanel" aria-labelledby="mt-tab-content" data-mt-panel="content">
+          <fieldset class="scf-fieldset">
+            <legend class="form-label">Format</legend>
+            <div class="scf-type-grid mt-format-grid">
+              {% for option in content_type_options %}
+                {% set is_html = option.value == 'text/html' %}
+                <label class="scf-type-card{% if option.value == current_type %} is-selected{% endif %}">
+                  <input type="radio" name="content_type" value="{{ option.value }}" {% if option.value == current_type %}checked{% endif %} data-mt-format />
+                  <span class="scf-type-icon mt-type-icon mt-type-icon--{{ 'html' if is_html else 'text' }}" aria-hidden="true"></span>
+                  <span class="scf-type-card__label">{{ option.label }}</span>
+                  <span class="scf-type-card__help">{{ 'Formatted email with links and images' if is_html else 'SMS, notifications and simple emails' }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </fieldset>
+
+          <div class="form-field">
+            <label class="form-label" for="message-template-content" id="message-template-content-label">Message</label>
+            <textarea
+              class="form-input form-input--textarea scf-mono mt-editor__text"
+              id="message-template-content"
+              name="content"
+              rows="14"
+              required
+              aria-describedby="message-template-content-help"
+              data-mt-content
+            >{{ template.content or '' }}</textarea>
+            <div class="mt-editor__rich" data-mt-rich hidden></div>
+            <p class="scf-error" data-mt-error="content" hidden></p>
+          </div>
+
+          <div class="sig-vars" data-mt-vars>
+            <p class="form-label" id="mt-vars-title">Insert a variable</p>
+            <ul class="sig-vars__list" aria-labelledby="mt-vars-title" data-mt-vars-list>
+              {% for variable in (system_use.variables if system_use else common_variables) %}
+                <li><button type="button" class="sig-var" data-mt-var="{{ variable.token }}" title="Insert {{ variable.token }}">{{ variable.label }}</button></li>
+              {% endfor %}
+            </ul>
+            <p class="form-help" id="message-template-content-help">
+              Click to insert at the cursor. Anything that sends this template can fill in its own variables too, such as <code>{{ '{{ ticket.number }}' }}</code>.
+            </p>
+          </div>
+        </section>
+
+        <section class="scf-panel sig-panel" id="mt-panel-details" role="tabpanel" aria-labelledby="mt-tab-details" data-mt-panel="details">
+          <div class="scf-grid">
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="message-template-name">Name</label>
+              <input class="form-input" id="message-template-name" name="name" maxlength="255" required placeholder="e.g. Ticket resolved notice" value="{{ template.name or '' }}" data-mt-name />
+              <p class="scf-error" data-mt-error="name" hidden></p>
+            </div>
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="message-template-slug">Key</label>
+              <input
+                class="form-input scf-mono"
+                id="message-template-slug"
+                name="slug"
+                maxlength="120"
+                required
+                spellcheck="false"
+                placeholder="ticket-resolved"
+                aria-describedby="message-template-slug-help"
+                value="{{ template.slug or '' }}"
+                data-mt-slug
+              />
+              <p class="form-help" id="message-template-slug-help">
+                {% if template.id %}Used in tokens that insert this template.{% else %}Generated from the name.{% endif %}
+                Lowercase letters, numbers, dots, hyphens and underscores.
+              </p>
+              <p class="mt-editor__warning" data-mt-slug-warning hidden></p>
+              <p class="scf-error" data-mt-error="slug" hidden></p>
+            </div>
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="message-template-description">Description <span class="scf-optional">optional</span></label>
+              <textarea class="form-input form-input--textarea" id="message-template-description" name="description" rows="2" placeholder="What this template is for and where it's used">{{ template.description or '' }}</textarea>
+            </div>
+          </div>
+        </section>
       </div>
-      <span class="card__toggle-icon" aria-hidden="true"></span>
-    </summary>
-    <div class="card-collapsible__content">
-      <div class="card__body card__body--stacked">
-        <p>
-          Templates can include any variable exposed by the automation or integration invoking them. Common variables include
-          <code>{{ '{{ user.first_name }}' }}</code>, <code>{{ '{{ company.name }}' }}</code>, and <code>{{ '{{ portal.url }}' }}</code>.
-          HTML templates render exactly as provided, so remember to sanitise any untrusted data before storing it in a template.
-        </p>
-        <p>
-          Review the <a href="/docs/message-templates" target="_blank" rel="noopener">message template documentation</a> for
-          a full list of supported tokens and implementation guidance.
-        </p>
-      </div>
+
+      <aside class="scf-preview sig-preview mt-preview" aria-label="Preview">
+        <p class="scf-preview__eyebrow">Preview</p>
+        <div class="sig-preview__frame-wrap" data-mt-preview-html {% if current_type != 'text/html' %}hidden{% endif %}>
+          <iframe class="sig-preview__frame mt-preview__frame" sandbox="" title="Template preview" data-mt-preview-frame></iframe>
+        </div>
+        <pre class="sig-preview__text mt-preview__text" data-mt-preview-text {% if current_type == 'text/html' %}hidden{% endif %}>{{ template.content or '' }}</pre>
+        <p class="form-help">Variables show as <span class="sig-token-sample">highlighted</span> placeholders. They're filled in when the message is sent.</p>
+
+        <div class="mt-preview__section">
+          <p class="scf-preview__eyebrow">Variables used</p>
+          <ul class="scf-item__chips" data-mt-used aria-live="polite"></ul>
+          <p class="form-help" data-mt-used-empty>None yet.</p>
+        </div>
+
+        <div class="mt-preview__section" data-mt-usage>
+          <p class="scf-preview__eyebrow">Insert this template elsewhere</p>
+          <button type="button" class="mt-token" data-mt-copy="{{ '{{ template.' ~ (template.slug or 'your-key') ~ ' }}' }}" data-mt-usage-token="template">{{ '{{ template.' ~ (template.slug or 'your-key') ~ ' }}' }}</button>
+          <p class="form-help">Click to copy. Use it in automations, notifications or another template.</p>
+        </div>
+      </aside>
     </div>
-  </details>
+
+    <footer class="modal__footer scf-editor__footer">
+      {% if template.id %}
+        <button type="button" class="button button--danger" data-mt-delete aria-haspopup="dialog" aria-controls="mt-delete-modal">Delete</button>
+      {% endif %}
+      <span class="scf-editor__spacer"></span>
+      <p class="scf-error mt-editor__form-error" data-mt-error="form" role="alert" hidden></p>
+      <span class="sig-editor__dirty text-muted" role="status" aria-live="polite" data-mt-dirty></span>
+      <a class="button button--ghost" href="/admin/message-templates" data-mt-leave>Cancel</a>
+      <button type="submit" class="button" data-mt-save>{{ 'Save changes' if template.id else 'Create template' }}</button>
+    </footer>
+  </form>
+
+  <script type="application/json" id="mt-editor-data">{{ {'commonVariables': common_variables, 'systemUses': system_uses} | tojson }}</script>
+
+  {% if template.id %}
+    {% include "partials/message_template_delete_modal.html" %}
+  {% endif %}
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
-  <script src="{{ static_url('/static/js/suneditor.min.js') }}"></script>
-  <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/suneditor.min.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/message_templates.js') }}" defer></script>
 {% endblock %}

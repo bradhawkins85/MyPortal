@@ -301,12 +301,12 @@
   <form class="modal__panel modal__panel--wide scf-editor whm-rule-editor" data-deletion-rule-form novalidate>
     <input type="hidden" name="id" />
     <header class="modal__header scf-editor__header">
-      <button type="button" class="modal__close" data-modal-close aria-label="Close deletion rule editor"></button>
       <div>
         <p class="scf-preview__eyebrow">Deletion rule</p>
         <h2 class="modal__title" id="webhook-rule-modal-title" data-rule-title>New deletion rule</h2>
         <p class="scf-editor__subtitle">Choose when the rule runs and which webhook entries it removes.</p>
       </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close deletion rule editor"></button>
     </header>
 
     <div class="modal__body scf-editor__body">
@@ -379,14 +379,14 @@
 </div>
 
 <div class="modal scf-modal" id="webhook-attempts-modal" role="dialog" aria-modal="true" aria-labelledby="webhook-attempts-title" aria-hidden="true" hidden>
-  <div class="modal__panel modal__panel--wide scf-editor whm-attempts-modal">
+  <div class="modal__panel modal__panel--wide scf-editor whm-attempts-panel">
     <header class="modal__header scf-editor__header">
-      <button type="button" class="modal__close" data-modal-close aria-label="Close webhook attempts"></button>
       <div>
         <p class="scf-preview__eyebrow">Delivery attempts</p>
         <h2 class="modal__title" id="webhook-attempts-title">Webhook attempts</h2>
         <p id="webhook-attempts-description" class="scf-editor__subtitle">Review the latest delivery attempts for the selected webhook event.</p>
       </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close webhook attempts"></button>
     </header>
     <div class="modal__body">
       <div class="table-wrapper">
