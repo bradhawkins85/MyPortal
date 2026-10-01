@@ -1,0 +1,7 @@
+{
+  "guid": "4d3b7a49-afdf-4246-9ab9-f2cf5bea8990",
+  "occurred_at": "2026-10-01T00:00Z",
+  "change_type": "Fix",
+  "summary": "The RAG Index admin page now loads on large databases: its statistics are gathered in fewer, index-backed queries that run in parallel instead of repeatedly scanning every indexed chunk.",
+  "content_hash": "02c924bc2cabbe10eb34c0fd56640dccfa5fed4ccd56168a4c0bb928efd232f1"
+}

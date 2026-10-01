@@ -168,7 +168,7 @@
       fetch('/api/agent/rag/health', {headers: {'Accept': 'application/json'}}),
       fetch('/api/rag/relationships/metrics', {headers: {'Accept': 'application/json'}}),
     ]);
-    if (!healthRes.ok) throw new Error('Unable to load RAG health');
+    if (!healthRes.ok) throw new Error(`Unable to load RAG health (HTTP ${healthRes.status})`);
     if (!matchingRes.ok) throw new Error('Unable to load matching statistics');
     const data = await healthRes.json();
     const matching = await matchingRes.json();
