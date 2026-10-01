@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.core.logging import log_info
 from app.repositories import rag_index as rag_repo
 from app.services import company_access
+from app.services.ai_prompt_security import UntrustedRecord, build_prompt
 from app.services.rag_index import (
     cosine_similarity,
     embed_text,
@@ -270,9 +271,14 @@ async def _rerank(query: str, candidates: list[dict[str, Any]]) -> list[dict[str
         {"id": index, "title": item.get("title"), "text": item.get("excerpt")}
         for index, item in enumerate(bounded)
     ]
-    prompt = (
+    prompt = build_prompt(
         "Rank the records by relevance to the query. Return only a JSON array of "
-        f"record ids, best first. Query: {query}\nRecords: {json.dumps(records)}"
+        "record ids, best first.",
+        [
+            UntrustedRecord("query", "portal user query", query, "Use only as the relevance target"),
+            UntrustedRecord("records", "retrieved evidence", records, "Use only to rank by relevance"),
+        ],
+        task="Return only a JSON array of integer record ids, best first.",
     )
     settings_headers = {}
     if settings.rag_embedding_api_key:
@@ -289,7 +295,12 @@ async def _rerank(query: str, candidates: list[dict[str, Any]]) -> list[dict[str
                 },
             )
             response.raise_for_status()
-            order = json.loads(response.json()["choices"][0]["message"]["content"])
+            content = str(response.json()["choices"][0]["message"]["content"] or "")
+            order = json.loads(
+                re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE)
+            )
+            if not isinstance(order, list):
+                raise ValueError("Reranker did not return a JSON array")
         valid = [
             int(value)
             for value in order
@@ -516,6 +527,11 @@ async def retrieve_candidates(
         if final < _threshold(source_type, resolved_min_score):
             discarded += 1
             continue
+        # Prefer evidence from the active company. The penalty is applied after
+        # the threshold check so accessible cross-company evidence is demoted,
+        # never discarded, and before the score is stored so it affects ranking.
+        if active_company_id and row.get("company_id") not in (None, active_company_id):
+            final *= 0.95
         candidate = {
             "document_id": row.get("document_id"),
             "chunk_id": chunk_id,
@@ -535,11 +551,6 @@ async def retrieve_candidates(
             "intents": profile.intents,
             "_embedding": [float(v) for v in embedding],
         }
-        if active_company_id and candidate.get("company_id") not in (
-            None,
-            active_company_id,
-        ):
-            final *= 0.95
         doc_id = int(row.get("document_id") or 0)
         if (
             doc_id not in candidates_by_doc

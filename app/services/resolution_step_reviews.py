@@ -9,6 +9,7 @@ import nh3
 
 from app.repositories import resolution_step_reviews as review_repo
 from app.services import knowledge_base, modules
+from app.services.ai_prompt_security import UntrustedRecord, build_prompt
 
 
 class _ListItemParser(HTMLParser):
@@ -52,6 +53,17 @@ def _response_text(result: Mapping[str, Any]) -> str:
     return str(payload or result.get("message") or "")
 
 
+def _extract_title(text: str) -> str:
+    """Return the first meaningful line of a model title response, max 20 words."""
+    cleaned = re.sub(r"^```\w*\s*|\s*```$", "", text.strip())
+    for line in cleaned.splitlines():
+        candidate = re.sub(r"^(?:title\s*:\s*|#+\s*)", "", line.strip(), flags=re.IGNORECASE)
+        candidate = candidate.strip().strip('"\'*`').strip()
+        if candidate:
+            return " ".join(candidate.split()[:20])
+    return ""
+
+
 async def generate_article(ticket_id: int, *, author_id: int) -> dict[str, Any]:
     entry = await review_repo.get_entry(ticket_id)
     if not entry:
@@ -63,19 +75,24 @@ async def generate_article(ticket_id: int, *, author_id: int) -> dict[str, Any]:
         raise ValueError("No usable resolution steps were found")
     subject = str(entry.get("subject") or "Resolved support issue").strip()
     summary = " ".join(steps)[:1000]
-    prompt = (
-        "Create a concise knowledge-base article title of no more than 20 words. "
-        "Return the title only, without quotation marks.\n"
-        f"Ticket subject: {subject}\nResolution summary: {summary}"
+    prompt = build_prompt(
+        "Create a concise knowledge-base article title of no more than 20 words "
+        "that names the problem solved. Return the title only, without quotation marks.",
+        [UntrustedRecord(
+            f"ticket:{ticket_id}", "resolved helpdesk ticket",
+            {"subject": subject, "resolution_summary": summary},
+            "Use only to describe the problem in the title",
+        )],
+        task="Return only the title.",
     )
+    # Reasoning-capable models spend completion tokens before the final answer;
+    # a 60 token cap can end before any title is emitted.
     result = await modules.trigger_module(
-        "ollama", {"prompt": prompt, "temperature": 0.2, "max_tokens": 60}, background=False
+        "ollama", {"prompt": prompt, "temperature": 0.2, "max_tokens": 512}, background=False
     )
     if not modules.module_result_succeeded(result):
         raise ValueError("The configured LLM could not generate an article title")
-    title = " ".join(_response_text(result).strip().strip('"\'').split())
-    title = re.sub(r"^(title\s*:\s*)", "", title, flags=re.IGNORECASE)
-    title = " ".join(title.split()[:20]).strip() or "Resolution guide"
+    title = _extract_title(_response_text(result)) or subject or "Resolution guide"
     sections = [
         {"heading": f"Step {index}", "content": f"<p>{escape(step)}</p>"}
         for index, step in enumerate(steps, start=1)

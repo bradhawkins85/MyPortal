@@ -344,3 +344,39 @@ async def test_update_snapshots_old_version_before_revision(monkeypatch):
     await knowledge_base_service.update_article(60, {"title": "Revised runbook"}, editor_id=9)
 
     snapshot.assert_awaited_once_with(current, created_by=9)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_search_articles_keeps_restricted_sections_out_of_excerpt_and_ai_prompt(monkeypatch):
+    article = _article_factory(
+        slug="vpn-setup",
+        title="VPN setup",
+        content="<p>VPN setup for everyone</p><p>VPN shared secret SECRETPSK</p>",
+        sections=[
+            {"position": 1, "heading": "Overview", "content": "<p>VPN setup for everyone</p>"},
+            {
+                "position": 2,
+                "heading": "Company only",
+                "content": "<p>VPN shared secret SECRETPSK</p>",
+                "allowed_company_ids": [99],
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        knowledge_base_service.kb_repo, "list_articles", AsyncMock(return_value=[article])
+    )
+    trigger = AsyncMock(
+        return_value={"status": "succeeded", "response": {"response": "See [KB:vpn-setup]."}}
+    )
+    monkeypatch.setattr(knowledge_base_service.modules_service, "trigger_module", trigger)
+    context = await knowledge_base_service.build_access_context({"id": 5, "is_super_admin": False})
+
+    result = await knowledge_base_service.search_articles("vpn setup", context)
+
+    assert [item["slug"] for item in result["results"]] == ["vpn-setup"]
+    assert "SECRETPSK" not in str(result["results"][0]["excerpt"])
+    assert "SECRETPSK" not in result["results"][0]["content"]
+    prompt = trigger.await_args.args[1]["prompt"]
+    assert "VPN setup for everyone" in prompt
+    assert "SECRETPSK" not in prompt
+    assert "<p>" not in prompt

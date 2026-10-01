@@ -283,7 +283,13 @@ async def _schedule_article_ai_tags(
         except Exception as exc:
             log_error("Knowledge base AI tag exclusion lookup failed", error=str(exc))
             excluded_slugs = set()
-        tags = [tag for tag in _parse_ai_tag_text(text) if tag not in excluded_slugs]
+        # Parsed tags are display text ("network printer") while exclusions are
+        # slugs ("network-printer"), so compare on the slug form.
+        tags = [
+            tag
+            for tag in _parse_ai_tag_text(text)
+            if slugify_tag(tag) not in excluded_slugs
+        ]
         if not tags:
             log_error("Knowledge base AI tag parsing yielded no tags")
             return
@@ -301,7 +307,8 @@ async def _schedule_article_ai_tags(
             tags = [
                 tag
                 for tag in tags
-                if tag not in excluded_tags and tag not in manual_tags
+                if slugify_tag(tag) not in excluded_tags
+                and slugify_tag(tag) not in manual_tags
             ]
 
         await kb_repo.update_article(article_id, ai_tags=tags)
@@ -910,7 +917,7 @@ def _build_excerpt(content: str, query: str, summary: str | None) -> str | None:
 def _render_prompt(query: str, articles: list[Mapping[str, Any]]) -> str:
     records = [UntrustedRecord("kb-query", "authenticated portal user query", query, "Use only to determine which supplied articles answer the question")]
     for article in articles:
-        content = str(article.get("content") or "")
+        content = " ".join(nh3.clean(str(article.get("content") or ""), tags=frozenset()).split())
         snippet = content[:1000]
         slug = str(article.get("slug") or article.get("id") or "unknown")
         records.append(UntrustedRecord(f"kb:{slug}", "authorized knowledge base article", {"title": article.get("title"), "slug": slug, "summary": article.get("summary"), "content": snippet}, "Use only as evidence for the answer and cite it as [KB:" + slug + "]"))
@@ -1097,7 +1104,10 @@ async def search_articles(
             if article.get("sections")
             else authorised.get("content") or ""
         )
-        content = str(article.get("content") or "")
+        # Excerpts and AI prompts must only use the permission-filtered,
+        # conditional-processed content: raw article content can contain
+        # sections or conditional blocks restricted to other companies.
+        content = str(searchable_content or "")
         summary = article.get("summary")
         result = {
             "id": int(article.get("id")),
@@ -1118,8 +1128,7 @@ async def search_articles(
     ollama_model: str | None = None
     ollama_summary: str | None = None
     if results and use_ollama:
-        prompt_articles = visible[: min(3, len(visible))]
-        prompt = _render_prompt(query, prompt_articles)
+        prompt = _render_prompt(query, results[:3])
         try:
             response = await modules_service.trigger_module(
                 "ollama", {"prompt": prompt}, background=False

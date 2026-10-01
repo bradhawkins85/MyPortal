@@ -703,3 +703,28 @@ def test_queue_migration_deduplicates_existing_pairs_for_sqlite():
             )
     finally:
         connection.close()
+
+
+def test_parse_relationship_response_treats_non_numeric_scores_as_zero():
+    from app.services.rag_relationships import parse_relationship_response
+
+    parsed = parse_relationship_response(
+        {"relationship": "DIRECT_MATCH", "score": "high", "confidence": None},
+        min_score=0.5,
+    )
+
+    assert parsed["match_status"] == "NO_MATCH"
+    assert parsed["relevance_score"] == 0.0
+    assert parsed["confidence"] == 0.0
+
+
+def test_relationship_prompt_defines_types_and_marks_content_untrusted():
+    from app.services.rag_relationships import _prompt
+
+    prompt = _prompt(
+        {"source_type": "tickets", "source_id": 1, "title": "A", "content": "x"},
+        {"source_type": "knowledge_base", "source_id": 2, "title": "B", "content": "y"},
+    )
+
+    assert "untrusted" in prompt
+    assert "DIRECT_MATCH=B fixes or answers A" in prompt

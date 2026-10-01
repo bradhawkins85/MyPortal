@@ -6,10 +6,31 @@ def test_finalise_tags_filters_unhelpful_slugs():
 
     filtered = tickets._finalise_tags(raw_tags, {})
 
-    assert "printer-error" in filtered
-    assert "json" not in filtered
-    assert "tags" not in filtered
-    assert "normal" not in filtered
+    assert filtered == ["printer-error"]
 
-    # Ensure the helper still pads the list to at least five entries using defaults.
-    assert len(filtered) >= 5
+
+def test_finalise_tags_does_not_pad_with_generic_or_workflow_tags():
+    ticket = {
+        "subject": "Please help with Outlook crash",
+        "description": "Hello, outlook crashes whenever attachments open. Thanks",
+        "status": "open",
+        "priority": "high",
+        "category": "Email",
+    }
+
+    filtered = tickets._finalise_tags(["outlook-crash"], ticket)
+
+    assert filtered == ["outlook-crash"]
+
+
+def test_finalise_tags_falls_back_to_topic_keywords_when_ai_returns_nothing():
+    ticket = {
+        "subject": "Please help with Outlook crash",
+        "status": "open",
+        "priority": "high",
+        "category": "Email",
+    }
+
+    filtered = tickets._finalise_tags([], ticket)
+
+    assert filtered == ["email", "outlook", "crash"]
