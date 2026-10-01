@@ -7,7 +7,7 @@
   <div class="page-header-bar page-header-bar--record">
     <span class="header__title-text" title="{{ control.name }}">{{ control.name }}</span>
     {% if company %}
-      <span class="page-header-bar__meta">
+      <div class="page-header-bar__meta">
         <div class="compliance-table__ml-badges">
           <span class="badge badge--status-{{ ml1_status }}">
             ML1:
@@ -35,7 +35,7 @@
           </span>
         </div>
         <span>{{ company.name }}</span>
-      </span>
+      </div>
     {% endif %}
   </div>
 {% endblock %}
