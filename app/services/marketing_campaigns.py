@@ -15,6 +15,7 @@ import secrets
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from email.utils import formataddr, parseaddr
+from importlib import import_module
 from typing import Any
 from urllib.parse import urlparse
 
@@ -524,7 +525,7 @@ async def _dispatch(
     rendered: Mapping[str, str],
     token: str,
 ) -> tuple[bool, dict[str, Any] | None]:
-    from app.services import email as email_service
+    email_service = import_module("app.services.email")
 
     return await email_service.send_email(
         subject=rendered["subject"],

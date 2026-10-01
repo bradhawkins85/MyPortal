@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+from importlib import import_module
 import json
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -21,6 +22,10 @@ _ALLOWED_ARTICLE_UPDATE_COLUMNS = frozenset({
 })
 
 _LIFECYCLE_STATUSES = {"draft", "in_review", "published", "retired"}
+
+
+def _rag_outbox_service():
+    return import_module("app.services.rag_outbox")
 
 
 def _normalise_datetime(value: Any) -> datetime | None:
@@ -314,8 +319,7 @@ async def create_article(
     created = await get_article_by_id(article_id)
     if not created:
         raise RuntimeError("Failed to create knowledge base article")
-    from app.services import rag_outbox
-    await rag_outbox.enqueue("knowledge_base", article_id, source_updated_at=created.get("updated_at"))
+    await _rag_outbox_service().enqueue("knowledge_base", article_id, source_updated_at=created.get("updated_at"))
     return created
 
 
@@ -365,8 +369,7 @@ async def update_article(article_id: int, **updates: Any) -> dict[str, Any]:
     updated = await get_article_by_id(article_id)
     if not updated:
         raise ValueError("Article not found after update")
-    from app.services import rag_outbox
-    await rag_outbox.enqueue("knowledge_base", article_id, source_updated_at=updated.get("updated_at"))
+    await _rag_outbox_service().enqueue("knowledge_base", article_id, source_updated_at=updated.get("updated_at"))
     return updated
 
 
@@ -451,8 +454,7 @@ async def delete_attachment(attachment_id: int) -> None:
 
 async def delete_article(article_id: int) -> None:
     await db.execute("DELETE FROM knowledge_base_articles WHERE id = %s", (article_id,))
-    from app.services import rag_outbox
-    await rag_outbox.enqueue("knowledge_base", article_id, action="delete")
+    await _rag_outbox_service().enqueue("knowledge_base", article_id, action="delete")
 
 
 async def replace_article_users(article_id: int, user_ids: Iterable[int]) -> None:

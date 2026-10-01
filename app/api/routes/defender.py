@@ -1,4 +1,6 @@
 """Company-scoped Windows Defender UI and tray-agent API."""
+from importlib import import_module
+
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse
 
@@ -17,9 +19,7 @@ router = APIRouter(tags=["Windows Defender"])
 
 def _main():
     """Import the main module lazily to avoid a router import cycle."""
-    from app import main as main_module
-
-    return main_module
+    return import_module("app.main")
 
 
 async def _portal_context(request: Request, *, write: bool = False):
