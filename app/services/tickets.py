@@ -127,19 +127,6 @@ _RESOLUTION_PROMPT_HEADER = (
     "Do not invent actions, credentials, or results."
 )
 
-_DEFAULT_TAG_FILL = [
-    "support-request",
-    "needs-triage",
-    "customer-impact",
-    "technical-issue",
-    "follow-up-needed",
-    "service-disruption",
-    "awaiting-update",
-    "priority-review",
-    "diagnostics",
-    "knowledge-base",
-]
-
 # Ollama installations commonly use an 8,192-token context window. Keeping ticket
 # prompts below this character limit leaves room for the model's response and is
 # deliberately conservative for log-heavy descriptions, which tokenize less
@@ -1329,10 +1316,21 @@ def _render_resolution_prompt(
     ))
 
 
-async def refresh_ticket_resolution_steps(ticket_id: int) -> None:
-    """Generate resolution steps without allowing provider failures to affect resolution."""
+async def refresh_ticket_resolution_steps(ticket_id: int, *, force: bool = False) -> None:
+    """Generate resolution steps without allowing provider failures to affect resolution.
+
+    Technician-edited steps are curated knowledge, so automatic refreshes (for
+    example when a ticket is re-resolved) leave them untouched. Pass ``force``
+    for explicit technician-requested regeneration.
+    """
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket or str(ticket.get("status") or "").casefold() not in {"resolved", "closed"}:
+        return
+    if (
+        not force
+        and ticket.get("resolution_steps_source") == "manually_edited"
+        and ticket.get("resolution_steps")
+    ):
         return
     replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
     now = datetime.now(timezone.utc)
@@ -1363,6 +1361,11 @@ async def refresh_ticket_resolution_steps(ticket_id: int) -> None:
             await tickets_repo.update_ticket(
                 ticket_id, resolution_steps_status="skipped", resolution_steps_updated_at=now
             )
+    except ValueError:
+        # The AI module is not configured; this is not a generation failure.
+        await tickets_repo.update_ticket(
+            ticket_id, resolution_steps_status="skipped", resolution_steps_updated_at=now
+        )
     except Exception as exc:  # pragma: no cover - provider/network failure
         log_error("Ticket resolution generation failed", ticket_id=ticket_id, error=str(exc))
         await tickets_repo.update_ticket(
@@ -1986,13 +1989,17 @@ def _normalise_tag_list(source: Any, excluded_tags: set[str] | None = None) -> l
         return []
     if isinstance(source, str):
         cleaned = _strip_wrapped_block(_normalise_model_response_text(source))
-        if cleaned and cleaned != source.strip():
+        if cleaned:
+            # Parse bare JSON too: splitting '{"tags": ["a", "b"]}' on commas
+            # would turn the first tag into "tags-a", which is then discarded.
             try:
                 parsed = json.loads(cleaned)
             except json.JSONDecodeError:
                 source = cleaned
             else:
-                return _normalise_tag_list(parsed, excluded_tags)
+                if isinstance(parsed, (Mapping, list)):
+                    return _normalise_tag_list(parsed, excluded_tags)
+                source = cleaned
         segments = [segment.strip() for segment in re.split(r"[,\n;]+", source) if segment.strip()]
         iterable: Iterable[str] = segments
     elif isinstance(source, Iterable) and not isinstance(source, (bytes, bytearray)):
@@ -2014,76 +2021,48 @@ def _normalise_tag_list(source: Any, excluded_tags: set[str] | None = None) -> l
 
 
 def _finalise_tags(tags: list[str], ticket: Mapping[str, Any], excluded_tags: set[str] | None = None) -> list[str]:
-    unique: list[str] = []
-    seen: set[str] = set()
-    for tag in filter_helpful_slugs(tags, excluded_tags):
-        if tag in seen:
-            continue
-        unique.append(tag)
-        seen.add(tag)
-        if len(unique) >= 10:
-            return unique[:10]
+    """Return up to ten topic-specific tags.
 
-    for candidate in _generate_candidate_tags(ticket, excluded_tags):
-        if len(unique) >= 10:
-            break
-        if candidate in seen or not is_helpful_slug(candidate, excluded_tags):
-            continue
-        unique.append(candidate)
-        seen.add(candidate)
+    AI tags are never padded with generic filler (``needs-triage``), workflow
+    state (``open``, ``high``) or arbitrary description words: those tags match
+    almost every ticket, so they add noise to tag-based cross-linking and RAG
+    retrieval. A small keyword fallback is used only when the model returned no
+    usable tags at all.
+    """
 
-    for fallback in _DEFAULT_TAG_FILL:
-        if len(unique) >= 5:
-            break
-        if fallback in seen or not is_helpful_slug(fallback, excluded_tags):
-            continue
-        unique.append(fallback)
-        seen.add(fallback)
+    unique = filter_helpful_slugs(tags, excluded_tags)[:10]
+    if unique:
+        return unique
+    return _generate_candidate_tags(ticket, excluded_tags)[:5]
 
-    if len(unique) < 5:
-        for fallback in _DEFAULT_TAG_FILL:
-            if len(unique) >= 5:
-                break
-            if fallback in seen or not is_helpful_slug(fallback, excluded_tags):
-                continue
-            unique.append(fallback)
-            seen.add(fallback)
 
-    return unique[:10]
+_TAG_FALLBACK_STOPWORDS = frozenset(
+    {
+        "about", "after", "again", "also", "and", "any", "are", "been", "can",
+        "cannot", "could", "does", "for", "from", "have", "hello", "help", "issue",
+        "issues", "need", "needs", "not", "please", "problem", "problems", "regards",
+        "request", "since", "still", "thanks", "thank", "that", "the", "there",
+        "this", "ticket", "urgent", "when", "with", "working", "would", "your",
+    }
+)
 
 
 def _generate_candidate_tags(ticket: Mapping[str, Any], excluded_tags: set[str] | None = None) -> list[str]:
     candidates: list[str] = []
-    for key in ("category", "module_slug", "priority", "status"):
+    for key in ("category", "module_slug"):
         value = ticket.get(key)
         if isinstance(value, str):
             slug = slugify_tag(value)
             if slug and is_helpful_slug(slug, excluded_tags):
                 candidates.append(slug)
     subject = str(ticket.get("subject") or "")
-    description = _prepare_prompt_text(ticket.get("description"))
     for word in re.findall(r"[A-Za-z0-9]+", subject):
-        if len(word) < 3:
+        if len(word) < 3 or word.casefold() in _TAG_FALLBACK_STOPWORDS:
             continue
         slug = slugify_tag(word)
         if slug and is_helpful_slug(slug, excluded_tags):
             candidates.append(slug)
-    for word in re.findall(r"[A-Za-z0-9]+", description):
-        if len(word) < 5:
-            continue
-        slug = slugify_tag(word)
-        if slug and is_helpful_slug(slug, excluded_tags):
-            candidates.append(slug)
-        if len(candidates) >= 25:
-            break
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        if candidate in seen:
-            continue
-        deduped.append(candidate)
-        seen.add(candidate)
-    return deduped
+    return list(dict.fromkeys(candidates))
 
 
 @dataclass(slots=True)

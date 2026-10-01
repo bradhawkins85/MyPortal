@@ -84,7 +84,7 @@ async def test_refresh_ticket_ai_tags_updates_tags(monkeypatch):
     assert final_update["ai_tags_model"] == "llama3"
     assert final_update["ai_tags_updated_at"] is not None
     assert isinstance(final_update["ai_tags"], list)
-    assert 5 <= len(final_update["ai_tags"]) <= 10
+    assert final_update["ai_tags"] == ["printer", "paper-jam"]
     assert "printer" in final_update["ai_tags"]
     assert "paper-jam" in final_update["ai_tags"]
 

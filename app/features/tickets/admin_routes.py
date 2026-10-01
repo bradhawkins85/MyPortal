@@ -1776,7 +1776,7 @@ async def admin_reprocess_resolution_steps(ticket_id: int, request: Request):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     if str(ticket.get("status") or "").casefold() not in {"resolved", "closed"}:
         raise HTTPException(status_code=409, detail="Resolution steps are available for resolved or closed tickets.")
-    await tickets_service.refresh_ticket_resolution_steps(ticket_id)
+    await tickets_service.refresh_ticket_resolution_steps(ticket_id, force=True)
     return JSONResponse({"status": "queued", "message": "Resolution steps will be regenerated shortly."})
 
 
