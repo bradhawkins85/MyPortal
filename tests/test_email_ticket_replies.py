@@ -266,8 +266,8 @@ class TestFindExistingTicket:
         assert result["subject"] == "Network Connection Issue"
 
 
-    async def test_find_ticket_by_subject_and_sender_in_description(self, monkeypatch):
-        """External sender tickets can be matched without a local requester user."""
+    async def test_find_ticket_by_subject_and_sender_watcher_email(self, monkeypatch):
+        """External sender tickets can be matched when the address is a watcher."""
         from app.core import database
         from app.services import imap
 
@@ -306,8 +306,56 @@ class TestFindExistingTicket:
 
         assert result is not None
         assert result["id"] == 12
-        assert "COALESCE(t.description" in str(captured["query"])
-        assert "%support@ideagen.example%" in captured["params"]
+        assert "LOWER(u.email) = LOWER(%s)" in str(captured["query"])
+        assert "COALESCE(t.description" not in str(captured["query"])
+        assert captured["params"] == ("support@ideagen.example", "support@ideagen.example")
+
+    async def test_subject_match_does_not_use_sender_in_description(self, monkeypatch):
+        """Attacker-controlled descriptions must not influence reply matching."""
+        from app.core import database
+        from app.services import imap
+
+        captured: dict[str, object] = {}
+
+        async def mock_fetch_all(query, params):
+            captured["query"] = query
+            captured["params"] = params
+            if "ticket_number" in query:
+                return []
+            # If the implementation ever reintroduces description-based matching,
+            # this attacker-controlled row would be a candidate with the same
+            # normalized subject as the victim sender's inbound email.
+            if "COALESCE(t.description" in query:
+                return [
+                    {
+                        "id": 777,
+                        "ticket_number": "777",
+                        "subject": "Quarterly Payroll Issue",
+                        "description": "Please contact victim.external@example.net",
+                        "status": "open",
+                        "requester_id": 101,
+                        "company_id": 666,
+                        "created_at": None,
+                        "updated_at": None,
+                        "closed_at": None,
+                        "ai_summary_updated_at": None,
+                        "ai_tags": None,
+                        "ai_tags_updated_at": None,
+                    }
+                ]
+            return []
+
+        monkeypatch.setattr(database.db, "fetch_all", mock_fetch_all)
+
+        result = await imap._find_existing_ticket_for_reply(
+            subject="Re: Quarterly Payroll Issue",
+            from_email="victim.external@example.net",
+            requester_id=None,
+        )
+
+        assert result is None
+        assert "COALESCE(t.description" not in str(captured["query"])
+        assert "%victim.external@example.net%" not in captured["params"]
 
     async def test_find_ticket_by_in_reply_to_header(self, monkeypatch):
         """Test finding ticket by matching Message-ID references."""
