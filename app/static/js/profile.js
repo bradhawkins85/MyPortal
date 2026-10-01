@@ -523,7 +523,7 @@
   const sidebarList = root.querySelector('[data-sidebar-items]');
   const sidebarSaveButton = root.querySelector('[data-sidebar-save]');
   const navigationStyleInputs = root.querySelectorAll('input[name="navigation-style"]');
-  let navigationStyle = 'sidebar';
+  let navigationStyle = 'top';
   const sidebarResetButton = root.querySelector('[data-sidebar-reset]');
   const sidebarAddDividerButton = root.querySelector('[data-sidebar-add-divider]');
   const sidebarAddSpacerButton = root.querySelector('[data-sidebar-add-spacer]');
@@ -1170,14 +1170,14 @@
 
   if (sidebarSection && window.MyPortalSidebarMenu) {
     const initialPreferences = window.MyPortalSidebarMenu.getPreferences();
-    navigationStyle = initialPreferences.navigation_style === 'top' ? 'top' : 'sidebar';
+    navigationStyle = initialPreferences.navigation_style === 'sidebar' ? 'sidebar' : 'top';
     navigationStyleInputs.forEach((input) => { input.checked = input.value === navigationStyle; });
     buildSidebarState(initialPreferences);
     renderSidebarItems();
 
     navigationStyleInputs.forEach((input) => input.addEventListener('change', () => {
       if (!input.checked) return;
-      navigationStyle = input.value === 'top' ? 'top' : 'sidebar';
+      navigationStyle = input.value === 'sidebar' ? 'sidebar' : 'top';
       setSidebarDirty(true);
     }));
 
@@ -1186,7 +1186,7 @@
     document.addEventListener('myportal:sidebar-updated', () => {
       if (!sidebarDirty) {
         const preferences = window.MyPortalSidebarMenu.getPreferences();
-        navigationStyle = preferences.navigation_style === 'top' ? 'top' : 'sidebar';
+        navigationStyle = preferences.navigation_style === 'sidebar' ? 'sidebar' : 'top';
         navigationStyleInputs.forEach((input) => { input.checked = input.value === navigationStyle; });
         buildSidebarState(preferences);
         renderSidebarItems();
@@ -1267,7 +1267,7 @@
         sidebarResetButton.disabled = true;
         try {
           const defaults = await window.MyPortalSidebarMenu.reset();
-          navigationStyle = defaults.navigation_style === 'top' ? 'top' : 'sidebar';
+          navigationStyle = defaults.navigation_style === 'sidebar' ? 'sidebar' : 'top';
           navigationStyleInputs.forEach((input) => { input.checked = input.value === navigationStyle; });
           expandedGroupKeys.clear();
           buildSidebarState(defaults);
