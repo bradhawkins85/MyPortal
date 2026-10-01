@@ -9,6 +9,8 @@ from starlette.responses import HTMLResponse
 
 from app import main
 from app.core.database import db
+from app.features.cart import routes as cart_routes
+from app.repositories import freight_rules as freight_rules_repo
 from app.security.session import SessionData
 
 
@@ -116,6 +118,7 @@ def _place_order_test(
     *,
     capture_create_order_kwargs: list | None = None,
     capture_create_ticket_kwargs: list | None = None,
+    capture_invoice_kwargs: list | None = None,
 ) -> str:
     """Returns the redirect location after placing (or attempting) an order."""
 
@@ -154,8 +157,16 @@ def _place_order_test(
     async def fake_get_user(user_id):
         return {"first_name": "Test", "last_name": "User", "email": "test@example.com"}
 
-    async def fake_send_order_to_xero(**kwargs):
-        return None
+    async def fake_generate_order_invoice(**kwargs):
+        if capture_invoice_kwargs is not None:
+            capture_invoice_kwargs.append(kwargs)
+        return {"status": "succeeded", "invoice_id": 1, "xero_result": {"status": "succeeded"}}
+
+    async def fake_list_products_by_ids(product_ids, **kwargs):
+        return [{"id": product_id, "name": "Widget", "stock": 10} for product_id in product_ids]
+
+    async def fake_list_freight_rules(*, active_only):
+        return []
 
     async def fake_create_subscriptions(**kwargs):
         return None
@@ -177,7 +188,13 @@ def _place_order_test(
     monkeypatch.setattr(main.shop_repo, "get_product_by_id", fake_get_product)
     monkeypatch.setattr(main.cart_repo, "clear_cart", fake_clear_cart)
     monkeypatch.setattr(main.user_repo, "get_user_by_id", fake_get_user)
-    monkeypatch.setattr(main.xero_service, "send_order_to_xero", fake_send_order_to_xero)
+    monkeypatch.setattr(main.shop_repo, "list_products_by_ids", fake_list_products_by_ids)
+    monkeypatch.setattr(freight_rules_repo, "list_rules", fake_list_freight_rules)
+    monkeypatch.setattr(
+        cart_routes.invoice_generator_service,
+        "generate_order_invoice",
+        fake_generate_order_invoice,
+    )
     monkeypatch.setattr(
         main.subscription_shop_integration,
         "create_subscriptions_from_order",
@@ -364,3 +381,21 @@ def test_place_order_invalid_shipping_option_falls_back(monkeypatch, active_sess
     )
     assert "street" in location.lower()
     assert not captured
+
+
+def test_place_order_generates_invoice_for_xero(monkeypatch, active_session):
+    """Regression: placing an order must create the local invoice that syncs to Xero."""
+    captured_invoices: list = []
+    location = _place_order_test(
+        monkeypatch,
+        active_session,
+        form_data={"shippingOption": "local_pickup"},
+        capture_invoice_kwargs=captured_invoices,
+    )
+    assert "orderMessage" in location
+    assert len(captured_invoices) == 1
+    invoice_kwargs = captured_invoices[0]
+    assert invoice_kwargs["order_number"].startswith("ORD")
+    assert invoice_kwargs["company_id"] == 1
+    assert invoice_kwargs["user_name"] == "Test User"
+    assert [item["product_id"] for item in invoice_kwargs["order_items"]] == [5]
