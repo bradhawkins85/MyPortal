@@ -69,6 +69,7 @@
             {% set group = role_group_by_key.get(key) %}
             {% if group and group not in granted_groups %}{% set _ = granted_groups.append(group) %}{% endif %}
           {% endfor %}
+          {% set granted_group_count = granted_groups | length %}
           <li
             class="scf-item rol-item"
             data-role-item
@@ -93,7 +94,7 @@
                   {% if read_count %}<li class="scf-chip rol-chip--read">{{ read_count }} read only</li>{% endif %}
                   {% if perms.get('menu.admin.technician') == 'write' %}<li class="scf-chip rol-chip--elevated">Technician</li>{% endif %}
                   {% for group in granted_groups[:4] %}<li class="scf-chip scf-chip--logic">{{ group }}</li>{% endfor %}
-                  {% if granted_groups | length > 4 %}<li class="scf-chip" title="{{ granted_groups[4:] | join(', ') }}">+{{ granted_groups | length - 4 }} more</li>{% endif %}
+                  {% if granted_group_count > 4 %}<li class="scf-chip" title="{{ granted_groups[4:] | join(', ') }}">+{{ granted_group_count - 4 }} more</li>{% endif %}
                 {% else %}
                   <li class="scf-chip scf-chip--muted">No menu access</li>
                 {% endif %}
