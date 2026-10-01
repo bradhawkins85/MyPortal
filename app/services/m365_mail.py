@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from importlib import import_module
 from typing import Any, Mapping
-from urllib.parse import quote, unquote, urlencode, urlsplit
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit
 
 import httpx
 
@@ -713,6 +714,10 @@ async def _record_message(
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 _GRAPH_BASE_PARTS = urlsplit(_GRAPH_BASE)
 _GRAPH_BASE_PATH = _GRAPH_BASE_PARTS.path.rstrip("/")
+_GRAPH_ALLOWED_ROOTS = {"users", "me"}
+_GRAPH_ALLOWED_RESOURCE_SEGMENTS = {"mailFolders", "messages"}
+_GRAPH_ALLOWED_LEAF_SEGMENTS = {"childFolders", "attachments", "$value"}
+_INVALID_PERCENT_ENCODING_RE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _MIN_FOLDER_ID_LENGTH = 20
 _WELL_KNOWN_MAIL_FOLDERS = {
     "archive",
@@ -735,11 +740,93 @@ _WELL_KNOWN_MAIL_FOLDERS = {
 }
 
 
+def _validate_graph_request_url(url: str, *, method: str) -> str:
+    """Validate a Graph API URL before issuing an outbound HTTP request."""
+    candidate = (url or "").strip()
+    if not candidate:
+        raise ValueError(f"Rejected Microsoft Graph {method} URL: URL is empty")
+
+    parsed_url = urlsplit(candidate)
+    if (
+        parsed_url.scheme != _GRAPH_BASE_PARTS.scheme
+        or parsed_url.hostname != _GRAPH_BASE_PARTS.hostname
+        or parsed_url.port is not None
+        or parsed_url.username is not None
+        or parsed_url.password is not None
+        or parsed_url.fragment
+    ):
+        raise ValueError(f"Rejected Microsoft Graph {method} URL: {candidate}")
+
+    path = parsed_url.path
+    if (
+        not path
+        or path == "/"
+        or _INVALID_PERCENT_ENCODING_RE.search(path)
+        or _INVALID_PERCENT_ENCODING_RE.search(parsed_url.query)
+    ):
+        raise ValueError(f"Rejected Microsoft Graph {method} URL: {candidate}")
+    if not (path == _GRAPH_BASE_PATH or path.startswith(f"{_GRAPH_BASE_PATH}/")):
+        raise ValueError(f"Rejected Microsoft Graph {method} URL: {candidate}")
+    if ";" in parsed_url.query:
+        raise ValueError(f"Rejected Microsoft Graph {method} URL: {candidate}")
+
+    normalized_path = path.rstrip("/")
+    relative_path = normalized_path[len(_GRAPH_BASE_PATH):]
+    path_segments = [segment for segment in relative_path.split("/") if segment]
+    decoded_segments: list[str] = []
+    for segment in path_segments:
+        decoded = unquote(segment)
+        if (
+            not decoded
+            or decoded in {".", ".."}
+            or "\\" in decoded
+            or any(ord(ch) < 32 for ch in decoded)
+        ):
+            raise ValueError(f"Rejected Microsoft Graph {method} URL: {candidate}")
+        decoded_segments.append(decoded)
+
+    if not decoded_segments or decoded_segments[0] not in _GRAPH_ALLOWED_ROOTS:
+        raise ValueError(f"Rejected Microsoft Graph {method} URL: {candidate}")
+    if decoded_segments[0] == "users" and len(decoded_segments) < 2:
+        raise ValueError(f"Rejected Microsoft Graph {method} URL: {candidate}")
+
+    base_offset = 2 if decoded_segments[0] == "users" else 1
+    resource_segments = decoded_segments[base_offset:]
+    if (
+        not resource_segments
+        or resource_segments[0] not in _GRAPH_ALLOWED_RESOURCE_SEGMENTS
+    ):
+        raise ValueError(f"Rejected Microsoft Graph {method} URL: {candidate}")
+    for index, segment in enumerate(resource_segments):
+        if (
+            segment in _GRAPH_ALLOWED_LEAF_SEGMENTS
+            and index != len(resource_segments) - 1
+        ):
+            raise ValueError(f"Rejected Microsoft Graph {method} URL: {candidate}")
+
+    if parsed_url.query:
+        try:
+            query_items = parse_qsl(
+                parsed_url.query,
+                keep_blank_values=True,
+                strict_parsing=True,
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"Rejected Microsoft Graph {method} URL: malformed query"
+            ) from exc
+        if any(not key.startswith("$") for key, _ in query_items):
+            raise ValueError(f"Rejected Microsoft Graph {method} URL: {candidate}")
+
+    return candidate
+
+
 async def _graph_get(access_token: str, url: str) -> dict[str, Any]:
     """Perform a GET request to Microsoft Graph."""
+    safe_url = _validate_graph_request_url(url, method="GET")
     headers = {"Authorization": f"Bearer {access_token}"}
     async with monitored_client(httpx.AsyncClient, timeout=30) as client:
-        response = await client.get(url, headers=headers)
+        response = await client.get(safe_url, headers=headers)
     if response.status_code != 200:
         log_error(
             "Microsoft Graph mail request failed",
@@ -756,9 +843,10 @@ async def _graph_get(access_token: str, url: str) -> dict[str, Any]:
 
 async def _graph_get_bytes(access_token: str, url: str) -> bytes:
     """Perform a GET request to Microsoft Graph and return raw bytes."""
+    safe_url = _validate_graph_request_url(url, method="GET")
     headers = {"Authorization": f"Bearer {access_token}"}
     async with monitored_client(httpx.AsyncClient, timeout=30) as client:
-        response = await client.get(url, headers=headers)
+        response = await client.get(safe_url, headers=headers)
     if response.status_code != 200:
         log_error(
             "Microsoft Graph mail binary request failed",
@@ -775,23 +863,10 @@ async def _graph_get_bytes(access_token: str, url: str) -> bytes:
 
 async def _graph_patch(access_token: str, url: str, payload: dict[str, Any]) -> None:
     """Perform a PATCH request to Microsoft Graph."""
-    parsed_url = urlsplit(url)
-    if (
-        parsed_url.scheme != _GRAPH_BASE_PARTS.scheme
-        or parsed_url.netloc != _GRAPH_BASE_PARTS.netloc
-        or not parsed_url.path
-        or (
-            parsed_url.path != _GRAPH_BASE_PATH
-            and not parsed_url.path.startswith(f"{_GRAPH_BASE_PATH}/")
-        )
-    ):
-        raise ValueError(
-            f"Rejected Microsoft Graph PATCH URL: {url}. "
-            f"Expected URL to match base: {_GRAPH_BASE}"
-        )
+    safe_url = _validate_graph_request_url(url, method="PATCH")
     headers = {"Authorization": f"Bearer {access_token}"}
     async with monitored_client(httpx.AsyncClient, timeout=30) as client:
-        response = await client.patch(url, headers=headers, json=payload)
+        response = await client.patch(safe_url, headers=headers, json=payload)
     if response.status_code not in (200, 204):
         log_error(
             "Microsoft Graph PATCH failed",
@@ -802,16 +877,10 @@ async def _graph_patch(access_token: str, url: str, payload: dict[str, Any]) -> 
 
 async def _graph_delete(access_token: str, url: str) -> None:
     """Delete a message through Microsoft Graph (moves it to Deleted Items)."""
-    parsed_url = urlsplit(url)
-    if (
-        parsed_url.scheme != _GRAPH_BASE_PARTS.scheme
-        or parsed_url.netloc != _GRAPH_BASE_PARTS.netloc
-        or not parsed_url.path.startswith(f"{_GRAPH_BASE_PATH}/")
-    ):
-        raise ValueError(f"Rejected Microsoft Graph DELETE URL: {url}")
+    safe_url = _validate_graph_request_url(url, method="DELETE")
     headers = {"Authorization": f"Bearer {access_token}"}
     async with monitored_client(httpx.AsyncClient, timeout=30) as client:
-        response = await client.delete(url, headers=headers)
+        response = await client.delete(safe_url, headers=headers)
     if response.status_code != 204:
         raise M365Error(
             f"Microsoft Graph delete failed ({response.status_code})",
