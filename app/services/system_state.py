@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -90,10 +91,9 @@ def write_upgrade_state(
         os.chmod(temporary, 0o644)  # nginx's unprivileged worker must read it
         os.replace(temporary, _UPGRADE_STATE_PATH)
     finally:
-        try:
+        # os.replace() may have already moved the temporary file into place.
+        with suppress(FileNotFoundError):
             os.unlink(temporary)
-        except FileNotFoundError:
-            pass
     return state
 
 

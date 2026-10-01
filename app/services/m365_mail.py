@@ -2270,7 +2270,13 @@ async def _embed_graph_inline_images(
     url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/{message_id_encoded}/attachments"
     try:
         data = await _graph_get(access_token, url)
-    except Exception:
+    except Exception as exc:
+        log_error(
+            "Failed to fetch Microsoft Graph inline attachments; keeping original HTML body",
+            upn=upn,
+            message_id=message_id,
+            error=str(exc),
+        )
         return html_body
 
     inline_images: dict[str, tuple[str, bytes]] = {}
@@ -2421,7 +2427,14 @@ async def _save_graph_attachments(
     url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/{message_id_encoded}/attachments"
     try:
         data = await _graph_get(access_token, url)
-    except Exception:
+    except Exception as exc:
+        log_error(
+            "Failed to fetch Microsoft Graph attachments for ticket import",
+            upn=upn,
+            message_id=message_id,
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
         return
 
     for attachment in data.get("value") or []:

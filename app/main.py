@@ -355,7 +355,12 @@ _version_file = Path(__file__).resolve().parent.parent / "version.txt"
 if _version_file.is_file():
     try:
         _APP_VERSION = _version_file.read_text().strip()
-    except Exception:
+    except (OSError, UnicodeError) as exc:
+        log_warning(
+            "Could not read application version file for static cache busting",
+            version_file=str(_version_file),
+            error=str(exc),
+        )
         _APP_VERSION = ""
 
 _PWA_SERVICE_WORKER_PATH = templates_config.static_path / "service-worker.js"

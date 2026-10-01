@@ -170,7 +170,12 @@ def _normalize_source_url(url: str) -> str:
         port = parts.port
         netloc = f"{hostname}:{port}" if port and port != 80 else hostname
         return urlunsplit(("https", netloc, parts.path, parts.query, parts.fragment))
-    except Exception:
+    except (TypeError, ValueError) as exc:
+        log_error(
+            "Failed to normalize webhook source URL; preserving original URL",
+            source_url=sanitise_url(str(url)),
+            error=type(exc).__name__,
+        )
         return url
 
 
