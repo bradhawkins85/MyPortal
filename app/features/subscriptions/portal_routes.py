@@ -28,7 +28,6 @@ from app.repositories import companies as company_repo
 from app.repositories import shop as shop_repo
 from app.repositories import subscription_change_requests as change_requests_repo
 from app.repositories import subscriptions as subscriptions_repo
-from app.repositories import user_companies as user_company_repo
 from app.services import subscription_renewals
 from app.services.voice_monitor_billing import (
     contract_display,

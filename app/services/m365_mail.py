@@ -12,14 +12,12 @@ from app.services.monitored_http import monitored_client
 
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
-from app.repositories import m365 as m365_repo
 from app.repositories import m365_mail_accounts as mail_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import tickets as tickets_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import m365 as m365_service
 from app.services import modules as modules_service
-from app.services import system_state
 from app.services import ticket_attachments as ticket_attachments_service
 from app.services import tickets as tickets_service
 from app.services import dmarc as dmarc_service

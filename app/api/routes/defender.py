@@ -1,6 +1,6 @@
 """Company-scoped Windows Defender UI and tray-agent API."""
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.api.routes.tray import _resolve_tray_device
 from app.repositories import defender as repo

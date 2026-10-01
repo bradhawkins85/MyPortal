@@ -231,7 +231,7 @@ async def assign_to_ticket(*, ticket_id: int, configuration_id: int,
     )
     if existing:
         await db.execute("DELETE FROM ticket_approval_workflows WHERE id = %s", (existing["id"],))
-    workflow_id = await db.execute_returning_lastrowid(
+    await db.execute_returning_lastrowid(
         """INSERT INTO ticket_approval_workflows
            (ticket_id, configuration_id, configuration_name, workflow_type, assigned_by_user_id)
            VALUES (%s, %s, %s, %s, %s)""",

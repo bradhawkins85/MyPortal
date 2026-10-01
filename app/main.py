@@ -165,8 +165,7 @@ from app.security.rate_limiter import (
 from app.security.session import ensure_datetime
 from app.security.request_logger import RequestLoggingMiddleware
 from app.security.security_headers import SecurityHeadersMiddleware
-from app.security.session import SessionData, session_manager
-from app.api.dependencies.auth import get_current_session
+from app.security.session import session_manager
 from app.services.scheduler import scheduler_service, COMMANDS_BY_MODULE
 from app.services.component_availability import (
     AvailabilityConfigurationError,
@@ -201,7 +200,6 @@ from app.services import webhook_monitor
 from app.services import integration_operations as integration_operations_service
 from app.services import m365_jobs as m365_jobs_service
 from app.services import issues as issues_service
-from app.services import invoice_generator as invoice_generator_service
 from app.services import service_status as service_status_service
 from app.services import system_state as system_state_service
 from app.services import impersonation as impersonation_service
@@ -3115,7 +3113,6 @@ async def on_startup() -> None:
         split tasks (sync_m365_licenses, sync_m365_contacts, sync_m365_mailboxes) at
         staggered times and deactivate the old task to avoid gateway timeouts."""
         legacy_commands = {"sync_m365_data", "sync_o365"}
-        new_commands = {"sync_m365_licenses", "sync_m365_contacts", "sync_m365_mailboxes"}
         all_tasks = await scheduled_tasks_repo.list_tasks(include_inactive=False)
         # Group tasks by company_id
         from collections import defaultdict

@@ -642,6 +642,8 @@ def generate_open_access_token(attachment_id: int, expires_in_seconds: int = 864
     Returns:
         Signed token string
     """
+    # Retained for API compatibility; token age is enforced by verify_open_access_token(max_age=...).
+    _ = expires_in_seconds
     # Use the secret key from settings
     config = get_settings()
     secret_key = getattr(config, "secret_key", "change-me-in-production")

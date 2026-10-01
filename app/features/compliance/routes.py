@@ -20,7 +20,6 @@ from app.repositories import essential8 as essential8_repo
 from app.repositories import smb1001 as smb1001_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as users_repo
-from app.repositories import user_companies as user_company_repo
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
 from app.services import email as email_service
