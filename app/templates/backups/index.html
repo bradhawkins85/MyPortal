@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block title %}Backups{% endblock %}
+
+{% block header_title %}
+  <div class="header__title-content header__title-content--stacked">
+    <span class="header__title-text">Backups</span>
+    <span class="header__title-meta">Backup jobs for {{ company.name if company else 'this company' }}: what is backed up, where it goes and how to recover it.</span>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  {% if can_edit %}
+    {{ page_header_actions([
+      {"label": "Add backup", "type": "link", "variant": "primary", "href": "/backups/new"}
+    ]) }}
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<section class="card card--panel">
+  <header class="card__header card__header--stacked">
+    <div>
+      <h2 class="card__title">Backup jobs</h2>
+      <p class="card__subtitle">
+        {{ tracked_count }} status-tracked job{{ '' if tracked_count == 1 else 's' }} and
+        {{ manual_count }} manual entr{{ 'y' if manual_count == 1 else 'ies' }}.
+        Tracked jobs report their status automatically; manual entries document backups that do not.
+      </p>
+    </div>
+  </header>
+  <div class="card__body">
+    <div class="table-wrapper">
+      <table class="table" id="backup-register-table" data-table data-table-id="backup-register">
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string" data-column-key="name">Job</th>
+            <th scope="col" data-sort="string" data-column-key="tracking">Tracking</th>
+            <th scope="col" data-sort="string" data-column-key="app">Backup app</th>
+            <th scope="col" data-sort="string" data-column-key="frequency">Frequency</th>
+            <th scope="col" data-column-key="source">Source</th>
+            <th scope="col" data-column-key="destinations">Destinations</th>
+            <th scope="col" data-column-key="keys">Encryption keys</th>
+            <th scope="col" data-column-key="notes">Notes</th>
+            {% if can_edit %}<th scope="col" class="table__actions" data-column-key="actions">Actions</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            {% set details = row.details or {} %}
+            <tr>
+              <td data-label="Job" data-column-key="name">
+                <strong>{{ row.name }}</strong>
+                {% if row.description %}<div class="table__meta">{{ row.description }}</div>{% endif %}
+              </td>
+              <td data-label="Tracking" data-column-key="tracking">
+                {% if row.kind == 'tracked' %}
+                  <span class="status status--{{ row.status_variant }}" title="Today's reported status">{{ (row.today_status or 'unknown') | title }}</span>
+                  {% if not row.is_active %}<div class="table__meta">Tracking disabled</div>{% endif %}
+                {% else %}
+                  <span class="status status--neutral">Not tracked</span>
+                {% endif %}
+              </td>
+              <td data-label="Backup app" data-column-key="app">{{ details.backup_app_name or '—' }}</td>
+              <td data-label="Frequency" data-column-key="frequency">{{ details.frequency or '—' }}</td>
+              <td data-label="Source" data-column-key="source">{% if details.source %}<span class="backup-register__text">{{ details.source }}</span>{% else %}—{% endif %}</td>
+              <td data-label="Destinations" data-column-key="destinations">
+                {% if details.destinations %}
+                  <ul class="backup-register__list">{% for destination in details.destinations %}<li>{{ destination }}</li>{% endfor %}</ul>
+                {% else %}—{% endif %}
+              </td>
+              <td data-label="Encryption keys" data-column-key="keys">
+                {% set credential_ids = details.credential_ids or [] %}
+                {% set key_links = details.key_links or [] %}
+                {% if credential_ids or key_links %}
+                  <ul class="backup-register__list">
+                    {% for credential_id in credential_ids %}
+                      <li>
+                        {% if vault_available %}
+                          {% if is_company_admin and active_company_id %}<a href="/admin/companies/{{ active_company_id }}#credentials">{{ credential_names.get(credential_id, 'Credential #' ~ credential_id) }}</a>{% else %}{{ credential_names.get(credential_id, 'Credential #' ~ credential_id) }}{% endif %}
+                          <span class="table__meta">vault</span>
+                        {% else %}
+                          Vault credential
+                        {% endif %}
+                      </li>
+                    {% endfor %}
+                    {% for link in key_links %}
+                      <li><a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.label }}</a></li>
+                    {% endfor %}
+                  </ul>
+                {% else %}—{% endif %}
+              </td>
+              <td data-label="Notes" data-column-key="notes">{% if details.notes %}<span class="backup-register__text">{{ details.notes }}</span>{% else %}—{% endif %}</td>
+              {% if can_edit %}
+                <td class="table__actions" data-column-key="actions">
+                  <a class="button button--ghost button--small" href="{{ row.edit_url }}">{{ 'Edit details' if row.kind == 'tracked' else 'Edit' }}</a>
+                  {% if row.delete_url %}
+                    <form action="{{ row.delete_url }}" method="post" class="inline-form" data-confirm="Delete this backup entry?">
+                      {% include "partials/csrf.html" %}
+                      <button type="submit" class="button button--danger button--small">Delete</button>
+                    </form>
+                  {% endif %}
+                </td>
+              {% endif %}
+            </tr>
+          {% else %}
+            <tr><td colspan="{{ 9 if can_edit else 8 }}" class="table__empty">No backups recorded yet.{% if can_edit %} <a href="/backups/new">Add a backup</a> to document one.{% endif %}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if is_super_admin %}
+      <p class="form-help">Status-tracked jobs and their webhooks are managed in <a href="/admin/backup-jobs">Backup history</a>.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

@@ -67,6 +67,7 @@ MENU_PERMISSIONS: tuple[MenuPermission, ...] = (
     MenuPermission("menu.ipam", "IP address management", "Infrastructure", "View networks and addresses; write access allows network and address changes."),
     MenuPermission("menu.racks", "Rack management", "Infrastructure", "View racks and placements; write access allows rack and equipment changes."),
     MenuPermission("menu.network_map", "Network map", "Infrastructure", "View and export the network map built from racks, IPAM and assets; write access allows asset interfaces and network links to be documented."),
+    MenuPermission("menu.backups", "Backups", "Infrastructure", "View the backup register of tracked and manual backup jobs; write access allows backup entries and their details to be changed. Linked vault credentials are only listed for roles with Credential vault access."),
     MenuPermission("menu.defender", "Windows Defender", "Company", "View endpoint protection status; write access allows Defender configuration, exclusions, and ticket creation."),
     MenuPermission("menu.m365.configuration", "Office 365 Configuration", "Office 365", "View or manage Microsoft 365 tenant configuration.", ("licenses.manage",), "can_manage_licenses"),
     MenuPermission("menu.m365.best_practices", "Office 365 Best Practices", "Office 365", "View or run Microsoft 365 best-practice checks.", ("m365_best_practices.access",), "can_view_m365_best_practices"),
