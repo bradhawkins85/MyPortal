@@ -3285,6 +3285,112 @@
   }
 
 
+  function initialiseSuggestedReply() {
+    const button = document.querySelector('[data-ticket-suggest-reply]');
+    const panel = document.querySelector('[data-ticket-suggest-reply-panel]');
+    if (!(button instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) {
+      return;
+    }
+    const ticketId = button.getAttribute('data-ticket-id') || '';
+    const statusEl = panel.querySelector('[data-ticket-suggest-reply-status]');
+    const sourcesEl = panel.querySelector('[data-ticket-suggest-reply-sources]');
+    const sourceList = panel.querySelector('[data-ticket-suggest-reply-source-list]');
+    const editor = document.querySelector('#ticket-reply-form [data-rich-text-content]');
+    const fallback = document.querySelector('#ticket-reply-form [data-rich-text-value]');
+
+    function setStatus(message) {
+      if (statusEl instanceof HTMLElement) {
+        statusEl.textContent = message || '';
+        statusEl.hidden = !message;
+      }
+    }
+
+    function draftToHtml(text) {
+      return String(text)
+        .replace(/\r\n?/g, '\n')
+        .trim()
+        .split(/\n{2,}/)
+        .map((paragraph) => paragraph.split('\n').map((line) => escapeHtml(line)).join('<br>'))
+        .map((paragraph) => `<p>${paragraph || '<br>'}</p>`)
+        .join('');
+    }
+
+    function insertDraft(text) {
+      if (editor instanceof HTMLElement) {
+        const current = editor.innerHTML.trim();
+        const html = draftToHtml(text);
+        editor.innerHTML = current ? `${current}${html}` : html;
+        editor.dispatchEvent(new Event('input', { bubbles: true }));
+        editor.focus();
+        return;
+      }
+      if (fallback instanceof HTMLTextAreaElement) {
+        fallback.value = fallback.value.trim() ? `${fallback.value}\n\n${text}` : text;
+        fallback.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+
+    function renderSources(sources) {
+      if (!(sourceList instanceof HTMLElement) || !(sourcesEl instanceof HTMLElement)) {
+        return;
+      }
+      sourceList.replaceChildren();
+      sources.forEach((source) => {
+        const item = document.createElement('li');
+        const reference = document.createElement('code');
+        reference.textContent = source.reference || '';
+        item.appendChild(reference);
+        item.appendChild(document.createTextNode(' '));
+        const link = document.createElement('a');
+        const url = String(source.url || '');
+        link.href = url.startsWith('/') && !url.startsWith('//') ? url : '#';
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = source.title || source.reference || 'Source';
+        item.appendChild(link);
+        if (source.relationship_label) {
+          item.appendChild(document.createTextNode(` (${source.relationship_label})`));
+        }
+        sourceList.appendChild(item);
+      });
+      sourcesEl.hidden = sources.length === 0;
+    }
+
+    button.addEventListener('click', async () => {
+      if (!ticketId || button.disabled) {
+        return;
+      }
+      button.disabled = true;
+      button.classList.add('is-loading');
+      panel.hidden = false;
+      renderSources([]);
+      setStatus('Drafting a reply from related resolutions...');
+      try {
+        const headers = { Accept: 'application/json' };
+        const csrfToken = getCsrfToken();
+        if (csrfToken) {
+          headers['X-CSRF-Token'] = csrfToken;
+        }
+        const response = await fetch(`/admin/tickets/${encodeURIComponent(ticketId)}/suggest-reply`, {
+          method: 'POST',
+          headers,
+        });
+        if (!response.ok) {
+          throw new Error(await getApiErrorMessage(response, 'Unable to draft a reply.'));
+        }
+        const payload = await response.json();
+        insertDraft(String(payload.draft || ''));
+        setStatus('');
+        renderSources(Array.isArray(payload.sources) ? payload.sources : []);
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : 'Unable to draft a reply.');
+      } finally {
+        button.disabled = false;
+        button.classList.remove('is-loading');
+      }
+    });
+  }
+
   function initialiseCannedResponses() {
     const pickerModal = document.querySelector('[data-canned-responses-modal]');
     const createModal = document.querySelector('[data-canned-response-create-modal]');
@@ -3422,6 +3528,7 @@
     initialiseWatcherManagement();
     initialiseTicketMentions();
     initialiseCannedResponses();
+    initialiseSuggestedReply();
     initialiseAttachmentActions();
     initTicketRelated();
     convertUtcElements();

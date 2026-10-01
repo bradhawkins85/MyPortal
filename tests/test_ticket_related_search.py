@@ -117,6 +117,7 @@ async def test_stored_relationships_recheck_permission_and_include_evidence(monk
             "type": "products",
             "label": "Replacement battery",
             "url": "/shop/admin/product/12",
+            "relationship_type": "KNOWN_ISSUE",
             "relationship_label": "Known issue",
             "confidence_band": "High confidence",
             "score": 88,

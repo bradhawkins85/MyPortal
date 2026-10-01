@@ -1,0 +1,7 @@
+{
+  "guid": "36318568-685d-4531-b42a-d7461b820df0",
+  "occurred_at": "2026-10-01T10:50Z",
+  "change_type": "Feature",
+  "summary": "Added a Suggest reply button to the admin ticket reply composer that drafts a reply from the resolution steps of the ticket's direct-match and known-issue related tickets and knowledge-base articles, with [KB:slug] and [Ticket:id] citations; drafts citing records the model was not given are rejected, and the technician reviews the draft before sending.",
+  "content_hash": "585d69f25c12c4178b1c8af3e9431f820bfb913c4f58ac96a02e5964513eaa2f"
+}

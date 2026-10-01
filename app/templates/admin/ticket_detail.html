@@ -1303,6 +1303,15 @@
               <div class="card__title-group">
                 <h2 class="card__title">Add a reply</h2>
                 <button type="button" class="button button--secondary button--small" data-canned-responses-open>Use canned response</button>
+                {% if ticket_suggest_reply_available %}
+                  <button
+                    type="button"
+                    class="button button--secondary button--small"
+                    data-ticket-suggest-reply
+                    data-ticket-id="{{ ticket.id }}"
+                    title="Draft a reply from the resolution steps of direct matches and known issues"
+                  >Suggest reply</button>
+                {% endif %}
                 <button type="button" class="button button--secondary button--small" data-ticket-reply-cache-load data-ticket-reply-cache-target="ticket-reply-form" hidden>Load Previous Reply</button>
               </div>
               <div class="card__collapsible-meta">
@@ -1331,6 +1340,15 @@
                 data-ticket-reply-error
                 {% if not reply_error %}hidden{% endif %}
               >{{ reply_error or '' }}</p>
+              {% if ticket_suggest_reply_available %}
+                <div class="ticket-reply-suggestion" data-ticket-suggest-reply-panel hidden>
+                  <p class="ticket-reply-suggestion__status" role="status" aria-live="polite" data-ticket-suggest-reply-status></p>
+                  <div data-ticket-suggest-reply-sources hidden>
+                    <p class="text-muted">AI draft inserted below. Review it and remove the citation markers before sending. Sources:</p>
+                    <ul class="ticket-reply-suggestion__sources" data-ticket-suggest-reply-source-list></ul>
+                  </div>
+                </div>
+              {% endif %}
               <div class="ticket-reply-context" aria-label="Reply delivery details">
                 <span><strong>To:</strong> {{ ticket_requester_lookup_name or 'Requester' }}</span>
                 <span><strong>Channel:</strong> Email</span>

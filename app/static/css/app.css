@@ -13378,6 +13378,11 @@ a.service-card__ai-icon:hover {
   font-size: 0.84rem;
 }
 
+.ticket-reply-suggestion { padding: 0.65rem 0.8rem; border: 1px solid rgba(148, 163, 184, 0.28); border-radius: 0.55rem; font-size: 0.84rem; }
+.ticket-reply-suggestion__status { margin: 0; }
+.ticket-reply-suggestion__status[hidden] { display: none; }
+.ticket-reply-suggestion__sources { margin: 0.35rem 0 0; padding-left: 1.2rem; }
+
 .ticket-reply-worklog { padding: 0.65rem 0.8rem; border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 0.55rem; }
 .ticket-reply-worklog > summary { cursor: pointer; color: #e2e8f0; font-weight: 650; }
 .ticket-reply-worklog > summary span { margin-left: 0.4rem; color: #cbd5e1; font-size: 0.8rem; font-weight: 400; }
