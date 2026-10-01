@@ -2283,7 +2283,7 @@ def _build_menu_access_map(
         for key in (
             "menu.documentation_search", "menu.asset_photos",
             "menu.asset_relationships", "menu.processes", "menu.expirations",
-            "menu.websites",
+            "menu.websites", "menu.applications",
         ):
             promote(key, "write")
     if membership_data.get("is_admin"):
