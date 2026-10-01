@@ -1,11 +1,17 @@
 {% extends "base.html" %}
-{% block header_title %}<span class="header__title-text">System update history</span>{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">System update history</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="system-updates-filter">Filter updates</label>
+      <input id="system-updates-filter" type="search" class="form-input page-header-toolbar__search" placeholder="Filter updates" title="Status, revision, source…" data-table-filter="system-updates-table" />
+    </div>
+  </div>
+{% endblock %}
 {% block header_actions %}{% endblock %}
 {% block content %}
 <div class="management management--single"><section class="management__content">
-  <header class="management__header"><div><h1 class="management__title">System updates</h1><p class="management__subtitle">Rolling blue/green deployments and sanitized coordinator results. Times display in your local timezone.</p></div>
-    <label class="form-field"><span class="form-label">Filter updates</span><input class="form-input" type="search" data-table-filter="system-updates-table" placeholder="Status, revision, source…"></label>
-  </header>
+  <p class="management__subtitle">Rolling blue/green deployments and sanitized coordinator results. Times display in your local timezone.</p>
   {% set check = update_check | default({}, true) %}
   {% set is_docker = check.deployment == 'docker' %}
   {% macro version_label(value) %}{% if value %}<code>{{ value[:12] if not is_docker else value }}</code>{% else %}<span class="text-muted">Unknown</span>{% endif %}{% endmacro %}

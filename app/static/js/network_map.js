@@ -74,7 +74,7 @@
     return boxes.length > 0 && !boxes.some((box) => box.checked);
   };
 
-  const filters = document.querySelector('.nm-filters');
+  const filters = document.querySelector('[data-nm-filters]');
   filters?.addEventListener('submit', (event) => {
     event.preventDefault();
     if (noTypes(filters)) {

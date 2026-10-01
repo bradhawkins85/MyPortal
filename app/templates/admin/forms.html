@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 
 {% block header_title %}Forms admin{% endblock %}
+{% block header_actions %}
+  {% if opnform_base_url %}
+    <a class="button button--primary" href="{{ opnform_base_url }}" target="_blank" rel="noopener">Open OpnForm</a>
+  {% endif %}
+{% endblock %}
 
 {% block content %}
 <div class="admin-grid">
@@ -10,9 +15,6 @@
         <h2 class="card__title">Build with OpnForm</h2>
         <p class="card__subtitle">Design forms in OpnForm and manage granular visibility directly from the portal.</p>
       </div>
-      {% if opnform_base_url %}
-        <a class="button" href="{{ opnform_base_url }}" target="_blank" rel="noopener">Open OpnForm</a>
-      {% endif %}
     </header>
     <p class="text-muted">New forms stay private until you assign them to specific companies and users below.</p>
   </section>

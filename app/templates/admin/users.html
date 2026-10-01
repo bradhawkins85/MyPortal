@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 
-{% block header_title %}<span class="header__title-text">Users</span>{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Users</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="users-filter">Filter users</label>
+      <input id="users-filter" type="search" class="form-input page-header-toolbar__search" placeholder="Filter users" data-table-filter="users-table" />
+    </div>
+  </div>
+{% endblock %}
 
 {% block content %}
   <section class="card card--panel">
@@ -8,10 +16,6 @@
       <div>
         <h2 class="card__title">Active MyPortal users</h2>
         <p class="card__description">Review active portal accounts and remove access that is no longer needed.</p>
-      </div>
-      <div class="card__controls">
-        <input type="search" class="form-input" placeholder="Filter users" aria-label="Filter users"
-               data-table-filter="users-table" />
       </div>
     </header>
     <div class="table-wrapper">

@@ -1,15 +1,15 @@
 {% extends "base.html" %}
+{% block header_title %}<span class="header__title-text">{% if subscriptions_page %}Voice Monitor subscriptions{% else %}Voice Monitor{% endif %}</span>{% endblock %}
+{% block header_actions %}
+  {% if not subscriptions_page %}
+    <a class="button button--primary" href="/admin/voice-monitor/subscriptions">Manage subscriptions</a>
+  {% else %}
+    <a class="button button--ghost" href="/admin/voice-monitor">Back to Voice Monitor</a>
+  {% endif %}
+{% endblock %}
 {% block content %}
 <div class="admin-page">
-  <div class="admin-header">
-    <h1>{% if subscriptions_page %}Manage Voice Monitor Subscriptions{% else %}Voice Monitor{% endif %}</h1>
-    <p class="subtitle">Add the specific phone numbers that should be monitored and manage voice monitoring operations.</p>
-    {% if not subscriptions_page %}
-    <a class="button" href="/admin/voice-monitor/subscriptions">Manage Voice Monitor Subscriptions</a>
-    {% else %}
-    <a href="/admin/voice-monitor">Back to Voice Monitor</a>
-    {% endif %}
-  </div>
+  <p class="subtitle">Add the specific phone numbers that should be monitored and manage voice monitoring operations.</p>
 
   <section class="card" aria-labelledby="add-number-heading">
     <h2 id="add-number-heading">Add monitored number</h2>

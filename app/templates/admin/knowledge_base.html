@@ -1,7 +1,31 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}Knowledge base admin{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Knowledge base admin</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="kb-admin-filter">Filter articles</label>
+      <input
+        id="kb-admin-filter"
+        type="search"
+        class="form-input page-header-toolbar__search"
+        placeholder="Search articles"
+        title="Search titles, summaries and tags"
+        data-table-filter="kb-admin-table"
+      />
+      <div class="kb-cat__filters" role="group" aria-label="Filter by status" data-kb-status-filters>
+        <button type="button" class="kb-cat__filter is-active" data-kb-status-filter="" aria-pressed="true">All<span class="kb-cat__filter-count">{{ kb_status_counts.all }}</span></button>
+        <button type="button" class="kb-cat__filter" data-kb-status-filter="published" aria-pressed="false">Published<span class="kb-cat__filter-count">{{ kb_status_counts.published }}</span></button>
+        <button type="button" class="kb-cat__filter" data-kb-status-filter="draft" aria-pressed="false">Draft<span class="kb-cat__filter-count">{{ kb_status_counts.draft }}</span></button>
+        {% if kb_status_counts.in_review %}<button type="button" class="kb-cat__filter" data-kb-status-filter="in_review" aria-pressed="false">In review<span class="kb-cat__filter-count">{{ kb_status_counts.in_review }}</span></button>{% endif %}
+        {% if kb_status_counts.retired %}<button type="button" class="kb-cat__filter" data-kb-status-filter="retired" aria-pressed="false">Retired<span class="kb-cat__filter-count">{{ kb_status_counts.retired }}</span></button>{% endif %}
+        {% if kb_status_counts.overdue %}<button type="button" class="kb-cat__filter" data-kb-status-filter="overdue" aria-pressed="false">Review overdue<span class="kb-cat__filter-count">{{ kb_status_counts.overdue }}</span></button>{% endif %}
+      </div>
+      <input type="hidden" data-table-column-filter="status" data-table-column-filter-table="kb-admin-table" data-kb-status-input />
+    </div>
+  </div>
+{% endblock %}
 
 {% set scope_labels = {
   "anonymous": "Public",
@@ -28,24 +52,6 @@
 {% block content %}
 <div class="kb-cat">
   <section class="card card--panel">
-    <div class="kb-cat__toolbar">
-      <input
-        type="search"
-        class="form-input kb-cat__search"
-        placeholder="Search titles, summaries and tags"
-        aria-label="Filter articles"
-        data-table-filter="kb-admin-table"
-      />
-      <div class="kb-cat__filters" role="group" aria-label="Filter by status" data-kb-status-filters>
-        <button type="button" class="kb-cat__filter is-active" data-kb-status-filter="" aria-pressed="true">All<span class="kb-cat__filter-count">{{ kb_status_counts.all }}</span></button>
-        <button type="button" class="kb-cat__filter" data-kb-status-filter="published" aria-pressed="false">Published<span class="kb-cat__filter-count">{{ kb_status_counts.published }}</span></button>
-        <button type="button" class="kb-cat__filter" data-kb-status-filter="draft" aria-pressed="false">Draft<span class="kb-cat__filter-count">{{ kb_status_counts.draft }}</span></button>
-        {% if kb_status_counts.in_review %}<button type="button" class="kb-cat__filter" data-kb-status-filter="in_review" aria-pressed="false">In review<span class="kb-cat__filter-count">{{ kb_status_counts.in_review }}</span></button>{% endif %}
-        {% if kb_status_counts.retired %}<button type="button" class="kb-cat__filter" data-kb-status-filter="retired" aria-pressed="false">Retired<span class="kb-cat__filter-count">{{ kb_status_counts.retired }}</span></button>{% endif %}
-        {% if kb_status_counts.overdue %}<button type="button" class="kb-cat__filter" data-kb-status-filter="overdue" aria-pressed="false">Review overdue<span class="kb-cat__filter-count">{{ kb_status_counts.overdue }}</span></button>{% endif %}
-      </div>
-      <input type="hidden" data-table-column-filter="status" data-table-column-filter-table="kb-admin-table" data-kb-status-input />
-    </div>
     <div class="table-wrapper table-wrapper--short">
       <table class="table table--compact" id="kb-admin-table" data-table data-table-id="knowledge-base-admin">
         <thead>

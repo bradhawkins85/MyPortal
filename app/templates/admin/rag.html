@@ -1,19 +1,17 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% block header_title %}<span class="header__title-text">RAG Index</span>{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Trigger indexing", "variant": "primary", "attrs": {"data-rag-index-trigger": true}},
+    {"label": "Pause Matching", "attrs": {"data-rag-matching-pause": true}},
+    {"label": "Resume Matching", "attrs": {"data-rag-matching-resume": true}},
+    {"label": "Cleanup stale matches", "attrs": {"data-rag-matching-cleanup": true}},
+    {"label": "Cleanup finished jobs", "attrs": {"data-rag-jobs-cleanup": true}}
+  ], menu_id="rag-actions") }}
+{% endblock %}
 {% block content %}
-<section class="page-header">
-  <div>
-    <p class="eyebrow">Administration</p>
-    <h1>RAG Index</h1>
-    <p class="page-description">Monitor retrieval-augmented generation coverage and refresh the searchable index.</p>
-  </div>
-  <div class="button-row">
-    <button type="button" class="button button--ghost" data-rag-matching-pause>Pause Matching</button>
-    <button type="button" class="button button--ghost" data-rag-matching-resume>Resume Matching</button>
-    <button type="button" class="button button--ghost" data-rag-matching-cleanup>Cleanup stale matches</button>
-    <button type="button" class="button button--ghost" data-rag-jobs-cleanup>Cleanup finished jobs</button>
-    <button type="button" class="button" data-rag-index-trigger>Trigger indexing</button>
-  </div>
-</section>
+<p class="page-description">Monitor retrieval-augmented generation coverage and refresh the searchable index.</p>
 
 <div class="card card--panel" data-rag-diagnostics>
   <div class="card__header">

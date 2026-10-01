@@ -82,8 +82,8 @@
   }
 
   function bindCatalogue(root) {
-    const search = root.querySelector('[data-role-search]');
-    const filter = root.querySelector('[data-role-filter]');
+    const search = document.querySelector('[data-role-search]');
+    const filter = document.querySelector('[data-role-filter]');
     const items = Array.from(root.querySelectorAll('[data-role-item]'));
     const noResults = root.querySelector('[data-role-no-results]');
     if (!items.length) {

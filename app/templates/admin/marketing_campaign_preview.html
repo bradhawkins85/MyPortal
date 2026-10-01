@@ -1,7 +1,22 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}Preview — {{ campaign.name }}{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text" title="Preview — {{ campaign.name }}">Preview — {{ campaign.name }}</span>
+    {% if preview_recipients %}
+      <form method="get" class="page-header-toolbar">
+        <label class="visually-hidden" for="preview-recipient">Preview as</label>
+        <select id="preview-recipient" class="form-input page-header-toolbar__select" name="email" onchange="this.form.submit()" title="Preview as">
+          {% for recipient in preview_recipients %}
+            <option value="{{ recipient.email }}" {% if recipient.email == preview_recipient.email %}selected{% endif %}>{{ recipient.company_name or 'No company' }} — {{ recipient.name or recipient.email }}</option>
+          {% endfor %}
+        </select>
+        <noscript><button type="submit" class="button button--ghost button--compact">Show</button></noscript>
+      </form>
+    {% endif %}
+  </div>
+{% endblock %}
 
 {% block header_actions %}
   {{ page_header_actions([
@@ -18,19 +33,6 @@
         <p class="card__subtitle">As {{ preview_recipient.name or preview_recipient.email }}{% if preview_recipient.company_name %} at {{ preview_recipient.company_name }}{% endif %} will see it.</p>
       </div>
     </header>
-    {% if preview_recipients %}
-      <form method="get" class="form-grid">
-        <div class="form-field">
-          <label class="form-label" for="preview-recipient">Preview as</label>
-          <select id="preview-recipient" class="form-input" name="email">
-            {% for recipient in preview_recipients %}
-              <option value="{{ recipient.email }}" {% if recipient.email == preview_recipient.email %}selected{% endif %}>{{ recipient.company_name or 'No company' }} — {{ recipient.name or recipient.email }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-actions"><button type="submit" class="button button--ghost">Show</button></div>
-      </form>
-    {% endif %}
     <iframe title="Email preview" sandbox="" style="width:100%;min-height:640px;border:1px solid var(--border-color);border-radius:8px;background:#fff;" srcdoc="{{ rendered_email.html }}"></iframe>
   </section>
 </div>

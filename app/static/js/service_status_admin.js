@@ -165,9 +165,9 @@
 
   function initList(root) {
     const items = Array.from(root.querySelectorAll('[data-ssa-item]'));
-    const search = root.querySelector('[data-ssa-search]');
-    const filter = root.querySelector('[data-ssa-filter]');
-    const count = root.querySelector('[data-ssa-count]');
+    const search = document.querySelector('[data-ssa-search]');
+    const filter = document.querySelector('[data-ssa-filter]');
+    const count = document.querySelector('[data-ssa-count]');
     const noResults = root.querySelector('[data-ssa-no-results]');
     if (!items.length) {
       return;

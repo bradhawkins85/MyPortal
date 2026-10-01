@@ -2,7 +2,38 @@
 {% from "macros/header.html" import page_header_actions %}
 {% from "macros/counters.html" import counter_strip %}
 
-{% block header_title %}<span class="header__title-text">Message templates</span>{% endblock %}
+{% block header_title %}
+  {% set has_filters = filters.search or filters.content_type %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Message templates</span>
+    <form method="get" class="page-header-toolbar" role="search" aria-label="Filter message templates" data-mt-filter data-mt-server-filtered="{{ 'true' if has_filters else 'false' }}">
+      <label class="visually-hidden" for="mt-search">Search templates</label>
+      <input
+        id="mt-search"
+        type="search"
+        class="form-input page-header-toolbar__search"
+        name="search"
+        value="{{ filters.search or '' }}"
+        placeholder="Search templates"
+        title="Search by name, key or description"
+        data-mt-search
+      />
+      <div class="mt-segmented" role="group" aria-label="Format">
+        <label class="mt-segmented__option">
+          <input type="radio" name="content_type" value="" {% if not filters.content_type %}checked{% endif %} data-mt-type />
+          <span>All</span>
+        </label>
+        {% for option in content_type_options %}
+          <label class="mt-segmented__option">
+            <input type="radio" name="content_type" value="{{ option.value }}" {% if option.value == filters.content_type %}checked{% endif %} data-mt-type />
+            <span>{{ option.label }}</span>
+          </label>
+        {% endfor %}
+      </div>
+      <button type="submit" class="button button--ghost button--compact" data-mt-apply>Filter</button>
+    </form>
+  </div>
+{% endblock %}
 
 {% block header_actions %}
   {{ page_header_actions([
@@ -19,31 +50,6 @@
   ], total=template_counts.total, total_label="Templates" if not has_filters else "Matching") }}
 
   <section class="card card--panel mt" aria-label="Message templates">
-    <form method="get" class="scf-toolbar" role="search" aria-label="Filter message templates" data-mt-filter data-mt-server-filtered="{{ 'true' if has_filters else 'false' }}">
-      <input
-        type="search"
-        class="form-input scf-toolbar__search"
-        name="search"
-        value="{{ filters.search or '' }}"
-        placeholder="Search by name, key or description"
-        aria-label="Search templates"
-        data-mt-search
-      />
-      <div class="mt-segmented" role="group" aria-label="Format">
-        <label class="mt-segmented__option">
-          <input type="radio" name="content_type" value="" {% if not filters.content_type %}checked{% endif %} data-mt-type />
-          <span>All</span>
-        </label>
-        {% for option in content_type_options %}
-          <label class="mt-segmented__option">
-            <input type="radio" name="content_type" value="{{ option.value }}" {% if option.value == filters.content_type %}checked{% endif %} data-mt-type />
-            <span>{{ option.label }}</span>
-          </label>
-        {% endfor %}
-      </div>
-      <button type="submit" class="button button--ghost" data-mt-apply>Filter</button>
-    </form>
-
     {% if templates %}
       <ul class="scf-list" data-mt-list>
         {% for template in templates %}

@@ -22,7 +22,8 @@
   }
 
   function render(root, update) {
-    const tag = root.querySelector('[data-system-update-tag]');
+    // The status tag renders in the page header bar, outside root.
+    const tag = document.querySelector('[data-system-update-tag]');
     if (tag) {
       tag.textContent = update.status;
       tag.classList.remove(...TAG_CLASSES);

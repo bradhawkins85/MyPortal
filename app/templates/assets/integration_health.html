@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
-{% block header_title %}Integration health{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Integration health</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="health-search">Filter sources</label>
+      <input class="form-input page-header-toolbar__search" id="health-search" type="search" placeholder="Filter sources" data-table-filter="integration-health-table">
+    </div>
+  </div>
+{% endblock %}
 {% block title %}Integration health{% endblock %}
 {% block header_actions %}{{ page_header_actions([{"label": "View assets", "type": "link", "href": "/assets"}]) }}{% endblock %}
 {% block content %}
@@ -8,7 +16,6 @@
   <section class="card card--panel admin-grid__full">
     <header class="card__header"><div><h2 class="card__title">Source sync status</h2><p class="card__subtitle">Company-scoped operational status. Stale data remains usable; a current failure means the latest run failed.</p></div></header>
     <div class="card__body">
-      <div class="table-toolbar"><label class="visually-hidden" for="health-search">Filter sources</label><input class="input" id="health-search" type="search" placeholder="Filter sources" data-table-filter="integration-health-table"></div>
       <div class="table-wrapper"><table class="table" id="integration-health-table" data-table data-table-id="integration-health"><thead><tr><th data-sortable>Source</th><th data-sortable>Health</th><th data-sortable>Last success</th><th data-sortable>Last failure</th><th data-sortable>Processed</th><th>Error</th><th>Assets</th></tr></thead><tbody>
       {% for item in health %}{% set latest = item.latest %}{% set success = item.last_success %}{% set failure = item.last_failure %}<tr>
         <td>{{ item.source | replace('_', ' ') | title }}</td>

@@ -1,12 +1,36 @@
 {% extends "base.html" %}
 
-{% block header_title %}Subscriptions admin{% endblock %}
+{% block header_title %}
+<div class="page-header-bar">
+    <span class="header__title-text" title="Manage customer subscriptions and renewals">Subscriptions admin</span>
+    <form method="get" action="/admin/subscriptions" class="page-header-toolbar">
+        <label class="visually-hidden" for="subscriptions-filter-status">Status</label>
+        <select id="subscriptions-filter-status" name="status" class="form-input page-header-toolbar__select" onchange="this.form.submit()">
+            <option value="">All statuses</option>
+            <option value="active" {% if filters.status == 'active' %}selected{% endif %}>Active</option>
+            <option value="pending_renewal" {% if filters.status == 'pending_renewal' %}selected{% endif %}>Pending Renewal</option>
+            <option value="expired" {% if filters.status == 'expired' %}selected{% endif %}>Expired</option>
+            <option value="canceled" {% if filters.status == 'canceled' %}selected{% endif %}>Canceled</option>
+        </select>
+        <label class="visually-hidden" for="subscriptions-filter-category">Category</label>
+        <select id="subscriptions-filter-category" name="category" class="form-input page-header-toolbar__select" onchange="this.form.submit()">
+            <option value="">All Categories</option>
+            {% for category in categories %}
+            <option value="{{ category.id }}" {% if filters.category == category.id|string %}selected{% endif %}>
+                {{ category.name }}
+            </option>
+            {% endfor %}
+        </select>
+        <noscript><button type="submit" class="button button--ghost button--compact">Filter</button></noscript>
+    </form>
+</div>
+{% endblock %}
 
 {% block title %}Subscriptions - {{ app_name }}{% endblock %}
 
 {% block header_actions %}
 {% if is_super_admin %}
-<a class="button" href="/admin/subscriptions/create">Add external subscription</a>
+<a class="button button--primary" href="/admin/subscriptions/create">Add external subscription</a>
 {% endif %}
 {% endblock %}
 
@@ -16,42 +40,6 @@
     {% if success_message %}
     <div class="alert alert--success" role="status">{{ success_message }}</div>
     {% endif %}
-    <div class="admin-header">
-        <h1>Subscriptions</h1>
-        <p class="subtitle">Manage customer subscriptions and renewals</p>
-    </div>
-
-    <div class="filters">
-        <form method="get" action="/admin/subscriptions">
-            <div class="filter-row">
-                <label>
-                    Status:
-                    <select name="status">
-                        <option value="">All</option>
-                        <option value="active" {% if filters.status == 'active' %}selected{% endif %}>Active</option>
-                        <option value="pending_renewal" {% if filters.status == 'pending_renewal' %}selected{% endif %}>Pending Renewal</option>
-                        <option value="expired" {% if filters.status == 'expired' %}selected{% endif %}>Expired</option>
-                        <option value="canceled" {% if filters.status == 'canceled' %}selected{% endif %}>Canceled</option>
-                    </select>
-                </label>
-
-                <label>
-                    Category:
-                    <select name="category">
-                        <option value="">All Categories</option>
-                        {% for category in categories %}
-                        <option value="{{ category.id }}" {% if filters.category == category.id|string %}selected{% endif %}>
-                            {{ category.name }}
-                        </option>
-                        {% endfor %}
-                    </select>
-                </label>
-
-                <button type="submit">Filter</button>
-            </div>
-        </form>
-    </div>
-
     <div class="subscriptions-table">
         <table>
             <thead>

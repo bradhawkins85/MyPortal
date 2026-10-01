@@ -320,12 +320,46 @@ and the admin ticket detail page (`app/templates/admin/ticket_detail.html`).
         [Group by ▾] [Columns ▾] [Stats ▾]  Showing X of Y     [New ▾] [Tools ▾]
 ```
 
-- Keep the title short (one or two words). Wrap the controls in a flex row
-  (`.ticket-header-toolbar` is the reference) that wraps onto a second line
-  before the primary action and tools menu do.
+Every other list page uses the same pattern with the generic classes below,
+so the ticket-specific `.ticket-header-toolbar` is only needed on the ticket
+list. A typical page:
+
+```html
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Companies</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="companies-filter">Filter companies</label>
+      <input id="companies-filter" type="search"
+             class="form-input page-header-toolbar__search"
+             placeholder="Filter companies" data-table-filter="companies-table" />
+      <label class="page-header-toolbar__check">
+        <input type="checkbox" … /> <span>Show archived</span>
+      </label>
+      {{ table_column_picker("companies", companies_columns) }}
+    </div>
+  </div>
+{% endblock %}
+```
+
+| Class / macro | Use |
+|---|---|
+| `.page-header-bar` | Wrapper in `header_title`: title, then toolbar, then (optionally) a tools dropdown pushed to the right. |
+| `.page-header-toolbar` | The control row. Can be the `<form method="get">` itself; use `.page-header-toolbar__group` for a nested form or a cluster of controls. |
+| `__search`, `__select`, `__number` | Compact widths for search inputs, selects (including searchable selects) and small number inputs. |
+| `__check` | A muted inline checkbox label (Show archived, Show inactive). |
+| `__info` | Muted result count or summary (`3 services`, `Showing X of Y`). |
+| `page_header_filter_menu` (`macros/header.html`) | "Filters ▾" panel for pages with more fields than fit in the bar (audit logs). Keep search and the one or two most used filters in the bar; the rest go in the panel. |
+| `table_toolbar(…, header=true)` (`macros/tables.html`) | The standard table toolbar rendered for the header bar. |
+
+- Keep the title short (one or two words). The toolbar wraps onto a second
+  line before the header actions do; at 768 px and below it takes the full
+  width under the title.
 - Inputs and selects carry a `.visually-hidden` `<label>`, and use the
-  placeholder or first option for the visible hint. Buttons use
-  `button--compact`.
+  placeholder or first option for the visible hint. Put any longer hint in a
+  `title` attribute. Buttons use `button--compact`.
+- Selects in a GET filter form submit on change, so an "Apply" button is only
+  needed for free-text fields (or as a `<noscript>` fallback).
 - The "Showing X of Y" count is a muted text span with `data-table-info` and
   `aria-live="polite"`, not a row above the table.
 - The content area then starts with a full-width `counter_strip`, followed
@@ -333,6 +367,9 @@ and the admin ticket detail page (`app/templates/admin/ticket_detail.html`).
 - Scripts that drive these controls look them up with
   `document.querySelector`, not inside the content container, because the
   header renders outside it.
+- Pages built around several peer tables (IPAM, Defender) or around a form
+  or workspace (documentation search, rack designer) keep their per-section
+  controls in the content.
 
 **Record pages** (one ticket, company, asset…) make the record itself the
 header:
@@ -357,6 +394,11 @@ header:
   `data-confirm`) that says what will happen. Don't give them their own card.
 - Below 1100 px the header actions may wrap; the record name truncates with
   an ellipsis and keeps a `title` attribute with the full text.
+- Outside the ticket page, wrap the name and meta in
+  `<div class="page-header-bar page-header-bar--record">` with the meta in
+  `.page-header-bar__meta`. When a record page also has filters (SMB1001
+  controls), nest that block inside a `.page-header-bar` before the
+  `.page-header-toolbar`.
 
 ### Responsive breakpoints
 

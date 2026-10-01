@@ -3,9 +3,27 @@
 {% from "macros/counters.html" import counter_strip %}
 
 {% block header_title %}
-  <div class="header__title-content header__title-content--stacked">
-    <span class="header__title-text">Backup history</span>
-    <span class="header__title-meta">Manage per-company backup jobs and review reported status events.</span>
+  <div class="page-header-bar">
+    <span class="header__title-text" title="Manage per-company backup jobs and review reported status events.">Backup history</span>
+    <form method="get" action="/admin/backup-jobs" class="page-header-toolbar">
+      <label class="visually-hidden" for="filter-company">Company</label>
+      <select id="filter-company" name="company_id" class="form-input page-header-toolbar__select" onchange="this.form.submit()">
+        <option value="">All companies</option>
+        {% for company in backup_companies %}
+          <option value="{{ company.id }}" {% if backup_company_filter == company.id %}selected{% endif %}>{{ company.name }}</option>
+        {% endfor %}
+      </select>
+      <label class="visually-hidden" for="filter-status">Status</label>
+      <select id="filter-status" name="status_filter" class="form-input page-header-toolbar__select" onchange="this.form.submit()">
+        <option value="">All statuses</option>
+        {% for definition in backup_status_definitions %}
+          <option value="{{ definition.value }}" {% if backup_status_filter == definition.value %}selected{% endif %}>{{ definition.label }}</option>
+        {% endfor %}
+      </select>
+      {% if backup_company_filter or backup_status_filter %}
+        <a class="button button--ghost button--compact" href="/admin/backup-jobs">Reset filters</a>
+      {% endif %}
+    </form>
   </div>
 {% endblock %}
 
@@ -53,29 +71,6 @@
   </header>
 
   <div class="card__body">
-    <form method="get" action="/admin/backup-jobs" class="table-toolbar">
-      <div class="table-toolbar__field">
-        <label for="filter-company">Company</label>
-        <select id="filter-company" name="company_id" class="form-input" onchange="this.form.submit()">
-          <option value="">All companies</option>
-          {% for company in backup_companies %}
-            <option value="{{ company.id }}" {% if backup_company_filter == company.id %}selected{% endif %}>{{ company.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="table-toolbar__field">
-        <label for="filter-status">Status</label>
-        <select id="filter-status" name="status_filter" class="form-input" onchange="this.form.submit()">
-          <option value="">All statuses</option>
-          {% for definition in backup_status_definitions %}
-            <option value="{{ definition.value }}" {% if backup_status_filter == definition.value %}selected{% endif %}>{{ definition.label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="table-toolbar__field">
-        <a class="button button--ghost button--small" href="/admin/backup-jobs">Reset filters</a>
-      </div>
-    </form>
 
     <div class="table-wrapper">
       <table class="table" id="backup-jobs-table" data-table data-table-id="backup-jobs">

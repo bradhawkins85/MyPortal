@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 
-{% block header_title %}<span class="header__title-text">Sessions</span>{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Sessions</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="active-sessions-filter">Filter active sessions</label>
+      <input id="active-sessions-filter" type="search" class="form-input page-header-toolbar__search" placeholder="Filter sessions" data-table-filter="active-sessions-table" />
+    </div>
+  </div>
+{% endblock %}
 
 {% block content %}
   <section class="card card--panel">
@@ -8,15 +16,6 @@
       <div>
         <h2 class="card__title">Currently logged-in users</h2>
         <p class="card__description">Live authenticated browser sessions across the MyPortal platform.</p>
-      </div>
-      <div class="card__controls">
-        <input
-          type="search"
-          class="form-input"
-          placeholder="Filter active sessions"
-          aria-label="Filter active sessions"
-          data-table-filter="active-sessions-table"
-        />
       </div>
     </header>
     <div class="table-wrapper">

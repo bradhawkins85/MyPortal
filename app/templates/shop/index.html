@@ -13,9 +13,55 @@
 {% set showing_product_category = (current_category is number) and not show_packages and not show_featured %}
 {% set show_main_shop_card = current_category is not none and not showing_category_cards %}
 
-{% block header_title_content %}
-  <div class="header__title-content">
-    <span class="header__title-text">{{ super() }}</span>
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">{{ title | default('Shop') }}</span>
+    <div class="page-header-toolbar">
+      {# Keep the action same-origin so an internal HTTP proxy hop cannot leak
+         into the browser-facing URL and violate the form-action CSP. #}
+      <form method="get" action="{{ request.url_for('shop_page').path }}" class="page-header-toolbar__group" role="search">
+        {% if current_category is not none %}
+          <input type="hidden" name="category" value="{{ 'packages' if show_packages else current_category }}" />
+        {% endif %}
+        <input
+          type="search"
+          name="q"
+          class="form-input page-header-toolbar__search"
+          placeholder="{{ 'Search packages' if show_packages else 'Search featured products' if show_featured else 'Search products' }}"
+          aria-label="{{ 'Search packages' if show_packages else 'Search featured products' if show_featured else 'Search products' }}"
+          value="{{ search_term or '' }}"
+          data-shop-search
+        />
+        {% if not show_subscriptions %}
+          <label class="page-header-toolbar__check shop-out-of-stock-toggle">
+            <input
+              type="checkbox"
+              name="showOutOfStock"
+              value="1"
+              {% if show_out_of_stock %}checked{% endif %}
+              data-submit-on-change
+            />
+            <span>Show out of stock</span>
+          </label>
+        {% endif %}
+      </form>
+      {% if not showing_category_cards %}
+        <div class="shop-view-toggle" role="group" aria-label="Product display style" data-shop-view-toggle>
+          <button type="button" class="button button--ghost button--compact shop-view-toggle__button" data-shop-view="card" aria-pressed="true" title="Card view">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path fill="currentColor" d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6Z" />
+            </svg>
+            <span>Cards</span>
+          </button>
+          <button type="button" class="button button--ghost button--compact shop-view-toggle__button" data-shop-view="row" aria-pressed="false" title="Row view">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path fill="currentColor" d="M4 5h16v4H4V5Zm0 10h16v4H4v-4Z" />
+            </svg>
+            <span>Rows</span>
+          </button>
+        </div>
+      {% endif %}
+    </div>
   </div>
 {% endblock %}
 
@@ -56,52 +102,6 @@
     <header class="card__header shop-card-header">
       <div class="shop-card-header__title">
         <h2 class="card__title">{{ 'Product categories' if showing_category_cards else 'Available packages' if show_packages else 'Featured products' if show_featured else 'Available products' }}</h2>
-      </div>
-      <div class="card__controls shop-toolbar">
-        {# Keep the action same-origin so an internal HTTP proxy hop cannot leak
-           into the browser-facing URL and violate the form-action CSP. #}
-        <form method="get" action="{{ request.url_for('shop_page').path }}" class="shop-search-form" role="search">
-          {% if current_category is not none %}
-            <input type="hidden" name="category" value="{{ 'packages' if show_packages else current_category }}" />
-          {% endif %}
-          <input
-            type="search"
-            name="q"
-            class="form-input card__control"
-            placeholder="{{ 'Search packages' if show_packages else 'Search featured products' if show_featured else 'Search products' }}"
-            aria-label="{{ 'Search packages' if show_packages else 'Search featured products' if show_featured else 'Search products' }}"
-            value="{{ search_term or '' }}"
-            data-shop-search
-          />
-          {% if not show_subscriptions %}
-            <label class="checkbox card__control shop-out-of-stock-toggle">
-              <input
-                type="checkbox"
-                name="showOutOfStock"
-                value="1"
-                {% if show_out_of_stock %}checked{% endif %}
-                data-submit-on-change
-              />
-              <span>Show Out Of Stock Items</span>
-            </label>
-          {% endif %}
-        </form>
-        {% if not showing_category_cards %}
-          <div class="shop-view-toggle" role="group" aria-label="Product display style" data-shop-view-toggle>
-            <button type="button" class="button button--ghost button--sm shop-view-toggle__button" data-shop-view="card" aria-pressed="true" title="Card view">
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path fill="currentColor" d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6Z" />
-              </svg>
-              <span>Cards</span>
-            </button>
-            <button type="button" class="button button--ghost button--sm shop-view-toggle__button" data-shop-view="row" aria-pressed="false" title="Row view">
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path fill="currentColor" d="M4 5h16v4H4V5Zm0 10h16v4H4v-4Z" />
-              </svg>
-              <span>Rows</span>
-            </button>
-          </div>
-        {% endif %}
       </div>
     </header>
     {% if showing_category_cards %}

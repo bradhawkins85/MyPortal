@@ -1,13 +1,22 @@
 {% extends "base.html" %}
 {% from "macros/counters.html" import counter_strip %}
 
-{% block header_title %}Subscriptions{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Subscriptions</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="subscription-filter">Filter subscriptions</label>
+      <input type="search" id="subscription-filter" class="form-input page-header-toolbar__search" placeholder="Filter subscriptions" />
+      {% if company %}<span class="tag">{{ company.name }}</span>{% endif %}
+    </div>
+  </div>
+{% endblock %}
 
 {% block title %}Subscriptions{% endblock %}
 
 {% block header_actions %}
 {% if can_request_changes %}
-<a class="button" href="/subscriptions/create">Add external subscription</a>
+<a class="button button--primary" href="/subscriptions/create">Add external subscription</a>
 {% endif %}
 {% if is_super_admin %}
 <div class="header-title-menu">
@@ -56,9 +65,7 @@
 <section class="panel">
   <header class="panel__header">
     <div class="panel__meta">
-      {% if company %}<span class="tag">{{ company.name }}</span>{% endif %}
       <span class="text-muted">Active subscriptions</span>
-      <input type="search" id="subscription-filter" class="form-input" placeholder="Filter subscriptions" aria-label="Filter subscriptions" />
     </div>
   </header>
   <div class="panel__body">

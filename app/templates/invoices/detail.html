@@ -1,40 +1,35 @@
 {% extends "base.html" %}
-{% from "macros/header.html" import page_header_actions %}
+{% from "macros/header.html" import page_header_overflow %}
 
-{% block header_title %}Invoice{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar page-header-bar--record">
+    <span class="header__title-text" title="Invoice {{ invoice.invoice_number }}">{{ invoice.invoice_number }}</span>
+    <span class="page-header-bar__meta">
+      {% if invoice.status_slug %}<span class="status {{ invoice.status_class }}">{{ invoice.status_display }}</span>{% endif %}
+      <span>{{ invoice.amount_display }}</span>
+      {% if company %}<span>· {{ company.name }}</span>{% endif %}
+      <span>· Created {% if invoice.created_display %}<span data-utc="{{ invoice.created_iso }}">{{ invoice.created_display }}</span>{% else %}unknown{% endif %}</span>
+      <span>· {% if invoice.due_display %}Due {{ invoice.due_display }}{% else %}No due date{% endif %}</span>
+    </span>
+  </div>
+{% endblock %}
 
 {% block title %}{{ title }}{% endblock %}
 
 {% block header_actions %}
-  {{ page_header_actions([
-    {"label": "Back to invoices", "type": "link", "href": "/invoices"}
-  ]) }}
+  <div class="header-actions">
+    <a class="button button--ghost" href="/invoices">Back to invoices</a>
+    {% if can_delete_invoices %}
+      {{ page_header_overflow("invoice-actions", "Actions", [
+        {"label": "Delete invoice", "variant": "danger", "attrs": {"data-invoice-delete": invoice.id}}
+      ]) }}
+    {% endif %}
+  </div>
 {% endblock %}
 
 {% block content %}
 <div class="admin-grid admin-grid--columns">
   <section class="card card--panel admin-grid__full">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">{{ invoice.invoice_number }}</h2>
-        <p class="card__subtitle">
-          {% if company %}{{ company.name }} · {% endif %}
-          Created {% if invoice.created_display %}<span data-utc="{{ invoice.created_iso }}">{{ invoice.created_display }}</span>{% else %}unknown{% endif %}
-          · {% if invoice.due_display %}Due {{ invoice.due_display }}{% else %}No due date{% endif %}
-        </p>
-      </div>
-      <div class="card__controls">
-        {% if invoice.status_slug %}
-          <span class="status {{ invoice.status_class }}">{{ invoice.status_display }}</span>
-        {% endif %}
-        <span class="tag tag--large">{{ invoice.amount_display }}</span>
-        {% if can_delete_invoices %}
-        <button type="button" class="button button--danger button--small" data-invoice-delete="{{ invoice.id }}">
-          Delete invoice
-        </button>
-        {% endif %}
-      </div>
-    </header>
 
     {% if has_lines %}
     <div class="table-wrapper">

@@ -1,6 +1,28 @@
 {% extends "base.html" %}
 
-{% block header_title %}{{ 'Global invoices' if is_global_invoices else 'Invoices' }}{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">{{ 'Global invoices' if is_global_invoices else 'Invoices' }}</span>
+    <div class="page-header-toolbar">
+      {% if is_global_invoices %}<span class="tag">All companies</span>{% elif company %}<span class="tag">{{ company.name }}</span>{% endif %}
+      <label class="visually-hidden" for="{{ invoice_table_id }}-search">Search invoices</label>
+      <input
+        type="search"
+        id="{{ invoice_table_id }}-search"
+        class="form-input page-header-toolbar__search"
+        placeholder="Search invoices"
+        data-table-filter="{{ invoice_table_id }}-table"
+      />
+      <label class="visually-hidden" for="{{ invoice_table_id }}-status-filter">Filter by status</label>
+      <select id="{{ invoice_table_id }}-status-filter" class="form-input page-header-toolbar__select" data-table-column-filter="status" data-table-column-filter-table="{{ invoice_table_id }}-table">
+        <option value="">All statuses</option>
+        {% for status in status_options %}
+          <option value="{{ status }}">{{ status|replace('_', ' ')|title }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+{% endblock %}
 
 {% block header_actions %}
   {% from "macros/header.html" import page_header_actions %}
@@ -18,27 +40,6 @@
 {% block content %}
 <div class="admin-grid admin-grid--columns">
   <section class="card card--panel admin-grid__full">
-    <header class="card__header">
-      <div class="card__controls">
-        {% if is_global_invoices %}<span class="tag">All companies</span>{% elif company %}<span class="tag">{{ company.name }}</span>{% endif %}
-        <label class="visually-hidden" for="{{ invoice_table_id }}-search">Search invoices</label>
-        <input
-          type="search"
-          id="{{ invoice_table_id }}-search"
-          class="form-input"
-          placeholder="Search invoices"
-          aria-label="Search invoices"
-          data-table-filter="{{ invoice_table_id }}-table"
-        />
-        <label class="visually-hidden" for="{{ invoice_table_id }}-status-filter">Filter by status</label>
-        <select id="{{ invoice_table_id }}-status-filter" class="form-input" aria-label="Filter by status" data-table-column-filter="status" data-table-column-filter-table="{{ invoice_table_id }}-table">
-          <option value="">All statuses</option>
-          {% for status in status_options %}
-            <option value="{{ status }}">{{ status|replace('_', ' ')|title }}</option>
-          {% endfor %}
-        </select>
-      </div>
-    </header>
     <div class="invoice-summary">
       <div class="invoice-summary__item">
         <span class="invoice-summary__label">Total billed</span>

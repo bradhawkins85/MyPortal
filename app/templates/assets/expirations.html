@@ -2,7 +2,12 @@
 {% from "macros/header.html" import page_header_actions %}
 {% from "macros/tables.html" import data_table, table_toolbar, empty_state %}
 {% block title %}Expirations{% endblock %}
-{% block header_title %}<span class="header__title-text">Expirations</span>{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Expirations</span>
+    {{ table_toolbar("expiration-table", search=true, search_placeholder="Search expirations", columns=columns, header=true) }}
+  </div>
+{% endblock %}
 {% block header_actions %}
   {% set actions = [{"label": "Company view" if global_view else "Global view", "type": "link", "href": "/expirations" if global_view else "/expirations?scope=global"}] if is_super_admin else [] %}
   {{ page_header_actions(actions) }}
@@ -21,7 +26,6 @@
 <section class="card card--panel">
   <header class="card__header card__header--stacked">
     <p class="text-muted">Live dates from assets and accessible knowledge base articles. Source edits appear here automatically.</p>
-    {{ table_toolbar("expiration-table", search=true, search_placeholder="Search expirations", columns=columns) }}
   </header>
   {% if expirations %}
     {% call data_table(columns, table_id="expiration-table", columns=columns, aria_label="Expiration register") %}

@@ -1,7 +1,17 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}Cart{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Cart</span>
+    {% if cart_items %}
+      <div class="page-header-toolbar">
+        <label class="visually-hidden" for="cart-filter">Filter cart items</label>
+        <input id="cart-filter" type="search" class="form-input page-header-toolbar__search" placeholder="Filter cart" data-table-filter="cart-table" />
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}
 {% import "partials/stock_status.html" as stock_helpers %}
 
 {% block header_actions %}
@@ -13,21 +23,7 @@
 {% block content %}
 <section class="card card--panel cart-card">
   <header class="card__header card__header--stacked">
-    <div>
-      <h2 class="card__title">Cart</h2>
-      <p class="card__subtitle">Review and adjust quantities, then submit a purchase order.</p>
-    </div>
-    {% if cart_items %}
-    <div class="card__controls">
-      <input
-        type="search"
-        class="form-input card__control"
-        placeholder="Filter cart"
-        aria-label="Filter cart items"
-        data-table-filter="cart-table"
-      />
-    </div>
-    {% endif %}
+    <p class="card__subtitle">Review and adjust quantities, then submit a purchase order.</p>
   </header>
 
   {% if cart_items %}

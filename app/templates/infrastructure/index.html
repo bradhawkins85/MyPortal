@@ -2,13 +2,20 @@
 {% from "macros/tables.html" import table_column_picker %}
 {% block title %}IP addresses & racks{% endblock %}
 {% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/infrastructure.css') }}">{% endblock %}
-{% block header_title %}<span class="header__title-text">IP addresses &amp; racks</span>{% endblock %}
-{% block header_actions %}<a class="button button--secondary" href="/devices">Discovered devices</a>{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">IP addresses &amp; racks</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="ip-filter">Search IP addresses</label><input id="ip-filter" class="form-input page-header-toolbar__search" type="search" placeholder="Filter addresses" data-table-filter="ip-addresses">
+      {{ table_column_picker("ip-addresses", [{"key":"address","label":"Address"},{"key":"network","label":"Network"},{"key":"state","label":"State"},{"key":"dns","label":"DNS names"},{"key":"asset","label":"Asset"}]) }}
+    </div>
+  </div>
+{% endblock %}
+{% block header_actions %}<a class="button button--ghost" href="/devices">Discovered devices</a>{% endblock %}
 {% block content %}
 <div class="admin-grid admin-grid--columns infrastructure-page">
   <section class="card card--panel admin-grid__full">
     <header class="card__header card__header--stacked"><div><h2>IP address documentation</h2><p class="card__lede">Document subnets and names against the existing asset register. Scanner discoveries remain observations and are not duplicated here.</p></div>
-      <div class="card__controls"><label class="visually-hidden" for="ip-filter">Search IP addresses</label><input id="ip-filter" class="input" type="search" placeholder="Filter addresses" data-table-filter="ip-addresses">{{ table_column_picker("ip-addresses", [{"key":"address","label":"Address"},{"key":"network","label":"Network"},{"key":"state","label":"State"},{"key":"dns","label":"DNS names"},{"key":"asset","label":"Asset"}]) }}</div>
     </header>
     <div class="table-wrapper"><table class="table" data-table data-table-id="ip-addresses"><thead><tr><th data-column-key="address" data-sort="string">Address</th><th data-column-key="network" data-sort="string">Network</th><th data-column-key="state" data-sort="string">State</th><th data-column-key="dns" data-sort="string">DNS names</th><th data-column-key="asset" data-sort="string">Existing asset</th>{% if can_edit %}<th class="table__actions">Actions</th>{% endif %}</tr></thead><tbody>
       {% for address in addresses %}<tr><td data-column-key="address"><code>{{ address.address }}</code></td><td data-column-key="network">{{ address.network_name }}</td><td data-column-key="state"><span class="status status--{{ 'success' if address.state == 'assigned' else ('warning' if address.state == 'reserved' else 'neutral') }}">{{ address.state|title }}</span></td><td data-column-key="dns">{{ address.dns_names or '—' }}</td><td data-column-key="asset">{% if address.asset_id %}<a href="/assets/{{ address.asset_id }}">{{ address.asset_name }}</a>{% else %}—{% endif %}</td>{% if can_edit %}<td class="table__actions"><form method="post" action="/api/infrastructure/addresses/{{ address.id }}/delete" data-confirm="Remove this address documentation?">{% include "partials/csrf.html" %}<button class="button button--danger button--small">Remove</button></form></td>{% endif %}</tr>{% else %}<tr><td colspan="6">No addresses documented.</td></tr>{% endfor %}

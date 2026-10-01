@@ -2,7 +2,42 @@
 {% from "macros/header.html" import page_header_actions %}
 {% from "macros/counters.html" import counter_strip %}
 
-{% block header_title %}<span class="header__title-text">Issue tracker</span>{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Issue tracker</span>
+    <form method="get" action="/admin/issues" class="page-header-toolbar" role="search" data-iss-filters>
+      <label class="visually-hidden" for="iss-search">Search issues</label>
+      <input
+        id="iss-search"
+        type="search"
+        name="search"
+        class="form-input page-header-toolbar__search"
+        placeholder="Search issues"
+        title="Search issues and descriptions"
+        value="{{ search_term }}"
+        data-iss-search
+      />
+      <label class="visually-hidden" for="iss-filter-status">Status</label>
+      <select id="iss-filter-status" name="status" class="form-input page-header-toolbar__select" data-iss-filter data-searchable="off">
+        <option value="">Any status</option>
+        {% for option in issue_status_options %}
+          <option value="{{ option.value }}" {% if option.value == selected_status %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+      <label class="visually-hidden" for="iss-filter-company">Company</label>
+      <select id="iss-filter-company" name="companyId" class="form-input page-header-toolbar__select" data-iss-filter>
+        <option value="">All companies</option>
+        {% for option in company_options %}
+          <option value="{{ option.id }}" {% if option.id == selected_company_id %}selected{% endif %}>{{ option.name }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="button button--ghost button--compact" data-iss-apply>Apply</button>
+      {% if search_term or selected_status or selected_company_id %}
+        <a class="button button--ghost button--compact" href="/admin/issues">Clear filters</a>
+      {% endif %}
+    </form>
+  </div>
+{% endblock %}
 
 {% block header_actions %}
   {{ page_header_actions([
@@ -97,38 +132,6 @@
       </div>
     </header>
     <div class="card__body card__body--stacked">
-      <form method="get" action="/admin/issues" class="scf-toolbar iss-toolbar" role="search" data-iss-filters>
-        <input
-          type="search"
-          name="search"
-          class="form-input scf-toolbar__search"
-          placeholder="Search issues and descriptions"
-          aria-label="Search issues"
-          value="{{ search_term }}"
-          data-iss-search
-        />
-        <div class="iss-toolbar__filters">
-          <label class="visually-hidden" for="iss-filter-status">Status</label>
-          <select id="iss-filter-status" name="status" class="form-input" data-iss-filter data-searchable="off">
-            <option value="">Any status</option>
-            {% for option in issue_status_options %}
-              <option value="{{ option.value }}" {% if option.value == selected_status %}selected{% endif %}>{{ option.label }}</option>
-            {% endfor %}
-          </select>
-          <label class="visually-hidden" for="iss-filter-company">Company</label>
-          <select id="iss-filter-company" name="companyId" class="form-input" data-iss-filter>
-            <option value="">All companies</option>
-            {% for option in company_options %}
-              <option value="{{ option.id }}" {% if option.id == selected_company_id %}selected{% endif %}>{{ option.name }}</option>
-            {% endfor %}
-          </select>
-          <button type="submit" class="button button--ghost button--small" data-iss-apply>Apply</button>
-          {% if iss_filtered %}
-            <a class="button button--ghost button--small" href="/admin/issues">Clear filters</a>
-          {% endif %}
-        </div>
-      </form>
-
       {% if issues %}
         <ul class="scf-list iss-list" data-iss-list>
           {% for issue in issues %}

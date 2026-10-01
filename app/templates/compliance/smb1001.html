@@ -1,6 +1,36 @@
 {% extends "base.html" %}
 
-{% block header_title %}SMB1001{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <div class="page-header-bar page-header-bar--record">
+      <span class="header__title-text">SMB1001 compliance</span>
+      {% if company %}<span class="page-header-bar__meta">{{ company.name }}</span>{% endif %}
+    </div>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="smb1001-filter">Filter controls</label>
+      <input type="search" id="smb1001-filter" class="form-input page-header-toolbar__search" placeholder="Filter controls" />
+      <label class="visually-hidden" for="smb1001-status-filter">Filter by status</label>
+      <select id="smb1001-status-filter" class="form-input page-header-toolbar__select">
+        <option value="">All statuses</option>
+        <option value="outstanding">Outstanding</option>
+        <option value="not_started">Not started</option>
+        <option value="in_progress">In progress</option>
+        <option value="non_compliant">Non-compliant</option>
+        <option value="compliant">Compliant</option>
+        <option value="not_applicable">Not applicable</option>
+      </select>
+    </div>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  {% if company %}
+    {% if has_essential8_records and feature_pack_available('essential8') %}
+      <a href="/compliance/essential8" class="button button--ghost">Legacy Essential 8 records</a>
+    {% endif %}
+    <a href="/compliance/attestation-report.pdf" class="button button--primary">Export attestation PDF</a>
+  {% endif %}
+{% endblock %}
 
 {% block title %}SMB1001 Compliance{% endblock %}
 
@@ -17,21 +47,7 @@
 {% set next_tier = progress.next_tier %}
 <div class="management management--single compliance smb1001" data-layout>
   <section class="management__content">
-    <header class="management__header compliance__header">
-      <div>
-        <h1 class="management__title">SMB1001 compliance</h1>
-        <p class="management__subtitle">Work through the SMB1001 cyber security certification tiers, from Bronze to Diamond. Each tier includes every control from the tiers below it.</p>
-      </div>
-      {% if company %}
-      <div class="management__header-actions compliance__header-actions">
-        <span class="tag tag--muted">{{ company.name }}</span>
-        <a href="/compliance/attestation-report.pdf" class="button button--primary button--small">Export attestation PDF</a>
-        {% if has_essential8_records and feature_pack_available('essential8') %}
-        <a href="/compliance/essential8" class="button button--ghost button--small">Legacy Essential 8 records</a>
-        {% endif %}
-      </div>
-      {% endif %}
-    </header>
+    <p class="management__subtitle">Work through the SMB1001 cyber security certification tiers, from Bronze to Diamond. Each tier includes every control from the tiers below it.</p>
 
     <div class="card card--panel compliance-summary-card">
       <div class="compliance-summary__grid">
@@ -101,23 +117,6 @@
         </span>
       </div>
       {% endif %}
-    </div>
-
-    <div class="card card--panel">
-      <header class="card__header">
-        <div class="card__controls">
-          <input type="search" id="smb1001-filter" class="form-input" placeholder="Filter controls" aria-label="Filter controls" />
-          <select id="smb1001-status-filter" class="form-input" aria-label="Filter by status">
-            <option value="">All statuses</option>
-            <option value="outstanding">Outstanding</option>
-            <option value="not_started">Not started</option>
-            <option value="in_progress">In progress</option>
-            <option value="non_compliant">Non-compliant</option>
-            <option value="compliant">Compliant</option>
-            <option value="not_applicable">Not applicable</option>
-          </select>
-        </div>
-      </header>
     </div>
 
     <div class="compliance-requirements">

@@ -11,9 +11,11 @@
 
   document.querySelectorAll('[data-process-table]').forEach((root) => {
     const rows = [...root.querySelectorAll('tbody tr:not([data-empty])')];
-    const apply = () => { const term = (root.querySelector('[data-table-search]')?.value || '').toLowerCase(); const status = root.querySelector('[data-status-filter]')?.value || ''; rows.forEach(row => { row.hidden = !((row.dataset.search || '').toLowerCase().includes(term) && (!status || row.dataset.status === status)); }); };
-    root.querySelector('[data-table-search]')?.addEventListener('input', apply);
-    root.querySelector('[data-status-filter]')?.addEventListener('change', apply);
+    // Search and status filters render in the page header bar, outside root.
+    const controls = document.querySelector('[data-process-toolbar]') || root;
+    const apply = () => { const term = (controls.querySelector('[data-table-search]')?.value || '').toLowerCase(); const status = controls.querySelector('[data-status-filter]')?.value || ''; rows.forEach(row => { row.hidden = !((row.dataset.search || '').toLowerCase().includes(term) && (!status || row.dataset.status === status)); }); };
+    controls.querySelector('[data-table-search]')?.addEventListener('input', apply);
+    controls.querySelector('[data-status-filter]')?.addEventListener('change', apply);
     root.querySelectorAll('[data-sort]').forEach(button => button.addEventListener('click', () => { const key = button.dataset.sort; const body = root.querySelector('tbody'); rows.sort((a, b) => (a.dataset[key] || '').localeCompare(b.dataset[key] || '', undefined, {numeric: true})).forEach(row => body.append(row)); }));
   });
 

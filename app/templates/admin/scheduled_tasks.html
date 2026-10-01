@@ -1,7 +1,51 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 {% from "macros/scheduled_ticket_payload.html" import scheduled_ticket_payload %}
-{% block header_title %}<span class="header__title-text">{{ title | default('Scheduled Tasks') }}</span>{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">{{ title | default('Scheduled Tasks') }}</span>
+    <div class="page-header-toolbar sch-toolbar">
+      <label class="visually-hidden" for="sch-search">Search tasks</label>
+      <input id="sch-search" type="search" class="form-input page-header-toolbar__search" placeholder="Search tasks" title="Search tasks, companies or commands" data-sch-search />
+      <div class="page-header-toolbar__group sch-toolbar__filters">
+        {% if tasks %}
+          <details class="sch-types" data-sch-types>
+            <summary class="form-input sch-types__toggle"><span data-sch-types-label>All task types</span></summary>
+            <div class="sch-types__panel" role="group" aria-label="Task types to show">
+              <div class="sch-types__actions">
+                <button type="button" class="button button--ghost button--small" data-sch-types-all>Show all</button>
+                <button type="button" class="button button--ghost button--small" data-sch-types-none>Hide all</button>
+              </div>
+              <div class="sch-types__list">
+                {% for group in tasks | groupby('command_label') %}
+                  <label class="sch-types__option">
+                    <input type="checkbox" value="{{ group.grouper }}" data-sch-type checked />
+                    <span>{{ group.grouper }}</span>
+                    <span class="sch-types__count">{{ group.list | length }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+            </div>
+          </details>
+        {% endif %}
+        <label class="visually-hidden" for="sch-sort">Sort by</label>
+        <select class="form-input page-header-toolbar__select" id="sch-sort" data-sch-sort>
+          <option value="name">Sort by name</option>
+          <option value="next">Sort by next run</option>
+          <option value="last">Sort by last run</option>
+        </select>
+        <form method="get" class="sch-toolbar__inactive" data-sch-inactive-form>
+          <label class="scf-switch">
+            <input type="checkbox" name="show_inactive" value="1" data-sch-show-inactive {% if show_inactive %}checked{% endif %} />
+            <span class="scf-switch__track" aria-hidden="true"></span>
+            <span>Show paused</span>
+          </label>
+          <noscript><button type="submit" class="button button--ghost button--small">Apply</button></noscript>
+        </form>
+      </div>
+    </div>
+  </div>
+{% endblock %}
 
 {% block header_actions %}
   {{ page_header_actions([
@@ -48,46 +92,6 @@
       {% if tasks %}{{ sch_filter_tile('due', 'Due in 24 hours', none, 'info', 'tasks due to run in the next 24 hours') }}{% endif %}
       {% if show_inactive and paused_tasks %}{{ sch_filter_tile('paused', 'Paused', paused_tasks | length, 'warning', 'paused tasks') }}{% endif %}
       {% if calendar_hidden_tasks %}{{ sch_filter_tile('hidden', 'Hidden from calendar', calendar_hidden_tasks | length, 'neutral', 'tasks hidden from the schedule calendar') }}{% endif %}
-    </div>
-
-    <div class="scf-toolbar sch-toolbar">
-      <input type="search" class="form-input scf-toolbar__search" placeholder="Search tasks, companies or commands" aria-label="Search tasks" data-sch-search />
-      <div class="sch-toolbar__filters">
-        {% if tasks %}
-          <details class="sch-types" data-sch-types>
-            <summary class="form-input sch-types__toggle"><span data-sch-types-label>All task types</span></summary>
-            <div class="sch-types__panel" role="group" aria-label="Task types to show">
-              <div class="sch-types__actions">
-                <button type="button" class="button button--ghost button--small" data-sch-types-all>Show all</button>
-                <button type="button" class="button button--ghost button--small" data-sch-types-none>Hide all</button>
-              </div>
-              <div class="sch-types__list">
-                {% for group in tasks | groupby('command_label') %}
-                  <label class="sch-types__option">
-                    <input type="checkbox" value="{{ group.grouper }}" data-sch-type checked />
-                    <span>{{ group.grouper }}</span>
-                    <span class="sch-types__count">{{ group.list | length }}</span>
-                  </label>
-                {% endfor %}
-              </div>
-            </div>
-          </details>
-        {% endif %}
-        <label class="visually-hidden" for="sch-sort">Sort by</label>
-        <select class="form-input" id="sch-sort" data-sch-sort>
-          <option value="name">Sort by name</option>
-          <option value="next">Sort by next run</option>
-          <option value="last">Sort by last run</option>
-        </select>
-        <form method="get" class="sch-toolbar__inactive" data-sch-inactive-form>
-          <label class="scf-switch">
-            <input type="checkbox" name="show_inactive" value="1" data-sch-show-inactive {% if show_inactive %}checked{% endif %} />
-            <span class="scf-switch__track" aria-hidden="true"></span>
-            <span>Show paused</span>
-          </label>
-          <noscript><button type="submit" class="button button--ghost button--small">Apply</button></noscript>
-        </form>
-      </div>
     </div>
 
     <div class="oof__bulk sch-bulk" data-sch-bulk hidden role="region" aria-label="Selected tasks">

@@ -3,9 +3,25 @@
 {% from "macros/counters.html" import counter_strip %}
 
 {% block header_title %}
-  <div class="header__title-content header__title-content--stacked">
-    <span class="header__title-text">Service status</span>
-    <span class="header__title-meta">Keep customers informed about the services they rely on.</span>
+  {% set header_service_count = service_status_entries | length %}
+  <div class="page-header-bar">
+    <span class="header__title-text" title="Keep customers informed about the services they rely on.">Service status</span>
+    {% if service_status_entries %}
+      <div class="page-header-toolbar">
+        <label class="visually-hidden" for="ssa-search">Search services</label>
+        <input id="ssa-search" type="search" class="form-input page-header-toolbar__search" placeholder="Search services" title="Search services, tags or companies" data-ssa-search />
+        <label class="visually-hidden" for="ssa-filter">Show</label>
+        <select class="form-input page-header-toolbar__select" id="ssa-filter" data-ssa-filter>
+          <option value="">All services</option>
+          <option value="attention">Needs attention</option>
+          {% for definition in service_status_definitions %}
+            <option value="{{ definition.value }}">{{ definition.label }}</option>
+          {% endfor %}
+          {% if service_status_entries | rejectattr("is_active") | list %}<option value="inactive">Hidden from dashboards</option>{% endif %}
+        </select>
+        <span class="page-header-toolbar__info" data-ssa-count role="status" aria-live="polite">{{ header_service_count }} service{{ 's' if header_service_count != 1 }}</span>
+      </div>
+    {% endif %}
   </div>
 {% endblock %}
 
@@ -52,20 +68,6 @@
   </header>
   <div class="card__body card__body--stacked">
     {% if service_status_entries %}
-      <div class="scf-toolbar ssa__toolbar">
-        <input type="search" class="form-input scf-toolbar__search" placeholder="Search services, tags or companies" aria-label="Search services" data-ssa-search />
-        <label class="visually-hidden" for="ssa-filter">Show</label>
-        <select class="form-input ssa__filter" id="ssa-filter" data-ssa-filter>
-          <option value="">All services</option>
-          <option value="attention">Needs attention</option>
-          {% for definition in service_status_definitions %}
-            <option value="{{ definition.value }}">{{ definition.label }}</option>
-          {% endfor %}
-          {% if ssa_inactive_count %}<option value="inactive">Hidden from dashboards</option>{% endif %}
-        </select>
-        <span class="text-muted ssa__count" data-ssa-count role="status" aria-live="polite">{{ service_count }} service{{ 's' if service_count != 1 }}</span>
-      </div>
-
       <ul class="scf-list ssa__list" data-ssa-list>
         {% for service in service_status_entries %}
           {% set status_meta = service_status_lookup.get(service.status) %}
