@@ -4,11 +4,13 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 from fastapi import HTTPException
+from fastapi.responses import RedirectResponse
 from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader
 import pytest
 from starlette.datastructures import FormData
 from starlette.requests import Request
 
+from app import main as main_module
 from app.features.websites import routes
 from app.features.websites.routes import _form_payload
 
@@ -112,3 +114,22 @@ async def test_website_delete_returns_not_found_without_deleting(monkeypatch):
 
     assert exc.value.status_code == 404
     delete.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_web_context_sanitizes_auth_redirect_target(monkeypatch):
+    request = Request({"type": "http", "method": "GET", "path": "/websites", "headers": []})
+    monkeypatch.setattr(
+        main_module,
+        "_require_authenticated_user",
+        AsyncMock(return_value=(None, RedirectResponse(url="//evil.example/phish", status_code=303))),
+    )
+
+    user, company_id, membership, redirect = await routes._web_context(request)
+
+    assert user is None
+    assert company_id is None
+    assert membership is None
+    assert redirect is not None
+    assert redirect.status_code == 303
+    assert redirect.headers["location"] == "/login"

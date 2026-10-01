@@ -71,7 +71,12 @@ async def _web_context(request: Request, *, write: bool = False):
     from app import main as main_module
     user, redirect = await main_module._require_authenticated_user(request)
     if redirect:
-        return None, None, None, redirect
+        location = redirect.headers.get("location")
+        safe_location = main_module._sanitize_local_redirect_target(
+            location if isinstance(location, str) else None,
+            fallback="/login",
+        )
+        return None, None, None, RedirectResponse(url=safe_location, status_code=redirect.status_code)
     company_id = user.get("company_id")
     if company_id is None:
         raise HTTPException(status_code=400, detail="An active company is required")
