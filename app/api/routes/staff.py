@@ -7,7 +7,11 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
 from app.api.dependencies.auth import get_current_user, get_optional_user, require_super_admin
-from app.api.dependencies.api_keys import get_optional_api_key, require_api_key
+from app.api.dependencies.api_keys import (
+    get_optional_api_key,
+    require_api_key,
+    require_api_key_company_access,
+)
 from app.api.dependencies.database import require_database
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
@@ -349,6 +353,8 @@ async def create_staff_request(
     await _ensure_company_exists(company_id)
     if current_user is not None:
         await _require_staff_request_access(current_user, company_id)
+    else:
+        require_api_key_company_access(api_key_record or {}, company_id)
     payload_data = payload.model_dump(by_alias=False)
     payload_data.pop("company_id", None)
     custom_fields: dict = payload_data.pop("custom_fields", None) or {}
@@ -700,6 +706,7 @@ async def request_staff_offboarding(
             status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found"
         )
     company_id = int(staff["company_id"])
+    require_api_key_company_access(api_key_record, company_id)
     if payload.company_id is not None and payload.company_id != company_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
