@@ -15,7 +15,7 @@ from decimal import Decimal
 from html import escape
 from pathlib import Path, PurePosixPath
 from typing import Any
-from urllib.parse import parse_qsl, quote, urlencode, urlsplit
+from urllib.parse import parse_qsl, quote, unquote_to_bytes, urlencode, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
@@ -1442,17 +1442,28 @@ def _safe_next_path(value: str | None) -> str | None:
 
     if not value:
         return None
+
     candidate = value.strip()
-    if not candidate.startswith("/") or candidate.startswith("//"):
+    if not candidate:
         return None
-    if "\\" in candidate or any(ord(ch) < 32 for ch in candidate):
+
+    if _has_invalid_percent_encoding(candidate):
         return None
-    parts = urlsplit(candidate)
+    try:
+        normalized = unquote_to_bytes(candidate).decode("utf-8").replace("\\", "/")
+    except UnicodeDecodeError:
+        return None
+
+    if not normalized.startswith("/") or normalized.startswith("//"):
+        return None
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in normalized):
+        return None
+    parts = urlsplit(normalized)
     if parts.scheme or parts.netloc:
         return None
-    if candidate == "/login" or candidate.startswith(("/login?", "/logout")):
+    if normalized == "/login" or normalized.startswith(("/login?", "/logout")):
         return None
-    return candidate
+    return normalized
 
 
 def _login_redirect(request: Request) -> RedirectResponse:
@@ -3036,20 +3047,45 @@ def _sanitize_local_redirect_target(
     if not target:
         return fallback
 
-    parsed = URL(target)
+    if _has_invalid_percent_encoding(target):
+        return fallback
+    try:
+        normalized = unquote_to_bytes(target).decode("utf-8").replace("\\", "/")
+    except UnicodeDecodeError:
+        return fallback
+
+    parsed = URL(normalized)
     if parsed.scheme or parsed.netloc:
         return fallback
 
-    if not target.startswith("/") or target.startswith("//") or "\\" in target:
+    if not normalized.startswith("/") or normalized.startswith("//"):
         return fallback
 
-    if any(ord(char) < 32 for char in target):
+    if any(ord(char) < 32 or ord(char) == 127 for char in normalized):
         return fallback
 
-    if allowed_prefixes and not any(target.startswith(prefix) for prefix in allowed_prefixes):
+    if allowed_prefixes and not any(normalized.startswith(prefix) for prefix in allowed_prefixes):
         return fallback
 
-    return target
+    return normalized
+
+
+def _has_invalid_percent_encoding(value: str) -> bool:
+    """Return True when ``value`` contains malformed percent escapes."""
+    length = len(value)
+    index = 0
+    while index < length:
+        if value[index] == "%":
+            if index + 2 >= length:
+                return True
+            if value[index + 1] not in "0123456789ABCDEFabcdef":
+                return True
+            if value[index + 2] not in "0123456789ABCDEFabcdef":
+                return True
+            index += 3
+            continue
+        index += 1
+    return False
 
 
 
