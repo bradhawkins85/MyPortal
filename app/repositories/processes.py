@@ -5,6 +5,11 @@ from typing import Any
 
 from app.core.database import db
 
+_REFERENCE_TABLE_SQL = {
+    "assets": "SELECT id FROM assets WHERE id = %s AND company_id = %s",
+    "tickets": "SELECT id FROM tickets WHERE id = %s AND company_id = %s",
+}
+
 
 async def list_templates(company_id: int) -> list[dict[str, Any]]:
     return list(await db.fetch_all(
@@ -59,12 +64,10 @@ async def add_version(template_id: int, current_version: int,
 
 
 async def company_reference_exists(table: str, company_id: int, record_id: int) -> bool:
-    if table not in {"assets", "tickets"}:
+    query = _REFERENCE_TABLE_SQL.get(table)
+    if query is None:
         raise ValueError("Unsupported reference table")
-    row = await db.fetch_one(
-        "SELECT id FROM " + table + " WHERE id = %s AND company_id = %s",
-        (record_id, company_id),
-    )
+    row = await db.fetch_one(query, (record_id, company_id))
     return bool(row)
 
 
