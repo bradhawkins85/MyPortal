@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence
 
 from app.core.database import db
+from app.repositories import rag_vector_index
 
 
 async def get_document_by_source(
@@ -118,11 +119,14 @@ async def upsert_document(record: dict[str, Any]) -> int:
 
 
 async def deactivate_document(source_type: str, source_id: str) -> int:
-    return await db.execute_rowcount(
+    rowcount = await db.execute_rowcount(
         """UPDATE rag_documents SET is_active = 0, indexed_at = CURRENT_TIMESTAMP
            WHERE source_type = ? AND source_id = ? AND is_active = 1""",
         (source_type, source_id),
     )
+    if rowcount:
+        await rag_vector_index.remove_source(source_type, source_id)
+    return rowcount
 
 
 async def replace_chunks(document_id: int, chunks: Sequence[dict[str, Any]]) -> None:
@@ -173,6 +177,7 @@ async def replace_chunks(document_id: int, chunks: Sequence[dict[str, Any]]) -> 
                 ),
             )
 
+    await rag_vector_index.sync_document(document_id)
 
 async def list_active_chunks(
     *, embedding_model: str, source_types: Sequence[str] | None = None, limit: int = 10000
@@ -197,6 +202,35 @@ async def list_active_chunks(
         tuple(params),
     )
 
+
+async def list_active_chunks_by_ids(
+    *, embedding_model: str, chunk_ids: Sequence[int]
+) -> list[dict[str, Any]]:
+    """Return the active chunks among ``chunk_ids`` with the same shape as
+    :func:`list_active_chunks`, for rows chosen by the vector pre-filter."""
+    ids = list(dict.fromkeys(int(value) for value in chunk_ids))
+    rows: list[dict[str, Any]] = []
+    for start in range(0, len(ids), 1000):
+        batch = ids[start : start + 1000]
+        placeholders = ",".join("?" for _ in batch)
+        # Placeholder groups are derived only from normalised integer ids.
+        rows.extend(
+            await db.fetch_all(
+                f"""
+                SELECT c.id AS chunk_id, c.chunk_index, c.chunk_text, c.embedding_json,
+                       d.id AS document_id, d.source_type, d.source_id, d.company_id,
+                       d.title, d.url, d.permission_scope_json, d.metadata_json,
+                       d.indexed_at
+                FROM rag_chunks c
+                JOIN rag_documents d ON d.id = c.document_id
+                WHERE d.is_active = 1 AND c.is_active = 1 AND c.embedding_model = ?
+                  AND c.id IN ({placeholders})
+                """,  # nosec B608
+                (embedding_model, *batch),
+            )
+            or []
+        )
+    return rows
 
 async def health() -> dict[str, Any]:
     docs = await db.fetch_one(
@@ -375,6 +409,7 @@ async def delete_documents_by_ids(document_ids: Sequence[int]) -> int:
     await db.execute(
         f"DELETE FROM rag_documents WHERE id IN ({placeholders})", tuple(ids)  # nosec B608
     )
+    await rag_vector_index.remove_documents(ids)
     return len(ids)
 
 

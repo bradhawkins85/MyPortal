@@ -130,3 +130,135 @@ def test_retrieve_candidates_demotes_other_company_evidence_in_stored_score(monk
 
     assert [item["company_id"] for item in candidates] == [8, 7]
     assert candidates[0]["score"] > candidates[1]["score"]
+
+
+def _prefilter_row(chunk_id, company_id):
+    import json
+
+    return {
+        "chunk_id": chunk_id,
+        "document_id": chunk_id,
+        "source_type": "tickets",
+        "source_id": str(chunk_id),
+        "company_id": company_id,
+        "title": f"Printer jam {chunk_id}",
+        "chunk_text": f"Printer jam reported on floor {chunk_id}",
+        "embedding_json": json.dumps([1.0, 0.0]),
+        "metadata_json": "{}",
+        "permission_scope_json": json.dumps(
+            {"version": 1, "visibility": "company", "company_ids": [company_id]}
+        ),
+    }
+
+
+def _patch_prefilter(monkeypatch, rows_by_id, vector_pages, lexical_ids=()):
+    from unittest.mock import AsyncMock
+
+    calls = {"nearest": [], "full_scan": 0}
+
+    async def nearest(source_type, query_embedding, *, limit, offset=0):
+        calls["nearest"].append((limit, offset))
+        return list(vector_pages.get(offset, []))
+
+    async def lexical(source_type, text, *, limit):
+        return list(lexical_ids)
+
+    async def by_ids(*, embedding_model, chunk_ids):
+        return [rows_by_id[i] for i in chunk_ids if i in rows_by_id]
+
+    async def full_scan(**kwargs):
+        calls["full_scan"] += 1
+        return list(rows_by_id.values())
+
+    vector_index = rag_retrieval.rag_vector_index
+    monkeypatch.setattr(vector_index, "prefilter_ready", AsyncMock(return_value=True))
+    monkeypatch.setattr(vector_index, "nearest_chunk_ids", nearest)
+    monkeypatch.setattr(vector_index, "lexical_chunk_ids", lexical)
+    monkeypatch.setattr(rag_retrieval.rag_repo, "list_active_chunks_by_ids", by_ids)
+    monkeypatch.setattr(rag_retrieval.rag_repo, "list_active_chunks", full_scan)
+    monkeypatch.setattr(rag_retrieval, "embed_text", AsyncMock(return_value=[1.0, 0.0]))
+    return calls
+
+
+def _retrieve_as_company_member(monkeypatch, company_id):
+    import asyncio
+
+    async def static_policy(candidate, *, user, memberships, cache=None):
+        from app.services.rag_permissions import can_access_candidate
+
+        return can_access_candidate(candidate, user=user, memberships=memberships)
+
+    monkeypatch.setattr(rag_retrieval, "can_access_current_candidate", static_policy)
+    return asyncio.run(
+        rag_retrieval.retrieve_candidates(
+            "printer jam",
+            {"id": 5},
+            memberships=[{"company_id": company_id}],
+            source_filters=["tickets"],
+            min_score=0.0,
+        )
+    )
+
+
+def test_prefilter_scores_only_nearest_and_lexical_rows_and_keeps_permissions(
+    monkeypatch,
+):
+    rows = {1: _prefilter_row(1, 7), 2: _prefilter_row(2, 8), 3: _prefilter_row(3, 7)}
+    rows[3]["chunk_text"] = "Completely different wording about toner"
+    calls = _patch_prefilter(monkeypatch, rows, {0: [1, 2]}, lexical_ids=[3])
+
+    candidates = _retrieve_as_company_member(monkeypatch, 7)
+
+    assert calls["full_scan"] == 0
+    assert {item["company_id"] for item in candidates} == {7}
+    assert 2 not in {item["chunk_id"] for item in candidates}
+
+
+def test_prefilter_widens_vector_page_when_nearest_rows_are_unauthorised(monkeypatch):
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "rag_prefilter_top_k", 50)
+    monkeypatch.setattr(settings, "rag_active_chunk_limit", 1000)
+    rows = {i: _prefilter_row(i, 8) for i in range(1, 51)}
+    rows.update({i: _prefilter_row(i, 7) for i in range(51, 151)})
+    calls = _patch_prefilter(
+        monkeypatch,
+        rows,
+        {0: list(range(1, 51)), 50: list(range(51, 151))},
+    )
+
+    candidates = _retrieve_as_company_member(monkeypatch, 7)
+
+    assert calls["nearest"] == [(50, 0), (100, 50)]
+    assert calls["full_scan"] == 0
+    assert candidates and {item["company_id"] for item in candidates} == {7}
+
+
+def test_prefilter_failure_falls_back_to_full_scan(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    rows = {1: _prefilter_row(1, 7)}
+    calls = _patch_prefilter(monkeypatch, rows, {})
+    monkeypatch.setattr(
+        rag_retrieval.rag_vector_index,
+        "nearest_chunk_ids",
+        AsyncMock(side_effect=RuntimeError("vector index offline")),
+    )
+
+    candidates = _retrieve_as_company_member(monkeypatch, 7)
+
+    assert calls["full_scan"] == 1
+    assert [item["chunk_id"] for item in candidates] == [1]
+
+
+def test_vector_prefilter_is_never_ready_without_vector_support(monkeypatch):
+    import asyncio
+
+    from app.repositories import rag_vector_index
+
+    rag_vector_index.reset_state()
+    monkeypatch.setattr(rag_vector_index.db, "is_sqlite", lambda: True)
+
+    assert asyncio.run(rag_vector_index.prefilter_ready()) is False
+    rag_vector_index.reset_state()
