@@ -72,6 +72,7 @@ _DEFAULT_LAYOUT: tuple[tuple[str, ...] | tuple[str, str, str, tuple[str, ...]], 
         "server",
         (
             "/assets",
+            "/applications",
             "/devices",
             "/ipam",
             "/racks",
@@ -296,7 +297,34 @@ def resolve_stored_preferences(payload: Any) -> dict[str, Any]:
         defaults = build_default_sidebar_preferences()
         defaults["hidden"] = coerced["hidden"]
         return defaults
+    _place_new_default_items(coerced)
     return coerced
+
+
+def _place_new_default_items(preferences: dict[str, Any]) -> None:
+    """Put menu entries added to the default layout into their default group.
+
+    A key absent from a saved layout's order, hidden list and groups was
+    added after the user saved it. When the user still has the default group
+    that owns it, it joins that group after its default predecessor instead
+    of falling to the bottom of the menu ungrouped.
+    """
+
+    known = set(preferences["order"]) | set(preferences["hidden"])
+    groups_by_id = {group["id"]: group for group in preferences["groups"]}
+    for group in groups_by_id.values():
+        known.update(group["items"])
+    for default_group in build_default_sidebar_preferences()["groups"]:
+        target = groups_by_id.get(default_group["id"])
+        if target is None:
+            continue
+        previous: str | None = None
+        for item in default_group["items"]:
+            if item not in known:
+                index = target["items"].index(previous) + 1 if previous in target["items"] else len(target["items"])
+                target["items"].insert(index, item)
+                known.add(item)
+            previous = item
 
 
 async def get_user_sidebar_preferences(user_id: int) -> dict[str, Any]:

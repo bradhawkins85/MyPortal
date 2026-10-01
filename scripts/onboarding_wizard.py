@@ -284,6 +284,7 @@ FEATURES: tuple[Feature, ...] = (
     Feature("racks", "Racks", "Rack layouts, equipment and reservations.", packs=("racks",), parent="assets"),
     Feature("network_map", "Network Map", "Visual network topology maps.", packs=("network_map",)),
     Feature("automations", "Automations", "Scheduled and event-driven automations.", packs=("automations",)),
+    Feature("applications", "Applications", "Register of company applications, types, champions and product keys.", packs=("applications",)),
     Feature("processes", "Processes", "Reusable, versioned process templates and execution runs.", packs=("processes",)),
     Feature("knowledge_base", "Knowledge Base", "Knowledge base articles.", packs=("knowledge_base",)),
     Feature("notifications", "Notifications", "In-portal notifications and preferences.", packs=("notifications",)),

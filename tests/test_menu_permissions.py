@@ -134,7 +134,7 @@ def test_new_feature_permissions_default_to_no_access():
     permissions = normalize_menu_permissions(None)
     for key in (
         "menu.documentation_search", "menu.processes", "menu.ipam", "menu.racks", "menu.network_map",
-        "menu.expirations", "menu.websites", "menu.asset_photos",
+        "menu.expirations", "menu.websites", "menu.applications", "menu.asset_photos",
         "menu.asset_relationships", "menu.bcp_asset_links", "menu.credentials",
         "menu.credential_sharing",
     ):

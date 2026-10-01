@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "applications/_importance.html" import importance_badge %}
+{% block title %}{{ application.name }}{% endblock %}{% block header_title %}{{ application.name }}{% endblock %}
+{% block header_actions %}{% set actions = [] %}{% if can_write %}{% set _ = actions.append({"label":"Edit","type":"link","href":"/applications/" ~ application.id ~ "/edit","variant":"primary"}) %}{% endif %}{% set _ = actions.append({"label":"All applications","type":"link","href":"/applications"}) %}{{ page_header_actions(actions) }}{% endblock %}
+{% block content %}<div class="admin-grid admin-grid--columns">
+<section class="card card--panel"><header class="card__header"><h2 class="card__title">Details</h2></header><div class="card__body"><dl class="definition-list">
+<dt>Type</dt><dd>{{ application.type_name or 'No type' }}</dd>
+<dt>Version</dt><dd>{{ application.version or 'Not recorded' }}</dd>
+<dt>Importance</dt><dd>{{ importance_badge(application.importance, importance_labels) }}</dd>
+<dt>Application champion</dt><dd>{% if application.champion_display %}{{ application.champion_display }}{% if application.champion_email %} · <a href="mailto:{{ application.champion_email }}">{{ application.champion_email }}</a>{% endif %}{% else %}Unassigned{% endif %}</dd>
+<dt>Product key</dt><dd>{% if application.has_product_key %}<span data-product-key-value class="text-muted">••••••••••••</span> <button class="button button--small" type="button" data-product-key-reveal data-url="/api/applications/{{ application.id }}/product-key">Reveal</button> <button class="button button--small" type="button" data-product-key-copy hidden>Copy</button><span class="visually-hidden" role="status" data-product-key-status></span>{% else %}Not recorded{% endif %}</dd>
+</dl></div></section>
+<section class="card card--panel"><header class="card__header"><h2 class="card__title">Business impact</h2></header><div class="card__body"><p style="white-space: pre-line">{{ application.business_impact or 'Not documented.' }}</p></div></section>
+<section class="card card--panel"><header class="card__header"><h2 class="card__title">KB articles</h2></header><div class="card__body"><ul>{% for article in links.articles %}<li><a href="/knowledge-base/articles/{{ article.slug }}">{{ article.title }}</a></li>{% endfor %}{% for link in links.external %}<li><a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.title or link.url }}</a></li>{% endfor %}{% if not links.articles and not links.external %}<li class="text-muted">No linked KB articles.</li>{% endif %}</ul></div></section>
+<section class="card card--panel"><header class="card__header"><h2 class="card__title">Notes</h2></header><div class="card__body"><p style="white-space: pre-line">{{ application.notes or 'No notes' }}</p></div></section>
+</div>{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/applications.js') }}" defer></script>{% endblock %}
