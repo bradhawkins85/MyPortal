@@ -174,9 +174,9 @@
                       class="attachment-card__preview"
                       href="/api/tickets/{{ ticket.id }}/attachments/{{ attachment.id }}/download"
                       title="Open {{ attachment.original_filename or attachment.filename }}"
-                      {% if attachment.mime_type and attachment.mime_type.startswith('image/') %}data-attachment-image-preview{% endif %}
+                      {% if attachment.mime_type in ('image/jpeg', 'image/png', 'image/gif', 'image/webp') %}data-attachment-image-preview{% endif %}
                     >
-                      {% if attachment.mime_type and attachment.mime_type.startswith('image/') %}
+                      {% if attachment.mime_type in ('image/jpeg', 'image/png', 'image/gif', 'image/webp') %}
                         <img
                           src="/api/tickets/{{ ticket.id }}/attachments/{{ attachment.id }}/download?preview=true"
                           alt="Preview of {{ attachment.original_filename or attachment.filename }}"

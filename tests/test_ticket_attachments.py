@@ -282,6 +282,22 @@ def test_allowed_mime_types_include_whisperx_audio_formats():
     assert whisperx_audio_types <= attachments_service.ALLOWED_MIME_TYPES
 
 
+@pytest.mark.parametrize(
+    "mime_type",
+    ["application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp"],
+)
+def test_safe_preview_mime_types_can_render_inline(mime_type):
+    assert attachments_service.can_preview_inline(mime_type)
+
+
+@pytest.mark.parametrize(
+    "mime_type",
+    ["text/html", "image/svg+xml", "application/xml", None],
+)
+def test_active_content_mime_types_cannot_render_inline(mime_type):
+    assert not attachments_service.can_preview_inline(mime_type)
+
+
 def test_validate_file_upload_invalid_mime_type():
     """Test validation fails with invalid MIME type."""
     mock_file = MagicMock()
