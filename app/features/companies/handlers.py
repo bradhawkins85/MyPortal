@@ -16,6 +16,24 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 import aiomysql
 
+from app.security.menu_permissions import MENU_PERMISSION_MAP
+
+
+def _role_contains_admin_only_permissions(role_record: dict[str, Any]) -> bool:
+    """Return True when a role grants permissions reserved for super admins."""
+
+    permissions = (
+        role_record.get("menu_permissions") or role_record.get("permissions") or {}
+    )
+    if not isinstance(permissions, Mapping):
+        return False
+    return any(
+        level != "none"
+        and MENU_PERMISSION_MAP.get(key)
+        and MENU_PERMISSION_MAP[key].admin_only
+        for key, level in permissions.items()
+    )
+
 
 def _main():
     from app import main as main_module
@@ -1963,6 +1981,14 @@ async def admin_update_membership_role(company_id: int, user_id: int, request: R
     if not role_record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Role not found"
+        )
+    if (
+        not bool(current_user.get("is_super_admin"))
+        and _role_contains_admin_only_permissions(role_record)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super admins can assign roles with global administration permissions",
         )
 
     updated = await membership_repo.update_membership(

@@ -4,11 +4,12 @@ from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from fastapi import status
+from fastapi import HTTPException, status
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
 
 from app import main
+from app.features.companies import handlers as company_handlers
 from app.repositories import company_memberships as membership_repo
 from app.schemas.memberships import MembershipUpdate
 
@@ -41,7 +42,7 @@ async def test_admin_update_membership_role_saves(monkeypatch):
         AsyncMock(return_value=(current_user, None)),
     )
     monkeypatch.setattr(
-        main,
+        company_handlers,
         "_ensure_company_permission",
         AsyncMock(return_value=None),
     )
@@ -62,11 +63,58 @@ async def test_admin_update_membership_role_saves(monkeypatch):
     log_mock = AsyncMock()
     monkeypatch.setattr(main.audit_service, "log_action", log_mock)
 
-    response = await main.admin_update_membership_role(1, 2, request)
+    response = await company_handlers.admin_update_membership_role(1, 2, request)
 
     assert response.status_code == status.HTTP_200_OK
     update_mock.assert_awaited_once_with(5, role_id=3)
     log_mock.assert_awaited_once()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_admin_update_membership_role_blocks_admin_only_role_for_company_admin(
+    monkeypatch,
+):
+    request = _make_request()
+
+    monkeypatch.setattr(request, "form", AsyncMock(return_value={"roleId": "99"}))
+
+    current_user = {"id": 7, "is_super_admin": False}
+    monkeypatch.setattr(
+        main,
+        "_require_authenticated_user",
+        AsyncMock(return_value=(current_user, None)),
+    )
+    monkeypatch.setattr(
+        company_handlers,
+        "_ensure_company_permission",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        main.membership_repo,
+        "get_membership_by_company_user",
+        AsyncMock(return_value={"id": 5, "role_id": 2}),
+    )
+    monkeypatch.setattr(
+        main.role_repo,
+        "get_role_by_id",
+        AsyncMock(
+            return_value={
+                "id": 99,
+                "permissions": {
+                    "menu.admin.technician": "write",
+                    "menu.tickets": "write",
+                },
+            }
+        ),
+    )
+    update_mock = AsyncMock()
+    monkeypatch.setattr(main.membership_repo, "update_membership", update_mock)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await company_handlers.admin_update_membership_role(1, 2, request)
+
+    assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+    update_mock.assert_not_awaited()
 
 
 @pytest.mark.anyio("asyncio")
