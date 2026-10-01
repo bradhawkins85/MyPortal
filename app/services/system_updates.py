@@ -199,7 +199,8 @@ async def _release_changes(client: httpx.AsyncClient, installed: str, latest: st
         releases.extend(batch)
         # Releases are listed newest first: stop once a page reaches the installed one.
         reached_installed = any(
-            installed and not _version_newer(str(item.get("tag_name") or ""), installed)
+            not _version_newer(str(item.get("tag_name") or ""), installed)
+            if installed else str(item.get("tag_name") or "") == latest
             for item in batch
         )
         if len(batch) < 100 or reached_installed:
@@ -210,6 +211,9 @@ async def _release_changes(client: httpx.AsyncClient, installed: str, latest: st
         if release.get("draft") or release.get("prerelease") or not _TAG_RE.fullmatch(tag):
             continue
         if not _version_newer(tag, installed) or _version_newer(tag, latest):
+            continue
+        if not installed and tag != latest:
+            # Without a starting version only the target release is known to apply.
             continue
         items, notes = _parse_release_notes(str(release.get("body") or ""))
         html_url = str(release.get("html_url") or "")
@@ -275,27 +279,25 @@ async def _commit_changes(client: httpx.AsyncClient, installed: str, latest: str
     }
 
 
-async def list_changes(check: dict[str, Any], *, refresh: bool = False) -> dict[str, Any]:
-    """List what changed between the installed and the latest version.
-
-    Docker installs list the published releases (with their notes) newer than
-    the installed release; bare-metal installs list the commits on main since
-    the installed revision.  Failures are reported in ``error``, never raised.
-    """
-    deployment = str(check.get("deployment") or deployment_type())
-    installed = str(check.get("installed") or "")
-    latest = str(check.get("latest") or "")
-    empty: dict[str, Any] = {
+def _empty_changes(deployment: str) -> dict[str, Any]:
+    return {
         "kind": "releases" if deployment == "docker" else "commits",
         "releases": [], "commits": [], "total": 0, "truncated": False,
         "change_count": 0, "compare_url": "", "error": None,
     }
-    if check.get("error") or not check.get("available") or not latest:
+
+
+async def _fetch_changes(
+    deployment: str, installed: str, latest: str, *, refresh: bool = False,
+) -> dict[str, Any]:
+    """List the releases (Docker) or commits (bare metal) from ``installed`` to ``latest``."""
+    empty = _empty_changes(deployment)
+    if not latest:
         return empty
     if deployment != "docker" and not (
         _REVISION_RE.fullmatch(installed) and _REVISION_RE.fullmatch(latest)
     ):
-        return {**empty, "error": "The installed revision is not a Git commit, so the changes cannot be listed."}
+        return {**empty, "error": "The starting revision is not a Git commit, so the changes cannot be listed."}
 
     key = (deployment, installed, latest)
     now = time.monotonic()
@@ -319,6 +321,86 @@ async def list_changes(check: dict[str, Any], *, refresh: bool = False) -> dict[
         return {**empty, "error": f"Could not list the changes: {reason}."}
     _changes_cache.update(key=key, at=now, value=result)
     return result
+
+
+async def list_changes(check: dict[str, Any], *, refresh: bool = False) -> dict[str, Any]:
+    """List what changed between the installed and the latest version.
+
+    Docker installs list the published releases (with their notes) newer than
+    the installed release; bare-metal installs list the commits on main since
+    the installed revision.  Failures are reported in ``error``, never raised.
+    """
+    deployment = str(check.get("deployment") or deployment_type())
+    if check.get("error") or not check.get("available"):
+        return _empty_changes(deployment)
+    return await _fetch_changes(
+        deployment, str(check.get("installed") or ""), str(check.get("latest") or ""),
+        refresh=refresh,
+    )
+
+
+def _previous_target(record: dict[str, Any], history: list[dict[str, Any]]) -> str:
+    """Infer where an update started: the target of the last earlier successful update."""
+    started = str(record.get("started_at") or "")
+    docker = record.get("mode") == "docker"
+    for earlier in history:  # newest first
+        if str(earlier.get("started_at") or "") >= started or earlier.get("id") == record.get("id"):
+            continue
+        if earlier.get("status") == "succeeded" and (earlier.get("mode") == "docker") == docker:
+            return str(earlier.get("target_revision") or "")
+    return ""
+
+
+async def changes_for_update(
+    record: dict[str, Any], history: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """Return the change list stored with an update, recording it if missing.
+
+    Updates requested since this was added store the version they started
+    from; older ones are backfilled from the previous successful update.  The
+    list is saved only once the update has finished, so it never races the
+    host job's progress reports, and never when GitHub could not be reached.
+    """
+    stored = record.get("changes")
+    if isinstance(stored, dict):
+        return stored
+    target = str(record.get("target_revision") or "")
+    if not target:
+        return None
+    from_revision = str(record.get("from_revision") or "")
+    inferred = False
+    if not from_revision:
+        from_revision = _previous_target(record, history if history is not None else system_update_history.list_updates())
+        inferred = bool(from_revision)
+    deployment = "docker" if record.get("mode") == "docker" else "baremetal"
+    if deployment != "docker" and not from_revision:
+        return None
+    if from_revision == target:
+        changes = _empty_changes(deployment)
+    else:
+        changes = await _fetch_changes(deployment, from_revision, target)
+    changes = {**changes, "from_revision": from_revision, "from_inferred": inferred}
+    if changes.get("error") or record.get("status") not in {"succeeded", "failed"}:
+        return changes
+    try:
+        system_update_history.attach_changes(str(record["id"]), changes)
+    except (KeyError, ValueError, OSError) as exc:
+        log_error("Could not store system update changes", update_id=record.get("id"), error=str(exc))
+    return changes
+
+
+async def backfill_changes(history: list[dict[str, Any]], *, limit: int = 5) -> None:
+    """Record the change list for a few finished updates that do not have one yet."""
+    missing = [
+        record for record in history
+        if record.get("status") in {"succeeded", "failed"} and not isinstance(record.get("changes"), dict)
+    ][:limit]
+    results = await asyncio.gather(
+        *(changes_for_update(record, history) for record in missing), return_exceptions=True,
+    )
+    for record, result in zip(missing, results):
+        if isinstance(result, dict) and not result.get("error"):
+            record["changes"] = result
 
 
 def _write_docker_request(update_id: str, target: str, requested_at: str) -> None:
@@ -483,7 +565,7 @@ async def request_update() -> dict[str, Any]:
         requested_at = datetime.now(timezone.utc).isoformat()
         record = system_update_history.create_pending(
             requested_at=requested_at, target_revision=str(check["latest"]),
-            source="web", mode="docker",
+            source="web", mode="docker", from_revision=str(check.get("installed") or ""),
             output="Upgrade requested. Waiting for the Docker host to pick it up (checked every minute).",
         )
         _write_docker_request(record["id"], str(check["latest"]), requested_at)

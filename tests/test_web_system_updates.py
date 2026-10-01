@@ -329,6 +329,86 @@ def test_changes_are_not_fetched_when_up_to_date_and_failures_are_reported(monke
     assert result["error"].startswith("Could not list the changes")
 
 
+def _release(tag):
+    return {
+        "tag_name": tag, "name": tag, "published_at": "2026-10-01T00:00:00Z",
+        "html_url": f"https://github.com/o/r/releases/tag/{tag}",
+        "body": f"* Change in {tag} by @brad in https://github.com/o/r/pull/1",
+    }
+
+
+def test_docker_request_records_the_starting_version(monkeypatch, history):
+    _docker(monkeypatch, installed="v1.0.0", latest="v1.1.0")
+    record = asyncio.run(system_updates.request_update())["record"]
+    assert system_update_history.get(record["id"])["from_revision"] == "v1.0.0"
+
+
+def test_finished_update_stores_its_changes(monkeypatch, history):
+    monkeypatch.setenv("MYPORTAL_DEPLOYMENT", "docker")
+    seen = _github_transport(monkeypatch, {"/repos/bradhawkins85/MyPortal/releases": [
+        _release("v1.2.0"), _release("v1.1.0"), _release("v1.0.0"),
+    ]})
+    record = system_update_history.create_pending(
+        requested_at="2026-09-29T00:00:00+00:00", target_revision="v1.2.0",
+        source="web", mode="docker", from_revision="v1.0.0",
+    )
+    running = asyncio.run(system_updates.changes_for_update(record))
+    assert [item["tag"] for item in running["releases"]] == ["v1.2.0", "v1.1.0"]
+    assert "changes" not in system_update_history.get(record["id"])  # never races the host job
+
+    finished = system_update_history.update(record["id"], status="succeeded", completed=True)
+    asyncio.run(system_updates.changes_for_update(finished))
+    stored = system_update_history.get(record["id"])["changes"]
+    assert stored["change_count"] == 2
+    assert stored["from_revision"] == "v1.0.0"
+    assert stored["from_inferred"] is False
+
+    calls = len(seen)
+    assert asyncio.run(system_updates.changes_for_update(system_update_history.get(record["id"]))) == stored
+    assert len(seen) == calls
+
+
+def test_backfill_infers_the_start_from_the_previous_successful_update(monkeypatch, history):
+    monkeypatch.setenv("MYPORTAL_DEPLOYMENT", "docker")
+    _github_transport(monkeypatch, {"/repos/bradhawkins85/MyPortal/releases": [
+        _release("v1.3.0"), _release("v1.2.0"), _release("v1.1.0"), _release("v1.0.0"),
+    ]})
+
+    def old_update(day, target, status):
+        record = system_update_history.create_pending(
+            requested_at=f"2026-09-{day:02d}T00:00:00+00:00", target_revision=target,
+            source="web", mode="docker",
+        )
+        return system_update_history.update(record["id"], status=status, completed=True)
+
+    first = old_update(1, "v1.1.0", "succeeded")
+    failed = old_update(2, "v1.2.0", "failed")
+    latest = old_update(3, "v1.3.0", "succeeded")
+    asyncio.run(system_updates.backfill_changes(system_update_history.list_updates()))
+
+    first_changes = system_update_history.get(first["id"])["changes"]
+    assert [item["tag"] for item in first_changes["releases"]] == ["v1.1.0"]  # no earlier start known
+    assert first_changes["from_revision"] == ""
+    failed_changes = system_update_history.get(failed["id"])["changes"]
+    assert [item["tag"] for item in failed_changes["releases"]] == ["v1.2.0"]
+    latest_changes = system_update_history.get(latest["id"])["changes"]
+    assert latest_changes["from_revision"] == "v1.1.0"  # skips the failed update
+    assert latest_changes["from_inferred"] is True
+    assert [item["tag"] for item in latest_changes["releases"]] == ["v1.3.0", "v1.2.0"]
+
+
+def test_backfill_does_not_store_github_failures(monkeypatch, history):
+    monkeypatch.setenv("MYPORTAL_DEPLOYMENT", "docker")
+    _github_transport(monkeypatch, {})
+    record = system_update_history.create_pending(
+        requested_at="2026-09-29T00:00:00+00:00", target_revision="v1.2.0",
+        source="web", mode="docker", from_revision="v1.0.0",
+    )
+    system_update_history.update(record["id"], status="succeeded", completed=True)
+    asyncio.run(system_updates.backfill_changes(system_update_history.list_updates()))
+    assert "changes" not in system_update_history.get(record["id"])
+
+
 # ---------------------------------------------------------------------------
 # Host coordinators
 # ---------------------------------------------------------------------------

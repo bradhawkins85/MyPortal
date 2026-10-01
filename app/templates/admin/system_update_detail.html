@@ -45,6 +45,24 @@
     {% endif %}
   </div>
 </div>
+{% if update_changes %}
+{% set changes = update_changes %}
+{% set is_docker = update.mode == 'docker' %}
+<div class="card card--panel" data-system-update-changes>
+  <header class="card__header"><div><h2 class="card__title">Changes in this update</h2>
+    <p class="card__subtitle">
+      {% if changes.error %}{{ changes.error }}
+      {% else %}
+        {% if is_docker %}{{ changes.total }} release{{ '' if changes.total == 1 else 's' }} and {{ changes.change_count }} change{{ '' if changes.change_count == 1 else 's' }}{% else %}{{ changes.total }} commit{{ '' if changes.total == 1 else 's' }} on main{% endif %}
+        {% if changes.from_revision %}from <code>{{ changes.from_revision if is_docker else changes.from_revision[:12] }}</code>{% endif %}
+        to <code>{{ update.target_revision if is_docker else (update.target_revision or '')[:12] }}</code>.
+        {% if changes.from_inferred %}The starting version was taken from the previous successful update.{% elif not changes.from_revision and is_docker %}The starting version wasn't recorded, so only the target release is shown.{% endif %}
+        {% if update.status == 'failed' %}This update failed, so these changes were not applied.{% elif update.status in ('pending', 'running') %}These changes apply once the update finishes.{% endif %}
+      {% endif %}
+    </p></div></header>
+  {% if not changes.error %}<div class="card__body">{% include "partials/system_update_changes.html" %}</div>{% endif %}
+</div>
+{% endif %}
 <div class="alert alert--danger" data-system-update-error {% if not update.error %}hidden{% endif %}><strong>Failure</strong><p data-system-update-error-text>{{ update.error or '' }}</p></div>
 <div class="card card--panel">
   <header class="card__header"><div><h2 class="card__title">Coordinator output</h2>

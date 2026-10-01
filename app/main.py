@@ -7194,6 +7194,8 @@ async def admin_system_updates(request: Request):
     refresh = request.query_params.get("refresh") == "1"
     update_check = await system_updates_service.check_for_update(refresh=refresh)
     pending_changes = await system_updates_service.list_changes(update_check, refresh=refresh)
+    if not update_check.get("error"):  # GitHub is reachable: record past updates' changes
+        await system_updates_service.backfill_changes(updates)
     status_counts = {
         "succeeded": sum(1 for update in updates if update.get("status") == "succeeded"),
         "failed": sum(1 for update in updates if update.get("status") == "failed"),
@@ -7259,10 +7261,11 @@ async def admin_system_update_detail(request: Request, update_id: str):
         update = system_update_history.get(update_id)
     except (KeyError, ValueError):
         raise HTTPException(status_code=404, detail="System update not found")
+    update_changes = await system_updates_service.changes_for_update(update)
     return await _render_template(
         "admin/system_update_detail.html", request, current_user,
         extra={
-            "title": "System update result", "update": update,
+            "title": "System update result", "update": update, "update_changes": update_changes,
             "host_setup_hint": system_updates_service.host_setup_hint(),
             "target_url": system_updates_service.revision_url(str(update.get("target_revision") or "")),
         },

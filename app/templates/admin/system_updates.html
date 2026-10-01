@@ -13,6 +13,7 @@
   {"key": "mode", "label": "Mode"},
   {"key": "target", "label": "Target revision"},
   {"key": "completed", "label": "Completed"},
+  {"key": "changes", "label": "Changes"},
 ] %}
 {% macro version_label(value) %}{% if value %}<code>{{ value[:12] if not is_docker else value }}</code>{% else %}<span class="text-muted">Unknown</span>{% endif %}{% endmacro %}
 
@@ -101,48 +102,7 @@
   </header>
   {% if check.available and not check.error and not changes.error %}
   <div class="card__body">
-    {% if is_docker %}
-      {% for release in changes.releases %}
-        <details class="system-updates__release"{% if loop.first %} open{% endif %}>
-          <summary>
-            <strong>{{ release.name }}</strong>
-            {% if release.published_at %}<span class="text-muted">Published <span data-utc="{{ release.published_at }}"></span></span>{% endif %}
-            <span class="tag">{{ release.changes | length }} change{{ '' if release.changes | length == 1 else 's' }}</span>
-          </summary>
-          {% if release.changes %}
-            <ul class="system-updates__changes">
-              {% for item in release.changes %}
-                <li>
-                  {{ item.title }}
-                  {% if item.number and item.url %}<a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">#{{ item.number }}</a>{% elif item.url %}<a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">details</a>{% endif %}
-                  {% if item.author %}<span class="text-muted">by {{ item.author }}</span>{% endif %}
-                </li>
-              {% endfor %}
-            </ul>
-          {% endif %}
-          {% if release.notes %}<p class="system-updates__notes">{{ release.notes }}</p>{% endif %}
-          {% if release.url %}<p><a href="{{ release.url }}" target="_blank" rel="noopener noreferrer">View {{ release.tag }} on GitHub</a></p>{% endif %}
-        </details>
-      {% else %}
-        <p class="text-muted">GitHub did not list any published releases in this range.</p>
-      {% endfor %}
-      {% if changes.truncated %}<p class="text-muted">Showing the newest {{ changes.releases | length }} of {{ changes.total }} releases.</p>{% endif %}
-    {% else %}
-      <ul class="system-updates__changes">
-        {% for commit in changes.commits %}
-          <li>
-            {{ commit.title }}
-            {% if commit.number %}<span class="text-muted">#{{ commit.number }}</span>{% endif %}
-            {% if commit.url %}<a href="{{ commit.url }}" target="_blank" rel="noopener noreferrer"><code>{{ commit.sha[:7] }}</code></a>{% else %}<code>{{ commit.sha[:7] }}</code>{% endif %}
-            {% if commit.author %}<span class="text-muted">by {{ commit.author }}</span>{% endif %}
-            {% if commit.date %}<span class="text-muted">· <span data-utc="{{ commit.date }}"></span></span>{% endif %}
-          </li>
-        {% else %}
-          <li class="text-muted">GitHub did not list any commits in this range.</li>
-        {% endfor %}
-      </ul>
-      {% if changes.truncated %}<p class="text-muted">GitHub lists the first 250 commits of {{ changes.total }}; use Compare on GitHub in Actions to see them all.</p>{% endif %}
-    {% endif %}
+    {% include "partials/system_update_changes.html" %}
   </div>
   {% endif %}
 </section>
@@ -156,6 +116,7 @@
       <th data-sort="string" data-column-key="mode">Mode</th>
       <th data-sort="string" data-column-key="target">Target revision</th>
       <th data-sort="date" data-column-key="completed">Completed</th>
+      <th data-sort="number" data-column-key="changes">Changes</th>
       <th class="table__actions">Result</th>
     </tr></thead>
     <tbody>{% for update in updates %}<tr data-system-update-group="{{ 'active' if update.status in ('pending', 'running') else update.status }}">
@@ -165,8 +126,10 @@
       <td data-label="Mode" data-column-key="mode">{{ update.mode }}</td>
       <td data-label="Target revision" data-column-key="target"><code>{{ update.target_revision[:12] }}</code></td>
       <td data-label="Completed" data-column-key="completed" data-value="{{ update.completed_at or '' }}">{% if update.completed_at %}<span data-utc="{{ update.completed_at }}"></span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+      {% set update_changes = update.changes if update.changes is mapping else none %}
+      <td data-label="Changes" data-column-key="changes" data-value="{{ update_changes.change_count if update_changes else '' }}">{% if update_changes %}{{ update_changes.change_count }} {{ 'change' if update_changes.change_count == 1 else 'changes' }}{% if update_changes.kind == 'releases' and update_changes.total %} <span class="text-muted">in {{ update_changes.total }} release{{ '' if update_changes.total == 1 else 's' }}</span>{% endif %}{% else %}<span class="text-muted">—</span>{% endif %}</td>
       <td data-label="Result" class="table__actions"><a class="button button--ghost button--small" href="/admin/system-updates/{{ update.id }}">Inspect</a></td>
-    </tr>{% else %}<tr><td colspan="7" class="table__empty">No system updates have been recorded yet.</td></tr>{% endfor %}</tbody>
+    </tr>{% else %}<tr><td colspan="8" class="table__empty">No system updates have been recorded yet.</td></tr>{% endfor %}</tbody>
   </table></div>
 </section>
 <script src="{{ static_url('/static/js/system_updates.js') }}" defer></script>
