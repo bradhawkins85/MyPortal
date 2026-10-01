@@ -166,10 +166,12 @@ def _match_history_dir_owner(fd: int, dir_fd: int | None) -> None:
 def create_pending(
     *, requested_at: str, target_revision: str, source: str,
     mode: str = "rolling", output: str = "Rolling blue/green update queued.",
+    from_revision: str | None = None,
 ) -> dict[str, Any]:
     record = {
         "id": str(uuid.uuid4()), "status": "pending", "mode": mode,
         "source": source, "target_revision": target_revision,
+        "from_revision": from_revision or None,
         "started_at": requested_at, "completed_at": None, "updated_at": _now(),
         "output": output, "error": None,
     }
@@ -191,6 +193,15 @@ def update(update_id: str, *, status: str, output: str | None = None,
         record["error"] = sanitise_output(error)
     if completed:
         record["completed_at"] = _now()
+    return _write(record)
+
+
+def attach_changes(update_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+    """Store the releases or commits an update applied, leaving its status alone."""
+    record = get(update_id)
+    record["changes"] = changes
+    if changes.get("from_revision") and not record.get("from_revision"):
+        record["from_revision"] = changes["from_revision"]
     return _write(record)
 
 

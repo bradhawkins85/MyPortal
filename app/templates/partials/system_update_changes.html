@@ -1,0 +1,44 @@
+{# Releases (Docker) or commits (bare metal) between two versions.
+   Expects `changes` (system_updates.list_changes / changes_for_update) and `is_docker`. #}
+    {% if is_docker %}
+      {% for release in changes.releases %}
+        <details class="system-updates__release"{% if loop.first %} open{% endif %}>
+          <summary>
+            <strong>{{ release.name }}</strong>
+            {% if release.published_at %}<span class="text-muted">Published <span data-utc="{{ release.published_at }}"></span></span>{% endif %}
+            <span class="tag">{{ release.changes | length }} change{{ '' if release.changes | length == 1 else 's' }}</span>
+          </summary>
+          {% if release.changes %}
+            <ul class="system-updates__changes">
+              {% for item in release.changes %}
+                <li>
+                  {{ item.title }}
+                  {% if item.number and item.url %}<a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">#{{ item.number }}</a>{% elif item.url %}<a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">details</a>{% endif %}
+                  {% if item.author %}<span class="text-muted">by {{ item.author }}</span>{% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+          {% if release.notes %}<p class="system-updates__notes">{{ release.notes }}</p>{% endif %}
+          {% if release.url %}<p><a href="{{ release.url }}" target="_blank" rel="noopener noreferrer">View {{ release.tag }} on GitHub</a></p>{% endif %}
+        </details>
+      {% else %}
+        <p class="text-muted">GitHub did not list any published releases in this range.</p>
+      {% endfor %}
+      {% if changes.truncated %}<p class="text-muted">Showing the newest {{ changes.releases | length }} of {{ changes.total }} releases.</p>{% endif %}
+    {% else %}
+      <ul class="system-updates__changes">
+        {% for commit in changes.commits %}
+          <li>
+            {{ commit.title }}
+            {% if commit.number %}<span class="text-muted">#{{ commit.number }}</span>{% endif %}
+            {% if commit.url %}<a href="{{ commit.url }}" target="_blank" rel="noopener noreferrer"><code>{{ commit.sha[:7] }}</code></a>{% else %}<code>{{ commit.sha[:7] }}</code>{% endif %}
+            {% if commit.author %}<span class="text-muted">by {{ commit.author }}</span>{% endif %}
+            {% if commit.date %}<span class="text-muted">· <span data-utc="{{ commit.date }}"></span></span>{% endif %}
+          </li>
+        {% else %}
+          <li class="text-muted">GitHub did not list any commits in this range.</li>
+        {% endfor %}
+      </ul>
+      {% if changes.truncated %}<p class="text-muted">GitHub lists the first 250 commits of {{ changes.total }}; {% if changes.compare_url %}<a href="{{ changes.compare_url }}" target="_blank" rel="noopener noreferrer">compare on GitHub</a> to see them all{% else %}compare on GitHub to see them all{% endif %}.</p>{% endif %}
+    {% endif %}

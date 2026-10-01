@@ -1736,6 +1736,7 @@ class SchedulerService:
                 target_revision=remote_head,
                 source=source or ("scheduled" if scheduled else "manual"),
                 mode=requested_mode,
+                from_revision=local_head,
             )
             requested_reason = (
                 "manual_restart_requested"
