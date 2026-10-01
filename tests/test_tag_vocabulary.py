@@ -210,3 +210,23 @@ async def test_create_synonym_route_rejects_cycles_and_duplicates(monkeypatch):
             current_user={"id": 5},
         )
     assert duplicate.value.status_code == 409
+
+
+@pytest.mark.anyio
+async def test_synonym_map_is_cached_until_cleared(monkeypatch):
+    calls = 0
+
+    async def fake_map():
+        nonlocal calls
+        calls += 1
+        return dict(SYNONYMS)
+
+    monkeypatch.setattr(tagging.db, "is_connected", lambda: True)
+    monkeypatch.setattr(tagging.tag_synonyms_repo, "get_synonym_map", fake_map)
+
+    assert await tagging.get_tag_synonym_map() == SYNONYMS
+    assert await tagging.get_tag_synonym_map() == SYNONYMS
+    assert calls == 1
+    tagging.clear_tag_vocabulary_cache()
+    await tagging.get_tag_synonym_map()
+    assert calls == 2

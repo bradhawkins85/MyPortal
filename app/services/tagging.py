@@ -144,25 +144,29 @@ PREFERRED_TAG_MIN_USES = 2
 _PREFERRED_TAG_TICKET_SAMPLE = 2000
 _MAX_SYNONYM_HOPS = 8
 
-_synonym_cache: tuple[float, dict[str, str]] | None = None
-_preferred_cache: tuple[float, list[str]] | None = None
+# Maps "synonyms" / "preferred" to (loaded_at, value).
+_vocabulary_cache: dict[str, tuple[float, object]] = {}
+
+
+def _cached(key: str) -> object | None:
+    entry = _vocabulary_cache.get(key)
+    if entry is not None and time.monotonic() - entry[0] < _VOCABULARY_CACHE_SECONDS:
+        return entry[1]
+    return None
 
 
 def clear_tag_vocabulary_cache() -> None:
     """Drop cached synonyms and preferred tags so the next lookup reloads them."""
 
-    global _synonym_cache, _preferred_cache
-    _synonym_cache = None
-    _preferred_cache = None
+    _vocabulary_cache.clear()
 
 
 async def get_tag_synonym_map() -> dict[str, str]:
     """Return the ``{variant_slug: canonical_slug}`` synonym table."""
 
-    global _synonym_cache
-    now = time.monotonic()
-    if _synonym_cache is not None and now - _synonym_cache[0] < _VOCABULARY_CACHE_SECONDS:
-        return _synonym_cache[1]
+    cached = _cached("synonyms")
+    if isinstance(cached, dict):
+        return cached
     if not db.is_connected():
         return {}
     try:
@@ -170,7 +174,7 @@ async def get_tag_synonym_map() -> dict[str, str]:
     except Exception as exc:  # pragma: no cover - defensive database guard
         log_error("Tag synonym lookup failed", error=str(exc))
         return {}
-    _synonym_cache = (now, synonyms)
+    _vocabulary_cache["synonyms"] = (time.monotonic(), synonyms)
     return synonyms
 
 
@@ -263,10 +267,9 @@ def rank_preferred_tags(
 async def get_preferred_tags(limit: int = PREFERRED_TAG_LIMIT) -> list[str]:
     """Return the most-used canonical tag slugs across tickets and articles."""
 
-    global _preferred_cache
-    now = time.monotonic()
-    if _preferred_cache is not None and now - _preferred_cache[0] < _VOCABULARY_CACHE_SECONDS:
-        return _preferred_cache[1][:limit]
+    cached = _cached("preferred")
+    if isinstance(cached, list):
+        return cached[:limit]
     if not db.is_connected():
         return []
     try:
@@ -280,7 +283,7 @@ async def get_preferred_tags(limit: int = PREFERRED_TAG_LIMIT) -> list[str]:
         log_error("Preferred tag lookup failed", error=str(exc))
         return []
     preferred = rank_preferred_tags(tag_lists, synonyms, excluded)
-    _preferred_cache = (now, preferred)
+    _vocabulary_cache["preferred"] = (time.monotonic(), preferred)
     return preferred[:limit]
 
 
