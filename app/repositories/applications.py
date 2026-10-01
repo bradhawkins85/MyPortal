@@ -83,25 +83,23 @@ async def update_application(
     ``clear_product_key`` is set, so editing other fields never needs the
     secret to round-trip through the form.
     """
-    assignments = [
-        "name = %s", "type_id = %s", "version = %s", "business_impact = %s", "importance = %s",
-        "champion_staff_id = %s", "champion_name = %s", "notes = %s",
-    ]
-    params: list[Any] = [
-        values["name"], values.get("type_id"), values.get("version"), values.get("business_impact"),
-        values["importance"], values.get("champion_staff_id"), values.get("champion_name"),
-        values.get("notes"),
-    ]
-    if product_key is not None:
-        assignments.append("product_key_encrypted = %s")
-        params.append(product_key)
-    elif clear_product_key:
-        assignments.append("product_key_encrypted = NULL")
-    assignments.append("updated_at = CURRENT_TIMESTAMP")
-    params.extend([application_id, company_id])
+    # One static statement: a new key wins, otherwise the clear flag decides
+    # between NULL and the stored value.
     await db.execute(
-        f"UPDATE applications SET {', '.join(assignments)} WHERE id = %s AND company_id = %s",
-        tuple(params),
+        """UPDATE applications SET name = %s, type_id = %s, version = %s,
+        business_impact = %s, importance = %s, champion_staff_id = %s,
+        champion_name = %s, notes = %s,
+        product_key_encrypted = CASE
+            WHEN %s IS NOT NULL THEN %s
+            WHEN %s = 1 THEN NULL
+            ELSE product_key_encrypted
+        END,
+        updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s AND company_id = %s""",
+        (values["name"], values.get("type_id"), values.get("version"), values.get("business_impact"),
+         values["importance"], values.get("champion_staff_id"), values.get("champion_name"),
+         values.get("notes"), product_key, product_key, 1 if clear_product_key else 0,
+         application_id, company_id),
     )
 
 

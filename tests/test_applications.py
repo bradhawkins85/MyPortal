@@ -296,6 +296,8 @@ async def test_repository_round_trip(sqlite_db):
 
     await repo.update_application(1, app_id, {**values, "version": "2027"}, product_key=None)
     assert await repo.get_product_key_ciphertext(1, app_id) == "cipher"
+    await repo.update_application(1, app_id, values, product_key="new-cipher", clear_product_key=True)
+    assert await repo.get_product_key_ciphertext(1, app_id) == "new-cipher"
     await repo.update_application(1, app_id, values, product_key=None, clear_product_key=True)
     assert (await repo.get_application(1, app_id))["has_product_key"] is False
 
