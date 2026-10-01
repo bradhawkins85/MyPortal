@@ -22,6 +22,7 @@ from typing import Sequence
 from app.core.config import get_settings
 from app.core.database import db
 from app.core.logging import log_info, log_warning
+from app.services.rag_embedding_identity import embedding_model
 
 _BACKFILL_BATCH = 500
 _COVERAGE_TTL_SECONDS = 300.0
@@ -29,7 +30,7 @@ _COVERAGE_TTL_SECONDS = 300.0
 _supported: bool | None = None
 _tables_ready: set[int] = set()
 _ready_until: dict[str, float] = {}
-_backfill_task: asyncio.Task[None] | None = None
+_backfill: dict[str, asyncio.Task[None]] = {}
 
 
 def _dimensions() -> int:
@@ -37,10 +38,6 @@ def _dimensions() -> int:
 
 
 def _embedding_model() -> str:
-    # Imported lazily: app.services.rag_index imports the rag_index repository,
-    # which imports this module.
-    from app.services.rag_index import embedding_model
-
     return embedding_model()
 
 
@@ -51,11 +48,11 @@ def table_name(dimensions: int | None = None) -> str:
 
 def reset_state() -> None:
     """Forget cached capability and readiness (tests, reconnects)."""
-    global _supported, _backfill_task
+    global _supported
     _supported = None
     _tables_ready.clear()
     _ready_until.clear()
-    _backfill_task = None
+    _backfill.clear()
 
 
 async def is_supported() -> bool:
@@ -268,7 +265,6 @@ async def prefilter_ready() -> bool:
     A partial index would silently drop documents from retrieval, so until a
     backfill completes the caller keeps using the full scan.
     """
-    global _backfill_task
     try:
         if not bool(get_settings().rag_vector_prefilter) or not await is_supported():
             return False
@@ -278,10 +274,9 @@ async def prefilter_ready() -> bool:
         state = await coverage()
         if state["missing"] == 0:
             _ready_until[key] = time.monotonic() + _COVERAGE_TTL_SECONDS
-        if (state["missing"] or state["stale"]) and (
-            _backfill_task is None or _backfill_task.done()
-        ):
-            _backfill_task = asyncio.create_task(_run_backfill(key))
+        running = _backfill.get("task")
+        if (state["missing"] or state["stale"]) and (running is None or running.done()):
+            _backfill["task"] = asyncio.create_task(_run_backfill(key))
         return state["missing"] == 0
     except Exception as exc:  # noqa: BLE001
         log_warning("RAG vector pre-filter check failed", error=str(exc))
