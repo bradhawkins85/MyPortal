@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from app.services import knowledge_base as knowledge_base_service
 from app.services import audit as audit_service
+from app.services import rag_relationships as rag_relationships_service
 from app.repositories import assets as asset_repo
 from app.repositories import roles as role_repo
 from app.repositories import customer_content_audience as audience_repo
@@ -149,7 +150,11 @@ async def admin_knowledge_base_page(request: Request):
         include_permissions=True,
     )
     now = datetime.now(timezone.utc)
-    counts = {"all": len(articles), "published": 0, "draft": 0, "in_review": 0, "retired": 0, "overdue": 0}
+    update_signals = await rag_relationships_service.kb_articles_needing_update()
+    counts = {
+        "all": len(articles), "published": 0, "draft": 0, "in_review": 0,
+        "retired": 0, "overdue": 0, "needs_update": 0,
+    }
     for article in articles:
         lifecycle = "published" if article.get("is_published") else str(article.get("lifecycle_status") or "draft")
         if lifecycle == "published" and not article.get("is_published"):
@@ -160,6 +165,9 @@ async def admin_knowledge_base_page(request: Request):
             review_due = review_due.replace(tzinfo=timezone.utc)
         article["review_overdue"] = bool(review_due and review_due < now and lifecycle != "retired")
         counts["overdue"] += int(article["review_overdue"])
+        signal = update_signals.get(int(article["id"])) if lifecycle != "retired" else None
+        article["needs_update"] = signal
+        counts["needs_update"] += int(bool(signal))
     extra = {
         "title": "Knowledge base admin",
         "kb_articles": jsonable_encoder(articles),

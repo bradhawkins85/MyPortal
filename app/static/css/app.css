@@ -8547,6 +8547,13 @@ body:has(.stf-modal.is-visible) {
   font-weight: 600;
 }
 
+.kb-cat__needs-update {
+  display: block;
+  color: var(--hf-warning);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
 .kb-cat__actions {
   display: flex;
   justify-content: flex-end;

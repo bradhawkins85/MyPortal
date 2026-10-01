@@ -866,3 +866,51 @@ async def cleanup_stale_matches_and_decisions() -> dict[str, int]:
         "queue_deleted": stale_queue,
         "processing_reset": reset_processing,
     }
+
+
+async def list_kb_supporting_on_tickets_fixed_elsewhere() -> list[dict[str, Any]]:
+    """Return KB/ticket pairs where the KB article only supported the ticket.
+
+    Each row is a current SUPPORTING match between an active knowledge base
+    article and an active ticket, where that ticket also has a current
+    DIRECT_MATCH with some other document. Relationships whose stored hashes no
+    longer match the documents are ignored, so editing the article clears its
+    history until the relationship engine re-evaluates it.
+    """
+    return await db.fetch_all(
+        """
+        SELECT kb.source_id AS article_id,
+               tk.source_id AS ticket_id,
+               tk.title AS ticket_title,
+               r.evaluated_at
+        FROM rag_relationships r
+        JOIN rag_documents s ON s.id = r.source_document_id
+        JOIN rag_documents t ON t.id = r.target_document_id
+        JOIN rag_documents kb
+          ON kb.id = CASE WHEN s.source_type = 'knowledge_base' THEN s.id ELSE t.id END
+        JOIN rag_documents tk
+          ON tk.id = CASE WHEN s.source_type = 'knowledge_base' THEN t.id ELSE s.id END
+        WHERE r.match_status = 'MATCH'
+          AND r.relationship_type = 'SUPPORTING'
+          AND s.is_active = 1 AND t.is_active = 1
+          AND r.source_hash = s.content_hash AND r.target_hash = t.content_hash
+          AND kb.source_type = 'knowledge_base'
+          AND tk.source_type = 'tickets'
+          AND EXISTS (
+              SELECT 1
+              FROM rag_relationships f
+              JOIN rag_documents fs ON fs.id = f.source_document_id
+              JOIN rag_documents ft ON ft.id = f.target_document_id
+              WHERE f.match_status = 'MATCH'
+                AND f.relationship_type = 'DIRECT_MATCH'
+                AND fs.is_active = 1 AND ft.is_active = 1
+                AND f.source_hash = fs.content_hash AND f.target_hash = ft.content_hash
+                AND (
+                    (f.source_document_id = tk.id AND f.target_document_id <> kb.id)
+                    OR (f.target_document_id = tk.id AND f.source_document_id <> kb.id)
+                )
+          )
+        ORDER BY r.evaluated_at DESC
+        """,
+        (),
+    )
