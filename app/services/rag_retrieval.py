@@ -13,8 +13,9 @@ import httpx
 from app.services.monitored_http import monitored_client
 
 from app.core.config import get_settings
-from app.core.logging import log_info
+from app.core.logging import log_info, log_warning
 from app.repositories import rag_index as rag_repo
+from app.repositories import rag_vector_index
 from app.services import company_access
 from app.services.ai_prompt_security import UntrustedRecord, build_prompt
 from app.services.rag_index import (
@@ -427,6 +428,126 @@ def _group_duplicate_candidates(
     return grouped
 
 
+async def _authorise_rows(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    user: Mapping[str, Any],
+    memberships: Sequence[Mapping[str, Any]],
+    cache: dict[tuple[str, str], bool],
+) -> list[Mapping[str, Any]]:
+    authorised: list[Mapping[str, Any]] = []
+    for row in rows:
+        candidate = {
+            "permission_scope": _loads(row.get("permission_scope_json"), {}),
+            "company_id": row.get("company_id"),
+            "source_type": row.get("source_type"),
+            "source_id": row.get("source_id"),
+        }
+        if await can_access_current_candidate(
+            candidate, user=user, memberships=memberships, cache=cache,
+        ):
+            authorised.append(row)
+    return authorised
+
+
+async def _prefiltered_source_rows(
+    source_type: str,
+    *,
+    profile: QueryProfile,
+    query_embedding: Sequence[float],
+    user: Mapping[str, Any],
+    memberships: Sequence[Mapping[str, Any]],
+    cache: dict[tuple[str, str], bool],
+) -> list[Mapping[str, Any]]:
+    """Fetch the nearest and best full-text chunks for one source type.
+
+    Authorisation runs on every fetched row, exactly as on the full scan. When
+    most of the nearest chunks belong to other tenants, the vector page is
+    widened until enough authorised rows exist or the active chunk limit is
+    reached, so a narrowly scoped user still gets a full candidate pool.
+    """
+    settings = get_settings()
+    top_k = int(settings.rag_prefilter_top_k)
+    scan_limit = max(top_k, int(settings.rag_active_chunk_limit))
+    wanted = max(25, top_k // 4)
+    model = embedding_model()
+    seen: set[int] = set()
+    authorised: list[Mapping[str, Any]] = []
+    lexical_ids = await rag_vector_index.lexical_chunk_ids(
+        source_type, profile.expanded, limit=top_k
+    )
+    offset, page = 0, top_k
+    while True:
+        vector_ids = await rag_vector_index.nearest_chunk_ids(
+            source_type, query_embedding, limit=page, offset=offset
+        )
+        ids = [i for i in vector_ids + lexical_ids if i not in seen]
+        lexical_ids = []
+        seen.update(ids)
+        if ids:
+            rows = await rag_repo.list_active_chunks_by_ids(
+                embedding_model=model, chunk_ids=ids
+            )
+            authorised.extend(
+                await _authorise_rows(
+                    rows, user=user, memberships=memberships, cache=cache
+                )
+            )
+        offset += page
+        if len(authorised) >= wanted or len(vector_ids) < page or offset >= scan_limit:
+            return authorised
+        page = min(page * 2, scan_limit - offset)
+
+
+async def _load_authorised_rows(
+    source_types: Sequence[str],
+    *,
+    profile: QueryProfile,
+    query_embedding: Sequence[float],
+    user: Mapping[str, Any],
+    memberships: Sequence[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    """Return the authorised chunk rows that hybrid scoring will consider.
+
+    This must precede metadata parsing, lexical matching, scoring and
+    reranking: inaccessible text must not affect either evidence or another
+    result's rank. With a ready vector index only the top-K nearest and
+    full-text matches per source are loaded; otherwise every active chunk up to
+    ``RAG_ACTIVE_CHUNK_LIMIT`` is scored, as before.
+    """
+    if await rag_vector_index.prefilter_ready():
+        cache: dict[tuple[str, str], bool] = {}
+        try:
+            rows: list[Mapping[str, Any]] = []
+            for source_type in source_types:
+                rows.extend(
+                    await _prefiltered_source_rows(
+                        source_type,
+                        profile=profile,
+                        query_embedding=query_embedding,
+                        user=user,
+                        memberships=memberships,
+                        cache=cache,
+                    )
+                )
+            return rows
+        except Exception as exc:  # noqa: BLE001 - fall back to the full scan
+            log_warning("RAG vector pre-filter failed; scoring all chunks", error=str(exc))
+    scanned: list[Mapping[str, Any]] = []
+    active_chunk_limit = int(get_settings().rag_active_chunk_limit)
+    for source_type in source_types:
+        scanned.extend(
+            await rag_repo.list_active_chunks(
+                embedding_model=embedding_model(),
+                source_types=[source_type],
+                limit=active_chunk_limit,
+            )
+        )
+    return await _authorise_rows(
+        scanned, user=user, memberships=memberships, cache={}
+    )
+
+
 async def retrieve_candidates(
     query: str,
     user: Mapping[str, Any],
@@ -436,6 +557,7 @@ async def retrieve_candidates(
     source_filters: Sequence[str] | None = None,
     limit: int | None = None,
     min_score: float | None = None,
+    rerank: bool = True,
 ) -> list[dict[str, Any]]:
     query_text = (query or "").strip()
     if not query_text:
@@ -463,32 +585,13 @@ async def retrieve_candidates(
         minimum_score=resolved_min_score,
     )
     query_embedding = await embed_text(profile.expanded)
-    rows: list[Mapping[str, Any]] = []
-    active_chunk_limit = int(settings.rag_active_chunk_limit)
-    for source_type in requested_source_types:
-        source_rows = await rag_repo.list_active_chunks(
-            embedding_model=embedding_model(),
-            source_types=[source_type],
-            limit=active_chunk_limit,
-        )
-        rows.extend(source_rows)
-    # This must precede metadata parsing, lexical matching, scoring and reranking:
-    # inaccessible text must not affect either evidence or another result's rank.
-    authorisation_cache: dict[tuple[str, str], bool] = {}
-    authorised_rows: list[Mapping[str, Any]] = []
-    for row in rows:
-        candidate = {
-            "permission_scope": _loads(row.get("permission_scope_json"), {}),
-            "company_id": row.get("company_id"),
-            "source_type": row.get("source_type"),
-            "source_id": row.get("source_id"),
-        }
-        if await can_access_current_candidate(
-            candidate, user=user, memberships=resolved_memberships,
-            cache=authorisation_cache,
-        ):
-            authorised_rows.append(row)
-    rows = authorised_rows
+    rows = await _load_authorised_rows(
+        requested_source_types,
+        profile=profile,
+        query_embedding=query_embedding,
+        user=user,
+        memberships=resolved_memberships,
+    )
     metadata_by_chunk = {
         int(r.get("chunk_id") or 0): (_loads(r.get("metadata_json"), {}) or {})
         for r in rows
@@ -570,7 +673,8 @@ async def retrieve_candidates(
         if len(diverse) >= max(1, resolved_limit):
             break
     diverse = _group_duplicate_candidates(diverse)
-    diverse = await _rerank(query_text, diverse)
+    if rerank:
+        diverse = await _rerank(query_text, diverse)
     log_info(
         "RAG hybrid retrieval completed",
         query=query_text,

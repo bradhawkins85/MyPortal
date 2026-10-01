@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
+from datetime import datetime, timezone
 
 from app.core.database import db
 
@@ -89,6 +91,59 @@ def migrate_legacy_ticket_attachments(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+async def m365_spam_worker(args: argparse.Namespace) -> None:
+    """Long-running worker that processes queued M365 spam search/purge requests."""
+    from app.services import m365_spam_purge as purge_service
+
+    await db.connect()
+    poll_interval = args.interval
+    print(f"M365 spam purge worker started (poll every {poll_interval}s). Ctrl+C to stop.")
+    try:
+        while True:
+            try:
+                processed = await purge_service.process_queued()
+                if processed:
+                    print(f"[{datetime.now(timezone.utc).isoformat(timespec='seconds')}] Processed {processed} request(s).")
+            except Exception as exc:
+                print(f"  Error: {exc}", file=sys.stderr)
+            await asyncio.sleep(poll_interval)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await db.disconnect()
+        print("Worker stopped.")
+
+
+async def m365_spam_process_once(args: argparse.Namespace) -> None:
+    """Process all currently queued M365 spam requests and exit (for cron)."""
+    from app.services import m365_spam_purge as purge_service
+
+    await db.connect()
+    try:
+        processed = await purge_service.process_queued()
+        print(f"Processed {processed} request(s).")
+    finally:
+        await db.disconnect()
+
+
+async def export_related_feedback(args: argparse.Namespace) -> None:
+    import json
+    from pathlib import Path
+
+    from app.repositories import rag_relationships as rel_repo
+
+    await db.connect()
+    try:
+        await db.run_migrations()
+        dataset = rel_repo.build_related_feedback_dataset(
+            await rel_repo.list_relationship_feedback_labels()
+        )
+    finally:
+        await db.disconnect()
+    Path(args.output).write_text(json.dumps(dataset, indent=2) + "\n")
+    print(f"labels={len(dataset['labels'])} output={args.output}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="manage.py")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -111,6 +166,23 @@ def main() -> None:
         help="move static/uploads/tickets files into private_uploads/tickets",
     )
     legacy_parser.add_argument("--dry-run", action="store_true")
+    # M365 spam purge commands
+    m365_worker_parser = sub.add_parser(
+        "m365-spam-worker",
+        help="long-running worker that processes queued M365 spam search/purge requests",
+    )
+    m365_worker_parser.add_argument(
+        "--interval", type=int, default=10, help="poll interval in seconds (default: 10)"
+    )
+    sub.add_parser(
+        "m365-spam-process-once",
+        help="process all currently queued M365 spam requests and exit (for cron)",
+    )
+    export_parser = sub.add_parser(
+        "export-related-feedback",
+        help="write technician Related-item votes as an evals/ai_quality dataset",
+    )
+    export_parser.add_argument("--output", default="evals/ai_quality/related_feedback.json")
     args = parser.parse_args()
     if args.command == "migrate":
         asyncio.run(migrate(args))
@@ -118,6 +190,12 @@ def main() -> None:
         asyncio.run(rebuild(args))
     elif args.command == "migrate-legacy-ticket-attachments":
         migrate_legacy_ticket_attachments(args)
+    elif args.command == "m365-spam-worker":
+        asyncio.run(m365_spam_worker(args))
+    elif args.command == "m365-spam-process-once":
+        asyncio.run(m365_spam_process_once(args))
+    elif args.command == "export-related-feedback":
+        asyncio.run(export_related_feedback(args))
 
 
 if __name__ == "__main__":

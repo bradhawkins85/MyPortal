@@ -440,12 +440,6 @@ async def test_sync_account_imports_email_successfully(monkeypatch):
         created_tickets.append(payload)
         return {"id": 99, "subject": payload.get("subject")}
 
-    async def fake_refresh_ai_summary(ticket_id: int) -> None:
-        pass
-
-    async def fake_refresh_ai_tags(ticket_id: int) -> None:
-        pass
-
     async def fake_find_existing_ticket(*_args, **_kwargs):
         return None
 
@@ -503,8 +497,7 @@ async def test_sync_account_imports_email_successfully(monkeypatch):
     monkeypatch.setattr(imap.imap_repo, "update_account", fake_update_account)
     monkeypatch.setattr(imap, "decrypt_secret", fake_decrypt_secret)
     monkeypatch.setattr(imap.tickets_service, "create_ticket", fake_create_ticket)
-    monkeypatch.setattr(imap.tickets_service, "refresh_ticket_ai_summary", fake_refresh_ai_summary)
-    monkeypatch.setattr(imap.tickets_service, "refresh_ticket_ai_tags", fake_refresh_ai_tags)
+    monkeypatch.setattr(imap.tickets_service, "schedule_ticket_ai_refresh", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(imap, "_find_existing_ticket_for_reply", fake_find_existing_ticket)
     monkeypatch.setattr(imap.company_repo, "get_company_by_email_domain", fake_get_company_by_email_domain)
     monkeypatch.setattr(imap.staff_repo, "get_staff_by_company_and_email", fake_get_staff_by_company_and_email)
@@ -533,110 +526,6 @@ async def test_sync_account_imports_email_successfully(monkeypatch):
 
     assert mailbox.logged_out
     assert account_updates and account_updates[0][0] == 5
-
-
-async def test_sync_account_imports_email_when_ai_tags_raises(monkeypatch):
-    """An exception from refresh_ticket_ai_tags must not prevent the email from being recorded as imported."""
-    recorded_messages: list[dict[str, object]] = []
-
-    monkeypatch.setattr(imap.system_state, "is_restart_pending", lambda: False)
-
-    async def fake_get_module(slug: str, *, redact: bool = True):
-        return {"enabled": True}
-
-    async def fake_get_account(account_id: int):
-        return {
-            "id": account_id,
-            "host": "mail.example.com",
-            "port": 993,
-            "username": "inbox",
-            "password_encrypted": "encrypted",
-            "folder": "INBOX",
-            "process_unread_only": True,
-            "mark_as_read": False,
-            "active": True,
-        }
-
-    async def fake_get_message(account_id: int, uid: str):
-        return None
-
-    async def fake_upsert_message(**payload):
-        recorded_messages.append(payload)
-
-    async def fake_update_account(account_id: int, **payload):
-        return None
-
-    def fake_decrypt_secret(value: str) -> str:
-        return "password"
-
-    async def fake_create_ticket(**_payload):
-        return {"id": 77, "subject": "Hello"}
-
-    async def fake_refresh_ai_summary(ticket_id: int) -> None:
-        pass
-
-    async def fake_refresh_ai_tags(ticket_id: int) -> None:
-        raise RuntimeError("AI tags failure")
-
-    async def fake_find_existing_ticket(*_args, **_kwargs):
-        return None
-
-    async def fake_get_company_by_email_domain(domain: str):
-        return None
-
-    async def fake_get_staff_by_company_and_email(company_id: int, email: str):
-        return None
-
-    async def fake_get_user_by_email(email: str):
-        return None
-
-    class SimpleMailbox:
-        def login(self, username: str, password: str) -> None:
-            pass
-
-        def select(self, folder: str, readonly: bool = False):
-            return "OK", []
-
-        def uid(self, command: str, *args):
-            if command == "search":
-                return "OK", [b"20"]
-            if command == "fetch":
-                raw_message = (
-                    b"From: Test <test@example.com>\r\n"
-                    b"Subject: Hello\r\n"
-                    b"Message-ID: <msg-20@example.com>\r\n"
-                    b"\r\n"
-                    b"Body"
-                )
-                return "OK", [(b"20 (FLAGS () BODY[] {4}", raw_message)]
-            return "OK", []
-
-        def logout(self) -> None:
-            pass
-
-    monkeypatch.setattr(imap.imaplib, "IMAP4_SSL", lambda host, port: SimpleMailbox())
-    monkeypatch.setattr(imap.modules_service, "get_module", fake_get_module)
-    monkeypatch.setattr(imap.imap_repo, "get_account", fake_get_account)
-    monkeypatch.setattr(imap.imap_repo, "get_message", fake_get_message)
-    monkeypatch.setattr(imap.imap_repo, "upsert_message", fake_upsert_message)
-    monkeypatch.setattr(imap.imap_repo, "update_account", fake_update_account)
-    monkeypatch.setattr(imap, "decrypt_secret", fake_decrypt_secret)
-    monkeypatch.setattr(imap.tickets_service, "create_ticket", fake_create_ticket)
-    monkeypatch.setattr(imap.tickets_service, "refresh_ticket_ai_summary", fake_refresh_ai_summary)
-    monkeypatch.setattr(imap.tickets_service, "refresh_ticket_ai_tags", fake_refresh_ai_tags)
-    monkeypatch.setattr(imap, "_find_existing_ticket_for_reply", fake_find_existing_ticket)
-    monkeypatch.setattr(imap.company_repo, "get_company_by_email_domain", fake_get_company_by_email_domain)
-    monkeypatch.setattr(imap.staff_repo, "get_staff_by_company_and_email", fake_get_staff_by_company_and_email)
-    monkeypatch.setattr(imap.users_repo, "get_user_by_email", fake_get_user_by_email)
-
-    result = await imap.sync_account(6)
-
-    assert result["status"] == "succeeded"
-    assert result["processed"] == 1
-    assert result["errors"] == []
-
-    assert recorded_messages, "Expected message to be recorded"
-    assert recorded_messages[-1]["status"] == "imported"
 
 
 async def test_sync_account_skips_filtered_message(monkeypatch):

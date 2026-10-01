@@ -728,3 +728,85 @@ def test_relationship_prompt_defines_types_and_marks_content_untrusted():
 
     assert "untrusted" in prompt
     assert "DIRECT_MATCH=B fixes or answers A" in prompt
+
+
+@pytest.fixture
+async def kb_review_graph_db(monkeypatch):
+    connection = await aiosqlite.connect(":memory:")
+    connection.row_factory = aiosqlite.Row
+    await connection.executescript("""
+        CREATE TABLE rag_documents (
+            id INTEGER PRIMARY KEY, source_type TEXT NOT NULL, source_id TEXT NOT NULL,
+            title TEXT NOT NULL, content_hash TEXT NOT NULL, is_active INTEGER NOT NULL
+        );
+        CREATE TABLE rag_relationships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, source_document_id INTEGER NOT NULL,
+            target_document_id INTEGER NOT NULL, relationship_type TEXT NOT NULL,
+            match_status TEXT NOT NULL, source_hash TEXT NOT NULL, target_hash TEXT NOT NULL,
+            evaluated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO rag_documents VALUES
+            (1, 'knowledge_base', '10', 'VPN setup', 'kb1', 1),
+            (2, 'knowledge_base', '20', 'VPN certificate renewal', 'kb2', 1),
+            (3, 'tickets', '100', 'VPN drops', 't100', 1),
+            (4, 'tickets', '101', 'VPN will not connect', 't101', 1),
+            (5, 'tickets', '102', 'VPN slow', 't102', 1),
+            (6, 'tickets', '103', 'VPN error 809', 't103', 1);
+        -- KB 10 supported four tickets (in both edge directions).
+        INSERT INTO rag_relationships
+            (source_document_id, target_document_id, relationship_type, match_status, source_hash, target_hash)
+        VALUES
+            (3, 1, 'SUPPORTING', 'MATCH', 't100', 'kb1'),
+            (1, 4, 'SUPPORTING', 'MATCH', 'kb1', 't101'),
+            (5, 1, 'SUPPORTING', 'MATCH', 't102', 'kb1'),
+            (6, 1, 'SUPPORTING', 'MATCH', 't103', 'stale-kb1-hash'),
+        -- KB 20 was the fix for 100 and 101; 102 was fixed by another ticket.
+            (3, 2, 'DIRECT_MATCH', 'MATCH', 't100', 'kb2'),
+            (2, 4, 'DIRECT_MATCH', 'MATCH', 'kb2', 't101'),
+            (5, 6, 'DIRECT_MATCH', 'MATCH', 't102', 't103'),
+            (6, 2, 'DIRECT_MATCH', 'NO_MATCH', 't103', 'kb2');
+        """)
+    monkeypatch.setattr(rag_relationships_repo.db, "_use_sqlite", True)
+    monkeypatch.setattr(rag_relationships_repo.db, "_sqlite_conn", connection)
+    yield connection
+    await connection.close()
+
+
+@pytest.mark.anyio
+async def test_kb_supporting_rows_only_include_tickets_fixed_elsewhere(kb_review_graph_db):
+    rows = await rag_relationships_repo.list_kb_supporting_on_tickets_fixed_elsewhere()
+
+    pairs = sorted((row["article_id"], row["ticket_id"]) for row in rows)
+    # Ticket 103's SUPPORTING edge is stale (article changed) and its only fix
+    # is NO_MATCH, so it is excluded. KB 20 is never SUPPORTING.
+    assert pairs == [("10", "100"), ("10", "101"), ("10", "102")]
+
+
+@pytest.mark.anyio
+async def test_kb_articles_needing_update_applies_threshold(kb_review_graph_db, monkeypatch):
+    from app.services import rag_relationships as rag_relationships_service
+
+    monkeypatch.setattr(rag_relationships_service, "rag_available", lambda: True)
+
+    flagged = await rag_relationships_service.kb_articles_needing_update(threshold=3)
+    assert list(flagged) == [10]
+    assert flagged[10]["ticket_count"] == 3
+    assert {ticket["id"] for ticket in flagged[10]["tickets"]} == {"100", "101", "102"}
+
+    assert await rag_relationships_service.kb_articles_needing_update(threshold=4) == {}
+
+
+@pytest.mark.anyio
+async def test_kb_articles_needing_update_is_empty_when_rag_disabled(monkeypatch):
+    from app.services import rag_relationships as rag_relationships_service
+
+    async def fail():  # pragma: no cover - must not be called
+        raise AssertionError("graph should not be queried")
+
+    monkeypatch.setattr(rag_relationships_service, "rag_available", lambda: False)
+    monkeypatch.setattr(
+        rag_relationships_service.rel_repo,
+        "list_kb_supporting_on_tickets_fixed_elsewhere",
+        fail,
+    )
+    assert await rag_relationships_service.kb_articles_needing_update() == {}

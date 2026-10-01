@@ -145,11 +145,7 @@ async def _find_sms_ticket(normalised_phone: str, sms_day: date) -> dict[str, An
 async def _refresh_sms_ticket_ai(ticket_id: int) -> None:
     """Run the same AI enrichment pipeline used by standard ticket creation/reply flows."""
 
-    try:
-        await tickets_service.refresh_ticket_ai_summary(ticket_id)
-    except RuntimeError as exc:
-        log_error("Failed to refresh AI summary for SMS ticket", ticket_id=ticket_id, error=str(exc))
-    await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    tickets_service.schedule_ticket_ai_refresh(ticket_id)
 
 
 @router.post("/inbound", status_code=status.HTTP_201_CREATED)

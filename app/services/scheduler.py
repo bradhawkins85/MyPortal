@@ -194,6 +194,7 @@ class SchedulerService:
             id="website-check-worker", max_instances=1, coalesce=True,
             next_run_time=datetime.now(timezone.utc), replace_existing=True,
         )
+        self._register_spam_purge_job()
         await self._ensure_monitoring_jobs()
         self._start_refresh_task()
         log_info("Scheduler started")
@@ -205,6 +206,49 @@ class SchedulerService:
         self._scheduler.shutdown(wait=True)
         self._started = False
         log_info("Scheduler stopped")
+
+    def _register_spam_purge_job(self) -> None:
+        """Register the in-app M365 spam purge poller.
+
+        Polls ``m365_spam_purge.process_queued()`` on a fixed interval so
+        that queued search/purge requests are handled without requiring a
+        separate cron or CLI worker process.  The ``singleton_run`` lease
+        ensures that only one blue/green instance processes the queue at a
+        time, preventing duplicate SCC calls.
+
+        Disable by setting ``M365_SPAM_PURGE_POLL_SECONDS=0`` in the
+        environment (falls back to an external cron job if needed).
+        """
+        settings = get_settings()
+        poll_seconds = settings.m365_spam_purge_poll_seconds
+        if poll_seconds <= 0:
+            log_info("M365 spam purge in-app poller disabled")
+            return
+
+        from app.services.singleton_jobs import singleton_run
+
+        @singleton_run("m365_spam_purge", ttl_seconds=max(poll_seconds * 10, 120))
+        async def _poll_spam_purge() -> None:
+            from app.services import m365_spam_purge as purge_service
+
+            try:
+                processed = await purge_service.process_queued()
+                if processed:
+                    log_info("M365 spam purge: processed queued requests", count=processed)
+            except Exception as exc:
+                log_error("M365 spam purge poller error", error=str(exc))
+
+        self._scheduler.add_job(
+            _poll_spam_purge,
+            "interval",
+            seconds=poll_seconds,
+            id="m365-spam-purge-worker",
+            max_instances=1,
+            coalesce=True,
+            next_run_time=datetime.now(timezone.utc),
+            replace_existing=True,
+        )
+        log_info("M365 spam purge in-app poller registered", interval_seconds=poll_seconds)
 
     async def refresh(self) -> None:
         if not self._started:

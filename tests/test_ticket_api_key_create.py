@@ -125,14 +125,10 @@ def test_create_ticket_with_api_key_authentication(monkeypatch):
     async def mock_validate_status(status, *, allow_hidden: bool = True):
         return status
     
-    async def mock_refresh_ai(*args, **kwargs):
-        pass
-    
     monkeypatch.setattr(tickets_service, "create_ticket", mock_create_ticket)
     monkeypatch.setattr(tickets_service, "resolve_status_or_default", mock_resolve_status)
     monkeypatch.setattr(tickets_service, "validate_status_choice", mock_validate_status)
-    monkeypatch.setattr(tickets_service, "refresh_ticket_ai_summary", mock_refresh_ai)
-    monkeypatch.setattr(tickets_service, "refresh_ticket_ai_tags", mock_refresh_ai)
+    monkeypatch.setattr(tickets_service, "schedule_ticket_ai_refresh", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(tickets_repo, "get_ticket", mock_get_ticket)
     monkeypatch.setattr(tickets_repo, "list_replies", mock_list_replies)
     monkeypatch.setattr(tickets_repo, "list_watchers", mock_list_watchers)
@@ -313,13 +309,9 @@ def test_create_ticket_with_session_still_works(monkeypatch):
     async def mock_resolve_status(status):
         return status or "open"
     
-    async def mock_refresh_ai(*args, **kwargs):
-        pass
-    
     monkeypatch.setattr(tickets_service, "create_ticket", mock_create_ticket)
     monkeypatch.setattr(tickets_service, "resolve_status_or_default", mock_resolve_status)
-    monkeypatch.setattr(tickets_service, "refresh_ticket_ai_summary", mock_refresh_ai)
-    monkeypatch.setattr(tickets_service, "refresh_ticket_ai_tags", mock_refresh_ai)
+    monkeypatch.setattr(tickets_service, "schedule_ticket_ai_refresh", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(tickets_repo, "get_ticket", mock_get_ticket)
     monkeypatch.setattr(tickets_repo, "list_replies", mock_list_replies)
     monkeypatch.setattr(tickets_repo, "list_watchers", mock_list_watchers)

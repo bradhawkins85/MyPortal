@@ -127,6 +127,18 @@ class Settings(BaseSettings):
     website_check_lease_seconds: int = Field(default=120, ge=30, le=3600)
     website_check_batch_size: int = Field(default=20, ge=1, le=100)
     website_check_company_concurrency: int = Field(default=2, ge=1, le=20)
+    m365_spam_purge_poll_seconds: int = Field(
+        default=10,
+        ge=0,
+        le=3600,
+        validation_alias="M365_SPAM_PURGE_POLL_SECONDS",
+        description=(
+            "How often the in-app scheduler polls for queued M365 spam "
+            "search/purge requests. Set to 0 to disable the in-app worker "
+            "(fall back to an external cron). "
+            "Default: 10 seconds."
+        ),
+    )
     m365_it_external_email_address: str = Field(
         default="", validation_alias="M365_IT_EXTERNAL_EMAIL_ADDRESS"
     )
@@ -426,6 +438,25 @@ class Settings(BaseSettings):
             "Increase for large corpora to avoid excluding older but relevant documents."
         ),
     )
+    rag_vector_prefilter: bool = Field(
+        default=True,
+        validation_alias="RAG_VECTOR_PREFILTER",
+        description=(
+            "Use the database vector index (MariaDB 11.7+) to pre-select the nearest "
+            "and best lexical chunks before hybrid scoring. Falls back to scoring "
+            "every active chunk in Python when the database has no vector support."
+        ),
+    )
+    rag_prefilter_top_k: int = Field(
+        default=400,
+        validation_alias="RAG_PREFILTER_TOP_K",
+        ge=50,
+        le=10000,
+        description=(
+            "Nearest chunks and full-text matches fetched per source type when the "
+            "vector pre-filter is active."
+        ),
+    )
     rag_min_score: float = Field(
         default=0.35,
         validation_alias=AliasChoices("RAG_MIN_SCORE", "MIN_SIMILARITY"),
@@ -546,6 +577,16 @@ class Settings(BaseSettings):
         le=3600,
         description="Seconds a relationship queue claim remains valid without a heartbeat.",
     )
+    rag_kb_review_supporting_threshold: int = Field(
+        default=3,
+        validation_alias="RAG_KB_REVIEW_SUPPORTING_THRESHOLD",
+        ge=1,
+        le=100,
+        description=(
+            "Tickets that must link a KB article as SUPPORTING while a different "
+            "document fixed them before the article is flagged for review."
+        ),
+    )
     swagger_ui_url: str = Field(default="/docs", validation_alias="SWAGGER_UI_URL")
     public_base_url: str | None = Field(
         default=None,
@@ -641,6 +682,17 @@ class Settings(BaseSettings):
         default=1,
         validation_alias="AI_TAG_THRESHOLD",
         ge=1,
+    )
+    ticket_ai_refresh_debounce_seconds: float = Field(
+        default=45,
+        validation_alias="TICKET_AI_REFRESH_DEBOUNCE_SECONDS",
+        ge=0,
+        le=3600,
+        description=(
+            "Seconds a ticket must be quiet before its combined AI summary and "
+            "tags refresh runs. Each new reply restarts the timer; 0 runs it "
+            "straight away in the background."
+        ),
     )
     bcp_enabled: bool = Field(
         default=True,

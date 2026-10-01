@@ -558,11 +558,114 @@
         link.rel = 'noopener noreferrer';
         link.textContent = item.label || item.url || 'Related item';
         link.title = link.textContent;
+        if (item.relationship_id) {
+          const meta = document.createElement('div');
+          meta.className = 'ticket-related__meta';
+          meta.appendChild(buildVoteControls(item.relationship_id, item.my_rating));
+          li.appendChild(meta);
+        }
         li.appendChild(link);
         list.appendChild(li);
       });
       list.hidden = false;
       setStatus('');
+    }
+
+    function buildVoteControls(relationshipId, myRating) {
+      const group = document.createElement('span');
+      group.className = 'ticket-related__vote';
+      group.setAttribute('role', 'group');
+      group.setAttribute('aria-label', 'Was this related item useful?');
+      group.setAttribute('data-ticket-related-vote', '');
+      group.setAttribute('data-relationship-id', String(relationshipId));
+      [
+        ['up', '👍', 'Useful for this ticket', 'Mark as useful'],
+        ['down', '👎', 'Not relevant: hide from this ticket', 'Mark as not relevant and hide'],
+      ].forEach(([vote, glyph, title, label]) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ticket-related__vote-button';
+        button.setAttribute('data-vote', vote);
+        button.setAttribute('aria-pressed', vote === 'up' && myRating === 'up' ? 'true' : 'false');
+        button.title = title;
+        button.setAttribute('aria-label', label);
+        button.textContent = glyph;
+        group.appendChild(button);
+      });
+      return group;
+    }
+
+    async function sendVote(relationshipId, rating) {
+      const headers = { Accept: 'application/json', 'Content-Type': 'application/json' };
+      const csrfToken = getCsrfToken();
+      if (csrfToken) {
+        headers['X-CSRF-Token'] = csrfToken;
+      }
+      const response = await fetch(
+        `/admin/tickets/${encodeURIComponent(ticketId)}/related/${encodeURIComponent(relationshipId)}/feedback`,
+        { method: 'POST', headers, body: JSON.stringify({ rating }) },
+      );
+      if (!response.ok) {
+        throw new Error(`Feedback failed (${response.status})`);
+      }
+    }
+
+    function showHidden(item, group, relationshipId) {
+      const original = Array.from(item.childNodes);
+      const notice = document.createElement('span');
+      notice.className = 'ticket-related__hidden';
+      notice.textContent = 'Hidden from this ticket. ';
+      const undo = document.createElement('button');
+      undo.type = 'button';
+      undo.className = 'ticket-related__undo';
+      undo.textContent = 'Undo';
+      undo.addEventListener('click', async () => {
+        undo.disabled = true;
+        try {
+          await sendVote(relationshipId, null);
+          item.replaceChildren(...original);
+          group.querySelectorAll('[data-vote]').forEach((button) => {
+            button.setAttribute('aria-pressed', 'false');
+            button.disabled = false;
+          });
+        } catch (error) {
+          console.error('Failed to undo related item feedback:', error);
+          undo.disabled = false;
+        }
+      });
+      notice.appendChild(undo);
+      item.replaceChildren(notice);
+    }
+
+    if (list) {
+      list.addEventListener('click', async (event) => {
+        const button = event.target.closest('[data-vote]');
+        const group = button ? button.closest('[data-ticket-related-vote]') : null;
+        if (!button || !group || !list.contains(group)) {
+          return;
+        }
+        event.preventDefault();
+        const relationshipId = group.getAttribute('data-relationship-id');
+        const vote = button.getAttribute('data-vote');
+        const rating = button.getAttribute('aria-pressed') === 'true' ? null : vote;
+        const buttons = group.querySelectorAll('[data-vote]');
+        buttons.forEach((candidate) => { candidate.disabled = true; });
+        try {
+          await sendVote(relationshipId, rating);
+          buttons.forEach((candidate) => {
+            candidate.setAttribute('aria-pressed', candidate.getAttribute('data-vote') === rating ? 'true' : 'false');
+          });
+          const item = group.closest('.ticket-related__item');
+          if (rating === 'down' && item) {
+            showHidden(item, group, relationshipId);
+          }
+        } catch (error) {
+          console.error('Failed to save related item feedback:', error);
+          setStatus(error.message || 'Failed to save feedback.');
+        } finally {
+          buttons.forEach((candidate) => { candidate.disabled = false; });
+        }
+      });
     }
 
     async function scanRelated() {
@@ -3285,6 +3388,112 @@
   }
 
 
+  function initialiseSuggestedReply() {
+    const button = document.querySelector('[data-ticket-suggest-reply]');
+    const panel = document.querySelector('[data-ticket-suggest-reply-panel]');
+    if (!(button instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) {
+      return;
+    }
+    const ticketId = button.getAttribute('data-ticket-id') || '';
+    const statusEl = panel.querySelector('[data-ticket-suggest-reply-status]');
+    const sourcesEl = panel.querySelector('[data-ticket-suggest-reply-sources]');
+    const sourceList = panel.querySelector('[data-ticket-suggest-reply-source-list]');
+    const editor = document.querySelector('#ticket-reply-form [data-rich-text-content]');
+    const fallback = document.querySelector('#ticket-reply-form [data-rich-text-value]');
+
+    function setStatus(message) {
+      if (statusEl instanceof HTMLElement) {
+        statusEl.textContent = message || '';
+        statusEl.hidden = !message;
+      }
+    }
+
+    function draftToHtml(text) {
+      return String(text)
+        .replace(/\r\n?/g, '\n')
+        .trim()
+        .split(/\n{2,}/)
+        .map((paragraph) => paragraph.split('\n').map((line) => escapeHtml(line)).join('<br>'))
+        .map((paragraph) => `<p>${paragraph || '<br>'}</p>`)
+        .join('');
+    }
+
+    function insertDraft(text) {
+      if (editor instanceof HTMLElement) {
+        const current = editor.innerHTML.trim();
+        const html = draftToHtml(text);
+        editor.innerHTML = current ? `${current}${html}` : html;
+        editor.dispatchEvent(new Event('input', { bubbles: true }));
+        editor.focus();
+        return;
+      }
+      if (fallback instanceof HTMLTextAreaElement) {
+        fallback.value = fallback.value.trim() ? `${fallback.value}\n\n${text}` : text;
+        fallback.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+
+    function renderSources(sources) {
+      if (!(sourceList instanceof HTMLElement) || !(sourcesEl instanceof HTMLElement)) {
+        return;
+      }
+      sourceList.replaceChildren();
+      sources.forEach((source) => {
+        const item = document.createElement('li');
+        const reference = document.createElement('code');
+        reference.textContent = source.reference || '';
+        item.appendChild(reference);
+        item.appendChild(document.createTextNode(' '));
+        const link = document.createElement('a');
+        const url = String(source.url || '');
+        link.href = url.startsWith('/') && !url.startsWith('//') ? url : '#';
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = source.title || source.reference || 'Source';
+        item.appendChild(link);
+        if (source.relationship_label) {
+          item.appendChild(document.createTextNode(` (${source.relationship_label})`));
+        }
+        sourceList.appendChild(item);
+      });
+      sourcesEl.hidden = sources.length === 0;
+    }
+
+    button.addEventListener('click', async () => {
+      if (!ticketId || button.disabled) {
+        return;
+      }
+      button.disabled = true;
+      button.classList.add('is-loading');
+      panel.hidden = false;
+      renderSources([]);
+      setStatus('Drafting a reply from related resolutions...');
+      try {
+        const headers = { Accept: 'application/json' };
+        const csrfToken = getCsrfToken();
+        if (csrfToken) {
+          headers['X-CSRF-Token'] = csrfToken;
+        }
+        const response = await fetch(`/admin/tickets/${encodeURIComponent(ticketId)}/suggest-reply`, {
+          method: 'POST',
+          headers,
+        });
+        if (!response.ok) {
+          throw new Error(await getApiErrorMessage(response, 'Unable to draft a reply.'));
+        }
+        const payload = await response.json();
+        insertDraft(String(payload.draft || ''));
+        setStatus('');
+        renderSources(Array.isArray(payload.sources) ? payload.sources : []);
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : 'Unable to draft a reply.');
+      } finally {
+        button.disabled = false;
+        button.classList.remove('is-loading');
+      }
+    });
+  }
+
   function initialiseCannedResponses() {
     const pickerModal = document.querySelector('[data-canned-responses-modal]');
     const createModal = document.querySelector('[data-canned-response-create-modal]');
@@ -3422,6 +3631,7 @@
     initialiseWatcherManagement();
     initialiseTicketMentions();
     initialiseCannedResponses();
+    initialiseSuggestedReply();
     initialiseAttachmentActions();
     initTicketRelated();
     convertUtcElements();

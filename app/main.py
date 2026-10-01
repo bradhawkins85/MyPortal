@@ -15,7 +15,7 @@ from decimal import Decimal
 from html import escape
 from pathlib import Path, PurePosixPath
 from typing import Any
-from urllib.parse import parse_qsl, quote, urlencode, urlsplit
+from urllib.parse import parse_qsl, quote, unquote_to_bytes, urlencode, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
@@ -96,6 +96,7 @@ from app.api.routes import (
     staff as staff_api,
     subscriptions as subscriptions_api,
     tag_exclusions,
+    tag_synonyms,
     tickets as tickets_api,
     tray as tray_api,
     users,
@@ -1401,6 +1402,7 @@ app.include_router(service_status_api.router)
 app.include_router(backup_jobs_api.router)
 app.include_router(asset_custom_fields.router)
 app.include_router(tag_exclusions.router)
+app.include_router(tag_synonyms.router)
 app.include_router(chat_api.router)
 app.include_router(tray_api.router)
 app.include_router(defender_api.router)
@@ -1442,17 +1444,28 @@ def _safe_next_path(value: str | None) -> str | None:
 
     if not value:
         return None
+
     candidate = value.strip()
-    if not candidate.startswith("/") or candidate.startswith("//"):
+    if not candidate:
         return None
-    if "\\" in candidate or any(ord(ch) < 32 for ch in candidate):
+
+    if _has_invalid_percent_encoding(candidate):
         return None
-    parts = urlsplit(candidate)
+    try:
+        normalized = unquote_to_bytes(candidate).decode("utf-8").replace("\\", "/")
+    except UnicodeDecodeError:
+        return None
+
+    if not normalized.startswith("/") or normalized.startswith("//"):
+        return None
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in normalized):
+        return None
+    parts = urlsplit(normalized)
     if parts.scheme or parts.netloc:
         return None
-    if candidate == "/login" or candidate.startswith(("/login?", "/logout")):
+    if normalized == "/login" or normalized.startswith(("/login?", "/logout")):
         return None
-    return candidate
+    return normalized
 
 
 def _login_redirect(request: Request) -> RedirectResponse:
@@ -3036,20 +3049,45 @@ def _sanitize_local_redirect_target(
     if not target:
         return fallback
 
-    parsed = URL(target)
+    if _has_invalid_percent_encoding(target):
+        return fallback
+    try:
+        normalized = unquote_to_bytes(target).decode("utf-8").replace("\\", "/")
+    except UnicodeDecodeError:
+        return fallback
+
+    parsed = URL(normalized)
     if parsed.scheme or parsed.netloc:
         return fallback
 
-    if not target.startswith("/") or target.startswith("//") or "\\" in target:
+    if not normalized.startswith("/") or normalized.startswith("//"):
         return fallback
 
-    if any(ord(char) < 32 for char in target):
+    if any(ord(char) < 32 or ord(char) == 127 for char in normalized):
         return fallback
 
-    if allowed_prefixes and not any(target.startswith(prefix) for prefix in allowed_prefixes):
+    if allowed_prefixes and not any(normalized.startswith(prefix) for prefix in allowed_prefixes):
         return fallback
 
-    return target
+    return normalized
+
+
+def _has_invalid_percent_encoding(value: str) -> bool:
+    """Return True when ``value`` contains malformed percent escapes."""
+    length = len(value)
+    index = 0
+    while index < length:
+        if value[index] == "%":
+            if index + 2 >= length:
+                return True
+            if value[index + 1] not in "0123456789ABCDEFabcdef":
+                return True
+            if value[index + 2] not in "0123456789ABCDEFabcdef":
+                return True
+            index += 3
+            continue
+        index += 1
+    return False
 
 
 
@@ -9134,6 +9172,22 @@ async def admin_tag_exclusions_page(
     )
 
 
+@app.get("/admin/tag-synonyms", response_class=HTMLResponse)
+async def admin_tag_synonyms_page(
+    request: Request,
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    context = await _build_base_context(request, current_user)
+    return templates.TemplateResponse(
+        context["request"],
+        "admin/tag_synonyms.html",
+        context,
+    )
+
+
 async def _prepare_kb_editor_options() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     users_task = asyncio.create_task(user_repo.list_users())
     companies_task = asyncio.create_task(company_repo.list_companies())
@@ -10302,6 +10356,8 @@ async def _load_ticket_stored_related_items(
         evidence_rows = await rag_relationship_repo.list_relationship_evidence(
             int(document["id"]),
             limit=limit,
+            ticket_id=ticket_id,
+            user_id=int(user.get("id") or 0),
         )
     except Exception as exc:  # pragma: no cover - defensive UI fallback
         log_error("Failed to load stored ticket related content", ticket_id=ticket_id, error=str(exc))
@@ -10311,8 +10367,13 @@ async def _load_ticket_stored_related_items(
     seen_urls: set[str] = set()
     for row in evidence_rows:
         relationship_type = str(row.get("relationship_type") or "RELATED")
+        feedback = {
+            "relationship_id": row.get("relationship_id"),
+            "my_rating": row.get("my_rating"),
+        }
         if not bool(row.get("target_available")):
             items.append({
+                **feedback,
                 "available": False,
                 "relationship_label": _RELATIONSHIP_LABELS.get(relationship_type, "Related"),
                 "confidence_band": _relationship_confidence_band(row.get("confidence")),
@@ -10348,10 +10409,12 @@ async def _load_ticket_stored_related_items(
         label = str(row.get("title") or f"{source_type.title()} {source_id}").strip()[:180]
         reason = str(row.get("reason") or row.get("supporting_excerpt") or "").strip()[:300]
         items.append({
+            **feedback,
             "available": True,
             "type": source_type,
             "label": label,
             "url": url,
+            "relationship_type": relationship_type,
             "relationship_label": _RELATIONSHIP_LABELS.get(relationship_type, "Related"),
             "confidence_band": _relationship_confidence_band(row.get("confidence")),
             "score": round(float(row.get("relevance_score") or 0) * 100),
@@ -11005,6 +11068,12 @@ async def _render_ticket_detail(
         "ticket_expense_total": ticket_expense_total,
         "ticket_related_auto_scan": False,
         "ticket_related_items": ticket_related_items,
+        "ticket_suggest_reply_available": any(
+            item.get("available")
+            and item.get("relationship_type") in {"DIRECT_MATCH", "KNOWN_ISSUE"}
+            and item.get("type") in {"knowledge_base", "tickets"}
+            for item in ticket_related_items
+        ),
         "ticket_labour_types": labour_types,
         "ticket_billable_minutes": total_billable_minutes,
         "ticket_non_billable_minutes": total_non_billable_minutes,

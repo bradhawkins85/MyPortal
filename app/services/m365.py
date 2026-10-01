@@ -15,7 +15,7 @@ import tempfile
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 import httpx
 import jwt
@@ -1854,6 +1854,44 @@ async def _acquire_teams_access_tokens(company_id: int) -> tuple[str, str, str]:
     return graph_token, teams_token, tenant_id
 
 
+async def _post_with_redirect(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+    *,
+    max_redirects: int = 3,
+) -> httpx.Response:
+    """POST to *url* with manual redirect handling that forces port 443.
+
+    Microsoft's SCC/EXO endpoints may 302-redirect to a regional host on a
+    non-standard port (e.g. 446).  httpx's built-in ``follow_redirects`` converts
+    POST→GET on 302, breaking the InvokeCommand API.  This helper intercepts
+    the redirect, rewrites the target to the default HTTPS port (443), and
+    preserves the POST method and body.
+    """
+    response = await client.post(url, headers=headers, json=payload)
+    for _ in range(max_redirects):
+        if response.status_code not in (301, 302, 303, 307, 308):
+            break
+        location = response.headers.get("location")
+        if not location:
+            break
+        # Strip any non-default port so the client connects to 443 (the default
+        # HTTPS port).  This avoids non-standard ports like 446 that some
+        # network policies may not permit.
+        parsed = urlsplit(location)
+        redirect_url = urlunsplit((
+            parsed.scheme,
+            parsed.hostname or "",
+            parsed.path,
+            parsed.query,
+            "",
+        ))
+        response = await client.post(redirect_url, headers=headers, json=payload)
+    return response
+
+
 async def _exo_invoke_command(
     exo_token: str,
     tenant_id: str,
@@ -1885,8 +1923,8 @@ async def _exo_invoke_command(
         "Content-Type": "application/json; charset=utf-8",
     }
     try:
-        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
-            response = await client.post(url, headers=headers, json=payload)
+        async with monitored_client(httpx.AsyncClient, timeout=30, follow_redirects=False) as client:
+            response = await _post_with_redirect(client, url, headers, payload)
     except httpx.DecodingError as exc:
         raise M365Error(
             f"Exchange Online {cmdlet_name} request decode error: {exc}"
@@ -1954,13 +1992,13 @@ def _exo_error_detail(response: httpx.Response) -> str:
 
 
 async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
-    """Acquire an app-only access token for the Security & Compliance PowerShell REST API.
+    """Acquire an access token for the Security & Compliance PowerShell REST API.
 
-    Uses the ``client_credentials`` grant with the Microsoft Purview/Compliance
-    scope (``https://ps.compliance.protection.outlook.com/.default``).  The
-    provisioned app must have application permissions that allow reading and
-    writing protection alert policies (e.g. Compliance Administrator role or
-    ``ComplianceManager.ReadWrite.All``).
+    Prefers a delegated (user) token via the stored refresh token so that
+    Purview can resolve the user's organizational unit without requiring the
+    app to be registered as an Exchange service principal.  Falls back to
+    app-only ``client_credentials`` when no refresh token is available or the
+    delegated grant fails.
 
     :returns: A tuple of ``(access_token, tenant_id)``.
     """
@@ -1970,13 +2008,50 @@ async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
 
     tenant_id = str(creds.get("tenant_id") or "").strip()
     client_id = str(creds.get("client_id") or "").strip()
+    client_secret = creds.get("client_secret") or ""
 
+    # Prefer a delegated (user) token so Purview resolves the orgUnit from
+    # the user's identity rather than requiring an Exchange-registered
+    # service principal for the app.
+    refresh_token = creds.get("refresh_token")
+    if refresh_token:
+        try:
+            access_token, _, _ = await _exchange_token(
+                tenant_id=tenant_id,
+                client_id=client_id,
+                client_secret=client_secret,
+                refresh_token=refresh_token,
+                scope=_SCC_SCOPE,
+            )
+            log_info(
+                "SCC access token acquired via delegated (refresh_token) grant",
+                company_id=company_id,
+                tenant_id=tenant_id,
+            )
+            return access_token, tenant_id
+        except M365Error as exc:
+            # If the delegated grant fails (expired/revoked refresh token,
+            # missing delegated permission, etc.) fall back to app-only.
+            log_info(
+                "SCC delegated token failed; falling back to client_credentials",
+                company_id=company_id,
+                tenant_id=tenant_id,
+                failure_kind=getattr(exc, "failure_kind", None),
+                error=str(exc),
+            )
+
+    # Fallback: app-only client_credentials
     access_token, _, _ = await _exchange_token(
         tenant_id=tenant_id,
         client_id=client_id,
-        client_secret=creds.get("client_secret") or "",
+        client_secret=client_secret,
         refresh_token=None,
         scope=_SCC_SCOPE,
+    )
+    log_info(
+        "SCC access token acquired via client_credentials grant",
+        company_id=company_id,
+        tenant_id=tenant_id,
     )
     return access_token, tenant_id
 
@@ -2018,10 +2093,10 @@ async def _scc_invoke_command(
     POSTs to the Security & Compliance admin API. When *organization* is
     supplied, its initial ``*.onmicrosoft.com`` domain is used in both the URL
     route and the routing header, matching ``Connect-IPPSSession -Organization``.
-    Other callers continue to use *tenant_id*. The request uses an app-only
-    Security & Compliance access token. The app must have a
-    Compliance Administrator (or Global Administrator) role assigned so that
-    cmdlets such as ``Get-ProtectionAlert`` and ``New-ProtectionAlert`` succeed.
+    Other callers continue to use *tenant_id*. The request uses a Security &
+    Compliance access token (delegated or app-only) that carries a Compliance
+    Administrator (or Global Administrator) role so that cmdlets such as
+    ``Get-ProtectionAlert`` and ``New-ProtectionAlert`` succeed.
 
     An ``X-AnchorMailbox`` header is included when the ``appid`` claim can be
     decoded from *scc_token*. Compliance-search callers must supply the tenant's
@@ -2054,8 +2129,8 @@ async def _scc_invoke_command(
     if appid and route_organization:
         headers["X-AnchorMailbox"] = f"app:{appid}@{route_organization}"
     try:
-        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
-            response = await client.post(url, headers=headers, json=payload)
+        async with monitored_client(httpx.AsyncClient, timeout=30, follow_redirects=False) as client:
+            response = await _post_with_redirect(client, url, headers, payload)
     except httpx.DecodingError as exc:
         raise M365Error(
             f"Security & Compliance {cmdlet_name} request decode error: {exc}"
@@ -4713,10 +4788,10 @@ async def run_purview_preflight(
     Microsoft explicitly excludes Purview compliance/eDiscovery cmdlets from
     app-only authentication support, so a ready result is best-effort: Purview
     can still reject an individual cmdlet, and that error is surfaced verbatim.
-    ``repair`` is accepted for API compatibility, but role-group membership is
-    never broadened automatically.
+    When ``repair`` is True and the SCC session is reachable, the preflight
+    will register the service principal in Purview and add it to the
+    eDiscoveryManager role group if either is missing, then re-verify.
     """
-    _ = repair
     checked_at = datetime.now(timezone.utc)
     correlation_id = str(uuid.uuid4())
     creds = await get_credentials(company_id)
@@ -4902,6 +4977,81 @@ async def run_purview_preflight(
                 if principal_identities & member_identities:
                     membership_ok = True
                     break
+            # When repair is requested and the SCC session is reachable,
+            # register the service principal and add it to the role group
+            # if either is missing, then re-verify.
+            if repair and not (registration_ok and membership_ok):
+                if not registration_ok:
+                    try:
+                        await _scc_invoke_command(
+                            scc_token, tenant_id, "New-ServicePrincipal",
+                            {"AppId": client_id, "ObjectId": object_id,
+                             "DisplayName": "MyPortal Purview eDiscovery"},
+                            organization=tenant_domain,
+                        )
+                        repaired.append("Registered service principal in Purview")
+                    except M365Error as exc:
+                        log_error(
+                            "Purview preflight repair: New-ServicePrincipal failed",
+                            error=str(exc),
+                        )
+                if not membership_ok:
+                    try:
+                        await _scc_invoke_command(
+                            scc_token, tenant_id, "Add-RoleGroupMember",
+                            {"Identity": "eDiscoveryManager", "Member": object_id},
+                            organization=tenant_domain,
+                        )
+                        repaired.append("Added to eDiscoveryManager role group")
+                    except M365Error as exc:
+                        log_error(
+                            "Purview preflight repair: Add-RoleGroupMember failed",
+                            error=str(exc),
+                        )
+                # Re-verify after repair attempts
+                if repaired:
+                    try:
+                        recheck_principals = await _scc_invoke_command(
+                            scc_token, tenant_id, "Get-ServicePrincipal",
+                            {"Identity": object_id}, organization=tenant_domain,
+                        )
+                        recheck_rows = recheck_principals.get("value") or recheck_principals.get("Value") or []
+                        if isinstance(recheck_rows, dict):
+                            recheck_rows = [recheck_rows]
+                        registration_ok = any(
+                            str(row.get("ObjectId") or row.get("ExternalDirectoryObjectId") or row.get("Identity") or "").lower() == object_id.lower()
+                            or str(row.get("AppId") or "").lower() == client_id.lower()
+                            for row in recheck_rows if isinstance(row, dict)
+                        )
+                    except M365Error:
+                        pass
+                    try:
+                        recheck_roles = await _scc_invoke_command(
+                            scc_token, tenant_id, "Get-RoleGroup",
+                            {"Identity": "eDiscoveryManager"}, organization=tenant_domain,
+                        )
+                        recheck_role_rows = recheck_roles.get("value") or recheck_roles.get("Value") or []
+                        if isinstance(recheck_role_rows, dict):
+                            recheck_role_rows = [recheck_role_rows]
+                        for row in recheck_role_rows if isinstance(recheck_role_rows, list) else []:
+                            if not isinstance(row, dict):
+                                continue
+                            members = row.get("Members") or row.get("members") or []
+                            if not isinstance(members, list):
+                                members = [members]
+                            member_identities = {
+                                str(value).lower()
+                                for member in members
+                                for value in (
+                                    member.values() if isinstance(member, dict) else (member,)
+                                )
+                                if value
+                            }
+                            if {object_id.lower(), client_id.lower()} & member_identities:
+                                membership_ok = True
+                                break
+                    except M365Error:
+                        pass
         except M365Error as exc:
             scc_error = str(exc)
             correlation_id = getattr(exc, "correlation_id", None) or correlation_id

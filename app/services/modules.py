@@ -1072,16 +1072,6 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         },
     },
     {
-        "slug": "apprise",
-        "name": "Apprise",
-        "description": "Send notifications to 80+ services via Apprise notification URLs.",
-        "icon": "🔔",
-        "settings": {
-            "urls": [],
-            "title": "",
-        },
-    },
-    {
         "slug": "uptimekuma",
         "name": "Uptime Kuma",
         "description": "Ingest uptime alerts from Uptime Kuma webhooks.",
@@ -1392,7 +1382,6 @@ _DEFAULT_OLLAMA_BASE_URL = _default_module_setting(
 # variables. When FORCE_ENV_MODULE_SETTINGS=true, these fields are resolved from
 # env/default values instead of the database while non-env-backed fields remain.
 _ENV_BACKED_MODULE_FIELDS: dict[str, tuple[str, ...]] = {
-    "apprise": ("urls", "title"),
     "call-recordings": ("recordings_path", "phone_system_type"),
     "chatgpt-mcp": (
         "shared_secret_hash",
@@ -1828,26 +1817,6 @@ def _coerce_settings(
         _env = os.getenv("NTFY_AUTH_TOKEN", "").strip()
         if _env:
             merged["auth_token"] = _env
-    elif slug == "apprise":
-        raw_urls = merged.get("urls")
-        if isinstance(raw_urls, str):
-            urls = [u.strip() for u in raw_urls.splitlines() if u.strip()]
-        elif isinstance(raw_urls, list):
-            urls = [str(u).strip() for u in raw_urls if u and str(u).strip()]
-        else:
-            urls = []
-        merged.update(
-            {
-                "urls": urls,
-                "title": str(merged.get("title", "")).strip(),
-            }
-        )
-        _env = os.getenv("APPRISE_URLS", "").strip()
-        if _env:
-            merged["urls"] = [u.strip() for u in _env.splitlines() if u.strip()]
-        _env = os.getenv("APPRISE_TITLE", "").strip()
-        if _env:
-            merged["title"] = _env
     elif slug == "imap":
         manage_url = (
             str(merged.get("manage_url") or "").strip() or "/admin/modules/imap"
@@ -3076,7 +3045,6 @@ async def trigger_module(
         "smtp2go": _invoke_smtp2go,
         "tacticalrmm": _invoke_tacticalrmm,
         "ntfy": _invoke_ntfy,
-        "apprise": _invoke_apprise,
         "uptimekuma": _validate_uptimekuma,
         "chatgpt-mcp": _invoke_chatgpt_mcp,
         "xero": _validate_xero,
@@ -4424,93 +4392,6 @@ async def _invoke_sms_gateway(
     return _build_event_result(
         updated_event,
         extra={"gateway_url": gateway_url, "phone_count": len(phone_numbers)},
-    )
-
-
-async def _invoke_apprise(
-    settings: Mapping[str, Any],
-    payload: Mapping[str, Any],
-    *,
-    event_future: asyncio.Future[int | None] | None = None,
-) -> dict[str, Any]:
-    import apprise as apprise_lib
-
-    raw_urls = settings.get("urls")
-    if isinstance(raw_urls, list):
-        urls = [str(u).strip() for u in raw_urls if u and str(u).strip()]
-    else:
-        urls = []
-
-    if not urls:
-        raise ValueError("At least one Apprise notification URL must be configured")
-
-    message = str(payload.get("message") or "Automation triggered").strip()
-    title_value = payload.get("title") or settings.get("title") or "MyPortal"
-    title = str(title_value).strip() or "MyPortal"
-
-    event = await _webhook_monitor().create_manual_event(
-        name="module.apprise.notify",
-        target_url="apprise://",
-        payload={"title": title, "message": message, "url_count": len(urls)},
-        headers={},
-        max_attempts=1,
-        backoff_seconds=60,
-    )
-    event_id = int(event.get("id")) if event.get("id") is not None else None
-    if event_id is None:
-        raise RuntimeError("Failed to create webhook event for Apprise request")
-    if event_future and not event_future.done():
-        event_future.set_result(event_id)
-
-    attempt_number = 1
-    try:
-        ap = apprise_lib.Apprise()
-        for url in urls:
-            ap.add(url)
-        loop = asyncio.get_event_loop()
-        success = await loop.run_in_executor(
-            None,
-            lambda: ap.notify(body=message, title=title),
-        )
-        if not success:
-            updated_event = await _record_failure(
-                event_id,
-                attempt_number=attempt_number,
-                status="failed",
-                error_message="One or more Apprise notifications failed to send",
-                response_status=None,
-                response_body=None,
-            )
-            return _build_event_result(
-                updated_event,
-                extra={"title": title, "url_count": len(urls)},
-            )
-    except Exception as exc:
-        updated_event = await _record_failure(
-            event_id,
-            attempt_number=attempt_number,
-            status="error",
-            error_message=str(exc),
-            response_status=None,
-            response_body=None,
-        )
-        return _build_event_result(
-            updated_event,
-            extra={"title": title, "url_count": len(urls)},
-        )
-
-    response_body = json.dumps(
-        {"title": title, "message": message, "url_count": len(urls)}
-    )
-    updated_event = await _record_success(
-        event_id,
-        attempt_number=attempt_number,
-        response_status=200,
-        response_body=response_body,
-    )
-    return _build_event_result(
-        updated_event,
-        extra={"title": title, "url_count": len(urls)},
     )
 
 
@@ -6982,10 +6863,14 @@ async def _invoke_reprocess_ai(
     attempt_number = 1
     processed = []
     try:
-        if refresh_summary:
+        if refresh_summary and refresh_tags:
+            # One combined model call covers both outputs.
+            await _tickets_service().refresh_ticket_ai_insights(ticket_id_int)
+            processed.extend(["summary", "tags"])
+        elif refresh_summary:
             await _tickets_service().refresh_ticket_ai_summary(ticket_id_int)
             processed.append("summary")
-        if refresh_tags:
+        elif refresh_tags:
             await _tickets_service().refresh_ticket_ai_tags(ticket_id_int)
             processed.append("tags")
         if refresh_resolution:

@@ -15,6 +15,7 @@ from app.core.config import get_settings
 from app.core.logging import log_info, log_warning
 from app.repositories import rag_index as rag_repo
 from app.services import rag_relationships
+from app.services import rag_embedding_identity
 from app.services.rag_urls import canonical_source_url
 from app.services.sanitization import sanitize_rich_text
 
@@ -114,22 +115,9 @@ _STOP_WORDS = frozenset(
 )
 
 
-_EMBEDDING_ALGORITHM = "myportal-embedding-v3"
-
-
 def embedding_model() -> str:
     """Return the persisted compatibility fingerprint for the active vectors."""
-    settings = get_settings()
-    components = {
-        "algorithm": _EMBEDDING_ALGORITHM,
-        "provider": settings.rag_embedding_provider.strip().lower(),
-        "model": settings.rag_embedding_model.strip(),
-        "dimensions": int(settings.rag_embedding_dimensions),
-    }
-    digest = hashlib.sha256(
-        json.dumps(components, sort_keys=True).encode("utf-8")
-    ).hexdigest()[:16]
-    return f"{components['provider']}:{components['model']}:{components['dimensions']}:{digest}"
+    return rag_embedding_identity.embedding_model(get_settings())
 
 
 def embedding_dimensions() -> int:

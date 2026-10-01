@@ -36,7 +36,11 @@ def _request(path: str, query: str = "", method: str = "GET") -> Request:
         (None, None),
         ("https://evil.example.com/", None),
         ("//evil.example.com/", None),
+        ("/%2F%2Fevil.example.com/", None),
+        ("/%5C%5Cevil.example.com/", None),
         ("/\\evil.example.com", None),
+        ("/%E0%A4%A", None),
+        ("/%2", None),
         ("staff", None),
         ("/login", None),
         ("/login?next=/staff", None),
@@ -110,6 +114,29 @@ def test_login_page_redirects_authenticated_user_to_next(monkeypatch):
     response = client.get("/login?next=%2Fstaff", follow_redirects=False)
     assert response.status_code == 303
     assert response.headers["location"] == "/staff"
+
+
+def test_sanitize_local_redirect_target_allows_decoded_local_path():
+    result = main_module._sanitize_local_redirect_target(
+        "/staff%2Faddstaff?department=IT",
+        fallback="/",
+    )
+    assert result == "/staff/addstaff?department=IT"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "//evil.example.com/",
+        "/%2F%2Fevil.example.com/",
+        "/%5C%5Cevil.example.com/",
+        "/%E0%A4%A",
+        "/%2",
+    ],
+)
+def test_sanitize_local_redirect_target_rejects_encoded_and_malformed_targets(value):
+    result = main_module._sanitize_local_redirect_target(value, fallback="/home")
+    assert result == "/home"
 
 
 def test_staff_add_page_flags_modal_open(monkeypatch):

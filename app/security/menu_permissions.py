@@ -116,6 +116,7 @@ MENU_PERMISSIONS: tuple[MenuPermission, ...] = (
     MenuPermission("menu.admin.message_templates", "Message Templates", "Administration", "Manage message templates.", admin_only=True),
     MenuPermission("menu.admin.forms", "Forms administration", "Administration", "Manage forms and their company and user assignments.", admin_only=True),
     MenuPermission("menu.admin.tag_exclusions", "AI tag exclusions", "Administration", "Manage ticket and knowledge-base AI tag exclusions.", admin_only=True),
+    MenuPermission("menu.admin.tag_synonyms", "AI tag synonyms", "Administration", "Merge variant ticket and knowledge-base AI tags into canonical tags.", admin_only=True),
     MenuPermission("menu.admin.tray", "Tray administration", "Administration", "View and manage tray devices, installers, branding, diagnostics, and ticket questions.", admin_only=True),
     MenuPermission("menu.admin.webhooks", "Webhooks", "Administration", "Monitor and manage webhooks.", admin_only=True),
     MenuPermission("menu.admin.api_keys", "API Keys", "Administration", "Manage API keys.", admin_only=True),

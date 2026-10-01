@@ -66,12 +66,7 @@ async def _test_tacticalrmm_ticket_maps_external_company_and_agent_ids(monkeypat
         AsyncMock(return_value="new"),
     )
     monkeypatch.setattr(tickets_routes.tickets_service, "create_ticket", create_ticket)
-    monkeypatch.setattr(
-        tickets_routes.tickets_service, "refresh_ticket_ai_summary", AsyncMock()
-    )
-    monkeypatch.setattr(
-        tickets_routes.tickets_service, "refresh_ticket_ai_tags", AsyncMock()
-    )
+    monkeypatch.setattr(tickets_routes.tickets_service, "schedule_ticket_ai_refresh", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         tickets_routes.tickets_repo, "replace_ticket_assets", replace_assets
     )

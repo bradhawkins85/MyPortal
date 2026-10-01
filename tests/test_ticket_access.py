@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, Mapping
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import status
@@ -639,22 +639,7 @@ def test_non_admin_reply_forces_public_visibility(monkeypatch, active_session):
         fake_has_helpdesk_permission,
     )
 
-    async def fake_refresh_summary(ticket_id: int):
-        assert ticket_id == ticket["id"]
-
-    async def fake_refresh_tags(ticket_id: int):
-        assert ticket_id == ticket["id"]
-
-    monkeypatch.setattr(
-        tickets_routes.tickets_service,
-        "refresh_ticket_ai_summary",
-        fake_refresh_summary,
-    )
-    monkeypatch.setattr(
-        tickets_routes.tickets_service,
-        "refresh_ticket_ai_tags",
-        fake_refresh_tags,
-    )
+    monkeypatch.setattr(tickets_routes.tickets_service, "schedule_ticket_ai_refresh", lambda *_args, **_kwargs: None)
 
     app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
         "id": active_session.user_id,
@@ -941,22 +926,7 @@ def test_helpdesk_reply_preserves_internal_flag(monkeypatch, active_session):
         fake_has_helpdesk_permission,
     )
 
-    async def fake_refresh_summary(ticket_id: int):
-        assert ticket_id == ticket["id"]
-
-    async def fake_refresh_tags(ticket_id: int):
-        assert ticket_id == ticket["id"]
-
-    monkeypatch.setattr(
-        tickets_routes.tickets_service,
-        "refresh_ticket_ai_summary",
-        fake_refresh_summary,
-    )
-    monkeypatch.setattr(
-        tickets_routes.tickets_service,
-        "refresh_ticket_ai_tags",
-        fake_refresh_tags,
-    )
+    monkeypatch.setattr(tickets_routes.tickets_service, "schedule_ticket_ai_refresh", lambda *_args, **_kwargs: None)
 
     app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
         "id": active_session.user_id,
@@ -1066,12 +1036,12 @@ def test_admin_reprocess_ticket_ai_triggers_services(monkeypatch, active_session
         assert ticket_id == 42
         return {"id": ticket_id}
 
-    summary_mock = AsyncMock(return_value=None)
+    insights_mock = AsyncMock(return_value=None)
     tags_mock = AsyncMock(return_value=None)
 
     monkeypatch.setattr(main_module, "_require_super_admin_page", fake_require_super_admin)
     monkeypatch.setattr(main_module.tickets_repo, "get_ticket", fake_get_ticket)
-    monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_summary", summary_mock)
+    monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_insights", insights_mock)
     monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_tags", tags_mock)
     monkeypatch.setattr(session_manager, "load_session", AsyncMock(return_value=active_session))
 
@@ -1091,8 +1061,8 @@ def test_admin_reprocess_ticket_ai_triggers_services(monkeypatch, active_session
     assert response.status_code == status.HTTP_200_OK
     payload = response.json()
     assert payload["status"] == "queued"
-    summary_mock.assert_awaited_once_with(42)
-    tags_mock.assert_awaited_once_with(42)
+    insights_mock.assert_awaited_once_with(42)
+    tags_mock.assert_not_awaited()
 
 
 def test_admin_reprocess_closed_ticket_ai_only_triggers_tags(monkeypatch, active_session):
@@ -1103,12 +1073,12 @@ def test_admin_reprocess_closed_ticket_ai_only_triggers_tags(monkeypatch, active
         assert ticket_id == 42
         return {"id": ticket_id, "status": "closed"}
 
-    summary_mock = AsyncMock(return_value=None)
+    insights_mock = AsyncMock(return_value=None)
     tags_mock = AsyncMock(return_value=None)
 
     monkeypatch.setattr(main_module, "_require_super_admin_page", fake_require_super_admin)
     monkeypatch.setattr(main_module.tickets_repo, "get_ticket", fake_get_ticket)
-    monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_summary", summary_mock)
+    monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_insights", insights_mock)
     monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_tags", tags_mock)
     monkeypatch.setattr(session_manager, "load_session", AsyncMock(return_value=active_session))
 
@@ -1130,7 +1100,7 @@ def test_admin_reprocess_closed_ticket_ai_only_triggers_tags(monkeypatch, active
         "status": "queued",
         "message": "AI tags will be regenerated shortly.",
     }
-    summary_mock.assert_not_awaited()
+    insights_mock.assert_not_awaited()
     tags_mock.assert_awaited_once_with(42)
 
 
@@ -1141,12 +1111,12 @@ def test_admin_reprocess_ticket_ai_missing_ticket(monkeypatch, active_session):
     async def fake_get_ticket(ticket_id: int):
         return None
 
-    summary_mock = AsyncMock(return_value=None)
+    insights_mock = AsyncMock(return_value=None)
     tags_mock = AsyncMock(return_value=None)
 
     monkeypatch.setattr(main_module, "_require_super_admin_page", fake_require_super_admin)
     monkeypatch.setattr(main_module.tickets_repo, "get_ticket", fake_get_ticket)
-    monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_summary", summary_mock)
+    monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_insights", insights_mock)
     monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_tags", tags_mock)
     monkeypatch.setattr(session_manager, "load_session", AsyncMock(return_value=active_session))
 
@@ -1166,7 +1136,7 @@ def test_admin_reprocess_ticket_ai_missing_ticket(monkeypatch, active_session):
     assert response.status_code == status.HTTP_404_NOT_FOUND
     payload = response.json()
     assert payload["detail"] == "Ticket not found"
-    summary_mock.assert_not_awaited()
+    insights_mock.assert_not_awaited()
     tags_mock.assert_not_awaited()
 
 
@@ -1179,15 +1149,13 @@ def test_admin_update_ticket_description_updates_service(monkeypatch, active_ses
         return {"id": ticket_id, "description": "Original"}
 
     update_mock = AsyncMock(return_value={"id": 42, "description": "Line one\nLine two"})
-    summary_mock = AsyncMock(return_value=None)
-    tags_mock = AsyncMock(return_value=None)
+    schedule_mock = Mock(return_value=None)
     emit_mock = AsyncMock(return_value=None)
 
     monkeypatch.setattr(main_module, "_require_helpdesk_page", fake_require_helpdesk)
     monkeypatch.setattr(main_module.tickets_repo, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(main_module.tickets_service, "update_ticket_description", update_mock)
-    monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_summary", summary_mock)
-    monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_tags", tags_mock)
+    monkeypatch.setattr(main_module.tickets_service, "schedule_ticket_ai_refresh", schedule_mock)
     monkeypatch.setattr(main_module.tickets_service, "emit_ticket_updated_event", emit_mock)
     monkeypatch.setattr(session_manager, "load_session", AsyncMock(return_value=active_session))
 
@@ -1214,8 +1182,7 @@ def test_admin_update_ticket_description_updates_service(monkeypatch, active_ses
     assert "_flash=" in flash_cookie
     assert "success" in flash_cookie
     update_mock.assert_awaited_once_with(42, "Line one\nLine two")
-    summary_mock.assert_awaited_once_with(42)
-    tags_mock.assert_awaited_once_with(42)
+    schedule_mock.assert_called_once_with(42)
     emit_mock.assert_not_awaited()
 
 

@@ -99,12 +99,7 @@ def _setup_common_mocks(monkeypatch, ticket: dict, company_id: int = 5) -> None:
     )
     monkeypatch.setattr(main_module.tickets_repo, "update_ticket", AsyncMock(return_value=ticket))
     monkeypatch.setattr(main_module.tickets_repo, "set_ticket_status", AsyncMock(return_value=None))
-    monkeypatch.setattr(
-        main_module.tickets_service, "refresh_ticket_ai_summary", AsyncMock(return_value=None)
-    )
-    monkeypatch.setattr(
-        main_module.tickets_service, "refresh_ticket_ai_tags", AsyncMock(return_value=None)
-    )
+    monkeypatch.setattr(main_module.tickets_service, "schedule_ticket_ai_refresh", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         main_module.tickets_service, "broadcast_ticket_event", AsyncMock(return_value=None)
     )

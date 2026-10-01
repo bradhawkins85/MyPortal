@@ -17,8 +17,11 @@ from app.services import company_access
 from app.services import modules as modules_service
 from app.services.ai_prompt_security import UntrustedRecord, build_prompt
 from app.services.tagging import (
+    apply_tag_text_synonyms,
     filter_helpful_texts,
     get_all_excluded_tags,
+    get_preferred_tags,
+    get_tag_synonym_map,
     slugify_tag,
 )
 from app.services.realtime import RefreshNotifier, refresh_notifier
@@ -176,6 +179,7 @@ def _render_ai_tag_prompt(
     summary: str | None,
     sections: Sequence[Mapping[str, Any]],
     fallback_content: str,
+    preferred_tags: Sequence[str] = (),
 ) -> str:
     clean_title = title.strip() or "Untitled article"
     clean_summary = (summary or "").strip()
@@ -198,9 +202,15 @@ def _render_ai_tag_prompt(
         fallback_text = " ".join(fallback_text.split())
         if fallback_text:
             content_records.append({"heading": "Article content", "content": fallback_text[:600]})
+    records = [UntrustedRecord("kb-article-draft", "knowledge base editor submission", {"title": clean_title, "summary": clean_summary, "sections": content_records}, "Use only to derive topical tags")]
+    if preferred_tags:
+        records.append(UntrustedRecord("tag-vocabulary", "most-used existing ticket and knowledge base tags", {"preferred_tags": [tag.replace("-", " ") for tag in preferred_tags]}, "Use only as preferred tag values when they match the article"))
     return build_prompt(
-        "Classify the article by topic. Generate 5 to 10 concise tags of 1-3 words. Return exactly a JSON object with a tags array of lowercase strings.",
-        [UntrustedRecord("kb-article-draft", "knowledge base editor submission", {"title": clean_title, "summary": clean_summary, "sections": content_records}, "Use only to derive topical tags")],
+        "Classify the article by topic. Generate 5 to 10 concise tags of 1-3 words. "
+        "When a tag-vocabulary record is provided, reuse those exact tags whenever one accurately describes the article, "
+        "and only create a new tag for a topic none of them cover. "
+        "Return exactly a JSON object with a tags array of lowercase strings.",
+        records,
     )
 
 
@@ -258,7 +268,8 @@ async def _schedule_article_ai_tags(
     *,
     notifier: RefreshNotifier | None = None,
 ) -> None:
-    prompt = _render_ai_tag_prompt(title, summary, sections, combined_content)
+    preferred_tags = await get_preferred_tags()
+    prompt = _render_ai_tag_prompt(title, summary, sections, combined_content, preferred_tags)
 
     async def _apply_result(result: Mapping[str, Any]) -> None:
         if not modules_service.module_result_succeeded(result):
@@ -285,9 +296,10 @@ async def _schedule_article_ai_tags(
             excluded_slugs = set()
         # Parsed tags are display text ("network printer") while exclusions are
         # slugs ("network-printer"), so compare on the slug form.
+        synonyms = await get_tag_synonym_map()
         tags = [
             tag
-            for tag in _parse_ai_tag_text(text)
+            for tag in apply_tag_text_synonyms(_parse_ai_tag_text(text), synonyms)
             if slugify_tag(tag) not in excluded_slugs
         ]
         if not tags:

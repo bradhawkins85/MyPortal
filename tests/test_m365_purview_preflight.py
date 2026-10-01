@@ -340,9 +340,22 @@ async def test_preflight_repair_registers_principal_and_adds_role_member():
         raise AssertionError(url)
 
     commands: list[tuple[str, dict | None]] = []
+    # Track call counts so re-verification calls return different data
+    call_counts: dict[str, int] = {}
 
     async def invoke(_token, _tenant, command, parameters=None, **_kwargs):
+        call_counts[command] = call_counts.get(command, 0) + 1
         commands.append((command, parameters))
+        if command == "Get-ServicePrincipal":
+            # First call: not registered. Second call (re-verify): registered.
+            if call_counts[command] > 1:
+                return {"value": [{"ObjectId": object_id, "AppId": client_id}]}
+            return {"value": []}
+        if command == "Get-RoleGroup":
+            # First call: empty members. Second call (re-verify): member present.
+            if call_counts[command] > 1:
+                return {"value": [{"Members": [{"ExternalDirectoryObjectId": object_id}]}]}
+            return {"value": []}
         return {"value": []}
 
     with (
@@ -356,11 +369,21 @@ async def test_preflight_repair_registers_principal_and_adds_role_member():
     ):
         result = await m365.run_purview_preflight(7, repair=True)
 
-    assert result["repaired"] == []
-    assert not any(
-        command in {"New-ServicePrincipal", "Add-RoleGroupMember"}
-        for command, _parameters in commands
-    )
+    # Both repair commands should have been issued
+    assert ("New-ServicePrincipal", {
+        "AppId": client_id, "ObjectId": object_id, "DisplayName": "MyPortal Purview eDiscovery",
+    }) in commands
+    assert ("Add-RoleGroupMember", {
+        "Identity": "eDiscoveryManager", "Member": object_id,
+    }) in commands
+    assert result["repaired"] == [
+        "Registered service principal in Purview",
+        "Added to eDiscoveryManager role group",
+    ]
+    # Re-verification should confirm both are now present
+    checks = {check["key"]: check for check in result["checks"]}
+    assert checks["service_principal"]["status"] == "Passed"
+    assert checks["ediscovery_manager"]["status"] == "Passed"
 
 
 @pytest.mark.anyio("asyncio")

@@ -882,12 +882,6 @@ async def test_sync_account_reimports_message_with_orphaned_import_marker(monkey
         embedded_bodies.append(kwargs["html_body"])
         return '<p>Please help</p><img src="/api/tickets/100/attachments/1/download">'
 
-    async def fake_refresh_ai_summary(ticket_id):
-        pass
-
-    async def fake_refresh_ai_tags(ticket_id):
-        pass
-
     monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
     monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
     monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
@@ -900,8 +894,7 @@ async def test_sync_account_reimports_message_with_orphaned_import_marker(monkey
     monkeypatch.setattr(m365_mail, "_find_existing_ticket_for_reply", fake_find_existing_ticket)
     monkeypatch.setattr(m365_mail, "_embed_graph_inline_images", fake_embed_graph_inline_images)
     monkeypatch.setattr(m365_mail.tickets_service, "create_ticket", fake_create_ticket)
-    monkeypatch.setattr(m365_mail.tickets_service, "refresh_ticket_ai_summary", fake_refresh_ai_summary)
-    monkeypatch.setattr(m365_mail.tickets_service, "refresh_ticket_ai_tags", fake_refresh_ai_tags)
+    monkeypatch.setattr(m365_mail.tickets_service, "schedule_ticket_ai_refresh", lambda *_args, **_kwargs: None)
 
     result = await m365_mail.sync_account(1)
 
@@ -1007,12 +1000,6 @@ async def test_sync_account_no_company_resolves_from_email(monkeypatch):
         created_tickets.append(kwargs)
         return {"id": 200, "ticket_number": "T-200"}
 
-    async def fake_refresh_ai_summary(ticket_id):
-        pass
-
-    async def fake_refresh_ai_tags(ticket_id):
-        pass
-
     monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
     monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
     monkeypatch.setattr(m365_mail.m365_repo, "list_provisioned_company_ids", fake_list_provisioned)
@@ -1025,8 +1012,7 @@ async def test_sync_account_no_company_resolves_from_email(monkeypatch):
     monkeypatch.setattr(m365_mail, "_resolve_ticket_entities", fake_resolve_ticket_entities)
     monkeypatch.setattr(m365_mail, "_find_existing_ticket_for_reply", fake_find_existing_ticket)
     monkeypatch.setattr(m365_mail.tickets_service, "create_ticket", fake_create_ticket)
-    monkeypatch.setattr(m365_mail.tickets_service, "refresh_ticket_ai_summary", fake_refresh_ai_summary)
-    monkeypatch.setattr(m365_mail.tickets_service, "refresh_ticket_ai_tags", fake_refresh_ai_tags)
+    monkeypatch.setattr(m365_mail.tickets_service, "schedule_ticket_ai_refresh", lambda *_args, **_kwargs: None)
 
     result = await m365_mail.sync_account(1)
 
@@ -1395,9 +1381,6 @@ async def test_sync_account_creates_ticket_for_reply_to_closed_ticket_number(mon
         created_tickets.append(kwargs)
         return {"id": 999}
 
-    async def fake_refresh_ticket_ai(_ticket_id: int):
-        pass
-
     replies_added: list[dict[str, Any]] = []
 
     async def fake_create_reply(**kwargs):
@@ -1426,12 +1409,7 @@ async def test_sync_account_creates_ticket_for_reply_to_closed_ticket_number(mon
     monkeypatch.setattr(imap.tickets_repo, "get_ticket_by_external_reference", fake_get_ticket_by_external_reference)
     monkeypatch.setattr(imap.db, "fetch_all", fake_fetch_all)
     monkeypatch.setattr(m365_mail.tickets_service, "create_ticket", fake_create_ticket)
-    monkeypatch.setattr(
-        m365_mail.tickets_service, "refresh_ticket_ai_summary", fake_refresh_ticket_ai
-    )
-    monkeypatch.setattr(
-        m365_mail.tickets_service, "refresh_ticket_ai_tags", fake_refresh_ticket_ai
-    )
+    monkeypatch.setattr(m365_mail.tickets_service, "schedule_ticket_ai_refresh", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(m365_mail.tickets_repo, "create_reply", fake_create_reply)
     monkeypatch.setattr(m365_mail.tickets_service, "emit_ticket_updated_event", fake_emit_ticket_updated_event)
 

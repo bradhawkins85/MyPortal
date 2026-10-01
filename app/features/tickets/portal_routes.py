@@ -7,6 +7,8 @@ Mirrors the routes that used to live in ``app/main.py``:
 * ``POST /tickets``               — create a ticket from the portal.
 * ``GET  /tickets/{ticket_id}``   — portal ticket detail.
 * ``POST /tickets/{ticket_id}/replies`` — post a reply from the portal.
+* ``POST /tickets/suggestions``   — KB articles and resolved tickets for a draft.
+* ``POST /tickets/suggestions/feedback`` — record "Did this fix it?" answers.
 
 URLs and behaviour are intentionally identical to the previous in-line
 handlers so external links, bookmarks, and tests keep working after
@@ -20,7 +22,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.core.logging import log_error
 from app.features.tickets.form_helpers import get_last_form_value
@@ -29,7 +31,10 @@ from app.security.flash import flash_redirect
 from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import staff as staff_repo
 from app.repositories import tickets as tickets_repo
+from app.services import audit as audit_service
+from app.services import company_access
 from app.services import ticket_attachments as attachments_service
+from app.services import ticket_deflection
 from app.services import tickets as tickets_service
 from app.services.sanitization import sanitize_rich_text
 
@@ -231,15 +236,7 @@ async def portal_create_ticket(request: Request):
                         log_error(f"Failed to save attachment: {attach_error}")
                         # Continue processing ticket even if attachment fails
 
-        try:
-            await tickets_service.refresh_ticket_ai_summary(ticket["id"])
-        except RuntimeError as exc:
-            log_error(
-                "Portal ticket AI summary refresh skipped after create",
-                ticket_id=ticket["id"],
-                error=str(exc),
-            )
-        await tickets_service.refresh_ticket_ai_tags(ticket["id"])
+        tickets_service.schedule_ticket_ai_refresh(ticket["id"])
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create portal ticket", error=str(exc))
         return await main_module._render_portal_tickets_page(
@@ -253,6 +250,91 @@ async def portal_create_ticket(request: Request):
         )
 
     return flash_redirect(f"/tickets/{ticket['id']}", "Ticket created.", "success")
+
+
+async def _suggestion_ticket_scope(
+    request: Request, user: Mapping[str, Any]
+) -> tuple[bool, set[int]]:
+    """Return the portal ticket detail access rule for suggested tickets."""
+
+    main_module = _main()
+    if user.get("is_super_admin") or await main_module._has_admin_technician_access(
+        user, request
+    ):
+        return True, set()
+    if not await main_module._has_menu_page_access(
+        request, user, "menu.tickets", write=True
+    ):
+        return False, set()
+    active_company_id = tickets_service.parse_company_id(
+        getattr(request.state, "active_company_id", None)
+    )
+    if active_company_id is not None:
+        return False, {active_company_id}
+    company_ids: set[int] = set()
+    for entry in await company_access.list_accessible_companies(user):
+        try:
+            company_ids.add(int(entry.get("company_id")))
+        except (TypeError, ValueError):
+            continue
+    return False, company_ids
+
+
+async def _read_json_object(request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+@router.post("/tickets/suggestions")
+async def portal_ticket_suggestions(request: Request):
+    user, redirect = await _main()._require_menu_page_access(request, "menu.tickets")
+    if redirect:
+        return JSONResponse({"suggestions": []}, status_code=status.HTTP_403_FORBIDDEN)
+    payload = await _read_json_object(request)
+    full_access, company_ids = await _suggestion_ticket_scope(request, user)
+    suggestions = await ticket_deflection.suggest_for_new_ticket(
+        str(payload.get("subject") or ""),
+        str(payload.get("description") or ""),
+        user,
+        active_company_id=tickets_service.parse_company_id(
+            getattr(request.state, "active_company_id", None)
+        ),
+        full_ticket_access=full_access,
+        company_ticket_ids=company_ids,
+    )
+    return JSONResponse({"suggestions": suggestions})
+
+
+@router.post("/tickets/suggestions/feedback")
+async def portal_ticket_suggestion_feedback(request: Request):
+    user, redirect = await _main()._require_menu_page_access(request, "menu.tickets")
+    if redirect:
+        return JSONResponse({"ok": False}, status_code=status.HTTP_403_FORBIDDEN)
+    payload = await _read_json_object(request)
+    suggestion_type = str(payload.get("type") or "")
+    try:
+        suggestion_id = int(payload.get("id"))
+    except (TypeError, ValueError):
+        suggestion_id = 0
+    if suggestion_type not in {"knowledge_base", "ticket"} or suggestion_id <= 0:
+        return JSONResponse({"ok": False}, status_code=status.HTTP_400_BAD_REQUEST)
+    helpful = payload.get("helpful") is True
+    try:
+        user_id = int(user.get("id"))
+    except (TypeError, ValueError):
+        user_id = None
+    await audit_service.record(
+        action="tickets.suggestion.feedback",
+        request=request,
+        user_id=user_id,
+        entity_type=suggestion_type,
+        entity_id=suggestion_id,
+        metadata={"helpful": helpful},
+    )
+    return JSONResponse({"ok": True})
 
 
 @router.get("/tickets/{ticket_id}", response_class=HTMLResponse)
@@ -431,15 +513,7 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
-    try:
-        await tickets_service.refresh_ticket_ai_summary(ticket_id)
-    except RuntimeError as exc:
-        log_error(
-            "Portal ticket AI summary refresh skipped after reply",
-            ticket_id=ticket_id,
-            error=str(exc),
-        )
-    await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    tickets_service.schedule_ticket_ai_refresh(ticket_id)
     actor_type = "technician" if has_helpdesk_access or is_super_admin else "requester"
     reply_event_payload = dict(created_reply)
     if reply_attachments:

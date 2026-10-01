@@ -23,7 +23,6 @@ TERMINAL_STATUSES = frozenset({"completed", "failed", "partiallysucceeded", "sto
 _ORG_CONTEXT_ERRORS = ("organization container", "parameter name: orgunit")
 _NEW_SEARCH_MAX_RETRIES = 3
 _NEW_SEARCH_RETRY_BASE_SECONDS = 30
-_tasks: dict[tuple[int, str], asyncio.Task[None]] = {}
 
 
 def _is_organization_context_error(exc: Exception) -> bool:
@@ -144,18 +143,6 @@ async def create_request(company_id: int, user_id: int, data: dict[str, Any]) ->
     })
 
 
-def _start_task(request_id: int, action: str, *, retry: bool = False) -> None:
-    key = (request_id, action)
-    current = _tasks.get(key)
-    if current and not current.done():
-        raise ValueError(f"{action.capitalize()} is already running")
-    task = asyncio.create_task(
-        _run_search(request_id, retry=retry) if action == "search" else _run_purge(request_id)
-    )
-    _tasks[key] = task
-    task.add_done_callback(lambda _task: _tasks.pop(key, None))
-
-
 async def start_search(request_id: int, company_id: int) -> dict[str, Any]:
     request = await _owned_request(request_id, company_id)
     previous_status = str(request["search_status"]).lower()
@@ -166,7 +153,6 @@ async def start_search(request_id: int, company_id: int) -> dict[str, Any]:
         "matched_items": 0, "matched_size": 0, "search_started_at": _utcnow(),
         "search_completed_at": None,
     })
-    _start_task(request_id, "search", retry=previous_status == "failed")
     return (await purge_repo.get_request(request_id)) or request
 
 
@@ -181,7 +167,6 @@ async def start_purge(request_id: int, company_id: int) -> dict[str, Any]:
     await purge_repo.update_request(request_id, {
         "purge_status": "queued", "error_message": None, "purge_started_at": _utcnow(),
     })
-    _start_task(request_id, "purge")
     return (await purge_repo.get_request(request_id)) or request
 
 
@@ -256,7 +241,7 @@ async def _run_search(request_id: int, *, retry: bool = False) -> None:
                     wait = _NEW_SEARCH_RETRY_BASE_SECONDS * (2 ** attempt)
                     log_info(
                         "New-ComplianceSearch transient org-container error; retrying",
-                        request_id=request_id, attempt=attempt + 1, wait_seconds=wait,
+                        request_id=request_id, company_id=company_id, attempt=attempt + 1, wait_seconds=wait,
                     )
                     await asyncio.sleep(wait)
                 elif _is_organization_context_error(exc):
@@ -281,7 +266,7 @@ async def _run_search(request_id: int, *, retry: bool = False) -> None:
             updates["error_message"] = str(result.get("Errors") or "Compliance search did not complete")[:2000]
         await purge_repo.update_request(request_id, updates)
     except Exception as exc:  # noqa: BLE001 - background boundary records safe error
-        log_error("M365 spam search failed", request_id=request_id, error=str(exc))
+        log_error("M365 spam search failed", request_id=request_id, company_id=company_id, error=str(exc))
         await purge_repo.update_request(request_id, {
             "search_status": "failed", "error_message": _failure_message(exc),
             "search_completed_at": _utcnow(),
@@ -344,7 +329,7 @@ async def _run_purge(request_id: int) -> None:
         if status == "completed":
             await _run_managed_folder_assistant(token, tenant_id, request_id)
     except Exception as exc:  # noqa: BLE001 - background boundary records safe error
-        log_error("M365 spam purge failed", request_id=request_id, error=str(exc))
+        log_error("M365 spam purge failed", request_id=request_id, company_id=company_id, error=str(exc))
         await purge_repo.update_request(request_id, {
             "purge_status": "failed", "error_message": _failure_message(exc),
             "purge_completed_at": _utcnow(),
@@ -380,3 +365,73 @@ async def _run_managed_folder_assistant(_scc_token: str, _tenant: str, request_i
             details = {"results": details}
         details["managed_folder_assistant_warning"] = str(exc)[:500]
         await purge_repo.update_request(request_id, {"purge_details": details})
+
+
+async def process_queued() -> int:
+    """Find and process queued search/purge requests. Returns the count processed.
+
+    This is the entry point for the server-shell worker.  It finds all requests
+    with ``search_status = 'queued'`` or ``purge_status = 'queued'`` and executes
+    them sequentially via the SCC pipeline.  Safe to call repeatedly; each
+    invocation processes whatever is currently queued and returns.
+
+    Each request is validated against its company before processing.  If the
+    company no longer exists, the request is marked as failed with a clear
+    message rather than attempted against a missing tenant.
+    """
+    from app.core.database import db
+    from app.repositories import companies as companies_repo
+
+    processed = 0
+
+    # --- Queued searches ---
+    rows = await db.fetch_all(
+        "SELECT id, company_id FROM m365_spam_purge_requests WHERE search_status = 'queued' ORDER BY created_at"
+    )
+    for row in rows:
+        request_id = int(row["id"])
+        company_id = int(row["company_id"])
+        request = await purge_repo.get_request(request_id)
+        if not request:
+            continue
+        # Validate company context before processing.
+        company = await companies_repo.get_company_by_id(company_id)
+        if not company:
+            log_error("Worker skipping queued search: company not found", request_id=request_id, company_id=company_id)
+            await purge_repo.update_request(request_id, {
+                "search_status": "failed",
+                "error_message": f"Company {company_id} no longer exists; search cannot be processed.",
+                "search_completed_at": _utcnow(),
+            })
+            continue
+        log_info("Worker processing queued search", request_id=request_id, company_id=company_id, company=str(company.get("name") or ""))
+        # Always retry: the Remove-ComplianceSearch cleanup is a no-op for
+        # first-time searches (suppressed), but essential for re-runs.
+        await _run_search(request_id, retry=True)
+        processed += 1
+
+    # --- Queued purges ---
+    rows = await db.fetch_all(
+        "SELECT id, company_id FROM m365_spam_purge_requests WHERE purge_status = 'queued' ORDER BY created_at"
+    )
+    for row in rows:
+        request_id = int(row["id"])
+        company_id = int(row["company_id"])
+        request = await purge_repo.get_request(request_id)
+        if not request:
+            continue
+        # Validate company context before processing.
+        company = await companies_repo.get_company_by_id(company_id)
+        if not company:
+            log_error("Worker skipping queued purge: company not found", request_id=request_id, company_id=company_id)
+            await purge_repo.update_request(request_id, {
+                "purge_status": "failed",
+                "error_message": f"Company {company_id} no longer exists; purge cannot be processed.",
+                "purge_completed_at": _utcnow(),
+            })
+            continue
+        log_info("Worker processing queued purge", request_id=request_id, company_id=company_id, company=str(company.get("name") or ""))
+        await _run_purge(request_id)
+        processed += 1
+
+    return processed

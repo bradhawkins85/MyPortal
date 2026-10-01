@@ -302,6 +302,7 @@
   "POST /subscriptions/{subscription_id}/request-change",
   "POST /switch-company",
   "POST /tickets",
+  "POST /tickets/suggestions",
   "POST /tickets/{ticket_id}/replies",
   "PUT /api/backup-jobs/{job_id}",
   "PUT /api/bc/plans/{plan_id}/contacts/{contact_id}",

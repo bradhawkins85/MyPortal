@@ -1,0 +1,7 @@
+{
+  "guid": "7599747f-b7c9-4346-bcdd-191965e28b54",
+  "occurred_at": "2026-10-01T11:00Z",
+  "change_type": "Feature",
+  "summary": "Technicians can now mark items in a ticket's Related panel \ud83d\udc4d or \ud83d\udc4e. A \ud83d\udc4e hides that item from the ticket (with Undo), and the votes are exported as labels for evals/ai_quality so model or threshold changes can be measured against real technician judgements.",
+  "content_hash": "27ee68c937ced073d4cd6b6a7730a50bd3b05e9de92163a6585a20a631c57b66"
+}

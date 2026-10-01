@@ -48,3 +48,12 @@ def test_editor_saves_in_place_and_supports_section_reordering():
     assert "history.replaceState" in script
     assert "dragstart" in script and "data-kb-drag-handle" in script
     assert "ensurePreviewMatchesForm" not in script
+
+
+def test_catalogue_review_queue_surfaces_relationship_update_flag():
+    catalogue = Path("app/templates/admin/knowledge_base.html").read_text()
+    routes = Path("app/features/knowledge_base/routes.py").read_text()
+
+    assert 'data-kb-status-filter="needs-update"' in catalogue
+    assert "{% if article.needs_update %} needs-update{% endif %}" in catalogue
+    assert "kb_articles_needing_update()" in routes

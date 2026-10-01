@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">AI Tag Synonyms</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="synonyms-filter">Filter tag synonyms</label>
+      <input id="synonyms-filter" type="search" class="form-input page-header-toolbar__search" placeholder="Filter synonyms" data-table-filter="synonyms-table" />
+    </div>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([]) }}
+{% endblock %}
+
+{% block content %}
+  <div class="admin-grid">
+    <section class="card card--panel">
+      <div class="table-wrapper">
+        <table class="table" id="synonyms-table" data-table data-table-id="tag-synonyms">
+          <thead>
+            <tr>
+              <th scope="col" data-sort="string" data-column-key="variant_slug">Variant</th>
+              <th scope="col" data-sort="string" data-column-key="canonical_slug">Merged into</th>
+              <th scope="col" data-sort="date" data-column-key="created_at">Created At</th>
+              <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="synonyms-tbody">
+            <!-- Populated by JavaScript -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card card--panel">
+      <header class="card__header">
+        <div>
+          <h2 class="card__title">Merge a Tag Variant</h2>
+          <p class="card__subtitle">AI-generated ticket and knowledge base tags matching the variant are replaced with the canonical tag. Tags are normalized to kebab-case.</p>
+        </div>
+      </header>
+      <form id="synonym-form" class="form" autocomplete="off">
+        <div class="form-group">
+          <label for="synonym-variant" class="form-label">Variant</label>
+          <input type="text" id="synonym-variant" name="variant" class="form-input" placeholder="e.g., outlook-crashing" required maxlength="80" />
+        </div>
+        <div class="form-group">
+          <label for="synonym-canonical" class="form-label">Canonical tag</label>
+          <input type="text" id="synonym-canonical" name="canonical" class="form-input" placeholder="e.g., outlook-crash" required maxlength="80" list="preferred-tag-options" />
+          <datalist id="preferred-tag-options"></datalist>
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="form-checkbox" for="synonym-apply-existing">
+            <input type="checkbox" id="synonym-apply-existing" name="apply_to_existing" checked />
+            <span>Also rewrite the variant on existing tickets and articles</span>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary">Add Synonym</button>
+        </div>
+        <p class="form-help" id="synonym-result" role="status"></p>
+      </form>
+    </section>
+
+    <section class="card card--panel">
+      <header class="card__header">
+        <div>
+          <h2 class="card__title">Preferred Tags</h2>
+          <p class="card__subtitle">The most-used existing tags. These are passed to the AI tagging prompts as preferred values so new tickets and articles reuse them.</p>
+        </div>
+      </header>
+      <div class="tag-list" id="preferred-tags"></div>
+    </section>
+  </div>
+
+  <script>
+    (function() {
+      const csrfToken = {{ csrf_token | tojson }};
+      const synonymsTable = document.getElementById('synonyms-tbody');
+      const synonymForm = document.getElementById('synonym-form');
+      const variantInput = document.getElementById('synonym-variant');
+      const canonicalInput = document.getElementById('synonym-canonical');
+      const applyExistingInput = document.getElementById('synonym-apply-existing');
+      const resultText = document.getElementById('synonym-result');
+      const preferredContainer = document.getElementById('preferred-tags');
+      const preferredOptions = document.getElementById('preferred-tag-options');
+
+      function escapeHtml(value) {
+        return String(value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      async function loadSynonyms() {
+        try {
+          const response = await fetch('/api/tag-synonyms');
+          if (!response.ok) {
+            throw new Error('Failed to load synonyms');
+          }
+          const data = await response.json();
+          renderSynonyms(data.synonyms || []);
+          renderPreferred(data.preferred_tags || []);
+        } catch (error) {
+          console.error('Error loading synonyms:', error);
+          synonymsTable.innerHTML = '<tr><td colspan="4" class="table__empty">Failed to load tag synonyms</td></tr>';
+        }
+      }
+
+      function renderPreferred(tags) {
+        preferredOptions.innerHTML = tags.map(tag => `<option value="${escapeHtml(tag)}"></option>`).join('');
+        if (!tags.length) {
+          preferredContainer.innerHTML = '<span class="form-help">No tag is used on more than one ticket or article yet.</span>';
+          return;
+        }
+        preferredContainer.innerHTML = tags.map(tag => `<span class="tag tag--muted">${escapeHtml(tag)}</span>`).join('');
+      }
+
+      function renderSynonyms(synonyms) {
+        if (!synonyms.length) {
+          synonymsTable.innerHTML = '<tr><td colspan="4" class="table__empty">No tag synonyms defined yet.</td></tr>';
+          return;
+        }
+
+        synonymsTable.innerHTML = synonyms.map(item => {
+          const variant = escapeHtml(item.variant_slug);
+          const canonical = escapeHtml(item.canonical_slug);
+          const createdAt = item.created_at ? new Date(item.created_at).toLocaleString() : '—';
+          return `
+          <tr data-variant-slug="${variant}">
+            <td data-label="Variant">${variant}</td>
+            <td data-label="Merged into">${canonical}</td>
+            <td data-label="Created At">${escapeHtml(createdAt)}</td>
+            <td class="table__actions">
+              <div class="table__action-buttons">
+                <button type="button" class="button button--danger" data-delete-variant="${variant}">Delete</button>
+              </div>
+            </td>
+          </tr>
+        `;
+        }).join('');
+
+        document.querySelectorAll('[data-delete-variant]').forEach(button => {
+          button.addEventListener('click', function() {
+            deleteSynonym(this.getAttribute('data-delete-variant'));
+          });
+        });
+
+        const table = document.getElementById('synonyms-table');
+        if (table) {
+          table.dispatchEvent(new CustomEvent('table:rows-updated'));
+        }
+      }
+
+      async function deleteSynonym(variant) {
+        if (!confirm(`Stop merging "${variant}"? Tags that were already rewritten stay as they are.`)) {
+          return;
+        }
+        try {
+          const response = await fetch(`/api/tag-synonyms/${encodeURIComponent(variant)}`, {
+            method: 'DELETE',
+            headers: { 'X-CSRF-Token': csrfToken || '' },
+          });
+          if (!response.ok) {
+            throw new Error('Failed to delete synonym');
+          }
+          await loadSynonyms();
+        } catch (error) {
+          console.error('Error deleting synonym:', error);
+          alert('Failed to delete tag synonym. Please try again.');
+        }
+      }
+
+      synonymForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const variant = variantInput.value.trim();
+        const canonical = canonicalInput.value.trim();
+        if (!variant || !canonical) {
+          return;
+        }
+        resultText.textContent = '';
+        try {
+          const response = await fetch('/api/tag-synonyms', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-Token': csrfToken || '',
+            },
+            body: JSON.stringify({
+              variant,
+              canonical,
+              apply_to_existing: applyExistingInput.checked,
+            }),
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.detail || 'Failed to create synonym');
+          }
+          variantInput.value = '';
+          canonicalInput.value = '';
+          resultText.textContent = `Merged "${data.variant_slug}" into "${data.canonical_slug}". Updated ${data.tickets_updated} ticket(s) and ${data.articles_updated} article(s).`;
+          await loadSynonyms();
+        } catch (error) {
+          console.error('Error creating synonym:', error);
+          alert(error.message || 'Failed to create tag synonym. Please try again.');
+        }
+      });
+
+      loadSynonyms();
+    })();
+  </script>
+{% endblock %}
