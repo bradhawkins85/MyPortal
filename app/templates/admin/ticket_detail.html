@@ -1541,11 +1541,11 @@
                 <div class="ticket-reply-submit" data-ticket-reply-submit>
                   <input type="hidden" name="replyStatus" value="" data-ticket-reply-status-input />
                   <button type="submit" class="button button--primary ticket-reply-submit__primary" data-reply-submit-label>Send reply</button>
-                  <details class="ticket-reply-submit__status-menu">
+                  <details class="ticket-reply-submit__status-menu" data-floating-menu data-floating-menu-placement="top">
                     <summary class="button button--primary ticket-reply-submit__toggle" aria-label="Post reply with a selected ticket status">
                       <span aria-hidden="true">▾</span>
                     </summary>
-                    <div class="ticket-reply-submit__menu" role="menu" aria-label="Post reply and set status">
+                    <div class="ticket-reply-submit__menu" data-floating-menu-panel role="menu" aria-label="Post reply and set status">
                       {% for status_definition in ticket_status_definitions %}
                         <button type="submit" value="{{ status_definition.tech_status }}" class="ticket-reply-submit__menu-item" role="menuitem" onclick="this.form.querySelector('[data-ticket-reply-status-input]').value = this.value;">
                           {{ status_definition.tech_label }}

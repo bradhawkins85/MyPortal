@@ -9,6 +9,14 @@
  *
  * Behaviour: click toggles open/closed; Esc closes; click outside closes;
  * focus moves to the panel when opened.
+ *
+ * Native <details> menus can opt into the same floating placement with
+ *   <details data-floating-menu [data-floating-menu-placement="top"]>
+ *     <summary>…</summary>
+ *     <div data-floating-menu-panel>…items…</div>
+ *   </details>
+ * While open, the panel is position:fixed against its toggle so it pops over
+ * cards, sections and short pages instead of being clipped by their overflow.
  */
 (function () {
   'use strict';
@@ -18,6 +26,12 @@
   function positionPanel(menu, panel) {
     var toggle = menu.querySelector('[data-header-menu-toggle]');
     panel = panel || getMenuPanel(menu);
+    placeFloating(toggle, panel, false);
+  }
+
+  // Fix `panel` to the viewport next to `toggle`, opening below unless there
+  // is not enough room (or `preferTop` is set and there is room above).
+  function placeFloating(toggle, panel, preferTop) {
     if (!toggle || !panel) {
       return;
     }
@@ -34,7 +48,11 @@
     // is not enough room below the button, open upward instead.
     var panelHeight = panel.offsetHeight || 0;
     var spaceBelow = window.innerHeight - rect.bottom - gap - 8;
-    if (panelHeight > spaceBelow && rect.top > spaceBelow) {
+    var spaceAbove = rect.top - gap - 8;
+    var openUp = preferTop
+      ? panelHeight <= spaceAbove || spaceAbove > spaceBelow
+      : panelHeight > spaceBelow && spaceAbove > spaceBelow;
+    if (openUp) {
       panel.style.top = 'auto';
       panel.style.bottom = Math.max(8, window.innerHeight - rect.top + gap) + 'px';
     } else {
@@ -159,8 +177,60 @@
     });
   }
 
+  function getFloatingPanel(details) {
+    return details.querySelector('[data-floating-menu-panel]');
+  }
+
+  function placeFloatingMenu(details) {
+    var panel = getFloatingPanel(details);
+    var toggle = details.querySelector('summary');
+    if (!details.open) {
+      resetPanelPosition(panel);
+      return;
+    }
+    placeFloating(toggle, panel, details.getAttribute('data-floating-menu-placement') === 'top');
+  }
+
+  function attachFloatingMenu(details) {
+    if (details.__floatingMenuBound || details.tagName !== 'DETAILS') {
+      return;
+    }
+    details.__floatingMenuBound = true;
+    details.addEventListener('toggle', function () {
+      placeFloatingMenu(details);
+    });
+    if (details.open) {
+      placeFloatingMenu(details);
+    }
+  }
+
+  // Fixed panels don't follow their toggle when the page or a container
+  // scrolls, so re-place any open ones.
+  function repositionOpenMenus() {
+    if (openMenu) {
+      positionPanel(openMenu);
+    }
+    document.querySelectorAll('details[data-floating-menu][open]').forEach(placeFloatingMenu);
+  }
+
+  var repositionQueued = false;
+  function queueReposition() {
+    if (repositionQueued) {
+      return;
+    }
+    repositionQueued = true;
+    window.requestAnimationFrame(function () {
+      repositionQueued = false;
+      repositionOpenMenus();
+    });
+  }
+
+  window.addEventListener('scroll', queueReposition, true);
+  window.addEventListener('resize', queueReposition);
+
   function init() {
     document.querySelectorAll('[data-header-menu]').forEach(attachMenu);
+    document.querySelectorAll('details[data-floating-menu]').forEach(attachFloatingMenu);
   }
 
   document.addEventListener('click', function (event) {
