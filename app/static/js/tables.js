@@ -559,7 +559,10 @@
         const text = (row.textContent || '').toLowerCase();
         const matchesGlobal = !term || text.includes(term);
         const matchesColumns = this.rowMatchesColumnFilters(row);
-        if (matchesGlobal && matchesColumns) {
+        // Page scripts (for example stat strip filters) hide rows by setting
+        // data-stat-filter-hidden and dispatching table:rows-updated.
+        const matchesStat = row.dataset.statFilterHidden !== 'true';
+        if (matchesGlobal && matchesColumns && matchesStat) {
           delete row.dataset.filterHidden;
         } else {
           row.dataset.filterHidden = 'true';

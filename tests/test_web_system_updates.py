@@ -230,11 +230,103 @@ def test_update_request_api_requires_global_administrator():
 def test_update_pages_offer_button_and_live_progress():
     history_page = (ROOT / "app/templates/admin/system_updates.html").read_text()
     detail = (ROOT / "app/templates/admin/system_update_detail.html").read_text()
-    assert 'action="/admin/system-updates/request"' in history_page
-    assert 'partials/csrf.html' in history_page
+    assert '"/admin/system-updates/request"' in history_page
+    assert '"confirm":' in history_page
     assert "data-system-update=" in detail
     assert "/static/js/system_updates.js" in detail
     assert "/scheduler/system-updates/" in (ROOT / "app/static/js/system_updates.js").read_text()
+
+
+def _github_transport(monkeypatch, routes):
+    import httpx
+
+    real_client = httpx.AsyncClient
+    seen = []
+
+    def handler(request):
+        seen.append(request.url.path)
+        for path, payload in routes.items():
+            if request.url.path == path:
+                return httpx.Response(200, json=payload)
+        return httpx.Response(404, json={})
+
+    monkeypatch.setattr(
+        system_updates.httpx, "AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    system_updates._changes_cache.update(key=None, at=0.0, value=None)
+    return seen
+
+
+def test_release_notes_are_split_into_pull_requests():
+    items, notes = system_updates._parse_release_notes(
+        "## What's Changed\r\n"
+        "* Fix the header by @brad in https://github.com/o/r/pull/12\r\n"
+        "* Bump deps by @dependabot[bot] in https://github.com/o/r/pull/13\r\n"
+        "Thanks everyone\r\n\r\n"
+        "**Full Changelog**: https://github.com/o/r/compare/v1...v2"
+    )
+    assert items == [
+        {"title": "Fix the header", "author": "brad", "url": "https://github.com/o/r/pull/12", "number": 12},
+        {"title": "Bump deps", "author": "dependabot[bot]", "url": "https://github.com/o/r/pull/13", "number": 13},
+    ]
+    assert notes == "Thanks everyone"
+
+
+def test_docker_changes_list_releases_between_installed_and_latest(monkeypatch):
+    monkeypatch.setenv("MYPORTAL_DEPLOYMENT", "docker")
+    release = lambda tag, **extra: {
+        "tag_name": tag, "name": tag, "published_at": "2026-10-01T00:00:00Z",
+        "html_url": f"https://github.com/o/r/releases/tag/{tag}",
+        "body": f"* Change in {tag} by @brad in https://github.com/o/r/pull/1", **extra,
+    }
+    _github_transport(monkeypatch, {"/repos/bradhawkins85/MyPortal/releases": [
+        release("v1.3.0"), release("v1.2.1-rc1", prerelease=True), release("v1.2.0"),
+        release("v1.1.0"), release("v1.0.0"),
+    ]})
+    check = {"deployment": "docker", "installed": "v1.0.0", "latest": "v1.2.0", "available": True}
+    changes = asyncio.run(system_updates.list_changes(check))
+    assert changes["error"] is None
+    assert [item["tag"] for item in changes["releases"]] == ["v1.2.0", "v1.1.0"]
+    assert changes["releases"][0]["changes"][0]["title"] == "Change in v1.2.0"
+    assert changes["change_count"] == 2
+    assert changes["compare_url"].endswith("/compare/v1.0.0...v1.2.0")
+
+
+def test_baremetal_changes_list_commits_newest_first(monkeypatch):
+    monkeypatch.delenv("MYPORTAL_DEPLOYMENT", raising=False)
+    installed, latest = "a" * 40, "b" * 40
+    commit = lambda sha, message: {
+        "sha": sha, "html_url": f"https://github.com/o/r/commit/{sha}",
+        "author": {"login": "brad"},
+        "commit": {"message": message, "author": {"name": "Brad", "date": "2026-10-01T00:00:00Z"}},
+    }
+    _github_transport(monkeypatch, {f"/repos/bradhawkins85/MyPortal/compare/{installed}...{latest}": {
+        "html_url": "https://github.com/o/r/compare/x...y", "total_commits": 3,
+        "commits": [
+            commit("1" * 40, "Fix the header bar"),
+            commit("2" * 40, "Merge branch 'main' into feature"),
+            commit("3" * 40, "Merge pull request #42 from o/feature\n\nRedesign system updates"),
+        ],
+    }})
+    check = {"deployment": "baremetal", "installed": installed, "latest": latest, "available": True}
+    changes = asyncio.run(system_updates.list_changes(check))
+    assert changes["error"] is None
+    assert [(c["title"], c["number"]) for c in changes["commits"]] == [
+        ("Redesign system updates", 42), ("Fix the header bar", None),
+    ]
+    assert changes["total"] == 3
+    assert changes["truncated"] is False
+
+
+def test_changes_are_not_fetched_when_up_to_date_and_failures_are_reported(monkeypatch):
+    seen = _github_transport(monkeypatch, {})
+    up_to_date = {"deployment": "docker", "installed": "v1", "latest": "v1", "available": False}
+    assert asyncio.run(system_updates.list_changes(up_to_date))["releases"] == []
+    assert seen == []
+    failing = {"deployment": "docker", "installed": "v1", "latest": "v2", "available": True}
+    result = asyncio.run(system_updates.list_changes(failing))
+    assert result["error"].startswith("Could not list the changes")
 
 
 # ---------------------------------------------------------------------------

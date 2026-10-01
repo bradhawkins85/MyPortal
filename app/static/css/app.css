@@ -21631,3 +21631,49 @@ a.sch-item__company:focus-visible {
 .backup-register__text { white-space: pre-wrap; }
 .backup-register__list { list-style: none; margin: 0; padding: 0; }
 .backup-register__list li + li { margin-top: 0.25rem; }
+
+/* Admin > System updates */
+.system-updates__filter-tile {
+  cursor: pointer;
+  border: none;
+  font: inherit;
+  text-align: left;
+}
+
+.system-updates__filter-tile:focus-visible,
+.system-updates__filter-tile[aria-pressed="true"] {
+  outline: 2px solid var(--color-accent, #38bdf8);
+  outline-offset: 2px;
+}
+
+.system-updates__release + .system-updates__release {
+  margin-top: 0.75rem;
+}
+
+.system-updates__release > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  cursor: pointer;
+}
+
+.system-updates__changes {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.system-updates__changes li + li {
+  margin-top: 0.25rem;
+}
+
+.system-updates__notes {
+  white-space: pre-wrap;
+}
+
+.system-updates__output {
+  max-height: 55vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

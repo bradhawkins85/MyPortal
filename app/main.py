@@ -7202,14 +7202,20 @@ async def admin_system_updates(request: Request):
     system_updates_service.expire_unclaimed_requests()
     await system_updates_service.fail_superseded_updates()
     updates = system_update_history.list_updates()
-    update_check = await system_updates_service.check_for_update(
-        refresh=request.query_params.get("refresh") == "1"
-    )
+    refresh = request.query_params.get("refresh") == "1"
+    update_check = await system_updates_service.check_for_update(refresh=refresh)
+    pending_changes = await system_updates_service.list_changes(update_check, refresh=refresh)
+    status_counts = {
+        "succeeded": sum(1 for update in updates if update.get("status") == "succeeded"),
+        "failed": sum(1 for update in updates if update.get("status") == "failed"),
+        "active": sum(1 for update in updates if update.get("status") in {"pending", "running"}),
+    }
     return await _render_template(
         "admin/system_updates.html", request, current_user,
         extra={
-            "title": "System update history", "updates": updates,
-            "update_check": update_check,
+            "title": "System updates", "updates": updates,
+            "update_check": update_check, "pending_changes": pending_changes,
+            "status_counts": status_counts,
             "active_update": system_update_history.find_active(),
         },
     )
@@ -7269,6 +7275,7 @@ async def admin_system_update_detail(request: Request, update_id: str):
         extra={
             "title": "System update result", "update": update,
             "host_setup_hint": system_updates_service.host_setup_hint(),
+            "target_url": system_updates_service.revision_url(str(update.get("target_revision") or "")),
         },
     )
 
