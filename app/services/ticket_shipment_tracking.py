@@ -541,6 +541,7 @@ async def _extract_snapshot_with_llm(
     text_excerpt: str,
     html_excerpt: str,
 ) -> CanonicalShipmentSnapshot | None:
+    _ = html_excerpt
     prompt = (
         "Extract shipping-tracking details into strict JSON."
         " Return only a JSON object with these keys exactly:"

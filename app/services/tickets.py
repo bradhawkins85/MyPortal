@@ -1481,6 +1481,8 @@ async def _send_ticket_creation_email(
     preventing the platform notification service or fallback email sender from
     producing default messages such as ``MyPortal notification: Your ticket``.
     """
+    _ = enriched_ticket
+    _ = requester_email_fallback
     return None
 
 
@@ -1509,6 +1511,7 @@ async def create_ticket(
 ) -> TicketRecord:
     """Create a ticket and emit the corresponding automation event."""
 
+    _ = send_creation_notification
     status_slug = await resolve_status_or_default(status)
 
     original_description: str | None = None

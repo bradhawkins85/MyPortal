@@ -280,10 +280,6 @@
     return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
   }
 
-  function sortedValues(field) {
-    return Array.from(field.values).sort((a, b) => a - b);
-  }
-
   function describeDays(dowText) {
     const field = parseField(dowText, FIELD_SPECS[4]);
     const days = new Set(Array.from(field.values).map((value) => value % 7));

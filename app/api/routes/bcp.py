@@ -1019,7 +1019,6 @@ async def bcp_schedules(request: Request):
     user, company_id = await _require_bcp_view(request)
     
     build_base_context, templates = _get_page_rendering()
-    from app.repositories import users as user_repo
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)

@@ -13,9 +13,6 @@ from fastapi.responses import HTMLResponse
 from app.repositories import companies as company_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import invoice_lines as invoice_lines_repo
-from app.repositories import user_companies as user_company_repo
-
-
 router = APIRouter(tags=["Invoices"])
 
 

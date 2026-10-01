@@ -45,7 +45,6 @@ from app.services import webhook_monitor
 from app.services import system_update_history
 from app.services.deployment_plan import build_deployment_plan
 from app.services.component_availability import get_component_availability, rag_available
-from app.services.component_availability import DEPLOYMENT_DISABLED_REASON
 from app.services import xero as xero_service
 from app.services import service_status as service_status_service
 from app.services import ticket_shipment_tracking as shipment_watch_service

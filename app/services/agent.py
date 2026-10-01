@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib
 import json
 import os
-import re
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -2195,7 +2194,6 @@ async def execute_agent_query(
     event_id: int | None = None
     message: str | None = None
 
-    final_conversation_prompts: list[str] = []
     if not has_relevant_sources:
         module_status = "succeeded"
         answer_text = (
@@ -2212,7 +2210,6 @@ async def execute_agent_query(
             prompt,
             "Produce the final user-facing answer now. Use only the supplied evidence, return concise Markdown, include inline source citations, and do not mention internal pipeline instructions.",
         ])
-        final_conversation_prompts = [final_prompt]
         llm_started = time.monotonic()
         model_calls += 1
         model_input_tokens += _count_tokens(final_prompt)
