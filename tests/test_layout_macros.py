@@ -201,3 +201,15 @@ def test_data_table_without_table_id_keeps_legacy_signature(env):
     assert "data-table-id" not in html
     # First column is sortable by default, second has the flag flipped off.
     assert html.count("sortable") >= 1
+
+
+def test_page_header_actions_submit_targets_page_form(env):
+    html = _render(
+        env,
+        "{% from 'macros/header.html' import page_header_actions %}"
+        "{{ page_header_actions([{'label': 'Save', 'type': 'submit', "
+        "'form': 'thing-form', 'variant': 'primary'}]) }}",
+    )
+    assert 'type="submit"' in html
+    assert 'form="thing-form"' in html
+    assert "button--primary" in html

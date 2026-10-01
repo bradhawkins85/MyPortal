@@ -1,20 +1,130 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
-{% block title %}{{ title }}{% endblock %}{% block header_title %}{{ title }}{% endblock %}
-{% block header_actions %}{{ page_header_actions([{"label":"Cancel","type":"link","href":"/applications/" ~ application.id if application else "/applications"}]) }}{% endblock %}
-{% block content %}<form method="post" action="/applications/save"><section class="card card--panel"><div class="card__body">
-{% include "partials/csrf.html" %}{% if application %}<input type="hidden" name="application_id" value="{{ application.id }}">{% endif %}
-<div class="form-group"><label class="form-label" for="application-name">Name</label><input class="input" id="application-name" name="name" maxlength="191" required value="{{ application.name if application else '' }}"></div>
-<div class="form-group"><label class="form-label" for="application-type">Type</label><select class="input" id="application-type" name="type_id" data-searchable="on"><option value="">No type</option>{% for item in types %}<option value="{{ item.id }}" {% if application and application.type_id == item.id %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select><small class="form-help">Search the types created before. <a href="/applications/types">Manage types</a></small></div>
-<div class="form-group"><label class="form-label" for="application-new-type">Or add a new type</label><input class="input" id="application-new-type" name="type_name" maxlength="191" autocomplete="off" placeholder="e.g. Accounting, CRM, Line of business"><small class="form-help">A new type is saved for reuse and replaces the type chosen above. An existing type with the same name is reused.</small></div>
-<div class="form-group"><label class="form-label" for="application-version">Version</label><input class="input" id="application-version" name="version" maxlength="100" value="{{ application.version or '' if application else '' }}"></div>
-<div class="form-group"><label class="form-label" for="application-importance">Importance</label><select class="input" id="application-importance" name="importance" required>{% for key, label in importance_levels %}<option value="{{ key }}" {% if (application and application.importance == key) or (not application and key == 'medium') %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><small class="form-help">How badly the business is affected if this application is unavailable.</small></div>
-<div class="form-group"><label class="form-label" for="application-impact">Business impact</label><textarea class="input" id="application-impact" name="business_impact" rows="4" maxlength="20000" placeholder="What the business uses it for and what stops if it is unavailable">{{ application.business_impact or '' if application else '' }}</textarea></div>
-<div class="form-group"><label class="form-label" for="application-champion">Application champion</label><select class="input" id="application-champion" name="champion_staff_id" data-searchable="on"><option value="">Not a listed staff member</option>{% for person in staff %}<option value="{{ person.id }}" {% if application and application.champion_staff_id == person.id %}selected{% endif %}>{{ person.first_name }} {{ person.last_name }}{% if person.email %} — {{ person.email }}{% endif %}</option>{% endfor %}</select></div>
-<div class="form-group"><label class="form-label" for="application-champion-name">Champion name</label><input class="input" id="application-champion-name" name="champion_name" maxlength="255" value="{{ application.champion_name or '' if application else '' }}"><small class="form-help">Used only when no staff member is selected above, for example an external contact.</small></div>
-<div class="form-group"><label class="form-label" for="application-product-key">Product key</label><input class="input" id="application-product-key" name="product_key" maxlength="1000" autocomplete="off" spellcheck="false" {% if application and application.has_product_key %}placeholder="A product key is stored. Leave blank to keep it."{% endif %}><small class="form-help">Encrypted when saved. Viewing it later is recorded in the audit log.</small>{% if application and application.has_product_key %}<label class="checkbox"><input type="checkbox" name="clear_product_key"> <span>Remove the stored product key</span></label>{% endif %}</div>
-<div class="form-group"><label class="form-label" for="application-articles">Knowledge base articles</label><select class="input" id="application-articles" name="knowledge_base_article_ids" multiple size="6">{% set selected_articles = links.articles|map(attribute='id')|list %}{% for article in articles %}<option value="{{ article.id }}" {% if article.id in selected_articles %}selected{% endif %}>{{ article.title }}</option>{% endfor %}</select></div>
-<div class="form-group"><label class="form-label" for="application-links">External KB links</label><textarea class="input" id="application-links" name="external_links" rows="4" maxlength="60000" spellcheck="false" placeholder="Vendor install guide | https://support.example.com/kb/12345">{% for link in links.external %}{% if link.title %}{{ link.title }} | {% endif %}{{ link.url }}
-{% endfor %}</textarea><small class="form-help">One link per line, optionally written as <code>Title | URL</code>. Only http and https links are accepted.</small></div>
-<div class="form-group"><label class="form-label" for="application-notes">Notes</label><textarea class="input" id="application-notes" name="notes" rows="6" maxlength="20000">{{ application.notes or '' if application else '' }}</textarea><small class="form-help">Do not store passwords here; use the product key field or shared credentials.</small></div>
-</div><footer class="card__footer"><button class="button button--primary" type="submit">{{ 'Save application' if application else 'Create application' }}</button></footer></section></form>{% endblock %}
+{% set cancel_href = "/applications/" ~ application.id if application else "/applications" %}
+{% set submit_label = "Save application" if application else "Create application" %}
+{% block title %}{{ title }}{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar page-header-bar--record">
+    <span class="header__title-text" title="{{ application.name if application else title }}">{{ application.name if application else title }}</span>
+    <span class="page-header-bar__meta">{% if application %}Editing application{% else %}Record an application the company relies on, who champions it and where its documentation lives.{% endif %}</span>
+  </div>
+{% endblock %}
+{% block header_actions %}
+  <div class="header-actions">
+    <a class="button button--ghost" href="{{ cancel_href }}">Cancel</a>
+    {{ page_header_actions([{"label":submit_label,"type":"submit","form":"application-form","variant":"primary"}]) }}
+  </div>
+{% endblock %}
+{% block content %}
+<form id="application-form" method="post" action="/applications/save" class="admin-grid">
+  {% include "partials/csrf.html" %}
+  {% if application %}<input type="hidden" name="application_id" value="{{ application.id }}">{% endif %}
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Details</h2>
+        <p class="card__subtitle">What the application is and how much the business depends on it.</p>
+      </div>
+    </header>
+    <div class="form-field">
+      <label class="form-label" for="application-name">Name</label>
+      <input class="form-input" id="application-name" name="name" maxlength="191" required value="{{ application.name if application else '' }}">
+    </div>
+    <div class="form-grid">
+      <div class="form-field">
+        <label class="form-label" for="application-type">Type</label>
+        <select class="form-input" id="application-type" name="type_id" data-searchable="on">
+          <option value="">No type</option>
+          {% for item in types %}<option value="{{ item.id }}" {% if application and application.type_id == item.id %}selected{% endif %}>{{ item.name }}</option>{% endfor %}
+        </select>
+        <p class="form-help">Search the types created before. <a href="/applications/types">Manage types</a></p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="application-new-type">Or add a new type</label>
+        <input class="form-input" id="application-new-type" name="type_name" maxlength="191" autocomplete="off" placeholder="e.g. Accounting, CRM, Line of business">
+        <p class="form-help">Saved for reuse and replaces the type chosen. An existing type with the same name is reused.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="application-version">Version</label>
+        <input class="form-input" id="application-version" name="version" maxlength="100" value="{{ application.version or '' if application else '' }}">
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="application-importance">Importance</label>
+        <select class="form-input" id="application-importance" name="importance" required>
+          {% for key, label in importance_levels %}<option value="{{ key }}" {% if (application and application.importance == key) or (not application and key == 'medium') %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <p class="form-help">How badly the business is affected if this application is unavailable.</p>
+      </div>
+    </div>
+    <div class="form-field">
+      <label class="form-label" for="application-impact">Business impact</label>
+      <textarea class="form-input form-input--textarea" id="application-impact" name="business_impact" rows="4" maxlength="20000" placeholder="What the business uses it for and what stops if it is unavailable">{{ application.business_impact or '' if application else '' }}</textarea>
+    </div>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Champion</h2>
+        <p class="card__subtitle">The person who owns the application day to day and can answer questions about it.</p>
+      </div>
+    </header>
+    <div class="form-grid">
+      <div class="form-field">
+        <label class="form-label" for="application-champion">Staff member</label>
+        <select class="form-input" id="application-champion" name="champion_staff_id" data-searchable="on">
+          <option value="">Not a listed staff member</option>
+          {% for person in staff %}<option value="{{ person.id }}" {% if application and application.champion_staff_id == person.id %}selected{% endif %}>{{ person.first_name }} {{ person.last_name }}{% if person.email %} — {{ person.email }}{% endif %}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="application-champion-name">Champion name</label>
+        <input class="form-input" id="application-champion-name" name="champion_name" maxlength="255" value="{{ application.champion_name or '' if application else '' }}">
+        <p class="form-help">Used only when no staff member is selected, for example an external contact.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Product key</h2>
+        <p class="card__subtitle">Encrypted when saved. Viewing it later is recorded in the audit log.</p>
+      </div>
+    </header>
+    <div class="form-field">
+      <label class="form-label" for="application-product-key">Product key</label>
+      <input class="form-input" id="application-product-key" name="product_key" maxlength="1000" autocomplete="off" spellcheck="false" {% if application and application.has_product_key %}placeholder="A product key is stored. Leave blank to keep it."{% endif %}>
+      {% if application and application.has_product_key %}<label class="checkbox"><input type="checkbox" name="clear_product_key"> <span>Remove the stored product key</span></label>{% endif %}
+    </div>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Documentation</h2>
+        <p class="card__subtitle">Knowledge base articles and vendor links that help support this application.</p>
+      </div>
+    </header>
+    <div class="form-field">
+      <label class="form-label" for="application-articles">Knowledge base articles</label>
+      <select class="form-input" id="application-articles" name="knowledge_base_article_ids" multiple size="6">
+        {% set selected_articles = links.articles|map(attribute='id')|list %}
+        {% for article in articles %}<option value="{{ article.id }}" {% if article.id in selected_articles %}selected{% endif %}>{{ article.title }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="form-field">
+      <label class="form-label" for="application-links">External KB links</label>
+      <textarea class="form-input form-input--textarea" id="application-links" name="external_links" rows="4" maxlength="60000" spellcheck="false" placeholder="Vendor install guide | https://support.example.com/kb/12345">{% for link in links.external %}{% if link.title %}{{ link.title }} | {% endif %}{{ link.url }}
+{% endfor %}</textarea>
+      <p class="form-help">One link per line, optionally written as <code>Title | URL</code>. Only http and https links are accepted.</p>
+    </div>
+    <div class="form-field">
+      <label class="form-label" for="application-notes">Notes</label>
+      <textarea class="form-input form-input--textarea" id="application-notes" name="notes" rows="6" maxlength="20000">{{ application.notes or '' if application else '' }}</textarea>
+      <p class="form-help">Do not store passwords here; use the product key field or shared credentials.</p>
+    </div>
+  </section>
+</form>
+{% endblock %}

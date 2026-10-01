@@ -6,11 +6,12 @@
    Action shape (dict):
      {
        "label":   "New ticket",            # required
-       "type":    "button" | "link" | "form",   # default "button"
+       "type":    "button" | "link" | "form" | "submit",   # default "button"
        "variant": "primary" | "ghost" | "danger" | None,
        "href":    "/path",                  # for type="link"
        "action":  "/path",                  # for type="form"
        "method":  "post",                   # for type="form" (default "post")
+       "form":    "form-id",                # for type="submit": the page form it submits
        "icon":    "<svg ...>",              # raw HTML (must be safe)
        "confirm": "Are you sure?",          # optional confirmation prompt
        "attrs":   {"data-x": "y", ...},     # extra attributes
@@ -63,6 +64,11 @@
         <span>{{ action.label }}</span>
       </button>
     </form>
+  {%- elif kind == 'submit' -%}
+    <button type="submit" class="{{ classes }}"{% if action.get('form') %} form="{{ action.form }}"{% endif %}{{ _render_attrs(action.get('attrs')) }}>
+      {%- if action.get('icon') %}<span class="header-menu__icon" aria-hidden="true">{{ action.icon | safe }}</span>{% endif -%}
+      <span>{{ action.label }}</span>
+    </button>
   {%- else -%}
     <button type="button" class="{{ classes }}"{{ _render_attrs(action.get('attrs')) }}>
       {%- if action.get('icon') %}<span class="header-menu__icon" aria-hidden="true">{{ action.icon | safe }}</span>{% endif -%}
