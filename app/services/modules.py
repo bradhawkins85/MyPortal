@@ -6337,6 +6337,10 @@ async def _load_ticket_relationship_evidence(
     rel_repo = import_module("app.repositories.rag_relationships")
     rel_service = import_module("app.services.rag_relationships")
     rag_urls = import_module("app.services.rag_urls")
+    component_availability = import_module("app.services.component_availability")
+
+    if not component_availability.rag_available():
+        return []
 
     document = await rag_index_repo.get_document_by_source(
         "tickets", str(ticket_id), rag_index_service.embedding_model()
@@ -6360,6 +6364,8 @@ async def _load_ticket_relationship_evidence(
         ):
             continue
         source_type = str(row.get("source_type") or "").strip()
+        if not _ai_note_visible_scope(source_type, row.get("permission_scope_json")):
+            continue
         source_id = row.get("source_id")
         if source_type == "tickets" and str(source_id) == str(ticket_id):
             continue
@@ -6392,6 +6398,29 @@ async def _load_ticket_relationship_evidence(
     return items
 
 
+def _ai_note_visible_scope(source_type: str, raw_scope: Any) -> bool:
+    """Return whether evidence is visible to everyone who can read ticket notes.
+
+    Internal notes are read by every technician on the ticket, so only targets
+    without per-user, admin, permission-flag or role-audience restrictions are
+    copied into them.
+    """
+
+    try:
+        scope = json.loads(str(raw_scope or "{}"))
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(scope, Mapping) or int(scope.get("version") or 0) != 1:
+        return False
+    if scope.get("required_any") or scope.get("user_ids"):
+        return False
+    visibility = str(scope.get("visibility") or "")
+    if source_type == "knowledge_base":
+        # Company-scoped articles can carry live role audiences.
+        return visibility in {"anonymous", "authenticated"}
+    return visibility in {"anonymous", "authenticated", "company"}
+
+
 def _ai_confidence_band(value: Any) -> str:
     try:
         score = float(value or 0)
@@ -6413,6 +6442,12 @@ async def _invoke_ai_link_related(
     """Attach the ticket's top stored AI relationships as an internal note."""
 
     ticket_id, ticket = await _load_ai_action_ticket(payload)
+    if not import_module("app.services.component_availability").rag_available():
+        return {
+            "status": "skipped",
+            "reason": "RAG is disabled for this deployment",
+            "ticket_id": ticket_id,
+        }
     limit = _parse_nullable_int(payload.get("limit")) or _AI_LINK_RELATED_DEFAULT_LIMIT
     limit = max(1, min(limit, _AI_LINK_RELATED_MAX_LIMIT))
     items = await _load_ticket_relationship_evidence(ticket_id, ticket, limit=limit)
@@ -6629,6 +6664,11 @@ async def _invoke_ai_classify_ticket(
     update_fields: dict[str, Any] = {}
     previous_values: dict[str, Any] = {}
     category = parsed["category"]
+    if category is not None and not overwrite_category:
+        # A technician may have categorised the ticket while the AI ran.
+        latest = await _tickets_repo().get_ticket(ticket_id) or {}
+        if str(latest.get("category") or "").strip():
+            category = None
     if category is not None:
         category = category_choices[category.strip().casefold()]
         if category != current_category:

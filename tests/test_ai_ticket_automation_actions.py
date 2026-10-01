@@ -28,11 +28,23 @@ def _patch_ticket_writes(monkeypatch):
     return update, create_reply, emit
 
 
+COMPANY_SCOPE = json.dumps(
+    {"version": 1, "visibility": "company", "company_ids": [5], "user_ids": [], "required_any": []}
+)
+
+
+@pytest.fixture(autouse=True)
+def _rag_enabled(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.component_availability.rag_available", lambda: True
+    )
+
+
 def _relationship_row(**overrides):
     row = {
         "target_available": 1,
         "target_company_id": 5,
-        "permission_scope_json": "{}",
+        "permission_scope_json": COMPANY_SCOPE,
         "source_type": "tickets",
         "source_id": "11",
         "title": "Printer jams on duplex",
@@ -187,7 +199,22 @@ def test_ai_link_related_posts_company_scoped_links_as_internal_note(monkeypatch
                 relationship_type="KNOWN_ISSUE",
                 confidence=0.7,
                 target_company_id=None,
-                permission_scope_json='{"visibility": "authenticated"}',
+                permission_scope_json='{"version": 1, "visibility": "authenticated"}',
+            ),
+            _relationship_row(
+                source_type="assets",
+                source_id="31",
+                permission_scope_json=json.dumps(
+                    {"version": 1, "visibility": "company", "company_ids": [5], "required_any": ["can_manage_assets"]}
+                ),
+            ),
+            _relationship_row(
+                source_type="knowledge_base",
+                source_id="32",
+                metadata_json='{"slug": "admins-only"}',
+                permission_scope_json=json.dumps(
+                    {"version": 1, "visibility": "company_admin", "company_ids": [5]}
+                ),
             ),
         ],
     )
@@ -205,6 +232,8 @@ def test_ai_link_related_posts_company_scoped_links_as_internal_note(monkeypatch
     assert "/admin/tickets/12" not in body
     assert "/admin/tickets/13" not in body
     assert "/admin/tickets/42" not in body
+    assert "/assets/31" not in body
+    assert "admins-only" not in body
     assert len(result["related_items"]) == 2
     emit.assert_awaited_once()
 
@@ -292,3 +321,42 @@ def test_new_ai_actions_are_always_on_ticket_actions():
     for slug in ("ai-classify-ticket", "ai-link-related", "ai-request-missing-info"):
         assert slug in modules.ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS
         assert modules._get_always_on_ticket_action_module(slug)
+
+
+def test_ai_link_related_honours_rag_kill_switch(monkeypatch):
+    monkeypatch.setattr(
+        "app.repositories.tickets.get_ticket", AsyncMock(return_value=TICKET)
+    )
+    monkeypatch.setattr(
+        "app.services.component_availability.rag_available", lambda: False
+    )
+    load = _patch_relationships(monkeypatch, [_relationship_row()])
+    _, create_reply, _ = _patch_ticket_writes(monkeypatch)
+
+    result = asyncio.run(modules._invoke_ai_link_related({}, {"ticket_id": 42}))
+
+    assert result["status"] == "skipped"
+    load.assert_not_awaited()
+    create_reply.assert_not_awaited()
+
+
+def test_ai_classify_does_not_replace_category_set_during_ai_call(monkeypatch):
+    reads = iter([TICKET, {**TICKET, "category": "Set by technician"}])
+    monkeypatch.setattr(
+        "app.repositories.tickets.get_ticket",
+        AsyncMock(side_effect=lambda ticket_id: next(reads)),
+    )
+    _enable_ollama(
+        monkeypatch,
+        {"response": '{"category": "Printing", "priority": "normal", "duplicate_of": null}'},
+    )
+    update, _, _ = _patch_ticket_writes(monkeypatch)
+
+    result = asyncio.run(
+        modules._invoke_ai_classify_ticket(
+            {}, {"ticket_id": 42, "allowed_categories": "Printing", "detect_duplicates": False}
+        )
+    )
+
+    update.assert_not_awaited()
+    assert result["updated_fields"] == []
