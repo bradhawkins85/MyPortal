@@ -130,5 +130,6 @@
 
 {% block scripts %}
   {{ super() }}
+  <script src="{{ static_url('/static/js/purify.min.js') }}" defer></script>
   <script src="{{ static_url('/static/js/message_templates.js') }}" defer></script>
 {% endblock %}

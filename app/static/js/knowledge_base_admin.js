@@ -114,123 +114,25 @@
     img: new Set(['src', 'alt', 'width', 'height', 'style']),
     'kb-if': new Set(['company']),
   };
-  const SAFE_STYLE_PROPS = new Set(['width', 'height', 'max-width', 'max-height', 'float', 'text-align']);
-
-  function sanitizeInlineStyle(value) {
-    return String(value || '')
-      .split(';')
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const split = part.indexOf(':');
-        if (split <= 0) {
-          return null;
-        }
-        const key = part.slice(0, split).trim().toLowerCase();
-        const raw = part.slice(split + 1).trim();
-        if (!SAFE_STYLE_PROPS.has(key)) {
-          return null;
-        }
-        if (/expression\s*\(/i.test(raw) || /url\s*\(\s*['"]?\s*javascript:/i.test(raw)) {
-          return null;
-        }
-        return `${key}: ${raw}`;
-      })
-      .filter(Boolean)
-      .join('; ');
-  }
-
-  function sanitizeUrlValue(raw, options) {
-    const forImage = Boolean(options && options.forImage);
-    const value = String(raw || '').trim();
-    if (!value) {
-      return '';
-    }
-    if (value.startsWith('#') || value.startsWith('/')) {
-      return value;
-    }
-    if (/^https?:/i.test(value) || /^mailto:/i.test(value)) {
-      return value;
-    }
-    if (forImage && /^data:image\/(png|gif|jpe?g|webp|bmp|svg\+xml);/i.test(value)) {
-      return value;
-    }
-    return '';
-  }
 
   function sanitizeRichHtml(html) {
-    const template = document.createElement('template');
-    template.innerHTML = String(html || '');
-
-    function sanitizeNode(node) {
-      let child = node.firstChild;
-      while (child) {
-        const next = child.nextSibling;
-        if (child.nodeType === Node.ELEMENT_NODE) {
-          const tag = child.tagName.toLowerCase();
-          if (RICH_HTML_BLOCKED_TAGS.has(tag)) {
-            node.removeChild(child);
-            child = next;
-            continue;
-          }
-          if (!RICH_HTML_ALLOWED_TAGS.has(tag)) {
-            while (child.firstChild) {
-              node.insertBefore(child.firstChild, child);
-            }
-            node.removeChild(child);
-            child = next;
-            continue;
-          }
-          Array.from(child.attributes).forEach((attribute) => {
-            const name = attribute.name.toLowerCase();
-            if (name.startsWith('on')) {
-              child.removeAttribute(attribute.name);
-              return;
-            }
-            const allowed = RICH_HTML_GLOBAL_ATTRS.has(name)
-              || Boolean(RICH_HTML_ATTRS_BY_TAG[tag] && RICH_HTML_ATTRS_BY_TAG[tag].has(name));
-            if (!allowed) {
-              child.removeAttribute(attribute.name);
-              return;
-            }
-            if ((name === 'href' || name === 'src')) {
-              const safe = sanitizeUrlValue(attribute.value, { forImage: tag === 'img' && name === 'src' });
-              if (safe) {
-                child.setAttribute(attribute.name, safe);
-              } else {
-                child.removeAttribute(attribute.name);
-              }
-              return;
-            }
-            if (name === 'style') {
-              const cleanStyle = sanitizeInlineStyle(attribute.value);
-              if (cleanStyle) {
-                child.setAttribute('style', cleanStyle);
-              } else {
-                child.removeAttribute('style');
-              }
-              return;
-            }
-            if (tag === 'a' && name === 'target' && attribute.value !== '_blank' && attribute.value !== '_self') {
-              child.setAttribute('target', '_self');
-            }
-            if (tag === 'a' && name === 'rel') {
-              child.setAttribute('rel', 'noopener noreferrer');
-            }
-          });
-          if (tag === 'a' && child.getAttribute('target') === '_blank') {
-            child.setAttribute('rel', 'noopener noreferrer');
-          }
-          sanitizeNode(child);
-        } else if (child.nodeType === Node.COMMENT_NODE) {
-          node.removeChild(child);
-        }
-        child = next;
-      }
+    const source = String(html || '');
+    if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+      const allowedAttrs = [
+        ...Array.from(RICH_HTML_GLOBAL_ATTRS),
+        ...Object.values(RICH_HTML_ATTRS_BY_TAG).flatMap((attrs) => Array.from(attrs)),
+      ];
+      return window.DOMPurify.sanitize(source, {
+        ALLOWED_TAGS: Array.from(RICH_HTML_ALLOWED_TAGS),
+        ALLOWED_ATTR: Array.from(new Set(allowedAttrs)),
+        FORBID_TAGS: Array.from(RICH_HTML_BLOCKED_TAGS),
+        ALLOW_DATA_ATTR: false,
+        CUSTOM_ELEMENT_HANDLING: {
+          tagNameCheck: /^kb-if$/,
+        },
+      });
     }
-
-    sanitizeNode(template.content);
-    return template.innerHTML;
+    return escapeHtml(source).replace(/\n/g, '<br>');
   }
 
   function setSanitizedHtml(element, html) {
@@ -1495,6 +1397,11 @@
     if (!attachmentsElement) {
       return;
     }
+    const articleId = Number.parseInt(state.activeId, 10);
+    if (!Number.isFinite(articleId)) {
+      attachmentsElement.textContent = '';
+      return;
+    }
     if (attachmentCount) {
       attachmentCount.textContent = attachments.length ? String(attachments.length) : '';
     }
@@ -1508,12 +1415,17 @@
     }
     attachmentsElement.textContent = '';
     attachments.forEach((item) => {
+      const attachmentId = Number.parseInt(item.id, 10);
+      if (!Number.isFinite(attachmentId)) {
+        return;
+      }
       const size = Number(item.file_size || 0);
       const sizeLabel = size >= 1048576 ? `${(size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.ceil(size / 1024))} KB`;
       const row = document.createElement('div');
       row.className = 'kbe__attachment';
       const link = document.createElement('a');
-      link.href = `/api/knowledge-base/articles/${state.activeId}/attachments/${item.id}`;
+      const attachmentUrl = new URL(`/api/knowledge-base/articles/${articleId}/attachments/${attachmentId}`, window.location.origin);
+      link.href = attachmentUrl.toString();
       link.title = item.file_name || '';
       link.textContent = item.file_name || '';
       const sizeNode = document.createElement('span');
@@ -1522,10 +1434,10 @@
       const remove = document.createElement('button');
       remove.className = 'kbe-icon kbe-icon--danger';
       remove.type = 'button';
-      remove.dataset.kbDeleteAttachment = String(item.id);
+      remove.dataset.kbDeleteAttachment = String(attachmentId);
       remove.setAttribute('aria-label', `Remove ${item.file_name || 'attachment'}`);
       remove.title = 'Remove';
-      remove.innerHTML = ICONS.trash;
+      remove.textContent = '×';
       row.append(link, sizeNode, remove);
       attachmentsElement.appendChild(row);
     });

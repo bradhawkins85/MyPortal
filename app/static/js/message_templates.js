@@ -90,85 +90,21 @@
     img: new Set(['src', 'alt', 'width', 'height']),
   };
 
-  function sanitizeUrl(value, forImage) {
-    const url = String(value || '').trim();
-    if (!url) {
-      return '';
-    }
-    if (url.startsWith('#') || url.startsWith('/')) {
-      return url;
-    }
-    if (/^https?:/i.test(url) || /^mailto:/i.test(url)) {
-      return url;
-    }
-    if (forImage && /^data:image\/(png|gif|jpe?g|webp|bmp|svg\+xml);/i.test(url)) {
-      return url;
-    }
-    return '';
-  }
-
   function sanitizeHtml(html) {
-    const template = document.createElement('template');
-    template.innerHTML = String(html || '');
-    const sanitizeNode = (node) => {
-      let child = node.firstChild;
-      while (child) {
-        const next = child.nextSibling;
-        if (child.nodeType === Node.ELEMENT_NODE) {
-          const tag = child.tagName.toLowerCase();
-          if (HTML_BLOCKED_TAGS.has(tag)) {
-            node.removeChild(child);
-            child = next;
-            continue;
-          }
-          if (!HTML_ALLOWED_TAGS.has(tag)) {
-            while (child.firstChild) {
-              node.insertBefore(child.firstChild, child);
-            }
-            node.removeChild(child);
-            child = next;
-            continue;
-          }
-          Array.from(child.attributes).forEach((attribute) => {
-            const name = attribute.name.toLowerCase();
-            if (name.startsWith('on')) {
-              child.removeAttribute(attribute.name);
-              return;
-            }
-            const allowed = HTML_GLOBAL_ATTRS.has(name)
-              || Boolean(HTML_ATTRS_BY_TAG[tag] && HTML_ATTRS_BY_TAG[tag].has(name));
-            if (!allowed) {
-              child.removeAttribute(attribute.name);
-              return;
-            }
-            if (name === 'href' || name === 'src') {
-              const safe = sanitizeUrl(attribute.value, tag === 'img' && name === 'src');
-              if (safe) {
-                child.setAttribute(attribute.name, safe);
-              } else {
-                child.removeAttribute(attribute.name);
-              }
-              return;
-            }
-            if (tag === 'a' && name === 'target' && attribute.value !== '_blank' && attribute.value !== '_self') {
-              child.setAttribute('target', '_self');
-            }
-            if (tag === 'a' && name === 'rel') {
-              child.setAttribute('rel', 'noopener noreferrer');
-            }
-          });
-          if (tag === 'a' && child.getAttribute('target') === '_blank') {
-            child.setAttribute('rel', 'noopener noreferrer');
-          }
-          sanitizeNode(child);
-        } else if (child.nodeType === Node.COMMENT_NODE) {
-          node.removeChild(child);
-        }
-        child = next;
-      }
-    };
-    sanitizeNode(template.content);
-    return template.innerHTML;
+    const source = String(html || '');
+    if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+      const allowedAttrs = [
+        ...Array.from(HTML_GLOBAL_ATTRS),
+        ...Object.values(HTML_ATTRS_BY_TAG).flatMap((attrs) => Array.from(attrs)),
+      ];
+      return window.DOMPurify.sanitize(source, {
+        ALLOWED_TAGS: Array.from(HTML_ALLOWED_TAGS),
+        ALLOWED_ATTR: Array.from(new Set(allowedAttrs)),
+        FORBID_TAGS: Array.from(HTML_BLOCKED_TAGS),
+        ALLOW_DATA_ATTR: false,
+      });
+    }
+    return escapeHtml(source).replace(/\n/g, '<br>');
   }
 
   function tokensIn(content) {
