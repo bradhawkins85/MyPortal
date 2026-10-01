@@ -58,6 +58,19 @@ def test_configuration_normalizes_e164_and_enforces_configurable_policy():
         )
 
 
+def test_configuration_accepts_cron_and_rejects_invalid_expression():
+    config = VoiceMonitorConfiguration(
+        destination_e164="+61412345678", display_label="Main", schedule_cron=" */5 * * * * "
+    )
+    assert config.schedule_cron == "*/5 * * * *"
+    assert config.interval_seconds is None
+
+    with pytest.raises(ValidationError, match="valid cron expression"):
+        VoiceMonitorConfiguration(
+            destination_e164="+61412345678", display_label="Main", schedule_cron="not cron"
+        )
+
+
 def test_customer_attempt_lookup_is_tenant_scoped():
     with patch.object(repo.db, "fetch_one", new_callable=AsyncMock) as fetch:
         fetch.return_value = None
@@ -65,6 +78,21 @@ def test_customer_attempt_lookup_is_tenant_scoped():
     query, params = fetch.call_args.args
     assert "company_id = %s" in query
     assert params == (99, 42)
+
+
+def test_create_endpoint_uses_static_sql_and_defaults():
+    values = {"destination_e164": "+61412345678", "display_label": "Main", "interval_seconds": 300}
+    created = {"id": 17, "company_id": 42, **values}
+    with patch.object(repo.db, "execute_returning_lastrowid", new_callable=AsyncMock) as insert, \
+         patch.object(repo, "get_endpoint", new_callable=AsyncMock, return_value=created):
+        insert.return_value = 17
+        assert asyncio.run(repo.create_endpoint(42, values)) == created
+
+    query, params = insert.call_args.args
+    assert "destination_e164, display_label, enabled, timezone" in query
+    assert query.count("%s") == len(params) == 27
+    assert params[:8] == (42, None, "+61412345678", "Main", True, "UTC", None, 300)
+    assert params[8:15] == (30, 0, 60, "answer", False, False, 1)
 
 
 def test_ticket_link_is_atomic_and_tenant_scoped():

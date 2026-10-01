@@ -53,3 +53,27 @@ def test_dollar_vars_date_supports_formatting_and_month_offsets(monkeypatch):
         )
         == "February 2026"
     )
+
+
+def test_dollar_vars_supports_whitespace_inside_token_and_leaves_oversized_tokens(
+    monkeypatch,
+):
+    class FixedDateTime(value_templates.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = cls(2026, 1, 15, 9, 30, tzinfo=tz)
+            return base if tz is not None else base.replace(tzinfo=None)
+
+    oversized = "${" + ("x" * (value_templates._MAX_VAR_TOKEN_LENGTH + 10)) + "}"
+
+    monkeypatch.setattr(value_templates, "datetime", FixedDateTime)
+
+    assert (
+        asyncio.run(
+            value_templates.render_string_async(
+                '${   vars.now.local.date   }.format("MMMM")', {}
+            )
+        )
+        == "January"
+    )
+    assert asyncio.run(value_templates.render_string_async(oversized, {})) == oversized

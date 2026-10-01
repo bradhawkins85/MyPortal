@@ -10,6 +10,8 @@ import phonenumbers
 from phonenumbers import PhoneNumberType
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
+from app.services.cron_expression import validate as validate_cron_expression
+
 
 class DialingPolicy(BaseModel):
     """Deployment-specific restrictions applied after E.164 normalization."""
@@ -115,6 +117,13 @@ class VoiceMonitorConfiguration(BaseModel):
             raise ValueError("exactly one of schedule_cron or interval_seconds is required")
         if self.recording_consent_granted and not self.consent_granted:
             raise ValueError("recording consent requires call consent")
+        if self.schedule_cron is not None:
+            expression = self.schedule_cron.strip()
+            try:
+                validate_cron_expression(expression)
+            except ValueError:
+                raise ValueError("schedule_cron must be a valid cron expression")
+            self.schedule_cron = expression
         return self
 
 

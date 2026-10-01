@@ -1,0 +1,7 @@
+{
+  "guid": "892ca532-264b-4a19-ba7a-8ac1485a9ffc",
+  "occurred_at": "2026-09-24T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed llama.cpp RAG embeddings by using its supported OpenAI-compatible payload and locally reducing native vectors to the configured dimensions.",
+  "content_hash": "191324e9e9cea63f51611bcb6b3153cee832142639ef88ced8892d2299eb7883"
+}

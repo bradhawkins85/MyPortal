@@ -14,6 +14,9 @@ from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
 import httpx
+
+from app.services.monitored_http import monitored_client
+from app.services.outbound_url_guard import redirect_guard_hooks
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.database import db
@@ -275,7 +278,7 @@ def _extract_json_object(raw_text: str) -> dict[str, Any] | None:
         parsed = json.loads(text)
         return parsed if isinstance(parsed, dict) else None
     except json.JSONDecodeError:
-        pass
+        parsed = None
 
     fence_start = text.find("```")
     if fence_start != -1:
@@ -304,6 +307,17 @@ def _extract_json_object(raw_text: str) -> dict[str, Any] | None:
     return None
 
 
+_STARTRACK_DOMAINS: tuple[str, ...] = ("startrack.com.au",)
+
+
+def _host_matches_domains(hostname: str | None, domains: tuple[str, ...]) -> bool:
+    """Exact host or proper subdomain match (``evil-startrack.com`` does not match)."""
+    host = (hostname or "").strip().lower().rstrip(".")
+    if not host:
+        return False
+    return any(host == domain or host.endswith("." + domain) for domain in domains)
+
+
 def _validate_tracking_url(url: str) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
@@ -329,11 +343,37 @@ def _validate_tracking_url(url: str) -> str:
     return url.strip()
 
 
-async def _fetch_with_retries(url: str, *, timeout_seconds: float = 15.0, retries: int = 3) -> str:
+async def _fetch_with_retries(
+    url: str,
+    *,
+    allowed_domains: tuple[str, ...] = _STARTRACK_DOMAINS,
+    timeout_seconds: float = 15.0,
+    retries: int = 3,
+) -> str:
+    """Fetch a carrier tracking page.
+
+    The stored URL is re-validated at fetch time (it may have been saved before
+    the current rules existed) and every request, including each redirect hop,
+    must stay on the carrier's own domains and resolve to a public address
+    (enforced by the request event hook, which also covers the first request).
+    """
+    if not _host_matches_domains(urlparse(url).hostname, allowed_domains):
+        raise ValueError("Tracking URL host is not a supported carrier domain")
+
+    def _carrier_hop_check(hop_url: httpx.URL) -> None:
+        if hop_url.scheme not in {"http", "https"} or not _host_matches_domains(hop_url.host, allowed_domains):
+            raise ValueError("Tracking URL redirected outside the carrier domain")
+
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
-            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+            async with monitored_client(
+                httpx.AsyncClient,
+                timeout=timeout_seconds,
+                follow_redirects=True,
+                max_redirects=5,
+                event_hooks=redirect_guard_hooks(allow_private=False, extra_check=_carrier_hop_check),
+            ) as client:
                 response = await client.get(url, headers={"User-Agent": "MyPortal/1.0 (ticket-shipment-watch)"})
             response.raise_for_status()
             return response.text
@@ -349,11 +389,10 @@ class StarTrackProviderAdapter(ProviderAdapter):
     slug = "startrack"
 
     def can_handle(self, url: str) -> bool:
-        host = (urlparse(url).hostname or "").lower()
-        return "startrack" in host
+        return _host_matches_domains(urlparse(url).hostname, _STARTRACK_DOMAINS)
 
     async def fetch(self, url: str) -> dict[str, Any]:
-        html_text = await _fetch_with_retries(url)
+        html_text = await _fetch_with_retries(url, allowed_domains=_STARTRACK_DOMAINS)
         essential_text = _extract_startrack_essential_fields(html_text)
         return {
             "url": url,
@@ -502,6 +541,7 @@ async def _extract_snapshot_with_llm(
     text_excerpt: str,
     html_excerpt: str,
 ) -> CanonicalShipmentSnapshot | None:
+    _ = html_excerpt
     prompt = (
         "Extract shipping-tracking details into strict JSON."
         " Return only a JSON object with these keys exactly:"

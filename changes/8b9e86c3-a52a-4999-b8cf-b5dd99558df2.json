@@ -1,7 +1,7 @@
 {
   "guid": "8b9e86c3-a52a-4999-b8cf-b5dd99558df2",
-  "occurred_at": "2026-08-19T00:00:00Z",
-  "change_type": "fix",
+  "occurred_at": "2026-08-19T00:00Z",
+  "change_type": "Fix",
   "summary": "Fixed legacy Windows network scans failing while serializing discovered devices.",
-  "content_hash": "legacy-windows-network-scan-json-serialization"
+  "content_hash": "75f5766e41e4d834ad38096c6a4f0a63c75e36d85565cbf6f5e23098f16eabb0"
 }

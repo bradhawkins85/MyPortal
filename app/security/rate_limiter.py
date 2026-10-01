@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import inspect
+
 import asyncio
 import time
 from collections import deque
-from typing import Callable, Deque, Dict, Iterable
+from typing import Awaitable, Callable, Deque, Dict, Iterable
 
 from fastapi import Request
 from redis.asyncio import Redis
@@ -134,7 +136,7 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         *,
         rate_limiter: SimpleRateLimiter,
         exempt_paths: Iterable[str] | None = None,
-        key_func: Callable[[Request], str] | None = None,
+        key_func: Callable[[Request], str | Awaitable[str]] | None = None,
     ) -> None:
         super().__init__(app)
         self.rate_limiter = rate_limiter
@@ -153,6 +155,8 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
 
         client_ip = get_client_ip(request, default="anonymous")
         key = self.key_func(request)
+        if inspect.isawaitable(key):
+            key = await key
 
         allowed, retry_after = await self.rate_limiter.check(key)
         if not allowed:
@@ -195,12 +199,7 @@ class EndpointRateLimiterMiddleware(BaseHTTPMiddleware):
 
         allowed, retry_after, reason = await self.endpoint_limiter.check(request)
         if not allowed:
-            client_ip = request.headers.get("x-forwarded-for")
-            if client_ip:
-                client_ip = client_ip.split(",")[0].strip()
-            else:
-                client = request.client
-                client_ip = client.host if client else "anonymous"
+            client_ip = get_client_ip(request, default="anonymous")
 
             log_warning(
                 "Endpoint rate limit exceeded",

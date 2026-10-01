@@ -1,0 +1,7 @@
+{
+  "guid": "2c2fcc56-7f13-43a9-a567-680f6a29ca61",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "Feature",
+  "summary": "Added automated Microsoft 365 best-practice remediations for Security Defaults, Conditional Access baselines, password expiry, LAPS, SharePoint idle sign-out and sharing, mailbox audit bypass, Teams ZAP, Safe Links, DKIM and Teams meeting, federation and file-sharing policies.",
+  "content_hash": "a63b9eb3ce206e58765160264fabfc6a4384378e1442c0371afaebcdcc2481e9"
+}

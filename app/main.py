@@ -1,25 +1,27 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
+from importlib import import_module
 import json
-import math
 import random
 import re
 import secrets
+from contextlib import suppress
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import Decimal
 from html import escape
 from pathlib import Path, PurePosixPath
-from typing import Any, cast
-from urllib.parse import parse_qsl, quote, urlencode
+from typing import Any
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-import aiomysql
 import httpx
+
+from app.services.monitored_http import monitored_client
+from app.services.incoming_webhooks import IncomingWebhookMonitorMiddleware
 from fastapi import (
     Depends,
     FastAPI,
@@ -34,7 +36,6 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
-from fastapi.params import Form as FormField
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (
@@ -50,7 +51,6 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from itsdangerous import BadSignature, URLSafeSerializer
-from pydantic import ValidationError
 from starlette.datastructures import FormData, URL
 from http import HTTPStatus
 
@@ -69,10 +69,13 @@ from app.api.routes import (
     call_recordings as call_recordings_api,
     click_to_call as click_to_call_api,
     companies,
+    documentation,
     dashboard as dashboard_api,
     essential8 as essential8_api,
+    smb1001 as smb1001_api,
     compliance_checks as compliance_checks_api,
     email_blocklist as email_blocklist_api,
+    email_tracking as email_tracking_api,
     forms as forms_api,
     invoices as invoices_api,
     issues as issues_api,
@@ -96,12 +99,13 @@ from app.api.routes import (
     tickets as tickets_api,
     tray as tray_api,
     users,
+    vault as vault_api,
     system,
-    xero,
     chat as chat_api,
     features as features_api,
     defender as defender_api,
 )
+from app.api.dependencies.auth import is_user_active, require_super_admin
 from uuid import uuid4
 
 from app.core.config import get_settings, get_templates_config
@@ -110,111 +114,96 @@ from app.core.features import init_registry
 from app.core.plugin_loader import get_plugin_loader, init_plugin_loader
 from app.core.logging import configure_logging, log_error, log_info, log_warning
 from loguru import logger
+from app.repositories import access_activity as access_activity_repo
 from app.repositories import audit_logs as audit_repo
-from app.repositories import api_keys as api_key_repo
+from app.repositories import sidebar_preferences as sidebar_preferences_repo
 from app.repositories import auth as auth_repo
 from app.repositories import assets as assets_repo
-from app.repositories import billing_contacts as billing_contacts_repo
 from app.repositories import companies as company_repo
+from app.repositories import credential_features as credential_feature_repo
 from app.repositories import company_memberships as membership_repo
-from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.repositories import change_log as change_log_repo
-from app.repositories import assets as asset_repo
 from app.repositories import licenses as license_repo
 from app.repositories import license_sku_friendly_names as sku_friendly_repo
 from app.repositories import forms as forms_repo
 from app.repositories import knowledge_base as knowledge_base_repo
+from app.repositories import customer_content_audience as customer_content_audience_repo
 from app.repositories import m365 as m365_repo
 from app.repositories import notifications as notifications_repo
+from app.repositories import chat as chat_repo
 from app.repositories import defender as defender_repo
-from app.repositories import reporting as reporting_repo
 from app.repositories import roles as role_repo
-from app.repositories import shop as shop_repo
-from app.repositories import stock_feed as stock_feed_repo
 from app.repositories import cart as cart_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
-from app.repositories import subscription_categories as subscription_categories_repo
-from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import staff as staff_repo
-from app.repositories import staff_onboarding_workflows as staff_workflow_repo
-from app.repositories import staff_requests as staff_requests_repo
-from app.repositories import pending_staff_access as pending_staff_access_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
 from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import ticket_expenses as expenses_repo
-from app.repositories import ticket_views as ticket_views_repo
-from app.repositories import ticket_statuses as ticket_status_repo
-from app.repositories import automations as automation_repo
-from app.repositories import integration_modules as integration_modules_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
+from app.services import knowledge_base as knowledge_base_service
+from app.services import system_update_history
+from app.services import system_updates as system_updates_service
+from app.services.agent_sources import SOURCE_REGISTRY as AGENT_SOURCE_REGISTRY
 from app.security.menu_permissions import MENU_PERMISSIONS, catalogue_for_api, menu_has_access, normalize_access_level, normalize_menu_permissions
-from app.repositories import issues as issues_repo
-from app.repositories import asset_custom_fields as asset_custom_fields_repo
-from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.repositories import site_settings as site_settings_repo
-from app.schemas.staff_onboarding_workflows import (
-    CompanyWorkflowPolicyUpsertSchema,
-    WorkflowConfigSchema,
-)
 from app.security.cache_control import CacheControlMiddleware
 from app.security.client_ip import get_client_ip
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.security.flash import flash_redirect, set_flash
 from app.security.ip_whitelist import IPWhitelistMiddleware
+from app.security.maintenance import MaintenanceMiddleware
 from app.security.rate_limiter import (
     EndpointRateLimiter,
     EndpointRateLimiterMiddleware,
     RateLimiterMiddleware,
     SimpleRateLimiter,
 )
+from app.security.session import ensure_datetime
 from app.security.request_logger import RequestLoggingMiddleware
 from app.security.security_headers import SecurityHeadersMiddleware
-from app.security.session import SessionData, session_manager
-from app.api.dependencies.auth import get_current_session
+from app.security.session import session_manager
 from app.services.scheduler import scheduler_service, COMMANDS_BY_MODULE
+from app.services.component_availability import (
+    AvailabilityConfigurationError,
+    get_component_availability,
+)
 from app.services import audit as audit_service
 from app.services import background as background_tasks
 from app.services import automations as automations_service
 from app.services import change_log as change_log_service
 from app.services import cron_calendar as cron_calendar_service
-from app.services import company_domains
+from app.services.cron_expression import validate as validate_cron_expression
 from app.services import company_access
 from app.services import dashboard as dashboard_service
-from app.services import email as email_service
-from app.services import m365_mail as m365_mail_service
 from app.services import user_m365_contacts as user_m365_contacts_service
+from app.services import m365_oauth_transactions
 from app.services import rag_relationships as rag_relationship_service
 from app.services import m365 as m365_service
+from app.services.m365_connection_health import build_connection_health
+from app.repositories import m365_connections as m365_connection_repo
 from app.services import cis_benchmark as cis_benchmark_service
 from app.services import m365_best_practices as m365_best_practices_service
 from app.services import modules as modules_service
-from app.services import notification_event_settings as event_settings_service
+from app.services import passkeys as passkeys_service
 from app.services import message_templates as message_templates_service
-from app.services import products as products_service
-from app.services import shop as shop_service
-from app.services import shop_packages as shop_packages_service
-from app.services import staff_access as staff_access_service
-from app.services import staff_field_config as staff_field_config_service
-from app.services import staff_onboarding_workflows as staff_onboarding_workflow_service
 from app.services import labour_types as labour_types_service
-from app.services import subscription_shop_integration
 from app.services import tickets as tickets_service
 from app.services import rag_index as rag_index_service
-from app.services import ticket_attachments as attachments_service
+from app.services.rag_permissions import can_access_candidate
+from app.services.rag_urls import canonical_source_url
 from app.services import template_variables
 from app.services import webhook_monitor
-from app.services import xero as xero_service
+from app.services import integration_operations as integration_operations_service
+from app.services import m365_jobs as m365_jobs_service
 from app.services import issues as issues_service
-from app.services import reports as reports_service
-from app.services import reporting as reporting_service
 from app.services import service_status as service_status_service
 from app.services import system_state as system_state_service
-from app.services import backup_jobs as backup_jobs_service
 from app.services import impersonation as impersonation_service
+from app.services import role_switching
 from app.services.realtime import refresh_notifier
 from app.services.redis import close_redis_client, get_redis_client
 from app.services.sanitization import sanitize_rich_text
@@ -224,12 +213,43 @@ from app.services.opnform import (
     normalize_opnform_embed_code,
     normalize_opnform_form_url,
 )
-from app.services.file_storage import delete_stored_file, store_product_image, store_report_cover_image
 
 configure_logging()
 settings = get_settings()
 templates_config = get_templates_config()
 oauth_state_serializer = URLSafeSerializer(settings.secret_key, salt="m365-oauth")
+
+
+async def _new_m365_oauth_state(request: Request, **context: Any) -> str:
+    """Create opaque state bound to the current authenticated session."""
+    session = await session_manager.load_session(request)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    transaction_id = await m365_oauth_transactions.create(
+        user_id=session.user_id, session_id=session.id, **context
+    )
+    return oauth_state_serializer.dumps({"transaction_id": transaction_id})
+
+
+async def _consume_m365_oauth_state(request: Request, state: str | None) -> dict[str, Any] | None:
+    """Validate, consume, and bind opaque OAuth state to this live session."""
+    if not state:
+        return None
+    try:
+        envelope = oauth_state_serializer.loads(state)
+    except BadSignature:
+        return None
+    # Context-bearing legacy state is intentionally rejected (see service docs).
+    transaction_id = envelope.get("transaction_id") if isinstance(envelope, dict) else None
+    if not isinstance(transaction_id, str):
+        return None
+    transaction = await m365_oauth_transactions.consume(transaction_id)
+    session = await session_manager.load_session(request)
+    if not transaction or session is None:
+        return None
+    if int(transaction.get("user_id") or 0) != session.user_id or int(transaction.get("session_id") or 0) != session.id:
+        return None
+    return transaction
 PWA_THEME_COLOR = "#0f172a"
 PWA_BACKGROUND_COLOR = "#0f172a"
 SHOP_LOW_STOCK_THRESHOLD = 5
@@ -246,6 +266,30 @@ _ticket_dashboard_reference_lock = asyncio.Lock()
 _M365_PROVISION_PKCE_TTL_SECONDS = 600
 _m365_provision_pkce_cache: dict[str, tuple[str, datetime]] = {}
 _m365_provision_pkce_lock = asyncio.Lock()
+
+_LEGACY_MODULE_EXPORTS = {
+    "backup_jobs_service": "app.services.backup_jobs",
+    "email_service": "app.services.email",
+    "m365_mail_service": "app.services.m365_mail",
+    "shop_packages_service": "app.services.shop_packages",
+    "shop_repo": "app.repositories.shop",
+    "shop_service": "app.services.shop",
+    "staff_access_service": "app.services.staff_access",
+    "staff_field_config_service": "app.services.staff_field_config",
+    "staff_onboarding_workflow_service": "app.services.staff_onboarding_workflows",
+    "subscription_shop_integration": "app.services.subscription_shop_integration",
+    "subscriptions_repo": "app.repositories.subscriptions",
+    "xero_service": "app.services.xero",
+}
+
+
+def __getattr__(name: str) -> Any:
+    module_path = _LEGACY_MODULE_EXPORTS.get(name)
+    if module_path is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = import_module(module_path)
+    globals()[name] = module
+    return module
 
 
 async def _store_m365_provision_code_verifier(verifier: str) -> str:
@@ -309,10 +353,20 @@ _version_file = Path(__file__).resolve().parent.parent / "version.txt"
 if _version_file.is_file():
     try:
         _APP_VERSION = _version_file.read_text().strip()
-    except Exception:
-        pass
+    except (OSError, UnicodeError) as exc:
+        log_warning(
+            "Could not read application version file for static cache busting",
+            version_file=str(_version_file),
+            error=str(exc),
+        )
+        _APP_VERSION = ""
 
 _PWA_SERVICE_WORKER_PATH = templates_config.static_path / "service-worker.js"
+_RELEASE_POLICY_PATH = Path(__file__).resolve().parent.parent / "release.json"
+_RELEASE_HASH_ROOTS = (
+    templates_config.static_path,
+    Path(__file__).resolve().parent / "templates",
+)
 _PWA_ICON_SOURCES = [
     {
         "src": "/static/logo.svg",
@@ -498,6 +552,7 @@ TASK_COMMAND_LABELS: dict[str, str] = {
     "sync_to_xero": "Sync to Xero",
     "sync_to_xero_auto_send": "Sync to Xero (Auto Send)",
     "generate_invoice": "Generate Invoice",
+    "process_subscription_renewals": "Process subscription renewals",
     "unbill_time_entries": "Un-Bill Time Entries",
     "send_price_change_notifications": "Send Price Change Notification",
     "create_scheduled_ticket": "Create scheduled ticket",
@@ -516,6 +571,8 @@ TASK_COMMAND_LABELS: dict[str, str] = {
     "system_update": "Update MyPortal system",
     "update_products": "Update Shop Products",
     "update_stock_feed": "Update Shop Stock Feed",
+    "refresh_website_checks": "Refresh website checks",
+    "refresh_dns_records": "Refresh DNS records",
 }
 
 
@@ -527,6 +584,32 @@ def _scheduled_task_command_label(command: str) -> str:
         account_id = command.partition(":")[2]
         return f"Sync Microsoft 365 mailbox {account_id}"
     return command.replace("_", " ").replace(":", " ").strip().title()
+
+
+_TASK_COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Microsoft 365", ("sync_m365_", "refresh_m365_", "m365_mail_sync:")),
+    ("Staff and assets", ("sync_staff", "sync_assets", "sync_tactical_assets", "update_mac_vendors")),
+    ("Billing and Xero", (
+        "sync_to_xero", "generate_invoice", "unbill_time_entries",
+        "send_price_change_notifications", "process_subscription_renewals",
+    )),
+    ("Tickets", ("create_scheduled_ticket",)),
+    ("Calls and transcription", (
+        "sync_recordings", "sync_unifi_talk_recordings", "queue_transcriptions", "process_transcription",
+    )),
+    ("AI knowledge", ("rag_",)),
+    ("Security and monitoring", (
+        "sync_huntress", "refresh_website_checks", "refresh_dns_records",
+    )),
+)
+
+
+def _scheduled_task_command_group(command: str) -> str:
+    """Return the plain-language category a scheduled task command belongs to."""
+    for group, prefixes in _TASK_COMMAND_GROUPS:
+        if command.startswith(prefixes):
+            return group
+    return "Maintenance"
 
 app = FastAPI(
     title=settings.app_name,
@@ -563,43 +646,6 @@ async def _shutdown_integrations() -> None:
 
 SWAGGER_UI_PATH = settings.swagger_ui_url or "/docs"
 PROTECTED_OPENAPI_PATH = "/internal/openapi.json"
-
-
-async def _get_extra_csp_script_sources() -> list[str]:
-    """Get additional CSP script sources from enabled modules.
-    
-    This function retrieves script sources that need to be allowed in the
-    Content-Security-Policy, such as analytics scripts from enabled modules.
-    
-    Returns:
-        List of valid HTTPS URLs to allow as script sources
-    """
-    sources = []
-    
-    try:
-        # Check for Plausible analytics module
-        module_list = await modules_service.list_modules()
-        module_lookup = {module.get("slug"): module for module in module_list if module.get("slug")}
-        
-        plausible_module = module_lookup.get("plausible")
-        if plausible_module and plausible_module.get("enabled"):
-            plausible_settings = plausible_module.get("settings") or {}
-            base_url = (plausible_settings.get("base_url") or "")
-            if isinstance(base_url, str):
-                base_url = base_url.strip().rstrip("/")
-            else:
-                base_url = ""
-            
-            # Validate base_url - must be HTTPS with actual content after the protocol
-            if base_url.startswith("https://") and len(base_url) > 8:  # len("https://") = 8
-                # Add the base URL as a script source (this allows loading /js/script.js from it)
-                sources.append(base_url)
-    except Exception:
-        # If we fail to get module config, return empty list
-        # The CSP will still work with default sources
-        pass
-    
-    return sources
 
 
 # Configure CORS with security-first defaults
@@ -661,6 +707,7 @@ if settings.ip_whitelist_enabled and settings.ip_whitelist:
         "/api/auth/login",
         "/api/auth/register",
         "/api/webhooks",  # Webhooks use signature verification instead
+        "/api/vault/shares",  # External shares use opaque tokens and verification codes
         "/api/integration-modules/xero/webhook",
         "/manifest.webmanifest",
         "/service-worker.js",
@@ -689,8 +736,6 @@ elif settings.ip_whitelist_enabled:
 app.add_middleware(
     SecurityHeadersMiddleware,
     exempt_paths=("/static",),
-    get_extra_script_sources=_get_extra_csp_script_sources,
-    get_extra_connect_sources=_get_extra_csp_script_sources,
 )
 
 # Add request logging middleware
@@ -703,21 +748,28 @@ app.add_middleware(
 _rate_limit_redis = get_redis_client()
 endpoint_limiter = EndpointRateLimiter(redis_client=_rate_limit_redis)
 
-# Login: 5 attempts per 15 minutes per IP
-endpoint_limiter.add_limit("/api/auth/login", "POST", limit=5, window_seconds=900)
+# Login: per-IP ceiling on the real login route (the router is mounted at
+# /auth). The per-email counter in the login handler still applies on top.
+endpoint_limiter.add_limit("/auth/login", "POST", limit=20, window_seconds=900)
+endpoint_limiter.add_limit("/auth/register", "POST", limit=10, window_seconds=3600)
+endpoint_limiter.add_limit(
+    "/api/tray/ticket-form/fallback", "POST", limit=10, window_seconds=3600
+)
+endpoint_limiter.add_limit("/auth/passkeys/authenticate/options", "POST", limit=5, window_seconds=300)
+endpoint_limiter.add_limit("/auth/passkeys/authenticate/verify", "POST", limit=10, window_seconds=300)
+endpoint_limiter.add_limit("/auth/passkeys/register/options", "POST", limit=10, window_seconds=300)
+endpoint_limiter.add_limit("/auth/passkeys/register/verify", "POST", limit=10, window_seconds=300)
 
-# Password reset: 3 requests per hour per email
+# Password reset: 3 requests per hour per client IP
 def _password_reset_key(request: Request) -> str:
-    """Generate rate limit key based on email from query params or IP fallback."""
-    try:
-        email = request.query_params.get("email")
-        if email:
-            return f"reset:{email.lower()}"
-        # For POST requests with JSON bodies the body is consumed by FastAPI
-        # before middleware runs, so fall back to the validated client IP.
-        return get_client_ip(request, default="anonymous") or "anonymous"
-    except Exception:
-        return get_client_ip(request, default="anonymous") or "anonymous"
+    """Key reset requests on the validated client IP.
+
+    The handler reads the email from the request body, so keying on any
+    caller-supplied value (such as a query parameter) would let each request
+    pick a fresh bucket.
+    """
+    ip = get_client_ip(request, default="anonymous") or "anonymous"
+    return f"reset:{ip}"
 
 endpoint_limiter.add_limit(
     "/api/auth/password/forgot",
@@ -754,11 +806,16 @@ for path in upload_paths:
 # General HTTP traffic: per authenticated browser session, with IP fallback for
 # unauthenticated requests. Keying authenticated traffic by IP caused busy NATs,
 # office networks, and reverse proxies to share a single bucket across many users.
-def _general_rate_limit_key(request: Request) -> str:
-    session_token = request.cookies.get(settings.session_cookie_name)
-    if session_token:
-        digest = hashlib.sha256(session_token.encode("utf-8")).hexdigest()
-        return f"session:{digest}"
+# Only a session that actually validates earns its own bucket; otherwise a
+# client could send a random cookie value on every request to dodge the limit.
+async def _general_rate_limit_key(request: Request) -> str:
+    if request.cookies.get(settings.session_cookie_name):
+        try:
+            session = await session_manager.load_session(request)
+        except Exception:  # pragma: no cover - fall back to IP keying
+            session = None
+        if session is not None:
+            return f"session:{session.id}"
     ip = get_client_ip(request, default="anonymous") or "anonymous"
     return f"ip:{ip}"
 
@@ -799,6 +856,9 @@ app.add_middleware(
     CSRFMiddleware,
     exempt_paths=(
         "/api/webhooks/smtp2go",
+        # Unsubscribe links authenticate with the recipient's unguessable
+        # token and must accept RFC 8058 one-click POSTs from mail clients.
+        "/marketing/unsubscribe/",
         "/api/integration-modules/uptimekuma/alerts",
         "/api/integration-modules/trello/webhook",
         "/api/integration-modules/xero/webhook",
@@ -806,6 +866,8 @@ app.add_middleware(
         "/api/tray/enrol",
         "/api/tray/popup-chat",
         "/api/tray/ticket-form",
+        "/api/vault/shares/verify",
+        "/api/vault/shares/reveal",
         # Public Wait For Webhook callbacks authenticate with an unguessable
         # webhook URL plus the per-step post key in the JSON payload, not a
         # browser session. Requiring CSRF here blocks legitimate automation.
@@ -813,32 +875,16 @@ app.add_middleware(
     ),
 )
 
-# Add Plausible tracking middleware for authenticated pageviews
-# This middleware sends custom events to Plausible Analytics when users access pages
-# It includes privacy protections (hashed user IDs) and only tracks authenticated users
-from app.security.plausible_tracking import PlausibleTrackingMiddleware
-
-def _get_plausible_module_settings() -> dict[str, Any]:
-    """Synchronous function to get Plausible module settings for middleware."""
-    # We use a cached module lookup to avoid async issues in middleware
-    # This is populated in _build_base_context
-    return getattr(_get_plausible_module_settings, '_cached_module', {})
-
+# Registered last so it runs before authentication, CSRF, rate limiting and
+# database-backed handlers.  This also rejects new writes before worker drain.
 app.add_middleware(
-    PlausibleTrackingMiddleware,
-    exempt_paths=(
-        "/static",
-        "/api",
-        "/health",
-        "/healthz",
-        "/readyz",
-        "/manifest.webmanifest",
-        "/service-worker.js",
-        "/ws",
-        "/mcp",
-    ),
-    get_module_settings=_get_plausible_module_settings,
+    MaintenanceMiddleware,
+    page_path=str(Path(__file__).parent / "static" / "upgrade.html"),
 )
+
+# Registered outermost so authentication, body parsing, dependency validation,
+# handler failures, and maintenance/rate-limit rejections are all observable.
+app.add_middleware(IncomingWebhookMonitorMiddleware)
 
 templates = Jinja2Templates(directory=str(templates_config.template_path))
 
@@ -871,14 +917,87 @@ def _static_url(path: str) -> str:
     Appends version query string to force browsers (especially Edge) to fetch
     new versions when files change, preventing stale cached content.
     """
-    if _APP_VERSION:
+    asset_path = path.partition("?")[0]
+    candidate = templates_config.static_path / asset_path.removeprefix("/static/")
+    revision = _content_hash(candidate) if candidate.is_file() else _APP_VERSION
+    if revision:
         separator = "&" if "?" in path else "?"
-        return f"{path}{separator}v={_APP_VERSION}"
+        return f"{path}{separator}v={revision}"
     return path
+
+
+def _content_hash(path: Path) -> str:
+    """Return a short content revision without relying on process version state."""
+
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+    except OSError:
+        return ""
+
+
+def _release_manifest() -> dict[str, Any]:
+    """Build the release contract from current bytes, including hot-deployed files."""
+
+    policy: dict[str, Any] = {}
+    try:
+        loaded = json.loads(_RELEASE_POLICY_PATH.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            policy = loaded
+    except (OSError, ValueError):
+        pass
+    compatibility = str(policy.get("compatibility", "soft")).lower()
+    if compatibility not in {"none", "soft", "optional", "mandatory"}:
+        compatibility = "soft"
+    files: dict[str, str] = {}
+    for root in _RELEASE_HASH_ROOTS:
+        if not root.is_dir():
+            continue
+        prefix = "/static/" if root == templates_config.static_path else "template:"
+        for file_path in sorted(path for path in root.rglob("*") if path.is_file()):
+            relative = file_path.relative_to(root).as_posix()
+            files[prefix + relative] = _content_hash(file_path)
+    identity = {"content": files, "policy": policy}
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:20]
+    precache_paths = [
+        "/static/css/app.css", "/static/js/pwa.js", "/static/js/viewport.js",
+        "/static/logo.svg", "/static/favicon.svg", "/static/upgrade.html",
+    ]
+    return {
+        "release": digest,
+        "application_version": _APP_VERSION,
+        "compatibility": compatibility,
+        "message": str(policy.get("message", "A new portal release is ready.")),
+        "assets": {path: files.get(path, "") for path in precache_paths},
+        "content": files,
+    }
 
 
 # Add cache-busting helper to Jinja2 globals
 templates.env.globals["static_url"] = _static_url
+
+
+def _feature_pack_available(slug: str) -> bool:
+    """Expose deployment feature-pack availability to server-rendered UI."""
+
+    return get_component_availability().feature_pack_available(slug)
+
+
+templates.env.globals["feature_pack_available"] = _feature_pack_available
+# The sidebar applies this before its preferences request resolves, so first
+# visits render grouped instead of flashing the flat server-rendered list.
+templates.env.globals["sidebar_default_preferences"] = (
+    sidebar_preferences_repo.build_default_sidebar_preferences
+)
+
+
+def _deployment_slot() -> str | None:
+    """Return the canonical blue/green slot for this application process."""
+
+    slot = settings.app_instance_id.strip().lower()
+    return slot if slot in {"blue", "green"} else None
+
+
+templates.env.globals["deployment_slot"] = _deployment_slot()
 
 # Ensure document uploads remain web-accessible using the same paths as the
 # previous portal stack.  Product images continue to live in the
@@ -888,12 +1007,8 @@ _uploads_path.mkdir(parents=True, exist_ok=True)
 
 _private_uploads_path = Path(__file__).resolve().parent.parent / "private_uploads"
 _private_uploads_path.mkdir(parents=True, exist_ok=True)
-try:
+with suppress(OSError):
     _private_uploads_path.chmod(0o700)
-except OSError:
-    # The filesystem may not support chmod (e.g. on Windows).  Continue with
-    # the secure default provided by ``mkdir``.
-    pass
 
 
 def _sanitize_upload_path(file_path: str) -> PurePosixPath:
@@ -974,42 +1089,148 @@ async def pwa_manifest() -> JSONResponse:
         "categories": ["productivity", "business"],
     }
     response = JSONResponse(manifest, media_type="application/manifest+json")
-    response.headers["Cache-Control"] = "public, max-age=3600"
+    response.headers["Cache-Control"] = "no-cache, must-revalidate"
     return response
 
 
+@app.get("/release-manifest.json", include_in_schema=False)
+async def release_manifest() -> JSONResponse:
+    """Publish content revisions and the browser compatibility policy."""
+
+    return JSONResponse(
+        _release_manifest(),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
 @app.get("/service-worker.js", include_in_schema=False)
-async def pwa_service_worker() -> FileResponse:
+async def pwa_service_worker() -> Response:
     """Serve the static service worker with strict caching headers."""
 
     if not _PWA_SERVICE_WORKER_PATH.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    response = FileResponse(
-        _PWA_SERVICE_WORKER_PATH,
-        media_type="application/javascript",
-        filename="service-worker.js",
-    )
+    source = _PWA_SERVICE_WORKER_PATH.read_text(encoding="utf-8")
+    source = source.replace("__RELEASE_REVISION__", _release_manifest()["release"])
+    response = PlainTextResponse(source, media_type="application/javascript")
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Service-Worker-Allowed"] = "/"
     return response
 
 
+class _DownloadOnlyStaticFiles(StaticFiles):
+    """Serve user-uploaded files as inert downloads.
+
+    Files under ``static/uploads`` were uploaded by users (legacy port
+    documents, legacy ticket attachments), so they must never be rendered by
+    the browser as HTML/SVG/XML/script on the portal origin.
+
+    Legacy ticket attachments (``static/uploads/tickets``) are never served
+    here: they are only reachable through the access-controlled ticket
+    attachment endpoints (which fall back to the legacy folder until
+    ``manage.py migrate-legacy-ticket-attachments`` has moved them).
+    """
+
+    _BLOCKED_TOP_LEVEL_DIRS = frozenset({"tickets"})
+
+    def get_path(self, scope) -> str:
+        path = super().get_path(scope)
+        parts = Path(path).parts
+        if parts and parts[0].lower() in self._BLOCKED_TOP_LEVEL_DIRS:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        return path
+
+    def file_response(self, full_path, stat_result, scope, status_code: int = 200) -> Response:
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Content-Security-Policy"] = "sandbox; default-src 'none'"
+        if response.status_code != status.HTTP_304_NOT_MODIFIED:
+            response.headers["Content-Type"] = "application/octet-stream"
+            response.headers["Content-Disposition"] = "attachment"
+        return response
+
+
+# Must be mounted before ``/static`` so user uploads never reach the generic
+# static handler, which serves files inline with a guessed media type.
+app.mount("/static/uploads", _DownloadOnlyStaticFiles(directory=str(_uploads_path)), name="static-uploads")
 app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), name="static")
+
+
+@app.middleware("http")
+async def core_component_availability_guard(request: Request, call_next: Any) -> Response:
+    """Return 404 for routes owned by a deployment-disabled core component."""
+
+    if not get_component_availability().path_available(request.url.path):
+        return JSONResponse({"detail": "Not Found"}, status_code=status.HTTP_404_NOT_FOUND)
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def release_cache_headers(request: Request, call_next: Any) -> Response:
+    """Keep documents/release metadata fresh and fingerprinted assets immutable."""
+
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/static/"):
+        if request.query_params.get("v"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers.setdefault("Cache-Control", "public, max-age=300, must-revalidate")
+    elif response.headers.get("content-type", "").startswith("text/html"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
 
 
 @app.websocket("/ws/refresh")
 async def refresh_updates(websocket: WebSocket) -> None:
-    """Maintain a websocket connection for realtime refresh notifications."""
+    """Maintain a websocket connection for realtime refresh notifications.
 
-    await refresh_notifier.connect(websocket)
+    The handshake must carry a valid portal session cookie and, when the
+    browser sends an ``Origin`` header, it must match the request host or the
+    configured portal URL (cross-site websocket hijacking protection).  The
+    authenticated identity is attached to the connection so chat events are
+    only delivered to users who can access the room.
+    """
+
+    from urllib.parse import urlsplit
+
+    from app.services.realtime import ConnectionAccess
+
+    origin = (websocket.headers.get("origin") or "").strip()
+    if origin:
+        origin_host = urlsplit(origin).netloc.lower()
+        allowed_hosts = {
+            (websocket.headers.get("host") or "").strip().lower(),
+            (websocket.headers.get("x-forwarded-host") or "").split(",")[0].strip().lower(),
+        }
+        if settings.portal_url:
+            allowed_hosts.add(urlsplit(settings.portal_url.unicode_string()).netloc.lower())
+        allowed_hosts.discard("")
+        if not origin_host or origin_host not in allowed_hosts:
+            await websocket.close(code=4403)
+            return
+
+    try:
+        session = await session_manager.load_session(websocket)  # type: ignore[arg-type]
+    except Exception as exc:  # pragma: no cover - defensive guard for DB failures
+        log_error("Failed to load session for refresh websocket", error=str(exc))
+        session = None
+    user = await user_repo.get_user_by_id(session.user_id) if session else None
+    if not session or not user:
+        await websocket.close(code=4401)
+        return
+
+    is_privileged = bool(user.get("is_super_admin")) or await _is_helpdesk_technician(user)
+    access = ConnectionAccess(user_id=int(user["id"]), is_privileged=is_privileged)
+
+    await refresh_notifier.connect(websocket, access=access)
     try:
         while True:
             # Keep the connection open and consume incoming messages so we
             # detect client disconnects promptly.
             await websocket.receive_text()
     except WebSocketDisconnect:
-        pass
+        return
     finally:
         await refresh_notifier.disconnect(websocket)
 
@@ -1019,20 +1240,16 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
     """Persistent connection used by the tray client.
 
     The handshake authenticates with a bearer auth_token supplied via the
-    ``Authorization`` header, the ``X-Tray-Token`` header, or the ``token``
-    query parameter (the latter for environments where headers cannot be
-    set on a websocket open).  Messages are JSON; the protocol is documented
-    in ``docs/tray_app.md``.
+    ``Authorization`` header or the ``X-Tray-Token`` header.  A ``?token=``
+    query parameter is deliberately not accepted: the tray client always
+    sends a header, and query strings end up in proxy and access logs.
+    Messages are JSON; the protocol is documented in ``docs/tray_app.md``.
     """
 
     from app.repositories import tray as tray_repo
     from app.services import tray as tray_service
 
-    token = (
-        websocket.headers.get("X-Tray-Token")
-        or websocket.query_params.get("token")
-        or ""
-    )
+    token = websocket.headers.get("X-Tray-Token") or ""
     if not token:
         auth_header = websocket.headers.get("Authorization", "")
         if auth_header.lower().startswith("bearer "):
@@ -1085,17 +1302,24 @@ if settings.mcp_enabled:
 
 
 @app.get(PROTECTED_OPENAPI_PATH, include_in_schema=False)
-async def authenticated_openapi_schema(
-    _: SessionData = Depends(get_current_session),
-) -> JSONResponse:
-    """Return the OpenAPI schema for authenticated users only."""
+async def authenticated_openapi_schema(request: Request) -> JSONResponse:
+    """Return the OpenAPI schema to super admins and helpdesk technicians only.
 
+    The schema enumerates every internal and administrative endpoint, so it is
+    not exposed to customer accounts.
+    """
+
+    user, redirect = await _require_authenticated_user(request)
+    if redirect or not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    if not await _is_helpdesk_technician(user, request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API documentation access denied")
     return JSONResponse(app.openapi())
 
 
 @app.get(SWAGGER_UI_PATH, include_in_schema=False)
 async def authenticated_swagger_ui(request: Request) -> Response:
-    """Render the Swagger UI after verifying the user session."""
+    """Render the Swagger UI for super admins and helpdesk technicians."""
 
     session = await session_manager.load_session(request)
     if not session:
@@ -1103,6 +1327,12 @@ async def authenticated_swagger_ui(request: Request) -> Response:
         login_url = f"/login?next={next_target}"
         redirect = RedirectResponse(url=login_url, status_code=status.HTTP_303_SEE_OTHER)
         return redirect
+
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    if not await _is_helpdesk_technician(user, request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API documentation access denied")
 
     return get_swagger_ui_html(
         openapi_url=PROTECTED_OPENAPI_PATH,
@@ -1113,6 +1343,20 @@ async def authenticated_swagger_ui(request: Request) -> Response:
         swagger_favicon_url="/static/favicon.svg",
     )
 
+@app.get("/credential-share", response_class=HTMLResponse, include_in_schema=False)
+async def credential_share_page(request: Request):
+    """Public shell; the share token is read only from the URL fragment by the browser."""
+    response = templates.TemplateResponse(request, "credential_share.html", {})
+    response.headers.update({
+        "Cache-Control": "no-store, private, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet",
+        "Referrer-Policy": "no-referrer",
+    })
+    return response
+
+
 app.include_router(auth.router)
 app.include_router(dashboard_api.router)
 app.include_router(agent.router)
@@ -1120,7 +1364,9 @@ app.include_router(users.router)
 app.include_router(click_to_call_api.router)
 app.include_router(call_recordings_api.router)
 app.include_router(companies.router)
+app.include_router(documentation.router)
 app.include_router(essential8_api.router)
+app.include_router(smb1001_api.router)
 app.include_router(compliance_checks_api.router)
 app.include_router(licenses_api.router)
 app.include_router(forms_api.router)
@@ -1143,8 +1389,10 @@ app.include_router(issues_api.router)
 app.include_router(subscriptions_api.router)
 app.include_router(audit_logs.router)
 app.include_router(api_keys.router)
+app.include_router(vault_api.router)
 app.include_router(scheduler_api.router)
 app.include_router(tickets_api.router)
+app.include_router(email_tracking_api.router)
 app.include_router(email_blocklist_api.router)
 app.include_router(automations_api.router)
 app.include_router(modules_api.router)
@@ -1176,7 +1424,6 @@ TOTP_ENROLLMENT_PAGE_PATH = "/security/2fa"
 TOTP_ENROLLMENT_ALLOWED_PAGE_PATHS = frozenset(
     {
         TOTP_ENROLLMENT_PAGE_PATH,
-        "/admin/profile",
     }
 )
 
@@ -1190,12 +1437,47 @@ async def _user_requires_totp_enrollment(user: Mapping[str, Any]) -> bool:
     return not await auth_repo.user_has_totp_authenticator(user_id_int)
 
 
+def _safe_next_path(value: str | None) -> str | None:
+    """Return ``value`` if it is a safe same-origin path for post-login redirects."""
+
+    if not value:
+        return None
+    candidate = value.strip()
+    if not candidate.startswith("/") or candidate.startswith("//"):
+        return None
+    if "\\" in candidate or any(ord(ch) < 32 for ch in candidate):
+        return None
+    parts = urlsplit(candidate)
+    if parts.scheme or parts.netloc:
+        return None
+    if candidate == "/login" or candidate.startswith(("/login?", "/logout")):
+        return None
+    return candidate
+
+
+def _login_redirect(request: Request) -> RedirectResponse:
+    """Redirect to the login page, remembering the requested page for GET requests."""
+
+    login_url = "/login"
+    if request.method == "GET":
+        target = request.url.path
+        if request.url.query:
+            target = f"{target}?{request.url.query}"
+        next_path = _safe_next_path(target)
+        if next_path and next_path != "/":
+            login_url = f"/login?next={quote(next_path, safe='')}"
+    return RedirectResponse(url=login_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
 async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
     session = await session_manager.load_session(request)
     if not session:
-        return None, RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+        return None, _login_redirect(request)
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
+        return None, _login_redirect(request)
+    if not is_user_active(user):
+        await session_manager.revoke_session(session)
         return None, RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
     if (
         request.url.path not in TOTP_ENROLLMENT_ALLOWED_PAGE_PATHS
@@ -1210,7 +1492,7 @@ async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] 
     if active_company_id is not None:
         user["company_id"] = active_company_id
     request.state.active_company_id = active_company_id
-    return user, None
+    return await role_switching.apply_selected_role(request, user, session), None
 
 
 async def _require_super_admin_page(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
@@ -1404,12 +1686,47 @@ async def _require_administration_access(
     return user, membership, None
 
 
+_UPLOAD_INLINE_IMAGE_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+
+
+def _classify_private_upload(sanitized_path: PurePosixPath) -> tuple[bool, bool] | None:
+    """Return ``(allowed_public, is_inline_image)`` for an ``/uploads`` path.
+
+    Only directories the portal actually links through ``/uploads`` are
+    served: product images (``shop/``), knowledge base inline images
+    (``knowledge-base/<file>``) and legacy top-level raster images.  Other
+    private stores (ticket attachments, KB attachments, Essential 8 and
+    SMB1001 evidence, asset photos, report covers, ...) have dedicated,
+    per-company access-controlled
+    download endpoints and are never exposed here.  ``None`` means "not found".
+    """
+
+    parts = sanitized_path.parts
+    is_image = sanitized_path.suffix.lower() in _UPLOAD_INLINE_IMAGE_TYPES
+    if len(parts) == 1:
+        return (False, True) if is_image else None
+    if len(parts) == 2 and parts[0] == "shop":
+        return (False, True) if is_image else None
+    if len(parts) == 2 and parts[0] == "knowledge-base":
+        return (True, True) if is_image else None
+    return None
+
+
 @app.get("/uploads/{file_path:path}", response_class=FileResponse, include_in_schema=False)
 async def serve_private_upload(file_path: str, request: Request):
     """Serve product images stored in the legacy private uploads directory."""
 
     sanitized_path = _sanitize_upload_path(file_path)
-    is_public_kb_image = sanitized_path.parts and sanitized_path.parts[0] == "knowledge-base"
+    classification = _classify_private_upload(sanitized_path)
+    if classification is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    is_public_kb_image, is_inline_image = classification
 
     if not is_public_kb_image:
         _, redirect = await _require_authenticated_user(request)
@@ -1417,8 +1734,22 @@ async def serve_private_upload(file_path: str, request: Request):
             return redirect
 
     resolved_path = _resolve_private_upload(sanitized_path)
-    headers = {"Cache-Control": "public, max-age=86400"}
-    return FileResponse(resolved_path, headers=headers)
+    headers = {
+        "Cache-Control": "public, max-age=86400" if is_public_kb_image else "private, max-age=86400",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if is_inline_image:
+        media_type = _UPLOAD_INLINE_IMAGE_TYPES[sanitized_path.suffix.lower()]
+        return FileResponse(resolved_path, media_type=media_type, headers=headers)
+    # Anything that is not a known raster image is forced to download so it
+    # can never be rendered as active content on the portal origin.
+    return FileResponse(
+        resolved_path,
+        media_type="application/octet-stream",
+        filename=resolved_path.name,
+        content_disposition_type="attachment",
+        headers=headers,
+    )
 
 
 def _to_iso(dt: Any) -> str | None:
@@ -1462,7 +1793,7 @@ def _prepare_notification_metadata(metadata: Any) -> list[dict[str, str]]:
 
     if isinstance(serialised, Mapping):
         items: list[dict[str, str]] = []
-        for key in sorted(serialised.keys(), key=lambda item: str(item)):
+        for key in sorted(serialised.keys(), key=str):
             if str(key) in _NOTIFICATION_METADATA_HIDDEN_KEYS:
                 continue
             value = serialised[key]
@@ -1945,6 +2276,20 @@ def _build_menu_access_map(
         if membership_data.get(boolean_key):
             promote(menu_key, "write" if boolean_key.startswith("can_manage") or boolean_key == "is_admin" else "read")
 
+    # Pre-catalogue membership booleans receive the same compatibility-only
+    # preservation as sparse role payloads. Explicit feature denials still win
+    # through ``promote`` and newly saved roles contain every feature key.
+    if membership_data.get("can_manage_assets"):
+        for key in (
+            "menu.documentation_search", "menu.asset_photos",
+            "menu.asset_relationships", "menu.processes", "menu.expirations",
+            "menu.websites", "menu.applications",
+        ):
+            promote(key, "write")
+    if membership_data.get("is_admin"):
+        promote("menu.credentials", "write")
+        promote("menu.credential_sharing", "write")
+
     if membership_data.get("can_manage_licenses"):
         promote("menu.m365.configuration", "write")
     if membership_data.get("can_manage_licenses") and membership_data.get("can_access_cart"):
@@ -1957,6 +2302,12 @@ def _build_menu_access_map(
         promote("menu.marketing", "write")
     if int(membership_data.get("staff_permission") or 0) > 0:
         promote("menu.staff", "write")
+    else:
+        # Staff role permissions control what a member may do, but the company
+        # membership scope controls whether they may see any staff at all.
+        # Never let a role's Read/Write setting grant staff access when the
+        # member has neither Department nor All staff access.
+        menu_access["menu.staff"] = "none"
 
     return menu_access
 
@@ -2044,6 +2395,32 @@ def _membership_menu_can(user: dict[str, Any], membership: dict[str, Any] | None
     return _menu_can(menu_access, key, write=write)
 
 
+async def _get_effective_company_membership(
+    request: Request, user_id: int, company_id: int
+) -> dict[str, Any] | None:
+    """Load membership data without discarding an active role simulation.
+
+    Super admins do not normally need a persisted company membership.  While
+    viewing as a role, page loaders must therefore use the virtual membership
+    installed by :func:`role_switching.apply_selected_role` rather than the
+    (usually absent) database row.
+    """
+
+    membership = await user_company_repo.get_user_company(user_id, company_id)
+    return role_switching.effective_membership(request, membership)
+
+
+def _build_module_lookup(module_list: list[Any]) -> dict[str, dict[str, Any]]:
+    """Index valid module records without trusting database JSON shapes."""
+    return {
+        slug: module
+        for module in module_list
+        if isinstance(module, dict)
+        and isinstance((slug := module.get("slug")), str)
+        and slug
+    }
+
+
 async def _build_base_context(
     request: Request,
     user: dict[str, Any],
@@ -2070,7 +2447,10 @@ async def _build_base_context(
                 request.state.impersonator_profile = impersonator_user
     available_companies = getattr(request.state, "available_companies", None)
     if available_companies is None:
-        available_companies = await company_access.list_accessible_companies(user)
+        access_user = user
+        if getattr(request.state, "role_switcher_allowed", False):
+            access_user = {**user, "is_super_admin": True}
+        available_companies = await company_access.list_accessible_companies(access_user)
         request.state.available_companies = available_companies
     active_company_id = getattr(request.state, "active_company_id", None)
     if active_company_id is None and session:
@@ -2084,6 +2464,7 @@ async def _build_base_context(
     membership = None
     if active_company_id is not None:
         membership = await user_company_repo.get_user_company(user["id"], int(active_company_id))
+        membership = role_switching.effective_membership(request, membership)
         request.state.active_membership = membership
 
     membership_data = membership or {}
@@ -2142,6 +2523,8 @@ async def _build_base_context(
         "can_manage_compliance_checks": _menu_can(menu_access, "menu.compliance_checks.library", write=True) or is_super_admin or _has_permission("can_manage_compliance_checks"),
         "can_view_m365_user_mailboxes": _menu_can(menu_access, "menu.m365.user_mailboxes") or is_super_admin or _has_permission("can_view_m365_user_mailboxes"),
         "can_view_m365_shared_mailboxes": _menu_can(menu_access, "menu.m365.shared_mailboxes") or is_super_admin or _has_permission("can_view_m365_shared_mailboxes"),
+        "can_access_m365_signatures": _menu_can(menu_access, "menu.m365.signatures") or is_super_admin,
+        "can_access_m365_spam_purge": _menu_can(menu_access, "menu.m365.spam_purge", write=True),
         "can_access_chat": _menu_can(menu_access, "menu.chat") or is_super_admin or _has_permission("can_access_chat"),
         "can_access_marketing": _menu_can(menu_access, "menu.marketing") or has_marketing_access,
         "can_manage_subscriptions": _menu_can(menu_access, "menu.subscriptions", write=True),
@@ -2159,66 +2542,14 @@ async def _build_base_context(
         except Exception as exc:  # pragma: no cover - defensive logging
             log_error("Failed to load integration modules for context", error=str(exc))
             module_list = []
-        module_lookup = {module.get("slug"): module for module in module_list if module.get("slug")}
+        module_lookup = _build_module_lookup(module_list)
         request.state.module_lookup = module_lookup
     
-    # Cache Plausible module for middleware use
-    plausible_module = (module_lookup or {}).get("plausible")
-    if plausible_module:
-        # Store in function attribute for middleware to access
-        _get_plausible_module_settings._cached_module = plausible_module
-
-    # Get Plausible analytics configuration for app-wide tracking
-    plausible_config = {"enabled": False}
-    if plausible_module and plausible_module.get("enabled"):
-        plausible_settings = plausible_module.get("settings") or {}
-        base_url = str(plausible_settings.get("base_url") or "").strip().rstrip("/")
-        site_domain = str(plausible_settings.get("site_domain") or "").strip()
-        track_pageviews = bool(plausible_settings.get("track_pageviews"))
-        pepper = str(plausible_settings.get("pepper") or "").strip()
-        send_pii = bool(plausible_settings.get("send_pii"))
-        
-        # Validate base_url and site_domain to prevent injection attacks
-        # base_url must be a valid HTTPS URL
-        # site_domain must be a valid domain name (alphanumeric, dots, hyphens)
-        valid_base_url = False
-        valid_site_domain = False
-        
-        if base_url:
-            try:
-                from urllib.parse import urlparse
-                parsed = urlparse(base_url)
-                # Must be https or http, have a netloc, and no suspicious characters
-                if parsed.scheme in ("https", "http") and parsed.netloc and not any(c in base_url for c in ["<", ">", '"', "'"]):
-                    valid_base_url = True
-            except Exception:
-                pass
-        
-        if site_domain:
-            # Domain must only contain alphanumeric, dots, hyphens, underscores and optional port
-            # No spaces, quotes, or HTML-like characters
-            if re.match(r"^[A-Za-z0-9._-]+(?::\d+)?$", site_domain) and not any(
-                c in site_domain for c in ["<", ">", '"', "'"]
-            ):
-                valid_site_domain = True
-        
-        if valid_base_url and valid_site_domain:
-            plausible_config = {
-                "enabled": True,
-                "base_url": base_url,
-                "site_domain": site_domain,
-                "track_pageviews": track_pageviews,
-            }
-            
-            # Add hashed user ID for client-side tracking if pageview tracking enabled
-            if track_pageviews and user and user.get("id"):
-                from app.security.plausible_tracking import hash_user_id_for_plausible
-                
-                user_id = user.get("id")
-                # Hash user ID for privacy using shared utility
-                hashed_user_id = hash_user_id_for_plausible(user_id, pepper, send_pii)
-                
-                plausible_config["hashed_user_id"] = hashed_user_id
+    role_switcher_allowed = bool(getattr(request.state, "role_switcher_allowed", False))
+    role_switcher_roles: list[dict[str, Any]] = []
+    if role_switcher_allowed:
+        role_switcher_roles = sorted(await role_repo.list_roles(), key=lambda item: str(item.get("name") or "").casefold())
+    selected_role = getattr(request.state, "selected_role", None)
 
     context: dict[str, Any] = {
         "request": request,
@@ -2233,6 +2564,10 @@ async def _build_base_context(
         "csrf_token": session.csrf_token if session else None,
         "staff_permission": staff_permission_level,
         "is_super_admin": is_super_admin,
+        "role_switcher_allowed": role_switcher_allowed,
+        "role_switcher_roles": role_switcher_roles,
+        "selected_role_id": selected_role.get("id") if selected_role else None,
+        "selected_role": selected_role,
         "is_helpdesk_technician": is_helpdesk_technician,
         "has_admin_technician_access": has_admin_technician_access,
         "is_company_admin": is_super_admin or _menu_can(menu_access, "menu.admin.company"),
@@ -2249,6 +2584,9 @@ async def _build_base_context(
             if bool(module.get("enabled"))
         ),
         "syncro_module_enabled": bool((module_lookup or {}).get("syncro", {}).get("enabled")),
+        "llm_search_available": modules_service.llm_module_ready(
+            (module_lookup or {}).get("ollama")
+        ),
         "enable_auto_refresh": bool(settings.enable_auto_refresh),
         "matrix_chat_enabled": settings.matrix_enabled,
         "is_impersonating": is_impersonating,
@@ -2257,7 +2595,6 @@ async def _build_base_context(
         "has_issue_tracker_access": has_issue_tracker_access,
         "can_access_tickets": _menu_can(menu_access, "menu.tickets"),
         "can_access_all_tickets": _menu_can(menu_access, "menu.tickets", write=True),
-        "plausible_config": plausible_config,
     }
     context.update(permission_flags)
     if extra:
@@ -2282,6 +2619,28 @@ async def _build_base_context(
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error("Failed to count unread notifications", error=str(exc))
         context["notification_unread_count"] = unread_count
+    if "chat_open_count" not in context:
+        open_chat_count = 0
+        user_id = user.get("id")
+        can_view_chat = (
+            is_super_admin
+            or is_helpdesk_technician
+            or permission_flags["can_access_chat"]
+        )
+        if settings.matrix_enabled and can_view_chat and user_id is not None:
+            try:
+                if is_super_admin or is_helpdesk_technician:
+                    open_chat_count = await chat_repo.count_rooms(status="open")
+                else:
+                    company_id = user.get("company_id") or active_company_id
+                    open_chat_count = await chat_repo.count_rooms(
+                        user_id=int(user_id),
+                        company_id=int(company_id) if company_id is not None else None,
+                        status="open",
+                    )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_error("Failed to count open chats", error=str(exc))
+        context["chat_open_count"] = open_chat_count
     if "defender_detection_count" not in context:
         detection_count = 0
         if active_company_id is not None and (is_super_admin or _menu_can(menu_access, "menu.defender")):
@@ -2330,15 +2689,16 @@ async def _build_public_context(
         "can_view_m365_shared_mailboxes": False,
         "can_access_chat": False,
         "can_access_marketing": False,
-        "plausible_config": {"enabled": False},
         "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")},
         "notification_unread_count": 0,
+        "chat_open_count": 0,
         "defender_detection_count": 0,
         "enable_auto_refresh": bool(settings.enable_auto_refresh),
         "matrix_chat_enabled": settings.matrix_enabled,
         "integration_modules": {},
         "module_enabled": {},
         "enabled_module_slugs": frozenset(),
+        "llm_search_available": False,
     }
     if extra:
         context.update(extra)
@@ -2366,6 +2726,12 @@ async def _get_optional_user(
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
         return None, None
+    if not is_user_active(user):
+        await session_manager.revoke_session(session)
+        return None, None
+    if await _user_requires_totp_enrollment(user):
+        return None, None
+    user = await role_switching.apply_selected_role(request, user, session)
     request.state.active_company_id = session.active_company_id
     membership = None
     if session.active_company_id is not None:
@@ -2373,6 +2739,7 @@ async def _get_optional_user(
             membership = await user_company_repo.get_user_company(user["id"], int(session.active_company_id))
         except Exception:  # pragma: no cover - defensive
             membership = None
+        membership = role_switching.effective_membership(request, membership)
         if membership is not None:
             request.state.active_membership = membership
     return user, membership
@@ -2410,24 +2777,25 @@ async def _render_template(
     return response
 
 
-_NOTIFICATION_SORT_CHOICES: list[tuple[str, str]] = [
-    ("created_at", "Created date"),
-    ("event_type", "Event type"),
-    ("read_at", "Read date"),
-]
+@app.get("/shared-credentials", response_class=HTMLResponse)
+async def shared_credentials_page(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    if getattr(request.state, "active_company_id", None) is None:
+        raise HTTPException(status_code=403, detail="Select a company to view shared credentials")
+    if not await credential_feature_repo.is_enabled(int(request.state.active_company_id)):
+        raise HTTPException(status_code=404, detail="Credential vault unavailable")
+    return await _render_template(
+        "shared_credentials.html", request, user, extra={"title": "Shared credentials"}
+    )
 
-_NOTIFICATION_ORDER_CHOICES: list[tuple[str, str]] = [
-    ("desc", "Newest first"),
-    ("asc", "Oldest first"),
-]
 
-_NOTIFICATION_READ_OPTIONS: list[tuple[str, str]] = [
-    ("all", "All notifications"),
-    ("unread", "Unread only"),
-    ("read", "Read only"),
-]
+bcp.configure_page_rendering(
+    build_base_context=_build_base_context,
+    templates=templates,
+)
 
-_NOTIFICATION_PAGE_SIZES: list[int] = [10, 25, 50, 100]
 
 _PORTAL_STATUS_BADGE_MAP: dict[str, str] = {
     "open": "badge--warning",
@@ -2458,7 +2826,7 @@ async def _load_license_context(
         company_id = int(company_id_raw)
     except (TypeError, ValueError):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier")
-    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    membership = await _get_effective_company_membership(request, user["id"], company_id)
     can_manage = bool(membership and membership.get("can_manage_licenses"))
     can_order = bool(membership and membership.get("can_order_licenses"))
     can_view_licenses = _membership_menu_can(user, membership, "menu.m365.licenses")
@@ -2540,7 +2908,7 @@ async def _load_company_section_context(
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
 
-    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    membership = await _get_effective_company_membership(request, user["id"], company_id)
     has_permission = bool(membership and membership.get(permission_field))
     if not (is_super_admin or has_permission):
         return (
@@ -2725,12 +3093,21 @@ async def _render_impersonation_dashboard(
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    try:
-        await scheduler_service.run_system_update()
-    except Exception as exc:
-        log_error("Startup system update failed", error=str(exc))
+    # Startup must not depend on GitHub or other external services. The system
+    # update command performs a remote Git query and tray downloads can take
+    # minutes; awaiting either here prevents Uvicorn from completing lifespan
+    # startup and causes systemd's Type=notify unit to remain "activating".
+    # Both operations remain available through their scheduled/admin actions.
+    log_info("Application startup phase", phase="database_connect")
     await db.connect()
-    await db.run_migrations()
+    log_info("Application startup phase complete", phase="database_connect")
+    # Production schema changes are an explicit deployment phase.  Keeping this
+    # behind an opt-in is useful for isolated developer/test databases without
+    # allowing every production worker to race the deploy coordinator.
+    if settings.migration_bootstrap_on_start:
+        if settings.environment.strip().lower() == "production":
+            raise RuntimeError("MIGRATION_BOOTSTRAP_ON_START is not permitted in production")
+        await db.run_migrations()
     async def _bootstrap_default_bcp_template() -> None:
         from app.services.bcp_template import bootstrap_default_template
 
@@ -2741,7 +3118,6 @@ async def on_startup() -> None:
         split tasks (sync_m365_licenses, sync_m365_contacts, sync_m365_mailboxes) at
         staggered times and deactivate the old task to avoid gateway timeouts."""
         legacy_commands = {"sync_m365_data", "sync_o365"}
-        new_commands = {"sync_m365_licenses", "sync_m365_contacts", "sync_m365_mailboxes"}
         all_tasks = await scheduled_tasks_repo.list_tasks(include_inactive=False)
         # Group tasks by company_id
         from collections import defaultdict
@@ -2754,8 +3130,7 @@ async def on_startup() -> None:
         for company_id, company_tasks in by_company.items():
             commands_for_company = {t["command"] for t in company_tasks}
             has_legacy = bool(legacy_commands & commands_for_company)
-            has_new = bool(new_commands & commands_for_company)
-            if not has_legacy or has_new:
+            if not has_legacy:
                 continue
             # Find an existing company name from the legacy task name if possible
             legacy_task = next(
@@ -2807,14 +3182,6 @@ async def on_startup() -> None:
         else:
             log_info("Demo data seeded on startup", **{k: v for k, v in result.items() if k != "skipped"})
 
-    async def _fetch_tray_msi() -> None:
-        from app.services import tray_installer as tray_installer_service
-
-        await tray_installer_service.fetch_latest_tray_installers(
-            repo=settings.github_tray_msi_repo,
-            github_token=settings.github_token,
-        )
-
     startup_tasks = [
         ("sync_change_log_sources", change_log_service.sync_change_log_sources()),
         ("ensure_default_modules", modules_service.ensure_default_modules()),
@@ -2822,9 +3189,9 @@ async def on_startup() -> None:
         ("bootstrap_default_bcp_template", _bootstrap_default_bcp_template()),
         ("migrate_sync_m365_data_tasks", _migrate_sync_m365_data_tasks()),
         ("seed_demo_data_once", _seed_demo_data_once()),
-        ("fetch_latest_tray_msi", _fetch_tray_msi()),
     ]
 
+    log_info("Application startup phase", phase="local_bootstrap_tasks")
     results = await asyncio.gather(
         *(task for _, task in startup_tasks), return_exceptions=True
     )
@@ -2841,13 +3208,8 @@ async def on_startup() -> None:
                 )
         elif name == "bootstrap_default_bcp_template":
             log_info("BCP default template bootstrapped")
+    log_info("Application startup phase complete", phase="local_bootstrap_tasks")
 
-    global _rag_relationship_stop, _rag_relationship_tasks
-    _rag_relationship_stop = asyncio.Event()
-    _rag_relationship_tasks = []
-    if settings.enable_background_relationships and settings.rag_relationship_workers > 0:
-        for _ in range(settings.rag_relationship_workers):
-            _rag_relationship_tasks.append(asyncio.create_task(rag_relationship_service.relationship_worker(_rag_relationship_stop)))
     if settings.matrix_enabled:
         from app.services import matrix_sync, matrix_ai_waiting_assistant
         import asyncio as _asyncio
@@ -2860,6 +3222,17 @@ async def on_startup() -> None:
         for slug in (getattr(settings, "feature_packs", "") or "").split(",")
         if slug.strip()
     ]
+    from app.services.component_availability import configure_component_availability
+
+    from app.core.features import discover_builtin_feature_pack_slugs
+
+    availability = configure_component_availability(
+        disabled_feature_packs=settings.disabled_feature_packs,
+        disabled_modules=settings.disabled_modules,
+        known_feature_packs=discover_builtin_feature_pack_slugs(),
+        known_modules=(module["slug"] for module in modules_service.DEFAULT_MODULES),
+    )
+    pack_slugs = [slug for slug in pack_slugs if availability.feature_pack_available(slug)]
     from app.core.module_capabilities import validate_capability_registry
 
     capability_errors = validate_capability_registry(
@@ -2870,7 +3243,26 @@ async def on_startup() -> None:
             log_error("Module capability validation failed", error=error)
         raise RuntimeError("Invalid module capability registry: " + "; ".join(capability_errors))
 
+    # Relationship workers are part of the RAG feature pack; a disabled pack
+    # means no worker is started at all.
+    global _rag_relationship_stop, _rag_relationship_tasks
+    _rag_relationship_stop = asyncio.Event()
+    _rag_relationship_tasks = []
+    if (
+        settings.enable_background_relationships
+        and settings.rag_relationship_workers > 0
+        and availability.feature_pack_available("rag_index")
+    ):
+        for _ in range(settings.rag_relationship_workers):
+            _rag_relationship_tasks.append(asyncio.create_task(rag_relationship_service.relationship_worker(_rag_relationship_stop)))
+
     await scheduler_service.start()
+    async def _mailbox_sync_job(job: dict[str, Any]) -> dict[str, Any]:
+        count = await m365_service.sync_mailboxes(int(job["company_id"]))
+        return {"mailboxes_synced": count}
+
+    m365_jobs_service.register("mailbox_sync", _mailbox_sync_job)
+    m365_jobs_service.start_worker()
     modules_service.start_xero_token_keepalive()
 
     if pack_slugs:
@@ -2900,6 +3292,7 @@ async def on_startup() -> None:
 async def on_shutdown() -> None:
     global _app_ready
     _app_ready = False
+    await m365_jobs_service.stop_worker()
     if settings.matrix_enabled:
         from app.services import matrix_sync, matrix_ai_waiting_assistant
         matrix_sync.stop_sync_loop()
@@ -3088,11 +3481,32 @@ async def ai_search_page(request: Request):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return redirect
+    if not await modules_service.llm_available():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Search requires the LLM module to be enabled and configured",
+        )
     return await _render_template(
         "search.html",
         request,
         user,
-        extra={"title": "AI Search"},
+        extra={"title": "Search", "agent_sources": AGENT_SOURCE_REGISTRY},
+    )
+
+
+@app.get("/documentation-search", response_class=HTMLResponse)
+async def documentation_search_page(request: Request):
+    """Render the permission-scoped asset and knowledge-base search workspace."""
+    user, redirect = await _require_menu_page_access(
+        request, "menu.documentation_search", detail="Documentation search access required"
+    )
+    if redirect:
+        return redirect
+    return await _render_template(
+        "documentation_search.html",
+        request,
+        user,
+        extra={"title": "Documentation search"},
     )
 
 
@@ -3314,7 +3728,10 @@ async def switch_company(
     return_url_raw = _first_non_blank(("returnUrl", "return_url"), body_data, query_params)
     return_url: str | None = return_url_raw if isinstance(return_url_raw, str) else None
 
-    companies = await company_access.list_accessible_companies(user)
+    access_user = user
+    if getattr(request.state, "role_switcher_allowed", False):
+        access_user = {**user, "is_super_admin": True}
+    companies = await company_access.list_accessible_companies(access_user)
     request.state.available_companies = companies
 
     if any(company.get("company_id") == company_id for company in companies):
@@ -3327,6 +3744,37 @@ async def switch_company(
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.post("/switch-role", response_class=RedirectResponse)
+async def switch_role(request: Request):
+    """Select an effective role for the current Super Admin session."""
+
+    session = await session_manager.load_session(request)
+    if not session:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    actor = await user_repo.get_user_by_id(session.user_id)
+    if not actor or not actor.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+
+    body_data = await _extract_switch_company_payload(request)
+    role_id_raw = _first_non_blank(("roleId", "role_id"), body_data, request.query_params)
+    role_id: int | None = None
+    if role_id_raw not in (None, "", "super_admin"):
+        try:
+            role_id = int(role_id_raw)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role identifier") from None
+        if await role_repo.get_role_by_id(role_id) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+
+    await session_manager.set_selected_role(session, role_id)
+    return_url_raw = _first_non_blank(("returnUrl", "return_url"), body_data, request.query_params)
+    destination = _sanitize_local_redirect_target(
+        return_url_raw if isinstance(return_url_raw, str) else None,
+        fallback="/",
+    )
+    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+
+
 @app.get("/m365", response_class=HTMLResponse)
 async def m365_page(request: Request):
     user, membership, company, company_id, redirect = await _load_license_context(request)
@@ -3335,6 +3783,15 @@ async def m365_page(request: Request):
     if not _membership_menu_can(user, membership, "menu.m365.configuration"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Office 365 configuration access required")
     credentials = await m365_service.get_credentials(company_id)
+    active_connection = await m365_connection_repo.get_active(company_id)
+    pending_connection = await m365_connection_repo.get_pending(company_id)
+    permission_results = await m365_service.get_last_enterprise_app_permissions(company_id)
+    connection_health = build_connection_health(
+        credentials,
+        active=active_connection,
+        pending=pending_connection,
+        permission_results=permission_results,
+    )
     credential_view = None
     if credentials:
         expires = credentials.get("token_expires_at")
@@ -3375,10 +3832,27 @@ async def m365_page(request: Request):
         "admin_credential": admin_credential_view,
         "is_super_admin": bool(user.get("is_super_admin")),
         "has_credentials": bool(credentials),
+        "connection_health": connection_health,
         "has_admin_credentials": bool(admin_credential_view),
         "admin_credentials_configured": bool(all(await _get_m365_admin_credentials(company_id))),
     }
     return await _render_template("m365/index.html", request, user, extra=extra)
+
+
+@app.get("/admin/companies/{company_id}/m365", response_class=RedirectResponse)
+async def company_m365_connection_page(company_id: int, request: Request):
+    """Canonical per-company entry point while preserving the established page."""
+    user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    session = await session_manager.load_session(request)
+    if not session:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    await session_manager.set_active_company(session, company_id)
+    return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get("/m365/benchmarks", response_class=RedirectResponse)
@@ -3458,7 +3932,7 @@ async def _load_m365_best_practices_context(request: Request, *, super_admin_onl
         company_id = int(company_id_raw)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
-    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    membership = await _get_effective_company_membership(request, user["id"], company_id)
     can_view = bool(membership and membership.get("can_view_m365_best_practices"))
     if super_admin_only:
         if not is_super_admin:
@@ -3475,6 +3949,42 @@ async def _load_m365_best_practices_context(request: Request, *, super_admin_onl
     return user, membership, company, company_id, None
 
 
+def _is_valid_m365_best_practice_check_id(check_id: str) -> bool:
+    return bool(re.fullmatch(r"[a-z0-9_-]+", check_id))
+
+
+def _can_edit_m365_best_practice_notes(user: dict[str, Any], membership: dict[str, Any] | None) -> bool:
+    membership_role = str((membership or {}).get("role_name") or "").strip().lower()
+    return bool(
+        user.get("is_super_admin")
+        or membership_role in {"owner", "administrator", "technician"}
+    )
+
+
+def _can_manage_m365_account_exclusions(user: dict, membership: dict | None) -> bool:
+    return bool(
+        user.get("is_super_admin")
+        or (membership and membership.get("is_admin"))
+    )
+
+
+def _can_submit_m365_best_practice_tickets(user: Mapping[str, Any], company_id: Any) -> bool:
+    """Return whether the current M365 best-practices viewer can request help.
+
+    ``_load_m365_best_practices_context`` already restricts page access to the
+    active company's super admins and members with M365 best-practices view
+    access. Any user who can view a failed check may open a support ticket for
+    that company, so this helper only verifies the identifiers required to
+    submit the ticket.
+    """
+    if user.get("id") is None or company_id is None:
+        return False
+    try:
+        return int(company_id) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 @app.get("/m365/best-practices", response_class=HTMLResponse)
 async def m365_best_practices_page(request: Request):
     user, membership, company, company_id, redirect = await _load_m365_best_practices_context(request)
@@ -3482,18 +3992,62 @@ async def m365_best_practices_page(request: Request):
         return redirect
     credentials = await m365_service.get_credentials(company_id)
     results = await m365_best_practices_service.get_last_results(company_id)
+    secure_score = m365_best_practices_service.get_secure_score_summary(results)
     catalog = m365_best_practices_service.list_best_practices()
     enabled_ids = await m365_best_practices_service.get_enabled_check_ids()
     enabled_catalog = [bp for bp in catalog if bp["id"] in enabled_ids]
+    excluded_ids = await m365_best_practices_service.get_company_exclusions(company_id)
+    excluded_results = [
+        {
+            "check_id": bp["id"],
+            "check_name": bp.get("name") or bp["id"],
+            "description": bp.get("description", ""),
+            "status": "excluded",
+            "details": "Excluded for this company.",
+            "run_at": None,
+            "is_cis_benchmark": bool(bp.get("is_cis_benchmark")),
+            "cis_group": bp.get("cis_group", ""),
+            "risk_score": bp.get("risk_score", 0),
+            "risk_severity": bp.get("risk_severity", "medium"),
+        }
+        for bp in enabled_catalog
+        if bp["id"] in excluded_ids
+    ]
     extra = {
         "title": "M365 Best Practices",
         "company": company,
-        "results": results,
+        "results": [*results, *excluded_results],
+        "secure_score": secure_score,
         "catalog": enabled_catalog,
+        "batch_scopes": m365_best_practices_service.get_batch_remediation_scopes(results),
         "has_credentials": bool(credentials),
         "is_super_admin": bool(user.get("is_super_admin")),
+        "can_edit_notes": _can_edit_m365_best_practice_notes(user, membership),
+        "can_manage_account_exclusions": _can_manage_m365_account_exclusions(user, membership),
+        "can_submit_tickets": _can_submit_m365_best_practice_tickets(user, company_id),
     }
     return await _render_template("m365/best_practices.html", request, user, extra=extra)
+
+
+@app.get("/m365/best-practices/history", response_class=HTMLResponse)
+async def m365_best_practices_history_page(request: Request):
+    """Display daily security posture snapshots for the current company."""
+    user, membership, company, company_id, redirect = await _load_m365_best_practices_context(request)
+    if redirect:
+        return redirect
+    history = await m365_best_practices_service.get_daily_history(company_id)
+    extra = {
+        "title": "M365 Best Practices Score History",
+        "company": company,
+        "history": history,
+        "is_super_admin": bool(user.get("is_super_admin")),
+    }
+    return await _render_template(
+        "m365/best_practices_history.html",
+        request,
+        user,
+        extra=extra,
+    )
 
 
 @app.post("/m365/best-practices/run", response_class=RedirectResponse)
@@ -3505,6 +4059,19 @@ async def run_m365_best_practices(request: Request):
         return redirect
 
     user_id = user.get("id")
+    previous_statuses: dict[str, str | None] = {}
+    create_ticket_on_fail_ids = (
+        await m365_best_practices_service.get_create_ticket_on_fail_check_ids()
+    )
+    if create_ticket_on_fail_ids:
+        previous_results = await m365_best_practices_service.get_last_results(company_id)
+        previous_statuses = {
+            str(result.get("check_id")): (
+                str(result.get("status")) if result.get("status") is not None else None
+            )
+            for result in previous_results
+            if result.get("check_id")
+        }
     reset_count = await m365_best_practices_service.reset_enabled_results_to_unknown(company_id)
 
     def _on_complete(_results: list[dict]) -> None:
@@ -3524,7 +4091,10 @@ async def run_m365_best_practices(request: Request):
         )
 
     background_tasks.queue_background_task(
-        lambda: m365_best_practices_service.run_best_practices(company_id),
+        lambda: m365_best_practices_service.run_best_practices(
+            company_id,
+            previous_statuses=previous_statuses,
+        ),
         description="m365-best-practices-run",
         on_complete=_on_complete,
         on_error=_on_error,
@@ -3550,6 +4120,8 @@ async def run_single_m365_best_practice_check(request: Request, check_id: str):
     )
     if redirect:
         return redirect
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
     known_ids = {bp["id"] for bp in m365_best_practices_service.list_best_practices()}
     if check_id not in known_ids:
         return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
@@ -3571,6 +4143,36 @@ async def run_single_m365_best_practice_check(request: Request, check_id: str):
     return flash_redirect("/m365/best-practices", "Check evaluated", "success")
 
 
+@app.post("/m365/best-practices/exclude/{check_id}", response_class=RedirectResponse)
+async def exclude_m365_best_practice_check(request: Request, check_id: str):
+    """Exclude one best-practice check for the current company."""
+    user, membership, _, company_id, redirect = await _load_m365_best_practices_context(
+        request, super_admin_only=True,
+    )
+    if redirect:
+        return redirect
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
+    known_ids = {bp["id"] for bp in m365_best_practices_service.list_best_practices()}
+    if check_id not in known_ids:
+        return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
+
+    excluded_ids = await m365_best_practices_service.get_company_exclusions(company_id)
+    excluded_ids.add(check_id)
+    await m365_best_practices_service.save_company_exclusions(company_id, excluded_ids)
+    log_info(
+        "M365 best practice excluded for company",
+        company_id=company_id,
+        check_id=check_id,
+        user_id=user.get("id"),
+    )
+    return flash_redirect(
+        "/m365/best-practices",
+        "Best practice excluded for this company",
+        "success",
+    )
+
+
 @app.post("/m365/best-practices/remediate/{check_id}", response_class=RedirectResponse)
 async def remediate_m365_best_practice(request: Request, check_id: str):
     """Run automated remediation for a single best-practice check."""
@@ -3579,6 +4181,8 @@ async def remediate_m365_best_practice(request: Request, check_id: str):
     )
     if redirect:
         return redirect
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
     # Validate that the check_id is a known best practice to prevent unintended operations
     known_ids = {bp["id"] for bp in m365_best_practices_service.list_best_practices()}
     if check_id not in known_ids:
@@ -3587,6 +4191,28 @@ async def remediate_m365_best_practice(request: Request, check_id: str):
         company_id=company_id,
         check_id=check_id,
     )
+    # Re-evaluate even when remediation reports a failure: an operation may
+    # have partially changed the tenant, and the stored check status should
+    # always reflect the state observed after the attempt.
+    try:
+        await m365_best_practices_service.run_single_check(
+            company_id=company_id,
+            check_id=check_id,
+            allow_auto_remediation=False,
+        )
+    except (ValueError, m365_service.M365Error) as exc:
+        log_error(
+            "M365 best practice post-remediation check failed",
+            company_id=company_id,
+            check_id=check_id,
+            user_id=user.get("id"),
+            error=str(exc),
+        )
+        return flash_redirect(
+            "/m365/best-practices",
+            f"{result.get('message', 'Remediation attempted')}; unable to refresh check: {exc}",
+            "error",
+        )
     log_info(
         "M365 best practice remediation triggered",
         company_id=company_id,
@@ -3598,6 +4224,234 @@ async def remediate_m365_best_practice(request: Request, check_id: str):
     if result.get("success"):
         return flash_redirect("/m365/best-practices", message, "success")
     return flash_redirect("/m365/best-practices", message, "error")
+
+
+@app.post("/m365/best-practices/remediate-batch", response_class=RedirectResponse)
+async def remediate_m365_best_practice_batch(request: Request):
+    """Run automated remediation for all failed checks in one benchmark scope."""
+    user, _membership, _, company_id, redirect = await _load_m365_best_practices_context(
+        request, super_admin_only=True,
+    )
+    if redirect:
+        return redirect
+    form = await request.form()
+    scope = str(form.get("scope") or "").strip()
+    try:
+        result = await m365_best_practices_service.remediate_failed_checks_batch(
+            company_id=company_id,
+            scope=scope,
+        )
+    except ValueError:
+        return flash_redirect("/m365/best-practices", "Invalid remediation batch scope", "error")
+    log_info(
+        "M365 best practice batch remediation triggered",
+        company_id=company_id,
+        scope=scope,
+        user_id=user.get("id"),
+        total=result.get("total"),
+        succeeded=result.get("succeeded"),
+        failed=result.get("failed"),
+    )
+    variant = "success" if result.get("success") else "error"
+    if result.get("total") == 0:
+        variant = "info"
+    return flash_redirect(
+        "/m365/best-practices",
+        result.get("message", "Batch remediation completed"),
+        variant,
+    )
+
+
+@app.post("/m365/best-practices/ticket/{check_id}", response_class=RedirectResponse)
+async def submit_m365_best_practice_ticket(request: Request, check_id: str):
+    """Create a support ticket for one failed best-practice check."""
+    user, _membership, company, company_id, redirect = await _load_m365_best_practices_context(
+        request
+    )
+    if redirect:
+        return redirect
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
+    if not _can_submit_m365_best_practice_tickets(user, company_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    if check_id not in {bp["id"] for bp in m365_best_practices_service.list_best_practices()}:
+        return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
+
+    stored = await m365_best_practices_service.get_last_results(company_id)
+    result = next((item for item in stored if item.get("check_id") == check_id), None)
+    if result is None:
+        return flash_redirect("/m365/best-practices", "This check has not been evaluated yet", "error")
+    result_status = str(result.get("status") or "")
+    # Manual support tickets are intentionally limited to stored failed checks.
+    if result_status != m365_best_practices_service.STATUS_FAIL:
+        return flash_redirect("/m365/best-practices", "Support tickets can only be created for failed checks", "error")
+
+    external_reference = m365_best_practices_service.build_failure_ticket_external_reference(
+        company_id, check_id
+    )
+    existing_ticket = await tickets_repo.find_open_ticket_by_external_reference(external_reference)
+    if existing_ticket:
+        ticket_id = existing_ticket.get("id")
+        message = "An open support ticket already exists for this failed check."
+        if ticket_id:
+            message = f"An open support ticket already exists for this failed check (ticket #{ticket_id})."
+        return flash_redirect("/m365/best-practices", message, "info")
+
+    try:
+        requester_id = int(user["id"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied") from None
+    if requester_id <= 0:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    requester_name = str(
+        user.get("display_name")
+        or user.get("full_name")
+        or user.get("name")
+        or user.get("username")
+        or user.get("email")
+        or "Portal user"
+    ).strip()
+    requester_email = str(user.get("email") or "").strip() or None
+    company_name = str((company or {}).get("name") or f"Company {company_id}").strip()
+    ticket = await tickets_service.create_ticket(
+        subject=m365_best_practices_service.build_failure_ticket_subject(
+            str(result.get("check_name") or check_id),
+            regression_detected=bool(result.get("regression_detected")),
+        ),
+        description=m365_best_practices_service.build_failure_ticket_description(
+            company_name=company_name,
+            check_id=check_id,
+            check_name=str(result.get("check_name") or check_id),
+            details=str(result.get("details") or ""),
+            run_at=result.get("run_at"),
+            created_automatically=False,
+            regression_detected=bool(result.get("regression_detected")),
+            requester_name=requester_name,
+            requester_email=requester_email,
+        ),
+        requester_id=requester_id,
+        company_id=company_id,
+        assigned_user_id=None,
+        priority="normal",
+        status=await tickets_service.resolve_status_or_default(None),
+        category="Microsoft 365",
+        module_slug="m365_admin",
+        external_reference=external_reference,
+        trigger_automations=True,
+        initial_reply_author_id=requester_id,
+        requester_email=requester_email,
+    )
+    ticket_id = ticket.get("id")
+    message = "Support ticket submitted. A technician will review this failed M365 best-practice check."
+    if ticket_id:
+        message = (
+            f"Support ticket #{ticket_id} submitted. A technician will review this failed "
+            "M365 best-practice check."
+        )
+    log_info(
+        "M365 best practice support ticket created manually",
+        company_id=company_id,
+        check_id=check_id,
+        ticket_id=ticket_id,
+        user_id=user.get("id"),
+    )
+    return flash_redirect("/m365/best-practices", message, "success")
+
+
+@app.post("/m365/best-practices/account-exclusion/{check_id}", response_class=RedirectResponse)
+async def set_m365_best_practice_account_exclusion(request: Request, check_id: str):
+    """Exclude or restore one account finding for one company/check pair."""
+    user, membership, _, company_id, redirect = await _load_m365_best_practices_context(
+        request,
+    )
+    if redirect:
+        return redirect
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
+    can_manage_account_exclusions = _can_manage_m365_account_exclusions(user, membership)
+    if not can_manage_account_exclusions:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Best-practices account exclusion permission required",
+        )
+    if check_id not in {bp["id"] for bp in m365_best_practices_service.list_best_practices()}:
+        return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
+    form = await request.form()
+    account_id = str(form.get("account_id") or "").strip()
+    excluded = str(form.get("excluded") or "1") == "1"
+    if not account_id or len(account_id) > 255:
+        return flash_redirect("/m365/best-practices", "Invalid account identifier", "error")
+
+    stored = await m365_best_practices_service.get_last_results(company_id)
+    result = next((item for item in stored if item["check_id"] == check_id), None)
+    account = next(
+        (item for item in (result or {}).get("affected_accounts", []) if item.get("id") == account_id),
+        None,
+    )
+    if account is None:
+        return flash_redirect("/m365/best-practices", "Account is not listed by this check", "error")
+    await m365_best_practices_service.set_account_exclusion(
+        company_id=company_id,
+        check_id=check_id,
+        account_id=account_id,
+        account_name=str(account.get("name") or account_id),
+        excluded=excluded,
+    )
+    await m365_best_practices_service.run_single_check(
+        company_id=company_id, check_id=check_id, allow_auto_remediation=False
+    )
+    log_info(
+        "M365 best practice account exclusion updated",
+        company_id=company_id, check_id=check_id, account_id=account_id,
+        excluded=excluded, user_id=user.get("id"),
+    )
+    return flash_redirect(
+        "/m365/best-practices",
+        "Account excluded from this check" if excluded else "Account restored to this check",
+        "success",
+    )
+
+
+@app.post("/m365/best-practices/note/{check_id}", response_class=RedirectResponse)
+async def save_m365_best_practice_note(request: Request, check_id: str):
+    """Save or clear the technician/admin note for one stored best-practice result."""
+    user, membership, _, company_id, redirect = await _load_m365_best_practices_context(request)
+    if redirect:
+        return redirect
+    if not _can_edit_m365_best_practice_notes(user, membership):
+        return flash_redirect("/m365/best-practices", "You do not have permission to edit check notes", "error")
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
+    if check_id not in {bp["id"] for bp in m365_best_practices_service.list_best_practices()}:
+        return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
+    form = await request.form()
+    raw_notes = str(form.get("notes") or "")
+    notes = raw_notes.strip()
+    if len(notes) > 4000:
+        return flash_redirect(
+            "/m365/best-practices",
+            "Check note must be 4000 characters or fewer",
+            "error",
+        )
+    updated = await m365_best_practices_service.set_result_notes(
+        company_id=company_id,
+        check_id=check_id,
+        notes=notes or None,
+    )
+    if not updated:
+        return flash_redirect("/m365/best-practices", "Check result is not available yet", "error")
+    log_info(
+        "M365 best practice note updated",
+        company_id=company_id,
+        check_id=check_id,
+        user_id=user.get("id"),
+        cleared=not bool(notes),
+    )
+    return flash_redirect(
+        "/m365/best-practices",
+        "Check note saved" if notes else "Check note cleared",
+        "success",
+    )
 
 
 @app.get("/m365/best-practices/settings", response_class=HTMLResponse)
@@ -3634,14 +4488,32 @@ async def save_m365_best_practices_settings(request: Request):
     form = await request.form()
     enabled_ids = {value for value in form.getlist("enabled")}
     auto_remediate_ids = {value for value in form.getlist("auto_remediate")}
+    create_ticket_on_fail_ids = {value for value in form.getlist("create_ticket_on_fail")}
     excluded_ids = {value for value in form.getlist("excluded")}
-    await m365_best_practices_service.set_enabled_checks(enabled_ids, auto_remediate_ids)
+    try:
+        await m365_best_practices_service.set_enabled_checks(
+            enabled_ids,
+            auto_remediate_ids,
+            create_ticket_on_fail_ids,
+        )
+    except m365_best_practices_service.PolicySelectionError as exc:
+        log_info(
+            "M365 best practice settings rejected",
+            user_id=user.get("id"),
+            reason=str(exc),
+        )
+        return flash_redirect(
+            "/m365/best-practices/settings",
+            str(exc),
+            "error",
+        )
     await m365_best_practices_service.save_company_exclusions(company_id, excluded_ids)
     log_info(
         "M365 best practice settings updated",
         user_id=user.get("id"),
         enabled_count=len(enabled_ids),
         auto_remediate_count=len(auto_remediate_ids),
+        create_ticket_on_fail_count=len(create_ticket_on_fail_ids),
         excluded_count=len(excluded_ids),
     )
     return flash_redirect("/m365/best-practices/settings", "Settings saved", "success")
@@ -3650,9 +4522,8 @@ async def save_m365_best_practices_settings(request: Request):
 async def _load_m365_mailbox_context(request: Request, *, mailbox_permission: str):
     """Load context for M365 mailbox pages.
 
-    A user may access the page if they are a super admin, have
-    ``can_manage_licenses``, or have the specific ``mailbox_permission`` flag
-    (e.g. ``can_view_m365_user_mailboxes`` or ``can_view_m365_shared_mailboxes``).
+    A user may access the page if they are a super admin or have the specific
+    mailbox capability. License administration never implies mailbox access.
     """
     user, redirect = await _require_authenticated_user(request)
     if redirect:
@@ -3668,11 +4539,10 @@ async def _load_m365_mailbox_context(request: Request, *, mailbox_permission: st
         company_id = int(company_id_raw)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
-    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    membership = await _get_effective_company_membership(request, user["id"], company_id)
     mailbox_menu_key = "menu.m365.user_mailboxes" if mailbox_permission == "can_view_m365_user_mailboxes" else "menu.m365.shared_mailboxes"
     can_access = bool(
         is_super_admin
-        or (membership and membership.get("can_manage_licenses"))
         or (membership and membership.get(mailbox_permission))
         or _membership_menu_can(user, membership, mailbox_menu_key)
     )
@@ -3686,6 +4556,44 @@ async def _load_m365_mailbox_context(request: Request, *, mailbox_permission: st
         )
     company = await company_repo.get_company_by_id(company_id)
     return user, membership, company, company_id, None
+
+
+def _m365_mailbox_capabilities(user: dict[str, Any], membership: dict[str, Any] | None) -> dict[str, bool]:
+    """Return the single capability decision used by mailbox UI and routes.
+
+    License permissions deliberately do not participate: viewing or administering
+    subscriptions is not authority to inspect or change Exchange mailboxes.
+    """
+    super_admin = bool(user.get("is_super_admin"))
+    user_read = super_admin or bool(
+        (membership and membership.get("can_view_m365_user_mailboxes"))
+        or _membership_menu_can(user, membership, "menu.m365.user_mailboxes")
+    )
+    shared_read = super_admin or bool(
+        (membership and membership.get("can_view_m365_shared_mailboxes"))
+        or _membership_menu_can(user, membership, "menu.m365.shared_mailboxes")
+    )
+    return {
+        "user_read": user_read,
+        "shared_read": shared_read,
+        "user_write": super_admin or _membership_menu_can(user, membership, "menu.m365.user_mailboxes", write=True),
+        "shared_write": super_admin or _membership_menu_can(user, membership, "menu.m365.shared_mailboxes", write=True),
+        "sync": super_admin,
+        "destructive": super_admin,
+    }
+
+
+async def _load_m365_mailbox_api_context(request: Request):
+    """Authenticate an API request without introducing a license-menu gate."""
+    return await _load_license_context(request, require_manage=False)
+
+
+def _require_mailbox_capability(capabilities: dict[str, bool], capability: str) -> None:
+    if not capabilities.get(capability, False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Mailbox {capability.replace('_', ' ')} permission required",
+        )
 
 
 @app.get("/m365/mailboxes/users", response_class=HTMLResponse)
@@ -3706,6 +4614,8 @@ async def m365_user_mailboxes_page(request: Request):
         "synced_at": synced_at,
         "has_credentials": bool(credentials),
         "active_staff": active_staff,
+        "mailbox_kind": "user",
+        "mailbox_capabilities": _m365_mailbox_capabilities(user, membership),
     }
     return await _render_template("m365/user_mailboxes.html", request, user, extra=extra)
 
@@ -3728,6 +4638,8 @@ async def m365_shared_mailboxes_page(request: Request):
         "synced_at": synced_at,
         "has_credentials": bool(credentials),
         "active_staff": active_staff,
+        "mailbox_kind": "shared",
+        "mailbox_capabilities": _m365_mailbox_capabilities(user, membership),
     }
     return await _render_template("m365/shared_mailboxes.html", request, user, extra=extra)
 
@@ -3739,20 +4651,31 @@ async def sync_m365_mailboxes(request: Request):
     Returns 202 Accepted immediately so the browser never waits for the long-running
     sync and never hits a gateway timeout.
     """
-    user, membership, _, company_id, redirect = await _load_license_context(request)
+    user, membership, _, company_id, redirect = await _load_m365_mailbox_api_context(request)
     if redirect:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
-    if not user.get("is_super_admin"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
-    task = await scheduled_tasks_repo.get_first_task_for_company_by_commands(
-        company_id, ["sync_m365_mailboxes", "sync_m365_data", "sync_o365"]
-    )
-    if task is not None:
-        asyncio.create_task(scheduler_service.run_now(task["id"]))
-    else:
-        asyncio.create_task(m365_service.sync_mailboxes(company_id))
-    log_info("M365 mailbox sync queued", company_id=company_id, user_id=user.get("id"))
-    return JSONResponse({"queued": True}, status_code=202)
+    _require_mailbox_capability(_m365_mailbox_capabilities(user, membership), "sync")
+    job = await m365_jobs_service.enqueue(company_id, "mailbox_sync", "mailboxes")
+    log_info("M365 mailbox sync queued", company_id=company_id, user_id=user.get("id"), job_id=job["id"])
+    return JSONResponse({"job_id": job["id"], "status": job["status"]}, status_code=202)
+
+
+@app.get("/m365/jobs/{job_id}", response_class=JSONResponse, tags=["Microsoft 365"])
+async def get_m365_job_status(job_id: str, request: Request):
+    """Return safe progress for a durable operation in the active tenant only."""
+    user, membership, _, company_id, redirect = await _load_m365_mailbox_api_context(request)
+    if redirect:
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
+    capabilities = _m365_mailbox_capabilities(user, membership)
+    if not (capabilities["user_read"] or capabilities["shared_read"]):
+        _require_mailbox_capability(capabilities, "user_read")
+    job = await m365_jobs_service.get(job_id, company_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Operation not found")
+    return {
+        key: job.get(key)
+        for key in ("id", "job_type", "resource_key", "status", "result", "safe_error", "created_at", "started_at", "heartbeat_at", "completed_at", "updated_at")
+    }
 
 
 @app.post("/m365/mailboxes/enable-archive", response_class=JSONResponse, tags=["Microsoft 365"])
@@ -3764,15 +4687,10 @@ async def enable_m365_user_archive(request: Request):
     UPN. The UPN must belong to a known user mailbox in this company; otherwise
     a 404 is returned. Requires mailbox write privileges.
     """
-    user, membership, company, company_id, redirect = await _load_license_context(request)
+    user, membership, company, company_id, redirect = await _load_m365_mailbox_api_context(request)
     if redirect:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
-    if not (
-        user.get("is_super_admin")
-        or _membership_menu_can(user, membership, "menu.m365.user_mailboxes", write=True)
-        or _membership_menu_can(user, membership, "menu.m365.shared_mailboxes", write=True)
-    ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mailbox read/write permission required")
+    _require_mailbox_capability(_m365_mailbox_capabilities(user, membership), "user_write")
 
     try:
         body = await request.json()
@@ -3791,7 +4709,7 @@ async def enable_m365_user_archive(request: Request):
 
     try:
         await m365_service.enable_user_archive(company_id, upn)
-    except m365_service.M365Error as exc:
+    except m365_service.M365Error:
         logger.exception("Failed to enable in-place archive for UPN %s", upn)
         return JSONResponse(
             {"error": "Unable to enable in-place and auto-expanding archive at this time."},
@@ -3804,14 +4722,10 @@ async def enable_m365_user_archive(request: Request):
 @app.get("/m365/mailboxes/rules", response_class=JSONResponse, tags=["Microsoft 365"])
 async def get_m365_mailbox_rules(request: Request, upn: str):
     """Return inbox rules for a known mailbox. Super admins only."""
-    user, membership, company, company_id, redirect = await _load_license_context(request)
+    user, membership, company, company_id, redirect = await _load_m365_mailbox_api_context(request)
     if redirect:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
-    if not user.get("is_super_admin"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Super admin privileges required",
-        )
+    _require_mailbox_capability(_m365_mailbox_capabilities(user, membership), "destructive")
 
     user_mbs = await m365_service.get_user_mailboxes(company_id)
     shared_mbs = await m365_service.get_shared_mailboxes(company_id)
@@ -3838,11 +4752,10 @@ async def get_m365_mailbox_rules(request: Request, upn: str):
 @app.post("/m365/mailboxes/start-managed-folder-assistant", response_class=JSONResponse, tags=["Microsoft 365"])
 async def start_m365_managed_folder_assistant(request: Request):
     """Start Managed Folder Assistant for a specific mailbox."""
-    user, membership, company, company_id, redirect = await _load_license_context(request)
+    user, membership, company, company_id, redirect = await _load_m365_mailbox_api_context(request)
     if redirect:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
-    if not user.get("is_super_admin"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    _require_mailbox_capability(_m365_mailbox_capabilities(user, membership), "destructive")
 
     try:
         body = await request.json()
@@ -3873,11 +4786,10 @@ async def start_m365_managed_folder_assistant(request: Request):
 @app.post("/m365/mailboxes/start-managed-folder-assistant/all", response_class=JSONResponse, tags=["Microsoft 365"])
 async def start_m365_managed_folder_assistant_all(request: Request):
     """Start Managed Folder Assistant for all mailboxes in the tenant."""
-    user, membership, company, company_id, redirect = await _load_license_context(request)
+    user, membership, company, company_id, redirect = await _load_m365_mailbox_api_context(request)
     if redirect:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
-    if not user.get("is_super_admin"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    _require_mailbox_capability(_m365_mailbox_capabilities(user, membership), "destructive")
 
     try:
         result = await m365_service.start_managed_folder_assistant_all_mailboxes(company_id)
@@ -3908,7 +4820,7 @@ async def get_m365_mailbox_permissions(request: Request, upn: str):
     via M365 group membership) and ``accessible_by`` (members of the M365 group
     backing this mailbox).
     """
-    user, membership, company, company_id, redirect = await _load_license_context(request)
+    user, membership, company, company_id, redirect = await _load_m365_mailbox_api_context(request)
     if redirect:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
 
@@ -3916,6 +4828,9 @@ async def get_m365_mailbox_permissions(request: Request, upn: str):
     # arbitrary Graph API queries with user-supplied input.
     user_mbs = await m365_service.get_user_mailboxes(company_id)
     shared_mbs = await m365_service.get_shared_mailboxes(company_id)
+    capabilities = _m365_mailbox_capabilities(user, membership)
+    target_is_user = any(str(mb.get("user_principal_name") or "").lower() == upn.lower() for mb in user_mbs)
+    _require_mailbox_capability(capabilities, "user_read" if target_is_user else "shared_read")
     known_upns = {mb["user_principal_name"] for mb in user_mbs + shared_mbs}
     if upn not in known_upns:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mailbox not found")
@@ -3923,7 +4838,7 @@ async def get_m365_mailbox_permissions(request: Request, upn: str):
     try:
         permissions = await m365_service.get_mailbox_permissions(company_id, upn)
         return JSONResponse(permissions)
-    except m365_service.M365Error as exc:
+    except m365_service.M365Error:
         logger.exception("Failed to get mailbox permissions for UPN %s", upn)
         return JSONResponse(
             {"error": "Unable to retrieve mailbox permissions at this time."},
@@ -3934,17 +4849,9 @@ async def get_m365_mailbox_permissions(request: Request, upn: str):
 @app.post("/m365/mailboxes/permissions/request", response_class=JSONResponse, tags=["Microsoft 365"])
 async def request_m365_mailbox_permission_changes(request: Request):
     """Create a ticket requesting mailbox permission additions/removals."""
-    user, membership, company, company_id, redirect = await _load_license_context(request)
+    user, membership, company, company_id, redirect = await _load_m365_mailbox_api_context(request)
     if redirect:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
-    if not (
-        user.get("is_super_admin")
-        or _membership_menu_can(user, membership, "menu.m365.user_mailboxes", write=True)
-        or _membership_menu_can(user, membership, "menu.m365.shared_mailboxes", write=True)
-        or _membership_menu_can(user, membership, "menu.m365.user_mailboxes")
-        or _membership_menu_can(user, membership, "menu.m365.shared_mailboxes")
-    ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mailbox permission access required")
 
     try:
         body = await request.json()
@@ -3961,6 +4868,9 @@ async def request_m365_mailbox_permission_changes(request: Request):
 
     user_mbs = await m365_service.get_user_mailboxes(company_id)
     shared_mbs = await m365_service.get_shared_mailboxes(company_id)
+    capabilities = _m365_mailbox_capabilities(user, membership)
+    target_is_user = any(str(mb.get("user_principal_name") or "").strip().lower() == mailbox_upn.lower() for mb in user_mbs)
+    _require_mailbox_capability(capabilities, "user_write" if target_is_user else "shared_write")
     known_upns = {str(mb.get("user_principal_name") or "").strip().lower() for mb in user_mbs + shared_mbs}
     if mailbox_upn.lower() not in known_upns:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mailbox not found")
@@ -4099,6 +5009,23 @@ async def m365_diagnostics_page(request: Request):
 
     credentials = await m365_service.get_credentials(company_id)
     last_results = await m365_service.get_last_enterprise_app_permissions(company_id)
+    active_connection = await m365_connection_repo.get_active(company_id)
+    pending_connection = await m365_connection_repo.get_pending(company_id)
+    connection_health = build_connection_health(
+        credentials, active=active_connection, pending=pending_connection,
+        permission_results=last_results,
+    )
+    purview_preflight = None
+    required_access = None
+    if credentials:
+        try:
+            purview_preflight = await m365_service.run_purview_preflight(company_id)
+        except m365_service.M365Error as exc:
+            purview_preflight = {"ready": False, "error": str(exc), "checks": []}
+        try:
+            required_access = await m365_service.diagnose_required_m365_access(company_id)
+        except m365_service.M365Error as exc:
+            required_access = {"all_ok": False, "error": str(exc), "resources": [], "directory_roles": []}
 
     extra = {
         "title": "Office 365 Diagnostics",
@@ -4106,6 +5033,9 @@ async def m365_diagnostics_page(request: Request):
         "has_credentials": bool(credentials),
         "catalog": m365_service.ENTERPRISE_APP_CATALOG,
         "results": last_results,
+        "purview_preflight": purview_preflight,
+        "required_access": required_access,
+        "connection_health": connection_health,
         "is_super_admin": True,
     }
     return await _render_template("m365/diagnostics.html", request, user, extra=extra)
@@ -4121,6 +5051,7 @@ async def run_m365_diagnostics_check(request: Request):
         return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
     try:
         await m365_service.check_enterprise_app_permissions(company_id)
+        await m365_service.diagnose_required_m365_access(company_id)
     except m365_service.M365Error as exc:
         return flash_redirect("/m365/diagnostics", str(exc), "error")
     return flash_redirect("/m365/diagnostics", "Permission check completed", "success")
@@ -4149,16 +5080,16 @@ async def repair_m365_permissions(request: Request):
         # permissions and then return to the diagnostics page.
         credentials = await m365_service.get_credentials(company_id)
         if credentials:
-            state = oauth_state_serializer.dumps({
-                "company_id": company_id,
-                "user_id": user.get("id"),
-                "flow": "connect",
-                "return_to": "diagnostics",
-            })
+            redirect_uri = _build_m365_redirect_uri(request)
+            state = await _new_m365_oauth_state(
+                request, company_id=company_id, flow="connect",
+                return_to="diagnostics", tenant_id=credentials["tenant_id"],
+                client_id=credentials["client_id"], redirect_uri=redirect_uri,
+            )
             params = {
                 "client_id": credentials["client_id"],
                 "response_type": "code",
-                "redirect_uri": _build_m365_redirect_uri(request),
+                "redirect_uri": redirect_uri,
                 "response_mode": "query",
                 "scope": m365_service.CONNECT_SCOPE,
                 "state": state,
@@ -4173,8 +5104,12 @@ async def repair_m365_permissions(request: Request):
     except m365_service.M365Error as exc:
         return flash_redirect("/m365/diagnostics", str(exc), "error")
 
-    if outcome.get("granted"):
+    if outcome.get("granted") and outcome.get("purview_repaired"):
+        msg = "Missing permissions and Purview configuration have been repaired successfully."
+    elif outcome.get("granted"):
         msg = "Missing permissions have been granted successfully."
+    elif outcome.get("purview_repaired"):
+        msg = "Purview service-principal registration and role-group membership have been repaired successfully."
     else:
         msg = "No new permissions were needed – all permissions are already granted."
 
@@ -4302,6 +5237,79 @@ async def test_m365_connectivity(request: Request):
     return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.post("/m365/connection/complete", response_class=RedirectResponse)
+async def complete_m365_connection(request: Request):
+    """Verify and activate the staged app created by guided tenant setup."""
+    user, _, __, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super admin privileges required",
+        )
+
+    candidate = await m365_connection_repo.get_pending(company_id)
+    if not candidate:
+        return flash_redirect(
+            "/m365",
+            "There is no staged Microsoft 365 setup to complete. Start guided tenant setup first.",
+            "error",
+        )
+    try:
+        verified = await m365_service.verify_connection_candidate(
+            company_id, int(candidate["id"])
+        )
+        checks = (
+            "verification_tenant",
+            "verification_workload",
+            "verification_renewal",
+        )
+        if not all(verified.get(check) for check in checks):
+            reason = str(verified.get("verification_error") or "").strip()
+            message = "Microsoft 365 verification did not pass all required checks."
+            if reason:
+                message += f" Microsoft reported: {reason}"
+            return flash_redirect("/m365", message, "error")
+        await m365_service.activate_connection_candidate(
+            company_id, int(candidate["id"])
+        )
+    except (m365_service.M365Error, ValueError, RuntimeError) as exc:
+        return flash_redirect(
+            "/m365", f"Microsoft 365 setup could not be completed: {exc}", "error"
+        )
+
+    # Populate permission health immediately so a successful cutover can show
+    # Connected without requiring a separate diagnostics visit.  Activation is
+    # already durable at this point, so report a diagnostics problem accurately
+    # rather than implying that the cutover itself failed.
+    try:
+        await m365_service.check_enterprise_app_permissions(company_id)
+    except m365_service.M365Error as exc:
+        log_error(
+            "M365 permission check failed after candidate activation",
+            company_id=company_id,
+            error=str(exc),
+        )
+        return flash_redirect(
+            "/m365/diagnostics",
+            "The connection was verified and activated, but the final permission check needs attention: "
+            f"{exc}",
+            "warning",
+        )
+
+    log_info(
+        "M365 staged connection verified and activated",
+        company_id=company_id,
+        user_id=user.get("id"),
+    )
+    return flash_redirect(
+        "/m365",
+        "Microsoft 365 setup is complete. Tenant access, workloads, renewal, and permissions were verified.",
+        "success",
+    )
+
+
 @app.post("/m365/sync", response_class=JSONResponse)
 async def sync_m365(request: Request):
     user, membership, _, company_id, redirect = await _load_license_context(request)
@@ -4314,8 +5322,12 @@ async def sync_m365(request: Request):
     mailboxes_synced = 0
     try:
         mailboxes_synced = await m365_service.sync_mailboxes(company_id)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_error(
+            "Microsoft 365 mailbox sync failed after license sync",
+            company_id=company_id,
+            error=str(exc),
+        )
     log_info("Microsoft 365 license sync triggered", company_id=company_id, user_id=user.get("id"))
     return JSONResponse({"success": True, "mailboxes_synced": mailboxes_synced})
 
@@ -4329,10 +5341,20 @@ async def m365_connect(request: Request):
     if not credentials:
         return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
     redirect_uri = _build_m365_redirect_uri(request)
-    state = oauth_state_serializer.dumps({
+    state_payload = {
         "company_id": company_id,
-        "user_id": user.get("id"),
-    })
+        "flow": "connect",
+        "tenant_id": credentials["tenant_id"],
+        "client_id": credentials["client_id"],
+        "redirect_uri": redirect_uri,
+    }
+    if request.query_params.get("setup") == "compliance_role":
+        state_payload["setup"] = "compliance_role"
+        requested_return = request.query_params.get("return_to", "m365")
+        state_payload["return_to"] = (
+            requested_return if requested_return in {"m365", "diagnostics"} else "m365"
+        )
+    state = await _new_m365_oauth_state(request, **state_payload)
     params = {
         "client_id": credentials["client_id"],
         "response_type": "code",
@@ -4366,18 +5388,17 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
         return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
     redirect_uri = _build_m365_redirect_uri(request)
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    verifier_id = await _store_m365_provision_code_verifier(code_verifier)
-    state = oauth_state_serializer.dumps(
-        {
-            "company_id": company_id,
-            "user_id": user.get("id"),
-            "tenant_id": tenant_id,
-            "flow": "provision",
-            "verifier_id": verifier_id,
-        }
-    )
     oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(
         company_id, redirect_uri=redirect_uri
+    )
+    state = await _new_m365_oauth_state(
+        request,
+        company_id=company_id,
+        tenant_id=tenant_id,
+        flow="provision",
+        code_verifier=code_verifier,
+        client_id=oauth_client_id,
+        redirect_uri=redirect_uri,
     )
     params = {
         "client_id": oauth_client_id,
@@ -4471,12 +5492,13 @@ async def m365_discover(request: Request):
 
     state_payload: dict = {
         "company_id": company_id,
-        "user_id": user.get("id"),
         "flow": "discover",
         "code_verifier": code_verifier,
+        "client_id": oauth_client_id,
+        "redirect_uri": redirect_uri,
     }
 
-    state = oauth_state_serializer.dumps(state_payload)
+    state = await _new_m365_oauth_state(request, **state_payload)
     params: dict = {
         "client_id": oauth_client_id,
         "response_type": "code",
@@ -4521,15 +5543,17 @@ async def admin_csp_provision(request: Request):
     # Prefer existing admin credentials, then an explicitly configured
     # bootstrap client, and finally fall back to PKCE with the well-known
     # Azure CLI public client so no manual credential setup is required.
-    existing_client_id, _ = await _get_m365_admin_credentials()
+    existing_client_id, existing_client_secret = await _get_m365_admin_credentials()
     bootstrap_client_id = str(settings.m365_bootstrap_client_id or "").strip()
 
     code_verifier: str | None = None
-    pkce_handle: str | None = None
+    oauth_client_secret: str | None = None
     if existing_client_id:
         oauth_client_id = existing_client_id
+        oauth_client_secret = existing_client_secret
     elif bootstrap_client_id:
         oauth_client_id = bootstrap_client_id
+        oauth_client_secret = str(settings.m365_bootstrap_client_secret or "").strip() or None
     else:
         # No credentials configured – use PKCE with a public client.
         # Persist the code_verifier server-side and send only an opaque
@@ -4537,20 +5561,16 @@ async def admin_csp_provision(request: Request):
         # Use M365_PKCE_CLIENT_ID if configured; otherwise fall back to the
         # Azure CLI public client (which may be blocked in some tenants).
         code_verifier, code_challenge = m365_service.generate_pkce_pair()
-        pkce_handle = await _store_pkce_verifier(code_verifier)
         oauth_client_id = m365_service.get_pkce_client_id()
 
     state_payload: dict = {
-        "company_id": company_id,
-        "user_id": current_user.get("id"),
-        "flow": "discover",
-        "return_to": "company_edit",
+        "flow": "csp_admin_provision",
         "code_verifier": code_verifier,
+        "client_id": oauth_client_id,
+        "client_secret": oauth_client_secret,
+        "redirect_uri": redirect_uri,
     }
-    if pkce_handle:
-        state_payload["pkce_handle"] = pkce_handle
-
-    state = oauth_state_serializer.dumps(state_payload)
+    state = await _new_m365_oauth_state(request, **state_payload)
     params: dict = {
         "client_id": oauth_client_id,
         "response_type": "code",
@@ -4593,128 +5613,114 @@ async def _best_effort_sync_m365_email_domains(company_id: int) -> None:
 
 @app.get("/m365/callback", name="m365_callback")
 async def m365_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
+    # Consume first, including denied-consent responses: a callback transaction
+    # is single-use regardless of whether Microsoft returned a code.
+    state_data = await _consume_m365_oauth_state(request, state)
+    if not state_data:
+        return flash_redirect("/m365", "The Microsoft sign-in session expired or was already used.", "error")
+    flow = str(state_data.get("flow") or "connect")
+    company_id = int(state_data.get("company_id") or 0)
+    error_redirect = "/admin/profile#integrations" if flow == "user_m365_contacts" else (
+        "/admin/modules/m365-mail" if flow == "m365_mail_auth" else "/m365"
+    )
+
+    # Re-authorize the portal principal and resource at callback time.  Access
+    # may have been revoked, the active company changed, or an account moved
+    # while the Microsoft consent screen was open.
+    current_user, auth_redirect = await _require_authenticated_user(request)
+    if auth_redirect or not current_user:
+        return flash_redirect(error_redirect, "The Microsoft sign-in session is no longer valid.", "error")
+    if flow in {"discover", "provision", "csp_admin_provision", "m365_mail_auth"} and not current_user.get("is_super_admin"):
+        return flash_redirect(error_redirect, "Microsoft 365 administration access was revoked.", "error")
+    if company_id and not current_user.get("is_super_admin"):
+        accessible = await company_access.list_accessible_companies(current_user)
+        if company_id not in {int(item["id"]) for item in accessible}:
+            return flash_redirect(error_redirect, "Access to this company was revoked.", "error")
+
     if error:
         message = request.query_params.get("error_description", error)
-        # Try to determine the flow from state so we can redirect to the
-        # correct page and clear any stale PKCE client IDs. If state is
-        # unparseable we fall back to /m365.
-        error_redirect = "/m365"
-        state_data: dict[str, Any] = {}
-        if state:
-            try:
-                state_data = oauth_state_serializer.loads(state)
-                if state_data.get("flow") == "m365_mail_auth":
-                    error_redirect = "/admin/modules/m365-mail"
-                elif state_data.get("flow") == "user_m365_contacts":
-                    error_redirect = "/admin/profile"
-            except Exception:
-                pass
-        # AADSTS700016 means the PKCE app registration no longer exists in the
-        # tenant (it was deleted). Clear the stale pkce_client_id (including
-        # any company-specific value) so that the next sign-in attempt falls
-        # back to the Azure CLI public client, and guide the admin to re-
-        # provision so a fresh PKCE app is created.
         if "AADSTS700016" in message:
-            company_id_raw = state_data.get("company_id")
-            if company_id_raw is not None:
-                try:
-                    await m365_service.clear_company_pkce_client_id(int(company_id_raw))
-                except (TypeError, ValueError):
-                    log_warning(
-                        "Skipping per-company PKCE clear; invalid company_id in state",
-                        company_id_raw=company_id_raw,
-                    )
-                except Exception as exc:
-                    log_warning(
-                        "Failed to clear per-company PKCE client ID after AADSTS700016",
-                        company_id_raw=company_id_raw,
-                        error=str(exc),
-                    )
-            try:
-                await m365_service.clear_pkce_client_id()
-            except Exception as exc:
-                log_warning(
-                    "Failed to clear global PKCE client ID after AADSTS700016",
-                    error=str(exc),
-                )
+            # Never mutate shared/global configuration from an error callback.
+            # The verified transaction identifies the affected client so the
+            # administrator can repair precisely that connection.
             message = (
-                "The PKCE app registration was not found in Azure AD (AADSTS700016). "
-                "The cached app ID has been cleared. Please sign in again; if the problem "
-                "persists, re-provision the M365 integration via Admin → M365."
+                "Microsoft could not find the OAuth application (AADSTS700016). "
+                "No settings were changed. Repair the affected company connection and try again."
             )
-        encoded = urlencode({"error": message})
-        return RedirectResponse(url=f"{error_redirect}?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
-    if not code or not state:
-        return flash_redirect("/m365", "invalid response", "error")
-    try:
-        state_data = oauth_state_serializer.loads(state)
-    except BadSignature:
-        return flash_redirect("/m365", "invalid state", "error")
-    company_id_raw = state_data.get("company_id")
-    try:
-        company_id = int(company_id_raw)
-    except (TypeError, ValueError):
-        company_id = 0
-    flow = state_data.get("flow", "connect")
+        return flash_redirect(error_redirect, message, "error")
+    if not code:
+        return flash_redirect(error_redirect, "Microsoft returned an invalid response.", "error")
 
     if flow == "user_m365_contacts":
         current_user, auth_redirect = await _require_authenticated_user(request)
         if auth_redirect or not current_user or int(current_user["id"]) != int(state_data.get("user_id") or 0):
-            return flash_redirect("/admin/profile", "The Microsoft sign-in session is not valid.", "error")
-        verifier = await _pop_m365_provision_code_verifier(state_data.get("pkce_handle"))
+            return flash_redirect("/admin/profile#integrations", "The Microsoft sign-in session is not valid.", "error")
+        verifier = str(state_data.get("code_verifier") or "")
         if not verifier:
-            return flash_redirect("/admin/profile", "The Microsoft sign-in verifier is missing.", "error")
-        redirect_uri = _build_m365_redirect_uri(request)
+            return flash_redirect("/admin/profile#integrations", "The Microsoft sign-in verifier is missing.", "error")
+        redirect_uri = str(state_data.get("redirect_uri") or "")
         token_data = {
-            "client_id": await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri),
+            "client_id": str(state_data.get("client_id") or ""),
             "grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri,
             "code_verifier": verifier, "scope": user_m365_contacts_service.CONTACTS_SCOPE,
         }
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             token_response = await client.post(
                 "https://login.microsoftonline.com/organizations/oauth2/v2.0/token", data=token_data
             )
         if token_response.status_code != 200:
-            return flash_redirect("/admin/profile", "Microsoft 365 contact sign-in failed.", "error")
+            return flash_redirect("/admin/profile#integrations", "Microsoft 365 contact sign-in failed.", "error")
         payload = token_response.json()
         access_token, refresh_token = payload.get("access_token"), payload.get("refresh_token")
         if not access_token or not refresh_token:
-            return flash_redirect("/admin/profile", "Microsoft did not grant offline contact access.", "error")
+            return flash_redirect("/admin/profile#integrations", "Microsoft did not grant offline contact access.", "error")
         # Graph access tokens are intended for Microsoft Graph and are not
         # guaranteed to be JWTs that this application can decode.  The ID
         # token, on the other hand, is issued to this client and is the stable
         # source for the signed-in tenant.  Keep the access-token fallback for
         # older responses which did not include an ID token.
         try:
-            tenant_id = user_m365_contacts_service.tenant_id_from_token_response(payload)
-        except ValueError:
+            identity = await m365_service.validate_microsoft_id_token(
+                str(payload.get("id_token") or ""), client_id=str(state_data.get("client_id") or "")
+            )
+            tenant_id = str(identity["tid"])
+        except m365_service.M365Error:
             return flash_redirect(
-                "/admin/profile",
-                "Microsoft did not return a usable account identity.",
-                "error",
+                "/admin/profile#integrations", "Microsoft did not return a verified account identity.", "error"
             )
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(payload.get("expires_in") or 3600))
         await user_m365_contacts_service.store_tokens(
-            int(current_user["id"]), tenant_id=tenant_id, account_email=str(current_user.get("email") or "") or None,
+            int(current_user["id"]), tenant_id=tenant_id,
+            account_email=str(identity.get("preferred_username") or identity.get("email") or "") or None,
             refresh_token=str(refresh_token), access_token=str(access_token), expires_at=expires_at,
+            client_id=str(state_data.get("client_id") or ""),
+            account_id=str(identity.get("oid") or identity.get("sub") or "") or None,
+            scopes=str(payload.get("scope") or user_m365_contacts_service.CONTACTS_SCOPE),
+            connection_version=int(state_data["connection_version"]) if state_data.get("connection_version") else None,
         )
-        return flash_redirect("/admin/profile", "Outlook contacts connected.", "success")
+        return flash_redirect("/admin/profile#integrations", "Outlook contacts connected.", "success")
 
     if flow == "m365_mail_auth":
         from app.features.m365_mail.oauth import handle_m365_mail_auth_callback as _pack_handler
+        from app.services import m365_mail as m365_mail_service
 
         return await _pack_handler(
             request,
             state_data=state_data,
             code=code,
             company_id=company_id,
+            m365_service=m365_service,
+            m365_mail_service=m365_mail_service,
+            http_client_class=httpx.AsyncClient,
+            build_m365_redirect_uri=_build_m365_redirect_uri,
+            log_error=log_error,
         )
 
     if flow == "discover":
         # ── Tenant-discovery flow ──────────────────────────────────────────
         # Exchange the auth code to get a token, then extract the tid claim.
         return_to_company_edit = state_data.get("return_to") == "company_edit"
-        redirect_uri = _build_m365_redirect_uri(request)
+        redirect_uri = str(state_data.get("redirect_uri") or "")
 
         def _discover_error(msg: str) -> RedirectResponse:
             if return_to_company_edit:
@@ -4724,58 +5730,19 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
             )
 
-        _discover_cid, _discover_csec = await _get_m365_admin_credentials(company_id)
-
-        # Determine the token exchange method.  When the flow was initiated
-        # using PKCE (state contains a verifier handle), the exchange is done
-        # with the configured PKCE public client – no client secret required.
-        # Otherwise fall back to the traditional secret-based exchange using
-        # existing admin credentials or the M365_BOOTSTRAP_* env vars.
-        code_verifier: str | None = None
-        pkce_handle = state_data.get("pkce_handle")
-        if isinstance(pkce_handle, str) and pkce_handle:
-            code_verifier = await _pop_pkce_verifier(pkce_handle)
-            if not code_verifier:
-                return _csp_provision_error(
-                    "Provisioning session expired. Please restart the CSP provisioning flow."
-                )
-        elif state_verifier := state_data.get("code_verifier"):
-            # code_verifier stored directly in the signed state by the discover flow.
-            code_verifier = str(state_verifier)
-        token_endpoint = (
-            "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
-        )
-        if code_verifier:
-            token_data: dict = {
-                "client_id": await m365_service.get_effective_pkce_client_id_for_company(
-                    company_id, redirect_uri=redirect_uri
-                ),
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "code_verifier": code_verifier,
-                "scope": m365_service.DISCOVER_SCOPE,
-            }
-        else:
-            # code_verifier is always included by the discover endpoints now.
-            # This branch handles legacy state tokens that pre-date the PKCE-
-            # always change.  Using admin credentials here risks AADSTS700025
-            # if the configured client_id belongs to a public PKCE app, so we
-            # only fall back when the credentials are actually present and
-            # surface a clear error on failure.
-            if not _discover_cid or not _discover_csec:
-                return _discover_error(
-                    "Sign-in session is incomplete. Please click 'Sign in as Global Admin' again."
-                )
-            token_data = {
-                "client_id": _discover_cid,
-                "client_secret": _discover_csec,
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "scope": m365_service.DISCOVER_SCOPE,
-            }
-        async with httpx.AsyncClient(timeout=30) as client:
+        code_verifier = str(state_data.get("code_verifier") or "")
+        if not code_verifier:
+            return _discover_error("The sign-in verifier is missing or expired.")
+        token_endpoint = "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
+        token_data = {
+            "client_id": str(state_data.get("client_id") or ""),
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": str(state_data.get("redirect_uri") or ""),
+            "code_verifier": code_verifier,
+            "scope": m365_service.DISCOVER_SCOPE,
+        }
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             token_response = await client.post(token_endpoint, data=token_data)
         if token_response.status_code != 200:
             log_error(
@@ -4797,13 +5764,12 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             return _discover_error("Sign-in failed during tenant discovery.")
 
         token_payload = token_response.json()
-        # Prefer id_token (contains tid reliably); fall back to access_token
-        id_token = token_payload.get("id_token") or token_payload.get("access_token", "")
-        if not id_token:
-            return _discover_error("No token received during tenant discovery.")
-
+        id_token = str(token_payload.get("id_token") or "")
         try:
-            discovered_tenant_id = m365_service.extract_tenant_id_from_token(id_token)
+            identity = await m365_service.validate_microsoft_id_token(
+                id_token, client_id=str(state_data.get("client_id") or "")
+            )
+            discovered_tenant_id = str(identity["tid"])
         except m365_service.M365Error as exc:
             log_error(
                 "Failed to extract tenant ID from token",
@@ -4821,12 +5787,12 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # Redirect to the provision flow using the discovered tenant ID
         if return_to_company_edit:
             return RedirectResponse(
-                url=f"/admin/companies/{company_id}/m365-provision"
-                f"?{urlencode({'tenant_id': discovered_tenant_id})}",
+                url=f"/admin/companies/{company_id}/edit?"
+                f"{urlencode({'m365_discovered_tenant': discovered_tenant_id})}",
                 status_code=status.HTTP_303_SEE_OTHER,
             )
         return RedirectResponse(
-            url=f"/m365/provision?{urlencode({'tenant_id': discovered_tenant_id})}",
+            url=f"/m365?{urlencode({'m365_discovered_tenant': discovered_tenant_id})}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
@@ -4836,7 +5802,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # so their token has Application.ReadWrite.All + AppRoleAssignment.ReadWrite.All
         # in their own partner tenant.  We use it to create a dedicated app
         # registration that will serve as the M365 admin OAuth client.
-        redirect_uri = _build_m365_redirect_uri(request)
+        redirect_uri = str(state_data.get("redirect_uri") or "")
 
         def _csp_provision_error(msg: str) -> RedirectResponse:
             encoded = urlencode({"error": msg})
@@ -4855,7 +5821,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         )
         if code_verifier:
             token_data: dict = {
-                "client_id": m365_service.get_pkce_client_id(),
+                "client_id": str(state_data.get("client_id") or ""),
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,
@@ -4863,11 +5829,8 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 "scope": m365_service.PROVISION_SCOPE,
             }
         else:
-            bootstrap_client_id = str(settings.m365_bootstrap_client_id or "").strip()
-            existing_client_id, existing_client_secret = await _get_m365_admin_credentials()
-            oauth_client_id = existing_client_id or bootstrap_client_id
-            bootstrap_client_secret = str(settings.m365_bootstrap_client_secret or "").strip()
-            oauth_client_secret = existing_client_secret or bootstrap_client_secret
+            oauth_client_id = str(state_data.get("client_id") or "")
+            oauth_client_secret = str(state_data.get("client_secret") or "")
 
             if not oauth_client_id or not oauth_client_secret:
                 return _csp_provision_error(
@@ -4884,7 +5847,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 "redirect_uri": redirect_uri,
                 "scope": m365_service.PROVISION_SCOPE,
             }
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             token_response = await client.post(token_endpoint, data=token_data)
         if token_response.status_code != 200:
             log_error(
@@ -4899,17 +5862,13 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         if not access_token:
             return _csp_provision_error("No access token received during CSP admin provisioning.")
 
-        # Extract the partner tenant ID from the token
         try:
-            partner_tenant_id = m365_service.extract_tenant_id_from_token(access_token)
+            identity = await m365_service.validate_microsoft_id_token(
+                str(token_payload.get("id_token") or ""), client_id=str(state_data.get("client_id") or "")
+            )
+            partner_tenant_id = str(identity["tid"])
         except m365_service.M365Error:
-            try:
-                id_token = token_payload.get("id_token", "")
-                partner_tenant_id = m365_service.extract_tenant_id_from_token(id_token)
-            except m365_service.M365Error:
-                return _csp_provision_error(
-                    "Unable to determine partner tenant ID from token."
-                )
+            return _csp_provision_error("Unable to verify the Microsoft account identity.")
 
         try:
             provision_result = await m365_service.provision_csp_admin_app_registration(
@@ -4948,7 +5907,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # ── Auto-provision flow ────────────────────────────────────────────
         tenant_id = str(state_data.get("tenant_id", "")).strip()
         return_to_company_edit = state_data.get("return_to") == "company_edit"
-        redirect_uri = _build_m365_redirect_uri(request)
+        redirect_uri = str(state_data.get("redirect_uri") or "")
 
         def _provision_error(msg: str) -> RedirectResponse:
             if return_to_company_edit:
@@ -4964,16 +5923,13 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # Always use PKCE for the provision flow so the customer's Global Admin
         # can grant consent without requiring the CSP admin app to have a service
         # principal in the customer tenant (avoids AADSTS700016).
-        verifier_id = state_data.get("verifier_id")
-        code_verifier = await _pop_m365_provision_code_verifier(verifier_id)
+        code_verifier = str(state_data.get("code_verifier") or "")
         token_endpoint = (
             f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
         )
         if code_verifier:
             token_data = {
-                "client_id": await m365_service.get_effective_pkce_client_id_for_company(
-                    company_id, redirect_uri=redirect_uri
-                ),
+                "client_id": str(state_data.get("client_id") or ""),
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,
@@ -4981,31 +5937,8 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 "scope": m365_service.PROVISION_SCOPE,
             }
         else:
-            # Backward-compatibility: fall back to admin credentials when no
-            # verifier_id/code_verifier is present (e.g. old state tokens in flight).
-            code_verifier = state_data.get("code_verifier")
-            if code_verifier:
-                token_data = {
-                    "client_id": m365_service.get_pkce_client_id(),
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": redirect_uri,
-                    "code_verifier": code_verifier,
-                    "scope": m365_service.PROVISION_SCOPE,
-                }
-            else:
-                _provision_cid, _provision_csec = await _get_m365_admin_credentials()
-                if not _provision_cid or not _provision_csec:
-                    return _provision_error("Admin M365 credentials are not configured.")
-                token_data = {
-                    "client_id": _provision_cid,
-                    "client_secret": _provision_csec,
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": redirect_uri,
-                    "scope": m365_service.PROVISION_SCOPE,
-                }
-        async with httpx.AsyncClient(timeout=30) as client:
+            return _provision_error("The provisioning verifier is missing or expired.")
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             token_response = await client.post(token_endpoint, data=token_data)
         if token_response.status_code != 200:
             log_error(
@@ -5025,17 +5958,24 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # than the tenant_id carried in OAuth state, which can otherwise leave
         # credentials stored against the wrong tenant and cause Graph failures.
         try:
-            token_tenant_id = m365_service.extract_tenant_id_from_token(access_token)
+            identity = await m365_service.validate_microsoft_id_token(
+                str(token_payload.get("id_token") or ""), client_id=str(state_data.get("client_id") or "")
+            )
+            token_tenant_id = str(identity["tid"])
         except m365_service.M365Error:
-            token_tenant_id = ""
+            return _provision_error("Microsoft did not return a verified account identity.")
 
-        effective_tenant_id = token_tenant_id.strip() or tenant_id
+        effective_tenant_id = token_tenant_id.strip()
         if token_tenant_id and token_tenant_id != tenant_id:
-            log_info(
-                "M365 provision callback tenant mismatch; using token tenant",
+            log_error(
+                "M365 provision callback tenant mismatch; refusing candidate",
                 company_id=company_id,
                 requested_tenant_id=tenant_id,
                 token_tenant_id=token_tenant_id,
+            )
+            return _provision_error(
+                "The signed-in account belongs to a different tenant. "
+                "The existing connection was not changed."
             )
 
         # Load company name for a descriptive app display name
@@ -5044,10 +5984,18 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         display_name = f"MyPortal – {company_name}" if company_name else "MyPortal Integration"
 
         try:
+            pending_connection = await m365_service.get_pending_connection(
+                company_id, effective_tenant_id
+            )
             provision_result = await m365_service.provision_app_registration(
                 access_token=access_token,
                 display_name=display_name,
                 redirect_uri=redirect_uri,
+                app_object_id=(pending_connection or {}).get("app_object_id"),
+                client_id=(pending_connection or {}).get("client_id"),
+                service_principal_object_id=(pending_connection or {}).get(
+                    "service_principal_object_id"
+                ),
             )
         except m365_service.M365Error as exc:
             log_error(
@@ -5058,100 +6006,24 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             )
             return _provision_error(f"Provisioning failed: {exc}")
 
-        await m365_service.upsert_credentials(
-            company_id=company_id,
-            tenant_id=effective_tenant_id,
-            client_id=provision_result["client_id"],
-            client_secret=provision_result["client_secret"],
-            app_object_id=provision_result.get("app_object_id"),
-            client_secret_key_id=provision_result.get("client_secret_key_id"),
-            client_secret_expires_at=provision_result.get("client_secret_expires_at"),
+        candidate = await m365_service.stage_connection_candidate(
+            company_id, effective_tenant_id, provision_result
         )
         log_info(
-            "M365 enterprise app provisioned and credentials stored",
+            "M365 enterprise app candidate staged; active connection unchanged",
             company_id=company_id,
             tenant_id=effective_tenant_id,
             client_id=provision_result["client_id"],
+            connection_id=candidate["id"],
         )
 
-        # Best-effort: provision a dedicated PKCE public client for this company
-        try:
-            await m365_service.auto_provision_company_pkce_client_id(
-                company_id,
-                redirect_uri=redirect_uri,
-                company_admin_creds={
-                    "tenant_id": effective_tenant_id,
-                    "client_id": provision_result["client_id"],
-                    "client_secret": provision_result["client_secret"],
-                    "app_object_id": provision_result.get("app_object_id"),
-                    "client_secret_key_id": provision_result.get("client_secret_key_id"),
-                    "client_secret_expires_at": provision_result.get(
-                        "client_secret_expires_at"
-                    ),
-                },
-            )
-        except Exception as exc:  # pragma: no cover - best-effort helper
-            log_warning(
-                "Per-company PKCE auto-provision failed after M365 app provisioning",
-                company_id=company_id,
-                error=str(exc),
-            )
-
-        # Auto-create default sync tasks for the company if not already present.
-        existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
-        has_m365_sync_task = bool(
-            {"sync_m365_data", "sync_o365", "sync_m365_licenses", "sync_m365_contacts", "sync_m365_mailboxes"}
-            & existing_commands
-        )
-        sync_staff_task_name = (
-            f"{company_name} - Sync staff directory"
-            if company_name
-            else "Sync staff directory"
-        )
-        # Create the three split M365 sync tasks if no M365 sync tasks exist yet
-        if not has_m365_sync_task:
-            for command, label_suffix in (
-                ("sync_m365_licenses", "Sync Microsoft 365 licenses"),
-                ("sync_m365_contacts", "Sync Microsoft 365 contacts"),
-                ("sync_m365_mailboxes", "Sync Microsoft 365 mailboxes"),
-            ):
-                label = f"{company_name} - {label_suffix}" if company_name else label_suffix
-                await scheduled_tasks_repo.create_task(
-                    name=label,
-                    command=command,
-                    cron=_random_daily_cron(),
-                    company_id=company_id,
-                    active=True,
-                )
-                log_info(
-                    "Auto-created scheduled task after M365 provisioning",
-                    command=command,
-                    company_id=company_id,
-                )
-        if "sync_staff" not in existing_commands:
-            await scheduled_tasks_repo.create_task(
-                name=sync_staff_task_name,
-                command="sync_staff",
-                cron=_random_daily_cron(),
-                company_id=company_id,
-                active=True,
-            )
-            log_info(
-                "Auto-created scheduled task after M365 provisioning",
-                command="sync_staff",
-                company_id=company_id,
-            )
-        await scheduler_service.refresh()
-
-        asyncio.create_task(
-            _best_effort_sync_m365_email_domains(company_id),
-            name=f"sync_m365_email_domains_{company_id}",
-        )
-
+        # Provisioning is intentionally complete at staging. PKCE configuration,
+        # scheduled jobs and the compatibility credential row remain attached to
+        # the active connection until a separate verified cutover.
         if return_to_company_edit:
             return _company_edit_redirect(
                 company_id=company_id,
-                success="Microsoft 365 enterprise app provisioned successfully.",
+                success="Microsoft 365 replacement staged. Verify it before activation.",
             )
         return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -5159,17 +6031,17 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     credentials = await m365_service.get_credentials(company_id)
     if not credentials:
         return flash_redirect("/m365", "missing credentials", "error")
-    token_endpoint = f"https://login.microsoftonline.com/{credentials['tenant_id']}/oauth2/v2.0/token"
-    redirect_uri = _build_m365_redirect_uri(request)
+    token_endpoint = f"https://login.microsoftonline.com/{state_data['tenant_id']}/oauth2/v2.0/token"
+    redirect_uri = str(state_data.get("redirect_uri") or "")
     data = {
-        "client_id": credentials["client_id"],
+        "client_id": str(state_data.get("client_id") or ""),
         "client_secret": credentials.get("client_secret") or "",
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": redirect_uri,
         "scope": m365_service.CONNECT_SCOPE,
     }
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         response = await client.post(token_endpoint, data=data)
     if response.status_code != 200:
         log_error(
@@ -5181,21 +6053,51 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     payload = response.json()
     refresh_token = payload.get("refresh_token")
     access_token = payload.get("access_token")
-    expires_in = payload.get("expires_in")
-    expires_at = None
-    if isinstance(expires_in, (int, float)):
-        expires_at = datetime.utcnow() + timedelta(seconds=float(expires_in))
+    try:
+        identity = await m365_service.validate_microsoft_id_token(
+            str(payload.get("id_token") or ""), client_id=str(state_data.get("client_id") or "")
+        )
+    except m365_service.M365Error:
+        return flash_redirect("/m365", "Microsoft did not return a verified account identity.", "error")
+    if str(identity.get("tid") or "") != str(state_data.get("tenant_id") or ""):
+        return flash_redirect("/m365", "The signed-in Microsoft tenant did not match this connection.", "error")
     await m365_repo.update_tokens(
         company_id=company_id,
         refresh_token=encrypt_secret(refresh_token) if refresh_token else None,
         access_token=None,
         token_expires_at=None,
     )
+    compliance_role_result = None
+    compliance_role_error = None
+    compliance_setup = state_data.get("setup") == "compliance_role"
+    if compliance_setup:
+        if not access_token:
+            compliance_role_error = (
+                "Microsoft did not return the delegated administrator token "
+                "required for Compliance Administrator setup. Reconnect and consent "
+                "RoleManagement.ReadWrite.Directory."
+            )
+        else:
+            try:
+                compliance_role_result = await m365_service.ensure_compliance_administrator_role(
+                    company_id=company_id,
+                    access_token=access_token,
+                )
+            except m365_service.M365Error as exc:
+                compliance_role_error = str(exc)
+                log_error(
+                    "Compliance Administrator remediation failed",
+                    company_id=company_id,
+                    error=str(exc),
+                )
+
     # Best-effort: grant any newly-required app role assignments (e.g. the
     # permissions added for mailbox sync) using the admin's delegated token.
     # This ensures existing deployments pick up new permissions automatically
     # when an administrator re-runs "Authorize portal access".
-    if access_token:
+    # The focused Purview remediation intentionally does not grant other API
+    # permissions or administrator roles; those remain separate setup checks.
+    if access_token and not compliance_setup:
         new_permissions_granted = await m365_service.try_grant_missing_permissions(
             company_id=company_id,
             access_token=access_token,
@@ -5210,13 +6112,48 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         _best_effort_sync_m365_email_domains(company_id),
         name=f"sync_m365_email_domains_{company_id}",
     )
+    if compliance_setup:
+        destination = (
+            "/m365/diagnostics"
+            if state_data.get("return_to") == "diagnostics"
+            else "/m365"
+        )
+        if compliance_role_error:
+            return flash_redirect(
+                destination,
+                compliance_role_error,
+                "error",
+            )
+        role_status = str((compliance_role_result or {}).get("status") or "")
+        role_message = (
+            "Compliance Administrator was already assigned."
+            if role_status == "existing"
+            else "Compliance Administrator was assigned and verified."
+        )
+        return flash_redirect(
+            destination,
+            role_message
+            + " Reconnect is complete; Purview provisioning and search support "
+            "must still be verified separately.",
+            "success",
+        )
     if state_data.get("return_to") == "diagnostics":
-        # Re-run the diagnostics check so the page shows fresh results after repair.
+        # Re-run all diagnostics and complete the Purview-native setup now that
+        # delegated consent and the EOP role assignment are available.
         try:
             await m365_service.check_enterprise_app_permissions(company_id)
-        except m365_service.M365Error:
-            pass
-        return flash_redirect("/m365/diagnostics", "Permissions repaired and re-checked", "success")
+            await m365_service.run_purview_preflight(company_id, repair=True)
+        except m365_service.M365Error as exc:
+            log_error(
+                "M365 diagnostics re-check failed after permission repair",
+                company_id=company_id,
+                error=str(exc),
+            )
+        return flash_redirect(
+            "/m365/diagnostics",
+            "Permissions and Purview configuration repaired and re-checked",
+            "success",
+        )
     return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -5420,6 +6357,17 @@ async def admin_service_status_page(request: Request):
         for company in companies
         if company.get("id") is not None
     }
+    public_status_urls = {
+        int(company["id"]): "/service-status/public/{}/{}".format(
+            int(company["id"]),
+            service_status_service.build_public_status_token(
+                int(company["id"]),
+                seed=service_status_service.public_status_token_seed(company),
+            ),
+        )
+        for company in companies
+        if company.get("id") is not None
+    }
     return await _render_template(
         "admin/service_status.html",
         request,
@@ -5432,6 +6380,7 @@ async def admin_service_status_page(request: Request):
             "service_status_lookup": status_lookup,
             "company_options": companies,
             "service_status_company_lookup": company_lookup,
+            "service_status_public_urls": public_status_urls,
             "service_status_editing": editing_service,
             "service_status_default": service_status_service.DEFAULT_STATUS,
         },
@@ -5525,7 +6474,7 @@ async def admin_refresh_service_tags(request: Request, service_id: int):
         await service_status_service.refresh_service_tags(service_id)
     except ValueError as exc:
         return flash_redirect(f"/admin/service-status?serviceId={service_id}", str(exc), "error")
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception:  # pragma: no cover - defensive
         return flash_redirect(f"/admin/service-status?serviceId={service_id}", "Failed to refresh tags.", "error")
     return flash_redirect(f"/admin/service-status?serviceId={service_id}", "Tags refreshed.", "success")
 
@@ -5605,6 +6554,33 @@ async def admin_profile_page(request: Request):
         totp_devices.append({"id": identifier, "name": name})
 
     totp_devices.sort(key=lambda entry: entry["name"].lower())
+    try:
+        passkeys = await auth_repo.list_passkeys_for_user(int(user["id"]))
+    except Exception:  # pragma: no cover - defensive logging for profile rendering
+        passkeys = []
+    profile_passkeys: list[dict[str, Any]] = []
+    for passkey in passkeys:
+        identifier = passkey.get("id")
+        if identifier is None:
+            continue
+        try:
+            identifier = int(identifier)
+        except (TypeError, ValueError):
+            continue
+        created_at = passkey.get("created_at")
+        last_used_at = passkey.get("last_used_at")
+        profile_passkeys.append(
+            {
+                "id": identifier,
+                "name": passkey.get("display_name") or "Passkey",
+                "created_at": ensure_datetime(created_at).isoformat() if created_at else None,
+                "last_used_at": ensure_datetime(last_used_at).isoformat() if last_used_at else None,
+                "transports": passkeys_service.parse_transports(passkey.get("transports")),
+                "credential_device_type": passkey.get("credential_device_type"),
+                "credential_backed_up": bool(passkey.get("credential_backed_up")),
+            }
+        )
+    profile_passkeys.sort(key=lambda entry: entry["name"].lower())
     m365_contacts_status = await user_m365_contacts_service.status_for_user(int(user["id"]))
 
     context = await _build_base_context(
@@ -5615,6 +6591,7 @@ async def admin_profile_page(request: Request):
             "profile_membership": membership,
             "profile_show_technician_tools": _can_edit_profile_technician_tools(user, membership),
             "profile_totp_devices": totp_devices,
+            "profile_passkeys": profile_passkeys,
             "profile_m365_contacts": m365_contacts_status,
         },
     )
@@ -5628,11 +6605,11 @@ async def profile_m365_contacts_connect(request: Request):
         return redirect
     redirect_uri = _build_m365_redirect_uri(request)
     verifier, challenge = m365_service.generate_pkce_pair()
-    verifier_id = await _store_m365_provision_code_verifier(verifier)
-    state = oauth_state_serializer.dumps({
-        "flow": "user_m365_contacts", "user_id": int(user["id"]), "pkce_handle": verifier_id,
-    })
     client_id = await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri)
+    state = await _new_m365_oauth_state(
+        request, flow="user_m365_contacts", code_verifier=verifier,
+        client_id=client_id, redirect_uri=redirect_uri,
+    )
     params = {
         "client_id": client_id, "response_type": "code", "redirect_uri": redirect_uri,
         "response_mode": "query", "scope": user_m365_contacts_service.CONTACTS_SCOPE,
@@ -5652,7 +6629,7 @@ async def profile_m365_contacts_disconnect(request: Request):
         return redirect
     from app.repositories import user_m365_contacts as user_contacts_repo
     await user_contacts_repo.delete_integration(int(user["id"]))
-    return flash_redirect("/admin/profile", "Outlook contacts disconnected.", "success")
+    return flash_redirect("/admin/profile#integrations", "Outlook contacts disconnected.", "success")
 
 
 @app.api_route(
@@ -5673,12 +6650,23 @@ async def profile_m365_contact_phones(request: Request, name: str = Query(..., m
 
 @app.post("/api/tickets/{ticket_id}/requester/mobile", response_class=JSONResponse)
 async def attach_ticket_requester_mobile(request: Request, ticket_id: int):
-    _, redirect = await _require_authenticated_user(request)
+    user, redirect = await _require_authenticated_user(request)
     if redirect:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
     ticket = await tickets_repo.get_ticket(ticket_id)
-    if not ticket or ticket.get("requester_staff_id") is None:
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester contact not found")
+    # Helpdesk technicians (and super admins) may update any requester's
+    # number; otherwise only the ticket's own requester may change theirs.
+    if not await _is_helpdesk_technician(user, request):
+        try:
+            is_requester = int(ticket.get("requester_id")) == int(user.get("id"))
+        except (TypeError, ValueError):
+            is_requester = False
+        if not is_requester:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester contact not found")
+    if ticket.get("requester_staff_id") is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester contact not found")
 
     payload = await request.json()
@@ -5695,7 +6683,7 @@ async def attach_ticket_requester_mobile(request: Request, ticket_id: int):
 
 
 @app.get("/api/rag/relationships/metrics", response_class=JSONResponse)
-async def rag_relationship_metrics():
+async def rag_relationship_metrics(_: dict = Depends(require_super_admin)):
     from app.repositories import rag_relationships as rel_repo
 
     return JSONResponse(await rel_repo.metrics())
@@ -5714,6 +6702,18 @@ async def admin_rag_page(request: Request):
     )
 
 
+@app.get("/admin/ai-quality", response_class=HTMLResponse)
+async def admin_ai_quality_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import ai_quality as quality_repo
+    return await _render_template(
+        "admin/ai_quality.html", request, current_user,
+        extra={"title": "AI Quality", "quality_groups": await quality_repo.aggregate()},
+    )
+
+
 @app.get("/admin/impersonation", response_class=HTMLResponse)
 async def admin_impersonation_page(
     request: Request,
@@ -5725,6 +6725,201 @@ async def admin_impersonation_page(
         request,
         current_user,
     )
+
+
+@app.get("/admin/users", response_class=HTMLResponse)
+async def admin_users_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    active_users = await user_repo.list_active_users_for_admin()
+    return await _render_template(
+        "admin/users.html",
+        request,
+        current_user,
+        extra={"title": "Users", "users": active_users},
+    )
+
+
+@app.get("/admin/sessions", response_class=HTMLResponse)
+async def admin_sessions_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    active_sessions = await access_activity_repo.list_active_user_sessions(limit=500)
+    recent_connections = await access_activity_repo.list_recent_connection_activity(limit=1000)
+
+    for session in active_sessions:
+        session["created_at_iso"] = _to_iso(session.get("created_at"))
+        session["last_seen_at_iso"] = _to_iso(session.get("last_seen_at"))
+        session["expires_at_iso"] = _to_iso(session.get("expires_at"))
+
+    for connection in recent_connections:
+        connection["activity_at_iso"] = _to_iso(connection.get("activity_at"))
+
+    return await _render_template(
+        "admin/sessions.html",
+        request,
+        current_user,
+        extra={
+            "title": "Sessions",
+            "active_sessions": active_sessions,
+            "recent_connections": recent_connections,
+        },
+    )
+
+
+@app.get("/admin/sessions/{session_id}", response_class=HTMLResponse)
+async def admin_session_detail_page(request: Request, session_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    session_detail = await access_activity_repo.get_active_user_session(session_id)
+    if not session_detail:
+        return flash_redirect("/admin/sessions", "Session not found.", "error")
+    session_detail["created_at_iso"] = _to_iso(session_detail.get("created_at"))
+    session_detail["last_seen_at_iso"] = _to_iso(session_detail.get("last_seen_at"))
+    session_detail["expires_at_iso"] = _to_iso(session_detail.get("expires_at"))
+    correlated_audit_logs = await access_activity_repo.list_session_audit_activity(
+        session_id,
+        session=session_detail,
+        limit=200,
+    )
+    for entry in correlated_audit_logs:
+        entry["created_at_iso"] = _to_iso(entry.get("created_at"))
+    return await _render_template(
+        "admin/session_detail.html",
+        request,
+        current_user,
+        extra={
+            "title": "Session detail",
+            "session_detail": session_detail,
+            "correlated_audit_logs": correlated_audit_logs,
+        },
+    )
+
+
+@app.post("/admin/sessions/{session_id}/revoke", response_class=HTMLResponse)
+async def admin_session_revoke(request: Request, session_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    record = await auth_repo.get_session_by_id(session_id)
+    if not record or int(record.get("is_active") or 0) != 1:
+        return flash_redirect("/admin/sessions", "Active session not found.", "error")
+    actor_session = getattr(request.state, "session", None)
+    if actor_session is None:
+        actor_session = await session_manager.load_session(request)
+    if actor_session and int(actor_session.id) == session_id:
+        return flash_redirect(
+            f"/admin/sessions/{session_id}",
+            "You cannot revoke your current session from this screen.",
+            "error",
+        )
+    from app.services import audit as audit_service
+
+    await auth_repo.deactivate_session(session_id)
+    updated = dict(record)
+    updated["is_active"] = 0
+    await audit_service.record(
+        action="auth.session.revoke",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="user_session",
+        entity_id=session_id,
+        before=record,
+        after=updated,
+        metadata={"target_user_id": record.get("user_id")},
+    )
+    return flash_redirect(
+        "/admin/sessions",
+        "Session revoked.",
+        "success",
+    )
+
+
+@app.get("/admin/benchmarking", response_class=HTMLResponse)
+async def admin_benchmarking_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.services import benchmarking_dashboard as benchmarking_dashboard_service
+
+    rows = await benchmarking_dashboard_service.build_cross_company_summary(limit=500)
+    for row in rows:
+        row["snapshot_date_iso"] = _to_iso(row.get("snapshot_date"))
+    return await _render_template(
+        "admin/benchmarking.html",
+        request,
+        current_user,
+        extra={
+            "title": "Benchmarking",
+            "benchmark_rows": rows,
+        },
+    )
+
+
+@app.post("/admin/users/{user_id}/{action}", response_class=HTMLResponse)
+async def admin_users_action(request: Request, user_id: int, action: str):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    if action not in {"deactivate", "delete"}:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Unknown user action"
+        )
+    if int(current_user["id"]) == user_id:
+        return flash_redirect(
+            "/admin/users",
+            "You cannot deactivate or delete your own account.",
+            "error",
+        )
+
+    target = await user_repo.get_user_by_id(user_id)
+    if not target or not bool(target.get("is_active")):
+        return flash_redirect("/admin/users", "Active user not found.", "error")
+    if target.get("is_super_admin") and await user_repo.count_active_super_admins() <= 1:
+        return flash_redirect("/admin/users", "The last active super admin cannot be removed.", "error")
+
+    from app.services import audit as audit_service
+
+    if action == "deactivate":
+        updated = await user_repo.update_user(user_id, is_active=0)
+        await auth_repo.deactivate_sessions_for_user(user_id)
+        # An unused signup verification link would otherwise re-activate
+        # the account.
+        await auth_repo.invalidate_account_verification_tokens_for_user(user_id)
+        await audit_service.record(
+            action="user.deactivate",
+            request=request,
+            user_id=int(current_user["id"]),
+            entity_type="user",
+            entity_id=user_id,
+            before=target,
+            after=updated,
+        )
+        message = f"Deactivated {target.get('email') or 'user account'}."
+    else:
+        try:
+            await user_repo.delete_user(user_id)
+        except Exception as exc:
+            log_error("Failed to delete user account", user_id=user_id, error=str(exc))
+            return flash_redirect(
+                "/admin/users",
+                "This user could not be deleted because related records still exist. Deactivate the account instead.",
+                "error",
+            )
+        await audit_service.record(
+            action="user.delete",
+            request=request,
+            user_id=int(current_user["id"]),
+            entity_type="user",
+            entity_id=user_id,
+            before=target,
+            after=None,
+        )
+        message = f"Deleted {target.get('email') or 'user account'}."
+    return flash_redirect("/admin/users", message, "success")
 
 
 @app.post("/admin/impersonation", response_class=HTMLResponse)
@@ -5831,15 +7026,36 @@ async def admin_impersonation_start(request: Request):
 
 
 @app.get("/admin/roles", response_class=HTMLResponse)
-async def admin_roles(request: Request):
+async def admin_roles(request: Request, company_id: int | None = Query(None), role_id: int | None = Query(None)):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
     roles_list = await role_repo.list_roles()
+    member_counts = await role_repo.count_members_by_role()
+    roles_list = [{**role, "member_count": member_counts.get(int(role["id"]), 0)} for role in roles_list]
+    companies = await company_repo.list_companies()
+    overview: list[dict[str, Any]] = []
+    overview_role = next((role for role in roles_list if int(role["id"]) == role_id), None) if role_id else None
+    if company_id and overview_role:
+        content_permissions = overview_role.get("permissions") or {}
+        for article in await knowledge_base_service.list_articles_for_context(
+            await knowledge_base_service.build_access_context(current_user), include_unpublished=True, include_permissions=True
+        ):
+            company_ids = article.get("allowed_company_ids") or article.get("company_admin_ids") or []
+            if company_id in company_ids:
+                granted = role_id in await customer_content_audience_repo.list_role_ids(company_id, "knowledge_base", int(article["id"]))
+                overview.append({"type": "Article / runbook", "title": article["title"], "published": bool(article["is_published"]), "allowed": granted and content_permissions.get("content.knowledge_base") in {"read", "write"}})
+        for asset in await assets_repo.list_company_assets(company_id):
+            granted = role_id in await customer_content_audience_repo.list_role_ids(company_id, "asset", int(asset["id"]))
+            overview.append({"type": "Asset", "title": asset.get("name") or f"Asset {asset['id']}", "published": bool(asset.get("customer_visible")), "allowed": granted and content_permissions.get("content.assets") in {"read", "write"}})
     extra = {
         "title": "Role management",
         "roles": roles_list,
         "menu_permission_catalogue": catalogue_for_api(),
+        "companies": companies,
+        "overview_company_id": company_id,
+        "overview_role_id": role_id,
+        "published_content_overview": overview,
     }
     return await _render_template("admin/roles.html", request, current_user, extra=extra)
 
@@ -5888,6 +7104,9 @@ async def admin_scheduled_tasks(
             task, timezone_name=settings.default_timezone
         )
         serialised_task["next_run_iso"] = _to_iso(next_run)
+        command = str(task.get("command") or "")
+        serialised_task["command_label"] = _scheduled_task_command_label(command) if command else "Task"
+        serialised_task["command_group"] = _scheduled_task_command_group(command)
         raw_company_id = task.get("company_id")
         company_key: int | None = None
         if raw_company_id is not None:
@@ -5921,14 +7140,20 @@ async def admin_scheduled_tasks(
         "update_mac_vendors", "sync_staff", "sync_m365_data", "sync_m365_licenses",
         "sync_m365_contacts", "sync_m365_mailboxes", "refresh_m365_consent_status",
         "sync_huntress", "sync_to_xero", "sync_to_xero_auto_send", "generate_invoice",
+        "process_subscription_renewals",
         "unbill_time_entries", "send_price_change_notifications", "create_scheduled_ticket",
         "sync_recordings", "sync_unifi_talk_recordings", "queue_transcriptions",
         "process_transcription", "update_tray_icon_installer", "rag_index_start",
         "rag_index_stop", "rag_matching_pause", "rag_matching_resume",
         "rag_cleanup_stale_matches",
+        "refresh_website_checks", "refresh_dns_records",
     )
     command_options = [
-        {"value": command, "label": _scheduled_task_command_label(command)}
+        {
+            "value": command,
+            "label": _scheduled_task_command_label(command),
+            "group": _scheduled_task_command_group(command),
+        }
         for command in available_commands
     ]
     command_options = [o for o in command_options if o["value"] not in disabled_commands_global]
@@ -5936,7 +7161,11 @@ async def admin_scheduled_tasks(
     for command in sorted(existing_commands):
         if command and command not in {option["value"] for option in command_options} and command not in disabled_commands_global:
             command_options.append(
-                {"value": str(command), "label": _scheduled_task_command_label(str(command))}
+                {
+                    "value": str(command),
+                    "label": _scheduled_task_command_label(str(command)),
+                    "group": _scheduled_task_command_group(str(command)),
+                }
             )
     command_options.sort(key=lambda option: option["label"].casefold())
 
@@ -5960,8 +7189,95 @@ async def admin_scheduled_tasks(
         "command_options": command_options,
         "company_options": company_options,
         "bulk_company_options": bulk_company_options,
+        "schedule_timezone": settings.default_timezone or "UTC",
     }
     return await _render_template("admin/scheduled_tasks.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/system-updates", response_class=HTMLResponse)
+async def admin_system_updates(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    system_updates_service.expire_unclaimed_requests()
+    await system_updates_service.fail_superseded_updates()
+    updates = system_update_history.list_updates()
+    refresh = request.query_params.get("refresh") == "1"
+    update_check = await system_updates_service.check_for_update(refresh=refresh)
+    pending_changes = await system_updates_service.list_changes(update_check, refresh=refresh)
+    status_counts = {
+        "succeeded": sum(1 for update in updates if update.get("status") == "succeeded"),
+        "failed": sum(1 for update in updates if update.get("status") == "failed"),
+        "active": sum(1 for update in updates if update.get("status") in {"pending", "running"}),
+    }
+    return await _render_template(
+        "admin/system_updates.html", request, current_user,
+        extra={
+            "title": "System updates", "updates": updates,
+            "update_check": update_check, "pending_changes": pending_changes,
+            "status_counts": status_counts,
+            "active_update": system_update_history.find_active(),
+        },
+    )
+
+
+@app.post("/admin/system-updates/request", response_class=HTMLResponse)
+async def admin_request_system_update(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    result = await system_updates_service.request_update()
+    record = result["record"]
+    if result["created"] and record:
+        await audit_service.record(
+            action="system.update.request", request=request,
+            user_id=int(current_user["id"]), entity_type="system_update",
+            metadata={"update_id": record["id"], "target": record.get("target_revision"),
+                      "deployment": system_updates_service.deployment_type()},
+        )
+    if record:
+        return flash_redirect(
+            f"/admin/system-updates/{record['id']}", result["message"],
+            "success" if result["created"] else "info",
+        )
+    return flash_redirect("/admin/system-updates", result["message"], "info")
+
+
+@app.post("/admin/system-updates/{update_id}/cancel", response_class=HTMLResponse)
+async def admin_cancel_system_update(request: Request, update_id: str):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    try:
+        system_updates_service.cancel_request(update_id)
+    except (KeyError, ValueError) as exc:
+        message = str(exc) if isinstance(exc, ValueError) else "System update not found."
+        return flash_redirect(f"/admin/system-updates/{update_id}", message, "error")
+    await audit_service.record(
+        action="system.update.cancel", request=request,
+        user_id=int(current_user["id"]), entity_type="system_update",
+        metadata={"update_id": update_id},
+    )
+    return flash_redirect(f"/admin/system-updates/{update_id}", "Update request cancelled.", "success")
+
+
+@app.get("/admin/system-updates/{update_id}", response_class=HTMLResponse)
+async def admin_system_update_detail(request: Request, update_id: str):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    try:
+        update = system_update_history.get(update_id)
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=404, detail="System update not found")
+    return await _render_template(
+        "admin/system_update_detail.html", request, current_user,
+        extra={
+            "title": "System update result", "update": update,
+            "host_setup_hint": system_updates_service.host_setup_hint(),
+            "target_url": system_updates_service.revision_url(str(update.get("target_revision") or "")),
+        },
+    )
 
 
 
@@ -5994,8 +7310,12 @@ async def admin_bulk_create_scheduled_tasks(request: Request):
     start_minute: int | None = None
     start_hour: int | None = None
     if cron:
-        if len(cron_fields) not in {5, 6}:
-            return flash_redirect("/admin/scheduled-tasks", "Enter a valid five- or six-field cron expression.", "error")
+        try:
+            validate_cron_expression(cron)
+        except ValueError as exc:
+            return flash_redirect(
+                "/admin/scheduled-tasks", f"Invalid cron expression: {exc}.", "error"
+            )
         try:
             start_minute = int(cron_fields[0])
             start_hour = int(cron_fields[1])
@@ -6786,7 +8106,6 @@ async def admin_tray_configurations_page(request: Request):
 
     configurations = await tray_repo.list_menu_configs()
     for cfg in configurations:
-        scope = cfg.get("scope")
         ref = cfg.get("scope_ref_id")
         cfg["scope_target_label"] = f"#{ref}" if ref else None
     extra = {
@@ -7247,8 +8566,11 @@ async def admin_tray_branding_delete(request: Request):
                 or uploads_root_resolved in candidate.parents
             ) and candidate.is_file():
                 candidate.unlink()
-        except OSError:
-            pass
+        except OSError as exc:
+            log_error(
+                "Tray icon file cleanup skipped during reset",
+                error=str(exc),
+            )
     await site_settings_repo.set_tray_icon_path(None)
     await audit_service.log_action(
         action="admin.tray.icon.delete",
@@ -7283,10 +8605,14 @@ async def admin_tray_ticket_questions_page(request: Request):
     for q in questions:
         q["conditions"] = cond_index.get(int(q["id"]), [])
 
+    from app.repositories import companies as companies_repo
+
+    companies = await companies_repo.list_companies()
     params = request.query_params
     extra = {
         "title": "Ticket intake questions",
         "questions": questions,
+        "companies": companies,
         "success_message": params.get("success"),
         "error_message": params.get("error"),
     }
@@ -7774,10 +9100,10 @@ async def admin_forms_page(request: Request):
         company_map = permissions_map.get(int(form_id), {})
         company_count = 0
         user_count = 0
-        for users in company_map.values():
-            if users:
+        for company_users in company_map.values():
+            if company_users:
                 company_count += 1
-                user_count += len(users)
+                user_count += len(company_users)
         form_assignment_summary[int(form_id)] = {
             "companies": company_count,
             "users": user_count,
@@ -8217,10 +9543,6 @@ async def _render_portal_tickets_page(
 
     if status_filter_value is None and selected_status_slugs:
         status_filter_value = _encode_status_value(selected_status_slugs)
-    if selected_status_slugs:
-        selected_status_slugs = list(dict.fromkeys(selected_status_slugs))
-    else:
-        selected_status_slugs = None
 
     extra = {
         "title": "Tickets",
@@ -8265,6 +9587,20 @@ def _format_user_label(user_record: Mapping[str, Any] | None) -> str:
     return email or "System"
 
 
+def _format_booking_requester_name(user_record: Mapping[str, Any] | None) -> str:
+    """Build a booking prefill name from first/last name parts only."""
+    if not isinstance(user_record, Mapping):
+        return ""
+    return " ".join(
+        part.strip()
+        for part in (
+            str(user_record.get("first_name") or ""),
+            str(user_record.get("last_name") or ""),
+        )
+        if part and part.strip()
+    ).strip()
+
+
 async def _render_portal_ticket_detail(
     request: Request,
     user: dict[str, Any],
@@ -8305,11 +9641,9 @@ async def _render_portal_ticket_detail(
             available_companies = await company_access.list_accessible_companies(user)
             active_company_id = getattr(request.state, "active_company_id", None)
             allowed_company_ids: set[int] = set()
-            if active_company_id is not None:
-                try:
-                    allowed_company_ids.add(int(active_company_id))
-                except (TypeError, ValueError):
-                    pass
+            parsed_active_company_id = tickets_service.parse_company_id(active_company_id)
+            if parsed_active_company_id is not None:
+                allowed_company_ids.add(parsed_active_company_id)
             if not allowed_company_ids:
                 for entry in available_companies:
                     try:
@@ -8452,6 +9786,16 @@ async def _render_portal_ticket_detail(
         except (TypeError, ValueError):
             requester_staff_record = None
     assigned_record = user_lookup.get(ticket.get("assigned_user_id"))
+    booking_link_url = tickets_service.build_booking_link_url(
+        assigned_record.get("booking_link_url") if assigned_record else None,
+        ticket_id=ticket.get("id"),
+        ticket_number=ticket.get("ticket_number") or ticket.get("id"),
+        ticket_subject=ticket.get("subject"),
+        user_name=_format_booking_requester_name(user),
+        user_email=str(user.get("email") or ""),
+        user_phone=str(user.get("mobile_phone") or ""),
+        ticket_url=str(request.url),
+    )
 
     timeline_entries: list[dict[str, Any]] = []
     for reply in ordered_replies:
@@ -8548,6 +9892,7 @@ async def _render_portal_ticket_detail(
             {
                 "id": recording.get("id"),
                 "type": "call_recording",
+                "call_date": call_date,
                 "created_iso": call_date_iso,
                 "file_name": recording.get("file_name"),
                 "caller_name": caller_name or "Unknown",
@@ -8699,6 +10044,7 @@ async def _render_portal_ticket_detail(
             "billed_at_iso": billed_at_iso,
         },
         "assigned_user": assigned_record,
+        "ticket_booking_link_url": booking_link_url,
         "ticket_replies": timeline_entries,
         "ticket_watchers": watchers,
         "ticket_mention_staff_options": ticket_mention_staff_options,
@@ -8892,6 +10238,10 @@ async def _render_tickets_dashboard(
         "ticket_available_statuses": dashboard.available_statuses,
         "ticket_status_definitions": status_definitions_payload,
         "ticket_filter_status_definitions": filter_status_definitions_payload,
+        # Status visibility only controls ticket editing.  The configuration
+        # editor must retain every definition so saving it cannot implicitly
+        # delete statuses hidden from the current admin.
+        "ticket_status_configuration_definitions": filter_status_definitions_payload,
         "ticket_status_label_map": status_label_map,
         "ticket_public_status_map": public_status_map,
         "ticket_reply_default_status": reply_default_status,
@@ -8919,38 +10269,36 @@ async def _render_tickets_dashboard(
     return response
 
 
-def _ticket_related_safe_url(url: Any) -> str | None:
-    candidate = str(url or "").strip()
-    if not candidate:
-        return None
-    parsed = urlsplit(candidate)
-    if parsed.scheme or parsed.netloc:
-        return None
-    if not candidate.startswith("/") or candidate.startswith("//"):
-        return None
-    return candidate
+_RELATIONSHIP_LABELS = {
+    "DIRECT_MATCH": "Direct match",
+    "DUPLICATE": "Duplicate",
+    "FOLLOW_UP": "Follow-up",
+    "KNOWN_ISSUE": "Known issue",
+    "PARENT_CHILD": "Parent / child",
+    "RELATED": "Related",
+    "SUPPORTING": "Supporting evidence",
+}
 
 
-def _ticket_related_fallback_url(source_type: str, source_id: Any) -> str | None:
-    identifier = str(source_id or "").strip()
-    if not identifier:
-        return None
-    if source_type == "tickets":
-        return f"/admin/tickets/{quote(identifier, safe='')}"
-    if source_type == "assets":
-        return f"/admin/assets/{quote(identifier, safe='')}"
-    if source_type == "companies":
-        return f"/admin/companies/{quote(identifier, safe='')}"
-    if source_type == "staff":
-        return f"/admin/staff/{quote(identifier, safe='')}"
-    if source_type == "chats":
-        return f"/chat/{quote(identifier, safe='')}"
-    if source_type == "issues":
-        return f"/admin/issues/{quote(identifier, safe='')}"
-    return None
+def _relationship_confidence_band(value: Any) -> str:
+    try:
+        score = float(value or 0)
+    except (TypeError, ValueError):
+        score = 0
+    if score >= 0.85:
+        return "High confidence"
+    if score >= 0.65:
+        return "Medium confidence"
+    return "Low confidence"
 
 
-async def _load_ticket_stored_related_items(ticket_id: int, *, limit: int = 12) -> list[dict[str, str]]:
+async def _load_ticket_stored_related_items(
+    ticket_id: int,
+    *,
+    user: Mapping[str, Any],
+    memberships: Sequence[Mapping[str, Any]],
+    limit: int = 12,
+) -> list[dict[str, Any]]:
     try:
         document = await rag_index_repo.get_document_by_source(
             "tickets",
@@ -8967,9 +10315,26 @@ async def _load_ticket_stored_related_items(ticket_id: int, *, limit: int = 12) 
         log_error("Failed to load stored ticket related content", ticket_id=ticket_id, error=str(exc))
         return []
 
-    items: list[dict[str, str]] = []
+    items: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
     for row in evidence_rows:
+        relationship_type = str(row.get("relationship_type") or "RELATED")
+        if not bool(row.get("target_available")):
+            items.append({
+                "available": False,
+                "relationship_label": _RELATIONSHIP_LABELS.get(relationship_type, "Related"),
+                "confidence_band": _relationship_confidence_band(row.get("confidence")),
+                "label": "Related target is unavailable or has been deleted",
+            })
+            continue
+        try:
+            permission_scope = json.loads(str(row.get("permission_scope_json") or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            permission_scope = {}
+        if not can_access_candidate(
+            {"permission_scope": permission_scope}, user=user, memberships=memberships
+        ):
+            continue
         source_type = str(row.get("source_type") or "").strip()
         source_id = row.get("source_id")
         if source_type == "tickets":
@@ -8977,13 +10342,29 @@ async def _load_ticket_stored_related_items(ticket_id: int, *, limit: int = 12) 
                 if int(source_id) == ticket_id:
                     continue
             except (TypeError, ValueError):
-                pass
-        url = _ticket_related_safe_url(row.get("url")) or _ticket_related_fallback_url(source_type, source_id)
+                source_id = None
+        try:
+            metadata = json.loads(str(row.get("metadata_json") or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            metadata = {}
+        url = canonical_source_url(
+            source_type, source_id, metadata=metadata, supplied_url=row.get("url")
+        )
         if not url or url in seen_urls:
             continue
         seen_urls.add(url)
         label = str(row.get("title") or f"{source_type.title()} {source_id}").strip()[:180]
-        items.append({"type": source_type, "label": label, "url": url})
+        reason = str(row.get("reason") or row.get("supporting_excerpt") or "").strip()[:300]
+        items.append({
+            "available": True,
+            "type": source_type,
+            "label": label,
+            "url": url,
+            "relationship_label": _RELATIONSHIP_LABELS.get(relationship_type, "Related"),
+            "confidence_band": _relationship_confidence_band(row.get("confidence")),
+            "score": round(float(row.get("relevance_score") or 0) * 100),
+            "reason": reason,
+        })
     return items
 
 
@@ -9007,11 +10388,21 @@ async def _render_ticket_detail(
     ticket_id: int,
     success_message: str | None = None,
     error_message: str | None = None,
+    reply_error: str | None = None,
+    reply_body: str | None = None,
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    from app.repositories import approval_matrix as approval_matrix_repo
+    try:
+        ticket_approval_workflow = await approval_matrix_repo.get_ticket_workflow(ticket_id)
+    except RuntimeError as exc:
+        if "not initialised" not in str(exc):
+            raise
+        ticket_approval_workflow = None
 
     sanitized_description = sanitize_rich_text(str(ticket.get("description") or ""))
     ticket = {
@@ -9019,6 +10410,26 @@ async def _render_ticket_detail(
         "description_html": sanitized_description.html,
         "description_text": sanitized_description.text_content,
     }
+    from app.services import slas as sla_service
+    ticket_sla = (await sla_service.statuses_for_tickets([ticket_id])).get(
+        ticket_id,
+        {"state": "not_applicable", "label": "No SLA"},
+    )
+    ticket_business_hours: dict[str, Any] | None = None
+    ticket_deferred_automations: list[dict[str, Any]] = []
+    try:
+        from app.repositories import business_hours as business_hours_repo
+        from app.services import business_hours as business_hours_service
+
+        if ticket.get("company_id"):
+            ticket_business_hours = await business_hours_service.status_for_company(
+                int(ticket["company_id"])
+            )
+        ticket_deferred_automations = (
+            await business_hours_repo.list_pending_deferred_runs_for_ticket(ticket_id)
+        )
+    except Exception as exc:  # pragma: no cover - business hours must not break the page
+        log_error("Failed to load ticket business hours", ticket_id=ticket_id, error=str(exc))
 
     replies = await tickets_repo.list_replies(ticket_id)
     split_replies = await tickets_repo.list_split_replies_for_original(ticket_id)
@@ -9305,6 +10716,32 @@ async def _render_ticket_detail(
         watcher_user = user_lookup.get(watcher.get("user_id"))
         enriched_watchers.append({**watcher, "user": watcher_user})
 
+    assigned_user = user_lookup.get(ticket.get("assigned_user_id"))
+    ticket_booking_link_url = tickets_service.build_booking_link_url(
+        assigned_user.get("booking_link_url") if assigned_user else None,
+        ticket_id=ticket.get("id"),
+        ticket_number=ticket.get("ticket_number") or ticket.get("id"),
+        ticket_subject=ticket.get("subject"),
+        user_name=_format_booking_requester_name(user),
+        user_email=str(user.get("email") or ""),
+        user_phone=str(user.get("mobile_phone") or ""),
+        ticket_url=str(request.url),
+    )
+
+    timeline_entries = sorted(
+        [
+            *({**reply, "type": "reply"} for reply in enriched_replies),
+            *({**recording, "type": "call_recording"} for recording in enriched_recordings),
+        ],
+        key=lambda item: (
+            item.get("call_date")
+            if item.get("type") == "call_recording"
+            else item.get("created_at")
+        )
+        or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+
     labour_types = await labour_types_service.list_labour_types()
 
     status_definitions = await tickets_service.list_status_definitions()
@@ -9325,7 +10762,7 @@ async def _render_ticket_detail(
 
     companies = await company_repo.list_companies()
     technician_users = await membership_repo.list_users_with_permission(
-        HELPDESK_PERMISSION_KEY
+        tickets_service.TICKET_ASSIGNEE_PERMISSION_KEY
     )
     requester_options: list[dict[str, Any]] = []
     watcher_staff_options: list[dict[str, Any]] = []
@@ -9333,6 +10770,16 @@ async def _render_ticket_detail(
         requester_options = await staff_repo.list_enabled_staff_users(ticket_company_id)
         # Get all enabled staff for the company as watcher options
         watcher_staff_options = await staff_repo.list_enabled_staff_users(ticket_company_id)
+
+    try:
+        ticket_approval_configurations = (
+            await approval_matrix_repo.list_configurations(ticket_company_id)
+            if ticket_company_id is not None else []
+        )
+    except RuntimeError as exc:
+        if "not initialised" not in str(exc):
+            raise
+        ticket_approval_configurations = []
 
 
     ticket_mention_staff_options = [
@@ -9422,6 +10869,7 @@ async def _render_ticket_detail(
         priority_options.append(option_str)
 
     ticket_assets = await tickets_repo.list_ticket_assets(ticket_id)
+    ticket_suggested_assets = await tickets_repo.list_ticket_suggested_assets(ticket_id)
     asset_selection: list[int] = []
     for linked in ticket_assets:
         asset_id = linked.get("asset_id")
@@ -9497,7 +10945,11 @@ async def _render_ticket_detail(
 
     asset_options.sort(key=lambda option: option["label"].lower())
 
-    ticket_related_items = await _load_ticket_stored_related_items(ticket_id)
+    ticket_related_items = await _load_ticket_stored_related_items(
+        ticket_id,
+        user=user,
+        memberships=getattr(request.state, "available_companies", None) or [],
+    )
     ticket_expenses = await expenses_repo.list_expenses(ticket_id)
     ticket_canned_responses = await canned_responses_repo.list_responses()
     ticket_expense_total = sum(Decimal(str(expense.get("amount") or 0)) for expense in ticket_expenses)
@@ -9542,12 +10994,17 @@ async def _render_ticket_detail(
     extra = {
         "title": f"Ticket #{ticket_id}",
         "ticket": ticket,
+        "ticket_sla": ticket_sla,
+        "ticket_business_hours": ticket_business_hours,
+        "ticket_deferred_automations": ticket_deferred_automations,
         "ticket_company": company,
         "ticket_module": module_info,
-        "ticket_assigned_user": user_lookup.get(ticket.get("assigned_user_id")),
+        "ticket_assigned_user": assigned_user,
+        "ticket_booking_link_url": ticket_booking_link_url,
         "ticket_requester": user_lookup.get(ticket.get("requester_id")),
         "ticket_replies": enriched_replies,
         "ticket_call_recordings": enriched_recordings,
+        "ticket_timeline_entries": timeline_entries,
         "ticket_watchers": enriched_watchers,
         "ticket_shipment_watch": shipment_watch,
         "ticket_attachments": formatted_attachments,
@@ -9582,10 +11039,13 @@ async def _render_ticket_detail(
         "ticket_company_phone_display": ticket_company_phone_display,
         "ticket_requester_lookup_name": ticket_requester_lookup_name,
         "ticket_watcher_staff_options": watcher_staff_options,
+        "ticket_approval_configurations": ticket_approval_configurations,
+        "ticket_approval_workflow": ticket_approval_workflow,
         "ticket_mention_staff_options": ticket_mention_staff_options,
         "ticket_priority_options": priority_options,
         "ticket_return_url": request.url.path,
         "ticket_assets": ticket_assets,
+        "ticket_suggested_assets": ticket_suggested_assets,
         "ticket_asset_options": asset_options,
         "ticket_asset_selection": asset_selection,
         "ticket_asset_linked_data": serialisable_ticket_assets,
@@ -9594,6 +11054,7 @@ async def _render_ticket_detail(
         "hudu_company_url": hudu_company_url,
         "solidtime_links": solidtime_links,
         "can_delete_ticket": bool(user.get("is_super_admin")),
+        "can_reprocess_ticket_ai": bool(user.get("is_super_admin")),
         "relevant_kb_articles": relevant_articles,
         "relevant_services": relevant_services,
         "service_status_lookup": service_status_lookup,
@@ -9601,6 +11062,8 @@ async def _render_ticket_detail(
         "merged_child_tickets": merged_child_tickets,
         "success_message": success_message,
         "error_message": error_message,
+        "reply_error": reply_error,
+        "reply_body": reply_body or "",
     }
     response = await _render_template("admin/ticket_detail.html", request, user, extra=extra)
     response.status_code = status_code
@@ -9623,6 +11086,7 @@ async def _render_modules_dashboard(
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
     modules = await modules_service.list_modules()
+    operations_center = await integration_operations_service.build_operations_center(modules)
     public_base = str(settings.public_base_url or "").strip().rstrip("/")
     if not public_base:
         public_base = str(request.base_url).rstrip("/")
@@ -9639,6 +11103,7 @@ async def _render_modules_dashboard(
         "title": "Integration modules",
         "modules": modules,
         "module_webhook_urls": module_webhook_urls,
+        "operations_center": operations_center,
         "success_message": success_message,
         "error_message": error_message,
     }
@@ -9678,17 +11143,32 @@ async def admin_feature_packs_page(
     if redirect:
         return redirect
 
-    loaded = feature_registry.list()
+    from app.services.component_availability import get_component_availability
+    availability = get_component_availability()
+    loaded = [item for item in feature_registry.list()
+              if availability.feature_pack_available(str(item.get("slug") or ""))]
     packs = sorted(
         [item for item in loaded if not str(item.get("slug", "")).startswith("plugin.")],
         key=lambda p: p["slug"],
     )
     plugins = await get_plugin_loader().list_admin_rows(feature_registry)
+    from app.core.core_components import CORE_COMPONENTS
+    core_components = [
+        {
+            "slug": component.slug,
+            "label": component.label,
+            "description": component.description,
+            "parent_pack": component.parent_pack,
+            "available": availability.feature_pack_available(component.slug),
+        }
+        for component in CORE_COMPONENTS
+    ]
 
     extra = {
         "title": "Feature packs",
         "packs": packs,
         "plugins": plugins,
+        "core_components": core_components,
     }
     return await _render_template(
         "admin/feature_packs.html", request, current_user, extra=extra
@@ -9700,6 +11180,9 @@ async def admin_update_module(slug: str, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
+    from app.services.component_availability import get_component_availability
+    if not get_component_availability().module_available(slug):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     form = await request.form()
     raw_enabled = form.get("enabled")
     enabled = False
@@ -9710,6 +11193,13 @@ async def admin_update_module(slug: str, request: Request):
             enabled = bool(raw_enabled)
     try:
         await modules_service.update_module(slug, enabled=enabled)
+    except AvailabilityConfigurationError as exc:
+        return await _render_modules_dashboard(
+            request,
+            current_user,
+            error_message=str(exc),
+            status_code=status.HTTP_409_CONFLICT,
+        )
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to update integration module", slug=slug, error=str(exc))
         return await _render_modules_dashboard(
@@ -9751,12 +11241,13 @@ async def totp_enrollment_page(request: Request):
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
+    next_path = _safe_next_path(request.query_params.get("next"))
     session = await session_manager.load_session(request)
     if session:
         user = await user_repo.get_user_by_id(session.user_id)
         if user and await _user_requires_totp_enrollment(user):
             return RedirectResponse(url=TOTP_ENROLLMENT_PAGE_PATH, status_code=status.HTTP_303_SEE_OTHER)
-        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url=next_path or "/", status_code=status.HTTP_303_SEE_OTHER)
 
     try:
         user_count = await user_repo.count_users()
@@ -9771,6 +11262,8 @@ async def login_page(request: Request):
         request,
         extra={
             "title": "Sign in",
+            "verification_success": request.query_params.get("verified") == "1",
+            "next_path": next_path or "/",
         },
     )
     return templates.TemplateResponse(context["request"], "auth/login.html", context)
@@ -9863,6 +11356,19 @@ async def liveness_probe() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get(
+    "/upgrade-status",
+    response_model=None,
+    summary="Read planned upgrade progress",
+    description="Unauthenticated, cache-disabled status used by the deployment-independent upgrade page.",
+)
+async def upgrade_status_endpoint() -> JSONResponse:
+    return JSONResponse(
+        system_state_service.get_public_upgrade_state(),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.get("/readyz")
 async def readiness_probe() -> JSONResponse:
     """Readiness: startup has finished, DB is reachable, packs healthy."""
@@ -9887,7 +11393,11 @@ async def readiness_probe() -> JSONResponse:
     status_code = HTTPStatus.OK if ok else HTTPStatus.SERVICE_UNAVAILABLE
     return JSONResponse(
         status_code=status_code,
-        content={"status": "ok" if ok else "not_ready", "checks": checks},
+        content={
+            "status": "ok" if ok else "not_ready",
+            "version": _APP_VERSION,
+            "checks": checks,
+        },
     )
 
 

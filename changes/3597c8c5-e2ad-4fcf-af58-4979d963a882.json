@@ -1,0 +1,7 @@
+{
+  "guid": "3597c8c5-e2ad-4fcf-af58-4979d963a882",
+  "occurred_at": "2026-09-27T07:40Z",
+  "change_type": "Fix",
+  "summary": "Full-depth rack devices move with their elevation again when a rack is swivelled; only half-depth devices switch to their other side.",
+  "content_hash": "0db06b5c29f7c31452add61b62d7553efb71cd0db7fdbc443125f1a3f83207df"
+}

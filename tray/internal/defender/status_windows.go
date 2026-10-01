@@ -3,19 +3,28 @@
 package defender
 
 import (
-	"bytes"
-	"encoding/base64"
+	"context"
 	"fmt"
-	"os/exec"
-	"strings"
-	"unicode/utf16"
+	"time"
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 )
 
-const statusScript = `$ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+const statusScript = `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $s = Get-MpComputerStatus
+$antivirusProducts = @()
+try {
+  $antivirusProducts = @(Get-CimInstance -Namespace 'root/SecurityCenter2' -ClassName 'AntiVirusProduct' -ErrorAction Stop | ForEach-Object {
+    [string]$_.displayName
+  } | Where-Object { $_ } | Sort-Object -Unique)
+} catch {
+  $antivirusProducts = @()
+}
+if ($antivirusProducts.Count -eq 0 -and ($s.AMProductVersion -or $s.AMEngineVersion -or $s.AntivirusEnabled -or $s.RealTimeProtectionEnabled)) {
+  $antivirusProducts = @('Microsoft Defender Antivirus')
+}
+$firewall = @{}
+Get-NetFirewallProfile -PolicyStore ActiveStore | ForEach-Object { $firewall[$_.Name] = [bool]$_.Enabled }
 $health = if (-not $s.AntivirusEnabled -or -not $s.RealTimeProtectionEnabled) { 'critical' } elseif ($s.AntivirusSignatureAge -gt 7) { 'warning' } else { 'healthy' }
 $lastScan = @($s.QuickScanEndTime, $s.FullScanEndTime) | Where-Object { $_ } | Sort-Object -Descending | Select-Object -First 1
 $scanHistory = @(
@@ -39,12 +48,16 @@ $detections = @(Get-MpThreatDetection | Where-Object { $_.InitialDetectionTime -
   $threat = $threats[[string]$_.ThreatID]
   $severity = switch ([int]$threat.SeverityID) { 1 { 'low' } 2 { 'medium' } 4 { 'high' } 5 { 'critical' } default { 'unknown' } }
   $active = -not [bool]$_.ActionSuccess
+  $infectedFiles = @($_.Resources | ForEach-Object {
+    ([string]$_ -replace '^[^:]+:_', '').Trim()
+  } | Where-Object { $_ } | Sort-Object -Unique)
   [ordered]@{
     detection_uid = $uid
     threat_name = if ($threat.ThreatName) { [string]$threat.ThreatName } elseif ($_.ThreatName) { [string]$_.ThreatName } else { 'Microsoft Defender threat ' + $_.ThreatID }
     severity = $severity
     status = if ($active) { 'active' } else { 'remediated' }
     detected_at = $detectedAt.ToUniversalTime().ToString('o')
+    infected_files = $infectedFiles
     details = [ordered]@{
       threat_id = $_.ThreatID
       action_success = [bool]$_.ActionSuccess
@@ -57,36 +70,23 @@ $detections = @(Get-MpThreatDetection | Where-Object { $_.InitialDetectionTime -
   antivirus_enabled = [bool]$s.AntivirusEnabled
   realtime_protection_enabled = [bool]$s.RealTimeProtectionEnabled
   tamper_protection_enabled = [bool]$s.IsTamperProtected
+  firewall_domain_enabled = $firewall['Domain']
+  firewall_private_enabled = $firewall['Private']
+  firewall_public_enabled = $firewall['Public']
   signatures_updated_at = if ($s.AntivirusSignatureLastUpdated) { $s.AntivirusSignatureLastUpdated.ToUniversalTime().ToString('o') } else { $null }
   last_scan_at = if ($lastScan) { $lastScan.ToUniversalTime().ToString('o') } else { $null }
   scan_history = @($scanHistory)
   health_status = $health
-  details = [ordered]@{ engine_version = $s.AMEngineVersion; product_version = $s.AMProductVersion; signature_version = $s.AntivirusSignatureVersion; signature_age_days = $s.AntivirusSignatureAge }
+  details = [ordered]@{ antivirus_product_names = @($antivirusProducts); engine_version = $s.AMEngineVersion; product_version = $s.AMProductVersion; signature_version = $s.AntivirusSignatureVersion; signature_age_days = $s.AntivirusSignatureAge; running_mode = [string]$s.AMRunningMode; tamper_protection_source = [string]$s.TamperProtectionSource }
   detections = $detections
 } | ConvertTo-Json -Depth 4 -Compress`
 
 func collect() (api.DefenderStatus, error) {
-	powershell, err := exec.LookPath("powershell.exe")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	out, err := runPowerShell(ctx, statusScript)
 	if err != nil {
-		return api.DefenderStatus{}, fmt.Errorf("locate PowerShell: %w", err)
-	}
-	encoded := encodePowerShell(statusScript)
-	cmd := exec.Command(powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return api.DefenderStatus{}, fmt.Errorf("query Microsoft Defender: %w: %s", err, strings.TrimSpace(stderr.String()))
+		return api.DefenderStatus{}, fmt.Errorf("query Microsoft Defender: %w", err)
 	}
 	return decodeStatus(out)
-}
-
-func encodePowerShell(script string) string {
-	encoded := utf16.Encode([]rune(script))
-	buf := make([]byte, len(encoded)*2)
-	for i, value := range encoded {
-		buf[i*2] = byte(value)
-		buf[i*2+1] = byte(value >> 8)
-	}
-	return base64.StdEncoding.EncodeToString(buf)
 }

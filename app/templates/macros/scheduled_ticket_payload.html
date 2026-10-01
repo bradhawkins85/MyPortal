@@ -1,0 +1,55 @@
+{# Structured editor for the "Create scheduled ticket" task payload.
+
+   Renders friendly inputs (subject, description, priority, status, category)
+   that app/static/js/scheduled_ticket_payload.js serialises into the
+   ``jsonPayload`` textarea. The raw JSON stays available under "Advanced" so
+   less common keys (requester_id, module_slug, …) are kept and editable.
+
+   prefix      – id prefix, e.g. "task" or "bulk-task"
+   field_attrs – extra attributes for the wrapper (e.g. 'hidden' or a style)
+   help        – one-line context shown under the legend
+#}
+{% macro scheduled_ticket_payload(prefix, field_attrs='', help='') -%}
+<div class="form-field stp" id="{{ prefix }}-json-payload-field" {{ field_attrs | safe }} data-ticket-payload>
+  <fieldset class="stp__fieldset">
+    <legend class="form-label">Ticket to create</legend>
+    {% if help %}<p class="form-help">{{ help }}</p>{% endif %}
+    <div class="stp__grid" data-stp-fields hidden>
+      <div class="form-field stp__full">
+        <label class="form-label" for="{{ prefix }}-stp-subject">Subject</label>
+        <input class="form-input" id="{{ prefix }}-stp-subject" maxlength="255" placeholder="e.g. Monthly backup review" autocomplete="off" data-stp-field="subject" />
+        <p class="scf-error" data-stp-error="subject" hidden></p>
+      </div>
+      <div class="form-field stp__full">
+        <label class="form-label" for="{{ prefix }}-stp-description">Description <span class="scf-optional">optional</span></label>
+        <textarea class="form-input form-input--textarea" id="{{ prefix }}-stp-description" rows="4" placeholder="What should the technician check or do?" data-stp-field="description"></textarea>
+        <p class="form-help">Template variables such as <code>{{ '{{' }} report.slug.list {{ '}}' }}</code> are filled in when the ticket is created.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="{{ prefix }}-stp-priority">Priority</label>
+        <select class="form-input" id="{{ prefix }}-stp-priority" data-stp-field="priority">
+          <option value="urgent">Urgent</option>
+          <option value="high">High</option>
+          <option value="normal" selected>Normal</option>
+          <option value="low">Low</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="{{ prefix }}-stp-status">Status <span class="scf-optional">optional</span></label>
+        <input class="form-input" id="{{ prefix }}-stp-status" maxlength="64" placeholder="Default status" autocomplete="off" data-stp-field="status" />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="{{ prefix }}-stp-category">Category <span class="scf-optional">optional</span></label>
+        <input class="form-input" id="{{ prefix }}-stp-category" maxlength="255" autocomplete="off" data-stp-field="category" />
+      </div>
+    </div>
+    <details class="stp__advanced" data-stp-advanced open>
+      <summary>Advanced: edit as JSON</summary>
+      <label class="visually-hidden" for="{{ prefix }}-json-payload">Ticket payload JSON</label>
+      <textarea class="form-input form-input--textarea stp__json" id="{{ prefix }}-json-payload" name="jsonPayload" rows="7" spellcheck="false" placeholder='{"subject": "Example ticket", "description": "Ticket details", "priority": "normal"}'></textarea>
+      <p class="form-help">Also supports <code>requester_id</code>, <code>assigned_user_id</code>, <code>module_slug</code> and <code>external_reference</code>. Changes here update the fields above.</p>
+    </details>
+    <p class="scf-error" data-stp-error="json" hidden></p>
+  </fieldset>
+</div>
+{%- endmacro %}

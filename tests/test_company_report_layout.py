@@ -108,3 +108,23 @@ def test_build_does_not_execute_global_query_from_saved_layout(monkeypatch):
     report = asyncio.run(layout.build(1, {"id": 1}))
 
     assert report.rows[0]["columns"][0]["error"] == "Reporting slug not found."
+
+
+def test_stat_strip_display_is_preserved_and_builds_semantic_tiles():
+    rows = layout.normalise_layout(
+        [{"columns": [{"slug": "backup", "display": "stat_strip"}]}],
+        {"backup"},
+    )
+    assert rows[0]["columns"][0]["display"] == "stat_strip"
+
+    from app.services.stat_strips import build_items
+    items = build_items({
+        "columns": ["total_jobs", "pass", "fail", "unknown"],
+        "rows": [{"total_jobs": 8, "pass": 6, "fail": 1, "unknown": 1}],
+    })
+    assert [(item["label"], item["variant"]) for item in items] == [
+        ("Total Jobs", "total"),
+        ("Pass", "success"),
+        ("Fail", "danger"),
+        ("Unknown", "warning"),
+    ]

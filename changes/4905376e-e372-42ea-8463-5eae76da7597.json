@@ -1,0 +1,7 @@
+{
+  "guid": "4905376e-e372-42ea-8463-5eae76da7597",
+  "occurred_at": "2026-09-27T13:24Z",
+  "change_type": "Fix",
+  "summary": "Fix BCP template rendering with current Starlette",
+  "content_hash": "1fb9d32b3fd6090888f90631762942f04f1bfd7262bd0f36af053442111f1f9d"
+}

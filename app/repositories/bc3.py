@@ -103,7 +103,7 @@ async def update_template(
         UPDATE bc_template
         SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
         WHERE id = %s
-    """
+    """  # nosec B608
     await db.execute(query, tuple(params))
     return await get_template_by_id(template_id)
 
@@ -178,7 +178,7 @@ async def list_plans(
         {where_clause}
         ORDER BY updated_at DESC
         LIMIT %s OFFSET %s
-    """
+    """  # nosec B608
     return await db.fetch_all(query, tuple(params))
 
 
@@ -215,7 +215,7 @@ async def count_plans(
         SELECT COUNT(*) as count
         FROM bc_plan
         {where_clause}
-    """
+    """  # nosec B608
     result = await db.fetch_one(query, tuple(params))
     return result["count"] if result else 0
 
@@ -260,7 +260,7 @@ async def update_plan(
         UPDATE bc_plan
         SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
         WHERE id = %s
-    """
+    """  # nosec B608
     await db.execute(query, tuple(params))
     return await get_plan_by_id(plan_id)
 
@@ -394,7 +394,7 @@ async def update_version_export_hash(
         UPDATE bc_plan_version
         SET {', '.join(updates)}
         WHERE id = %s
-    """
+    """  # nosec B608
     await db.execute(query, tuple(params))
     return await get_version_by_id(version_id)
 
@@ -815,7 +815,7 @@ async def update_risk(
         UPDATE bc_risk
         SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
         WHERE id = %s
-    """
+    """  # nosec B608
     await db.execute(query, tuple(params))
     return await get_risk_by_id(risk_id)
 
@@ -904,7 +904,7 @@ async def update_contact(
         UPDATE bc_contact
         SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
         WHERE id = %s
-    """
+    """  # nosec B608
     await db.execute(query, tuple(params))
     return await get_contact_by_id(contact_id)
 
@@ -1009,7 +1009,7 @@ async def update_process(
         UPDATE bc_process
         SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
         WHERE id = %s
-    """
+    """  # nosec B608
     await db.execute(query, tuple(params))
     return await get_process_by_id(process_id)
 
@@ -1119,7 +1119,7 @@ async def update_vendor(
     
     params.append(vendor_id)
     query = (
-        "UPDATE bc_vendor SET "
+        "UPDATE bc_vendor SET "  # nosec B608
         + ", ".join(updates)
         + ", updated_at = CURRENT_TIMESTAMP WHERE id = %s"
     )

@@ -9,6 +9,27 @@ from app.schemas.compliance_checks import CheckStatus
 _DUE_SOON_DAYS = 14
 
 
+# Category codes owned by the ``gmp_glp`` core component.  When a deployment
+# disables it these categories, their checks and assignments are hidden.
+GMP_GLP_CATEGORY_CODES = ("GMP", "GLP")
+
+
+def _hidden_category_clause(alias: str) -> Optional[str]:
+    """Return a SQL predicate excluding GMP/GLP categories when disabled."""
+
+    from app.services.component_availability import get_component_availability
+
+    if get_component_availability().feature_pack_available("gmp_glp"):
+        return None
+    codes = ", ".join(f"'{code}'" for code in GMP_GLP_CATEGORY_CODES)
+    return f"{alias}.code NOT IN ({codes})"
+
+
+def _and_hidden(alias: str) -> str:
+    clause = _hidden_category_clause(alias)
+    return f" AND {clause}" if clause else ""
+
+
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -93,9 +114,10 @@ def _compute_next_review(last_checked_at: datetime, interval_days: int) -> datet
 async def list_categories() -> list[dict[str, Any]]:
     query = """
         SELECT id, code, name, description, is_system, created_at, updated_at
-        FROM compliance_check_categories
+        FROM compliance_check_categories cat
+        WHERE 1 = 1{hidden}
         ORDER BY name
-    """
+    """.format(hidden=_and_hidden("cat"))  # nosec B608
     rows = await db.fetch_all(query)
     result = []
     for row in rows:
@@ -109,9 +131,9 @@ async def list_categories() -> list[dict[str, Any]]:
 async def get_category(category_id: int) -> Optional[dict[str, Any]]:
     query = """
         SELECT id, code, name, description, is_system, created_at, updated_at
-        FROM compliance_check_categories
-        WHERE id = %(id)s
-    """
+        FROM compliance_check_categories cat
+        WHERE id = %(id)s{hidden}
+    """.format(hidden=_and_hidden("cat"))  # nosec B608
     row = await db.fetch_one(query, {"id": category_id})
     if not row:
         return None
@@ -126,7 +148,7 @@ async def create_category(*, code: str, name: str, description: Optional[str] = 
         INSERT INTO compliance_check_categories (code, name, description, is_system)
         VALUES (%(code)s, %(name)s, %(description)s, %(is_system)s)
     """
-    new_id = await db.execute(query, {"code": code, "name": name, "description": description, "is_system": int(is_system)})
+    new_id = await db.execute_returning_lastrowid(query, {"code": code, "name": name, "description": description, "is_system": int(is_system)})
     result = await get_category(new_id)
     if not result:
         raise RuntimeError("Failed to retrieve newly created category")
@@ -135,12 +157,18 @@ async def create_category(*, code: str, name: str, description: Optional[str] = 
 
 async def update_category(category_id: int, **kwargs: Any) -> Optional[dict[str, Any]]:
     allowed = {"name", "description"}
+    unknown = set(kwargs) - allowed
+    if unknown:
+        raise ValueError(f"Unsupported compliance category fields: {', '.join(sorted(unknown))}")
     updates = {k: v for k, v in kwargs.items() if k in allowed}
     if not updates:
         return await get_category(category_id)
     columns = ", ".join(f"{k} = %({k})s" for k in updates)
     params = {**updates, "id": category_id}
-    await db.execute(f"UPDATE compliance_check_categories SET {columns} WHERE id = %(id)s", params)
+    await db.execute(  # nosec B608
+        f"UPDATE compliance_check_categories SET {columns} WHERE id = %(id)s",  # nosec B608
+        params,
+    )
     return await get_category(category_id)
 
 
@@ -170,6 +198,9 @@ async def list_checks(
     if search:
         clauses.append("(cc.title LIKE %(search)s OR cc.code LIKE %(search)s)")
         params["search"] = f"%{search}%"
+    hidden = _hidden_category_clause("cat")
+    if hidden:
+        clauses.append(hidden)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     query = f"""
         SELECT
@@ -183,7 +214,7 @@ async def list_checks(
         INNER JOIN compliance_check_categories cat ON cat.id = cc.category_id
         {where}
         ORDER BY cat.name, cc.sort_order, cc.title
-    """
+    """  # nosec B608
     rows = await db.fetch_all(query, params)
     result = []
     for row in rows:
@@ -212,8 +243,8 @@ async def get_check(check_id: int) -> Optional[dict[str, Any]]:
             cat.description AS category_description, cat.is_system AS category_is_system
         FROM compliance_checks cc
         INNER JOIN compliance_check_categories cat ON cat.id = cc.category_id
-        WHERE cc.id = %(id)s
-    """
+        WHERE cc.id = %(id)s{hidden}
+    """.format(hidden=_and_hidden("cat"))  # nosec B608
     row = await db.fetch_one(query, {"id": check_id})
     if not row:
         return None
@@ -254,7 +285,7 @@ async def create_check(
            %(interval)s, %(evidence_required)s,
            %(is_predefined)s, %(is_active)s, %(sort_order)s, %(created_by)s)
     """
-    new_id = await db.execute(query, {
+    new_id = await db.execute_returning_lastrowid(query, {
         "category_id": category_id,
         "code": code,
         "title": title,
@@ -276,12 +307,18 @@ async def create_check(
 async def update_check(check_id: int, **kwargs: Any) -> Optional[dict[str, Any]]:
     allowed = {"title", "description", "guidance", "default_review_interval_days",
                "default_evidence_required", "is_active", "sort_order"}
+    unknown = set(kwargs) - allowed
+    if unknown:
+        raise ValueError(f"Unsupported compliance check fields: {', '.join(sorted(unknown))}")
     updates = {k: v for k, v in kwargs.items() if k in allowed}
     if not updates:
         return await get_check(check_id)
     columns = ", ".join(f"{k} = %({k})s" for k in updates)
     params = {**updates, "id": check_id}
-    await db.execute(f"UPDATE compliance_checks SET {columns} WHERE id = %(id)s", params)
+    await db.execute(  # nosec B608
+        f"UPDATE compliance_checks SET {columns} WHERE id = %(id)s",  # nosec B608
+        params,
+    )
     return await get_check(check_id)
 
 
@@ -336,6 +373,9 @@ async def list_assignments(
     if overdue_only:
         clauses.append("a.next_review_at IS NOT NULL AND a.next_review_at < %(now)s")
         params["now"] = _now_utc()
+    hidden = _hidden_category_clause("cat")
+    if hidden:
+        clauses.append(hidden)
     where = "WHERE " + " AND ".join(clauses)
     query = f"{_ASSIGNMENT_SELECT} {where} ORDER BY cc.category_id, cc.sort_order, cc.title"
     rows = await db.fetch_all(query, params)
@@ -343,7 +383,10 @@ async def list_assignments(
 
 
 async def get_assignment(company_id: int, assignment_id: int) -> Optional[dict[str, Any]]:
-    query = f"{_ASSIGNMENT_SELECT} WHERE a.id = %(id)s AND a.company_id = %(company_id)s"
+    query = (
+        f"{_ASSIGNMENT_SELECT} WHERE a.id = %(id)s AND a.company_id = %(company_id)s"
+        f"{_and_hidden('cat')}"
+    )
     row = await db.fetch_one(query, {"id": assignment_id, "company_id": company_id})
     return _build_assignment(row) if row else None
 
@@ -354,7 +397,7 @@ async def get_assignment_by_check(
     archived_filter = "" if include_archived else " AND a.archived = 0"
     query = (
         f"{_ASSIGNMENT_SELECT} WHERE a.company_id = %(company_id)s"
-        f" AND a.check_id = %(check_id)s{archived_filter}"
+        f" AND a.check_id = %(check_id)s{archived_filter}{_and_hidden('cat')}"
     )
     row = await db.fetch_one(query, {"company_id": company_id, "check_id": check_id})
     return _build_assignment(row) if row else None
@@ -390,8 +433,9 @@ async def create_assignment(
             updates["owner_user_id"] = owner_user_id
         columns = ", ".join(f"{k} = %({k})s" for k in updates)
         params: dict[str, Any] = {**updates, "id": existing["id"], "company_id": company_id}
+        # Columns are derived only from the fixed reactivation update map above; values remain bound.
         await db.execute(
-            f"UPDATE company_compliance_check_assignments SET {columns}"
+            f"UPDATE company_compliance_check_assignments SET {columns}"  # nosec B608
             f" WHERE id = %(id)s AND company_id = %(company_id)s",
             params,
         )
@@ -446,6 +490,9 @@ async def update_assignment(
 
     allowed = {"status", "review_interval_days", "last_checked_at", "notes",
                "evidence_summary", "owner_user_id", "archived"}
+    unknown = set(kwargs) - allowed
+    if unknown:
+        raise ValueError(f"Unsupported assignment fields: {', '.join(sorted(unknown))}")
     updates: dict[str, Any] = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
 
     old_status = existing.get("status")
@@ -481,8 +528,9 @@ async def update_assignment(
 
     columns = ", ".join(f"{k} = %({k})s" for k in updates)
     params = {**updates, "id": assignment_id, "company_id": company_id}
-    await db.execute(
-        f"UPDATE company_compliance_check_assignments SET {columns} WHERE id = %(id)s AND company_id = %(company_id)s",
+    # Assignment columns are constrained by the explicit allowlist above and company scoping stays bound.
+    await db.execute(  # nosec B608
+        f"UPDATE company_compliance_check_assignments SET {columns} WHERE id = %(id)s AND company_id = %(company_id)s",  # nosec B608
         params,
     )
 
@@ -516,16 +564,18 @@ async def get_assignment_summary(company_id: int) -> dict[str, Any]:
     query = """
         SELECT
             COUNT(*) AS total,
-            SUM(status = 'not_started') AS not_started,
-            SUM(status = 'in_progress') AS in_progress,
-            SUM(status = 'compliant') AS compliant,
-            SUM(status = 'non_compliant') AS non_compliant,
-            SUM(status = 'not_applicable') AS not_applicable,
-            SUM(next_review_at IS NOT NULL AND next_review_at < %(now)s) AS overdue_count,
-            SUM(next_review_at IS NOT NULL AND next_review_at >= %(now)s AND next_review_at < %(due_soon)s) AS due_soon_count
-        FROM company_compliance_check_assignments
-        WHERE company_id = %(company_id)s AND archived = 0
-    """
+            SUM(a.status = 'not_started') AS not_started,
+            SUM(a.status = 'in_progress') AS in_progress,
+            SUM(a.status = 'compliant') AS compliant,
+            SUM(a.status = 'non_compliant') AS non_compliant,
+            SUM(a.status = 'not_applicable') AS not_applicable,
+            SUM(a.next_review_at IS NOT NULL AND a.next_review_at < %(now)s) AS overdue_count,
+            SUM(a.next_review_at IS NOT NULL AND a.next_review_at >= %(now)s AND a.next_review_at < %(due_soon)s) AS due_soon_count
+        FROM company_compliance_check_assignments a
+        INNER JOIN compliance_checks cc ON cc.id = a.check_id
+        INNER JOIN compliance_check_categories cat ON cat.id = cc.category_id
+        WHERE a.company_id = %(company_id)s AND a.archived = 0{hidden}
+    """.format(hidden=_and_hidden("cat"))  # nosec B608
     row = await db.fetch_one(query, {"company_id": company_id, "now": now, "due_soon": due_soon_threshold})
     data: dict[str, Any] = dict(row) if row else {}
     total = int(data.get("total") or 0)
@@ -576,7 +626,7 @@ async def add_evidence(
         VALUES
           (%(assignment_id)s, %(evidence_type)s, %(title)s, %(content)s, %(file_path)s, %(uploaded_by)s)
     """
-    new_id = await db.execute(query, {
+    new_id = await db.execute_returning_lastrowid(query, {
         "assignment_id": assignment_id,
         "evidence_type": evidence_type,
         "title": title,

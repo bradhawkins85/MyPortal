@@ -5,8 +5,12 @@
 
   function loadVisibleColumns(defaultColumns) {
     try {
-      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-      if (Array.isArray(stored) && stored.every((item) => typeof item === 'string')) {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw === null) {
+        return defaultColumns;
+      }
+      const stored = JSON.parse(raw);
+      if (Array.isArray(stored) && stored.length > 0 && stored.every((item) => typeof item === 'string')) {
         return stored;
       }
     } catch (err) {

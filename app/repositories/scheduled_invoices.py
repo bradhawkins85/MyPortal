@@ -1,23 +1,69 @@
 """Repository for managing scheduled invoices."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
 from app.core.database import db
 
 
+_ALLOWED_PATCH_COLUMNS = frozenset({
+    "status",
+    "reminder_ticket_id",
+    "reminder_reply_id",
+    "reminder_sent_at",
+    "reminder_email_sent_at",
+    "reminder_error",
+    "invoice_id",
+    "invoice_number",
+    "invoice_sent_at",
+    "invoice_error",
+})
+
+
 def _normalize_scheduled_invoice(row: dict[str, Any]) -> dict[str, Any]:
     """Normalize a scheduled invoice row from the database."""
-    return {
+    invoice = {
         "id": int(row["id"]),
         "customer_id": int(row["customer_id"]),
         "scheduled_for_date": row["scheduled_for_date"],
+        "renewal_cycle": str(row.get("renewal_cycle") or "annual"),
         "status": row["status"],
+        "reminder_ticket_id": (
+            int(row["reminder_ticket_id"])
+            if row.get("reminder_ticket_id") is not None
+            else None
+        ),
+        "reminder_reply_id": (
+            int(row["reminder_reply_id"])
+            if row.get("reminder_reply_id") is not None
+            else None
+        ),
+        "invoice_id": int(row["invoice_id"]) if row.get("invoice_id") is not None else None,
+        "invoice_number": row.get("invoice_number"),
+        "reminder_error": row.get("reminder_error"),
+        "invoice_error": row.get("invoice_error"),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }
+    for key in (
+        "created_at",
+        "updated_at",
+        "reminder_sent_at",
+        "reminder_email_sent_at",
+        "invoice_sent_at",
+    ):
+        value = row.get(key)
+        if value is None:
+            invoice[key] = None
+            continue
+        if not isinstance(value, datetime):
+            value = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        invoice[key] = value
+    return invoice
 
 
 def _normalize_invoice_line(row: dict[str, Any]) -> dict[str, Any]:
@@ -26,7 +72,9 @@ def _normalize_invoice_line(row: dict[str, Any]) -> dict[str, Any]:
         "id": int(row["id"]),
         "scheduled_invoice_id": int(row["scheduled_invoice_id"]),
         "subscription_id": row["subscription_id"],
-        "product_id": int(row["product_id"]),
+        "product_id": (
+            int(row["product_id"]) if row.get("product_id") is not None else None
+        ),
         "term_start": row["term_start"],
         "term_end": row["term_end"],
         "price": Decimal(str(row["price"])),
@@ -49,15 +97,15 @@ async def get_scheduled_invoice(invoice_id: int) -> dict[str, Any] | None:
 
 
 async def get_scheduled_invoice_by_customer_and_date(
-    customer_id: int, scheduled_date: date
+    customer_id: int, scheduled_date: date, renewal_cycle: str = "annual"
 ) -> dict[str, Any] | None:
     """Get a scheduled invoice for a specific customer and date."""
     row = await db.fetch_one(
         """
         SELECT * FROM scheduled_invoices
-        WHERE customer_id = %s AND scheduled_for_date = %s
+        WHERE customer_id = %s AND scheduled_for_date = %s AND renewal_cycle = %s
         """,
-        (customer_id, scheduled_date),
+        (customer_id, scheduled_date, renewal_cycle),
     )
     if not row:
         return None
@@ -98,7 +146,7 @@ async def list_scheduled_invoices(
         SELECT * FROM scheduled_invoices
         {where_clause}
         ORDER BY scheduled_for_date ASC
-    """
+    """  # nosec B608
     
     if limit is not None:
         query += " LIMIT %s"
@@ -109,19 +157,23 @@ async def list_scheduled_invoices(
 
 
 async def create_scheduled_invoice(
-    customer_id: int, scheduled_for_date: date, status: str = "scheduled"
+    customer_id: int,
+    scheduled_for_date: date,
+    status: str = "scheduled",
+    renewal_cycle: str = "annual",
 ) -> dict[str, Any]:
     """Create a new scheduled invoice."""
     await db.execute(
         """
-        INSERT INTO scheduled_invoices (customer_id, scheduled_for_date, status)
-        VALUES (%s, %s, %s)
+        INSERT INTO scheduled_invoices (
+            customer_id, scheduled_for_date, status, renewal_cycle
+        ) VALUES (%s, %s, %s, %s)
         """,
-        (customer_id, scheduled_for_date, status),
+        (customer_id, scheduled_for_date, status, renewal_cycle),
     )
     
     created = await get_scheduled_invoice_by_customer_and_date(
-        customer_id, scheduled_for_date
+        customer_id, scheduled_for_date, renewal_cycle
     )
     if not created:
         raise RuntimeError("Failed to create scheduled invoice")
@@ -138,6 +190,31 @@ async def update_scheduled_invoice_status(invoice_id: int, status: str) -> None:
         """,
         (status, invoice_id),
     )
+
+
+async def patch_scheduled_invoice(invoice_id: int, **updates: Any) -> dict[str, Any]:
+    """Patch allowed scheduled invoice fields."""
+    unknown = set(updates) - _ALLOWED_PATCH_COLUMNS
+    if unknown:
+        raise ValueError(
+            f"Unsupported scheduled invoice fields: {', '.join(sorted(unknown))}"
+        )
+    if not updates:
+        existing = await get_scheduled_invoice(invoice_id)
+        if not existing:
+            raise ValueError("Scheduled invoice not found")
+        return existing
+    columns = ", ".join(f"{column} = %s" for column in updates.keys())
+    params = list(updates.values()) + [invoice_id]
+    # Columns are produced by the explicit scheduled invoice patch allowlist above; values remain bound.
+    await db.execute(  # nosec B608
+        f"UPDATE scheduled_invoices SET {columns} WHERE id = %s",  # nosec B608
+        tuple(params),
+    )
+    updated = await get_scheduled_invoice(invoice_id)
+    if not updated:
+        raise ValueError("Scheduled invoice not found after update")
+    return updated
 
 
 async def get_invoice_lines(invoice_id: int) -> list[dict[str, Any]]:
@@ -157,7 +234,7 @@ async def add_invoice_line(
     *,
     invoice_id: int,
     subscription_id: str,
-    product_id: int,
+    product_id: int | None,
     term_start: date,
     term_end: date,
     price: Decimal,
@@ -171,6 +248,14 @@ async def add_invoice_line(
         ) VALUES (%s, %s, %s, %s, %s, %s)
         """,
         (invoice_id, subscription_id, product_id, term_start, term_end, price),
+    )
+
+
+async def delete_invoice_lines(invoice_id: int) -> None:
+    """Delete all lines for a scheduled invoice."""
+    await db.execute(
+        "DELETE FROM scheduled_invoice_lines WHERE scheduled_invoice_id = %s",
+        (invoice_id,),
     )
 
 

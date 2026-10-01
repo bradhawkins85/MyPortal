@@ -16,6 +16,7 @@ from app.features.staff import handlers as staff_handlers
 
 EXPECTED = {
     ("GET", "/staff"),
+    ("GET", "/staff/addstaff"),
     ("GET", "/staff/workflows/onboarding"),
     ("GET", "/staff/workflows/onboarding/policy"),
     ("POST", "/staff/workflows/onboarding/policy"),

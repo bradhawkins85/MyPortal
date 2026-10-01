@@ -162,7 +162,7 @@ async def list_events(
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     params.append(limit)
     rows = await db.fetch_all(
-        f"SELECT * FROM webhook_events {where} ORDER BY updated_at DESC LIMIT %s",
+        f"SELECT * FROM webhook_events {where} ORDER BY updated_at DESC LIMIT %s",  # nosec B608
         tuple(params),
     )
     return [_normalise_event(row) for row in rows]
@@ -252,6 +252,21 @@ async def delete_succeeded_before(cutoff: datetime) -> int:
             """,
             (threshold,),
         )
+    return count
+
+
+async def delete_before(cutoff: datetime) -> int:
+    """Delete entries whose creation timestamp is older than ``cutoff``.
+
+    ``created_at`` defines retention age so delivery retries cannot extend an
+    entry's lifetime. Attempt/result rows are removed by the foreign key's
+    ``ON DELETE CASCADE``.
+    """
+    threshold = _ensure_naive_utc(cutoff)
+    row = await db.fetch_one("SELECT COUNT(*) AS count FROM webhook_events WHERE created_at < %s", (threshold,))
+    count = int(row["count"]) if row else 0
+    if count:
+        await db.execute("DELETE FROM webhook_events WHERE created_at < %s", (threshold,))
     return count
 
 

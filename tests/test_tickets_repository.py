@@ -126,6 +126,16 @@ class _AutomationContextDB:
         return []
 
 
+class _AssetAutomationContextDB:
+    async def fetch_one(self, sql, params):
+        assert params == (42,)
+        if "FROM ticket_assets" in sql:
+            return {"linked_asset_count": 2}
+        if "FROM ticket_suggested_assets" in sql:
+            return {"suggested_asset_count": 3}
+        return {}
+
+
 class _ReplaceTicketAssetsDB:
     def __init__(self, existing_rows, final_rows):
         self.fetch_calls: list[tuple[str, tuple]] = []
@@ -386,6 +396,16 @@ async def test_automation_filter_context_derives_latest_reply_kind(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_automation_filter_context_includes_asset_counts(monkeypatch):
+    monkeypatch.setattr(tickets, "db", _AssetAutomationContextDB())
+
+    context = await tickets.get_automation_filter_context(42)
+
+    assert context["linked_asset_count"] == 2
+    assert context["suggested_asset_count"] == 3
+
+
+@pytest.mark.anyio
 async def test_automation_filter_context_treats_shipment_reply_as_system(monkeypatch):
     dummy_db = _AutomationContextDB()
     monkeypatch.setattr(tickets, "db", dummy_db)
@@ -544,6 +564,69 @@ async def test_list_tickets_for_user_supports_multiple_statuses(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_list_tickets_for_user_searches_ticket_and_comment_bodies(monkeypatch):
+    class _SqliteListTicketsDB(_ListTicketsDB):
+        @staticmethod
+        def is_sqlite() -> bool:
+            return True
+
+    dummy_db = _SqliteListTicketsDB()
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    await tickets.list_tickets_for_user(
+        5,
+        company_ids=[12],
+        search="Dynamics 365",
+    )
+
+    assert "LOWER(t.subject) LIKE LOWER(%s)" in dummy_db.fetch_sql
+    assert "LOWER(COALESCE(t.description, '')) LIKE LOWER(%s)" in dummy_db.fetch_sql
+    assert "FROM ticket_replies AS tr_search" in dummy_db.fetch_sql
+    assert "tr_search.ticket_id = t.id" in dummy_db.fetch_sql
+    assert "LOWER(COALESCE(tr_search.body, '')) LIKE LOWER(%s)" in dummy_db.fetch_sql
+    assert "WHERE t.requester_id = %s" in dummy_db.fetch_sql
+    assert "tw.ticket_id = t.id AND tw.user_id = %s" in dummy_db.fetch_sql
+    assert "t.company_id IN (%s)" in dummy_db.fetch_sql
+    assert dummy_db.fetch_params == (
+        5,
+        5,
+        "%Dynamics 365%",
+        "%Dynamics 365%",
+        "%Dynamics 365%",
+        "%Dynamics 365%",
+        5,
+        12,
+        25,
+        0,
+    )
+
+
+@pytest.mark.anyio
+async def test_mysql_ticket_search_uses_fulltext_index_for_comments(monkeypatch):
+    class _MysqlListTicketsDB(_ListTicketsDB):
+        @staticmethod
+        def is_sqlite() -> bool:
+            return False
+
+    dummy_db = _MysqlListTicketsDB()
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    await tickets.list_tickets_for_user(5, search="Dynamics 365")
+
+    assert "MATCH (t.subject, t.description, t.external_reference)" in dummy_db.fetch_sql
+    assert "MATCH (tr_search.body) AGAINST (%s IN BOOLEAN MODE)" in dummy_db.fetch_sql
+    assert dummy_db.fetch_params == (
+        5,
+        5,
+        "+Dynamics* +365*",
+        "+Dynamics* +365*",
+        5,
+        25,
+        0,
+    )
+
+
+@pytest.mark.anyio
 async def test_count_tickets_for_user_supports_multiple_statuses(monkeypatch):
     dummy_db = _CountTicketsDB(count=3)
     monkeypatch.setattr(tickets, "db", dummy_db)
@@ -603,6 +686,17 @@ async def test_update_ticket_allows_updated_at_override(monkeypatch):
     assert dummy_db.execute_params[0] == "resolved"
     assert dummy_db.execute_params[-1] == 1
     assert dummy_db.execute_params[-2] == override
+
+
+@pytest.mark.anyio
+async def test_update_ticket_rejects_invalid_sql_field_name(monkeypatch):
+    dummy_db = _UpdateTicketDB({"id": 1})
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    with pytest.raises(ValueError, match="Invalid ticket field name"):
+        await tickets.update_ticket(1, **{"status = 'closed' --": "resolved"})
+
+    assert dummy_db.execute_sql is None
 
 
 @pytest.mark.anyio

@@ -13,6 +13,7 @@
     </div>
     <div class="page-actions">
       <a href="/bcp" class="btn btn-secondary">Back to Overview</a>
+      {% if user.is_super_admin %}<a href="/bcp/library" class="btn btn-secondary">Global Library</a>{% endif %}
       {% if can_edit %}
       <button type="button" class="btn btn-primary" onclick="document.getElementById('createRiskModal').showModal()">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
@@ -175,6 +176,12 @@
     </div>
   </section>
 
+  {% if can_edit %}
+  <section class="card"><div class="card-header"><h2 class="card-title">Available Global Risks</h2></div><div class="card-body"><p class="text-muted">Select a centrally managed risk to add a customer-specific copy to this plan.</p>
+    {% if available_global_risks %}<div class="table-responsive"><table class="table"><thead><tr><th>Assessment</th><th>Action</th></tr></thead><tbody>{% for item in available_global_risks %}<tr><td><strong>{{ item.description if 'risk' == 'risk' else item.name }}</strong></td><td><form method="post" action="/bcp/available/risk/{{ item.id }}/add"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><button class="btn btn-sm btn-primary">Add to this customer</button></form></td></tr>{% endfor %}</tbody></table></div>{% else %}<p>All available global assessments have already been added.</p>{% endif %}
+  </div></section>
+  {% endif %}
+
   <!-- Risk List -->
   <section class="card">
     <div class="card-header">
@@ -247,7 +254,7 @@
               <td>
                 {% if can_edit %}
                 <div class="action-buttons">
-                  <button type="button" class="btn btn-sm btn-secondary" onclick="editRisk({{ risk.id }}, '{{ risk.description|replace("'", "\\'") }}', {{ risk.likelihood }}, {{ risk.impact }}, '{{ (risk.preventative_actions or '')|replace("'", "\\'") }}', '{{ (risk.contingency_plans or '')|replace("'", "\\'") }}')">
+                  <button type="button" class="btn btn-sm btn-secondary" data-bcp-action="edit-risk" data-bcp-payload='{{ {"id": risk.id, "description": risk.description, "likelihood": risk.likelihood, "impact": risk.impact, "preventative_actions": risk.preventative_actions or "", "contingency_plans": risk.contingency_plans or ""} | tojson | e }}'>
                     Edit
                   </button>
                   <form method="post" action="/bcp/risks/{{ risk.id }}/delete" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this risk?');">
@@ -375,7 +382,7 @@
 
 <script>
 function editRisk(id, description, likelihood, impact, preventative_actions, contingency_plans) {
-  document.getElementById('editRiskForm').action = '/bcp/risks/' + id + '/update';
+  document.getElementById('editRiskForm').action = '/bcp/risks/' + encodeURIComponent(String(id)) + '/update';
   document.getElementById('edit_description').value = description;
   document.getElementById('edit_likelihood').value = likelihood;
   document.getElementById('edit_impact').value = impact;
@@ -441,7 +448,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Function to edit a risk
 function editRisk(id, description, likelihood, impact, preventativeActions, contingencyPlans) {
-  document.getElementById('editRiskForm').action = '/bcp/risks/' + id + '/update';
+  document.getElementById('editRiskForm').action = '/bcp/risks/' + encodeURIComponent(String(id)) + '/update';
   document.getElementById('edit_description').value = description;
   document.getElementById('edit_likelihood').value = likelihood;
   document.getElementById('edit_impact').value = impact;

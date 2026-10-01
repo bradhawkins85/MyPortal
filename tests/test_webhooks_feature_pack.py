@@ -99,9 +99,11 @@ def test_admin_webhooks_loads_larger_searchable_history_window():
     signature = inspect.signature(webhooks_routes.admin_webhooks)
 
     assert signature.parameters["event_limit"].default.default == 1000
+    assert signature.parameters["status"].default == ""
     source = inspect.getsource(webhooks_routes.admin_webhooks)
     assert "le=5000" in source
     assert "search=q" in source
+    assert "status=status_filter" in source
 
 
 def test_webhook_history_template_exposes_server_side_search_controls():
@@ -111,5 +113,7 @@ def test_webhook_history_template_exposes_server_side_search_controls():
 
     assert 'name="q"' in template
     assert 'name="event_limit"' in template
+    assert 'name="status"' in template
     assert "Search history" in template
     assert "Increase the history window" in template
+    assert "Dead-letter queue" in template

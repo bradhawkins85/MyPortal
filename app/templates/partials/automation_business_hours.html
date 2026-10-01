@@ -1,0 +1,21 @@
+{# Expects: values (form values), kind ("event" | "scheduled") #}
+{% set bh_mode = values.get('businessHoursMode', '') %}
+{% set bh_source = values.get('businessHoursSource', 'company') or 'company' %}
+<fieldset class="form-field">
+  <legend class="form-label">Business hours</legend>
+  <label class="form-checkbox"><input type="radio" name="businessHoursMode" value="" {% if not bh_mode %}checked{% endif %} /> Run at any time</label>
+  {% if kind == 'event' %}
+    <label class="form-checkbox"><input type="radio" name="businessHoursMode" value="pause" {% if bh_mode == 'pause' %}checked{% endif %} /> Outside business hours, pause until business hours open, then run</label>
+  {% endif %}
+  <label class="form-checkbox"><input type="radio" name="businessHoursMode" value="skip" {% if bh_mode == 'skip' %}checked{% endif %} /> Outside business hours, skip this automation</label>
+  <label class="form-label" for="automation-business-hours-source">Use the business hours of</label>
+  <select id="automation-business-hours-source" name="businessHoursSource" class="form-input">
+    <option value="company" {% if bh_source == 'company' %}selected{% endif %}>The ticket's company (falls back to global hours)</option>
+    <option value="global" {% if bh_source == 'global' %}selected{% endif %}>Our business (global hours)</option>
+  </select>
+  <p class="form-help">
+    Use the company's hours to avoid messaging customers when they are closed, or global hours to hold actions while your team is away.
+    {% if kind == 'event' %}Paused runs keep the original event details and run when business hours next open.{% else %}Ticket scans check each matched ticket's company hours.{% endif %}
+    Configure schedules under <a href="/admin/business-hours">Business hours</a>. Filters can also use <code>business_hours.company_open</code> and <code>business_hours.global_open</code>.
+  </p>
+</fieldset>

@@ -2,7 +2,33 @@
 {% from "macros/header.html" import page_header_actions %}
 {% from "macros/tables.html" import table_column_picker %}
 
-{% block header_title %}<span class="header__title-text">Companies</span>{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Companies</span>
+    {% if is_super_admin %}
+      <div class="page-header-toolbar">
+        <label class="visually-hidden" for="companies-filter">Filter companies</label>
+        <input
+          id="companies-filter"
+          type="search"
+          class="form-input page-header-toolbar__search"
+          placeholder="Filter companies"
+          data-table-filter="companies-table"
+        />
+        <label class="page-header-toolbar__check" for="show-archived">
+          <input
+            id="show-archived"
+            type="checkbox"
+            {% if show_archived %}checked{% endif %}
+            onchange="window.location.href = this.checked ? '/admin/companies?show_archived=true' : '/admin/companies';"
+          />
+          <span>Show archived</span>
+        </label>
+        {{ table_column_picker("companies", companies_columns) }}
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}
 
 {% block header_actions %}
   {{ page_header_actions([
@@ -36,31 +62,6 @@
   <div class="admin-grid admin-grid--columns">
     {% if is_super_admin %}
       <section class="card card--panel admin-grid__full">
-        <header class="card__header">
-          <div class="card__controls">
-            <div class="form-field form-field--checkbox" style="margin-right: 1rem;">
-              <label class="checkbox" for="show-archived">
-                <input 
-                  id="show-archived" 
-                  type="checkbox" 
-                  {% if show_archived %}checked{% endif %}
-                  onchange="window.location.href = this.checked ? '/admin/companies?show_archived=true' : '/admin/companies';"
-                />
-                <span>Show archived</span>
-              </label>
-            </div>
-            <input
-              type="search"
-              class="form-input card__control"
-              placeholder="Filter companies"
-              aria-label="Filter companies"
-              data-table-filter="companies-table"
-            />
-          </div>
-          <div class="card__controls card__controls--right">
-            {{ table_column_picker("companies", companies_columns) }}
-          </div>
-        </header>
         <div class="table-wrapper">
           <table class="table" id="companies-table" data-table data-table-id="companies" data-page-size-max="25">
             <thead>

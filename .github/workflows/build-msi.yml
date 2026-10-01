@@ -57,11 +57,14 @@ jobs:
 
       - name: Build Windows binaries
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}
         run: |
           $env:GOOS      = "windows"
           $env:GOARCH    = "amd64"
           $env:CGO_ENABLED = "0"
-          $version = "${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}"
+          $version = $env:RELEASE_TAG
+          if ($version -notmatch '^[A-Za-z0-9][A-Za-z0-9._/+-]{0,127}$') { throw "Invalid tag: $version" }
           $ldflags = "-X 'github.com/bradhawkins85/myportal-tray/internal/updater.AgentVersion=$version'"
 
           New-Item -ItemType Directory -Force -Path dist\windows | Out-Null
@@ -156,9 +159,12 @@ jobs:
 
       - name: Build MSI
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}
         run: |
           $binDir = (Resolve-Path dist\windows).Path
-          $version = "${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}"
+          $version = $env:RELEASE_TAG
+          if ($version -notmatch '^[A-Za-z0-9][A-Za-z0-9._/+-]{0,127}$') { throw "Invalid tag: $version" }
           $msiVersion = ($version -replace '^v', '' -replace '[^0-9.].*$', '')
           if ([string]::IsNullOrWhiteSpace($msiVersion)) {
             $msiVersion = '0.0.0'
@@ -197,7 +203,7 @@ jobs:
           $certificate.Dispose()
 
       - name: Upload MSI to release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}
           files: tray/dist/windows/myportal-tray.msi

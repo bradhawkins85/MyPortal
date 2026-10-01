@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
+from app import main
 from app.api.dependencies import auth as auth_dependencies
 from app.security.session import SessionData
 
@@ -60,3 +61,7 @@ def test_get_current_user_allows_totp_setup_api_without_totp(monkeypatch):
     user = asyncio.run(auth_dependencies.get_current_user(_request("/auth/totp/setup"), _session()))
 
     assert user["id"] == 42
+
+
+def test_only_totp_page_is_allowed_during_page_enrolment():
+    assert main.TOTP_ENROLLMENT_ALLOWED_PAGE_PATHS == {main.TOTP_ENROLLMENT_PAGE_PATH}

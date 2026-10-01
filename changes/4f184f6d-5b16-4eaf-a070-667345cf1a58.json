@@ -1,0 +1,7 @@
+{
+  "guid": "4f184f6d-5b16-4eaf-a070-667345cf1a58",
+  "occurred_at": "2026-09-26T00:00Z",
+  "change_type": "Feature",
+  "summary": "Added source-aware, idempotent asset integration provenance and ambiguous-match quarantine.",
+  "content_hash": "ade9a35074aa69a42816020a0e4b674c88db7289a027f950b59c58f1d0917dc4"
+}

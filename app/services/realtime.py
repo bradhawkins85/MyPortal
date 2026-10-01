@@ -7,7 +7,7 @@ import secrets
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable, Mapping
+from typing import Any, Awaitable, Callable, Iterable, Mapping
 
 from fastapi import WebSocket
 from redis.asyncio import Redis
@@ -15,6 +15,91 @@ from redis.asyncio.client import PubSub
 from redis.exceptions import RedisError
 
 from app.core.logging import log_warning
+
+_CHAT_ROOM_TOPIC_PREFIX = "chat:room:"
+
+
+@dataclass(slots=True, frozen=True)
+class ConnectionAccess:
+    """Identity attached to an authenticated realtime websocket connection.
+
+    ``is_privileged`` connections (super admins and helpdesk technicians)
+    receive every event.  Other connections only receive chat room events
+    for rooms they created or participate in.
+    """
+
+    user_id: int | None
+    is_privileged: bool = False
+
+
+RoomAccessResolver = Callable[[int], Awaitable["set[int] | None"]]
+
+
+async def _default_room_member_ids(room_id: int) -> set[int] | None:
+    """Return the portal user ids allowed to see ``room_id`` chat events."""
+
+    from app.repositories import chat as chat_repo
+
+    room = await chat_repo.get_room(room_id)
+    if not room:
+        return None
+    allowed: set[int] = set()
+    creator = room.get("created_by_user_id")
+    if creator is not None:
+        try:
+            allowed.add(int(creator))
+        except (TypeError, ValueError):
+            log_warning(
+                "Ignoring invalid chat room creator id during realtime access resolution",
+                room_id=room_id,
+                creator=creator,
+            )
+    for participant in await chat_repo.get_participants(room_id):
+        user_id = participant.get("user_id") if isinstance(participant, Mapping) else None
+        if user_id is None or participant.get("left_at"):
+            continue
+        try:
+            allowed.add(int(user_id))
+        except (TypeError, ValueError):
+            continue
+    return allowed
+
+
+def _chat_room_ids(payload: Mapping[str, Any]) -> set[int]:
+    room_ids: set[int] = set()
+    topics = payload.get("topics")
+    if isinstance(topics, (list, tuple)):
+        for topic in topics:
+            if isinstance(topic, str) and topic.startswith(_CHAT_ROOM_TOPIC_PREFIX):
+                suffix = topic[len(_CHAT_ROOM_TOPIC_PREFIX):]
+                if suffix.isdigit():
+                    room_ids.add(int(suffix))
+    data = payload.get("data")
+    if isinstance(data, Mapping) and (room_ids or "message" in data):
+        raw = data.get("room_id")
+        try:
+            if raw is not None:
+                room_ids.add(int(raw))
+        except (TypeError, ValueError):
+            # Ignore invalid room_id values during best-effort room id extraction.
+            pass
+    return room_ids
+
+
+def _redacted_chat_payload(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Strip room-scoped topics and data for connections without room access."""
+
+    topics = payload.get("topics")
+    remaining = [
+        topic
+        for topic in (topics if isinstance(topics, (list, tuple)) else [])
+        if isinstance(topic, str) and not topic.startswith(_CHAT_ROOM_TOPIC_PREFIX)
+    ]
+    if not remaining:
+        return None
+    redacted = {key: value for key, value in payload.items() if key not in {"data", "topics"}}
+    redacted["topics"] = remaining
+    return redacted
 
 
 @dataclass(slots=True)
@@ -29,8 +114,9 @@ class BroadcastResult:
 class RefreshNotifier:
     """Track websocket connections and broadcast refresh instructions."""
 
-    def __init__(self) -> None:
-        self._connections: set[WebSocket] = set()
+    def __init__(self, *, room_access_resolver: RoomAccessResolver | None = None) -> None:
+        self._connections: dict[WebSocket, ConnectionAccess | None] = {}
+        self._room_access_resolver = room_access_resolver or _default_room_member_ids
         self._lock = asyncio.Lock()
         self._redis: Redis | None = None
         self._pubsub: PubSub | None = None
@@ -58,45 +144,77 @@ class RefreshNotifier:
                 await self._listener_task
             self._listener_task = None
         if self._pubsub is not None:
-            try:
+            with suppress(Exception):
                 await self._pubsub.unsubscribe(self._channel)
-            except Exception:  # pragma: no cover - defensive cleanup
-                pass
-            try:
+            with suppress(Exception):
                 await self._pubsub.close()
-            except Exception:  # pragma: no cover - defensive cleanup
-                pass
             self._pubsub = None
 
-    async def connect(self, websocket: WebSocket) -> None:
-        """Accept a websocket and track it for future broadcasts."""
+    async def connect(
+        self,
+        websocket: WebSocket,
+        *,
+        access: ConnectionAccess | None = None,
+    ) -> None:
+        """Accept a websocket and track it for future broadcasts.
+
+        ``access`` identifies the authenticated user so chat room events can
+        be filtered per connection.  Connections without access information
+        never receive chat room message bodies.
+        """
 
         await websocket.accept()
         async with self._lock:
-            self._connections.add(websocket)
+            self._connections[websocket] = access
 
     async def disconnect(self, websocket: WebSocket) -> None:
         """Stop tracking the supplied websocket connection."""
 
         async with self._lock:
-            self._connections.discard(websocket)
+            self._connections.pop(websocket, None)
+
+    async def _resolve_room_members(self, room_ids: set[int]) -> dict[int, set[int]]:
+        members: dict[int, set[int]] = {}
+        for room_id in room_ids:
+            try:
+                allowed = await self._room_access_resolver(room_id)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_warning("Failed to resolve chat room access for refresh", room_id=room_id, error=str(exc))
+                allowed = None
+            members[room_id] = allowed or set()
+        return members
 
     async def _broadcast_payload(self, payload: Mapping[str, Any]) -> BroadcastResult:
         async with self._lock:
-            targets = list(self._connections)
+            targets = list(self._connections.items())
         if not targets:
             return BroadcastResult(attempted=0, delivered=0, dropped=0)
+        room_ids = _chat_room_ids(payload)
+        room_members: dict[int, set[int]] = {}
+        redacted: dict[str, Any] | None = None
+        if room_ids and any(not (access and access.is_privileged) for _, access in targets):
+            room_members = await self._resolve_room_members(room_ids)
+            redacted = _redacted_chat_payload(payload)
+        attempted = 0
         delivered = 0
         dropped = 0
-        for websocket in targets:
+        for websocket, access in targets:
+            outgoing: Mapping[str, Any] | None = payload
+            if room_ids and not (access and access.is_privileged):
+                user_id = access.user_id if access else None
+                if user_id is None or not all(user_id in room_members.get(rid, set()) for rid in room_ids):
+                    outgoing = redacted
+            if outgoing is None:
+                continue
+            attempted += 1
             try:
-                await websocket.send_json(payload)
+                await websocket.send_json(outgoing)
                 delivered += 1
             except Exception:
                 dropped += 1
                 async with self._lock:
-                    self._connections.discard(websocket)
-        return BroadcastResult(attempted=len(targets), delivered=delivered, dropped=dropped)
+                    self._connections.pop(websocket, None)
+        return BroadcastResult(attempted=attempted, delivered=delivered, dropped=dropped)
 
     async def broadcast_refresh(
         self,

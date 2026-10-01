@@ -1,0 +1,7 @@
+{
+  "guid": "70b92663-3bcf-46f1-b768-e822abe1e0c2",
+  "occurred_at": "2026-10-01T00:00Z",
+  "change_type": "Improvement",
+  "summary": "Move page search boxes, filters, column pickers and page buttons into the page header bar across the portal, matching the ticket list layout.",
+  "content_hash": "d95b7a91e7a56aa5b64af7c61ade0e54080c13838dee0c495a0e1a9cf438c6fc"
+}

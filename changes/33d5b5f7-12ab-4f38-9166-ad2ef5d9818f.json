@@ -1,0 +1,7 @@
+{
+  "guid": "33d5b5f7-12ab-4f38-9166-ad2ef5d9818f",
+  "occurred_at": "2026-09-16T00:00Z",
+  "change_type": "Fix",
+  "summary": "Added current stock availability and ordering warnings to PDF quote exports.",
+  "content_hash": "e71eff106277a88bb135abf17af9cd7b37f796c2e2c9c312183c10971a27dd65"
+}

@@ -5,7 +5,9 @@ from app.services import staff_onboarding_workflows as workflows
 
 
 @pytest.mark.anyio
-async def test_export_onedrive_creates_upn_folder_copies_children_and_marks_read_only(monkeypatch):
+async def test_export_onedrive_verifies_copies_without_claiming_owner_read_only(
+    monkeypatch,
+):
     calls = {"get": [], "get_all": [], "post_location": [], "post": []}
 
     monkeypatch.setattr(
@@ -16,7 +18,9 @@ async def test_export_onedrive_creates_upn_folder_copies_children_and_marks_read
     monkeypatch.setattr(
         workflows,
         "_resolve_staff_m365_user",
-        AsyncMock(return_value={"id": "user-id", "userPrincipalName": "user@example.com"}),
+        AsyncMock(
+            return_value={"id": "user-id", "userPrincipalName": "user@example.com"}
+        ),
     )
 
     async def fake_graph_get(token, url):
@@ -33,14 +37,18 @@ async def test_export_onedrive_creates_upn_folder_copies_children_and_marks_read
     async def fake_graph_post(token, url, payload):
         calls["post"].append((token, url, payload))
         if url.endswith("/children"):
-            return {"id": "dest-folder-id", "name": payload["name"], "webUrl": "https://sharepoint/export"}
+            return {
+                "id": "dest-folder-id",
+                "name": payload["name"],
+                "webUrl": "https://sharepoint/export",
+            }
         return {"value": []}
 
     async def fake_post_location(token, url, payload):
         calls["post_location"].append((token, url, payload))
         return {}, f"https://graph.microsoft.com/monitor/{len(calls['post_location'])}"
 
-    async def fake_wait(token, monitor_url, *, timeout_seconds):
+    async def fake_wait(token, monitor_url, *, timeout_seconds, company_id=None):
         return {"status": "completed"}
 
     monkeypatch.setattr(workflows.m365_service, "_graph_get", fake_graph_get)
@@ -66,7 +74,9 @@ async def test_export_onedrive_creates_upn_folder_copies_children_and_marks_read
     assert result["destination_folder_id"] == "dest-folder-id"
     assert result["copy_status"] == "completed"
     assert result["source_items_submitted"] == 2
-    assert result["source_marked_read_only"] is True
+    assert result["source_marked_read_only"] is False
+    assert result["source_protection_status"] == "not_requested"
+    assert result["inventory_verified"] is True
     assert calls["post"][0][2] == {
         "name": "user@example.com",
         "folder": {},
@@ -80,12 +90,13 @@ async def test_export_onedrive_creates_upn_folder_copies_children_and_marks_read
         "parentReference": {"driveId": "drive-id", "id": "dest-folder-id"},
         "name": "Notes.txt",
     }
-    assert calls["post"][-1][2]["roles"] == ["read"]
-    assert calls["post"][-1][2]["retainInheritedPermissions"] is False
+    assert not any(url.endswith("/invite") for _, url, _ in calls["post"])
 
 
 @pytest.mark.anyio
-async def test_export_onedrive_uses_drive_root_children_endpoint_for_default_parent(monkeypatch):
+async def test_export_onedrive_uses_drive_root_children_endpoint_for_default_parent(
+    monkeypatch,
+):
     calls = {"get": [], "get_all": [], "post_location": [], "post": []}
 
     monkeypatch.setattr(
@@ -96,7 +107,9 @@ async def test_export_onedrive_uses_drive_root_children_endpoint_for_default_par
     monkeypatch.setattr(
         workflows,
         "_resolve_staff_m365_user",
-        AsyncMock(return_value={"id": "user-id", "userPrincipalName": "user@example.com"}),
+        AsyncMock(
+            return_value={"id": "user-id", "userPrincipalName": "user@example.com"}
+        ),
     )
 
     async def fake_graph_get(token, url):
@@ -129,13 +142,18 @@ async def test_export_onedrive_uses_drive_root_children_endpoint_for_default_par
     )
 
     assert result["destination_folder_id"] == "dest-folder-id"
-    assert calls["post"][0][1] == "https://graph.microsoft.com/v1.0/drives/drive-id/root/children"
+    assert (
+        calls["post"][0][1]
+        == "https://graph.microsoft.com/v1.0/drives/drive-id/root/children"
+    )
     assert "/items/root/children" not in calls["post"][0][1]
 
 
 @pytest.mark.anyio
 async def test_export_onedrive_requires_destination_drive_id(monkeypatch):
-    monkeypatch.setattr(workflows.company_repo, "get_company_by_id", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        workflows.company_repo, "get_company_by_id", AsyncMock(return_value={})
+    )
     with pytest.raises(workflows.WorkflowStepError, match="destination_drive_id"):
         await workflows._run_export_onedrive_step(
             company_id=42,
@@ -146,7 +164,9 @@ async def test_export_onedrive_requires_destination_drive_id(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_export_onedrive_destination_403_raises_actionable_permission_error(monkeypatch):
+async def test_export_onedrive_destination_403_raises_actionable_permission_error(
+    monkeypatch,
+):
     monkeypatch.setattr(
         workflows.m365_service,
         "acquire_access_token",
@@ -155,7 +175,9 @@ async def test_export_onedrive_destination_403_raises_actionable_permission_erro
     monkeypatch.setattr(
         workflows,
         "_resolve_staff_m365_user",
-        AsyncMock(return_value={"id": "user-id", "userPrincipalName": "user@example.com"}),
+        AsyncMock(
+            return_value={"id": "user-id", "userPrincipalName": "user@example.com"}
+        ),
     )
     monkeypatch.setattr(
         workflows.m365_service,
@@ -184,3 +206,17 @@ async def test_export_onedrive_destination_403_raises_actionable_permission_erro
     assert "Sites.ReadWrite.All" in str(exc_info.value)
     assert "Sites.Selected" in str(exc_info.value)
     assert exc_info.value.request_payload == {"operation": "create_destination_folder"}
+
+
+def test_copy_monitor_url_rejects_non_microsoft_destination():
+    with pytest.raises(workflows.WorkflowStepError, match="untrusted"):
+        workflows._validate_copy_monitor_url("https://attacker.example/operation")
+
+
+def test_copy_monitor_url_accepts_graph_and_sharepoint():
+    workflows._validate_copy_monitor_url(
+        "https://graph.microsoft.com/v1.0/operations/1"
+    )
+    workflows._validate_copy_monitor_url(
+        "https://tenant.sharepoint.com/_api/operations/1"
+    )

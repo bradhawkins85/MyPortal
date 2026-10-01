@@ -15,18 +15,31 @@
   {% endif %}
 {% endblock %}
 {% block content %}
-<section class="page-header">
-  <div><p class="eyebrow">Endpoint security</p><h1>Windows Defender</h1>
-    <p>Monitor protection health, detections and exclusions reported by the MyPortal tray agent.</p></div>
-</section>
+{% set policy_labels = {
+  'applied': ('Applied', 'success'), 'partial': ('Partially applied', 'warning'),
+  'blocked': ('Blocked by tamper protection', 'warning'), 'failed': ('Not applied', 'danger'),
+  'not_configured': ('No policy', 'muted')} %}
+{% set item_labels = {
+  'blocked_tamper_protection': 'Blocked by tamper protection', 'managed_by_policy': 'Controlled by Group Policy/Intune',
+  'unsupported': 'Not supported by Defender', 'failed': 'Failed'} %}
+<p class="text-muted">Monitor protection health, detections and exclusions reported by the MyPortal tray agent.</p>
 {% if not defender_enabled %}
   <section class="card"><div class="empty-state"><h2>Defender management is disabled</h2>
     <p>This opt-in service is disabled for this company. A super administrator can enable it here.</p>
     {% if is_super_admin %}<button class="button button--primary" data-defender-enable>Enable Defender management</button>{% endif %}
   </div></section>
 {% else %}
+  {% if defender_tamper_locked_devices %}
+  <div class="alert alert--warning" role="status" data-defender-tamper-warning>
+    <strong>Tamper protection may block exclusion changes on {{ defender_tamper_locked_devices|length }} endpoint{{ '' if defender_tamper_locked_devices|length == 1 else 's' }}.</strong>
+    The tray agent does not attempt changes that Tamper Protection could block, so MyPortal exclusions are not applied to
+    {{ defender_tamper_locked_devices|map(attribute='hostname')|reject('none')|join(', ') }}.
+    Deploy those exclusions through Intune or Microsoft Defender for Endpoint, or turn off Tamper Protection on the device.
+    Scans, signature updates and scheduled scans are not affected.
+  </div>
+  {% endif %}
   {{ counter_strip([
-    {'label': 'Enrolled endpoints', 'value': defender_devices|length, 'variant': 'info'},
+    {'label': 'Managed endpoints', 'value': defender_devices|selectattr('defender_managed')|list|length, 'variant': 'info'},
     {'label': 'Active detections', 'value': defender_detections|selectattr('status','equalto','active')|list|length, 'variant': 'danger'},
     {'label': 'Configured exclusions', 'value': defender_exclusions|length, 'variant': 'success'},
     {'label': 'Stale agents', 'value': defender_devices|selectattr('is_stale')|list|length, 'variant': 'warning', 'title': 'No heartbeat for 15 minutes'}
@@ -37,19 +50,27 @@
         <input id="defender-device-filter" class="form-input" type="search" placeholder="Filter endpoints" data-table-filter="defender-devices-table">
       </label></div>
     <div class="table-wrapper"><table class="table" id="defender-devices-table" data-table data-table-id="defender-devices" data-table-empty-label="No endpoints match the selected filter.">
-      <thead><tr><th data-sort="string">Device</th><th data-sort="string">Agent</th><th data-sort="string">Health</th><th data-sort="string">Antivirus</th><th data-sort="string">Real-time</th><th data-sort="string">Tamper protection</th><th data-sort="date">Signatures</th><th data-sort="date">Last scan</th><th data-sort="int">Detections</th><th>Actions</th></tr></thead>
+      <thead><tr><th data-sort="string">Device</th><th data-sort="string">Management</th><th data-sort="string">Agent</th><th data-sort="string">Health</th><th data-sort="string">Antivirus</th><th data-sort="string">Real-time</th><th data-sort="string">Tamper protection</th><th data-sort="string">Policy</th><th data-sort="string">Firewall</th><th data-sort="date">Signatures</th><th data-sort="date">Last scan</th><th data-sort="int">Detections</th><th>Actions</th></tr></thead>
       <tbody>{% for d in defender_devices %}<tr>
         <td data-label="Device">{{ d.hostname or ('Device #' ~ d.id) }}</td>
+        <td data-label="Management" data-value="{{ 'managed' if d.defender_managed else 'excluded' }}"><span class="status-badge">{{ 'Managed' if d.defender_managed else 'Excluded' }}</span></td>
         <td data-label="Agent" data-value="{{ 'stale' if d.is_stale else 'online' }}"><span class="status-badge">{{ 'Stale' if d.is_stale else 'Online' }}</span></td>
-        <td data-label="Health" data-value="{{ d.health_status or 'unknown' }}"><span class="status-badge">{{ d.health_status or 'Awaiting report' }}</span></td>
-        <td data-label="Antivirus" data-value="{{ 'on' if d.antivirus_enabled else 'off' }}">{{ 'On' if d.antivirus_enabled else 'Off' }}</td>
+        <td data-label="Health" data-value="{{ d.health_status or 'unknown' }}"><span class="status-badge">{{ d.health_status or 'Awaiting report' }}</span>{% if d.running_mode and d.running_mode|lower != 'normal' %}<br><small title="Defender is not the primary antivirus on this device">{{ d.running_mode }} mode</small>{% endif %}</td>
+        <td data-label="Antivirus" data-value="{{ ((d.antivirus_product_names or [])|join(', ') ~ ' ' ~ ('on' if d.antivirus_enabled else 'off'))|trim }}">{{ 'On' if d.antivirus_enabled else 'Off' }}{% if d.antivirus_product_names %}<br><small>{{ d.antivirus_product_names|join(', ') }}</small>{% endif %}</td>
         <td data-label="Real-time" data-value="{{ 'on' if d.realtime_protection_enabled else 'off' }}">{{ 'On' if d.realtime_protection_enabled else 'Off' }}</td>
-        <td data-label="Tamper protection" data-value="{{ 'on' if d.tamper_protection_enabled else 'off' }}">{{ 'On' if d.tamper_protection_enabled else 'Off' }}</td>
+        <td data-label="Tamper protection" data-value="{{ 'on' if d.tamper_protection_enabled else 'off' }}">{{ 'On' if d.tamper_protection_enabled else 'Off' }}{% if d.policy and d.policy.tamper_protection and d.policy.tamper_protection.source %}<br><small>Source: {{ d.policy.tamper_protection.source }}</small>{% endif %}{% if d.defender_managed and d.tamper_locks_exclusions %}<br><span class="badge badge--warning" title="The agent will not change exclusions on this device because Tamper Protection could block the change.">Exclusions locked</span>{% endif %}</td>
+        {% set policy_label = policy_labels.get(d.policy_status) if d.policy_status else none %}
+        <td data-label="Policy" data-value="{{ d.policy_status or ('not_reported' if d.health_status else 'awaiting') }}">{% if not d.defender_managed %}—{% elif policy_label %}<span class="badge badge--{{ policy_label[1] }}">{{ policy_label[0] }}</span>{% if d.policy_issues %}<details class="defender-policy-issues"><summary>{{ d.policy_issues|length }} setting{{ '' if d.policy_issues|length == 1 else 's' }} not applied</summary><ul>{% for item in d.policy_issues %}<li><strong>{{ item_labels.get(item.status, item.status) }}:</strong> {{ item.setting|replace('exclusion_', '')|replace('_', ' ') }} <code>{{ item.value }}</code>{% if item.message %}<br><small>{{ item.message }}</small>{% endif %}</li>{% endfor %}</ul></details>{% endif %}{% if d.policy_evaluated_at %}<br><small>Checked <span data-utc="{{ d.policy_evaluated_at }}">{{ d.policy_evaluated_at }}</span></small>{% endif %}{% elif d.health_status %}<span class="badge badge--muted" title="This tray agent version reports status but does not apply Defender policy.">Update tray agent</span>{% else %}Awaiting report{% endif %}</td>
+        <td data-label="Firewall" data-value="{{ 'on' if d.firewall_domain_enabled and d.firewall_private_enabled and d.firewall_public_enabled else 'off' }}">
+          <span title="Domain network profile">Domain: {{ 'On' if d.firewall_domain_enabled else ('Off' if d.firewall_domain_enabled is not none else 'Unknown') }}</span><br>
+          <span title="Private network profile">Private: {{ 'On' if d.firewall_private_enabled else ('Off' if d.firewall_private_enabled is not none else 'Unknown') }}</span><br>
+          <span title="Public network profile">Public: {{ 'On' if d.firewall_public_enabled else ('Off' if d.firewall_public_enabled is not none else 'Unknown') }}</span>
+        </td>
         <td data-label="Signatures" data-value="{{ d.signatures_updated_at or '' }}">{{ d.signatures_updated_at or '—' }}</td>
         <td data-label="Last scan" data-value="{{ (d.last_scan.completed_at if d.last_scan else d.last_scan_at) or '' }}">{% if d.last_scan %}<strong>{{ d.last_scan.scan_type|title }} · {{ d.last_scan.status|title }}</strong><br>{% if d.last_scan.completed_at %}<span data-utc="{{ d.last_scan.completed_at }}">{{ d.last_scan.completed_at }}</span>{% elif d.last_scan.started_at %}<span data-utc="{{ d.last_scan.started_at }}">{{ d.last_scan.started_at }}</span>{% endif %}{% if d.last_scan.duration_seconds is not none %}<br><small>{{ d.last_scan.duration_seconds }} seconds</small>{% endif %}{% elif d.last_scan_at %}<span data-utc="{{ d.last_scan_at }}">{{ d.last_scan_at }}</span>{% else %}—{% endif %}</td>
         <td data-label="Detections" data-value="{{ d.threat_count or 0 }}">{{ d.threat_count or 0 }}</td>
-        <td data-label="Actions">{% if defender_can_write %}<button class="button button--small" data-defender-command="quick_scan" data-device-id="{{ d.id }}">Quick scan</button> <button class="button button--small" data-defender-command="full_scan" data-device-id="{{ d.id }}">Full scan</button> <button class="button button--small" data-defender-command="signature_update" data-device-id="{{ d.id }}">Update signatures</button>{% else %}—{% endif %}</td>
-      </tr>{% else %}<tr><td colspan="10">No tray endpoints have reported Defender status yet.</td></tr>{% endfor %}</tbody>
+        <td data-label="Actions">{% if defender_can_write %}{% if d.defender_managed %}<button class="button button--small" data-defender-command="quick_scan" data-device-id="{{ d.id }}">Quick scan</button> <button class="button button--small" data-defender-command="full_scan" data-device-id="{{ d.id }}">Full scan</button> <button class="button button--small" data-defender-command="signature_update" data-device-id="{{ d.id }}">Update signatures</button> <button class="button button--primary button--small" data-defender-command="enable_firewall" data-device-id="{{ d.id }}">Enable firewall</button> {% endif %}<button class="button button--small{% if d.defender_managed %} button--danger{% endif %}" data-defender-management data-device-id="{{ d.id }}" data-managed="{{ 'true' if d.defender_managed else 'false' }}">{{ 'Exclude from management' if d.defender_managed else 'Include in management' }}</button>{% else %}—{% endif %}</td>
+      </tr>{% else %}<tr><td colspan="13">No Windows tray endpoints are available.</td></tr>{% endfor %}</tbody>
     </table></div>
   </section>
 
@@ -59,14 +80,32 @@
         <input id="defender-detection-filter" class="form-input" type="search" placeholder="Filter detections" data-table-filter="defender-detections-table">
       </label></div>
     <div class="table-wrapper"><table class="table" id="defender-detections-table" data-table data-table-id="defender-detections" data-table-empty-label="No detections match the selected filter.">
-      <thead><tr><th data-sort="date">Detected</th><th data-sort="string">Device</th><th data-sort="string">Threat</th><th data-sort="string">Severity</th><th data-sort="string">Status</th><th data-sort="int">Ticket</th><th>Actions</th></tr></thead>
-      <tbody>{% for d in defender_detections %}<tr><td data-label="Detected" data-value="{{ d.detected_at }}">{{ d.detected_at }}</td><td data-label="Device">{{ d.hostname }}</td><td data-label="Threat">{{ d.threat_name }}</td><td data-label="Severity">{{ d.severity }}</td><td data-label="Status">{{ d.status }}{% if d.acknowledged_at %} · acknowledged{% endif %}</td><td data-label="Ticket" data-value="{{ d.ticket_id or 0 }}">{% if d.ticket_id %}<a href="/tickets/{{ d.ticket_id }}">#{{ d.ticket_id }}</a>{% else %}Not created{% endif %}</td><td data-label="Actions">{% if defender_can_write %}{% if not d.acknowledged_at %}<button class="button button--small" data-detection-action="acknowledge" data-detection-id="{{ d.id }}">Acknowledge</button>{% endif %}<button class="button button--small" data-detection-action="quarantine" data-detection-id="{{ d.id }}">Quarantine</button> <button class="button button--small" data-detection-action="remediate" data-detection-id="{{ d.id }}">Remediate</button> <button class="button button--small" data-detection-action="{{ 'reopen' if d.status == 'resolved' else 'resolve' }}" data-detection-id="{{ d.id }}">{{ 'Reopen' if d.status == 'resolved' else 'Resolve' }}</button>{% else %}—{% endif %}</td></tr>{% else %}<tr><td colspan="7">No detections reported.</td></tr>{% endfor %}</tbody>
+      <thead><tr><th data-sort="date">Detected</th><th data-sort="string">Device</th><th data-sort="string">Threat</th><th data-sort="string">Infected files</th><th data-sort="string">Severity</th><th data-sort="string">Status</th><th data-sort="int">Ticket</th><th>Actions</th></tr></thead>
+      <tbody>{% for d in defender_detections %}<tr><td data-label="Detected" data-value="{{ d.detected_at }}">{{ d.detected_at }}</td><td data-label="Device">{{ d.hostname }}</td><td data-label="Threat">{{ d.threat_name }}</td><td data-label="Infected files">{% for file in d.infected_files %}<code>{{ file }}</code>{% if defender_can_write %} <button class="button button--ghost button--small" data-detection-exclude-value="{{ file }}" data-detection-device-id="{{ d.tray_device_id }}">Exclude</button>{% endif %}{% if not loop.last %}<br>{% endif %}{% else %}—{% endfor %}</td><td data-label="Severity">{{ d.severity }}</td><td data-label="Status">{{ d.status }}{% if d.acknowledged_at %} · acknowledged{% endif %}</td><td data-label="Ticket" data-value="{{ d.ticket_id or 0 }}">{% if d.ticket_id %}<a href="/tickets/{{ d.ticket_id }}">#{{ d.ticket_id }}</a>{% else %}Not created{% endif %}</td><td data-label="Actions">{% if defender_can_write %}{% if not d.acknowledged_at %}<button class="button button--small" data-detection-action="acknowledge" data-detection-id="{{ d.id }}">Acknowledge</button>{% endif %}<button class="button button--small" data-detection-action="quarantine" data-detection-id="{{ d.id }}">Quarantine</button> <button class="button button--small" data-detection-action="remediate" data-detection-id="{{ d.id }}">Remediate</button> <button class="button button--small" data-detection-action="{{ 'reopen' if d.status == 'resolved' else 'resolve' }}" data-detection-id="{{ d.id }}">{{ 'Reopen' if d.status == 'resolved' else 'Resolve' }}</button>{% else %}—{% endif %}</td></tr>{% else %}<tr><td colspan="8">No detections reported.</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+
+  <section class="card defender-commands-section">
+    <div class="section-heading"><div><h2>Recent actions</h2><p>Scans, updates and remediation requested from MyPortal, with the result reported by the tray agent.</p></div>
+      <label class="form-label" for="defender-command-filter">Quick search
+        <input id="defender-command-filter" class="form-input" type="search" placeholder="Filter actions" data-table-filter="defender-commands-table">
+      </label></div>
+    <div class="table-wrapper"><table class="table" id="defender-commands-table" data-table data-table-id="defender-commands" data-table-empty-label="No actions match the selected filter.">
+      <thead><tr><th data-sort="date">Requested</th><th data-sort="string">Device</th><th data-sort="string">Action</th><th data-sort="string">Status</th><th data-sort="date">Completed</th><th data-sort="string">Result</th></tr></thead>
+      <tbody>{% for c in defender_commands %}<tr>
+        <td data-label="Requested" data-value="{{ c.requested_at }}"><span data-utc="{{ c.requested_at }}">{{ c.requested_at }}</span></td>
+        <td data-label="Device">{{ c.hostname or ('Device #' ~ c.tray_device_id) }}</td>
+        <td data-label="Action">{{ c.command_type|replace('_', ' ')|title }}{% if c.threat_name %}<br><small>{{ c.threat_name }}</small>{% endif %}</td>
+        <td data-label="Status"><span class="badge badge--{{ {'completed': 'success', 'failed': 'danger', 'cancelled': 'muted'}.get(c.status, 'info') }}">{{ {'pending': 'Waiting for agent', 'claimed': 'Running'}.get(c.status, c.status|title) }}</span></td>
+        <td data-label="Completed" data-value="{{ c.completed_at or '' }}">{% if c.completed_at %}<span data-utc="{{ c.completed_at }}">{{ c.completed_at }}</span>{% else %}—{% endif %}</td>
+        <td data-label="Result">{{ c.message or '—' }}</td>
+      </tr>{% else %}<tr><td colspan="6">No actions have been requested.</td></tr>{% endfor %}</tbody>
     </table></div>
   </section>
 
   <div class="modal" id="protection-policy-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="protection-policy-title">
     <div class="modal__backdrop" data-defender-modal-close></div><section class="modal__dialog">
-      <header class="modal__header"><div><h2 id="protection-policy-title">Protection policy</h2><p>Configure scheduled endpoint scans.</p></div><button class="modal__close" type="button" data-defender-modal-close aria-label="Close">&times;</button></header>
+      <header class="modal__header"><div><h2 id="protection-policy-title">Protection policy</h2><p>Configure scheduled endpoint scans. The tray agent applies the schedule within five minutes and restores the device's previous schedule when this is disabled. Devices whose scan schedule is set by Group Policy or Intune keep that schedule and are flagged in the Policy column.</p></div><button class="modal__close" type="button" data-defender-modal-close aria-label="Close">&times;</button></header>
       <form id="defender-protection-form" data-defender-settings-form><div class="modal__body form-grid">
         <label>Scheduled scan<select name="scheduled_scan_type" {% if not defender_can_write %}disabled{% endif %}><option value="">Disabled</option><option value="quick" {% if defender_settings.defender_scheduled_scan_type == 'quick' %}selected{% endif %}>Quick scan</option><option value="full" {% if defender_settings.defender_scheduled_scan_type == 'full' %}selected{% endif %}>Full scan</option></select></label>
         <label>Day<select name="scheduled_scan_day" {% if not defender_can_write %}disabled{% endif %}>{% for label in ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'] %}<option value="{{ loop.index0 }}" {% if defender_settings.defender_scheduled_scan_day == loop.index0 %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
@@ -90,12 +129,12 @@
 
   <div class="modal" id="exclusions-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="exclusions-title">
     <div class="modal__backdrop" data-defender-modal-close></div><section class="modal__dialog modal__dialog--wide">
-      <header class="modal__header"><div><h2 id="exclusions-title">Manage exclusions</h2><p>Effective policy combines global, company and device exclusions.</p></div><button class="modal__close" type="button" data-defender-modal-close aria-label="Close">&times;</button></header>
-      <div class="modal__body">{% if defender_can_write %}<form id="defender-exclusion-form" class="form-grid">
-        <label>Scope<select name="scope"><option value="company">Company</option>{% if is_super_admin %}<option value="global">Global</option>{% endif %}<option value="device">Device</option></select></label><label>Type<select name="exclusion_type"><option value="path">Path</option><option value="process">Process</option><option value="extension">Extension</option></select></label>
+      <header class="modal__header"><div><h2 id="exclusions-title">Manage exclusions</h2><p>Effective policy combines global, company and device exclusions. The tray agent applies them within five minutes and only removes exclusions it added.</p></div><button class="modal__close" type="button" data-defender-modal-close aria-label="Close">&times;</button></header>
+      <div class="modal__body">{% if defender_tamper_locked_devices %}<div class="alert alert--warning" role="status">Tamper protection may block exclusion changes on {{ defender_tamper_locked_devices|length }} endpoint{{ '' if defender_tamper_locked_devices|length == 1 else 's' }} ({{ defender_tamper_locked_devices|map(attribute='hostname')|reject('none')|join(', ') }}). Exclusions saved here will not be applied to {{ 'it' if defender_tamper_locked_devices|length == 1 else 'them' }}.</div>{% endif %}{% if defender_can_write %}<form id="defender-exclusion-form" class="form-grid">
+        <label>Scope<select name="scope"><option value="company">Company</option>{% if is_super_admin %}<option value="global">Global</option>{% endif %}<option value="device">Device</option></select></label><label>Type<select name="exclusion_type"><option value="path">Path</option><option value="process">Process</option><option value="extension">Extension</option><option value="registry">Registry path (not supported by Defender)</option></select></label>
         <label>Device<select name="tray_device_id"><option value="">Not device-specific</option>{% for d in defender_devices %}<option value="{{ d.id }}">{{ d.hostname }}</option>{% endfor %}</select></label><label>Value<input name="value" required maxlength="1000" placeholder="C:\Trusted\"></label><button class="button button--primary" type="submit">Add exclusion</button>
-      </form>{% endif %}<label class="form-label" for="defender-exclusion-filter">Quick search<input id="defender-exclusion-filter" class="form-input" type="search" placeholder="Filter exclusions" data-table-filter="defender-exclusions-table"></label>
-      <div class="table-wrapper"><table class="table" id="defender-exclusions-table" data-table data-table-id="defender-exclusions" data-table-empty-label="No exclusions match the selected filter."><thead><tr><th data-sort="string">Scope</th><th data-sort="string">Type</th><th data-sort="string">Value</th><th data-sort="string">Device</th><th>Actions</th></tr></thead><tbody>{% for e in defender_exclusions %}<tr><td>{{ e.scope }}</td><td>{{ e.exclusion_type }}</td><td><code>{{ e.value }}</code></td><td>{{ e.hostname or 'All' }}</td><td>{% if defender_can_write %}<button class="button button--danger button--small" data-delete-exclusion="{{ e.id }}">Remove</button>{% else %}—{% endif %}</td></tr>{% else %}<tr><td colspan="5">No exclusions configured.</td></tr>{% endfor %}</tbody></table></div></div>
+      </form><p class="form-help" data-defender-exclusion-status role="status" aria-live="polite"></p>{% endif %}<label class="form-label" for="defender-exclusion-filter">Quick search<input id="defender-exclusion-filter" class="form-input" type="search" placeholder="Filter exclusions" data-table-filter="defender-exclusions-table"></label>
+      <div class="table-wrapper"><table class="table" id="defender-exclusions-table" data-table data-table-id="defender-exclusions" data-table-empty-label="No exclusions match the selected filter."><thead><tr><th data-sort="string">Scope</th><th data-sort="string">Type</th><th data-sort="string">Value</th><th data-sort="string">Device</th><th>Actions</th></tr></thead><tbody>{% for e in defender_exclusions %}<tr><td>{{ e.scope }}</td><td>{{ e.exclusion_type }}{% if e.exclusion_type == 'registry' %}<br><span class="badge badge--warning" title="Microsoft Defender Antivirus has no registry exclusions, so this entry is recorded but never applied.">Not applied</span>{% endif %}</td><td><code>{{ e.value }}</code></td><td>{{ e.hostname or 'All' }}</td><td>{% if defender_can_write %}<button class="button button--danger button--small" data-delete-exclusion="{{ e.id }}">Remove</button>{% else %}—{% endif %}</td></tr>{% else %}<tr><td colspan="5">No exclusions configured.</td></tr>{% endfor %}</tbody></table></div></div>
     </section>
   </div>
   {% if is_super_admin %}
@@ -106,7 +145,7 @@
         <form class="card form-stack" data-exclusion-list-form>
           <h3>New exclusion list</h3>
           <label>Name<input name="name" required maxlength="255" placeholder="Standard line-of-business apps"></label>
-          <div class="form-stack" data-exclusion-list-items><div class="form-grid" data-exclusion-list-item><label>Type<select name="exclusion_type"><option value="path">Path</option><option value="process">Process</option><option value="extension">Extension</option></select></label><label>Value<input name="value" required maxlength="1000" placeholder="C:\Trusted\"></label><button class="button button--ghost" type="button" data-remove-list-item>Remove</button></div></div>
+          <div class="form-stack" data-exclusion-list-items><div class="form-grid" data-exclusion-list-item><label>Type<select name="exclusion_type"><option value="path">Path</option><option value="process">Process</option><option value="extension">Extension</option><option value="registry">Registry path (not supported by Defender)</option></select></label><label>Value<input name="value" required maxlength="1000" placeholder="C:\Trusted\"></label><button class="button button--ghost" type="button" data-remove-list-item>Remove</button></div></div>
           <button class="button button--ghost" type="button" data-add-list-item>Add another exclusion</button>
           <fieldset><legend>Apply to companies</legend><div class="form-grid">{% for company in defender_companies %}<label><input type="checkbox" name="company_ids" value="{{ company.id }}"> {{ company.name }}</label>{% endfor %}</div></fieldset>
           <div><button class="button button--primary" type="submit">Create list</button></div>
@@ -115,7 +154,7 @@
         <form class="card form-stack" data-exclusion-list-form data-list-id="{{ exclusion_list.id }}">
           <div class="section-heading"><h3>{{ exclusion_list.name }}</h3><button class="button button--danger button--small" type="button" data-delete-exclusion-list="{{ exclusion_list.id }}">Delete list</button></div>
           <label>Name<input name="name" value="{{ exclusion_list.name }}" required maxlength="255"></label>
-          <div class="form-stack" data-exclusion-list-items>{% for item in exclusion_list.exclusions %}<div class="form-grid" data-exclusion-list-item><label>Type<select name="exclusion_type">{% for type in ['path','process','extension'] %}<option value="{{ type }}" {% if item.exclusion_type == type %}selected{% endif %}>{{ type|title }}</option>{% endfor %}</select></label><label>Value<input name="value" value="{{ item.value }}" required maxlength="1000"></label><button class="button button--ghost" type="button" data-remove-list-item>Remove</button></div>{% endfor %}</div>
+          <div class="form-stack" data-exclusion-list-items>{% for item in exclusion_list.exclusions %}<div class="form-grid" data-exclusion-list-item><label>Type<select name="exclusion_type">{% for type, label in [('path','Path'),('process','Process'),('extension','Extension'),('registry','Registry path (not supported by Defender)')] %}<option value="{{ type }}" {% if item.exclusion_type == type %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label><label>Value<input name="value" value="{{ item.value }}" required maxlength="1000"></label><button class="button button--ghost" type="button" data-remove-list-item>Remove</button></div>{% endfor %}</div>
           <button class="button button--ghost" type="button" data-add-list-item>Add another exclusion</button>
           <fieldset><legend>Apply to companies</legend><div class="form-grid">{% for company in defender_companies %}<label><input type="checkbox" name="company_ids" value="{{ company.id }}" {% if company.id in exclusion_list.company_ids %}checked{% endif %}> {{ company.name }}</label>{% endfor %}</div></fieldset>
           <div><button class="button button--primary" type="submit">Save list</button></div>

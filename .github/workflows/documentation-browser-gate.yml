@@ -1,0 +1,31 @@
+name: Documentation browser rollout gate
+
+on:
+  workflow_dispatch:
+  deployment_status:
+
+permissions:
+  contents: read
+
+jobs:
+  journeys:
+    if: github.event_name == 'workflow_dispatch' || github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    environment: documentation-staging
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -e '.[dev]'
+      - run: playwright install --with-deps chromium
+      - name: Write non-production journey fixture
+        env:
+          BROWSER_FIXTURE_JSON: ${{ secrets.DOCUMENTATION_BROWSER_FIXTURE_JSON }}
+        run: |
+          test -n "$BROWSER_FIXTURE_JSON"
+          printf '%s' "$BROWSER_FIXTURE_JSON" > "$RUNNER_TEMP/documentation-browser-fixture.json"
+      - name: Gate staged rollout on browser journeys
+        env:
+          MYPORTAL_BROWSER_FIXTURE: ${{ runner.temp }}/documentation-browser-fixture.json
+        run: pytest -q -m browser_gate tests/browser

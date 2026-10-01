@@ -11,14 +11,37 @@ from app.workers.voice_monitor import VoiceMonitorWorker
 
 def test_unique_dispatch_uses_stable_key_and_ignore_insert():
     due = {"id": 1, "company_id": 2, "next_run_at": datetime(2026, 1, 1),
-           "interval_seconds": 60, "max_retries": 2}
+           "interval_seconds": 60, "max_retries": 2,
+           "voice_monitor_calls_per_day": 12, "timezone": "UTC"}
     with patch.object(repo.db, "fetch_all", new_callable=AsyncMock, return_value=[due]), \
+         patch.object(repo.db, "fetch_one", new_callable=AsyncMock, return_value={"count": 0}), \
          patch.object(repo.db, "execute_rowcount", new_callable=AsyncMock, side_effect=[1, 1]) as execute:
         assert asyncio.run(repo.enqueue_due_attempts(now=datetime(2026, 1, 2))) == 1
     sql, values = execute.call_args_list[0].args
     assert "IGNORE" in sql and "dispatch_key" in sql
     assert values[5] == values[6] == repo.dispatch_key(1, due["next_run_at"])
     assert values[7] == 3
+
+
+def test_cron_schedule_advances_after_each_match():
+    endpoint = {"schedule_cron": "* * * * *", "timezone": "UTC"}
+    assert repo.next_scheduled_run(endpoint, datetime(2026, 1, 1)) == datetime(
+        2026, 1, 1, 0, 1
+    )
+
+
+def test_daily_subscription_limit_skips_extra_cron_matches():
+    due = {
+        "id": 1, "company_id": 2, "next_run_at": datetime(2026, 1, 1),
+        "interval_seconds": None, "schedule_cron": "* * * * *", "timezone": "UTC",
+        "max_retries": 0, "voice_monitor_calls_per_day": 1,
+    }
+    with patch.object(repo.db, "fetch_all", new_callable=AsyncMock, return_value=[due]), \
+         patch.object(repo.db, "fetch_one", new_callable=AsyncMock, return_value={"count": 1}), \
+         patch.object(repo.db, "execute_rowcount", new_callable=AsyncMock, return_value=1) as execute:
+        assert asyncio.run(repo.enqueue_due_attempts(now=datetime(2026, 1, 1, 0, 5))) == 0
+    assert len(execute.call_args_list) == 1
+    assert execute.call_args.args[1][0] == datetime(2026, 1, 1, 0, 1)
 
 
 def test_concurrent_claim_is_compare_and_swap_and_tenant_bounded():

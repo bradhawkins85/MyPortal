@@ -1,0 +1,7 @@
+{
+  "guid": "6b112c8e-ec38-4df6-94c5-5be5da7ac0b0",
+  "occurred_at": "2026-09-22T00:00Z",
+  "change_type": "changed",
+  "summary": "Changed ticket approval types into optional classifiers that do not require selected approvers.",
+  "content_hash": "8c17c2cf3bc786eae6c0503f7a1a73028e5eddcf9cc413d5bd10955ab718453b"
+}

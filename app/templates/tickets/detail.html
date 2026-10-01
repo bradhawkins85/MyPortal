@@ -1,25 +1,23 @@
 {% extends "base.html" %}
-{% from "macros/header.html" import page_header_actions %}
+{% from "macros/mobile.html" import mobile_collapsible %}
 
-{% block header_title %}Ticket{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar page-header-bar--record">
+    <span class="header__title-text" title="{{ ticket.subject or 'Ticket' }}">{{ ticket.subject or 'Ticket' }}</span>
+    <span class="page-header-bar__meta">
+      <span class="badge {{ ticket.status_badge }}">{{ ticket.status_label }}</span>
+      <span>Ticket #{{ ticket.id }}</span>
+    </span>
+  </div>
+{% endblock %}
 
 {% block header_actions %}
-  {{ page_header_actions([
-    {"label": "All tickets", "type": "link", "href": "/tickets"}
-  ]) }}
+  <a class="button button--ghost" href="/tickets">Back to tickets</a>
 {% endblock %}
 
 {% block content %}
-  <div class="management management--single">
+  <div class="management management--single management--ticket-detail">
     <section class="management__content">
-      <header class="management__header">
-        <div>
-          <h1 class="management__title">{{ ticket.subject or 'Ticket' }}</h1>
-        </div>
-        <div class="management__header-actions">
-          <a class="button button--ghost" href="/tickets">Back to tickets</a>
-        </div>
-      </header>
       <div class="management__body management__body--columns management__body--ticket-detail management__body--ticket-detail-two-column">
         <div class="management__column management__column--details">
           <details class="card card--panel card-collapsible" open>
@@ -105,17 +103,72 @@
             </div>
           </details>
 
-          <article class="card card--panel">
-            <header class="card__header">
+          {% if assigned_user and assigned_user.booking_link_url %}
+            <article class="card card--panel">
+              <header class="card__header">
+                <h2 class="card__title">Schedule a call</h2>
+              </header>
+              <div class="card__body">
+                <p class="text-muted">Book a call with {{ ticket.assigned_label }} to discuss this ticket.</p>
+                <a
+                  href="{{ ticket_booking_link_url or assigned_user.booking_link_url }}"
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  class="button"
+                >
+                  Book a call
+                </a>
+              </div>
+            </article>
+          {% endif %}
+
+          {% if matrix_chat_enabled and (ticket_chat_room or is_requester) %}
+            <article class="card card--panel">
+              <header class="card__header">
+                <h2 class="card__title">Chat</h2>
+              </header>
+              <div class="card__body">
+                {% if ticket_chat_room %}
+                  <p class="text-muted" style="margin-bottom: 1rem;">
+                    A chat room is linked to this ticket.
+                  </p>
+                  <a href="/chat/{{ ticket_chat_room.id }}" class="button button--primary">
+                    Open Chat
+                  </a>
+                {% elif is_requester %}
+                  <p class="text-muted" style="margin-bottom: 1rem;">
+                    Start a chat room for this ticket.
+                  </p>
+                  <button
+                    type="button"
+                    class="button button--primary"
+                    data-start-chat-button
+                    data-ticket-id="{{ ticket.id }}"
+                    data-ticket-subject="{{ ticket.subject | e }}"
+                  >
+                    Start Chat
+                  </button>
+                {% endif %}
+              </div>
+            </article>
+          {% endif %}
+
+          <details class="card card--panel card-collapsible">
+            <summary class="card__header card__header--collapsible">
               <h2 class="card__title">Attachments</h2>
-            </header>
-            <div class="card__body">
-              <div
-                class="attachments-grid"
-                data-attachments-grid
-                data-ticket-id="{{ ticket.id }}"
-              >
-                {% for attachment in ticket_attachments %}
+              <div class="card__collapsible-meta">
+                {% if ticket_attachments %}<span class="badge badge--muted">{{ ticket_attachments|length }}</span>{% endif %}
+                <span class="card__toggle-icon" aria-hidden="true"></span>
+              </div>
+            </summary>
+            <div class="card-collapsible__content">
+              <div class="card__body">
+                <div
+                  class="attachments-grid"
+                  data-attachments-grid
+                  data-ticket-id="{{ ticket.id }}"
+                >
+                  {% for attachment in ticket_attachments %}
                   <article class="attachment-card" data-attachment-id="{{ attachment.id }}">
                     <a
                       class="attachment-card__preview"
@@ -179,71 +232,18 @@
                       </div>
                     </div>
                   </article>
-                {% endfor %}
-              </div>
-              <p
-                class="card__empty"
-                data-attachments-empty
-                {% if ticket_attachments %}hidden{% endif %}
-              >
-                No attachments have been added yet.
-              </p>
-            </div>
-          </article>
-
-          {% if assigned_user and assigned_user.booking_link_url %}
-            <article class="card card--panel">
-              <header class="card__header">
-                <h2 class="card__title">Schedule a call</h2>
-              </header>
-              <div class="card__body">
-                <p class="text-muted">Book a call with {{ ticket.assigned_label }} to discuss this ticket.</p>
-                <button 
-                  type="button" 
-                  class="button"
-                  data-cal-link="{{ assigned_user.booking_link_url }}"
-                  data-ticket-id="{{ ticket.id }}"
-                  data-ticket-subject="{{ ticket.subject | e }}"
-                  data-user-name="{{ ([user.first_name, user.last_name] | select | join(' ')) | e }}"
-                  data-user-email="{{ (user.email or '') | e }}"
-                  data-user-phone="{{ (user.mobile_phone or '') | e }}"
+                  {% endfor %}
+                </div>
+                <p
+                  class="card__empty"
+                  data-attachments-empty
+                  {% if ticket_attachments %}hidden{% endif %}
                 >
-                  Book a call
-                </button>
+                  No attachments have been added yet.
+                </p>
               </div>
-            </article>
-          {% endif %}
-
-          {% if matrix_chat_enabled and (ticket_chat_room or is_requester) %}
-            <article class="card card--panel">
-              <header class="card__header">
-                <h2 class="card__title">Chat</h2>
-              </header>
-              <div class="card__body">
-                {% if ticket_chat_room %}
-                  <p class="text-muted" style="margin-bottom: 1rem;">
-                    A chat room is linked to this ticket.
-                  </p>
-                  <a href="/chat/{{ ticket_chat_room.id }}" class="button button--primary">
-                    Open Chat
-                  </a>
-                {% elif is_requester %}
-                  <p class="text-muted" style="margin-bottom: 1rem;">
-                    Start a chat room for this ticket.
-                  </p>
-                  <button
-                    type="button"
-                    class="button button--primary"
-                    data-start-chat-button
-                    data-ticket-id="{{ ticket.id }}"
-                    data-ticket-subject="{{ ticket.subject | e }}"
-                  >
-                    Start Chat
-                  </button>
-                {% endif %}
-              </div>
-            </article>
-          {% endif %}
+            </div>
+          </details>
 
           {% if ticket_assets %}
             <article class="card card--panel">
@@ -254,7 +254,7 @@
                 <ul class="list">
                   {% for asset in ticket_assets %}
                     <li class="list__item">
-                      <strong>{{ asset.name }}</strong>
+                      <strong><a href="/assets/{{ asset.asset_id }}">{{ asset.name }}</a></strong>
                       {% if asset.type %}
                         <div class="list__meta">Type: {{ asset.type }}</div>
                       {% endif %}
@@ -337,6 +337,41 @@
             </div>
           </article>
 
+          {% if ticket.status in ['resolved', 'closed'] %}
+          <details class="card card--panel" id="resolution-steps">
+            <summary class="card__header">
+              <span class="card__title">Resolution Steps</span>
+              {% if ticket.resolution_steps_status == 'queued' %}<span class="status status--info">Generating…</span>
+              {% elif ticket.resolution_steps_status == 'error' %}<span class="status status--danger">Generation failed</span>
+              {% elif ticket.resolution_steps %}<span class="status status--success">Available</span>{% endif %}
+            </summary>
+            <div class="card__body">
+              <form action="/admin/tickets/{{ ticket.id }}/resolution-steps" method="post" class="form">
+                {% include "partials/csrf.html" %}
+                <div class="form-field">
+                  <span class="form-label" id="ticket-resolution-steps-label">Final resolution outline</span>
+                  <div class="rich-text-editor" data-rich-text-editor aria-labelledby="ticket-resolution-steps-label">
+                    <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Resolution formatting options">
+                      <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="bold" aria-label="Bold">B</button>
+                      <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="italic" aria-label="Italic">I</button>
+                      <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="insertUnorderedList" aria-label="Bulleted list">•</button>
+                      <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="insertOrderedList" aria-label="Numbered list">1.</button>
+                    </div>
+                    <div class="rich-text-editor__surface" data-rich-text-content contenteditable="true" role="textbox" aria-multiline="true">{{ ticket.resolution_steps | default('', true) | safe }}</div>
+                    <textarea id="ticket-resolution-steps" name="resolutionSteps" class="rich-text-editor__fallback" data-rich-text-value data-rich-text-fallback aria-labelledby="ticket-resolution-steps-label">{{ ticket.resolution_steps or '' }}</textarea>
+                  </div>
+                  <p class="form-help">{{ 'AI generated' if ticket.resolution_steps_source == 'ai_generated' else 'Manually edited' if ticket.resolution_steps_source == 'manually_edited' else 'Add or generate a reusable resolution outline.' }}</p>
+                </div>
+                <div class="form-actions">
+                  <button class="button button--primary" type="submit">Save resolution steps</button>
+                  <button class="button button--secondary" type="submit" formaction="/admin/tickets/{{ ticket.id }}/resolution-steps/reprocess" data-resolution-reprocess>Regenerate with AI</button>
+                </div>
+              </form>
+            </div>
+          </details>
+          {% endif %}
+
+          {% call mobile_collapsible('Reply', open=True, id='ticket-reply-mobile') %}
           <article class="card card--panel">
             <header class="card__header">
               <div class="card__title-group">
@@ -346,7 +381,7 @@
             </header>
             <div class="card__body">
               {% if can_reply %}
-                <form id="ticket-reply-form" action="/tickets/{{ ticket.id }}/replies" method="post" class="form" novalidate enctype="multipart/form-data" data-ticket-reply-form data-ticket-reply-cache data-ticket-reply-cache-ticket-id="{{ ticket.id }}">
+                <form id="ticket-reply-form" action="/tickets/{{ ticket.id }}/replies" method="post" class="form card__form ticket-reply-form" novalidate enctype="multipart/form-data" data-ticket-reply-form data-ticket-reply-cache data-ticket-reply-cache-ticket-id="{{ ticket.id }}">
                   {% include "partials/csrf.html" %}
                   <div class="form-field">
                     <span class="form-label" id="ticket-reply-label">Message</span>
@@ -451,19 +486,35 @@
                         aria-multiline="true"
                         data-placeholder="Write your reply..."
                       >{{ reply_body }}</div>
+                      <input type="hidden" name="mentionedUserIds" data-ticket-mention-user-ids />
+                      <textarea
+                        id="ticket-reply-body-hidden"
+                        name="body"
+                        class="rich-text-editor__fallback"
+                        data-rich-text-value
+                        data-rich-text-fallback
+                        aria-labelledby="ticket-reply-label"
+                        placeholder="Write your reply..."
+                        required
+                      >{{ reply_body | e }}</textarea>
                     </div>
-                    <input type="hidden" name="mentionedUserIds" data-ticket-mention-user-ids />
-                    <textarea
-                      id="ticket-reply-body-hidden"
-                      name="body"
-                      class="rich-text-editor__fallback"
-                      data-rich-text-value
-                      data-rich-text-fallback
-                      aria-labelledby="ticket-reply-label"
-                      placeholder="Write your reply..."
-                      required
-                    >{{ reply_body | e }}</textarea>
                   </div>
+                  {% if has_helpdesk_access or is_super_admin %}
+                  <div class="ticket-reply-flags ticket-reply-flags--inline">
+                    <div class="form-field form-field--checkbox">
+                      <label class="checkbox">
+                        <input type="checkbox" name="isResolutionStep" value="1" data-resolution-classification="resolution" />
+                        <span>Mark this reply as a resolution step</span>
+                      </label>
+                    </div>
+                    <div class="form-field form-field--checkbox">
+                      <label class="checkbox">
+                        <input type="checkbox" name="isNotResolutionStep" value="1" data-resolution-classification="excluded" />
+                        <span>Not a resolution step</span>
+                      </label>
+                    </div>
+                  </div>
+                  {% endif %}
                   <div class="form-field">
                     <label class="form-label" for="ticket-reply-attachments">Attachments (optional)</label>
                     <input
@@ -482,11 +533,11 @@
                       <div class="ticket-reply-submit" data-ticket-reply-submit>
                         <input type="hidden" name="replyStatus" value="" data-ticket-reply-status-input />
                         <button type="submit" class="button button--primary ticket-reply-submit__primary">Post reply</button>
-                        <details class="ticket-reply-submit__status-menu">
+                        <details class="ticket-reply-submit__status-menu" data-floating-menu data-floating-menu-placement="top">
                           <summary class="button button--primary ticket-reply-submit__toggle" aria-label="Post reply with a selected ticket status">
                             <span aria-hidden="true">▾</span>
                           </summary>
-                          <div class="ticket-reply-submit__menu" role="menu" aria-label="Post reply and set status">
+                          <div class="ticket-reply-submit__menu" data-floating-menu-panel role="menu" aria-label="Post reply and set status">
                             {% for status_definition in ticket_status_definitions %}
                               <button type="submit" value="{{ status_definition.tech_status }}" class="ticket-reply-submit__menu-item" role="menuitem" onclick="this.form.querySelector('[data-ticket-reply-status-input]').value = this.value;">
                                 {{ status_definition.tech_label }}
@@ -507,6 +558,7 @@
               {% endif %}
             </div>
           </article>
+          {% endcall %}
 
           <article class="card card--panel" id="conversation">
             <header class="card__header">
@@ -593,6 +645,11 @@
                             {% if reply.is_internal %}
                               <span class="badge badge--muted">Internal</span>
                             {% endif %}
+                            {% if reply.is_resolution_step %}
+                              <span class="status status--success">Resolution step</span>
+                            {% elif reply.is_not_resolution_step %}
+                              <span class="status status--neutral">Not a resolution step</span>
+                            {% endif %}
                             {% if reply.has_email_tracking %}
                               {% set _reply_recipient_count = reply.recipient_count|default(0) %}
                               {% set _is_multi_recipient = _reply_recipient_count and _reply_recipient_count > 1 %}
@@ -656,6 +713,14 @@
                           </button>
                         {% else %}
                           <p class="text-muted">No content provided.</p>
+                        {% endif %}
+                        {% if has_helpdesk_access or is_super_admin %}
+                        <form action="/admin/tickets/{{ ticket.id }}/replies/{{ reply.id }}/resolution-step" method="post" class="form-actions">
+                          {% include "partials/csrf.html" %}
+                          <button type="submit" name="state" value="resolution" class="button button--ghost button--small"{% if reply.is_resolution_step %} disabled aria-pressed="true"{% endif %}>Mark as resolution step</button>
+                          <button type="submit" name="state" value="excluded" class="button button--ghost button--small"{% if reply.is_not_resolution_step %} disabled aria-pressed="true"{% endif %}>Not a resolution step</button>
+                          {% if reply.is_resolution_step or reply.is_not_resolution_step %}<button type="submit" name="state" value="neutral" class="button button--ghost button--small">Clear selection</button>{% endif %}
+                        </form>
                         {% endif %}
                       </div>
                     </article>

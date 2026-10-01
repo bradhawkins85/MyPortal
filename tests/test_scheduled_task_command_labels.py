@@ -7,6 +7,8 @@ def test_scheduled_task_commands_have_friendly_labels():
     assert _scheduled_task_command_label("system_update") == "Update MyPortal system"
     assert _scheduled_task_command_label("sync_tactical_assets") == "Sync Tactical RMM assets"
     assert _scheduled_task_command_label("m365_mail_sync:11") == "Sync Microsoft 365 mailbox 11"
+    assert _scheduled_task_command_label("refresh_website_checks") == "Refresh website checks"
+    assert _scheduled_task_command_label("refresh_dns_records") == "Refresh DNS records"
 
 
 def test_unknown_scheduled_task_commands_are_humanised():

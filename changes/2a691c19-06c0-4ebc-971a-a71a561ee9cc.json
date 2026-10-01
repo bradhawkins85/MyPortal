@@ -1,0 +1,7 @@
+{
+  "guid": "2a691c19-06c0-4ebc-971a-a71a561ee9cc",
+  "occurred_at": "2026-09-17T00:00Z",
+  "change_type": "Feature",
+  "summary": "Added delegated Microsoft Graph remediation for the Purview Compliance Administrator enterprise application role.",
+  "content_hash": "69bbbb26bf9d4c136c8a9cc1919d356f873caeb32be54d6a2dc2e4fe8931d27a"
+}

@@ -30,7 +30,6 @@ def _c(*, pack=None, commands=(), routes=(), services=(), ui=(), always_on=False
 
 
 MODULE_CAPABILITIES: dict[str, ModuleCapabilities] = {
-    "plausible": _c(pack="plausible", routes=("analytics.pageview", "email.tracking"), services=("plausible.analytics", "email_tracking.delivery"), ui=("modules.plausible",)),
     "syncro": _c(pack="syncro", routes=("syncro.import",), services=("syncro.api",), ui=("syncro",)),
     "ollama": _c(pack="ollama", commands=("process_transcription",), services=("ollama.ai",), ui=("ai.ollama",)),
     "smtp": _c(pack="smtp", services=("smtp.delivery",), ui=("modules.smtp",)),
@@ -88,6 +87,27 @@ def modules_for_command(command: str) -> frozenset[str]:
         if command in capabilities.scheduled_commands
         or any(item.endswith("*") and command.startswith(item[:-1]) for item in capabilities.scheduled_commands)
     )
+
+
+def _modules_for_capability(kind: str, name: str) -> frozenset[str]:
+    """Return all module owners of a route, service, or UI capability."""
+    return frozenset(
+        slug
+        for slug, capabilities in MODULE_CAPABILITIES.items()
+        if name in getattr(capabilities, kind)
+    )
+
+
+def modules_for_route(route: str) -> frozenset[str]:
+    return _modules_for_capability("inbound_routes", route)
+
+
+def modules_for_service(service: str) -> frozenset[str]:
+    return _modules_for_capability("outbound_services", service)
+
+
+def modules_for_ui_feature(feature: str) -> frozenset[str]:
+    return _modules_for_capability("ui_features", feature)
 
 
 # Registration inventories are intentionally separate from ownership.  Adding a

@@ -24,8 +24,30 @@ app/static/tray/*.msi
 app/static/tray/*.msi.etag
 app/static/tray/*.dmg
 app/static/tray/*.pkg
+# Release metadata the server caches beside the downloaded tray installers.
+app/static/tray/*.json
 tray/chat-shell/build/*.icns
 tray/chat-shell/build/*.iconset/
 tray/signing/
+# Local Go builds; release builds go to dist/.
+tray/*.exe
 *.pfx
 *.pfx.base64
+
+# Written at deploy or run time, never committed: scripts/upgrade.sh and the
+# Dockerfile record the deployed revision in version.txt.
+/version.txt
+# Runtime files that appear when the control checkout doubles as the
+# deployment root (/opt/myportal) or runs the app directly.
+/current
+/current.new.*
+/releases/
+/shared/
+/instances/
+/.venv/
+/.cache/
+/.env.old
+*.log
+/stock-feed.xml
+/StartupProfileData-*
+app/static/uploads/tickets/*

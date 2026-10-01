@@ -331,29 +331,32 @@ def test_generate_invoice_billable_ticket_uses_hours_and_minutes(monkeypatch):
         "get_unbilled_reply_ids",
         get_unbilled_reply_ids,
     )
+    list_replies = AsyncMock(
+        return_value=[
+            {
+                "id": 1,
+                "minutes_spent": 120,
+                "is_billable": True,
+                "is_internal": True,
+                "labour_type_name": "Remote",
+                "labour_type_code": "REMOTE",
+                "labour_type_rate": "100",
+            },
+            {
+                "id": 2,
+                "minutes_spent": 30,
+                "is_billable": True,
+                "is_internal": False,
+                "labour_type_name": "Remote",
+                "labour_type_code": "REMOTE",
+                "labour_type_rate": "100",
+            },
+        ]
+    )
     monkeypatch.setattr(
         invoice_generator.tickets_repo,
         "list_replies",
-        AsyncMock(
-            return_value=[
-                {
-                    "id": 1,
-                    "minutes_spent": 120,
-                    "is_billable": True,
-                    "labour_type_name": "Remote",
-                    "labour_type_code": "REMOTE",
-                    "labour_type_rate": "100",
-                },
-                {
-                    "id": 2,
-                    "minutes_spent": 30,
-                    "is_billable": True,
-                    "labour_type_name": "Remote",
-                    "labour_type_code": "REMOTE",
-                    "labour_type_rate": "100",
-                },
-            ]
-        ),
+        list_replies,
     )
     monkeypatch.setattr(
         invoice_generator.invoice_repo, "create_invoice", fake_create_invoice
@@ -378,6 +381,9 @@ def test_generate_invoice_billable_ticket_uses_hours_and_minutes(monkeypatch):
     )
     assert created_lines[0]["quantity"] == Decimal("150")
     list_tickets.assert_awaited_once_with(company_id=1, limit=None)
+    # Internal notes are technician work records and must be included in the
+    # generated invoice whenever their time is marked billable.
+    list_replies.assert_awaited_once_with(55, include_internal=True)
     # Finalisation must use the reply snapshot which produced the line rather
     # than discovering newly-added, uninvoiced work in a second query.
     get_unbilled_reply_ids.assert_awaited_once_with(55)

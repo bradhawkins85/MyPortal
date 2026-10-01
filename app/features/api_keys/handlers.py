@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import Request
 
+from app.repositories import api_keys as api_key_repo
 from app.schemas.api_keys import ALLOWED_API_KEY_HTTP_METHODS
 from app.security.api_keys import mask_api_key
 
@@ -409,7 +410,7 @@ async def _render_api_keys_dashboard(
     new_api_key: dict[str, Any] | None = None,
 ):
     main_module = _main()
-    rows = await main_module.api_key_repo.list_api_keys_with_usage(
+    rows = await api_key_repo.list_api_keys_with_usage(
         search=search,
         include_expired=include_expired,
         order_by=order_by,
@@ -510,7 +511,7 @@ async def admin_create_api_key_page(request: Request):
             errors=errors,
         )
     try:
-        raw_key, row = await main_module.api_key_repo.create_api_key(
+        raw_key, row = await api_key_repo.create_api_key(
             description=description,
             expiry_date=expiry_date,
             permissions=parsed_permissions,
@@ -604,7 +605,7 @@ async def admin_update_api_key_page(request: Request):
             errors=errors,
         )
 
-    existing = await main_module.api_key_repo.get_api_key_with_usage(api_key_id)
+    existing = await api_key_repo.get_api_key_with_usage(api_key_id)
     if not existing:
         errors.append("API key not found or no longer available.")
         return await _render_api_keys_dashboard(
@@ -651,7 +652,7 @@ async def admin_update_api_key_page(request: Request):
         update_kwargs["is_enabled"] = is_enabled_argument
 
     try:
-        updated = await main_module.api_key_repo.update_api_key(
+        updated = await api_key_repo.update_api_key(
             api_key_id,
             **update_kwargs,
         )
@@ -746,7 +747,7 @@ async def admin_rotate_api_key_page(request: Request):
             status_message=None,
             errors=errors,
         )
-    existing = await main_module.api_key_repo.get_api_key_with_usage(api_key_id)
+    existing = await api_key_repo.get_api_key_with_usage(api_key_id)
     if not existing:
         errors.append("The selected API key could not be found. It may have been deleted.")
         return await _render_api_keys_dashboard(
@@ -765,7 +766,7 @@ async def admin_rotate_api_key_page(request: Request):
         else [entry.get("cidr") for entry in existing.get("ip_restrictions", [])]
     )
     try:
-        raw_key, row = await main_module.api_key_repo.create_api_key(
+        raw_key, row = await api_key_repo.create_api_key(
             description=final_description,
             expiry_date=final_expiry,
             permissions=permissions,
@@ -802,7 +803,7 @@ async def admin_rotate_api_key_page(request: Request):
     )
     if retire_previous:
         retirement_date = date.today()
-        await main_module.api_key_repo.update_api_key_expiry(api_key_id, retirement_date)
+        await api_key_repo.update_api_key_expiry(api_key_id, retirement_date)
         await main_module.audit_service.log_action(
             action="api_keys.retire",
             user_id=current_user.get("id"),
@@ -883,7 +884,7 @@ async def admin_delete_api_key_page(request: Request):
             status_message=None,
             errors=errors,
         )
-    existing = await main_module.api_key_repo.get_api_key_with_usage(api_key_id)
+    existing = await api_key_repo.get_api_key_with_usage(api_key_id)
     if not existing:
         errors.append("API key not found or already deleted.")
         return await _render_api_keys_dashboard(
@@ -893,7 +894,7 @@ async def admin_delete_api_key_page(request: Request):
             status_message=None,
             errors=errors,
         )
-    await main_module.api_key_repo.delete_api_key(api_key_id)
+    await api_key_repo.delete_api_key(api_key_id)
     await main_module.audit_service.log_action(
         action="api_keys.delete",
         user_id=current_user.get("id"),

@@ -1,15 +1,71 @@
 {% extends "base.html" %}
+{% from "macros/counters.html" import counter_strip %}
 
-{% block header_title %}Subscriptions{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Subscriptions</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="subscription-filter">Filter subscriptions</label>
+      <input type="search" id="subscription-filter" class="form-input page-header-toolbar__search" placeholder="Filter subscriptions" />
+      {% if company %}<span class="tag">{{ company.name }}</span>{% endif %}
+    </div>
+  </div>
+{% endblock %}
 
 {% block title %}Subscriptions{% endblock %}
 
+{% block header_actions %}
+{% if can_request_changes %}
+<a class="button button--primary" href="/subscriptions/create">Add external subscription</a>
+{% endif %}
+{% if is_super_admin %}
+<div class="header-title-menu">
+  <details class="header-title-menu__dropdown" data-header-menu>
+    <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+      Actions
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon"><path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" /></svg>
+    </summary>
+    <ul class="header-title-menu__list" role="menu">
+      <li class="header-title-menu__item" role="none">
+        <button type="button" class="header-title-menu__link" role="menuitem" data-open-existing-subscription>Add existing subscription</button>
+      </li>
+    </ul>
+  </details>
+</div>
+{% endif %}
+{% endblock %}
+
 {% block content %}
+<section aria-labelledby="renewal-forecast-heading">
+  <h2 id="renewal-forecast-heading" class="visually-hidden">Renewal forecast</h2>
+  {{ counter_strip([
+    {
+      "label": "Renewing in 30 days",
+      "value": renewal_forecast.renewing_in_30_days,
+      "variant": "info",
+    },
+    {
+      "label": "Renewing in 60 days",
+      "value": renewal_forecast.renewing_in_60_days,
+      "variant": "warning",
+    },
+    {
+      "label": "Projected 90-day renewal revenue",
+      "value": "$%.2f"|format(renewal_forecast.projected_revenue_90),
+      "variant": "success",
+    },
+    {
+      "label": "Accounts needing attention",
+      "value": churn_report.total_at_risk,
+      "variant": "danger",
+    },
+  ]) }}
+</section>
+
 <section class="panel">
   <header class="panel__header">
     <div class="panel__meta">
-      {% if company %}<span class="tag">{{ company.name }}</span>{% endif %}
-      <input type="search" id="subscription-filter" class="form-input" placeholder="Filter subscriptions" aria-label="Filter subscriptions" />
+      <span class="text-muted">Active subscriptions</span>
     </div>
   </header>
   <div class="panel__body">
@@ -24,15 +80,20 @@
             <th scope="col" data-sort-key="start_date">Start date</th>
             <th scope="col" data-sort-key="end_date">End date</th>
             <th scope="col" data-sort-key="status">Status</th>
+            <th scope="col" data-sort-key="lifecycle">Lifecycle</th>
             <th scope="col" data-sort-key="auto_renew">Auto-renew</th>
             {% if can_request_changes %}<th scope="col">Actions</th>{% endif %}
           </tr>
         </thead>
         <tbody>
           {% for subscription in subscriptions %}
-          <tr>
-            <td data-column="product_name" data-value="{{ subscription.product_name or '' }}">{{ subscription.product_name or '—' }}</td>
-            <td data-column="category_name" data-value="{{ subscription.category_name or '' }}">{{ subscription.category_name or '—' }}</td>
+          <tr id="subscription-{{ subscription.id }}">
+            <td data-column="product_name" data-value="{{ subscription.product_name or subscription.external_name or '' }}">
+              {{ subscription.product_name or subscription.external_name or '—' }}
+              {% if subscription.external_sku %}<br><small class="text-muted">{{ subscription.external_sku }}</small>{% endif %}
+              {% if subscription.vendor %}<br><small class="text-muted">Vendor: {{ subscription.vendor }}</small>{% endif %}
+            </td>
+            <td data-column="category_name" data-value="{{ subscription.category_name or '' }}">{{ subscription.category_name or '—' }}{% if subscription.reminder_only %}<br><span class="tag tag--secondary">Reminder only</span>{% endif %}</td>
             <td data-column="quantity" data-value="{{ subscription.quantity }}">{{ subscription.quantity }}{% if subscription.voice_monitor_contract %} monitored number{% if subscription.quantity != 1 %}s{% endif %}{% endif %}</td>
             <td data-column="unit_price" data-value="{{ subscription.unit_price }}">${{ subscription.unit_price }}{% if subscription.voice_monitor_contract %} / number<br><small>{{ subscription.voice_monitor_contract.included_attempts }} calls included/month; ${{ subscription.voice_monitor_contract.attempt_overage_price }}/extra attempt + ${{ subscription.voice_monitor_contract.connected_minute_price }}/connected minute; ${{ subscription.voice_monitor_contract.transcription_surcharge }}/completed transcription</small>{% endif %}</td>
             <td data-column="start_date" data-value="{{ subscription.start_date }}">{{ subscription.start_date }}</td>
@@ -42,12 +103,39 @@
                 {{ subscription.status | replace('_', ' ') | title }}
               </span>
             </td>
+            <td data-column="lifecycle" data-value="{{ subscription.churn_risk.level }} {{ subscription.days_until_renewal if subscription.days_until_renewal is not none else '' }}">
+              {% if subscription.days_until_renewal is not none %}
+                <div>Renews in {{ subscription.days_until_renewal }} day{% if subscription.days_until_renewal != 1 %}s{% endif %}</div>
+              {% endif %}
+              {% if subscription.reminder_due_days is not none %}
+                <div class="text-muted">Reminder campaign due now ({{ subscription.reminder_due_days }} days out)</div>
+              {% endif %}
+              {% if subscription.pending_changes_count %}
+                <div class="text-muted">{{ subscription.pending_changes_count }} pending change{% if subscription.pending_changes_count != 1 %}s{% endif %}</div>
+              {% endif %}
+              {% if subscription.churn_risk.level != 'none' %}
+                <div class="tag {% if subscription.churn_risk.level == 'high' %}tag--danger{% elif subscription.churn_risk.level == 'medium' %}tag--warning{% else %}tag--secondary{% endif %}">
+                  Risk: {{ subscription.churn_risk.level | title }}
+                </div>
+                <ul class="text-muted">
+                  {% for reason in subscription.churn_risk.reasons %}
+                    <li>{{ reason }}</li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <span class="text-muted">Stable</span>
+              {% endif %}
+            </td>
             <td data-column="auto_renew" data-value="{{ subscription.auto_renew }}">{{ 'Yes' if subscription.auto_renew else 'No' }}</td>
             {% if can_request_changes %}
             <td>
               <div class="button-group">
+                {% if subscription.reminder_only %}
+                <button type="button" class="button button--small" data-subscription-adjust="{{ subscription.id }}" data-current-quantity="{{ subscription.quantity }}" data-subscription-name="{{ subscription.product_name or subscription.external_name or 'Subscription' }}">Adjust quantity</button>
+                {% else %}
                 <button type="button" class="button button--small button--success" data-subscription-add="{{ subscription.id }}" data-current-quantity="{{ subscription.quantity }}" data-end-date="{{ subscription.end_date }}">Add licenses</button>
                 <button type="button" class="button button--small button--warning" data-subscription-decrease="{{ subscription.id }}" data-current-quantity="{{ subscription.quantity }}" data-end-date="{{ subscription.end_date }}">Request decrease</button>
+                {% endif %}
                 {% if is_super_admin %}
                 <button type="button" class="button button--small button--danger" data-subscription-delete="{{ subscription.id }}">Delete</button>
                 {% endif %}
@@ -57,7 +145,7 @@
           </tr>
           {% else %}
           <tr>
-            <td colspan="{% if can_request_changes %}9{% else %}8{% endif %}" class="text-center">No active subscriptions found.</td>
+            <td colspan="{% if can_request_changes %}10{% else %}9{% endif %}" class="text-center">No active subscriptions found.</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -106,6 +194,77 @@
   </form>
 </dialog>
 
+<dialog id="quantity-dialog" class="dialog" aria-labelledby="quantity-dialog-title">
+  <form class="dialog__container" id="quantity-form">
+    <header class="dialog__header">
+      <div>
+        <h3 class="dialog__title" id="quantity-dialog-title">Adjust external subscription quantity</h3>
+        <p class="text-muted" id="quantity-subscription-name"></p>
+      </div>
+      <button type="button" class="dialog__close" aria-label="Close" data-quantity-dialog-close><span aria-hidden="true">&times;</span></button>
+    </header>
+    <div class="dialog__body">
+      <div class="form-field">
+        <label class="form-field__label" for="adjusted-quantity">Current vendor quantity</label>
+        <input class="form-input" id="adjusted-quantity" name="quantity" type="number" min="1" max="9999" step="1" required>
+        <p class="form-field__hint">Enter the quantity currently held with the external vendor. This updates reminders only and will not generate an invoice.</p>
+      </div>
+    </div>
+    <footer class="dialog__footer">
+      <button type="button" class="button button--secondary" data-quantity-dialog-close>Cancel</button>
+      <button type="submit" class="button" data-quantity-submit>Save quantity</button>
+    </footer>
+  </form>
+</dialog>
+
+{% if is_super_admin %}
+<dialog id="existing-subscription-dialog" class="dialog" aria-labelledby="existing-subscription-title">
+  <form class="dialog__container" id="existing-subscription-form">
+    <header class="dialog__header">
+      <div>
+        <h3 class="dialog__title" id="existing-subscription-title">Add existing subscription</h3>
+        <p class="text-muted">Register a subscription already billed in an external environment. No initial invoice will be created.</p>
+      </div>
+      <button type="button" class="dialog__close" aria-label="Close" data-existing-subscription-close><span aria-hidden="true">&times;</span></button>
+    </header>
+    <div class="dialog__body">
+      <div class="alert alert--danger" role="alert" data-existing-subscription-errors hidden></div>
+      <div class="form-field">
+        <label class="form-field__label" for="existing-customer">Customer</label>
+        <select class="form-input" id="existing-customer" name="customerId" required>
+          <option value="">Select a customer</option>
+          {% for item in creation_companies %}<option value="{{ item.id }}">{{ item.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-field__label" for="existing-product">Subscription product</label>
+        <select class="form-input" id="existing-product" name="productId" required>
+          <option value="">Select a subscription product</option>
+          {% for item in creation_products %}<option value="{{ item.id }}">{{ item.name }}{% if item.sku %} ({{ item.sku }}){% endif %}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-field__label" for="existing-start-date">Current term start date</label>
+        <input class="form-input" id="existing-start-date" name="startDate" type="date" value="{{ creation_default_start_date }}" required>
+        <p class="form-field__hint">The term end is calculated from the selected product's commitment.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-field__label" for="existing-quantity">Quantity</label>
+        <input class="form-input" id="existing-quantity" name="quantity" type="number" min="1" max="9999" step="1" value="1" required>
+      </div>
+      <label class="checkbox-row" for="existing-auto-renew">
+        <input id="existing-auto-renew" name="autoRenew" type="checkbox" checked>
+        <span>Automatically renew at the end of the current term</span>
+      </label>
+    </div>
+    <footer class="dialog__footer">
+      <button type="button" class="button button--secondary" data-existing-subscription-close>Cancel</button>
+      <button type="submit" class="button" data-existing-subscription-submit>Create subscription</button>
+    </footer>
+  </form>
+</dialog>
+{% endif %}
+
 <div id="subscription-toast" class="toast" role="status" aria-live="polite"></div>
 {% endblock %}
 
@@ -129,10 +288,33 @@
     const changeReasonInput = document.getElementById('change-reason');
     const previewButton = document.getElementById('preview-change-btn');
     const submitButton = document.getElementById('submit-change');
+    const existingDialog = document.getElementById('existing-subscription-dialog');
+    const existingForm = document.getElementById('existing-subscription-form');
+    const existingErrors = document.querySelector('[data-existing-subscription-errors]');
+    const existingSubmit = document.querySelector('[data-existing-subscription-submit]');
+    const quantityDialog = document.getElementById('quantity-dialog');
+    const quantityForm = document.getElementById('quantity-form');
+    const adjustedQuantity = document.getElementById('adjusted-quantity');
+    const quantitySubscriptionName = document.getElementById('quantity-subscription-name');
+    const quantitySubmit = document.querySelector('[data-quantity-submit]');
     
     let currentSubscriptionId = null;
     let currentChangeType = null;
     let currentPreview = null;
+    let adjustedSubscriptionId = null;
+
+    function showExistingErrors(messages) {
+      if (!existingErrors) return;
+      existingErrors.replaceChildren();
+      const list = document.createElement('ul');
+      messages.forEach((message) => {
+        const item = document.createElement('li');
+        item.textContent = message;
+        list.appendChild(item);
+      });
+      existingErrors.appendChild(list);
+      existingErrors.hidden = false;
+    }
 
     function showToast(message, type = 'info') {
       if (!toast) return;
@@ -232,6 +414,8 @@
       
       let html = '<ul class="space-y-1">';
       html += `<li><strong>Current quantity:</strong> ${preview.currentQuantity}</li>`;
+      html += `<li><strong>Current term-end quantity:</strong> ${preview.currentQuantityAtTermEnd}</li>`;
+      html += `<li><strong>Current pending charges:</strong> $${preview.currentTotalCharges}</li>`;
       
       if (currentChangeType === 'addition') {
         html += `<li><strong>Licenses to add:</strong> ${preview.requestedChange}</li>`;
@@ -244,18 +428,14 @@
         html += `<li><em>No charges for decreases</em></li>`;
       }
       
-      if (preview.pendingChangesCount > 0) {
-        html += `<li class="mt-2"><strong>Net change at term end:</strong> ${preview.newNetChange > 0 ? '+' : ''}${preview.newNetChange}</li>`;
-        html += `<li><strong>Quantity at term end:</strong> ${preview.newQuantityAtTermEnd}</li>`;
-        if (preview.newTotalCharges > 0) {
-          html += `<li><strong>Total pending charges:</strong> $${preview.newTotalCharges}</li>`;
-        }
+      html += `<li class="mt-2"><strong>New net change at term end:</strong> ${preview.newNetChange > 0 ? '+' : ''}${preview.newNetChange}</li>`;
+      if (currentChangeType === 'addition' && preview.pendingChangesCount === 0) {
+        html += `<li><strong>New quantity:</strong> ${preview.newQuantityAtTermEnd} (effective immediately)</li>`;
       } else {
-        if (currentChangeType === 'addition') {
-          html += `<li><strong>New quantity:</strong> ${preview.newQuantityAtTermEnd} (effective immediately)</li>`;
-        } else {
-          html += `<li><strong>Quantity at term end:</strong> ${preview.newQuantityAtTermEnd}</li>`;
-        }
+        html += `<li><strong>New quantity at term end:</strong> ${preview.newQuantityAtTermEnd}</li>`;
+      }
+      if (Number(preview.newTotalCharges) > 0) {
+        html += `<li><strong>New pending charges:</strong> $${preview.newTotalCharges}</li>`;
       }
       
       html += `<li class="text-xs text-gray-600 mt-2">Term ends: ${preview.endDate}</li>`;
@@ -353,6 +533,95 @@
         openAddDialog(subscriptionId, currentQuantity, endDate);
       });
     });
+
+    document.querySelectorAll('[data-subscription-adjust]').forEach((button) => {
+      button.addEventListener('click', () => {
+        adjustedSubscriptionId = button.dataset.subscriptionAdjust;
+        adjustedQuantity.value = button.dataset.currentQuantity;
+        quantitySubscriptionName.textContent = button.dataset.subscriptionName;
+        if (typeof quantityDialog.showModal === 'function') quantityDialog.showModal();
+      });
+    });
+
+    document.querySelectorAll('[data-quantity-dialog-close]').forEach((button) => {
+      button.addEventListener('click', () => quantityDialog?.close());
+    });
+
+    if (quantityForm) {
+      quantityForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (!quantityForm.reportValidity() || !adjustedSubscriptionId) return;
+        quantitySubmit.disabled = true;
+        try {
+          const response = await fetch(`/subscriptions/${adjustedSubscriptionId}/quantity`, {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || ''},
+            body: JSON.stringify({quantity: Number(adjustedQuantity.value)}),
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(body.detail || 'Unable to update quantity.');
+          quantityDialog.close();
+          showToast('External subscription quantity updated.', 'success');
+          setTimeout(() => window.location.reload(), 1000);
+        } catch (error) {
+          showToast(error.message || 'Unable to update quantity.', 'error');
+        } finally {
+          quantitySubmit.disabled = false;
+        }
+      });
+    }
+
+    document.querySelectorAll('[data-open-existing-subscription]').forEach((button) => {
+      button.addEventListener('click', () => {
+        button.closest('details')?.removeAttribute('open');
+        existingErrors?.setAttribute('hidden', '');
+        if (existingDialog && typeof existingDialog.showModal === 'function') existingDialog.showModal();
+      });
+    });
+
+    document.querySelectorAll('[data-existing-subscription-close]').forEach((button) => {
+      button.addEventListener('click', () => existingDialog?.close());
+    });
+
+    if (existingForm) {
+      existingForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (!existingForm.reportValidity()) return;
+        existingErrors.hidden = true;
+        existingSubmit.disabled = true;
+        const form = new FormData(existingForm);
+        const payload = {
+          customerId: Number(form.get('customerId')),
+          productId: Number(form.get('productId')),
+          startDate: form.get('startDate'),
+          quantity: Number(form.get('quantity')),
+          autoRenew: form.get('autoRenew') === 'on',
+        };
+        try {
+          const response = await fetch('/api/v1/subscriptions', {
+            method: 'POST',
+            credentials: 'include',
+            headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || ''},
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            const detail = body.detail;
+            if (Array.isArray(detail)) throw new Error(detail.map((item) => item.msg).join('; '));
+            throw new Error(detail || 'The subscription could not be created.');
+          }
+          const subscription = await response.json();
+          existingDialog.close();
+          showToast(`Subscription ${subscription.id} created successfully.`, 'success');
+          setTimeout(() => window.location.reload(), 1200);
+        } catch (error) {
+          showExistingErrors([error.message || 'The subscription could not be created.']);
+        } finally {
+          existingSubmit.disabled = false;
+        }
+      });
+    }
 
     document.querySelectorAll('[data-subscription-decrease]').forEach((button) => {
       button.addEventListener('click', () => {

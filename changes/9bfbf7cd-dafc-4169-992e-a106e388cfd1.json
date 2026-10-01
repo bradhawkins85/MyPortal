@@ -1,0 +1,7 @@
+{
+  "guid": "9bfbf7cd-dafc-4169-992e-a106e388cfd1",
+  "occurred_at": "2026-09-29T00:00Z",
+  "change_type": "Fix",
+  "summary": "Stopped the RAG relationship worker from warning every minute when the Ollama module is disabled; it now logs once and re-checks every 5 minutes.",
+  "content_hash": "9ed0a638a0ad3cb4e2e982afe321ceb9454ad28b791c5f243e81d4ba338f4451"
+}

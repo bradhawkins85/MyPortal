@@ -4,6 +4,8 @@ import csv
 import io
 import re
 import httpx
+
+from app.services.monitored_http import monitored_client
 from app.repositories import mac_vendors as mac_vendors_repo
 
 IEEE_OUI_CSV_URL = "https://standards-oui.ieee.org/oui/oui.csv"
@@ -24,7 +26,7 @@ def parse_ieee_oui_csv(content: str) -> list[tuple[str, str]]:
 async def update_mac_vendors() -> dict[str, int | str]:
     """Fetch the current IEEE registry and replace the database lookup list."""
     headers = {"User-Agent": "MyPortal MAC vendor updater/1.0"}
-    async with httpx.AsyncClient(
+    async with monitored_client(httpx.AsyncClient,
         timeout=60.0, follow_redirects=True, headers=headers
     ) as client:
         response = await client.get(IEEE_OUI_CSV_URL)

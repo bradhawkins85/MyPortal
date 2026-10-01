@@ -1,0 +1,7 @@
+{
+  "guid": "85e61ebc-834d-4192-ba98-b5a50adddd8c",
+  "occurred_at": "2026-09-19T10:42Z",
+  "change_type": "Fix",
+  "summary": "Allow Super Admin role simulation to retain the company switcher and authorize all pages granted to the selected role.",
+  "content_hash": "d3a92393229ae03f89fa4055646936b1283786ca1245ac00014a2588ee7f120a"
+}

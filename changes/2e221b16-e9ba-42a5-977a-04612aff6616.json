@@ -1,0 +1,7 @@
+{
+  "guid": "2e221b16-e9ba-42a5-977a-04612aff6616",
+  "occurred_at": "2026-09-07T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed shop search submissions behind HTTPS reverse proxies and matching for punctuation-delimited SKUs.",
+  "content_hash": "ab42fe978d115d381de4beddf672033897ad96f9255e7bcadbf021d05164afe7"
+}

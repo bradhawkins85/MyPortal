@@ -322,11 +322,12 @@
     ],
     'reprocess-ai': [
       {
-        label: 'Refresh AI summary and tags',
+        label: 'Refresh all ticket AI',
         value: toJsonTemplate({
           ticket_id: '{{ ticket.id }}',
           refresh_summary: true,
           refresh_tags: true,
+          refresh_resolution: true,
         }),
       },
       {
@@ -335,6 +336,7 @@
           ticket_id: '{{ ticket.id }}',
           refresh_summary: true,
           refresh_tags: false,
+          refresh_resolution: false,
         }),
       },
       {
@@ -343,6 +345,16 @@
           ticket_id: '{{ ticket.id }}',
           refresh_summary: false,
           refresh_tags: true,
+          refresh_resolution: false,
+        }),
+      },
+      {
+        label: 'Refresh AI resolution steps only',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          refresh_summary: false,
+          refresh_tags: false,
+          refresh_resolution: true,
         }),
       },
     ],
@@ -819,6 +831,10 @@
         jsonPayloadTextarea.value = '';
       }
     }
+    if (jsonPayloadTextarea) {
+      // Let the structured ticket payload editor refresh its fields.
+      jsonPayloadTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+    }
 
     let maxRetriesValue = Number(taskData.max_retries ?? taskData.maxRetries ?? 12);
     if (!Number.isFinite(maxRetriesValue) || maxRetriesValue < 0) {
@@ -1126,7 +1142,7 @@
             return;
           }
         } else {
-          alert('JSON payload is required for scheduled ticket creation.');
+          alert('Enter a subject for the ticket this task creates.');
           return;
         }
       }
@@ -1324,9 +1340,6 @@
       }
       if (jsonPayloadField) {
         jsonPayloadField.hidden = !requiresPayload;
-      }
-      if (jsonPayloadInput) {
-        jsonPayloadInput.required = Boolean(requiresPayload);
       }
     };
 
@@ -1727,6 +1740,7 @@
           [
             'ticket.subject',
             'ticket.body',
+            'ticket.initial_body',
             'ticket.status',
             'ticket.priority',
             'ticket.requester_email',
@@ -1748,6 +1762,8 @@
             'ticket.task_count',
             'ticket.has_open_tasks',
             'ticket.open_task_count',
+            'ticket.linked_asset_count',
+            'ticket.suggested_asset_count',
             'ticket.ai_tags',
             'ticket.labels',
             'ticket.age_days',
@@ -1755,6 +1771,7 @@
             'ticket.in_status_age_hours',
             'ticket.last_reply_age_hours',
             'ticket_update.actor_type',
+            'reply.body',
             'reply.is_internal',
             'reply.kind',
           ].forEach((field) => {

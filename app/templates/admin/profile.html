@@ -1,415 +1,538 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+{% from "auth/_auth_macros.html" import password_input %}
 
-{% block header_title %}Profile{% endblock %}
+{% block title %}My profile{% endblock %}
+{% block header_title %}My profile{% endblock %}
+{% block header_actions %}{{ page_header_actions([
+  {"label": "Change password", "variant": "primary", "attrs": {"data-profile-open": "profile-password-modal", "aria-haspopup": "dialog", "aria-controls": "profile-password-modal"}},
+  {"label": "Add authenticator app", "attrs": {"data-totp-add": true, "aria-haspopup": "dialog", "aria-controls": "profile-totp-modal"}},
+  {"label": "Add passkey", "attrs": {"data-passkey-open": true, "aria-haspopup": "dialog", "aria-controls": "profile-passkey-modal"}},
+], menu_id="profile-actions-menu") }}{% endblock %}
 
 {% block content %}
 {% set show_technician_profile_fields = profile_show_technician_tools | default(false) %}
+{% set show_outlook_contacts = show_technician_profile_fields and feature_pack_available('outlook_contacts') %}
+{% set show_click_to_call = show_technician_profile_fields and feature_pack_available('click_to_call') %}
+{% set show_integrations = show_outlook_contacts or show_click_to_call %}
+{% set totp_count = (profile_totp_devices or []) | length %}
+{% set passkey_count = (profile_passkeys or []) | length %}
+{% set m365_contacts = profile_m365_contacts or {} %}
 <div
-  class="management management--single"
+  class="profile"
   data-layout
   id="profile-root"
   data-user-id="{{ current_user.id }}"
   data-totp-devices='{{ profile_totp_devices | tojson | safe }}'
+  data-passkeys='{{ profile_passkeys | tojson | safe }}'
 >
-  <section class="management__content">
-    <header class="management__header">
-      <div>
-        <h1 class="management__title">My profile</h1>
-        <p class="management__subtitle">Manage your account security{% if show_technician_profile_fields %}, notification contact, booking links, chat details, email signature{% endif %}, and sidebar preferences.</p>
-      </div>
-    </header>
+  {% set profile_stats = [
+    {"label": "Authenticator apps", "value": totp_count, "variant": "success" if totp_count else "warning", "attrs": {"data-profile-stat": "totp"}},
+    {"label": "Passkeys", "value": passkey_count, "variant": "success" if passkey_count else "neutral", "attrs": {"data-profile-stat": "passkeys"}},
+  ] %}
+  {% if show_outlook_contacts %}
+    {% set _ = profile_stats.append({"label": "Outlook contacts", "value": "Connected" if m365_contacts.connected else "Off", "variant": "success" if m365_contacts.connected else "neutral"}) %}
+  {% endif %}
+  {{ counter_strip(profile_stats, total=totp_count + passkey_count, total_label="Sign-in methods", total_attrs={"data-profile-stat": "total", "title": "Authenticator apps and passkeys that can confirm your sign-in"}, class="profile__stats") }}
 
-    <div class="management__body management__body--columns profile-columns{% if not show_technician_profile_fields %} profile-columns--standard{% endif %}">
-      {% if show_technician_profile_fields %}
-      <div class="management__column profile-columns__column">
-        <section class="card card--panel">
-          <header class="card__header card__header--stacked">
-            <div>
-              <h2 class="card__title">Outlook contacts</h2>
-              <p class="card__subtitle">Connect your own Microsoft 365 account to show phone numbers from your Outlook contacts when viewing a requester.</p>
-            </div>
-          </header>
-          <div class="card__body">
-            {% if profile_m365_contacts.connected %}
-              <p class="form-help">Connected{% if profile_m365_contacts.account_email %} as {{ profile_m365_contacts.account_email }}{% endif %}. MyPortal only requests read access to your contacts.</p>
-              <form method="post" action="/admin/profile/m365-contacts/disconnect" class="form-actions">
-                <button type="submit" class="button button--ghost">Disconnect Outlook contacts</button>
-              </form>
-            {% else %}
-              <p class="form-help">Not connected. Contact lookups are private to your technician account.</p>
-              <div class="form-actions">
-                <a class="button" href="/admin/profile/m365-contacts/connect">Connect Microsoft 365</a>
-              </div>
-            {% endif %}
-          </div>
-        </section>
-        <section class="card card--panel">
-          <header class="card__header card__header--stacked">
-            <div>
-              <h2 class="card__title">Click to call</h2>
-              <p class="card__subtitle">Use your Grandstream phone to call phone numbers shown throughout the portal.</p>
-            </div>
-          </header>
-          <div class="card__body">
-            <form class="form" id="click-to-call-form">
-              <label class="form-checkbox"><input type="checkbox" id="click-to-call-enabled" /> Enable click to call</label>
-              <div class="form-field">
-                <label class="form-label" for="click-to-call-phone-ip">Phone IP</label>
-                <input class="form-input" id="click-to-call-phone-ip" inputmode="decimal" placeholder="192.168.1.50" />
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="click-to-call-username">Login username</label>
-                <input class="form-input" id="click-to-call-username" autocomplete="username" />
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="click-to-call-password">Password</label>
-                <input class="form-input" type="password" id="click-to-call-password" autocomplete="new-password" placeholder="Leave blank to keep current password" />
-              </div>
-              <div class="form-actions"><button type="submit" class="button">Save click-to-call settings</button></div>
-            </form>
-          </div>
-        </section>
-        <section class="card card--panel">
-          <header class="card__header card__header--stacked">
-            <div>
-              <h2 class="card__title">Notification Contact</h2>
-              <p class="card__subtitle">Provide a mobile number for SMS alerts. Numbers are stored in E.164 format for secure delivery.</p>
-            </div>
-          </header>
-          <div class="card__body">
-            <form class="form management__form" id="mobile-form">
-              <fieldset class="form__fieldset">
-                <legend class="form__legend">Notification contact</legend>
-                <div class="form-field">
-                  <label class="form-label" for="mobile-number">Mobile number</label>
-                  <input
-                    class="form-input"
-                    type="tel"
-                    id="mobile-number"
-                    name="mobileNumber"
-                    value="{{ current_user.mobile_phone or '' }}"
-                    placeholder="+441234567890"
-                  />
-                </div>
-                <div class="form-actions">
-                  <button type="submit" class="button">Save number</button>
-                </div>
-              </fieldset>
-            </form>
-          </div>
-        </section>
+  <nav class="scf-tabs profile-tabs" role="tablist" aria-label="Profile sections" data-profile-tabs hidden>
+    <button type="button" class="scf-tab is-active" role="tab" id="profile-tab-security" aria-controls="profile-panel-security" aria-selected="true" data-profile-tab="security">Security</button>
+    {% if show_technician_profile_fields %}
+    <button type="button" class="scf-tab" role="tab" id="profile-tab-details" aria-controls="profile-panel-details" aria-selected="false" tabindex="-1" data-profile-tab="details">Work details</button>
+    {% endif %}
+    {% if show_integrations %}
+    <button type="button" class="scf-tab" role="tab" id="profile-tab-integrations" aria-controls="profile-panel-integrations" aria-selected="false" tabindex="-1" data-profile-tab="integrations">Integrations</button>
+    {% endif %}
+    <button type="button" class="scf-tab" role="tab" id="profile-tab-menu" aria-controls="profile-panel-menu" aria-selected="false" tabindex="-1" data-profile-tab="menu">Navigation menu<span class="scf-tab__dot" aria-hidden="true"></span></button>
+  </nav>
 
-        <section class="card card--panel">
-          <header class="card__header card__header--stacked">
-            <div>
-              <h2 class="card__title">Booking Link</h2>
-              <p class="card__subtitle">Provide your booking link URL. This will be displayed to customers on tickets assigned to you.</p>
-            </div>
-          </header>
-          <div class="card__body">
-            <form class="form management__form" id="booking-link-form">
-              <fieldset class="form__fieldset">
-                <legend class="form__legend">Booking link</legend>
-                <div class="form-field">
-                  <label class="form-label" for="booking-link-url">Booking link URL</label>
-                  <input
-                    class="form-input"
-                    type="url"
-                    id="booking-link-url"
-                    name="bookingLinkUrl"
-                    value="{{ current_user.booking_link_url or '' }}"
-                    placeholder="https://calendly.com/your-link"
-                  />
-                </div>
-                <div class="form-actions">
-                  <button type="submit" class="button">Save booking link</button>
-                </div>
-              </fieldset>
-            </form>
-          </div>
-        </section>
+  {# ── Security ─────────────────────────────────────────────────────────── #}
+  <section class="profile-panel" id="profile-panel-security" role="tabpanel" aria-labelledby="profile-tab-security" data-profile-panel="security">
+    <div class="alert alert--warning profile__notice" role="status" data-profile-no-second-factor{% if totp_count or passkey_count %} hidden{% endif %}>
+      Add an authenticator app or a passkey so a stolen password isn't enough to sign in as you.
+    </div>
 
-        {% if matrix_chat_enabled %}
-        <section class="card card--panel">
-          <header class="card__header card__header--stacked">
-            <div>
-              <h2 class="card__title">Matrix Username</h2>
-              <p class="card__subtitle">Set your Matrix user ID (e.g. @username:server.com). When you join or are assigned to a chat room, you will be added as an admin using this account.</p>
-            </div>
-          </header>
-          <div class="card__body">
-            <form class="form management__form" id="matrix-username-form">
-              <fieldset class="form__fieldset">
-                <legend class="form__legend">Matrix username</legend>
-                <div class="form-field">
-                  <label class="form-label" for="matrix-user-id">Matrix user ID</label>
-                  <input
-                    class="form-input"
-                    type="text"
-                    id="matrix-user-id"
-                    name="matrixUserId"
-                    value="{{ current_user.matrix_user_id or '' }}"
-                    placeholder="@username:matrix.org"
-                  />
-                </div>
-                <div class="form-actions">
-                  <button type="submit" class="button">Save Matrix username</button>
-                </div>
-              </fieldset>
-            </form>
+    <div class="profile-grid profile-grid--wide">
+      <section class="card card--panel profile-card profile-card--full" aria-labelledby="profile-password-title">
+        <header class="card__header profile-card__header">
+          <span class="profile-card__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5Zm-3 5a3 3 0 1 1 6 0v3H9Zm3 7a2 2 0 0 1 1 3.73V19h-2v-1.27A2 2 0 0 1 12 14Z"/></svg>
+          </span>
+          <div class="profile-card__heading">
+            <h2 class="card__title" id="profile-password-title">Password</h2>
+            <p class="card__subtitle">You sign in as <strong>{{ current_user.email }}</strong>. Use at least 12 characters that you don't use anywhere else.</p>
           </div>
-        </section>
-        {% endif %}
-
-        <section class="card card--panel">
-          <header class="card__header card__header--stacked">
-            <div>
-              <h2 class="card__title">Email signature</h2>
-              <p class="card__subtitle">
-                Create your email signature for use in automated email notifications. This signature is accessible through automation events.
-              </p>
-            </div>
-          </header>
-          <div class="card__body">
-            <form class="form" id="email-signature-form">
-              <div class="form-field">
-                <label class="form-label" for="email-signature-editor" id="email-signature-label">Email signature</label>
-                <div
-                  class="rich-text-editor"
-                  data-rich-text-editor
-                  aria-labelledby="email-signature-label"
-                >
-                  <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Formatting options">
-                    <button
-                      type="button"
-                      class="rich-text-editor__button"
-                      data-rich-text-button
-                      data-command="bold"
-                      aria-label="Bold"
-                    >
-                      <span aria-hidden="true">B</span>
-                    </button>
-                    <button
-                      type="button"
-                      class="rich-text-editor__button"
-                      data-rich-text-button
-                      data-command="italic"
-                      aria-label="Italic"
-                    >
-                      <span aria-hidden="true">I</span>
-                    </button>
-                    <button
-                      type="button"
-                      class="rich-text-editor__button"
-                      data-rich-text-button
-                      data-command="underline"
-                      aria-label="Underline"
-                    >
-                      <span aria-hidden="true">U</span>
-                    </button>
-                    <button
-                      type="button"
-                      class="rich-text-editor__button"
-                      data-rich-text-button
-                      data-command="insertUnorderedList"
-                      aria-label="Bulleted list"
-                    >
-                      <span aria-hidden="true">•</span>
-                    </button>
-                    <button
-                      type="button"
-                      class="rich-text-editor__button"
-                      data-rich-text-button
-                      data-command="insertOrderedList"
-                      aria-label="Numbered list"
-                    >
-                      <span aria-hidden="true">1.</span>
-                    </button>
-                    <button
-                      type="button"
-                      class="rich-text-editor__button"
-                      data-rich-text-button
-                      data-command="link"
-                      aria-label="Insert link"
-                    >
-                      <span aria-hidden="true">🔗</span>
-                    </button>
-                    <button
-                      type="button"
-                      class="rich-text-editor__button"
-                      data-rich-text-button
-                      data-command="removeFormat"
-                      aria-label="Clear formatting"
-                    >
-                      <span aria-hidden="true">✕</span>
-                    </button>
-                  </div>
-                  <div class="rich-text-editor__body">
-                    <div
-                      class="rich-text-editor__surface"
-                      data-rich-text-content
-                      contenteditable="true"
-                      role="textbox"
-                      aria-labelledby="email-signature-label"
-                      aria-multiline="true"
-                      data-placeholder="Enter your email signature..."
-                    ></div>
-                  </div>
-                  <textarea
-                    id="email-signature-value"
-                    name="emailSignature"
-                    data-rich-text-value
-                    hidden
-                  >{{ current_user.email_signature|e or '' }}</textarea>
-                </div>
-              </div>
-              <div class="form-actions">
-                <button type="submit" class="button">Save signature</button>
-              </div>
-            </form>
-          </div>
-        </section>
-      </div>
-      {% endif %}
-
-      <div class="management__column profile-columns__column">
-        <section class="card card--panel">
-        <header class="card__header card__header--stacked">
-          <div>
-            <h2 class="card__title">Account security</h2>
-            <p class="card__subtitle">
-              Update your password and manage multi-factor authenticators. New passwords must contain at least 12 characters and differ from your current password.
-            </p>
-          </div>
+          <button type="button" class="button button--ghost button--small" data-profile-open="profile-password-modal" aria-haspopup="dialog" aria-controls="profile-password-modal">Change</button>
         </header>
-        <div class="card__body card__body--stacked">
-          <form class="form" id="password-form" autocomplete="off">
-            <fieldset class="form__fieldset">
-              <legend class="form__legend">Change password</legend>
-              <div class="form-field">
-                <label class="form-label" for="current-password">Current password</label>
-                <input class="form-input" type="password" id="current-password" name="currentPassword" autocomplete="current-password" required />
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="new-password">New password</label>
-                <input class="form-input" type="password" id="new-password" name="newPassword" autocomplete="new-password" minlength="12" required />
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="confirm-password">Confirm new password</label>
-                <input class="form-input" type="password" id="confirm-password" name="confirmPassword" autocomplete="new-password" minlength="12" required />
-              </div>
-              <div class="form-actions">
-                <button type="submit" class="button">Update password</button>
-              </div>
-            </fieldset>
-          </form>
-          <section class="divider"></section>
-          <div data-totp>
-            <h3 class="card__subtitle">Authenticator apps</h3>
-            <p class="text-muted">
-              Register an authenticator to protect sign-ins. You can remove unused devices after confirming your new authenticator works.
-            </p>
-            <div class="table-toolbar">
-              <input type="search" class="form-input" placeholder="Filter authenticators" aria-label="Filter authenticators" data-table-filter="totp-table" />
-              <button type="button" class="button" data-totp-add>Set up new authenticator</button>
-            </div>
-            <div class="table-wrapper">
-              <table class="table" id="totp-table" data-table data-table-id="totp">
-                <thead>
-                  <tr>
-                    <th scope="col" data-sort="string">Name</th>
-                    <th scope="col" class="table__actions">Actions</th>
-                  </tr>
-                </thead>
-                <tbody data-totp-body>
-                  <tr class="table__empty" data-totp-empty>
-                    <td colspan="2">No authenticators registered yet.</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div data-totp-setup hidden>
-              <h4 class="card__subtitle">Scan the provisioning details</h4>
-              <p class="text-muted">
-                Open your authenticator app and add a new account. You can paste the setup link into compatible desktop authenticator applications or enter the secret manually.
-              </p>
-              <div class="form-grid">
-                <div class="form-field">
-                  <label class="form-label" for="totp-secret">Secret</label>
-                  <div class="inline-form inline-form--stacked">
-                    <input class="form-input" id="totp-secret" name="totpSecret" readonly />
-                    <button type="button" class="button button--ghost" data-copy-target="totp-secret">Copy</button>
-                  </div>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="totp-link">Setup link</label>
-                  <div class="inline-form inline-form--stacked">
-                    <input class="form-input" id="totp-link" name="totpLink" readonly />
-                    <button type="button" class="button button--ghost" data-copy-target="totp-link">Copy</button>
-                  </div>
-                </div>
-              </div>
-              <form class="form" id="totp-verify-form">
-                <div class="form-field">
-                  <label class="form-label" for="totp-name">Device name</label>
-                  <input class="form-input" id="totp-name" name="totpName" maxlength="100" placeholder="e.g. Work phone" />
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="totp-code">Authenticator code</label>
-                  <input class="form-input" id="totp-code" name="totpCode" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" autocorrect="off" autocapitalize="none" required />
-                </div>
-                <div class="form-actions">
-                  <button type="submit" class="button">Verify and enable</button>
-                  <button type="button" class="button button--ghost" data-totp-cancel>Cancel</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-        </section>
-      </div>
+      </section>
 
-      <div class="management__column profile-columns__column">
-        <section class="card card--panel">
-        <header class="card__header card__header--stacked">
-          <div>
-            <h2 class="card__title">Left menu customisation</h2>
-            <p class="card__subtitle">
-              Choose which sidebar links are visible and arrange their order.
-            </p>
+      <section class="card card--panel profile-card" aria-labelledby="profile-totp-title" data-totp>
+        <header class="card__header profile-card__header">
+          <span class="profile-card__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false"><path d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm0 3v13h10V5Zm5 14.25a1 1 0 1 0 0 1.5 1 1 0 0 0 0-1.5ZM9 9h6v2H9Zm0 4h4v2H9Z"/></svg>
+          </span>
+          <div class="profile-card__heading">
+            <h2 class="card__title" id="profile-totp-title">Authenticator apps</h2>
+            <p class="card__subtitle">Six-digit codes from an app like Microsoft Authenticator or 1Password.</p>
           </div>
+          <button type="button" class="button button--ghost button--small" data-totp-add aria-haspopup="dialog" aria-controls="profile-totp-modal">Add</button>
         </header>
-        <div class="card__body" data-sidebar-customisation>
-          <div class="table-wrapper">
-            <table class="table" id="sidebar-menu-table">
-              <thead>
-                <tr>
-                  <th scope="col">Visible</th>
-                  <th scope="col">Menu item</th>
-                  <th scope="col" class="table__actions">Move</th>
-                  <th scope="col" class="table__actions">Remove</th>
-                </tr>
-              </thead>
-              <tbody data-sidebar-items></tbody>
-            </table>
-          </div>
-          <div class="form-actions">
-            <button type="button" class="button button--ghost" data-sidebar-add-divider>Add divider</button>
-            <button type="button" class="button button--ghost" data-sidebar-add-spacer>Add spacer</button>
-            <button type="button" class="button" data-sidebar-save>Save menu</button>
-            <button type="button" class="button button--ghost" data-sidebar-reset>Reset default</button>
-          </div>
+        <div class="card__body">
+          <ul class="profile-credentials" data-totp-body aria-label="Authenticator apps"></ul>
+          <p class="profile-empty" data-totp-empty{% if totp_count %} hidden{% endif %}>No authenticator apps yet. Add one to protect your sign-ins.</p>
         </div>
-        </section>
-      </div>
+      </section>
+
+      <section class="card card--panel profile-card" aria-labelledby="profile-passkeys-title" data-passkeys>
+        <header class="card__header profile-card__header">
+          <span class="profile-card__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false"><path d="M8 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm0 10c3.3 0 6 1.57 6 3.5V19H2v-2.5C2 14.57 4.7 13 8 13Zm10-4a3 3 0 0 1 1 5.83V16l1 1-1 1 1 1-1.5 1.5L17 19v-4.17A3 3 0 0 1 18 9Zm0 1.75a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"/></svg>
+          </span>
+          <div class="profile-card__heading">
+            <h2 class="card__title" id="profile-passkeys-title">Passkeys</h2>
+            <p class="card__subtitle">Sign in with your fingerprint, face, device PIN or a security key.</p>
+          </div>
+          <button type="button" class="button button--ghost button--small" data-passkey-open aria-haspopup="dialog" aria-controls="profile-passkey-modal">Add</button>
+        </header>
+        <div class="card__body">
+          <p class="form-help profile__unsupported" data-passkey-unsupported hidden>Passkeys aren't available in this browser or on this connection.</p>
+          <ul class="profile-credentials" data-passkey-body aria-label="Passkeys"></ul>
+          <p class="profile-empty" data-passkey-empty{% if passkey_count %} hidden{% endif %}>No passkeys yet.</p>
+          <p class="form-help">Removing a passkey stops it signing in to {{ app_name | default('MyPortal') }}. Also delete it from your device or password manager, and sign out anywhere it's still in use.</p>
+        </div>
+      </section>
     </div>
   </section>
+
+  {# ── Work details (technicians) ───────────────────────────────────────── #}
+  {% if show_technician_profile_fields %}
+  <section class="profile-panel" id="profile-panel-details" role="tabpanel" aria-labelledby="profile-tab-details" data-profile-panel="details">
+    <div class="profile-grid profile-grid--wide">
+      <section class="card card--panel" aria-labelledby="profile-contact-title">
+        <header class="card__header card__header--stacked">
+          <div>
+            <h2 class="card__title" id="profile-contact-title">Contact and booking</h2>
+            <p class="card__subtitle">How the portal reaches you and how customers book time with you.</p>
+          </div>
+        </header>
+        <form class="card__body form profile-form" id="profile-contact-form" novalidate>
+          {% if feature_pack_available('notification_contact') %}
+          <div class="form-field" data-profile-contact-field="mobile_phone">
+            <label class="form-label" for="mobile-number">Mobile number for SMS alerts</label>
+            <input class="form-input" type="tel" id="mobile-number" name="mobileNumber" value="{{ current_user.mobile_phone or '' }}" placeholder="+61412345678" autocomplete="tel" aria-describedby="mobile-number-help" />
+            <p class="form-help" id="mobile-number-help">Include the country code, for example +61 for Australia. Leave blank to stop SMS alerts.</p>
+          </div>
+          {% endif %}
+          <div class="form-field" data-profile-contact-field="booking_link_url">
+            <label class="form-label" for="booking-link-url">Booking link</label>
+            <div class="profile-inline-field">
+              <input class="form-input" type="url" id="booking-link-url" name="bookingLinkUrl" value="{{ current_user.booking_link_url or '' }}" placeholder="https://calendly.com/your-link" autocomplete="url" aria-describedby="booking-link-help" />
+              <a class="button button--ghost button--small" href="{{ current_user.booking_link_url or '#' }}" target="_blank" rel="noopener noreferrer" data-booking-link-test{% if not current_user.booking_link_url %} hidden{% endif %}>Open</a>
+            </div>
+            <p class="form-help" id="booking-link-help">Shown to customers on tickets assigned to you.</p>
+          </div>
+          {% if matrix_chat_enabled %}
+          <div class="form-field" data-profile-contact-field="matrix_user_id">
+            <label class="form-label" for="matrix-user-id">Matrix user ID</label>
+            <input class="form-input scf-mono" type="text" id="matrix-user-id" name="matrixUserId" value="{{ current_user.matrix_user_id or '' }}" placeholder="@username:matrix.org" autocomplete="off" spellcheck="false" aria-describedby="matrix-user-id-help" />
+            <p class="form-help" id="matrix-user-id-help">You're added as a room admin with this account when you join or are assigned to a chat.</p>
+          </div>
+          {% endif %}
+          <footer class="form-actions profile-form__actions">
+            <span class="profile-form__status" data-profile-contact-status aria-live="polite"></span>
+            <button type="submit" class="button">Save details</button>
+          </footer>
+        </form>
+      </section>
+
+      {% if feature_pack_available('email_signature') %}
+      <section class="card card--panel" aria-labelledby="profile-signature-title">
+        <header class="card__header card__header--stacked">
+          <div>
+            <h2 class="card__title" id="profile-signature-title">Email signature</h2>
+            <p class="card__subtitle">Added to automated emails sent on your behalf. Automations can use it too.</p>
+          </div>
+        </header>
+        <form class="card__body form profile-form" id="email-signature-form">
+          <div class="form-field">
+            <label class="form-label visually-hidden" for="email-signature-editor" id="email-signature-label">Email signature</label>
+            <div
+              class="rich-text-editor"
+              data-rich-text-editor
+              aria-labelledby="email-signature-label"
+            >
+              <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Formatting options">
+                <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="bold" aria-label="Bold"><span aria-hidden="true">B</span></button>
+                <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="italic" aria-label="Italic"><span aria-hidden="true">I</span></button>
+                <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="underline" aria-label="Underline"><span aria-hidden="true">U</span></button>
+                <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="insertUnorderedList" aria-label="Bulleted list"><span aria-hidden="true">•</span></button>
+                <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="insertOrderedList" aria-label="Numbered list"><span aria-hidden="true">1.</span></button>
+                <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="link" aria-label="Insert link"><span aria-hidden="true">🔗</span></button>
+                <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="removeFormat" aria-label="Clear formatting"><span aria-hidden="true">✕</span></button>
+              </div>
+              <div class="rich-text-editor__body">
+                <div
+                  class="rich-text-editor__surface"
+                  data-rich-text-content
+                  contenteditable="true"
+                  role="textbox"
+                  aria-labelledby="email-signature-label"
+                  aria-multiline="true"
+                  data-placeholder="Your name, role, phone number…"
+                ></div>
+              </div>
+              <textarea
+                id="email-signature-value"
+                name="emailSignature"
+                data-rich-text-value
+                hidden
+              >{{ current_user.email_signature|e or '' }}</textarea>
+            </div>
+          </div>
+          <footer class="form-actions profile-form__actions">
+            <span class="profile-form__status" data-profile-signature-status aria-live="polite"></span>
+            <button type="submit" class="button">Save signature</button>
+          </footer>
+        </form>
+      </section>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  {# ── Integrations (technicians) ───────────────────────────────────────── #}
+  {% if show_integrations %}
+  <section class="profile-panel" id="profile-panel-integrations" role="tabpanel" aria-labelledby="profile-tab-integrations" data-profile-panel="integrations">
+    <div class="profile-grid profile-grid--wide">
+      {% if show_outlook_contacts %}
+      <section class="card card--panel" aria-labelledby="profile-outlook-title">
+        <header class="card__header profile-card__header">
+          <div class="profile-card__heading">
+            <h2 class="card__title" id="profile-outlook-title">Outlook contacts</h2>
+            <p class="card__subtitle">Show phone numbers from your own Outlook contacts when you view a requester.</p>
+          </div>
+          {% if m365_contacts.connected %}
+            <span class="scf-chip sif-chip--optional">Connected</span>
+          {% else %}
+            <span class="scf-chip">Not connected</span>
+          {% endif %}
+        </header>
+        <div class="card__body">
+          {% if m365_contacts.connected %}
+            <p class="form-help">Connected{% if m365_contacts.account_email %} as <strong>{{ m365_contacts.account_email }}</strong>{% endif %}. {{ app_name | default('MyPortal') }} can only read your contacts.</p>
+            <form method="post" action="/admin/profile/m365-contacts/disconnect" class="form-actions profile-form__actions">
+              {% include "partials/csrf.html" %}
+              <button type="submit" class="button button--ghost">Disconnect</button>
+            </form>
+          {% else %}
+            <p class="form-help">Sign in with Microsoft 365 to allow read-only access to your contacts. Lookups stay private to you.</p>
+            <div class="form-actions profile-form__actions">
+              <a class="button button--ghost" href="/admin/profile/m365-contacts/connect">Connect Microsoft 365</a>
+            </div>
+          {% endif %}
+        </div>
+      </section>
+      {% endif %}
+
+      {% if show_click_to_call %}
+      <section class="card card--panel" aria-labelledby="profile-click-to-call-title">
+        <header class="card__header card__header--stacked">
+          <div>
+            <h2 class="card__title" id="profile-click-to-call-title">Click to call</h2>
+            <p class="card__subtitle">Call phone numbers shown in the portal from your Grandstream desk phone.</p>
+          </div>
+        </header>
+        <form class="card__body form profile-form" id="click-to-call-form">
+          <label class="form-checkbox"><input type="checkbox" id="click-to-call-enabled" /> Turn on click to call</label>
+          <div class="form-grid">
+            <div class="form-field">
+              <label class="form-label" for="click-to-call-phone-ip">Phone IP address</label>
+              <input class="form-input scf-mono" id="click-to-call-phone-ip" inputmode="decimal" placeholder="192.168.1.50" autocomplete="off" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="click-to-call-username">Phone login</label>
+              <input class="form-input" id="click-to-call-username" autocomplete="username" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="click-to-call-password">Phone password</label>
+              <input class="form-input" type="password" id="click-to-call-password" autocomplete="new-password" placeholder="Leave blank to keep the saved one" />
+            </div>
+          </div>
+          <footer class="form-actions profile-form__actions">
+            <button type="submit" class="button">Save click to call</button>
+          </footer>
+        </form>
+      </section>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  {# ── Navigation menu ────────────────────────────────────────────────────── #}
+  <section class="profile-panel" id="profile-panel-menu" role="tabpanel" aria-labelledby="profile-tab-menu" data-profile-panel="menu">
+    <section class="card card--panel menu-editor" data-sidebar-customisation>
+      <header class="card__header card__header--stacked menu-editor__header">
+        <div>
+          <h2 class="card__title">Navigation menu</h2>
+          <p class="card__subtitle">
+            Drag links to reorder them, move them between groups, and switch off anything you don't use.
+            Changes preview here and apply to the sidebar when you save.
+          </p>
+        </div>
+        <div class="menu-editor__toolbar" role="toolbar" aria-label="Add to menu">
+          <button type="button" class="button button--ghost button--small" data-sidebar-add-group>
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 5a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm8 5v3H8v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
+            New group
+          </button>
+          <button type="button" class="button button--ghost button--small" data-sidebar-add-divider>
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 11h18v2H3z"/></svg>
+            Divider
+          </button>
+          <button type="button" class="button button--ghost button--small" data-sidebar-add-spacer>
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11 3h2v5h3l-4 4-4-4h3zm0 18h2v-5h3l-4-4-4 4h3z"/></svg>
+            Spacer
+          </button>
+        </div>
+      </header>
+      <div class="card__body menu-editor__body">
+        <fieldset class="navigation-style" data-navigation-style>
+          <legend class="form-label">Menu position</legend>
+          <label class="navigation-style__option">
+            <input type="radio" name="navigation-style" value="sidebar" />
+            <span><strong>Left menu</strong><small>Show navigation vertically beside the page.</small></span>
+          </label>
+          <label class="navigation-style__option">
+            <input type="radio" name="navigation-style" value="top" />
+            <span><strong>Top menu</strong><small>Keep a horizontal menu at the top, with grouped items in drop-down menus.</small></span>
+          </label>
+        </fieldset>
+        {% if role_switcher_allowed | default(false) %}
+        <fieldset class="navigation-style navigation-style--modes" data-role-switcher-preference>
+          <legend class="form-label">Role switcher</legend>
+          <label class="navigation-style__option">
+            <input type="radio" name="role-switcher-display" value="full" />
+            <span><strong>Full selector</strong><small>Show the “View as role” drop-down list in the menu.</small></span>
+          </label>
+          <label class="navigation-style__option">
+            <input type="radio" name="role-switcher-display" value="icon" />
+            <span><strong>Icon only</strong><small>Show a compact icon that pops down the role list, saving menu space.</small></span>
+          </label>
+          <label class="navigation-style__option">
+            <input type="radio" name="role-switcher-display" value="hidden" />
+            <span><strong>Hidden</strong><small>Hide the role switcher. While viewing as another role the icon still shows so you can switch back.</small></span>
+          </label>
+        </fieldset>
+        {% endif %}
+        <div class="menu-editor__list-header">
+          <span class="menu-editor__list-title">Menu layout</span>
+          <button type="button" class="menu-editor__text-button" data-sidebar-expand-all aria-pressed="false">Expand all</button>
+        </div>
+        <ol class="menu-editor__list" data-sidebar-items aria-label="Left menu layout"></ol>
+        <p class="menu-editor__hint text-muted">
+          Tip: use the arrow buttons or the “Move to” menu if you prefer not to drag. Empty groups are hidden from the sidebar.
+        </p>
+      </div>
+      <footer class="menu-editor__footer">
+        <span class="menu-editor__status" data-sidebar-status aria-live="polite"></span>
+        <button type="button" class="button button--ghost" data-sidebar-reset>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+          Reset to default
+        </button>
+        <button type="button" class="button" data-sidebar-save>Save menu</button>
+      </footer>
+    </section>
+  </section>
+
+  {# ── Modals ───────────────────────────────────────────────────────────── #}
+  <div class="modal scf-modal" id="profile-password-modal" role="dialog" aria-modal="true" aria-labelledby="profile-password-modal-title" hidden>
+    <form class="modal__panel profile-modal" id="password-form" autocomplete="off" novalidate>
+      <header class="modal__header">
+        <div>
+          <h2 class="modal__title" id="profile-password-modal-title">Change password</h2>
+          <p class="scf-editor__subtitle">You'll stay signed in on this device.</p>
+        </div>
+        <button type="button" class="modal__close" data-modal-close aria-label="Close change password"></button>
+      </header>
+      <div class="modal__body profile-modal__body">
+        <div class="form-field">
+          <label class="form-label" for="current-password">Current password</label>
+          {{ password_input('current-password', 'current_password', 'current-password') }}
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="new-password">New password</label>
+          {{ password_input('new-password', 'password', 'new-password', 'At least 12 characters', 12, 'profile-password-rules', 128) }}
+          <ul class="auth-rules" id="profile-password-rules" data-password-rules aria-live="polite">
+            <li data-rule="length">At least 12 characters</li>
+            <li data-rule="mixed" data-rule-optional>Upper and lower case letters <span class="scf-optional">recommended</span></li>
+            <li data-rule="symbol" data-rule-optional>A number or symbol <span class="scf-optional">recommended</span></li>
+          </ul>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="confirm-password">Confirm new password</label>
+          {{ password_input('confirm-password', 'confirm_password', 'new-password', 'Type it again', 12, none, 128) }}
+          <p class="form-help auth-match" data-password-match aria-live="polite"></p>
+        </div>
+        <p class="profile-modal__error" data-modal-error role="alert" hidden></p>
+      </div>
+      <footer class="modal__footer scf-editor__footer">
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        <button type="submit" class="button">Update password</button>
+      </footer>
+    </form>
+  </div>
+
+  <div class="modal scf-modal" id="profile-totp-modal" role="dialog" aria-modal="true" aria-labelledby="profile-totp-modal-title" hidden>
+    <form class="modal__panel profile-modal" id="totp-verify-form" autocomplete="off" novalidate data-totp-setup>
+      <header class="modal__header">
+        <div>
+          <h2 class="modal__title" id="profile-totp-modal-title">Add an authenticator app</h2>
+          <p class="scf-editor__subtitle">Nothing changes until you enter a code from the app.</p>
+        </div>
+        <button type="button" class="modal__close" data-modal-close aria-label="Close authenticator setup"></button>
+      </header>
+      <div class="modal__body profile-modal__body">
+        <ol class="totp-steps">
+          <li class="totp-step">
+            <span class="totp-step__number" aria-hidden="true">1</span>
+            <div class="totp-step__body">
+              <h3 class="totp-step__title">Scan this QR code</h3>
+              <p class="text-muted">In your authenticator app, choose to add an account, then point your camera at the code.</p>
+              <div class="totp-scan">
+                <div class="totp-qr" data-totp-qr-container aria-live="polite" aria-busy="true">
+                  <div class="totp-qr__placeholder" data-totp-qr-placeholder>Generating your QR code…</div>
+                  <img class="totp-qr__image" data-totp-qr alt="QR code for adding this account to an authenticator app" hidden />
+                </div>
+                <div class="totp-scan__aside">
+                  <button type="button" class="button-link totp-manual-toggle" data-totp-manual-toggle aria-expanded="false" aria-controls="profile-totp-manual">Cannot scan the code?</button>
+                  <div class="totp-manual" id="profile-totp-manual" data-totp-manual hidden>
+                    <p class="form-help">Enter this secret in your app instead, or open the setup link on this device.</p>
+                    <div class="form-field">
+                      <label class="form-label" for="totp-secret">Secret</label>
+                      <div class="totp-copy-row">
+                        <input class="form-input scf-mono" id="totp-secret" name="totpSecret" readonly />
+                        <button type="button" class="button button--ghost button--small" data-copy-target="totp-secret">Copy</button>
+                      </div>
+                    </div>
+                    <div class="form-field">
+                      <label class="form-label" for="totp-link">Setup link</label>
+                      <div class="totp-copy-row">
+                        <input class="form-input scf-mono" id="totp-link" name="totpLink" readonly />
+                        <button type="button" class="button button--ghost button--small" data-copy-target="totp-link">Copy</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </li>
+          <li class="totp-step">
+            <span class="totp-step__number" aria-hidden="true">2</span>
+            <div class="totp-step__body">
+              <h3 class="totp-step__title">Enter the 6-digit code</h3>
+              <div class="form-grid">
+                <div class="form-field">
+                  <label class="form-label" for="totp-code">Code from the app</label>
+                  <input class="form-input totp-code" id="totp-code" name="totpCode" type="text" inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" autocomplete="one-time-code" autocorrect="off" autocapitalize="none" placeholder="123 456" required />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="totp-name">Device name <span class="scf-optional">optional</span></label>
+                  <input class="form-input" id="totp-name" name="totpName" maxlength="100" placeholder="e.g. Work phone" />
+                </div>
+                <div class="form-field" data-totp-password-field{% if not totp_count %} hidden{% endif %}>
+                  <label class="form-label" for="totp-current-password">Current password</label>
+                  {{ password_input('totp-current-password', 'current_password', 'current-password') }}
+                  <p class="form-help">Needed because you already have an authenticator app.</p>
+                </div>
+              </div>
+            </div>
+          </li>
+        </ol>
+        <p class="profile-modal__error" data-modal-error role="alert" hidden></p>
+      </div>
+      <footer class="modal__footer scf-editor__footer">
+        <button type="button" class="button button--ghost" data-modal-close data-totp-cancel>Cancel</button>
+        <button type="submit" class="button" data-totp-submit disabled>Verify and add</button>
+      </footer>
+    </form>
+  </div>
+
+  <div class="modal scf-modal" id="profile-passkey-modal" role="dialog" aria-modal="true" aria-labelledby="profile-passkey-modal-title" hidden>
+    <form class="modal__panel profile-modal" id="passkey-add-form" autocomplete="off" novalidate>
+      <header class="modal__header">
+        <div>
+          <h2 class="modal__title" id="profile-passkey-modal-title">Add a passkey</h2>
+          <p class="scf-editor__subtitle">Your browser will ask you to confirm with your device or security key.</p>
+        </div>
+        <button type="button" class="modal__close" data-modal-close aria-label="Close add passkey"></button>
+      </header>
+      <div class="modal__body profile-modal__body">
+        <div class="form-field">
+          <label class="form-label" for="passkey-name">Passkey name</label>
+          <input class="form-input" id="passkey-name" name="passkeyName" maxlength="100" placeholder="e.g. Work laptop" required />
+          <p class="form-help">Name it after the device or password manager so you can recognise it later.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="passkey-current-password">Current password</label>
+          {{ password_input('passkey-current-password', 'current_password', 'current-password') }}
+          <p class="form-help">Needed to confirm it's you before a new sign-in method is added.</p>
+        </div>
+        <p class="profile-modal__error" data-modal-error role="alert" hidden></p>
+      </div>
+      <footer class="modal__footer scf-editor__footer">
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        <button type="submit" class="button" data-passkey-add>Continue</button>
+      </footer>
+    </form>
+  </div>
+
+  <div class="modal scf-modal" id="profile-rename-modal" role="dialog" aria-modal="true" aria-labelledby="profile-rename-modal-title" hidden>
+    <form class="modal__panel profile-modal profile-modal--narrow" id="passkey-rename-form" autocomplete="off" novalidate>
+      <header class="modal__header">
+        <h2 class="modal__title" id="profile-rename-modal-title">Rename passkey</h2>
+        <button type="button" class="modal__close" data-modal-close aria-label="Close rename passkey"></button>
+      </header>
+      <div class="modal__body profile-modal__body">
+        <div class="form-field">
+          <label class="form-label" for="passkey-rename-input">Name</label>
+          <input class="form-input" id="passkey-rename-input" name="name" maxlength="100" required />
+        </div>
+        <p class="profile-modal__error" data-modal-error role="alert" hidden></p>
+      </div>
+      <footer class="modal__footer scf-editor__footer">
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        <button type="submit" class="button">Save name</button>
+      </footer>
+    </form>
+  </div>
+
+  <div class="modal scf-modal" id="profile-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="profile-confirm-modal-title" aria-describedby="profile-confirm-modal-message" hidden>
+    <form class="modal__panel profile-modal profile-modal--narrow" id="profile-confirm-form" autocomplete="off" novalidate>
+      <header class="modal__header">
+        <h2 class="modal__title" id="profile-confirm-modal-title" data-confirm-title>Confirm it's you</h2>
+        <button type="button" class="modal__close" data-modal-close aria-label="Close"></button>
+      </header>
+      <div class="modal__body profile-modal__body">
+        <p id="profile-confirm-modal-message" data-confirm-message></p>
+        <div class="form-field">
+          <label class="form-label" for="profile-confirm-password">Current password</label>
+          {{ password_input('profile-confirm-password', 'current_password', 'current-password') }}
+        </div>
+        <p class="profile-modal__error" data-modal-error role="alert" hidden></p>
+      </div>
+      <footer class="modal__footer scf-editor__footer">
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        <button type="submit" class="button" data-confirm-submit>Continue</button>
+      </footer>
+    </form>
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
-  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/passkey_utils.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/auth_ui.js') }}" defer></script>
   {% if profile_show_technician_tools | default(false) %}
   <script src="{{ static_url('/static/js/purify.min.js') }}" defer></script>
   <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>

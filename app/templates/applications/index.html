@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/tables.html" import data_table, table_toolbar, empty_state %}
+{% from "macros/counters.html" import counter_strip %}
+{% from "applications/_importance.html" import importance_badge %}
+{% set importance_labels = dict(importance_levels) %}
+{% set importance_value = request.query_params.get('importance', '') %}
+{% set type_value = request.query_params.get('type', '') %}
+{% block title %}Applications{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Applications</span>
+    {{ table_toolbar("applications-table", search=true, search_placeholder="Search applications", filters=[{"name":"importance","label":"Importance","value":importance_value,"options":[("","All importance levels")] + importance_levels|list},{"name":"type","label":"Type","value":type_value,"options":[("","All types")] + type_options}], columns=[{"key":"name","label":"Application"},{"key":"type","label":"Type"},{"key":"version","label":"Version"},{"key":"importance","label":"Importance"},{"key":"champion","label":"Champion"}], header=true) }}
+    <span class="page-header-toolbar__info" aria-live="polite">{% if applications|length != total_count %}Showing {{ applications|length }} of {{ total_count }}{% else %}{{ total_count }} application{{ '' if total_count == 1 else 's' }}{% endif %}</span>
+  </div>
+{% endblock %}
+{% block header_actions %}{% set actions = [] %}{% if can_write %}{% set _ = actions.append({"label":"Create application","type":"link","href":"/applications/new","variant":"primary"}) %}{% endif %}{% set _ = actions.append({"label":"Application types","type":"link","href":"/applications/types"}) %}{{ page_header_actions(actions) }}{% endblock %}
+{% block content %}
+{% if request.query_params.get('deleted') == '1' %}<div class="alert alert--success" role="status">Application deleted.</div>{% endif %}
+{{ counter_strip([
+  {"label": importance_labels.critical, "value": importance_counts.critical, "variant": "danger", "href": "/applications?importance=critical", "title": "Show critical applications"},
+  {"label": importance_labels.high, "value": importance_counts.high, "variant": "warning", "href": "/applications?importance=high", "title": "Show high importance applications"},
+  {"label": importance_labels.medium, "value": importance_counts.medium, "variant": "info", "href": "/applications?importance=medium", "title": "Show medium importance applications"},
+  {"label": importance_labels.low, "value": importance_counts.low, "variant": "neutral", "href": "/applications?importance=low", "title": "Show low importance applications"},
+], total=total_count, total_label="Applications") }}
+<section class="card card--panel">
+  {% set columns = [{"key":"name","label":"Application","mobile_priority":"essential"},{"key":"type","label":"Type"},{"key":"version","label":"Version"},{"key":"importance","label":"Importance","mobile_priority":"essential"},{"key":"champion","label":"Champion"}] %}
+  {% if can_write %}{% set columns = columns + [{"key":"actions","label":"Actions","sortable":false,"mobile_priority":"essential"}] %}{% endif %}
+  {% if applications %}{% call data_table([], table_id="applications-table", columns=columns, aria_label="Company applications") %}
+    {% for app in applications %}<tr><td data-column-key="name"><a href="/applications/{{ app.id }}"><strong>{{ app.name }}</strong></a></td><td data-column-key="type">{{ app.type_name or '—' }}</td><td data-column-key="version">{{ app.version or '—' }}</td><td data-column-key="importance">{{ importance_badge(app.importance, importance_labels) }}</td><td data-column-key="champion">{{ app.champion_display or '—' }}</td>{% if can_write %}<td data-column-key="actions" class="table__actions"><a class="button button--ghost button--small" href="/applications/{{ app.id }}/edit">Edit</a> <form method="post" action="/applications/{{ app.id }}/delete" data-confirm="Delete {{ app.name }}? This cannot be undone.">{% include "partials/csrf.html" %}<button class="button button--danger button--small" type="submit">Delete</button></form></td>{% endif %}</tr>{% endfor %}
+  {% endcall %}{% elif total_count %}{{ empty_state("No applications match these filters", "Clear the importance or type filter to see every application.") }}{% else %}{{ empty_state("No applications documented", "Create an application to record its type, version, importance, champion and supporting KB articles.") }}{% endif %}
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/applications.js') }}" defer></script>{% endblock %}

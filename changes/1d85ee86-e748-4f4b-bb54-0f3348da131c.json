@@ -1,0 +1,7 @@
+{
+  "guid": "1d85ee86-e748-4f4b-bb54-0f3348da131c",
+  "occurred_at": "2026-09-22T00:00Z",
+  "change_type": "Fix",
+  "summary": "Route cart-order billing through durable MyPortal invoices before attempting Xero synchronization, enabling administrator retries after failures.",
+  "content_hash": "172c586e77e1fd52e3deca95f44a80d7d9952a15935827ae6250b6d1cd7e825a"
+}

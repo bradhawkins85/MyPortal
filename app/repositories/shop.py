@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from decimal import Decimal
 import re
-from typing import Any, Iterable, Literal, Sequence
+from typing import Any, Iterable, Literal, Mapping, Sequence
 
 import aiomysql
 
@@ -22,7 +22,10 @@ def _prepare_product_search_term(search: str | None) -> tuple[str | None, str | 
     if len(term) < _FULLTEXT_MIN_SEARCH_LENGTH:
         return "prefix", f"{term}%"
 
-    tokens = [segment.strip() for segment in re.split(r"\s+", term) if segment.strip()]
+    # MySQL full-text indexes split identifiers at punctuation.  Build the
+    # boolean query from the same kind of segments so SKUs such as
+    # ``NBL-14-I516512G9`` can match their indexed tokens.
+    tokens = re.findall(r"[0-9A-Za-z]+", term)
     boolean_tokens: list[str] = []
     for token in tokens:
         cleaned = re.sub(r"[^0-9A-Za-z]", "", token)
@@ -310,7 +313,9 @@ async def get_category_ids_with_available_products(
     if company_id is not None:
         conditions.append("e.product_id IS NULL")
     if not include_out_of_stock:
-        conditions.append("p.stock > 0")
+        # Subscriptions are not inventory-backed.  ``stock`` is retained for
+        # backwards compatibility, but must never hide an available plan.
+        conditions.append("(p.stock > 0 OR p.subscription_category_id IS NOT NULL)")
 
     query_parts.append("WHERE " + " AND ".join(conditions))
 
@@ -350,7 +355,7 @@ async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
         params.extend(filters.category_ids)
     _append_product_search_filter(conditions, params, filters.search_term)
     if filters.require_in_stock:
-        conditions.append("p.stock > 0")
+        conditions.append("(p.stock > 0 OR p.subscription_category_id IS NOT NULL)")
 
     if conditions:
         query_parts.append("WHERE " + " AND ".join(conditions))
@@ -397,6 +402,10 @@ async def list_products_summary(filters: ProductFilters) -> list[dict[str, Any]]
         "    p.stock,",
         "    p.archived,",
         "    p.category_id,",
+        "    p.subscription_category_id,",
+        "    p.price_monthly_commitment,",
+        "    p.price_annual_monthly_payment,",
+        "    p.price_annual_annual_payment,",
         "    c.name AS category_name,",
         "    sf.duplicate_sku_import,",
         "    sf.duplicate_sku_count",
@@ -427,7 +436,7 @@ async def list_products_summary(filters: ProductFilters) -> list[dict[str, Any]]
         params.extend(filters.category_ids)
     _append_product_search_filter(conditions, params, filters.search_term)
     if filters.require_in_stock:
-        conditions.append("p.stock > 0")
+        conditions.append("(p.stock > 0 OR p.subscription_category_id IS NOT NULL)")
 
     if conditions:
         query_parts.append("WHERE " + " AND ".join(conditions))
@@ -484,7 +493,9 @@ async def count_products(filters: ProductFilters) -> int:
         params.extend(filters.category_ids)
     _append_product_search_filter(conditions, params, filters.search_term)
     if filters.require_in_stock:
-        conditions.append("p.stock > 0")
+        # Subscription plans are available based on their configured pricing,
+        # not an inventory count.
+        conditions.append("(p.stock > 0 OR p.subscription_category_id IS NOT NULL)")
 
     if conditions:
         query_parts.append("WHERE " + " AND ".join(conditions))
@@ -498,6 +509,31 @@ async def count_products(filters: ProductFilters) -> int:
 async def list_all_products(include_archived: bool = False) -> list[dict[str, Any]]:
     filters = ProductFilters(include_archived=include_archived)
     return await list_products(filters)
+
+
+async def list_product_description_refresh_ids(
+    *, include_archived: bool = False
+) -> list[int]:
+    """Return every catalogue product eligible for description refreshing.
+
+    Subscription plans share the product table, but their descriptions are managed
+    separately and must not be rewritten by the catalogue bulk action.
+    """
+
+    if include_archived:
+        sql = (
+            "SELECT id FROM shop_products "
+            "WHERE subscription_category_id IS NULL "
+            "ORDER BY id ASC"
+        )
+    else:
+        sql = (
+            "SELECT id FROM shop_products "
+            "WHERE subscription_category_id IS NULL AND archived = 0 "
+            "ORDER BY id ASC"
+        )
+    rows = await db.fetch_all(sql)
+    return [int(row["id"]) for row in rows]
 
 
 async def list_product_features(product_id: int) -> list[dict[str, Any]]:
@@ -523,7 +559,7 @@ async def list_features_for_products(
         FROM shop_product_features
         WHERE product_id IN ({placeholders})
         ORDER BY product_id ASC, position ASC, id ASC
-    """
+    """  # nosec B608
     rows = await db.fetch_all(sql, tuple(identifiers))
 
     features_map: dict[int, list[dict[str, Any]]] = {}
@@ -759,7 +795,7 @@ async def list_package_items_for_packages(
         INNER JOIN shop_products AS products ON products.id = items.product_id
         WHERE items.package_id IN ({placeholders})
         ORDER BY items.package_id ASC, products.name ASC
-        """,
+        """,  # nosec B608
         tuple(identifiers),
     )
     items = [_normalise_package_item(row) for row in rows]
@@ -814,7 +850,7 @@ async def list_package_item_alternates_for_items(
         INNER JOIN shop_products AS products ON products.id = alternates.alternate_product_id
         WHERE alternates.package_item_id IN ({placeholders})
         ORDER BY alternates.package_item_id ASC, alternates.priority ASC, products.name ASC
-        """,
+        """,  # nosec B608
         tuple(identifiers),
     )
     grouped: dict[int, list[dict[str, Any]]] = {}
@@ -920,7 +956,7 @@ async def get_restricted_product_ids(
         SELECT product_id
         FROM shop_product_exclusions
         WHERE company_id = %s AND product_id IN ({placeholders})
-        """,
+        """,  # nosec B608
         tuple([company_id, *identifiers]),
     )
     return {
@@ -1016,7 +1052,9 @@ async def list_featured_products_for_company(
     ]
     params: list[Any] = [company_id, company_id]
     if not include_out_of_stock:
-        query_parts.append("  AND p.stock > 0")
+        query_parts.append(
+            "  AND (p.stock > 0 OR p.subscription_category_id IS NOT NULL)"
+        )
     query_parts.append("ORDER BY p.name ASC")
     rows = await db.fetch_all(" ".join(query_parts), tuple(params))
     products = [_normalise_product(row) for row in rows]
@@ -1243,8 +1281,9 @@ async def bulk_dismiss_pending_optional_accessories(ids: list[int]) -> int:
     if not ids:
         return 0
     placeholders = ",".join(["%s"] * len(ids))
+    # The IN placeholders are derived only from the supplied accessory id count; values remain bound.
     result = await db.execute(
-        f"UPDATE shop_optional_accessories SET dismissed = 1, dismissed_at = UTC_TIMESTAMP() WHERE id IN ({placeholders}) AND dismissed = 0",
+        f"UPDATE shop_optional_accessories SET dismissed = 1, dismissed_at = UTC_TIMESTAMP() WHERE id IN ({placeholders}) AND dismissed = 0",  # nosec B608
         tuple(ids),
     )
     return int(result) if result else 0
@@ -1371,9 +1410,11 @@ async def create_product(
     name: str,
     sku: str,
     vendor_sku: str,
+    microsoft_sku: str | None = None,
     price: Decimal,
     stock: int,
     description: str | None = None,
+    invoice_description: str | None = None,
     vip_price: Decimal | None = None,
     category_id: int | None = None,
     image_url: str | None = None,
@@ -1385,6 +1426,7 @@ async def create_product(
     price_monthly_commitment: Decimal | None = None,
     price_annual_monthly_payment: Decimal | None = None,
     price_annual_annual_payment: Decimal | None = None,
+    voice_monitor_calls_per_day: int | None = None,
     product_link: str | None = None,
 ) -> dict[str, Any]:
     async with db.acquire() as conn:
@@ -1392,17 +1434,19 @@ async def create_product(
             await cursor.execute(
                 """
                 INSERT INTO shop_products
-                    (name, sku, vendor_sku, description, image_url, price, vip_price, stock,
+                    (name, sku, vendor_sku, microsoft_sku, description, invoice_description, image_url, price, vip_price, stock,
                      category_id, subscription_category_id, commitment_type, payment_frequency,
                      price_monthly_commitment, price_annual_monthly_payment, price_annual_annual_payment,
-                     product_link)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     product_link, voice_monitor_calls_per_day)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     name,
                     sku,
                     vendor_sku,
+                    microsoft_sku,
                     description,
+                    invoice_description,
                     image_url,
                     price,
                     vip_price,
@@ -1415,6 +1459,7 @@ async def create_product(
                     price_annual_monthly_payment,
                     price_annual_annual_payment,
                     product_link,
+                    voice_monitor_calls_per_day,
                 ),
             )
             product_id = int(cursor.lastrowid)
@@ -1517,13 +1562,17 @@ async def create_order(
             await conn.begin()
             try:
                 await cursor.execute(
-                    "SELECT stock FROM shop_products WHERE id = %s FOR UPDATE",
+                    "SELECT stock, subscription_category_id "
+                    "FROM shop_products WHERE id = %s FOR UPDATE",
                     (product_id,),
                 )
                 row = await cursor.fetchone()
                 previous_stock: int | None = None
                 new_stock: int | None = None
-                if row and row.get("stock") is not None:
+                is_subscription = bool(
+                    row and row.get("subscription_category_id") is not None
+                )
+                if not is_subscription and row and row.get("stock") is not None:
                     previous_stock = int(row["stock"])
                     if previous_stock < quantity:
                         raise ValueError(
@@ -1566,10 +1615,11 @@ async def create_order(
                         shipping_country,
                     ),
                 )
-                await cursor.execute(
-                    "UPDATE shop_products SET stock = stock - %s WHERE id = %s",
-                    (quantity, product_id),
-                )
+                if not is_subscription:
+                    await cursor.execute(
+                        "UPDATE shop_products SET stock = stock - %s WHERE id = %s",
+                        (quantity, product_id),
+                    )
                 await conn.commit()
                 return previous_stock, new_stock
             except Exception:
@@ -1613,6 +1663,12 @@ async def get_order_summary(
             MAX(shipping_status) AS shipping_status,
             MAX(notes) AS notes,
             MAX(po_number) AS po_number,
+            MAX(shipping_option) AS shipping_option,
+            MAX(shipping_street) AS shipping_street,
+            MAX(shipping_city) AS shipping_city,
+            MAX(shipping_state) AS shipping_state,
+            MAX(shipping_postcode) AS shipping_postcode,
+            MAX(shipping_country) AS shipping_country,
             MAX(consignment_id) AS consignment_id,
             MAX(eta) AS eta
         FROM shop_orders
@@ -1657,8 +1713,9 @@ async def update_order(
         set_clause = ", ".join(f"{column} = %s" for column in updates)
         params: list[Any] = list(updates.values())
         params.extend([order_number, company_id])
+        # `updates` is filtered against the fixed order-field allowlist above; values remain bound.
         await db.execute(
-            f"UPDATE shop_orders SET {set_clause} WHERE order_number = %s AND company_id = %s",
+            f"UPDATE shop_orders SET {set_clause} WHERE order_number = %s AND company_id = %s",  # nosec B608
             tuple(params),
         )
 
@@ -1688,6 +1745,13 @@ async def list_order_items(order_number: str, company_id: int) -> list[dict[str,
             p.stock_vic,
             p.stock_sa,
             p.stock_wa,
+            p.subscription_category_id,
+            p.commitment_type,
+            p.payment_frequency,
+            p.price_monthly_commitment,
+            p.price_annual_monthly_payment,
+            p.price_annual_annual_payment,
+            p.vip_price,
             c.is_vip AS is_vip,
             IF(c.is_vip = 1 AND p.vip_price IS NOT NULL, p.vip_price, p.price) AS price
         FROM shop_orders AS o
@@ -1763,13 +1827,18 @@ async def update_product_description(
     return await get_product_by_id(product_id, include_archived=True)
 
 
+_PRODUCT_FREIGHT_COLUMNS: tuple[str, ...] = ("item_size", "weight", "length", "width", "height")
+
+
 async def update_product(
     product_id: int,
     *,
     name: str,
     sku: str,
     vendor_sku: str,
+    microsoft_sku: str | None = None,
     description: str | None,
+    invoice_description: str | None = None,
     price: Decimal,
     stock: int,
     vip_price: Decimal | None,
@@ -1783,22 +1852,37 @@ async def update_product(
     price_monthly_commitment: Decimal | None = None,
     price_annual_monthly_payment: Decimal | None = None,
     price_annual_annual_payment: Decimal | None = None,
+    voice_monitor_calls_per_day: int | None = None,
     scheduled_price: Decimal | None = None,
     scheduled_vip_price: Decimal | None = None,
     scheduled_buy_price: Decimal | None = None,
     price_change_date: Any | None = None,
     product_link: str | None = None,
+    freight: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
+    # Freight fields (item size, weight and dimensions) are only written when
+    # supplied so callers that do not edit them leave stock-feed values intact.
+    freight_assignments = ""
+    freight_params: list[Any] = []
+    if freight is not None:
+        for column in _PRODUCT_FREIGHT_COLUMNS:
+            freight_assignments += f"{column} = %s,\n"
+            freight_params.append(freight.get(column))
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
             await cursor.execute(
                 """
                 UPDATE shop_products
                 SET
+                    """  # nosec B608 - column names come from a fixed allow-list
+                + freight_assignments
+                + """
                     name = %s,
                     sku = %s,
                     vendor_sku = %s,
+                    microsoft_sku = %s,
                     description = %s,
+                    invoice_description = %s,
                     image_url = %s,
                     product_link = %s,
                     price = %s,
@@ -1811,6 +1895,7 @@ async def update_product(
                     price_monthly_commitment = %s,
                     price_annual_monthly_payment = %s,
                     price_annual_annual_payment = %s,
+                    voice_monitor_calls_per_day = %s,
                     scheduled_price = %s,
                     scheduled_vip_price = %s,
                     scheduled_buy_price = %s,
@@ -1823,10 +1908,13 @@ async def update_product(
                 WHERE id = %s
                 """,
                 (
+                    *freight_params,
                     name,
                     sku,
                     vendor_sku,
+                    microsoft_sku,
                     description,
+                    invoice_description,
                     image_url,
                     product_link,
                     price,
@@ -1839,6 +1927,7 @@ async def update_product(
                     price_monthly_commitment,
                     price_annual_monthly_payment,
                     price_annual_annual_payment,
+                    voice_monitor_calls_per_day,
                     scheduled_price,
                     scheduled_vip_price,
                     scheduled_buy_price,
@@ -2003,6 +2092,78 @@ async def _populate_product_recommendations(products: list[dict[str, Any]]) -> N
         product["upsell_product_ids"] = [entry["id"] for entry in upsell_entries]
 
 
+async def _fetch_inbound_recommendation_map(
+    table_name: str, product_ids: Sequence[int]
+) -> dict[int, list[dict[str, Any]]]:
+    """Return source products that recommend each supplied target product."""
+    ids = sorted({int(pid) for pid in product_ids if int(pid) > 0})
+    if not ids:
+        return {}
+
+    placeholders = ", ".join(["%s"] * len(ids))
+    query = (
+        "SELECT rel.related_product_id, p.id, p.name, p.sku, p.archived "  # nosec B608
+        f"FROM {table_name} AS rel "
+        "JOIN shop_products AS p ON p.id = rel.product_id "
+        f"WHERE rel.related_product_id IN ({placeholders}) "
+        "ORDER BY p.name ASC"
+    )
+    rows = await db.fetch_all(query, tuple(ids))
+    mapping: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        target_id = _coerce_int(row.get("related_product_id"), default=0)
+        source_id = _coerce_int(row.get("id"), default=0)
+        if target_id > 0 and source_id > 0:
+            mapping[target_id].append(
+                {
+                    "id": source_id,
+                    "name": row.get("name") or "",
+                    "sku": row.get("sku") or "",
+                    "archived": bool(_coerce_int(row.get("archived"), default=0)),
+                }
+            )
+    return mapping
+
+
+async def populate_product_inbound_recommendations(product: dict[str, Any]) -> None:
+    """Attach reverse recommendation links for an admin product detail view."""
+    product_id = _coerce_int(product.get("id"), default=0)
+    cross_map = await _fetch_inbound_recommendation_map(
+        "shop_product_cross_sells", [product_id]
+    )
+    upsell_map = await _fetch_inbound_recommendation_map(
+        "shop_product_upsells", [product_id]
+    )
+    product["linked_from_cross_sell_products"] = cross_map.get(product_id, [])
+    product["linked_from_upsell_products"] = upsell_map.get(product_id, [])
+
+
+async def remove_inbound_product_recommendations(
+    product_id: int,
+    *,
+    cross_sell_source_ids: Iterable[int] = (),
+    upsell_source_ids: Iterable[int] = (),
+) -> None:
+    """Remove selected products that currently recommend ``product_id``."""
+    relations = (
+        ("shop_product_cross_sells", cross_sell_source_ids),
+        ("shop_product_upsells", upsell_source_ids),
+    )
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            for table_name, raw_ids in relations:
+                source_ids = sorted({int(value) for value in raw_ids if int(value) > 0})
+                if not source_ids:
+                    continue
+                placeholders = ", ".join(["%s"] * len(source_ids))
+                # `table_name` comes from the fixed `relations` mapping in this function and product ids are integer-normalised.
+                await cursor.execute(
+                    f"DELETE FROM {table_name} WHERE related_product_id = %s "  # nosec B608
+                    f"AND product_id IN ({placeholders})",
+                    (product_id, *source_ids),
+                )
+
+
 async def _fetch_recommendation_map(
     table_name: str, product_ids: Sequence[int]
 ) -> dict[int, list[dict[str, Any]]]:
@@ -2030,7 +2191,7 @@ async def _fetch_recommendation_map(
         LEFT JOIN shop_categories AS c ON c.id = p.category_id
         WHERE rel.product_id IN ({placeholders})
         ORDER BY p.name ASC
-        """,
+        """,  # nosec B608
         tuple(ids),
     )
 
@@ -2231,7 +2392,7 @@ async def get_product_ids_by_skus(skus: Sequence[str]) -> list[int]:
         return []
     placeholders = ", ".join(["%s"] * len(skus))
     sql = (
-        "SELECT DISTINCT id FROM shop_products"
+        "SELECT DISTINCT id FROM shop_products"  # nosec B608
         " WHERE (sku IN (" + placeholders + ") OR vendor_sku IN (" + placeholders + "))"
         " AND archived = 0"
     )
@@ -2267,6 +2428,7 @@ async def upsert_product_from_feed(
     sku: str,
     vendor_sku: str,
     description: str | None,
+    source_description_hash: str | None,
     image_url: str | None,
     price: Decimal,
     vip_price: Decimal,
@@ -2290,15 +2452,16 @@ async def upsert_product_from_feed(
     await db.execute(
         """
         INSERT INTO shop_products
-            (name, sku, vendor_sku, description, image_url, price, vip_price, stock,
+            (name, sku, vendor_sku, description, source_description_hash, image_url, price, vip_price, stock,
              category_id, stock_nsw, stock_qld, stock_vic, stock_sa, stock_wa, buy_price,
              weight, length, width, height, stock_at, warranty_length, manufacturer, product_link)
         VALUES
-            (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             name = VALUES(name),
             sku = VALUES(sku),
             description = VALUES(description),
+            source_description_hash = VALUES(source_description_hash),
             image_url = IFNULL(VALUES(image_url), image_url),
             price = VALUES(price),
             vip_price = VALUES(vip_price),
@@ -2327,6 +2490,7 @@ async def upsert_product_from_feed(
             sku,
             vendor_sku,
             description,
+            source_description_hash,
             image_url,
             price,
             vip_price,
@@ -2347,6 +2511,16 @@ async def upsert_product_from_feed(
             manufacturer,
             product_link,
         ),
+    )
+
+
+async def update_product_source_description_hash(
+    product_id: int, source_description_hash: str
+) -> None:
+    """Mark a feed description processed only after reformatting succeeds."""
+    await db.execute(
+        "UPDATE shop_products SET source_description_hash = %s WHERE id = %s",
+        (source_description_hash, product_id),
     )
 
 
@@ -2397,6 +2571,9 @@ def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
     )
     normalised["commitment_type"] = row.get("commitment_type")
     normalised["payment_frequency"] = row.get("payment_frequency")
+    normalised["voice_monitor_calls_per_day"] = _coerce_optional_int(
+        row.get("voice_monitor_calls_per_day")
+    )
     normalised["price"] = _coerce_decimal(row.get("price"), default=0.0)
     normalised["vip_price"] = _coerce_optional_decimal(row.get("vip_price"))
     normalised["price_monthly_commitment"] = _coerce_optional_decimal(
@@ -2413,6 +2590,8 @@ def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
     normalised["length"] = _coerce_optional_decimal(row.get("length"))
     normalised["width"] = _coerce_optional_decimal(row.get("width"))
     normalised["height"] = _coerce_optional_decimal(row.get("height"))
+    item_size = str(row.get("item_size") or "").strip().lower()
+    normalised["item_size"] = item_size or None
     normalised["stock"] = _coerce_int(row.get("stock"), default=0)
     normalised["stock_nsw"] = _coerce_int(row.get("stock_nsw"), default=0)
     normalised["stock_qld"] = _coerce_int(row.get("stock_qld"), default=0)
@@ -2429,6 +2608,8 @@ def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
     normalised.setdefault("cross_sell_product_ids", [])
     normalised.setdefault("upsell_products", [])
     normalised.setdefault("upsell_product_ids", [])
+    normalised.setdefault("linked_from_cross_sell_products", [])
+    normalised.setdefault("linked_from_upsell_products", [])
     return normalised
 
 
@@ -2446,6 +2627,18 @@ def _normalise_product_summary(row: dict[str, Any]) -> dict[str, Any]:
         "archived": bool(row.get("archived")),
         "category_id": _coerce_optional_int(row.get("category_id")),
         "category_name": row.get("category_name") or None,
+        "subscription_category_id": _coerce_optional_int(
+            row.get("subscription_category_id")
+        ),
+        "price_monthly_commitment": _coerce_optional_decimal(
+            row.get("price_monthly_commitment")
+        ),
+        "price_annual_monthly_payment": _coerce_optional_decimal(
+            row.get("price_annual_monthly_payment")
+        ),
+        "price_annual_annual_payment": _coerce_optional_decimal(
+            row.get("price_annual_annual_payment")
+        ),
         "duplicate_sku_import": bool(
             _coerce_int(row.get("duplicate_sku_import"), default=0)
         ),
@@ -2838,8 +3031,9 @@ async def update_quote(
     set_clause = ", ".join(f"{column} = %s" for column in updates)
     params: list[Any] = list(updates.values())
     params.extend([quote_number, company_id])
+    # `updates` is filtered against the fixed quote-field allowlist above; values remain bound.
     await db.execute(
-        f"UPDATE shop_quotes SET {set_clause} WHERE quote_number = %s AND company_id = %s",
+        f"UPDATE shop_quotes SET {set_clause} WHERE quote_number = %s AND company_id = %s",  # nosec B608
         tuple(params),
     )
 
@@ -2890,12 +3084,18 @@ async def list_quote_items(quote_number: str, company_id: int) -> list[dict[str,
             p.description,
             p.image_url,
             p.product_link,
+            p.subscription_category_id,
             p.stock,
             p.stock_nsw,
             p.stock_qld,
             p.stock_vic,
             p.stock_sa,
             p.stock_wa,
+            p.weight,
+            p.length,
+            p.width,
+            p.height,
+            p.item_size,
             IF(c.is_vip = 1 AND p.vip_price IS NOT NULL, p.vip_price, p.price) AS price
         FROM shop_quotes AS q
         INNER JOIN shop_products AS p ON p.id = q.product_id
@@ -2942,6 +3142,9 @@ def _normalise_quote_item(row: dict[str, Any]) -> dict[str, Any]:
     normalised["sku"] = row.get("sku")
     normalised["description"] = row.get("description")
     normalised["image_url"] = row.get("image_url")
+    normalised["subscription_category_id"] = _coerce_optional_int(
+        row.get("subscription_category_id")
+    )
     normalised["status"] = str(row.get("status") or "").strip()
     normalised["notes"] = row.get("notes")
     normalised["po_number"] = row.get("po_number")

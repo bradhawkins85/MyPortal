@@ -1,0 +1,7 @@
+{
+  "guid": "65430649-1001-47da-81a0-9782921c3650",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "Feature",
+  "summary": "Add item size (including Digital Delivery), weight and dimension fields to the shop product editor with a live shipping cost estimate from freight rules.",
+  "content_hash": "37dd7ebbfbd5f47af8ef5951d13a890e46a7d587af6993e460aed2104892afb4"
+}

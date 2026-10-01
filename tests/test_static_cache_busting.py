@@ -38,35 +38,26 @@ def mock_startup(monkeypatch):
 def test_static_url_adds_version_query_string():
     """Test that static_url helper adds version query string for cache-busting."""
     # Import the function after app initialization
-    from app.main import _static_url, _APP_VERSION
+    from app.main import _static_url, _content_hash, templates_config
     
     # Test CSS file
     css_url = _static_url("/static/css/app.css")
-    if _APP_VERSION:
-        assert f"?v={_APP_VERSION}" in css_url
-        assert css_url == f"/static/css/app.css?v={_APP_VERSION}"
-    else:
-        assert css_url == "/static/css/app.css"
+    css_revision = _content_hash(templates_config.static_path / "css/app.css")
+    assert css_url == f"/static/css/app.css?v={css_revision}"
     
     # Test JS file
     js_url = _static_url("/static/js/main.js")
-    if _APP_VERSION:
-        assert f"?v={_APP_VERSION}" in js_url
-        assert js_url == f"/static/js/main.js?v={_APP_VERSION}"
-    else:
-        assert js_url == "/static/js/main.js"
+    js_revision = _content_hash(templates_config.static_path / "js/main.js")
+    assert js_url == f"/static/js/main.js?v={js_revision}"
 
 
 def test_static_url_handles_existing_query_params():
     """Test that static_url appends version to URLs with existing query params."""
-    from app.main import _static_url, _APP_VERSION
+    from app.main import _static_url, _content_hash, templates_config
     
     url_with_params = _static_url("/static/css/app.css?theme=dark")
-    if _APP_VERSION:
-        assert f"&v={_APP_VERSION}" in url_with_params
-        assert url_with_params == f"/static/css/app.css?theme=dark&v={_APP_VERSION}"
-    else:
-        assert url_with_params == "/static/css/app.css?theme=dark"
+    revision = _content_hash(templates_config.static_path / "css/app.css")
+    assert url_with_params == f"/static/css/app.css?theme=dark&v={revision}"
 
 
 def test_base_template_uses_versioned_css():
@@ -131,4 +122,3 @@ def test_static_url_available_in_jinja2_templates():
     # Check that static_url is registered as a global
     assert "static_url" in templates.env.globals
     assert callable(templates.env.globals["static_url"])
-

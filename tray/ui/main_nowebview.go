@@ -110,6 +110,7 @@ func main() {
 
 	gConfig = loadCachedConfig()
 	go connectIPC()
+	go runOutlookSignatureWorker()
 
 	// runUI is provided by the platform-specific file:
 	//   tray_nowebview_windows.go  – shows a real systray icon on Windows
@@ -219,6 +220,7 @@ func handleIPCMessage(msg ipc.Message) {
 		refreshDeviceUID()
 		refreshAuthToken()
 		gConfig = loadCachedConfig()
+		triggerOutlookSignatureSync()
 		if onConfigChanged != nil {
 			onConfigChanged(gConfig)
 		}

@@ -46,6 +46,7 @@ def test_readyz_when_db_healthy(monkeypatch):
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "ok"
+        assert body["version"] == main_module._APP_VERSION
         assert body["checks"]["database"] == "ok"
         assert body["checks"]["startup"] == "ok"
         assert body["checks"]["feature_packs"] == "ok"

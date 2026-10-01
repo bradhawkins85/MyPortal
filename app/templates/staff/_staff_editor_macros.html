@@ -1,0 +1,157 @@
+{# Shared building blocks for the Add / Edit staff member editors. #}
+
+{% macro optional_tag() -%}
+  <span class="stf-optional">optional</span>
+{%- endmacro %}
+
+{# A tab button in the editor tab strip. #}
+{% macro editor_tab(prefix, name, label, active=False, hidden=False, count=False) -%}
+  <button
+    type="button"
+    class="stf-tab{% if active %} is-active{% endif %}"
+    role="tab"
+    id="{{ prefix }}-tab-{{ name }}"
+    aria-controls="{{ prefix }}-panel-{{ name }}"
+    aria-selected="{{ 'true' if active else 'false' }}"
+    {% if not active %}tabindex="-1"{% endif %}
+    data-stf-tab="{{ name }}"
+    {% if hidden %}hidden{% endif %}
+  >{{ label }}{% if count %}<span class="stf-tab__count" data-stf-tab-count></span>{% endif %}<span class="stf-tab__dot" aria-hidden="true"></span></button>
+{%- endmacro %}
+
+{# A core intake field on the Add staff member form, driven by the company's intake configuration. #}
+{% macro intake_field(field) -%}
+  {% if field.type == 'checkbox' %}
+    <div class="form-field form-field--checkbox" data-stf-field="{{ field.key }}">
+      <label class="stf-switch" for="{{ field.input_id }}">
+        <input
+          id="{{ field.input_id }}"
+          type="checkbox"
+          name="{{ field.input_name }}"
+          value="1"
+          {% if field.key == 'enabled' %}checked{% endif %}
+          {% if field.required %}required{% endif %}
+        />
+        <span class="stf-switch__track" aria-hidden="true"></span>
+        <span>{{ field.label }}</span>
+      </label>
+      <p class="stf-error" data-stf-error-for="{{ field.input_name }}" hidden></p>
+    </div>
+  {% elif field.type == 'select' %}
+    <div class="form-field" data-stf-field="{{ field.key }}">
+      <label class="form-label" for="{{ field.input_id }}">{{ field.label }}{% if not field.required %} {{ optional_tag() }}{% endif %}</label>
+      <select class="form-input" id="{{ field.input_id }}" name="{{ field.input_name }}" {% if field.required %}required{% endif %}>
+        <option value="">Select {{ field.label|lower }}</option>
+        {% for option in field.options %}
+          <option value="{{ option.value }}">{{ option.label }}</option>
+        {% endfor %}
+      </select>
+      <p class="stf-error" data-stf-error-for="{{ field.input_name }}" hidden></p>
+    </div>
+  {% elif field.type == 'multiselect' %}
+    <fieldset class="form-field stf-fieldset" data-stf-field="{{ field.key }}">
+      <legend class="form-label">{{ field.label }}{% if not field.required %} {{ optional_tag() }}{% endif %}</legend>
+      <div class="stf-chip-options">
+        {% for option in field.options %}
+          <label class="stf-chip-option">
+            <input type="checkbox" name="{{ field.input_name }}" value="{{ option.value }}" />
+            <span>{{ option.label }}</span>
+          </label>
+        {% endfor %}
+      </div>
+      <p class="stf-error" data-stf-error-for="{{ field.input_name }}" hidden></p>
+    </fieldset>
+  {% else %}
+    {% set is_email = field.validation_metadata.format == 'email' %}
+    <div class="form-field" data-stf-field="{{ field.key }}">
+      <label class="form-label" for="{{ field.input_id }}">{{ field.label }}{% if not field.required %} {{ optional_tag() }}{% endif %}</label>
+      <input
+        class="form-input"
+        id="{{ field.input_id }}"
+        name="{{ field.input_name }}"
+        type="{% if field.type == 'date' %}date{% elif is_email %}email{% elif field.key == 'mobile_phone' %}tel{% else %}text{% endif %}"
+        {% if field.key in ('first_name', 'last_name') %}autocomplete="off"{% endif %}
+        {% if is_email %}placeholder="name@example.com"{% endif %}
+        {% if field.required %}required{% endif %}
+      />
+      {% if field.key == 'date_onboarded' %}
+        <p class="form-help">Their first day at work.</p>
+      {% endif %}
+      <p class="stf-error" data-stf-error-for="{{ field.input_name }}" hidden></p>
+    </div>
+  {% endif %}
+{%- endmacro %}
+
+{# A company custom field on the Add staff member form. Conditional fields are shown by staff.js. #}
+{% macro custom_field(field, group_label) -%}
+  {% set label = field.display_name or field.name %}
+  {% set input_id = 'staff-custom-' ~ field.name %}
+  {% set wrapper_attrs %}
+    data-custom-field-wrapper
+    data-custom-field-name="{{ field.name }}"
+    data-custom-field-group="{{ group_label }}"
+    data-condition-parent-name="{{ field.condition_parent_name or '' }}"
+    data-condition-operator="{{ field.condition_operator or '' }}"
+    data-condition-value="{{ field.condition_value or '' }}"
+  {% endset %}
+  {% if field.field_type == 'checkbox' %}
+    <div class="form-field form-field--checkbox" {{ wrapper_attrs }}>
+      <label class="stf-switch" for="{{ input_id }}">
+        <input id="{{ input_id }}" type="checkbox" name="{{ field.name }}" value="1" />
+        <span class="stf-switch__track" aria-hidden="true"></span>
+        <span>{{ label }}</span>
+      </label>
+      {% if field.help_text %}<p class="form-help">{{ field.help_text }}</p>{% endif %}
+    </div>
+  {% elif field.field_type == 'select' %}
+    <div class="form-field" {{ wrapper_attrs }}>
+      <label class="form-label" for="{{ input_id }}">{{ label }}</label>
+      <select class="form-input" id="{{ input_id }}" name="{{ field.name }}">
+        <option value="">Select {{ label|lower }}</option>
+        {% for option in field.options %}
+          <option value="{{ option.value }}">{{ option.label }}</option>
+        {% endfor %}
+      </select>
+      {% if field.help_text %}<p class="form-help">{{ field.help_text }}</p>{% endif %}
+    </div>
+  {% elif field.field_type == 'multiselect' %}
+    {# A div, not a fieldset: staff.js treats fieldset[data-custom-field-group] as a group section. #}
+    <div class="form-field" role="group" aria-labelledby="{{ input_id }}-label" {{ wrapper_attrs }}>
+      <span class="form-label" id="{{ input_id }}-label">{{ label }}</span>
+      <div class="stf-chip-options">
+        {% for option in field.options %}
+          <label class="stf-chip-option">
+            <input type="checkbox" name="{{ field.name }}" value="{{ option.value }}" />
+            <span>{{ option.label }}</span>
+          </label>
+        {% endfor %}
+      </div>
+      {% if field.help_text %}<p class="form-help">{{ field.help_text }}</p>{% endif %}
+    </div>
+  {% else %}
+    <div class="form-field" {{ wrapper_attrs }}>
+      <label class="form-label" for="{{ input_id }}">{{ label }}</label>
+      <input class="form-input" id="{{ input_id }}" name="{{ field.name }}" type="{% if field.field_type == 'date' %}date{% else %}text{% endif %}" />
+      {% if field.help_text %}<p class="form-help">{{ field.help_text }}</p>{% endif %}
+    </div>
+  {% endif %}
+{%- endmacro %}
+
+{# The live preview aside shared by both editors. staff_editor.js fills it in. #}
+{% macro preview_aside(heading_id) -%}
+  <aside class="stf-preview" aria-labelledby="{{ heading_id }}">
+    <p class="stf-preview__eyebrow" id="{{ heading_id }}">Live preview</p>
+    <div class="stf-preview__card" data-stf-preview>
+      <div class="stf-preview__identity">
+        <span class="stf-avatar" data-stf-preview-initials aria-hidden="true">?</span>
+        <div class="stf-preview__who">
+          <p class="stf-preview__name" data-stf-preview-name></p>
+          <p class="stf-preview__role" data-stf-preview-role></p>
+        </div>
+      </div>
+      <ul class="stf-preview__chips" data-stf-preview-chips></ul>
+      <dl class="stf-preview__facts" data-stf-preview-facts></dl>
+    </div>
+    <ul class="stf-preview__rules" data-stf-preview-rules role="status" aria-live="polite"></ul>
+  </aside>
+{%- endmacro %}

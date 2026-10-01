@@ -1,6 +1,15 @@
 {% extends "base.html" %}
 
-{% block header_title %}Licenses{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Licenses</span>
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="license-filter">Filter licenses</label>
+      <input type="search" id="license-filter" class="form-input page-header-toolbar__search" placeholder="Filter licenses" />
+      {% if company %}<span class="tag">{{ company.name }}</span>{% endif %}
+    </div>
+  </div>
+{% endblock %}
 
 {% block title %}Licenses{% endblock %}
 
@@ -21,20 +30,6 @@
 
 {% block content %}
 <section class="panel">
-  <header class="panel__header">
-    {% if company %}
-    <div class="panel__meta">
-      <label class="visually-hidden" for="license-filter">Filter licenses</label>
-      <input type="search" id="license-filter" class="input" placeholder="Filter licenses" aria-label="Filter licenses" />
-      <span class="tag">{{ company.name }}</span>
-    </div>
-    {% else %}
-    <div class="panel__meta">
-      <label class="visually-hidden" for="license-filter">Filter licenses</label>
-      <input type="search" id="license-filter" class="input" placeholder="Filter licenses" aria-label="Filter licenses" />
-    </div>
-    {% endif %}
-  </header>
   <div class="panel__body">
     <div class="table-responsive">
       <table class="table" id="licenses-table" data-table data-table-id="licenses" data-license-table>

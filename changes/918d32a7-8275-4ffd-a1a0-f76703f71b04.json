@@ -1,0 +1,7 @@
+{
+  "guid": "918d32a7-8275-4ffd-a1a0-f76703f71b04",
+  "occurred_at": "2026-09-22T00:00Z",
+  "change_type": "Fix",
+  "summary": "Correct the M365 Best Practices stat strip report to count every enabled, non-excluded current result.",
+  "content_hash": "5346509acf0888f5bb454c2eb4de69a0c27e03a338ac54e36f355c691fcd7f99"
+}

@@ -126,9 +126,11 @@ type ConfigResponse struct {
 	// "browser": always open in the default system browser (legacy behaviour).
 	// "shell": require the dedicated chat shell; log a warning if absent rather
 	// than falling back to the browser.
-	ChatClientMode             string `json:"chat_client_mode,omitempty"`
-	NetworkScannerEnabled      bool   `json:"network_scanner_enabled"`
-	NetworkScanIntervalMinutes int    `json:"network_scan_interval_minutes"`
+	ChatClientMode             string   `json:"chat_client_mode,omitempty"`
+	NetworkScannerEnabled      bool     `json:"network_scanner_enabled"`
+	NetworkScanIntervalMinutes int      `json:"network_scan_interval_minutes"`
+	NetworkScanWANCIDRs        []string `json:"network_scan_wan_cidrs"`
+	NetworkScanLocalCIDRs      []string `json:"network_scan_local_cidrs"`
 }
 
 type NetworkHost struct {
@@ -248,7 +250,54 @@ type HeartbeatRequest struct {
 // DefenderPolicy is the effective Defender configuration for this device.
 // A disabled policy is also returned when the company has not opted in.
 type DefenderPolicy struct {
-	Enabled bool `json:"enabled"`
+	Enabled       bool                   `json:"enabled"`
+	Exclusions    []DefenderExclusion    `json:"exclusions"`
+	ScheduledScan *DefenderScheduledScan `json:"scheduled_scan,omitempty"`
+}
+
+// DefenderScheduledScan is the company's scheduled scan policy. A nil or
+// empty Type means MyPortal does not manage the endpoint's scan schedule.
+type DefenderScheduledScan struct {
+	Type string `json:"type"`
+	// Day is 0 (Monday) to 6 (Sunday), matching the portal's policy form.
+	Day  *int   `json:"day"`
+	Time string `json:"time"`
+}
+
+// DefenderPolicyResult reports how the endpoint reconciled the portal policy
+// so administrators can see settings that Tamper Protection or another
+// management system prevented the agent from applying.
+type DefenderPolicyResult struct {
+	Status           string               `json:"status"`
+	EvaluatedAt      time.Time            `json:"evaluated_at"`
+	TamperProtection DefenderTamperState  `json:"tamper_protection"`
+	Items            []DefenderPolicyItem `json:"items"`
+}
+
+// DefenderTamperState describes local controls that can block preference
+// changes. ProtectsExclusions is nil when Defender does not report it.
+type DefenderTamperState struct {
+	Enabled                 bool   `json:"enabled"`
+	Source                  string `json:"source,omitempty"`
+	ProtectsExclusions      *bool  `json:"protects_exclusions"`
+	LocalAdminMergeDisabled bool   `json:"local_admin_merge_disabled"`
+	ScheduleManagedByPolicy bool   `json:"schedule_managed_by_policy"`
+}
+
+// DefenderPolicyItem is the outcome for one policy setting.
+type DefenderPolicyItem struct {
+	Setting string `json:"setting"`
+	Value   string `json:"value"`
+	Action  string `json:"action"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+// DefenderExclusion is an exclusion selected by an administrator for this
+// endpoint, its company, or all managed endpoints.
+type DefenderExclusion struct {
+	Type  string `json:"exclusion_type"`
+	Value string `json:"value"`
 }
 
 // DefenderStatus is the protection state collected by the Windows service.
@@ -256,22 +305,27 @@ type DefenderStatus struct {
 	AntivirusEnabled          bool                   `json:"antivirus_enabled"`
 	RealtimeProtectionEnabled bool                   `json:"realtime_protection_enabled"`
 	TamperProtectionEnabled   bool                   `json:"tamper_protection_enabled"`
+	FirewallDomainEnabled     *bool                  `json:"firewall_domain_enabled"`
+	FirewallPrivateEnabled    *bool                  `json:"firewall_private_enabled"`
+	FirewallPublicEnabled     *bool                  `json:"firewall_public_enabled"`
 	SignaturesUpdatedAt       *time.Time             `json:"signatures_updated_at,omitempty"`
 	LastScanAt                *time.Time             `json:"last_scan_at,omitempty"`
 	ScanHistory               []DefenderScan         `json:"scan_history"`
 	HealthStatus              string                 `json:"health_status"`
 	Details                   map[string]interface{} `json:"details"`
 	Detections                []DefenderDetection    `json:"detections"`
+	PolicyResult              *DefenderPolicyResult  `json:"policy_result,omitempty"`
 }
 
 // DefenderDetection describes a threat recorded in Defender's protection history.
 type DefenderDetection struct {
-	DetectionUID string                 `json:"detection_uid"`
-	ThreatName   string                 `json:"threat_name"`
-	Severity     string                 `json:"severity"`
-	Status       string                 `json:"status"`
-	DetectedAt   time.Time              `json:"detected_at"`
-	Details      map[string]interface{} `json:"details"`
+	DetectionUID  string                 `json:"detection_uid"`
+	ThreatName    string                 `json:"threat_name"`
+	Severity      string                 `json:"severity"`
+	Status        string                 `json:"status"`
+	DetectedAt    time.Time              `json:"detected_at"`
+	InfectedFiles []string               `json:"infected_files"`
+	Details       map[string]interface{} `json:"details"`
 }
 
 // DefenderScan describes a recent scan reported by Microsoft Defender.
@@ -332,8 +386,9 @@ func (c *Client) ReportDefenderCommandResult(ctx context.Context, commandID int6
 	return nil
 }
 
-// GetDefenderPolicy checks whether Defender reporting is enabled. The server
-// intentionally returns 404 for devices whose company has not opted in.
+// GetDefenderPolicy checks whether Defender processing is enabled for this
+// specific device. Company-disabled and individually excluded devices both
+// produce a disabled policy, so callers must not run local Defender scripts.
 func (c *Client) GetDefenderPolicy(ctx context.Context) (*DefenderPolicy, error) {
 	resp, err := c.get(ctx, "/api/tray/defender/policy")
 	if err != nil {

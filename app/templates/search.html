@@ -1,30 +1,18 @@
 {% extends "base.html" %}
-{% from "macros/header.html" import page_header_actions %}
-
-{% block title %}AI Search{% endblock %}
+{% block title %}Search{% endblock %}
 
 {% block header_title %}
-  <div class="header__title-content header__title-content--stacked">
-    <span class="header__title-text">AI Search</span>
-    <span class="header__title-meta">Search permitted portal content using natural language.</span>
-  </div>
-{% endblock %}
-
-{% block header_actions %}
-  {{ page_header_actions([
-    {"label": "Create ticket", "type": "link", "href": "/tickets", "variant": "ghost"},
-    {"label": "Knowledge base", "type": "link", "href": "/knowledge-base", "variant": "ghost"}
-  ]) }}
+  <span class="header__title-text">Search</span>
 {% endblock %}
 
 {% block content %}
 <section class="dashboard__section dashboard__section--agent search-workspace" aria-labelledby="ai-search-heading">
   <article class="card card--panel agent-panel" data-agent-panel>
     <header class="agent-panel__header">
-      <h2 id="ai-search-heading" class="agent-panel__title">Search accessible content</h2>
+      <h2 id="ai-search-heading" class="agent-panel__title">How can we assist you</h2>
       <p class="agent-panel__subtitle">
-        Ask a question in plain English. The assistant only searches records already permitted for your account,
-        including visible knowledge base articles, chats, tickets, orders, shop content, assets, and enabled feature-pack data available to your account.
+        Ask a question in plain English. The assistant searches the selected portal sources, including support,
+        commerce, company, Microsoft 365, service, reporting, best-practice, and feature-pack data you can access.
       </p>
     </header>
 
@@ -45,22 +33,57 @@
           Search
         </button>
       </div>
-      <p class="agent-panel__hint">
-        Results are generated through the configured Ollama, llama.cpp, or OpenAI-compatible integration and include the source records used.
-      </p>
+      <fieldset class="agent-panel__filters" aria-label="Source filters">
+        <legend class="agent-panel__label">Search sources</legend>
+        {% for source_type, source in agent_sources.items() %}
+          <label><input type="checkbox" value="{{ source_type }}" data-agent-filter checked /> {{ source.label }}</label>
+        {% endfor %}
+      </fieldset>
+      <div class="agent-panel__saved-actions">
+        <input
+          type="text"
+          class="agent-panel__input"
+          name="saved_name"
+          maxlength="120"
+          placeholder="Save this search as…"
+          data-agent-save-name
+        />
+        <button class="button button--ghost" type="button" data-agent-save-search>Save Search</button>
+      </div>
+      <div class="agent-panel__saved-library" data-agent-saved-library></div>
     </form>
 
     <div class="agent-panel__status" role="status" aria-live="polite" data-agent-status></div>
+    <section class="agent-panel__stages" hidden data-agent-stages></section>
 
     <section class="agent-panel__results" hidden data-agent-results>
       <article class="agent-answer" hidden data-agent-answer>
         <h3 class="agent-answer__heading">Answer</h3>
+        <div class="agent-answer__meta" hidden data-agent-answer-meta></div>
         <div class="agent-answer__body" data-agent-answer-body></div>
+        <div class="agent-answer__feedback" hidden data-agent-feedback>
+          <span>Was this helpful?</span>
+          <button type="button" class="button button--ghost" data-agent-rating="up" aria-label="Helpful">👍</button>
+          <button type="button" class="button button--ghost" data-agent-rating="down" aria-label="Not helpful">👎</button>
+          <label>Reason
+            <select class="input" data-agent-feedback-reason>
+              <option value="">Optional</option><option value="incorrect">Incorrect</option>
+              <option value="uncited">Citation issue</option><option value="irrelevant">Irrelevant</option>
+              <option value="incomplete">Incomplete</option><option value="unsafe">Unsafe</option><option value="other">Other</option>
+            </select>
+          </label>
+          <label>Comment <input class="input" maxlength="1000" data-agent-feedback-comment></label>
+          <span role="status" data-agent-feedback-status></span>
+        </div>
       </article>
 
       <article class="agent-sources" hidden data-agent-sources>
-        <h3 class="agent-sources__heading">Permitted sources searched</h3>
+        <h3 class="agent-sources__heading">Possibly Useful Results</h3>
         <div class="agent-sources__lists" data-agent-source-lists></div>
+      </article>
+      <article class="agent-sources" hidden data-agent-evidence>
+        <h3 class="agent-sources__heading">Curated Evidence</h3>
+        <div class="agent-sources__lists" data-agent-evidence-lists></div>
       </article>
 
       <div class="agent-panel__actions">

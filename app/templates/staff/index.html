@@ -1,9 +1,93 @@
 {% extends "base.html" %}
 
 {% block header_title %}
-  {% if can_edit_staff %}
-    <div class="header-title-menu">
-      <span class="header-title-menu__label">Staff workspace</span>
+  <div class="header-title-menu page-header-bar">
+    <span class="header__title-text">Staff</span>
+    <div class="page-header-toolbar">
+      <form id="staff-filter-form" method="get" action="/staff" class="page-header-toolbar__group">
+        <label class="visually-hidden" for="staff-search">Search staff</label>
+        <input class="form-input page-header-toolbar__search" id="staff-search" type="search" data-table-filter="staff-table" placeholder="Search staff" />
+        <label class="visually-hidden" for="staff-enabled">Status</label>
+        <select class="form-input page-header-toolbar__select" id="staff-enabled" name="enabled" data-submit-on-change>
+          <option value="" {% if enabled_filter == '' %}selected{% endif %}>All statuses</option>
+          <option value="1" {% if enabled_filter == '1' %}selected{% endif %}>Enabled</option>
+          <option value="0" {% if enabled_filter == '0' %}selected{% endif %}>Disabled</option>
+        </select>
+        {% if staff_permission == 3 and departments %}
+          <label class="visually-hidden" for="staff-department-filter">Department</label>
+          <select class="form-input page-header-toolbar__select" id="staff-department-filter" name="department" data-submit-on-change>
+            <option value="" {% if department_filter == '' %}selected{% endif %}>All departments</option>
+            {% for department in departments %}
+              <option value="{{ department }}" {% if department_filter == department %}selected{% endif %}>{{ department }}</option>
+            {% endfor %}
+          </select>
+        {% endif %}
+        <label class="page-header-toolbar__check">
+          <input type="checkbox" name="show_ex_staff" value="1" data-submit-on-change {% if show_ex_staff %}checked{% endif %} />
+          <span>Show ex-staff</span>
+        </label>
+      </form>
+      <div class="ticket-columns ticket-header-toolbar__menu" data-staff-columns>
+        <button type="button" class="button button--ghost button--compact ticket-columns__toggle" data-columns-toggle aria-haspopup="true">
+          <span>Columns</span>
+          <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
+        </button>
+        <div class="ticket-columns__panel" data-columns-panel hidden>
+          <p class="ticket-columns__title">Toggle columns</p>
+          <div class="ticket-columns__options">
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="first-name" checked disabled />
+              First name
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="last-name" checked />
+              Last name
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="email" checked />
+              Email
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="mobile" checked />
+              Mobile
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="code" checked />
+              Code
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="onboarded" checked />
+              Onboarded
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="m365-sign-in" checked />
+              O365 Last Sign In
+            </label>
+            {% if is_super_admin %}
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="portal-last-login" checked />
+                MyPortal Last Login
+              </label>
+            {% endif %}
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="onboarding-workflow" checked />
+              Onboarding Workflow
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="staff-column-toggle" data-column="enabled" checked />
+              Enabled
+            </label>
+            {% for field in staff_custom_field_definitions %}
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="custom-{{ field.name }}" checked />
+                {{ field.display_name or field.name }}
+              </label>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% if can_edit_staff %}
       <details class="header-title-menu__dropdown" data-header-menu>
         <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
           Tools
@@ -14,7 +98,7 @@
         </summary>
         <ul class="header-title-menu__list" role="menu">
           <li class="header-title-menu__item" role="none">
-            <button type="button" class="header-title-menu__link" role="menuitem" data-open-add-staff-modal>
+            <button type="button" class="header-title-menu__link" role="menuitem" data-open-add-staff-modal aria-haspopup="dialog" aria-controls="staff-add-modal">
               Add Staff Member
             </button>
           </li>
@@ -28,11 +112,12 @@
           {% endif %}
         </ul>
       </details>
-    </div>
-  {% endif %}
+    {% endif %}
+  </div>
 {% endblock %}
 
 {% block content %}
+{% import "staff/_staff_editor_macros.html" as stf %}
 <div class="admin-grid">
   {% if can_approve_onboarding and staff_pending_requests %}
   <section class="card card--panel admin-grid__full">
@@ -43,7 +128,7 @@
       </div>
     </header>
     <div class="table-wrapper">
-      <table class="table" id="staff-requests-table" data-table data-table-id="staff-requests">
+      <table class="table table--stack-mobile" id="staff-requests-table" data-table data-table-id="staff-requests">
         <thead>
           <tr>
             <th scope="col" data-sort="string" data-mobile-priority="essential">First name</th>
@@ -52,6 +137,7 @@
             <th scope="col" data-sort="string">Mobile</th>
             <th scope="col" data-sort="string">Department</th>
             <th scope="col" data-sort="date">Start date</th>
+            <th scope="col" data-sort="string">Requested by</th>
             <th scope="col" data-sort="date">Requested at</th>
             <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
           </tr>
@@ -66,6 +152,12 @@
               <td data-label="Department">{{ req.department or '—' }}</td>
               <td data-label="Start date" data-value="{{ req.date_onboarded or '' }}" data-utc="{{ req.date_onboarded or '' }}">
                 {% if req.date_onboarded %}{{ req.date_onboarded }}{% else %}<span class="text-muted">—</span>{% endif %}
+              </td>
+              <td data-label="Requested by">
+                {% if req.requested_by_name or req.requested_by_email %}
+                  {{ req.requested_by_name or req.requested_by_email }}
+                  {% if req.requested_by_email and req.requested_by_name != req.requested_by_email %}<div class="text-muted text-small">{{ req.requested_by_email }}</div>{% endif %}
+                {% else %}<span class="text-muted">—</span>{% endif %}
               </td>
               <td data-label="Requested at" data-value="{{ req.requested_at or '' }}" data-utc="{{ req.requested_at or '' }}">
                 {% if req.requested_at %}{{ req.requested_at }}{% else %}<span class="text-muted">—</span>{% endif %}
@@ -91,7 +183,7 @@
       </div>
     </header>
     <div class="table-wrapper">
-      <table class="table" id="staff-offboarding-requests-table" data-table data-table-id="staff-offboarding-requests">
+      <table class="table table--stack-mobile" id="staff-offboarding-requests-table" data-table data-table-id="staff-offboarding-requests">
         <thead>
           <tr>
             <th scope="col" data-sort="string" data-mobile-priority="essential">First name</th>
@@ -132,100 +224,6 @@
   </section>
   {% endif %}
   <section class="card card--panel admin-grid__full">
-    <header class="card__header">
-      <div class="card__controls">
-        <form id="staff-filter-form" method="get" action="/staff" class="filters filters--compact">
-          <div class="filters__group">
-            <label class="form-label" for="staff-enabled">Status</label>
-            <select class="form-input" id="staff-enabled" name="enabled" data-submit-on-change>
-              <option value="" {% if enabled_filter == '' %}selected{% endif %}>All</option>
-              <option value="1" {% if enabled_filter == '1' %}selected{% endif %}>Enabled</option>
-              <option value="0" {% if enabled_filter == '0' %}selected{% endif %}>Disabled</option>
-            </select>
-          </div>
-          <div class="filters__group filters__group--checkbox">
-            <label class="checkbox">
-              <input type="checkbox" name="show_ex_staff" value="1" data-submit-on-change {% if show_ex_staff %}checked{% endif %} />
-              <span>Show Ex-Staff</span>
-            </label>
-          </div>
-          {% if staff_permission == 3 and departments %}
-            <div class="filters__group">
-              <label class="form-label" for="staff-department-filter">Department</label>
-              <select class="form-input" id="staff-department-filter" name="department" data-submit-on-change>
-                <option value="" {% if department_filter == '' %}selected{% endif %}>All departments</option>
-                {% for department in departments %}
-                  <option value="{{ department }}" {% if department_filter == department %}selected{% endif %}>{{ department }}</option>
-                {% endfor %}
-              </select>
-            </div>
-          {% endif %}
-          <div class="filters__group">
-            <label class="form-label" for="staff-search">Search</label>
-            <input class="form-input" id="staff-search" type="search" data-table-filter="staff-table" placeholder="Search staff" />
-          </div>
-        </form>
-        <div class="ticket-columns" data-staff-columns>
-          <button type="button" class="button button--ghost ticket-columns__toggle" data-columns-toggle aria-haspopup="true">
-            <span>Columns</span>
-            <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
-          </button>
-          <div class="ticket-columns__panel" data-columns-panel hidden>
-            <p class="ticket-columns__title">Toggle columns</p>
-            <div class="ticket-columns__options">
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="first-name" checked disabled />
-                First name
-              </label>
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="last-name" checked />
-                Last name
-              </label>
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="email" checked />
-                Email
-              </label>
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="mobile" checked />
-                Mobile
-              </label>
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="code" checked />
-                Code
-              </label>
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="onboarded" checked />
-                Onboarded
-              </label>
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="m365-sign-in" checked />
-                O365 Last Sign In
-              </label>
-              {% if is_super_admin %}
-                <label class="ticket-columns__option">
-                  <input type="checkbox" class="staff-column-toggle" data-column="portal-last-login" checked />
-                  MyPortal Last Login
-                </label>
-              {% endif %}
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="onboarding-workflow" checked />
-                Onboarding Workflow
-              </label>
-              <label class="ticket-columns__option">
-                <input type="checkbox" class="staff-column-toggle" data-column="enabled" checked />
-                Enabled
-              </label>
-              {% for field in staff_custom_field_definitions %}
-                <label class="ticket-columns__option">
-                  <input type="checkbox" class="staff-column-toggle" data-column="custom-{{ field.name }}" checked />
-                  {{ field.display_name or field.name }}
-                </label>
-              {% endfor %}
-            </div>
-          </div>
-        </div>
-      </div>
-    </header>
     <div class="table-wrapper">
       <table class="table" id="staff-table" data-table data-table-id="staff">
         <thead>
@@ -397,6 +395,8 @@
                           class="header-title-menu__link"
                           role="menuitem"
                           data-staff-edit="{{ member.id }}"
+                          aria-haspopup="dialog"
+                          aria-controls="staff-edit-modal"
                         >{{ 'Edit' if can_edit_staff else 'Actions' }}</button>
                       </li>
                       {% endif %}
@@ -481,199 +481,103 @@
 {% endif %}
 
 {% if can_edit_staff %}
-  <div class="modal" id="staff-add-modal" role="dialog" aria-modal="true" hidden>
-    <div class="modal__content" role="document">
-      <button type="button" class="modal__close" data-modal-close>
-        <span class="visually-hidden">Close add staff member modal</span>
-        &times;
-      </button>
-      <h2 class="modal__title">Add staff member</h2>
-      <p class="card__subtitle">Capture onboarding details to provision accounts and workflows.</p>
-      <form action="/staff" method="post" class="staff-form form-grid">
-        {% include "partials/csrf.html" %}
-        <input type="hidden" name="browser_timezone" value="" />
-        {% set ns = namespace(active_order=-1, row_open=False) %}
-        {% for field in staff_field_config %}
-          {% if field.visible %}
-            {% set field_order = field.sort_order %}
-            {% set needs_new_row = field_order != ns.active_order %}
-            {% if needs_new_row and ns.row_open %}
-                </div>
-              {% set ns.row_open = False %}
-            {% endif %}
-            {% if not ns.row_open %}
-              <div class="staff-custom-field-row">
-              {% set ns.active_order = field_order %}
-              {% set ns.row_open = True %}
-            {% endif %}
-            {% if field.type == 'checkbox' %}
-              <div class="form-field form-field--checkbox">
-                <label class="checkbox" for="{{ field.input_id }}">
-                  <input
-                    id="{{ field.input_id }}"
-                    type="checkbox"
-                    name="{{ field.input_name }}"
-                    value="1"
-                    {% if field.key == 'enabled' %}checked{% endif %}
-                    {% if field.required %}required{% endif %}
-                  />
-                  <span>{{ field.label }}</span>
-                </label>
-              </div>
-            {% elif field.type == 'select' %}
-              <div class="form-field">
-                <label class="form-label" for="{{ field.input_id }}">{{ field.label }}</label>
-                <select class="form-input" id="{{ field.input_id }}" name="{{ field.input_name }}" {% if field.required %}required{% endif %}>
-                  <option value="">Select {{ field.label|lower }}</option>
-                  {% for option in field.options %}
-                    <option value="{{ option.value }}">{{ option.label }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-            {% elif field.type == 'multiselect' %}
-              <div class="form-field">
-                <label class="form-label">{{ field.label }}</label>
-                <div class="multiselect-checkboxes">
-                  {% for option in field.options %}
-                    <label class="checkbox">
-                      <input type="checkbox" name="{{ field.input_name }}" value="{{ option.value }}" />
-                      <span>{{ option.label }}</span>
-                    </label>
-                  {% endfor %}
-                </div>
-              </div>
-            {% else %}
-              <div class="form-field">
-                <label class="form-label" for="{{ field.input_id }}">{{ field.label }}</label>
-                <input
-                  class="form-input"
-                  id="{{ field.input_id }}"
-                  name="{{ field.input_name }}"
-                  type="{% if field.type == 'date' %}date{% else %}{% if field.validation_metadata.format == 'email' %}email{% else %}text{% endif %}{% endif %}"
-                  {% if field.required %}required{% endif %}
-                />
-              </div>
-            {% endif %}
-          {% endif %}
-        {% endfor %}
-        {% if ns.row_open %}
+  <div class="modal stf-modal" id="staff-add-modal" role="dialog" aria-modal="true" aria-labelledby="staff-add-title" aria-describedby="staff-add-subtitle" aria-hidden="true" hidden>
+    <form action="/staff" method="post" class="modal__panel modal__panel--wide stf-editor" data-staff-add-form data-stf-editor="add">
+      {% include "partials/csrf.html" %}
+      <input type="hidden" name="browser_timezone" value="" />
+
+      <header class="modal__header stf-editor__header">
+        <button type="button" class="modal__close" data-modal-close aria-label="Close add staff member"></button>
+        <div>
+          <p class="stf-editor__eyebrow">Onboarding request</p>
+          <h2 class="modal__title" id="staff-add-title">Add staff member</h2>
+          <p class="stf-editor__subtitle" id="staff-add-subtitle">Tell us who is joining. Their accounts are set up once the request is approved.</p>
+        </div>
+      </header>
+
+      <nav class="stf-tabs" role="tablist" aria-label="Staff member details">
+        {{ stf.editor_tab('staff-add', 'person', 'Person', active=True) }}
+        {{ stf.editor_tab('staff-add', 'details', 'Additional details', hidden=not staff_custom_field_definitions, count=True) }}
+      </nav>
+
+      <div class="modal__body stf-editor__body">
+        <div class="stf-editor__main">
+          <section class="stf-panel" id="staff-add-panel-person" role="tabpanel" aria-labelledby="staff-add-tab-person" data-stf-panel="person">
+            <div class="stf-panel__intro">
+              <h3 class="stf-panel__title">Who's joining?</h3>
+              <p class="text-muted">Their name and start date are the essentials. Anything else helps us prepare their accounts.</p>
             </div>
-        {% endif %}
-        {% set ns = namespace(active_group='', group_open=False, active_order=-1, row_open=False) %}
-        {% for field in staff_custom_field_definitions %}
-          {% set group_label = (field.field_group or 'Additional details') %}
-          {% set field_order = (field.display_order if field.display_order is not none else 0) %}
-          {% set needs_new_row = (group_label != ns.active_group or field_order != ns.active_order) %}
-          {% if needs_new_row and ns.row_open %}
+            {% set ns = namespace(active_order=-1, row_open=False) %}
+            {% for field in staff_field_config if field.visible %}
+              {% if field.sort_order != ns.active_order and ns.row_open %}
                 </div>
-            {% set ns.row_open = False %}
-          {% endif %}
-          {% if group_label != ns.active_group %}
+                {% set ns.row_open = False %}
+              {% endif %}
+              {% if not ns.row_open %}
+                <div class="staff-custom-field-row">
+                {% set ns.active_order = field.sort_order %}
+                {% set ns.row_open = True %}
+              {% endif %}
+              {{ stf.intake_field(field) }}
+            {% endfor %}
+            {% if ns.row_open %}
+              </div>
+            {% endif %}
+          </section>
+
+          {% if staff_custom_field_definitions %}
+          <section class="stf-panel" id="staff-add-panel-details" role="tabpanel" aria-labelledby="staff-add-tab-details" data-stf-panel="details" hidden>
+            <div class="stf-panel__intro">
+              <h3 class="stf-panel__title">Additional details</h3>
+              <p class="text-muted">Questions your company asks about new starters. Some appear only after you answer another question.</p>
+            </div>
+            {% set ns = namespace(active_group=None, group_open=False, active_order=-1, row_open=False) %}
+            {% for field in staff_custom_field_definitions %}
+              {% set group_label = field.field_group or 'Additional details' %}
+              {% set field_order = field.display_order if field.display_order is not none else 0 %}
+              {% if (group_label != ns.active_group or field_order != ns.active_order) and ns.row_open %}
+                </div>
+                {% set ns.row_open = False %}
+              {% endif %}
+              {% if group_label != ns.active_group %}
+                {% if ns.group_open %}
+                  </fieldset>
+                {% endif %}
+                <fieldset class="stf-section" data-custom-field-section="{{ group_label }}">
+                  <legend class="stf-section__title">{{ group_label }}</legend>
+                {% set ns.active_group = group_label %}
+                {% set ns.group_open = True %}
+              {% endif %}
+              {% if not ns.row_open %}
+                <div class="staff-custom-field-row">
+                {% set ns.active_order = field_order %}
+                {% set ns.row_open = True %}
+              {% endif %}
+              {{ stf.custom_field(field, group_label) }}
+            {% endfor %}
+            {% if ns.row_open %}
+              </div>
+            {% endif %}
             {% if ns.group_open %}
               </fieldset>
             {% endif %}
-            <fieldset class="fieldset staff-form__section" data-custom-field-section="{{ group_label }}">
-              <legend>{{ group_label }}</legend>
-            {% set ns.active_group = group_label %}
-            {% set ns.group_open = True %}
+          </section>
           {% endif %}
-          {% if not ns.row_open %}
-            <div class="staff-custom-field-row">
-            {% set ns.active_order = field_order %}
-            {% set ns.row_open = True %}
-          {% endif %}
-          {% if field.field_type == 'checkbox' %}
-            <div
-              class="form-field form-field--checkbox"
-              data-custom-field-wrapper
-              data-custom-field-name="{{ field.name }}"
-              data-custom-field-group="{{ group_label }}"
-              data-condition-parent-name="{{ field.condition_parent_name or '' }}"
-              data-condition-operator="{{ field.condition_operator or '' }}"
-              data-condition-value="{{ field.condition_value or '' }}"
-            >
-              <label class="checkbox" for="staff-custom-{{ field.name }}">
-                <input id="staff-custom-{{ field.name }}" type="checkbox" name="{{ field.name }}" value="1" />
-                <span>{{ field.display_name or field.name }}</span>
-              </label>
-              {% if field.help_text %}
-                <p class="form-help">{{ field.help_text }}</p>
-              {% endif %}
-            </div>
-          {% elif field.field_type == 'select' %}
-            <div
-              class="form-field"
-              data-custom-field-wrapper
-              data-custom-field-name="{{ field.name }}"
-              data-custom-field-group="{{ group_label }}"
-              data-condition-parent-name="{{ field.condition_parent_name or '' }}"
-              data-condition-operator="{{ field.condition_operator or '' }}"
-              data-condition-value="{{ field.condition_value or '' }}"
-            >
-              <label class="form-label" for="staff-custom-{{ field.name }}">{{ field.display_name or field.name }}</label>
-              {% if field.help_text %}
-                <p class="form-help">{{ field.help_text }}</p>
-              {% endif %}
-              <select class="form-input" id="staff-custom-{{ field.name }}" name="{{ field.name }}">
-                <option value="">Select {{ (field.display_name or field.name)|lower }}</option>
-                {% for option in field.options %}
-                  <option value="{{ option.value }}">{{ option.label }}</option>
-                {% endfor %}
-              </select>
-            </div>
-          {% elif field.field_type == 'multiselect' %}
-            <div
-              class="form-field"
-              data-custom-field-wrapper
-              data-custom-field-name="{{ field.name }}"
-              data-custom-field-group="{{ group_label }}"
-              data-condition-parent-name="{{ field.condition_parent_name or '' }}"
-              data-condition-operator="{{ field.condition_operator or '' }}"
-              data-condition-value="{{ field.condition_value or '' }}"
-            >
-              <label class="form-label">{{ field.display_name or field.name }}</label>
-              {% if field.help_text %}
-                <p class="form-help">{{ field.help_text }}</p>
-              {% endif %}
-              <div class="multiselect-checkboxes">
-                {% for option in field.options %}
-                  <label class="checkbox">
-                    <input type="checkbox" name="{{ field.name }}" value="{{ option.value }}" />
-                    <span>{{ option.label }}</span>
-                  </label>
-                {% endfor %}
-              </div>
-            </div>
-          {% else %}
-            <div
-              class="form-field"
-              data-custom-field-wrapper
-              data-custom-field-name="{{ field.name }}"
-              data-custom-field-group="{{ group_label }}"
-              data-condition-parent-name="{{ field.condition_parent_name or '' }}"
-              data-condition-operator="{{ field.condition_operator or '' }}"
-              data-condition-value="{{ field.condition_value or '' }}"
-            >
-              <label class="form-label" for="staff-custom-{{ field.name }}">{{ field.display_name or field.name }}</label>
-              {% if field.help_text %}
-                <p class="form-help">{{ field.help_text }}</p>
-              {% endif %}
-              <input class="form-input" id="staff-custom-{{ field.name }}" name="{{ field.name }}" type="{% if field.field_type == 'date' %}date{% else %}text{% endif %}" />
-            </div>
-          {% endif %}
-        {% endfor %}
-        {% if ns.row_open %}
-            </div>
-        {% endif %}
-        {% if ns.group_open %}
-            </fieldset>
-        {% endif %}
-        <div class="form-actions staff-form__actions">
-          <button type="submit" class="button">Add staff</button>
-          <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
         </div>
-      </form>
-    </div>
+
+        {{ stf.preview_aside('staff-add-preview-title') }}
+      </div>
+
+      <footer class="modal__footer stf-editor__footer">
+        <p class="stf-error stf-editor__status" data-stf-form-error role="alert" hidden></p>
+        <span class="stf-editor__spacer"></span>
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        {% if staff_custom_field_definitions %}
+          <button type="button" class="button" data-stf-next>Next</button>
+        {% endif %}
+        <button type="submit" class="button">Send request</button>
+      </footer>
+    </form>
   </div>
 {% endif %}
 
@@ -733,7 +637,7 @@
           <label class="form-label" for="offboarding-mailbox-grant">Grant mailbox access to <span class="form-label__optional">(optional)</span></label>
           <select class="form-input" id="offboarding-mailbox-grant" multiple size="4">
           </select>
-          <p class="form-help">Hold Ctrl (or ⌘ on Mac) to select multiple staff members who should be granted access to this mailbox.</p>
+          <p class="form-help">Search to add the staff members who should be granted access to this mailbox.</p>
         </div>
       </div>
       <p class="form-help form-help--error offboarding-form__status" id="offboarding-form-error" hidden role="alert" aria-live="polite"></p>
@@ -745,183 +649,248 @@
   </div>
 </div>
 
-<div class="modal" id="staff-edit-modal" role="dialog" aria-modal="true" hidden>
-  <div class="modal__content modal__content--staff" role="document">
-    <button type="button" class="modal__close" data-modal-close>
-      <span class="visually-hidden">Close edit staff modal</span>
-      &times;
-    </button>
-    <div class="staff-modal__header">
-      <h2 class="modal__title">Edit staff member</h2>
-      <p class="staff-modal__staff-name" id="edit-modal-staff-name"></p>
-      {% if can_edit_staff and not is_super_admin %}
-        <p class="form-help">Saving Identity, Employment / Organisation, Address, or Custom Fields changes creates a helpdesk ticket for a technician to apply. Workflow &amp; lifecycle fields are read-only.</p>
-      {% endif %}
-    </div>
-    <form id="staff-edit-form" class="form-grid staff-modal-grid">
-      <input type="hidden" id="edit-staff-id" />
-      <fieldset class="fieldset staff-modal__section">
-        <legend>Identity</legend>
-        <div class="form-grid staff-modal-grid">
-          <div class="form-field">
-            <label class="form-label" for="edit-first-name">First name</label>
-            <input class="form-input" id="edit-first-name" {% if not can_edit_staff %}readonly{% endif %} />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-last-name">Last name</label>
-            <input class="form-input" id="edit-last-name" {% if not can_edit_staff %}readonly{% endif %} />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-email">Email</label>
-            <input class="form-input" id="edit-email" type="email" {% if not can_edit_staff %}readonly{% endif %} />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-mobile">Mobile phone</label>
-            <input class="form-input" id="edit-mobile" type="tel" {% if not can_edit_staff %}readonly{% endif %} />
-          </div>
-          <div class="form-field form-field--checkbox form-field--full">
-            <label class="checkbox">
-              <input type="checkbox" id="edit-enabled" {% if not can_edit_staff %}disabled{% endif %} />
-              <span>Enabled</span>
-            </label>
-          </div>
-        </div>
-      </fieldset>
-      <fieldset class="fieldset staff-modal__section">
-        <legend>Employment / Organisation</legend>
-        <div class="form-grid staff-modal-grid">
-          <div class="form-field">
-            <label class="form-label" for="edit-department">Department</label>
-            <input class="form-input" id="edit-department" {% if not can_edit_staff %}readonly{% endif %} />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-job-title">Job title</label>
-            <input class="form-input" id="edit-job-title" {% if not can_edit_staff %}readonly{% endif %} />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-company">Company</label>
-            <input class="form-input" id="edit-company" {% if not can_edit_staff %}readonly{% endif %} />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-manager-name">Manager</label>
-            <input class="form-input" id="edit-manager-name" {% if not can_edit_staff %}readonly{% endif %} />
-          </div>
-        </div>
-      </fieldset>
-      <fieldset class="fieldset staff-modal__section">
-        <legend>Workflow &amp; lifecycle</legend>
-        <div class="form-grid staff-modal-grid">
-          <div class="form-field">
-            <label class="form-label" for="edit-account-action">Account action</label>
-            <select class="form-input" id="edit-account-action" {% if not is_super_admin %}disabled{% endif %}>
-              <option value="Onboard Requested">Onboard Requested</option>
-              <option value="Onboard Approved">Onboard Approved</option>
-              <option value="Onboarding In Progress">Onboarding In Progress</option>
-              <option value="Onboarded">Onboarded</option>
-              <option value="Offboard Requested">Offboard Requested</option>
-              <option value="Offboard Approved">Offboard Approved</option>
-              <option value="Offboard Scheduled">Offboard Scheduled</option>
-              <option value="Offboarded">Offboarded</option>
-            </select>
-            <p class="form-help">Changes here affect automation state and downstream provisioning/offboarding tasks.</p>
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-date-onboarded">Onboard date</label>
-            <input class="form-input" id="edit-date-onboarded" type="date" {% if not is_super_admin %}readonly{% endif %} />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-date-offboarded">Offboard schedule</label>
-            <input class="form-input" id="edit-date-offboarded" type="datetime-local" {% if not is_super_admin %}readonly{% endif %} />
-            <p class="form-help">Set when offboarding should be executed; leave blank until a confirmed exit date.</p>
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-m365-last-sign-in">O365 Last Sign In</label>
-            <input class="form-input" id="edit-m365-last-sign-in" readonly />
-          </div>
-        </div>
-      </fieldset>
-      <fieldset class="fieldset staff-modal__section">
-        <legend>Address</legend>
-        <div class="form-grid staff-modal-grid">
-          <div class="form-field">
-            <label class="form-label" for="edit-street">Street</label>
-            <input class="form-input" id="edit-street" {% if not can_edit_staff %}readonly{% endif %} />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-city">City</label>
-            <input class="form-input" id="edit-city" {% if not can_edit_staff %}readonly{% endif %} />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-state">State</label>
-            <input class="form-input" id="edit-state" {% if not can_edit_staff %}readonly{% endif %} />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-postcode">Postcode</label>
-            <input class="form-input" id="edit-postcode" {% if not can_edit_staff %}readonly{% endif %} />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-country">Country</label>
-            <input class="form-input" id="edit-country" {% if not can_edit_staff %}readonly{% endif %} />
-          </div>
-        </div>
-      </fieldset>
-      <fieldset class="fieldset staff-modal__section" id="edit-custom-fields-section">
-        <legend>Custom fields</legend>
-        <div class="staff-modal__group-stack" id="edit-custom-fields-grid"></div>
-      </fieldset>
-      {% if can_edit_staff or can_request_staff_offboarding %}
-      <fieldset class="fieldset staff-modal__section" id="edit-actions-section">
-        <legend>Secondary actions</legend>
-        <p class="form-help form-field--full">Use these controls for invite, approvals, or workflow interventions. Add context notes for audit history.</p>
-        <div class="form-grid staff-modal-grid">
-          <div class="form-field form-field--full">
-            <label class="form-label" for="edit-action-note">Action note / reason</label>
-            <textarea class="form-input" id="edit-action-note" rows="2" maxlength="1000" placeholder="Optional for invite/retry; required for deny."></textarea>
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-action-step">Workflow step (force-complete)</label>
-            <input class="form-input" id="edit-action-step" placeholder="Current step name" />
-          </div>
-        </div>
-        <p class="form-help form-help--error form-field--full" id="edit-action-error" hidden role="alert" aria-live="polite"></p>
-        <div class="form-actions form-actions--inline staff-actions">
-          <button type="button" class="button button--ghost" id="edit-action-invite" data-edit-action="invite">Invite</button>
-          <button type="button" class="button button--ghost" id="edit-action-offboarding-request" data-edit-action="offboarding-request">Request Offboarding</button>
-          <button type="button" class="button button--ghost" id="edit-action-approve" data-edit-action="approve" hidden>Approve</button>
-          <button type="button" class="button button--ghost" id="edit-action-deny" data-edit-action="deny" hidden>Deny</button>
-          <button type="button" class="button button--ghost" id="edit-action-workflow-rerun" data-edit-action="workflow-rerun">Workflow rerun</button>
-          <button type="button" class="button button--ghost" id="edit-action-workflow-retry" data-edit-action="workflow-retry">Workflow retry</button>
-          <button type="button" class="button button--ghost" id="edit-action-workflow-resume" data-edit-action="workflow-resume">Workflow resume</button>
-          <button type="button" class="button button--ghost" id="edit-action-workflow-force-complete" data-edit-action="workflow-force-complete">Workflow force-complete</button>
-          <button type="button" class="button button--ghost" id="edit-action-m365-export-onedrive" data-edit-action="m365-export-onedrive" hidden>Export OneDrive</button>
-          <button type="button" class="button button--ghost" id="edit-action-m365-reset-password" data-edit-action="m365-reset-password" hidden>Reset O365 Password</button>
-          <button type="button" class="button button--ghost" id="edit-action-m365-enable-sign-in" data-edit-action="m365-enable-sign-in" hidden>Enable O365 Sign-in</button>
-          <button type="button" class="button button--ghost" id="edit-action-m365-disable-sign-in" data-edit-action="m365-disable-sign-in" hidden>Disable O365 Sign-in</button>
-        </div>
-        {% if is_super_admin %}
-        <div class="staff-danger-panel" id="edit-danger-zone">
-          <h3 class="staff-danger-panel__title">Danger zone</h3>
-          <p class="form-help">Delete permanently removes the staff record and cannot be undone.</p>
-          <label class="checkbox" for="edit-delete-confirm">
-            <input type="checkbox" id="edit-delete-confirm" />
-            <span>I understand this action is permanent.</span>
-          </label>
-          <div class="form-actions form-actions--inline">
-          <button type="button" class="button button--danger" id="edit-action-delete" data-edit-action="delete">Delete</button>
-          </div>
-        </div>
-        {% endif %}
-      </fieldset>
-      {% endif %}
-      <p class="form-help form-help--error form-field--full" id="edit-form-error" hidden role="alert" aria-live="polite"></p>
-      <div class="form-actions staff-modal__footer">
-        {% if can_edit_staff %}
-          <button type="submit" class="button">Save changes</button>
-        {% endif %}
-        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+{% set staff_readonly = not can_edit_staff %}
+<div class="modal stf-modal" id="staff-edit-modal" role="dialog" aria-modal="true" aria-labelledby="staff-edit-title" aria-describedby="edit-modal-staff-name" aria-hidden="true" hidden>
+  <form id="staff-edit-form" class="modal__panel modal__panel--wide stf-editor" data-stf-editor="edit" novalidate>
+    <input type="hidden" id="edit-staff-id" />
+
+    <header class="modal__header stf-editor__header">
+      <button type="button" class="modal__close" data-modal-close aria-label="Close staff member editor"></button>
+      <div>
+        <p class="stf-editor__eyebrow">{{ 'Edit staff member' if can_edit_staff else 'Staff member' }}</p>
+        <h2 class="modal__title" id="staff-edit-title" data-stf-title>Staff member</h2>
+        <p class="stf-editor__subtitle" id="edit-modal-staff-name"></p>
       </div>
-    </form>
-  </div>
+    </header>
+
+    <nav class="stf-tabs" role="tablist" aria-label="Staff member settings">
+      {{ stf.editor_tab('staff-edit', 'profile', 'Profile', active=True) }}
+      {{ stf.editor_tab('staff-edit', 'address', 'Address') }}
+      {{ stf.editor_tab('staff-edit', 'custom', 'Additional details', hidden=not staff_custom_field_definitions) }}
+      {{ stf.editor_tab('staff-edit', 'lifecycle', 'Lifecycle') }}
+      {% if can_edit_staff or can_request_staff_offboarding %}
+        {{ stf.editor_tab('staff-edit', 'actions', 'Actions', count=True) }}
+      {% endif %}
+    </nav>
+
+    <div class="modal__body stf-editor__body">
+      <div class="stf-editor__main">
+        {% if can_edit_staff and not is_super_admin %}
+          <p class="stf-notice">Saving changes to the profile, address or additional details creates a helpdesk ticket for a technician to apply.</p>
+        {% endif %}
+
+        <section class="stf-panel" id="staff-edit-panel-profile" role="tabpanel" aria-labelledby="staff-edit-tab-profile" data-stf-panel="profile">
+          <fieldset class="stf-section">
+            <legend class="stf-section__title">Identity</legend>
+            <div class="stf-grid">
+              <div class="form-field">
+                <label class="form-label" for="edit-first-name">First name</label>
+                <input class="form-input" id="edit-first-name" data-stf-bind="first_name" autocomplete="off" required {% if staff_readonly %}readonly{% endif %} />
+                <p class="stf-error" data-stf-error-for="first_name" hidden></p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="edit-last-name">Last name</label>
+                <input class="form-input" id="edit-last-name" data-stf-bind="last_name" autocomplete="off" required {% if staff_readonly %}readonly{% endif %} />
+                <p class="stf-error" data-stf-error-for="last_name" hidden></p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="edit-email">Email {{ stf.optional_tag() }}</label>
+                <input class="form-input" id="edit-email" type="email" data-stf-bind="email" placeholder="name@example.com" {% if staff_readonly %}readonly{% endif %} />
+                <p class="stf-error" data-stf-error-for="email" hidden></p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="edit-mobile">Mobile phone {{ stf.optional_tag() }}</label>
+                <input class="form-input" id="edit-mobile" type="tel" data-stf-bind="mobile_phone" {% if staff_readonly %}readonly{% endif %} />
+              </div>
+              <div class="form-field stf-grid__full">
+                <label class="stf-switch" for="edit-enabled">
+                  <input type="checkbox" id="edit-enabled" data-stf-bind="enabled" {% if staff_readonly %}disabled{% endif %} />
+                  <span class="stf-switch__track" aria-hidden="true"></span>
+                  <span>Enabled</span>
+                </label>
+              </div>
+            </div>
+          </fieldset>
+          <fieldset class="stf-section">
+            <legend class="stf-section__title">Role</legend>
+            <div class="stf-grid">
+              <div class="form-field">
+                <label class="form-label" for="edit-job-title">Job title {{ stf.optional_tag() }}</label>
+                <input class="form-input" id="edit-job-title" data-stf-bind="job_title" {% if staff_readonly %}readonly{% endif %} />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="edit-department">Department {{ stf.optional_tag() }}</label>
+                <input class="form-input" id="edit-department" data-stf-bind="department" {% if staff_readonly %}readonly{% endif %} />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="edit-company">Company {{ stf.optional_tag() }}</label>
+                <input class="form-input" id="edit-company" data-stf-bind="org_company" {% if staff_readonly %}readonly{% endif %} />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="edit-manager-name">Manager {{ stf.optional_tag() }}</label>
+                <input class="form-input" id="edit-manager-name" data-stf-bind="manager_name" {% if staff_readonly %}readonly{% endif %} />
+              </div>
+            </div>
+          </fieldset>
+        </section>
+
+        <section class="stf-panel" id="staff-edit-panel-address" role="tabpanel" aria-labelledby="staff-edit-tab-address" data-stf-panel="address" hidden>
+          <div class="stf-panel__intro">
+            <h3 class="stf-panel__title">Where do they work from?</h3>
+            <p class="text-muted">The address this person normally works from.</p>
+          </div>
+          <div class="stf-grid">
+            <div class="form-field stf-grid__full">
+              <label class="form-label" for="edit-street">Street</label>
+              <input class="form-input" id="edit-street" data-stf-bind="street" autocomplete="off" {% if staff_readonly %}readonly{% endif %} />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="edit-city">City</label>
+              <input class="form-input" id="edit-city" data-stf-bind="city" {% if staff_readonly %}readonly{% endif %} />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="edit-state">State</label>
+              <input class="form-input" id="edit-state" data-stf-bind="state" {% if staff_readonly %}readonly{% endif %} />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="edit-postcode">Postcode</label>
+              <input class="form-input" id="edit-postcode" data-stf-bind="postcode" {% if staff_readonly %}readonly{% endif %} />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="edit-country">Country</label>
+              <input class="form-input" id="edit-country" data-stf-bind="country" {% if staff_readonly %}readonly{% endif %} />
+            </div>
+          </div>
+        </section>
+
+        <section class="stf-panel" id="staff-edit-panel-custom" role="tabpanel" aria-labelledby="staff-edit-tab-custom" data-stf-panel="custom" hidden>
+          <div class="stf-panel__intro">
+            <h3 class="stf-panel__title">Additional details</h3>
+            <p class="text-muted">Your company's own questions about this person. Some appear only when another answer matches.</p>
+          </div>
+          <div class="stf-section-stack" id="edit-custom-fields-grid"></div>
+        </section>
+
+        <section class="stf-panel" id="staff-edit-panel-lifecycle" role="tabpanel" aria-labelledby="staff-edit-tab-lifecycle" data-stf-panel="lifecycle" hidden>
+          <div class="stf-panel__intro">
+            <h3 class="stf-panel__title">Onboarding and offboarding</h3>
+            <p class="text-muted">
+              {% if is_super_admin %}
+                These settings drive automation. Changing them can start or skip provisioning and offboarding tasks.
+              {% else %}
+                Where this person is in onboarding or offboarding. Only a super administrator can change these.
+              {% endif %}
+            </p>
+          </div>
+          <div class="stf-grid">
+            <div class="form-field stf-grid__full">
+              <label class="form-label" for="edit-account-action">Account stage</label>
+              <select class="form-input" id="edit-account-action" data-stf-bind="account_action" {% if not is_super_admin %}disabled{% endif %}>
+                {% for stage in ['Onboard Requested', 'Onboard Approved', 'Onboarding In Progress', 'Onboarded', 'Offboard Requested', 'Offboard Approved', 'Offboard Scheduled', 'Offboarded'] %}
+                  <option value="{{ stage }}">{{ stage }}</option>
+                {% endfor %}
+              </select>
+              <ol class="stf-stages" data-stf-stages aria-hidden="true">
+                <li data-stf-stage="Onboard Requested">Requested</li>
+                <li data-stf-stage="Onboard Approved">Approved</li>
+                <li data-stf-stage="Onboarding In Progress">In progress</li>
+                <li data-stf-stage="Onboarded">Onboarded</li>
+                <li data-stf-stage="Offboard Requested">Offboard requested</li>
+                <li data-stf-stage="Offboard Approved">Offboard approved</li>
+                <li data-stf-stage="Offboard Scheduled">Scheduled</li>
+                <li data-stf-stage="Offboarded">Offboarded</li>
+              </ol>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="edit-date-onboarded">Start date</label>
+              <input class="form-input" id="edit-date-onboarded" type="date" data-stf-bind="date_onboarded" {% if not is_super_admin %}readonly{% endif %} />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="edit-date-offboarded">Offboard at {{ stf.optional_tag() }}</label>
+              <input class="form-input" id="edit-date-offboarded" type="datetime-local" data-stf-bind="date_offboarded" {% if not is_super_admin %}readonly{% endif %} />
+              <p class="form-help">When access should be removed. Leave blank until the exit date is confirmed.</p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="edit-m365-last-sign-in">Last Microsoft 365 sign-in</label>
+              <input class="form-input" id="edit-m365-last-sign-in" data-stf-bind="m365_last_sign_in" placeholder="Never" readonly />
+            </div>
+          </div>
+        </section>
+
+        {% if can_edit_staff or can_request_staff_offboarding %}
+        <section class="stf-panel" id="staff-edit-panel-actions" role="tabpanel" aria-labelledby="staff-edit-tab-actions" data-stf-panel="actions" hidden>
+          <div class="stf-panel__intro">
+            <h3 class="stf-panel__title">Actions</h3>
+            <p class="text-muted">These run straight away and don't need Save. Only the actions that apply to this person are shown.</p>
+          </div>
+
+          <div class="stf-action-groups">
+            <section class="stf-action-group" data-stf-action-group aria-labelledby="staff-edit-actions-access">
+              <h4 class="stf-action-group__title" id="staff-edit-actions-access">Access</h4>
+              <div class="stf-action-group__buttons">
+                <button type="button" class="button button--ghost button--small" id="edit-action-invite" data-edit-action="invite">Send portal invite</button>
+                <button type="button" class="button button--ghost button--small" id="edit-action-offboarding-request" data-edit-action="offboarding-request">Request offboarding</button>
+              </div>
+            </section>
+            <section class="stf-action-group" data-stf-action-group aria-labelledby="staff-edit-actions-approval">
+              <h4 class="stf-action-group__title" id="staff-edit-actions-approval">Approval</h4>
+              <div class="stf-action-group__buttons">
+                <button type="button" class="button button--small" id="edit-action-approve" data-edit-action="approve" hidden>Approve</button>
+                <button type="button" class="button button--ghost button--small" id="edit-action-deny" data-edit-action="deny" hidden>Deny</button>
+              </div>
+            </section>
+            <section class="stf-action-group" data-stf-action-group aria-labelledby="staff-edit-actions-workflow">
+              <h4 class="stf-action-group__title" id="staff-edit-actions-workflow">Workflow</h4>
+              <div class="stf-action-group__buttons">
+                <button type="button" class="button button--ghost button--small" id="edit-action-workflow-rerun" data-edit-action="workflow-rerun">Run again</button>
+                <button type="button" class="button button--ghost button--small" id="edit-action-workflow-retry" data-edit-action="workflow-retry">Retry failed step</button>
+                <button type="button" class="button button--ghost button--small" id="edit-action-workflow-resume" data-edit-action="workflow-resume">Resume</button>
+                <button type="button" class="button button--ghost button--small" id="edit-action-workflow-force-complete" data-edit-action="workflow-force-complete">Force-complete step</button>
+              </div>
+              <div class="form-field" data-stf-step-field>
+                <label class="form-label" for="edit-action-step">Step to force-complete {{ stf.optional_tag() }}</label>
+                <input class="form-input" id="edit-action-step" placeholder="Defaults to the current step" />
+              </div>
+            </section>
+            <section class="stf-action-group" data-stf-action-group aria-labelledby="staff-edit-actions-m365">
+              <h4 class="stf-action-group__title" id="staff-edit-actions-m365">Microsoft 365</h4>
+              <div class="stf-action-group__buttons">
+                <button type="button" class="button button--ghost button--small" id="edit-action-m365-reset-password" data-edit-action="m365-reset-password" hidden>Reset password</button>
+                <button type="button" class="button button--ghost button--small" id="edit-action-m365-enable-sign-in" data-edit-action="m365-enable-sign-in" hidden>Allow sign-in</button>
+                <button type="button" class="button button--ghost button--small" id="edit-action-m365-disable-sign-in" data-edit-action="m365-disable-sign-in" hidden>Block sign-in</button>
+                <button type="button" class="button button--ghost button--small" id="edit-action-m365-export-onedrive" data-edit-action="m365-export-onedrive" hidden>Export OneDrive</button>
+              </div>
+            </section>
+          </div>
+          <p class="stf-empty" data-stf-actions-empty hidden>No actions are available for this person right now.</p>
+
+          <div class="form-field">
+            <label class="form-label" for="edit-action-note">Note for the audit log</label>
+            <textarea class="form-input" id="edit-action-note" rows="2" maxlength="1000" placeholder="Why are you taking this action?"></textarea>
+            <p class="form-help">Optional, except when denying a request.</p>
+          </div>
+          <p class="stf-error" id="edit-action-error" hidden role="alert" aria-live="polite"></p>
+        </section>
+        {% endif %}
+      </div>
+
+      {{ stf.preview_aside('staff-edit-preview-title') }}
+    </div>
+
+    <footer class="modal__footer stf-editor__footer">
+      {% if is_super_admin %}
+        <button type="button" class="button button--danger" id="edit-action-delete" data-edit-action="delete">Delete</button>
+      {% endif %}
+      <p class="stf-error stf-editor__status" id="edit-form-error" hidden role="alert" aria-live="polite"></p>
+      <span class="stf-editor__spacer"></span>
+      {% if can_edit_staff %}
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        <button type="submit" class="button">Save changes</button>
+      {% else %}
+        <button type="button" class="button button--ghost" data-modal-close>Close</button>
+      {% endif %}
+    </footer>
+  </form>
 </div>
 
 <script type="application/json" id="staff-data">{{ staff_members | tojson }}</script>
@@ -937,7 +906,8 @@
   'isHelpdeskTechnician': is_helpdesk_technician,
   'offboardingEmailForwardingEnabled': offboarding_email_forwarding_enabled,
   'hasM365': has_m365,
-  'manualOneDriveExportEnabled': manual_onedrive_export_enabled
+  'manualOneDriveExportEnabled': manual_onedrive_export_enabled,
+  'openAddStaffModal': open_add_staff_modal | default(false)
 } | tojson }}</script>
 <script type="application/json" id="active-staff-for-offboarding">{{ active_staff_for_offboarding | tojson }}</script>
 
@@ -967,6 +937,7 @@
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/staff_editor.js') }}" defer></script>
   <script src="{{ static_url('/static/js/staff.js') }}" defer></script>
   <script src="{{ static_url('/static/js/staff_columns.js') }}" defer></script>
 {% endblock %}

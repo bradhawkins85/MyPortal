@@ -491,14 +491,15 @@ async def _check_sspr_enabled(token: str) -> dict[str, Any]:
         data = await _graph_get(
             token,
             "https://graph.microsoft.com/v1.0/policies/authorizationPolicy"
-            "?$select=allowedToUseSspr,defaultUserRolePermissions",
+            "?$select=allowedToUseSSPR",
         )
         policy = _unwrap_singleton_policy(data, _endpoint)
-        # allowedToUseSspr may be a direct property of authorizationPolicy or
-        # nested inside defaultUserRolePermissions depending on the API version.
-        allowed = policy.get("allowedToUseSspr")
-        if allowed is None:
-            allowed = policy.get("defaultUserRolePermissions", {}).get("allowedToUseSspr")
+        # Graph returns the property as ``allowedToUseSSPR``; match the name
+        # case-insensitively so casing differences cannot hide the value.
+        allowed = next(
+            (value for key, value in policy.items() if key.lower() == "allowedtousesspr"),
+            None,
+        )
         if allowed is True:
             return _pass(check_id, check_name, "SSPR is enabled for users.")
         if allowed is False:
@@ -651,11 +652,17 @@ async def _check_monitor_risky_users(token: str) -> dict[str, Any]:
             (u.get("userPrincipalName") or u.get("id") or "?") for u in users[:5]
         )
         more = "" if len(users) <= 5 else f" (and {len(users) - 5} more)"
-        return _fail(
+        result = _fail(
             check_id,
             check_name,
             f"{len(users)} risky user(s) need investigation: {sample}{more}.",
         )
+        result["affected_accounts"] = [
+            {"id": str(user.get("id") or user.get("userPrincipalName") or ""),
+             "name": str(user.get("userPrincipalName") or user.get("id") or "")}
+            for user in users if user.get("id") or user.get("userPrincipalName")
+        ]
+        return result
     except M365Error as exc:
         return _unknown(check_id, check_name, f"Unable to query risky users: {exc}")
 
@@ -833,25 +840,28 @@ async def _check_monitor_cloud_admin_accounts(token: str) -> dict[str, Any]:
             f"https://graph.microsoft.com/v1.0/directoryRoles/{role_id}/members"
             "?$select=id,userPrincipalName,onPremisesSyncEnabled",
         )
-        synced: list[str] = []
+        synced: list[dict[str, str]] = []
         for member in members:
             if member.get("onPremisesSyncEnabled"):
-                synced.append(
-                    member.get("userPrincipalName") or member.get("id") or "?"
-                )
+                synced.append({
+                    "id": str(member.get("id") or member.get("userPrincipalName") or ""),
+                    "name": str(member.get("userPrincipalName") or member.get("id") or ""),
+                })
         if not synced:
             return _pass(
                 check_id,
                 check_name,
                 f"All {len(members)} Global Administrator account(s) are cloud-only.",
             )
-        return _fail(
+        result = _fail(
             check_id,
             check_name,
             f"{len(synced)} Global Administrator account(s) are synced from on-premises AD: "
-            + ", ".join(synced)
+            + ", ".join(account["name"] for account in synced)
             + ".",
         )
+        result["affected_accounts"] = synced
+        return result
     except M365Error as exc:
         return _unknown(
             check_id,
@@ -902,7 +912,7 @@ async def _check_monitor_secure_score(token: str) -> dict[str, Any]:
             return _unknown(
                 check_id,
                 check_name,
-                "Unable to retrieve Secure Score – the app may lack SecuritySecureScore.Read.All permission.",
+                "Unable to retrieve Secure Score – the app may lack SecurityEvents.Read.All permission.",
             )
         return _unknown(check_id, check_name, f"Unable to retrieve Secure Score: {exc}")
 
@@ -1069,7 +1079,7 @@ async def run_intune_windows_benchmarks(token: str) -> list[dict[str, Any]]:
         "intune_windows_firewall",
         "Windows Firewall required",
         windows_policies,
-        ["firewallEnabled"],
+        ["activeFirewallRequired"],
         True,
         "true",
         "All Windows policies require Firewall",
@@ -1178,11 +1188,6 @@ async def run_intune_ios_benchmarks(token: str) -> list[dict[str, Any]]:
         results.append(_pass("intune_ios_passcode_required", "Passcode required", "All iOS policies require a passcode."))
 
     # Jailbreak blocked
-    no_jailbreak_block = [
-        p.get("displayName", "Unnamed")
-        for p in ios_policies
-        if not p.get("deviceThreatProtectionRequiredSecurityLevel") and not p.get("jailBroken") == "Block"
-    ]
     # Many policies use securityRequireVerifyApps or managedEmailProfileRequired; check jailBroken field
     jailbreak_blocked = [
         p.get("displayName", "Unnamed")

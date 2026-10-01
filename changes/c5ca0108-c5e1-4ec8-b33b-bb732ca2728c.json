@@ -1,0 +1,7 @@
+{
+  "guid": "c5ca0108-c5e1-4ec8-b33b-bb732ca2728c",
+  "occurred_at": "2026-09-28T00:00Z",
+  "change_type": "Feature",
+  "summary": "Clicking a rack item now shows its ports and connections in a table, with a hover pencil to open the edit dialog.",
+  "content_hash": "967de75f94fae5854003e09805b3aedd81372edfcc2634163abd0bd0c64f0390"
+}

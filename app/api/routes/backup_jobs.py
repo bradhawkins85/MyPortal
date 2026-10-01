@@ -25,8 +25,19 @@ from app.schemas.backup_jobs import (
     serialise_job,
 )
 from app.services import backup_jobs as backup_jobs_service
+from app.services import audit as audit_service
 
 router = APIRouter(tags=["Backup History"])
+
+
+def _audit_job(job: dict[str, Any]) -> dict[str, Any]:
+    """Return job configuration without its usable webhook credential."""
+
+    return {
+        key: value
+        for key, value in job.items()
+        if key not in {"job_id", "token", "job_token"}
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +131,7 @@ async def list_backup_jobs(
 )
 async def create_backup_job(
     payload: BackupJobCreate,
+    request: Request,
     user: dict[str, Any] = Depends(require_super_admin),
 ) -> BackupJobResponse:
     await _ensure_company(payload.company_id)
@@ -139,6 +151,10 @@ async def create_backup_job(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
+    await audit_service.record_create(
+        action="backup.job.create", request=request, user_id=int(user["id"]),
+        entity_type="backup_job", entity_id=int(job["id"]), after=_audit_job(job),
+    )
     return serialise_job(job)
 
 
@@ -146,8 +162,10 @@ async def create_backup_job(
 async def update_backup_job(
     job_id: int,
     payload: BackupJobUpdate,
-    _: dict[str, Any] = Depends(require_super_admin),
+    request: Request,
+    user: dict[str, Any] = Depends(require_super_admin),
 ) -> BackupJobResponse:
+    existing = await backup_jobs_service.get_job(job_id)
     if payload.company_id is not None:
         await _ensure_company(payload.company_id)
     try:
@@ -177,6 +195,11 @@ async def update_backup_job(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Backup job not found",
         )
+    await audit_service.record(
+        action="backup.job.update", request=request, user_id=int(user["id"]),
+        entity_type="backup_job", entity_id=job_id,
+        before=_audit_job(existing or {}), after=_audit_job(updated),
+    )
     return serialise_job(updated)
 
 
@@ -186,7 +209,8 @@ async def update_backup_job(
 )
 async def regenerate_backup_job_token(
     job_id: int,
-    _: dict[str, Any] = Depends(require_super_admin),
+    request: Request,
+    user: dict[str, Any] = Depends(require_super_admin),
 ) -> BackupJobResponse:
     updated = await backup_jobs_service.regenerate_token(job_id)
     if not updated:
@@ -194,6 +218,11 @@ async def regenerate_backup_job_token(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Backup job not found",
         )
+    await audit_service.record(
+        action="backup.token.regenerate", request=request, user_id=int(user["id"]),
+        entity_type="backup_job", entity_id=job_id,
+        metadata={"credential_recorded": False},
+    )
     return serialise_job(updated)
 
 
@@ -203,6 +232,13 @@ async def regenerate_backup_job_token(
 )
 async def delete_backup_job(
     job_id: int,
-    _: dict[str, Any] = Depends(require_super_admin),
+    request: Request,
+    user: dict[str, Any] = Depends(require_super_admin),
 ) -> None:
+    existing = await backup_jobs_service.get_job(job_id)
     await backup_jobs_service.delete_job(job_id)
+    if existing:
+        await audit_service.record_delete(
+            action="backup.job.delete", request=request, user_id=int(user["id"]),
+            entity_type="backup_job", entity_id=job_id, before=_audit_job(existing),
+        )

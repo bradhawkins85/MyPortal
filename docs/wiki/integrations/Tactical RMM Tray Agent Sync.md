@@ -9,13 +9,17 @@ POST /api/tray/trmm-sync
 X-API-Key: <MyPortal API key>
 Content-Type: application/json
 
-{"agent_id":"<TRMM agent ID>","tray_agent_id":"<MyPortal device UID>"}
+{"agent_id":"<TRMM agent ID>","tray_agent_id":"<MyPortal device UID>","create_asset_if_missing":true}
 ```
 
 The endpoint first links an existing asset with that Tactical RMM agent ID. If
 the asset has not been imported yet, it fetches only that agent, creates the
 MyPortal asset, and links the already-enrolled tray device in the same request.
 It does not wait for or run a full client asset import.
+
+`create_asset_if_missing` defaults to `true` for backwards compatibility. Set
+it to `false` only when a caller intentionally requires the scheduled import to
+create the asset first.
 
 ## Tactical RMM setup — Windows
 

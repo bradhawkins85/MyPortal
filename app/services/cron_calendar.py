@@ -4,7 +4,9 @@ from datetime import datetime, timezone, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from croniter import CroniterBadCronError, croniter
+from croniter import CroniterBadCronError, CroniterBadDateError, croniter
+
+from app.services.cron_expression import for_croniter
 
 _MAX_EVENTS = 1000
 
@@ -44,9 +46,9 @@ def calculate_next_run(
     schedule_timezone = _resolve_timezone(timezone_name)
     reference_utc = _as_utc(reference or datetime.now(timezone.utc))
     try:
-        iterator = croniter(cron_expression, reference_utc.astimezone(schedule_timezone))
+        iterator = croniter(for_croniter(cron_expression), reference_utc.astimezone(schedule_timezone))
         return _as_utc(iterator.get_next(datetime))
-    except (CroniterBadCronError, ValueError, KeyError):
+    except (CroniterBadCronError, CroniterBadDateError, ValueError, KeyError):
         return None
 
 
@@ -78,15 +80,15 @@ def build_calendar_events(
             continue
         try:
             iterator = croniter(
-                cron_expression, start_utc.astimezone(schedule_timezone)
+                for_croniter(cron_expression), start_utc.astimezone(schedule_timezone)
             )
-        except (CroniterBadCronError, ValueError, KeyError):
+        except (CroniterBadCronError, CroniterBadDateError, ValueError, KeyError):
             continue
 
         while len(events) < capped_limit:
             try:
                 next_run = iterator.get_next(datetime)
-            except (CroniterBadCronError, ValueError, KeyError):
+            except (CroniterBadCronError, CroniterBadDateError, ValueError, KeyError):
                 break
             next_run_utc = _as_utc(next_run)
             if next_run_utc >= end_utc:

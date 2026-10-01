@@ -12,8 +12,10 @@ import nh3
 
 from app.core.logging import log_error
 from app.repositories import knowledge_base as kb_repo
+from app.repositories import customer_content_audience as audience_repo
 from app.services import company_access
 from app.services import modules as modules_service
+from app.services.ai_prompt_security import UntrustedRecord, build_prompt
 from app.services.tagging import (
     filter_helpful_texts,
     get_all_excluded_tags,
@@ -28,31 +30,33 @@ from app.services.knowledge_base_conditionals import (
 
 PermissionScope = str
 
-_ALLOWED_TAGS: frozenset[str] = frozenset((
-    "a",
-    "abbr",
-    "blockquote",
-    "code",
-    "em",
-    "strong",
-    "ul",
-    "ol",
-    "li",
-    "p",
-    "pre",
-    "br",
-    "h2",
-    "h3",
-    "h4",
-    "table",
-    "thead",
-    "tbody",
-    "tr",
-    "th",
-    "td",
-    "img",
-    "kb-if",
-))
+_ALLOWED_TAGS: frozenset[str] = frozenset(
+    (
+        "a",
+        "abbr",
+        "blockquote",
+        "code",
+        "em",
+        "strong",
+        "ul",
+        "ol",
+        "li",
+        "p",
+        "pre",
+        "br",
+        "h2",
+        "h3",
+        "h4",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "th",
+        "td",
+        "img",
+        "kb-if",
+    )
+)
 
 _ALLOWED_ATTRIBUTES: dict[str, set[str]] = {
     "a": {"href", "title", "target"},
@@ -175,16 +179,7 @@ def _render_ai_tag_prompt(
 ) -> str:
     clean_title = title.strip() or "Untitled article"
     clean_summary = (summary or "").strip()
-    lines = [
-        "You classify knowledge base articles by topic.",
-        "Generate between 5 and 10 concise tags (1-3 words) describing the main subjects.",
-        "Return only a JSON array of lowercase strings.",
-        "",
-        f"Title: {clean_title}",
-        f"Summary: {clean_summary or '(none provided)'}",
-        "",
-        "Sections:",
-    ]
+    content_records: list[dict[str, str]] = []
     included = 0
     for section in sections:
         if included >= 6:
@@ -196,20 +191,17 @@ def _render_ai_tag_prompt(
             continue
         heading = section.get("heading") or f"Section {included + 1}"
         snippet = text_content[:400]
-        lines.append(f"{included + 1}. {heading}: {snippet}")
+        content_records.append({"heading": str(heading), "content": snippet})
         included += 1
     if included == 0:
         fallback_text = nh3.clean(str(fallback_content), tags=frozenset())
         fallback_text = " ".join(fallback_text.split())
         if fallback_text:
-            lines.append(fallback_text[:600])
-    lines.extend(
-        [
-            "",
-            'Example output: ["networking", "setup", "security"]',
-        ]
+            content_records.append({"heading": "Article content", "content": fallback_text[:600]})
+    return build_prompt(
+        "Classify the article by topic. Generate 5 to 10 concise tags of 1-3 words. Return exactly a JSON object with a tags array of lowercase strings.",
+        [UntrustedRecord("kb-article-draft", "knowledge base editor submission", {"title": clean_title, "summary": clean_summary, "sections": content_records}, "Use only to derive topical tags")],
     )
-    return "\n".join(lines)
 
 
 def _parse_ai_tag_text(raw: str) -> list[str]:
@@ -223,7 +215,12 @@ def _parse_ai_tag_text(raw: str) -> list[str]:
             parsed = json.loads(value)
         except json.JSONDecodeError:
             return None
+        if isinstance(parsed, Mapping) and set(parsed) == {"tags"}:
+            tags = parsed.get("tags")
+            if isinstance(tags, list) and all(isinstance(tag, str) for tag in tags):
+                return tags
         if isinstance(parsed, list):
+            # Legacy provider compatibility; new prompts require {"tags": [...]}.
             return parsed
         return None
 
@@ -264,10 +261,7 @@ async def _schedule_article_ai_tags(
     prompt = _render_ai_tag_prompt(title, summary, sections, combined_content)
 
     async def _apply_result(result: Mapping[str, Any]) -> None:
-        status = str(result.get("status") or result.get("event_status") or "").lower()
-        if status == "queued":
-            return
-        if status == "skipped":
+        if not modules_service.module_result_succeeded(result):
             return
         payload = result.get("response")
         text: str | None = None
@@ -371,6 +365,9 @@ async def build_access_context(user: Mapping[str, Any] | None) -> ArticleAccessC
     except (TypeError, ValueError):
         user_id = None
     memberships: dict[int, Mapping[str, Any]] = {}
+    simulated = user.get("simulated_membership")
+    if isinstance(simulated, Mapping) and simulated.get("company_id") is not None:
+        memberships[int(simulated["company_id"])] = simulated
     if user_id is not None:
         try:
             membership_rows = await company_access.list_accessible_companies(user)
@@ -385,7 +382,7 @@ async def build_access_context(user: Mapping[str, Any] | None) -> ArticleAccessC
                 company_id_int = int(company_id)
             except (TypeError, ValueError):
                 continue
-            memberships[company_id_int] = membership
+            memberships.setdefault(company_id_int, membership)
     is_super_admin = bool(user.get("is_super_admin"))
     return ArticleAccessContext(
         user=user,
@@ -426,6 +423,38 @@ def _article_visible(article: Mapping[str, Any], context: ArticleAccessContext) 
             for membership in context.memberships.values()
         )
     return False
+
+
+def _membership_has_content_permission(membership: Mapping[str, Any], key: str) -> bool:
+    permissions = membership.get("menu_permissions") or membership.get("permissions") or {}
+    return isinstance(permissions, Mapping) and str(permissions.get(key) or "none") in {"read", "write"}
+
+
+async def _role_audience_visible(article: Mapping[str, Any], context: ArticleAccessContext) -> bool:
+    """Require both the content capability and an explicit per-record grant."""
+    if context.is_super_admin:
+        return True
+    if str(article.get("permission_scope") or "anonymous") in {"anonymous", "user", "super_admin"}:
+        return True
+    for company_id, membership in context.memberships.items():
+        role_id = membership.get("role_id")
+        if role_id is None or not _membership_has_content_permission(membership, "content.knowledge_base"):
+            continue
+        if await audience_repo.role_can_access(company_id, "knowledge_base", int(article["id"]), int(role_id)):
+            return True
+    return False
+
+
+def _article_access_metadata(article: Mapping[str, Any]) -> dict[str, Any]:
+    """Return index-only fields needed to re-authorise an article later."""
+    return {
+        "article_permission_scope": str(article.get("permission_scope") or ""),
+        "allowed_user_ids": _normalise_ids(article.get("allowed_user_ids", [])),
+        "allowed_company_ids": _normalise_ids(article.get("company_ids", [])),
+        "company_admin_ids": _normalise_ids(article.get("company_admin_ids", [])),
+        "asset_ids": _normalise_ids(article.get("asset_ids", [])),
+        "assets": list(article.get("assets") or []),
+    }
 
 
 def _get_primary_company_name(context: ArticleAccessContext) -> str | None:
@@ -495,6 +524,10 @@ def _serialise_article(
         "manual_ai_tags": list(article.get("manual_ai_tags") or []),
         "permission_scope": str(article.get("permission_scope")),
         "is_published": bool(article.get("is_published")),
+        "lifecycle_status": str(article.get("lifecycle_status") or "draft"),
+        "owner_id": article.get("owner_id"),
+        "review_due_at": article.get("review_due_at_utc"),
+        "review_due_at_iso": _isoformat(article.get("review_due_at_utc")),
         "updated_at": article.get("updated_at_utc"),
         "updated_at_iso": _isoformat(article.get("updated_at_utc")),
         "published_at": article.get("published_at_utc"),
@@ -575,6 +608,9 @@ def _serialise_article(
                     article.get("company_admin_ids", [])
                 ),
                 "conditional_companies": sorted(all_conditional_companies),
+                "asset_ids": _normalise_ids(article.get("asset_ids", [])),
+                "assets": list(article.get("assets") or []),
+                "attachments": list(article.get("attachments") or []),
             }
         )
     return base
@@ -589,8 +625,10 @@ async def list_articles_for_context(
     articles = await kb_repo.list_articles(include_unpublished=include_unpublished)
     visible: list[dict[str, Any]] = []
     for article in articles:
-        if include_unpublished or article.get("is_published"):
-            if _article_visible(article, context) or include_permissions:
+        lifecycle = article.get("lifecycle_status") or ("published" if article.get("is_published") else "draft")
+        publishable = article.get("is_published") and lifecycle == "published"
+        if include_unpublished or publishable:
+            if ((_article_visible(article, context) and await _role_audience_visible(article, context)) or include_permissions):
                 visible.append(
                     _serialise_article(
                         article,
@@ -623,11 +661,14 @@ async def get_article_by_slug_for_context(
         return None
     if (
         not include_unpublished
-        and not article.get("is_published")
+        and (
+            not article.get("is_published")
+            or (article.get("lifecycle_status") or "published") != "published"
+        )
         and not context.is_super_admin
     ):
         return None
-    if not _article_visible(article, context) and not (
+    if (not _article_visible(article, context) or not await _role_audience_visible(article, context)) and not (
         include_permissions and context.is_super_admin
     ):
         return None
@@ -669,9 +710,14 @@ async def create_article(
         published_at=published_at,
         created_by=author_id,
         ai_tags=None,
+        owner_id=payload.get("owner_id") or author_id,
+        lifecycle_status=("published" if is_published else str(payload.get("lifecycle_status") or "draft")),
+        review_due_at=payload.get("review_due_at"),
     )
     await _sync_relations(created["id"], permission_scope, payload)
+    await _sync_role_audience(created["id"], permission_scope, payload)
     await kb_repo.replace_article_sections(created["id"], prepared_sections)
+    await kb_repo.replace_article_assets(created["id"], payload.get("asset_ids") or [])
     refreshed = await kb_repo.get_article_by_id(created["id"])
     if not refreshed:
         raise RuntimeError("Failed to load knowledge base article after creation")
@@ -693,10 +739,13 @@ async def update_article(
     payload: Mapping[str, Any],
     *,
     notifier: RefreshNotifier | None = None,
+    editor_id: int | None = None,
 ) -> dict[str, Any]:
     current = await kb_repo.get_article_by_id(article_id)
     if not current:
         raise ValueError("Article not found")
+    # Capture the complete pre-edit state before destructive section/relation writes.
+    await kb_repo.create_article_version(current, created_by=editor_id)
     updates: dict[str, Any] = {}
     if "slug" in payload:
         updates["slug"] = payload.get("slug")
@@ -731,12 +780,16 @@ async def update_article(
         sections_update_required = True
     if "permission_scope" in payload:
         updates["permission_scope"] = payload.get("permission_scope")
+    for field in ("owner_id", "review_due_at", "lifecycle_status"):
+        if field in payload:
+            updates[field] = payload.get(field)
     published_flag = payload.get("is_published")
     if published_flag is not None:
         updates["is_published"] = bool(published_flag)
         updates["published_at"] = (
             datetime.now(timezone.utc) if updates["is_published"] else None
         )
+        updates["lifecycle_status"] = "published" if updates["is_published"] else str(payload.get("lifecycle_status") or "draft")
     title_for_ai_source = updates.get("title", current.get("title"))
     title_for_ai = str(title_for_ai_source) if title_for_ai_source is not None else ""
     summary_for_ai = (
@@ -747,8 +800,11 @@ async def update_article(
         current = await kb_repo.update_article(article_id, **updates)
     permission_scope = str(current.get("permission_scope"))
     await _sync_relations(article_id, permission_scope, payload)
+    await _sync_role_audience(article_id, permission_scope, payload)
     if sections_update_required:
         await kb_repo.replace_article_sections(article_id, prepared_sections)
+    if "asset_ids" in payload:
+        await kb_repo.replace_article_assets(article_id, payload.get("asset_ids") or [])
     refreshed = await kb_repo.get_article_by_id(article_id)
     if not refreshed:
         raise RuntimeError("Failed to refresh article after update")
@@ -819,6 +875,19 @@ async def _sync_relations(
         await kb_repo.replace_article_companies(article_id, [], require_admin=True)
 
 
+async def _sync_role_audience(article_id: int, permission_scope: str, payload: Mapping[str, Any]) -> None:
+    """Store an explicit deny-by-default audience for company publications."""
+    if "allowed_role_ids" not in payload:
+        return
+    company_ids = _normalise_ids(payload.get("allowed_company_ids") or [])
+    role_ids = _normalise_ids(payload.get("allowed_role_ids") or [])
+    if permission_scope not in {"company", "company_admin"}:
+        company_ids = []
+        role_ids = []
+    for company_id in company_ids:
+        await audience_repo.replace_roles(company_id, "knowledge_base", article_id, role_ids)
+
+
 def _build_excerpt(content: str, query: str, summary: str | None) -> str | None:
     lowered = content.lower()
     query_lower = query.lower()
@@ -839,30 +908,13 @@ def _build_excerpt(content: str, query: str, summary: str | None) -> str | None:
 
 
 def _render_prompt(query: str, articles: list[Mapping[str, Any]]) -> str:
-    lines = [
-        "You are an assistant helping users navigate a knowledge base.",
-        "Summarise the relevant articles for the query below.",
-        "Always cite article slugs in your response.",
-        "",
-        f"Query: {query}",
-        "",
-        "Articles:",
-    ]
+    records = [UntrustedRecord("kb-query", "authenticated portal user query", query, "Use only to determine which supplied articles answer the question")]
     for article in articles:
         content = str(article.get("content") or "")
         snippet = content[:1000]
-        lines.extend(
-            [
-                f"- Title: {article.get('title')}",
-                f"  Slug: {article.get('slug')}",
-                f"  Summary: {article.get('summary') or 'N/A'}",
-                "  Content snippet:",
-                f"  {snippet}",
-                "",
-            ]
-        )
-    lines.append("Provide a concise answer with bullet points when appropriate.")
-    return "\n".join(lines)
+        slug = str(article.get("slug") or article.get("id") or "unknown")
+        records.append(UntrustedRecord(f"kb:{slug}", "authorized knowledge base article", {"title": article.get("title"), "slug": slug, "summary": article.get("summary"), "content": snippet}, "Use only as evidence for the answer and cite it as [KB:" + slug + "]"))
+    return build_prompt("Summarize relevant supplied articles. Cite only supplied records using [KB:slug].", records, task="Provide a concise answer with bullet points when appropriate.")
 
 
 def _tokenise(text: str) -> list[str]:
@@ -954,7 +1006,10 @@ def _score_article(
 
 
 async def list_accessible_search_articles(
-    context: ArticleAccessContext, *, limit: int | None = None
+    context: ArticleAccessContext,
+    *,
+    limit: int | None = None,
+    include_access_metadata: bool = False,
 ) -> list[dict[str, Any]]:
     """Return all articles visible to a search user for complete RAG indexing."""
 
@@ -965,26 +1020,35 @@ async def list_accessible_search_articles(
             continue
         if not _article_visible(article, context):
             continue
+        authorised = _serialise_article(
+            article, include_content=True, include_permissions=False, context=context
+        )
+        searchable_content = (
+            _combine_sections_html(authorised.get("sections") or [])
+            if article.get("sections")
+            else authorised.get("content") or ""
+        )
         content_parts = [
-            article.get("summary"),
-            article.get("content"),
-            *(
-                section.get("content")
-                for section in article.get("sections", [])
-                if isinstance(section, Mapping)
-            ),
+            authorised.get("summary"),
+            searchable_content,
+            *(section.get("content") for section in authorised.get("sections", [])),
         ]
         excerpt_source = "\n".join(str(part or "") for part in content_parts if part)
-        visible.append(
-            {
-                "id": int(article.get("id")),
-                "slug": str(article.get("slug")),
-                "title": str(article.get("title")),
-                "summary": article.get("summary"),
-                "excerpt": _build_excerpt(excerpt_source, "", article.get("summary")),
-                "updated_at_iso": _isoformat(article.get("updated_at_utc")),
-            }
-        )
+        result = {
+            "id": int(article.get("id")),
+            "slug": str(article.get("slug")),
+            "title": str(article.get("title")),
+            "summary": article.get("summary"),
+            "excerpt": _build_excerpt(excerpt_source, "", article.get("summary")),
+            "content": searchable_content,
+            "sections": authorised.get("sections") or [],
+            "ai_tags": authorised.get("ai_tags") or [],
+            "manual_ai_tags": authorised.get("manual_ai_tags") or [],
+            "updated_at_iso": _isoformat(article.get("updated_at_utc")),
+        }
+        if include_access_metadata:
+            result.update(_article_access_metadata(article))
+        visible.append(result)
         if limit is not None and len(visible) >= limit:
             break
     return visible
@@ -996,6 +1060,7 @@ async def search_articles(
     *,
     limit: int = 8,
     use_ollama: bool = True,
+    include_access_metadata: bool = False,
 ) -> dict[str, Any]:
     candidates = await kb_repo.list_articles(include_unpublished=context.is_super_admin)
     visible: list[dict[str, Any]] = []
@@ -1024,18 +1089,31 @@ async def search_articles(
     visible = [dict(item[2]) for item in scored[:limit]]
     results: list[dict[str, Any]] = []
     for article in visible:
+        authorised = _serialise_article(
+            article, include_content=True, include_permissions=False, context=context
+        )
+        searchable_content = (
+            _combine_sections_html(authorised.get("sections") or [])
+            if article.get("sections")
+            else authorised.get("content") or ""
+        )
         content = str(article.get("content") or "")
         summary = article.get("summary")
-        results.append(
-            {
-                "id": int(article.get("id")),
-                "slug": str(article.get("slug")),
-                "title": str(article.get("title")),
-                "summary": summary,
-                "excerpt": _build_excerpt(content, query, summary),
-                "updated_at_iso": _isoformat(article.get("updated_at_utc")),
-            }
-        )
+        result = {
+            "id": int(article.get("id")),
+            "slug": str(article.get("slug")),
+            "title": str(article.get("title")),
+            "summary": summary,
+            "excerpt": _build_excerpt(content, query, summary),
+            "content": searchable_content,
+            "sections": authorised.get("sections") or [],
+            "ai_tags": authorised.get("ai_tags") or [],
+            "manual_ai_tags": authorised.get("manual_ai_tags") or [],
+            "updated_at_iso": _isoformat(article.get("updated_at_utc")),
+        }
+        if include_access_metadata:
+            result.update(_article_access_metadata(article))
+        results.append(result)
     ollama_status = "skipped"
     ollama_model: str | None = None
     ollama_summary: str | None = None
@@ -1053,15 +1131,16 @@ async def search_articles(
         else:
             ollama_status = str(response.get("status") or "unknown")
             ollama_model = response.get("model")
-            payload = response.get("response")
-            if isinstance(payload, Mapping):
-                ollama_summary = payload.get("response") or payload.get("message")
-                if not ollama_model:
-                    model_candidate = payload.get("model")
-                    if isinstance(model_candidate, str):
-                        ollama_model = model_candidate
-            elif isinstance(payload, str):
-                ollama_summary = payload
+            if modules_service.module_result_succeeded(response):
+                payload = response.get("response")
+                if isinstance(payload, Mapping):
+                    ollama_summary = payload.get("response") or payload.get("message")
+                    if not ollama_model:
+                        model_candidate = payload.get("model")
+                        if isinstance(model_candidate, str):
+                            ollama_model = model_candidate
+                elif isinstance(payload, str):
+                    ollama_summary = payload
     return {
         "results": results,
         "ollama_status": ollama_status,

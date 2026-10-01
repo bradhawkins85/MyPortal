@@ -1,5 +1,26 @@
 {% extends "base.html" %}
-{% block header_title %}<span class="header__title-text">{{ title | default('Cron Calendar') }}</span>{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">{{ title | default('Cron Calendar') }}</span>
+    <form class="page-header-toolbar" data-calendar-filters onsubmit="return false">
+      <div class="page-header-toolbar__group">
+        <label class="visually-hidden" for="cron-calendar-search">Find a task</label>
+        <input id="cron-calendar-search" class="form-input page-header-toolbar__search" type="search" placeholder="Find a task" title="Name, command, company, or cron" data-calendar-search />
+        <label class="page-header-toolbar__check"><input type="checkbox" data-calendar-inactive /><span>Show inactive</span></label>
+      </div>
+      <div class="page-header-toolbar__group" role="group" aria-label="Calendar navigation">
+        <button class="button button--ghost button--compact" type="button" data-calendar-prev aria-label="Previous period">←</button>
+        <button class="button button--ghost button--compact" type="button" data-calendar-today>Today</button>
+        <button class="button button--ghost button--compact" type="button" data-calendar-next aria-label="Next period">→</button>
+      </div>
+      <div class="page-header-toolbar__group" role="group" aria-label="Calendar views">
+        <button class="button button--ghost button--compact" type="button" data-calendar-view="day">Day</button>
+        <button class="button button--primary button--compact" type="button" data-calendar-view="week">Week</button>
+        <button class="button button--ghost button--compact" type="button" data-calendar-view="list">30 days</button>
+      </div>
+    </form>
+  </div>
+{% endblock %}
 
 {% block header_actions %}
   <a class="button button--ghost" href="/admin/scheduled-tasks">Manage scheduled tasks</a>
@@ -8,22 +29,9 @@
 {% block content %}
 <div class="management management--single cron-calendar" data-cron-calendar>
   <section class="management__content">
-    <header class="management__header cron-calendar__intro">
-      <div>
-        <p class="cron-calendar__eyebrow">Automation schedule</p>
-        <h1 class="management__title">Cron Calendar</h1>
-        <p class="management__subtitle">See every task by name and find clear gaps for new automation. Times use your browser timezone.</p>
-      </div>
-      <form class="management__filters" data-calendar-filters onsubmit="return false">
-        <label class="form-field"><span class="form-label">Find a task</span><input class="form-input" type="search" placeholder="Name, command, company, or cron" data-calendar-search /></label>
-        <label class="form-checkbox-label"><input class="form-checkbox" type="checkbox" data-calendar-inactive /><span class="form-checkbox-text">Show inactive tasks</span></label>
-      </form>
-    </header>
-
-    <div class="card card--panel cron-calendar__toolbar">
-      <div class="cron-calendar__nav"><button class="button button--ghost" type="button" data-calendar-prev aria-label="Previous period">←</button><button class="button button--ghost" type="button" data-calendar-today>Today</button><button class="button button--ghost" type="button" data-calendar-next aria-label="Next period">→</button></div>
-      <div class="cron-calendar__range"><h2 class="card__title" data-calendar-range>Loading…</h2><p class="card__subtitle"><strong data-calendar-count>0</strong> scheduled runs</p></div>
-      <div class="button-group" role="group" aria-label="Calendar views"><button class="button button--ghost" type="button" data-calendar-view="day">Day</button><button class="button button--primary" type="button" data-calendar-view="week">Week</button><button class="button button--ghost" type="button" data-calendar-view="list">30 days</button></div>
+    <div class="cron-calendar__range">
+      <h2 class="card__title" data-calendar-range>Loading…</h2>
+      <p class="card__subtitle"><strong data-calendar-count>0</strong> scheduled runs · See every task by name and find clear gaps for new automation. Times use your browser timezone.</p>
     </div>
 
     <div class="cron-calendar__legend" aria-label="Schedule legend"><span><i class="cron-calendar__legend-run"></i> Scheduled run</span><span><i class="cron-calendar__legend-free"></i> Available window (15+ minutes)</span></div>
@@ -35,14 +43,9 @@
 
 {% block extra_head %}
 <style>
-  .button-group { display: inline-flex; gap: .35rem; flex-wrap: wrap; }
   .cron-calendar { min-height: 0; }
   .cron-calendar .management__content { min-height: 0; }
-  .cron-calendar__intro { align-items: end; }
-  .cron-calendar__eyebrow { margin: 0 0 .25rem; color: var(--primary-color, #2563eb); font-size: .75rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
-  .cron-calendar__toolbar { display: grid; grid-template-columns: auto 1fr auto; gap: 1rem; align-items: center; margin-bottom: .75rem; }
-  .cron-calendar__nav { display: flex; gap: .4rem; }
-  .cron-calendar__range { text-align: center; }
+  .cron-calendar__range { margin-bottom: .75rem; }
   .cron-calendar__range h2, .cron-calendar__range p { margin: 0; }
   .cron-calendar__legend { display: flex; gap: 1.25rem; margin: 0 0 .75rem; color: var(--text-muted, #64748b); font-size: .8rem; }
   .cron-calendar__legend span { display: inline-flex; align-items: center; gap: .4rem; }
@@ -74,7 +77,7 @@
   .cron-calendar__availability strong { font-size: .76rem; }
   .cron-calendar__availability small { color: var(--text-muted, #64748b); font-size: .68rem; }
   .cron-calendar__empty { margin: 0; padding: 1rem; color: var(--text-muted, #64748b); text-align: center; }
-  @media (max-width: 900px) { .cron-calendar__intro { align-items: stretch; } .cron-calendar__toolbar { grid-template-columns: 1fr; } .cron-calendar__range { order: -1; text-align: left; } .cron-calendar__grid { grid-template-columns: repeat(7, minmax(18rem, 1fr)); } .cron-calendar__grid--day, .cron-calendar__grid--list { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { .cron-calendar__grid { grid-template-columns: repeat(7, minmax(18rem, 1fr)); } .cron-calendar__grid--day, .cron-calendar__grid--list { grid-template-columns: 1fr; } }
 </style>
 <script src="{{ static_url('/static/js/cron_calendar.js') }}" defer></script>
 {% endblock %}

@@ -9,6 +9,7 @@ from typing import Any
 from app.repositories import company_report_layouts as layout_repo
 from app.repositories import reporting as reporting_repo
 from app.services import reporting as reporting_service
+from app.services.stat_strips import build_items
 
 MAX_COLUMNS = 12
 MAX_ROWS = 50
@@ -32,7 +33,7 @@ def default_layout() -> list[dict[str, Any]]:
         ("Top mailboxes by size", "report-top-mailboxes-by-size"),
         ("Licenses", "report-licenses"),
         ("Subscriptions", "report-subscriptions"),
-        ("Essential 8 compliance", "report-essential-8-compliance-progress"),
+        ("SMB1001 compliance", "report-smb1001-compliance-progress"),
         ("Customer compliance checks", "report-customer-compliance-checks"),
         ("Tickets (past month)", "report-tickets-past-month"),
         ("Backup history", "report-backup-history"),
@@ -82,7 +83,7 @@ def normalise_layout(value: Any, valid_slugs: set[str]) -> list[dict[str, Any]]:
             slug = _text(raw.get("slug"), 120)
             if slug not in valid_slugs:
                 continue
-            display = "stat" if raw.get("display") == "stat" else "table"
+            display = raw.get("display") if raw.get("display") in {"stat", "stat_strip"} else "table"
             aggregate = _text(raw.get("aggregate"), 16).lower()
             if aggregate not in ALLOWED_AGGREGATES:
                 aggregate = "value"
@@ -156,11 +157,24 @@ class LayoutReport:
     rows: list[dict[str, Any]] = field(default_factory=list)
 
 
+def _query_available(slug: Any) -> bool:
+    """Hide reporting queries owned by a deployment-disabled component."""
+
+    text = str(slug or "")
+    for marker, component in (("essential-8", "essential8"), ("smb1001", "smb1001")):
+        if marker in text:
+            from app.services.component_availability import get_component_availability
+
+            return get_component_availability().feature_pack_available(component)
+    return True
+
+
 async def available_queries() -> list[dict[str, Any]]:
-    queries = await reporting_repo.list_queries()
     return [
-        query for query in queries
+        query
+        for query in await reporting_repo.list_queries()
         if reporting_service.uses_company_context(str(query.get("sql_query") or ""))
+        if _query_available(query.get("slug"))
     ]
 
 
@@ -190,6 +204,8 @@ async def build(company_id: int, company: dict[str, Any]) -> LayoutReport:
         rendered_columns = []
         for config in row.get("columns", []):
             slug = config.get("slug")
+            if not _query_available(slug):
+                continue
             query = by_slug.get(slug)
             error = None
             if not query:
@@ -206,6 +222,8 @@ async def build(company_id: int, company: dict[str, Any]) -> LayoutReport:
             if config.get("display") == "stat":
                 value = _stat_value(config, result)
                 cell.update({"value": value, "variant": _variant(value, config.get("thresholds") or [])})
+            elif config.get("display") == "stat_strip":
+                cell["stat_strip_data"] = build_items(result)
             rendered_columns.append(cell)
         if rendered_columns:
             rendered_rows.append({"title": row.get("title"), "columns": rendered_columns})

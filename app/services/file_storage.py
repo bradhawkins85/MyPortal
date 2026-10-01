@@ -10,13 +10,38 @@ from fastapi import HTTPException, UploadFile, status
 
 _MAX_FILE_SIZE = 15 * 1024 * 1024  # 15 MB
 _SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9._-]")
-_DISALLOWED_PORT_DOCUMENT_EXTENSIONS = {".html", ".htm", ".xhtml", ".svg", ".svgz", ".xml", ".js", ".mjs"}
+# Allowlist of inert document formats accepted for port documents. A
+# denylist is bypassable (.xsl, .rdf, .shtml, .xht, ...), so anything not
+# listed here is rejected.
+_ALLOWED_PORT_DOCUMENT_EXTENSIONS = {
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".odt",
+    ".ods",
+    ".odp",
+    ".rtf",
+    ".txt",
+    ".csv",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".zip",
+}
 _DISALLOWED_PORT_DOCUMENT_CONTENT_TYPES = {
     "text/html",
     "application/xhtml+xml",
     "image/svg+xml",
     "text/xml",
     "application/xml",
+    "application/xslt+xml",
+    "application/rdf+xml",
     "application/javascript",
     "text/javascript",
 }
@@ -66,7 +91,7 @@ async def store_port_document(
     suffix = Path(original_name).suffix.lower()
     content_type = (upload.content_type or "").split(";", 1)[0].strip().lower()
 
-    if suffix in _DISALLOWED_PORT_DOCUMENT_EXTENSIONS or content_type in _DISALLOWED_PORT_DOCUMENT_CONTENT_TYPES:
+    if suffix not in _ALLOWED_PORT_DOCUMENT_EXTENSIONS or content_type in _DISALLOWED_PORT_DOCUMENT_CONTENT_TYPES:
         await upload.close()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

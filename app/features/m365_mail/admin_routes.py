@@ -13,6 +13,7 @@ from app.security.flash import flash_redirect
 from app.repositories import companies as company_repo
 from app.services import m365 as m365_service
 from app.services import m365_mail as m365_mail_service
+from app.services import audit as audit_service
 
 __all__ = ["router"]
 
@@ -115,8 +116,10 @@ async def admin_create_m365_mail_account(request: Request):
         "filter_query": form.get("filterQuery"),
         "process_unread_only": _form_bool(form, "processUnreadOnly"),
         "mark_as_read": _form_bool(form, "markAsRead"),
+        "delete_after_import": _form_bool(form, "deleteAfterImport"),
         "sync_known_only": _form_bool(form, "syncKnownOnly"),
         "active": _form_bool(form, "active"),
+        "import_purpose": form.get("importPurpose", "support_ticket"),
     }
     priority_value = form.get("priority")
     if priority_value not in (None, ""):
@@ -162,6 +165,11 @@ async def admin_create_m365_mail_account(request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     message = f"Mailbox {account.get('name') or account.get('user_principal_name') or 'created'} added."
+    await audit_service.record(
+        action="m365_mail.account.configure", request=request,
+        user_id=int(current_user["id"]), entity_type="m365_mail_account",
+        entity_id=int(account["id"]), after={"import_purpose": account.get("import_purpose")},
+    )
     return flash_redirect("/admin/modules/m365-mail", message, "success")
 
 
@@ -193,8 +201,10 @@ async def admin_update_m365_mail_account(account_id: int, request: Request):
         updates["filter_query"] = form.get("filterQuery")
     updates["process_unread_only"] = _form_bool(form, "processUnreadOnly")
     updates["mark_as_read"] = _form_bool(form, "markAsRead")
+    updates["delete_after_import"] = _form_bool(form, "deleteAfterImport")
     updates["sync_known_only"] = _form_bool(form, "syncKnownOnly")
     updates["active"] = _form_bool(form, "active")
+    updates["import_purpose"] = form.get("importPurpose", "support_ticket")
     priority_value = form.get("priority")
     if priority_value not in (None, ""):
         try:
@@ -247,6 +257,11 @@ async def admin_update_m365_mail_account(account_id: int, request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     message = f"Mailbox {account.get('name') or account.get('user_principal_name') or account_id} updated."
+    await audit_service.record(
+        action="m365_mail.account.configure", request=request,
+        user_id=int(current_user["id"]), entity_type="m365_mail_account",
+        entity_id=account_id, after={"import_purpose": account.get("import_purpose")},
+    )
     return flash_redirect("/admin/modules/m365-mail", message, "success")
 
 
@@ -390,7 +405,14 @@ async def admin_sync_m365_mail_account(account_id: int, request: Request):
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
         return redirect
-    result = await m365_mail_service.sync_account(account_id)
+    form = await request.form()
+    recovery = _form_bool(form, "recovery")
+    folder_override = str(form.get("recoveryFolder") or "").strip() or None
+    result = await m365_mail_service.sync_account(
+        account_id,
+        recovery=recovery,
+        folder_override=folder_override if recovery else None,
+    )
     status_value = str(result.get("status") or "").lower()
     processed = int(result.get("processed") or 0)
     error_count = len(result.get("errors") or [])
@@ -460,25 +482,20 @@ async def admin_m365_mail_authorize(account_id: int, request: Request):
     company_id = account.get("company_id")
     redirect_uri = main_module._build_m365_redirect_uri(request)
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    state = main_module.oauth_state_serializer.dumps(
-        {
-            "user_id": current_user.get("id"),
-            "flow": "m365_mail_auth",
-            "account_id": account_id,
-            "company_id": company_id,
-            "code_verifier": code_verifier,
-        }
+    oauth_client_id = await m365_service.get_effective_pkce_client_id(
+        redirect_uri=redirect_uri
+    )
+    state = await main_module._new_m365_oauth_state(
+        request,
+        flow="m365_mail_auth",
+        account_id=account_id,
+        company_id=company_id,
+        code_verifier=code_verifier,
+        client_id=oauth_client_id,
+        redirect_uri=redirect_uri,
     )
     params = {
-        "client_id": (
-            await m365_service.get_effective_pkce_client_id_for_company(
-                company_id, redirect_uri=redirect_uri
-            )
-            if company_id
-            else await m365_service.get_effective_pkce_client_id(
-                redirect_uri=redirect_uri
-            )
-        ),
+        "client_id": oauth_client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -500,7 +517,7 @@ async def admin_m365_mail_authorize(account_id: int, request: Request):
     response_class=HTMLResponse,
 )
 async def admin_m365_mail_disconnect(account_id: int, request: Request):
-    """Remove the per-account delegated tokens and revert to company credentials."""
+    """Remove the mailbox's delegated user tokens and stop authenticated imports."""
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
         return redirect

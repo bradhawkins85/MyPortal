@@ -22,7 +22,7 @@
           <ul class="help__nav-list">
             {% for article in section.articles %}
             <li class="help__nav-item">
-              <a href="/help/{{ section.slug }}/{{ article.slug }}" class="help__nav-link">{{ article.name }}</a>
+              <a href="/help/{{ section.slug }}/{{ article.slug }}" class="help__nav-link">{{ article.name }}{% if article.inactive %} <span class="badge badge--muted help__inactive-badge" title="The feature this article documents is not active">Inactive</span>{% endif %}</a>
             </li>
             {% endfor %}
           </ul>

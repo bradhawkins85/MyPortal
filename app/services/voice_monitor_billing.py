@@ -14,11 +14,12 @@ creates or exports an invoice itself.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
 from app.core.database import db
+from app.services.shop import get_product_price
 
 
 VOICE_MONITOR_CATEGORY = "Voice Monitor"
@@ -140,3 +141,83 @@ async def usage_invoice_lines(subscription_id: str, period_start: date, period_e
     overage = max(0, int(rows.get("attempts") or 0) - included)
     values = (("Voice Monitor attempt overage", overage, ATTEMPT_OVERAGE_PRICE), ("Voice Monitor connected minutes", int(rows.get("minutes") or 0), CONNECTED_MINUTE_PRICE), ("Voice Monitor transcription surcharge", int(rows.get("transcriptions") or 0), TRANSCRIPTION_SURCHARGE))
     return [{"description": description, "quantity": quantity, "unit_price": price, "amount": (price * quantity).quantize(Decimal("0.01"))} for description, quantity, price in values if quantity]
+
+
+def _term_days_from_commitment(commitment_type: str | None) -> int:
+    """Return the term length in days for a given commitment type."""
+    if str(commitment_type or "").casefold() == "monthly":
+        return 30
+    return 365
+
+
+async def list_voice_monitor_products() -> list[dict[str, Any]]:
+    """Return active shop products that belong to the Voice Monitor subscription category."""
+    rows = await db.fetch_all(
+        """
+        SELECT p.id, p.name, p.price, p.commitment_type, p.payment_frequency,
+               p.price_monthly_commitment, p.price_annual_monthly_payment,
+               p.price_annual_annual_payment, p.voice_monitor_calls_per_day,
+               p.description
+        FROM shop_products p
+        JOIN subscription_categories c ON c.id = p.subscription_category_id
+        WHERE c.name = %s AND p.archived = 0
+        ORDER BY p.price ASC, p.name ASC
+        """,
+        (VOICE_MONITOR_CATEGORY,),
+    )
+    return [
+        {
+            "id": int(row["id"]),
+            "name": row["name"],
+            "price": get_product_price(row),
+            "calls_per_day": int(row.get("voice_monitor_calls_per_day") or 1),
+            "term_days": _term_days_from_commitment(row.get("commitment_type")),
+            "description": row.get("description"),
+        }
+        for row in rows
+    ]
+
+
+async def provision_subscription(
+    company_id: int,
+    product_id: int,
+    created_by: int,
+) -> dict[str, Any]:
+    """Auto-provision a Voice Monitor subscription for a company.
+
+    Validates the product belongs to the Voice Monitor subscription category,
+    then creates a new active subscription with quantity=1.
+    """
+    row = await db.fetch_one(
+        """
+        SELECT p.id, p.price, p.commitment_type, p.payment_frequency,
+               p.price_monthly_commitment, p.price_annual_monthly_payment,
+               p.price_annual_annual_payment, p.voice_monitor_calls_per_day,
+               c.id AS category_id
+        FROM shop_products p
+        JOIN subscription_categories c ON c.id = p.subscription_category_id
+        WHERE p.id = %s AND c.name = %s AND p.archived = 0
+        """,
+        (product_id, VOICE_MONITOR_CATEGORY),
+    )
+    if not row:
+        raise ValueError("product is not an active Voice Monitor subscription product")
+
+    from app.repositories import subscriptions as subscriptions_repo
+
+    today = date.today()
+    term_days = _term_days_from_commitment(row.get("commitment_type"))
+    end_date = today + timedelta(days=term_days)
+
+    return await subscriptions_repo.create_subscription(
+        customer_id=company_id,
+        product_id=int(row["id"]),
+        subscription_category_id=int(row["category_id"]),
+        start_date=today,
+        end_date=end_date,
+        quantity=1,
+        unit_price=get_product_price(row),
+        status="active",
+        auto_renew=False,
+        created_by=created_by,
+    )

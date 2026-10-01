@@ -82,3 +82,54 @@ func connectedSubnets() []string {
 func ConnectedSubnets() []string {
 	return connectedSubnets()
 }
+
+// AllowedTargets limits configured ranges to networks attached to this host.
+// The narrower of two overlapping CIDRs is used, preventing configuration from
+// turning a portable scanner into a route to unrelated networks.
+func AllowedTargets(allowed []string) []string {
+	connected := connectedSubnets()
+	if len(allowed) == 0 {
+		return connected
+	}
+	seen := map[string]bool{}
+	var targets []string
+	for _, raw := range allowed {
+		_, permitted, err := net.ParseCIDR(raw)
+		if err != nil || permitted.IP.To4() == nil {
+			continue
+		}
+		for _, localRaw := range connected {
+			_, local, _ := net.ParseCIDR(localRaw)
+			if !permitted.Contains(local.IP) && !local.Contains(permitted.IP) {
+				continue
+			}
+			permittedOnes, _ := permitted.Mask.Size()
+			localOnes, _ := local.Mask.Size()
+			target := permitted.String()
+			if localOnes > permittedOnes {
+				target = local.String()
+			}
+			if !seen[target] {
+				seen[target] = true
+				targets = append(targets, target)
+			}
+		}
+	}
+	sort.Strings(targets)
+	return targets
+}
+
+// IPAllowed reports whether an address belongs to any configured WAN range.
+func IPAllowed(address string, allowed []string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	ip := net.ParseIP(address)
+	for _, raw := range allowed {
+		_, network, err := net.ParseCIDR(raw)
+		if err == nil && network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}

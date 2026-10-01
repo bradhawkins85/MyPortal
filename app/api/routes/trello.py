@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import html
+import json
+import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -61,8 +66,25 @@ async def trello_webhook_receive(request: Request) -> JSONResponse:
     source_url = str(request.url)
     request_headers = dict(request.headers)
 
+    raw_body = await request.body()
+    if not await _verify_trello_signature(request, raw_body):
+        await webhook_monitor.log_incoming_webhook(
+            name="Trello Webhook - Signature Verification Failed",
+            source_url=source_url,
+            headers=request_headers,
+            response_status=401,
+            response_body="Invalid webhook signature",
+            error_message="Trello webhook signature verification failed",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid webhook signature",
+        )
+
     try:
-        payload: dict[str, Any] = await request.json()
+        payload: dict[str, Any] = json.loads(raw_body)
+        if not isinstance(payload, dict):
+            raise ValueError("Expected a JSON object")
     except Exception:
         await webhook_monitor.log_incoming_webhook(
             name="Trello Webhook - Invalid JSON",
@@ -195,6 +217,52 @@ async def register_trello_webhook(
 # ---------------------------------------------------------------------------
 
 _WEBHOOK_PATH = "/api/integration-modules/trello/webhook"
+
+
+def compute_trello_signature(secret: str, raw_body: bytes, callback_url: str) -> str:
+    """Return Trello's webhook signature: base64(HMAC-SHA1(secret, body + callbackURL))."""
+    digest = hmac.new(
+        secret.encode("utf-8"),
+        raw_body + callback_url.encode("utf-8"),
+        hashlib.sha1,
+    ).digest()
+    return base64.b64encode(digest).decode("ascii")
+
+
+async def _verify_trello_signature(request: Request, raw_body: bytes) -> bool:
+    """Verify the ``X-Trello-Webhook`` header against the configured app secret.
+
+    Fails closed: when no secret is configured, or settings cannot be loaded,
+    the event is rejected.
+    """
+    from app.services import modules as modules_service
+
+    signature = (request.headers.get("x-trello-webhook") or "").strip()
+    try:
+        module_settings = await modules_service.get_module_settings("trello") or {}
+    except Exception as exc:
+        logger.error("Failed to load Trello module settings for webhook verification: {}", exc)
+        return False
+    secret = str(
+        module_settings.get("api_secret") or os.getenv("TRELLO_API_SECRET", "")
+    ).strip()
+    if not secret:
+        logger.warning(
+            "Trello webhook rejected: no Trello API secret is configured. Set the "
+            "'api_secret' setting on the Trello module (or TRELLO_API_SECRET) to the "
+            "application secret from trello.com/app-key."
+        )
+        return False
+    if not signature:
+        return False
+
+    # The callback URL Trello signs is the one registered for the webhook,
+    # which is built by the same helper used during registration.
+    candidates = {_build_public_callback_url(request), str(request.url)}
+    return any(
+        hmac.compare_digest(signature, compute_trello_signature(secret, raw_body, url))
+        for url in candidates
+    )
 
 
 def _build_public_callback_url(request: Request) -> str:

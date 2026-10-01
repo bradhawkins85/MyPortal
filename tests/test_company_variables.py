@@ -4,11 +4,14 @@ from app.features.tickets.admin_routes import _ticket_template_context
 from app.services.message_templates import render_content
 
 
-def test_company_variables_section_is_collapsed_and_documents_token():
+def test_company_variables_section_documents_token():
     template = Path("app/templates/admin/company_edit.html").read_text()
-    marker = 'data-company-edit-section="company-variables"'
-    details = template[template.index("<details", template.index(marker) - 120):template.index(marker)]
-    assert " open" not in details
+    start = template.index('data-company-edit-section="company-variables"')
+    section = template[start:template.index('<section class="card card--panel ce-section"', start)]
+    assert "company.variables.SUPPORT_PORTAL_URL" in section
+    # Each variable shows its own copyable template token.
+    assert "{% set token = '{{ company.variables.' ~ variable.name ~ ' }}' %}" in section
+    assert 'data-ce-copy="{{ token }}"' in section
     assert "company.variables.VARIABLE_NAME" in template
 
 

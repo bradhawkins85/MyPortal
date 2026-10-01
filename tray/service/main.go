@@ -53,6 +53,9 @@ const (
 	heartbeatInterval = 30 * time.Second
 	configCacheName   = "tray-config.json"
 	stateFileName     = "tray-state.json"
+	// defenderPolicyStateFileName records the Defender exclusions and scan
+	// schedule the agent applied, so it never removes settings it did not add.
+	defenderPolicyStateFileName = "defender-policy.json"
 )
 
 var launchTrayUIForActiveUserFunc = launchTrayUIForActiveUser
@@ -131,6 +134,9 @@ type daemon struct {
 	pendingUIMessage *ipc.Message
 
 	networkScanMu sync.Mutex
+	// defenderScanMu serialises Defender scans, which run in the background
+	// because Start-MpScan blocks until a (possibly hours-long) scan finishes.
+	defenderScanMu sync.Mutex
 }
 
 func newDaemon(cfg *config.Config) *daemon {
@@ -240,6 +246,19 @@ func (d *daemon) defenderCommandLoop() {
 
 func (d *daemon) processDefenderCommands() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	policy, err := d.client.GetDefenderPolicy(ctx)
+	cancel()
+	if err != nil {
+		// Fail closed: never run a privileged local command unless the portal
+		// has just confirmed that this device is still managed.
+		logger.Warn("Defender command policy: %v", err)
+		return
+	}
+	if !policy.Enabled {
+		return
+	}
+
+	ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
 	commands, err := d.client.GetDefenderCommands(ctx)
 	cancel()
 	if err != nil {
@@ -247,21 +266,56 @@ func (d *daemon) processDefenderCommands() {
 		return
 	}
 	for _, command := range commands {
-		logger.Info("Executing Defender command %d (%s)", command.ID, command.CommandType)
-		executeErr := defender.Execute(command.CommandType, command.DetectionUID)
-		status := "completed"
-		result := map[string]interface{}{"message": "Command completed successfully"}
-		if executeErr != nil {
-			status = "failed"
-			result["message"] = executeErr.Error()
-			logger.Warn("Defender command %d failed: %v", command.ID, executeErr)
-		}
+		// A device can be excluded after this poll claimed its commands. Check
+		// again immediately before every execution so that an in-flight change
+		// cannot cause a queued Defender PowerShell action to run later.
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		err := d.client.ReportDefenderCommandResult(ctx, command.ID, status, result)
+		policy, err := d.client.GetDefenderPolicy(ctx)
 		cancel()
 		if err != nil {
-			logger.Warn("Defender command %d result upload: %v", command.ID, err)
+			logger.Warn("Defender command %d policy check: %v", command.ID, err)
+			return
 		}
+		if !policy.Enabled {
+			logger.Info("Skipping Defender commands because this device is not managed")
+			return
+		}
+		if defender.IsScan(command.CommandType) {
+			go func(command api.DefenderCommand) {
+				d.defenderScanMu.Lock()
+				defer d.defenderScanMu.Unlock()
+				// A queued scan may wait hours behind another one; confirm
+				// the device is still managed before it starts.
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				policy, err := d.client.GetDefenderPolicy(ctx)
+				cancel()
+				if err != nil || !policy.Enabled {
+					logger.Info("Skipping Defender command %d because management could not be confirmed", command.ID)
+					return
+				}
+				d.executeDefenderCommand(command)
+			}(command)
+			continue
+		}
+		d.executeDefenderCommand(command)
+	}
+}
+
+func (d *daemon) executeDefenderCommand(command api.DefenderCommand) {
+	logger.Info("Executing Defender command %d (%s)", command.ID, command.CommandType)
+	executeErr := defender.Execute(context.Background(), command.CommandType, command.DetectionUID)
+	status := "completed"
+	result := map[string]interface{}{"message": "Command completed successfully"}
+	if executeErr != nil {
+		status = "failed"
+		result["message"] = executeErr.Error()
+		logger.Warn("Defender command %d failed: %v", command.ID, executeErr)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	err := d.client.ReportDefenderCommandResult(ctx, command.ID, status, result)
+	cancel()
+	if err != nil {
+		logger.Warn("Defender command %d result upload: %v", command.ID, err)
 	}
 }
 
@@ -295,11 +349,24 @@ func (d *daemon) reportDefenderStatus() {
 	if !policy.Enabled {
 		return
 	}
+	// Reconcile the portal policy first so the status report carries the
+	// outcome. The defender package skips any change that Tamper Protection
+	// could block and reports it instead.
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Minute)
+	policyResult, policyErr := defender.ApplyPolicy(ctx, *policy, filepath.Join(stateDir(), defenderPolicyStateFileName))
+	cancel()
+	if policyErr != nil {
+		logger.Warn("Defender policy: %v", policyErr)
+		policyResult = &api.DefenderPolicyResult{Status: "failed", EvaluatedAt: time.Now().UTC(), Items: []api.DefenderPolicyItem{{
+			Setting: "policy", Action: "evaluate", Status: defender.StatusFailed, Message: policyErr.Error(),
+		}}}
+	}
 	status, err := defender.Collect()
 	if err != nil {
 		logger.Warn("Defender status collection: %v", err)
 		return
 	}
+	status.PolicyResult = policyResult
 	ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
 	err = d.client.ReportDefenderStatus(ctx, status)
 	cancel()
@@ -327,7 +394,7 @@ func (d *daemon) networkScannerLoop() {
 			}
 			if lastScan.IsZero() || time.Since(lastScan) >= interval {
 				lastScan = time.Now()
-				d.runNetworkScan("interval")
+				d.runNetworkScan("interval", cfg)
 			}
 		}
 
@@ -351,10 +418,10 @@ func (d *daemon) manualNetworkScan() {
 		logger.Warn("Manual network scan ignored: network scanning is not enabled for this device")
 		return
 	}
-	d.runNetworkScan("manual")
+	d.runNetworkScan("manual", cfg)
 }
 
-func (d *daemon) runNetworkScan(source string) {
+func (d *daemon) runNetworkScan(source string, cfg *api.ConfigResponse) {
 	if !d.networkScanMu.TryLock() {
 		logger.Info("Network scan (%s) ignored: another scan is already running", source)
 		return
@@ -374,13 +441,22 @@ func (d *daemon) runNetworkScan(source string) {
 		logger.Warn("Network scan (%s) WAN IP lookup: %v", source, err)
 		return
 	}
-	hosts, err := scanner.Scan()
+	if !scanner.IPAllowed(wanIP, cfg.NetworkScanWANCIDRs) {
+		logger.Warn("Network scan (%s) skipped: WAN IP %s is outside the configured ranges", source, wanIP)
+		return
+	}
+	targets := scanner.AllowedTargets(cfg.NetworkScanLocalCIDRs)
+	if len(targets) == 0 {
+		logger.Warn("Network scan (%s) skipped: no configured local CIDR is connected", source)
+		return
+	}
+	hosts, err := scanner.Scan(targets)
 	if err != nil {
 		logger.Warn("Network scan (%s): %v", source, err)
 		return
 	}
 	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
-	err = d.client.UploadNetworkScan(ctx, wanIP, scanner.ConnectedSubnets(), hosts)
+	err = d.client.UploadNetworkScan(ctx, wanIP, targets, hosts)
 	cancel()
 	if err != nil {
 		logger.Warn("Network scan (%s) upload: %v", source, err)

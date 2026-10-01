@@ -1,0 +1,7 @@
+{
+  "guid": "401964a6-0342-4e0d-8616-d6b06e6b6a36",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed top navigation alignment and made dropdown menus open one at a time and close after selection.",
+  "content_hash": "31b0e70db28e005c298a8150f901f3b316bf0376a83d1c959859a84a8b43b7c2"
+}

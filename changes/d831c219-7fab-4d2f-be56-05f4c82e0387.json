@@ -1,0 +1,7 @@
+{
+  "guid": "d831c219-7fab-4d2f-be56-05f4c82e0387",
+  "occurred_at": "2026-09-30T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed dynamic guest group remediation to POST to the Microsoft Graph groups collection without unsupported query options.",
+  "content_hash": "4f847eb5a56875e5f24e141d7093d21d001c171ac7459da77f789bc1b157c100"
+}

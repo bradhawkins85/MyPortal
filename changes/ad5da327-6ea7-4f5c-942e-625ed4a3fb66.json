@@ -1,0 +1,7 @@
+{
+  "guid": "ad5da327-6ea7-4f5c-942e-625ed4a3fb66",
+  "occurred_at": "2026-09-30T10:40Z",
+  "change_type": "Feature",
+  "summary": "Redesign the issue tracker around a searchable list of issues with an Active / Monitoring / Resolved summary, a status for each linked company in the row, and a modal editor with a live preview for creating and editing issues",
+  "content_hash": "2402d7241cc805ee2926d1b9518e97aa9554a7e0f38b0592408775b09587a5e6"
+}

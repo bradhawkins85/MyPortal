@@ -1,0 +1,7 @@
+{
+  "guid": "e1b652e4-fe67-463a-be5a-168e2294d953",
+  "occurred_at": "2026-09-23T00:00Z",
+  "change_type": "Feature",
+  "summary": "Bounded RAG relationship candidate generation with company scoping, hybrid ranking, ticket prioritisation, and funnel metrics",
+  "content_hash": "5f74b77cabf8836523c58f50361193300384e1560d15075367ddd78d4a6f0460"
+}

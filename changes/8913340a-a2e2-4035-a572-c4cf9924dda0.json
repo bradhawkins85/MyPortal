@@ -1,0 +1,7 @@
+{
+  "guid": "8913340a-a2e2-4035-a572-c4cf9924dda0",
+  "occurred_at": "2026-09-15T00:00Z",
+  "change_type": "Feature",
+  "summary": "Added automated remediation that enables Microsoft Authenticator MFA-fatigue protections for all users.",
+  "content_hash": "7253f687649b3d57daf3fa0356910339d83347e85b79e6f04acdb3d094da417d"
+}

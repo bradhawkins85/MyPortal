@@ -37,6 +37,7 @@ class TrayTRMMSyncRequest(BaseModel):
 
     agent_id: str = Field(min_length=1, max_length=255)
     tray_agent_id: str = Field(min_length=1, max_length=255)
+    create_asset_if_missing: bool = True
 
 
 class TrayTRMMSyncResponse(BaseModel):
@@ -60,6 +61,8 @@ class TrayMenuNode(BaseModel):
     * ``label`` — non-interactive caption.
     * ``app_version`` — non-interactive caption showing the tray app version.
     * ``link`` — opens ``url`` in the default browser.
+      The ``{{service_status_url}}`` URL variable is resolved by the server to
+      the absolute published status-page URL for the device's company.
     * ``submenu`` — has ``children``.
     * ``display_text`` — opens a popup with ``text`` (sanitised HTML).
     * ``env_var`` — reads an env var named ``name`` and shows / copies it.
@@ -104,6 +107,29 @@ class TrayConfigResponse(BaseModel):
     chat_client_mode: Optional[str] = None
     network_scanner_enabled: bool = False
     network_scan_interval_minutes: int = 360
+    network_scan_wan_cidrs: list[str] = Field(default_factory=list)
+    network_scan_local_cidrs: list[str] = Field(default_factory=list)
+
+
+class TrayOutlookSignaturesRequest(BaseModel):
+    """Email addresses of the Outlook accounts configured for the signed-in user."""
+
+    addresses: list[str] = Field(default_factory=list, max_length=20)
+
+
+class TrayOutlookSignature(BaseModel):
+    address: str
+    name: str
+    html: str
+    text: str
+    hash: str
+
+
+class TrayOutlookSignaturesResponse(BaseModel):
+    enabled: bool
+    template_slug: Optional[str] = None
+    signatures: list[TrayOutlookSignature] = Field(default_factory=list)
+    skipped: dict[str, str] = Field(default_factory=dict)
 
 
 class NetworkScanHost(BaseModel):

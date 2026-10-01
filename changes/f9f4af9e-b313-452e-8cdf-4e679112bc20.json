@@ -1,0 +1,7 @@
+{
+  "guid": "f9f4af9e-b313-452e-8cdf-4e679112bc20",
+  "occurred_at": "2026-09-29T14:28Z",
+  "change_type": "Fix",
+  "summary": "Fixed message template saves failing after database persistence when Redis caching encountered template timestamps.",
+  "content_hash": "a76f85d886a54c2d088a51149d4bcf0b22edebc831dc2cb01b5e2a2af4dcf51a"
+}

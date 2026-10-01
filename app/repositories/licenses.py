@@ -50,7 +50,7 @@ async def list_company_licenses(company_id: int) -> list[dict[str, Any]]:
           AND COALESCE(lsn.hidden, 0) = 0
         GROUP BY l.id
         ORDER BY display_name, l.name
-        """,
+        """,  # nosec B608
         (company_id,),
     )
     return [_normalise_license(row) for row in rows]
@@ -67,7 +67,7 @@ async def list_all_licenses() -> list[dict[str, Any]]:
         WHERE COALESCE(lsn.hidden, 0) = 0
         GROUP BY l.id
         ORDER BY l.company_id, display_name
-        """,
+        """,  # nosec B608
     )
     return [_normalise_license(row) for row in rows]
 
@@ -83,7 +83,7 @@ async def get_license_by_id(license_id: int) -> dict[str, Any] | None:
         WHERE l.id = %s
           AND COALESCE(lsn.hidden, 0) = 0
         GROUP BY l.id
-        """,
+        """,  # nosec B608
         (license_id,),
     )
     return _normalise_license(row) if row else None
@@ -101,7 +101,7 @@ async def get_license_by_company_and_sku(company_id: int, sku: str) -> dict[str,
           AND l.platform = %s
           AND COALESCE(lsn.hidden, 0) = 0
         GROUP BY l.id
-        """,
+        """,  # nosec B608
         (company_id, sku),
     )
     return _normalise_license(row) if row else None
@@ -290,6 +290,16 @@ async def link_staff_to_license(staff_id: int, license_id: int) -> None:
     )
 
 
+async def is_staff_linked_to_license(staff_id: int, license_id: int) -> bool:
+    """Return whether the staff member has a direct licence assignment."""
+
+    row = await db.fetch_one(
+        "SELECT 1 AS linked FROM staff_licenses WHERE staff_id = %s AND license_id = %s",
+        (staff_id, license_id),
+    )
+    return row is not None
+
+
 async def unlink_staff_from_license(staff_id: int, license_id: int) -> None:
     await db.execute(
         "DELETE FROM staff_licenses WHERE staff_id = %s AND license_id = %s",
@@ -302,8 +312,9 @@ async def bulk_unlink_staff(license_id: int, staff_ids: Iterable[int]) -> None:
     if not ids:
         return
     placeholders = ", ".join(["%s"] * len(ids))
+    # The IN placeholders are derived only from caller-supplied staff id count; values remain bound.
     await db.execute(
-        f"DELETE FROM staff_licenses WHERE license_id = %s AND staff_id IN ({placeholders})",
+        f"DELETE FROM staff_licenses WHERE license_id = %s AND staff_id IN ({placeholders})",  # nosec B608
         tuple([license_id, *ids]),
     )
 

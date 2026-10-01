@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/tables.html" import data_table, empty_state %}
+{% block title %}Application types{% endblock %}{% block header_title %}Application types{% endblock %}
+{% block header_actions %}{{ page_header_actions([{"label":"All applications","type":"link","href":"/applications"}]) }}{% endblock %}
+{% block content %}<div class="admin-grid admin-grid--columns">
+{% if can_write %}<section class="card card--panel"><header class="card__header"><h2 class="card__title">Add a type</h2></header><form method="post" action="/applications/types"><div class="card__body">{% include "partials/csrf.html" %}<div class="form-group"><label class="form-label" for="application-type-name">Name</label><input class="input" id="application-type-name" name="name" maxlength="191" required></div></div><footer class="card__footer"><button class="button button--primary" type="submit">Add type</button></footer></form></section>{% endif %}
+<section class="card card--panel"><header class="card__header"><div><h2 class="card__title">Types</h2><p class="card__subtitle">Deleting a type leaves its applications without a type.</p></div></header><div class="card__body">
+{% if types %}{% call data_table([], table_id="application-types-table", columns=[{"key":"name","label":"Type","mobile_priority":"essential"},{"key":"count","label":"Applications","sort_type":"number"}] + ([{"key":"actions","label":"Actions","sortable":false,"mobile_priority":"essential"}] if can_write else []), aria_label="Application types") %}
+{% for item in types %}<tr><td data-column-key="name"><a href="/applications?type={{ item.id }}">{{ item.name }}</a></td><td data-column-key="count">{{ item.application_count }}</td>{% if can_write %}<td data-column-key="actions" class="table__actions"><form method="post" action="/applications/types/{{ item.id }}/delete" data-confirm="Delete the type {{ item.name }}?{% if item.application_count %} {{ item.application_count }} application(s) will be left without a type.{% endif %}">{% include "partials/csrf.html" %}<button class="button button--danger button--small" type="submit">Delete</button></form></td>{% endif %}</tr>{% endfor %}
+{% endcall %}{% else %}{{ empty_state("No application types", "Types created here or while saving an application can be picked from the type list.") }}{% endif %}
+</div></section>
+</div>{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/applications.js') }}" defer></script>{% endblock %}

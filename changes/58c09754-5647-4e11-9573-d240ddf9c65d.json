@@ -1,0 +1,7 @@
+{
+  "guid": "58c09754-5647-4e11-9573-d240ddf9c65d",
+  "occurred_at": "2026-09-23T00:00Z",
+  "change_type": "Feature",
+  "summary": "Establish a system-wide audit logging policy, canonical action guardrails, and source attribution.",
+  "content_hash": "0ac534428c4afc9aeeefbb17278fb60f51dc76d1e0eea49ba001f65806535774"
+}

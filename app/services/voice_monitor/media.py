@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 import secrets
 import struct
-from typing import Iterable, Sequence
+from typing import Iterable
 import wave
 
 from cryptography.fernet import Fernet, InvalidToken
