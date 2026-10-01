@@ -1,0 +1,7 @@
+{
+  "guid": "56c48ef6-9b5d-4c6b-8f62-90e5e575a01e",
+  "occurred_at": "2026-10-01T00:00Z",
+  "change_type": "Feature",
+  "summary": "Add AI Classify Ticket, AI Link Related Items and AI Request Missing Info automation actions with validated, prompt-injection-hardened AI output.",
+  "content_hash": "1935eb0dfc5dffacfac62352a67749c2caf1adbe3d63ebfbcc398f05c16d68ae"
+}
