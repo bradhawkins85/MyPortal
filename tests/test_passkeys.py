@@ -412,6 +412,22 @@ def test_passkey_cookie_sink_rejects_malformed_tokens(token):
     assert "set-cookie" not in response.headers
 
 
+def test_passkey_cookie_sink_encodes_value_before_setting_cookie(monkeypatch):
+    token = "value;injected\r\nx=y"
+    response = auth_routes.Response()
+    monkeypatch.setattr(auth_routes.passkeys_service, "is_valid_browser_binding_token", lambda _: True)
+
+    auth_routes._set_passkey_login_cookie(
+        response,
+        _request("/auth/passkeys/authenticate/options"),
+        token,
+    )
+
+    set_cookie = response.headers["set-cookie"]
+    assert f"{auth_routes._passkey_login_cookie_name()}=value%3Binjected%0D%0Ax%3Dy;" in set_cookie
+    assert token not in set_cookie
+
+
 @pytest.mark.anyio
 async def test_begin_passkey_authentication_rejects_invalid_generated_binding(monkeypatch):
     async def fail_create_passkey_challenge(**kwargs):
