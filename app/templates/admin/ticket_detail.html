@@ -23,6 +23,9 @@
     {"label": "Clock history", "type": "button", "attrs": {"data-ticket-page-clock-history": true}},
     {"label": "Audit Trail", "type": "button", "attrs": {"data-ticket-automation-history-open": true, "data-ticket-id": ticket.id}}
   ] %}
+  {% if not ticket.xero_invoice_number and is_super_admin and module_enabled.get('xero', false) %}
+    {% set _ = ticket_header_actions.append({"label": "Bill Now", "type": "button", "attrs": {"data-ticket-bill-now": ticket.id}}) %}
+  {% endif %}
   {% if can_delete_ticket %}
     {% set _ = ticket_header_actions.append({
       "label": "Delete ticket",
@@ -704,18 +707,6 @@
                 <p class="card__help" style="margin-top: 1rem;">
                   This ticket has been billed and closed. No further time can be added.
                 </p>
-              </div>
-            </article>
-          {% elif is_super_admin and module_enabled.get('xero', false) %}
-            <article class="card card--panel">
-              <header class="card__header">
-                <h2 class="card__title">Bill Now</h2>
-              </header>
-              <div class="card__body">
-                <p class="card__subtitle">Create a ticket-only invoice draft and require approval before it is pushed to Xero.</p>
-                <button type="button" class="button button--primary button--small" data-ticket-bill-now="{{ ticket.id }}">
-                  Bill Now
-                </button>
               </div>
             </article>
           {% endif %}
@@ -2055,7 +2046,7 @@
         if (!ticketId) {
           return;
         }
-        if (!window.confirm('Create a manual invoice draft for this ticket now?')) {
+        if (!window.confirm('Create a ticket-only invoice for this ticket? The invoice draft needs approval before it is pushed to Xero.')) {
           return;
         }
         billNowButton.disabled = true;

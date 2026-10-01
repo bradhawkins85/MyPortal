@@ -298,8 +298,65 @@ Every authenticated page follows a strict three-zone shell:
 - **Page header** (`layout__header`): Sticky top-of-page bar. Contains title on
   the left, page-level actions on the right (rendered via the
   `page_header_actions` Jinja macro from `templates/macros/header.html`).
+  List pages also put their list controls here, and record pages put the
+  record name and status here (see **Page header bar** below).
 - **Content area** (`layout__content`): Vertically scrollable. Starts with an
   optional KPI stat strip, then one or more `.card.card--panel` sections.
+
+### Page header bar
+
+The header bar is the page's toolbar, not just its title. Anything that
+controls the whole page goes up there so the content area can give its full
+width to the stat strip and the main table or cards.
+
+**Reference implementations:** the ticket list (`app/templates/admin/tickets.html`)
+and the admin ticket detail page (`app/templates/admin/ticket_detail.html`).
+
+**List pages** put every list control in `{% block header_title %}` inside a
+`.header-title-menu`, in this order:
+
+```
+[Title] [Saved view ▾] [Save] [Update] [Delete]  [Quick search] [Limit ▾]
+        [Group by ▾] [Columns ▾] [Stats ▾]  Showing X of Y     [New ▾] [Tools ▾]
+```
+
+- Keep the title short (one or two words). Wrap the controls in a flex row
+  (`.ticket-header-toolbar` is the reference) that wraps onto a second line
+  before the primary action and tools menu do.
+- Inputs and selects carry a `.visually-hidden` `<label>`, and use the
+  placeholder or first option for the visible hint. Buttons use
+  `button--compact`.
+- The "Showing X of Y" count is a muted text span with `data-table-info` and
+  `aria-live="polite"`, not a row above the table.
+- The content area then starts with a full-width `counter_strip`, followed
+  by the table. Don't put filter panels or sidebars beside the stat strip.
+- Scripts that drive these controls look them up with
+  `document.querySelector`, not inside the content container, because the
+  header renders outside it.
+
+**Record pages** (one ticket, company, asset…) make the record itself the
+header:
+
+```
+[Record name]                          [Back to list] [External links] [Actions ▾]
+[status pill] muted meta · meta
+```
+
+- The record name replaces the generic page title (`Ticket detail` becomes
+  the ticket subject). Its status pill sits under it with no "SLA:" or
+  "Status:" prefix. Supporting meta (paused timers, due dates) follows as
+  muted text, with dates in `<span data-utc>`.
+- Don't repeat the name, status or navigation in a second header inside the
+  content area.
+- "Back to …" and links to external systems (Hudu, Solidtime) are ghost
+  buttons directly left of the Actions menu.
+- Everything else goes in the Actions menu, rendered with
+  `page_header_overflow` from `templates/macros/header.html`. Destructive
+  items (Delete) and one-off operations (Bill Now) live there, last, with
+  `variant: "danger"` for destructive ones and a `window.confirm` (or
+  `data-confirm`) that says what will happen. Don't give them their own card.
+- Below 1100 px the header actions may wrap; the record name truncates with
+  an ellipsis and keeps a `title` attribute with the full text.
 
 ### Responsive breakpoints
 
@@ -422,7 +479,8 @@ the status-pill names. Emits `.stat-strip` / `.stat` markup.
 
 ### Tables
 
-Every data table follows the shape:
+Every data table follows the shape below. On a page whose main content is
+that table, the toolbar lives in the header bar (see **Page header bar**):
 
 ```
 [ search ] [ filter ] [ filter ] … [ Columns ▾ ] [ Bulk actions ▾ ]
@@ -529,6 +587,11 @@ Rules:
 - ✅ Use `var(--color-…)` and `var(--space-…)` tokens; never hard-code hex or px
   values in new CSS rules.
 - ✅ Put page-level actions in the `page_header_actions` macro (top-right header).
+- ✅ Put a list page's saved views, search, limit, grouping, columns, stats
+  picker and result count in the header bar so the stat strip and table get
+  the full width.
+- ✅ On record pages, show the record name and status pill in the header bar,
+  with Back and external links directly left of the Actions menu.
 - ✅ Use `.card.card--panel` as the content container; let the sidebar and header
   handle navigation and identity.
 - ✅ Use `<span data-utc="…">` for all displayed timestamps.
@@ -543,6 +606,11 @@ Rules:
 
 - ❌ Don't repeat the page title inside the first card — it already lives in the
   header.
+- ❌ Don't give destructive or one-off record operations (Delete, Bill Now)
+  their own card or button in the content area; put them in the Actions menu
+  with a confirmation.
+- ❌ Don't place filter or saved-view panels beside the stat strip; they belong
+  in the header bar.
 - ❌ Don't use hard-coded colours (`#38bdf8`, `rgba(…)`) in new component CSS;
   reference the token instead.
 - ❌ Don't add a new `box-shadow` depth value that isn't in the Elevation table.
