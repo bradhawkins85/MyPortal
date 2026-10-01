@@ -137,6 +137,10 @@ the super administrator.
 
 <p align="center"><img src="docs/images/readme/bcp.png" alt="Business continuity overview" width="900" /></p>
 
+<p align="center"><img src="docs/images/readme/company-overview-report.png" alt="Company overview report" width="900" /></p>
+<p align="center"><em>Company overview report: a customer-ready summary of staff, orders, Microsoft 365 best practices,
+licences, subscriptions and compliance, with PDF download and a report designer.</em></p>
+
 ### Automation, AI and administration
 
 | | |
