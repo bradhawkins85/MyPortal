@@ -1885,7 +1885,7 @@ async def _exo_invoke_command(
         "Content-Type": "application/json; charset=utf-8",
     }
     try:
-        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30, follow_redirects=True) as client:
             response = await client.post(url, headers=headers, json=payload)
     except httpx.DecodingError as exc:
         raise M365Error(
@@ -2091,7 +2091,7 @@ async def _scc_invoke_command(
     if appid and route_organization:
         headers["X-AnchorMailbox"] = f"app:{appid}@{route_organization}"
     try:
-        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30, follow_redirects=True) as client:
             response = await client.post(url, headers=headers, json=payload)
     except httpx.DecodingError as exc:
         raise M365Error(
