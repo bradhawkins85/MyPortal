@@ -21,19 +21,23 @@ class M365OAuthService(Protocol):
         company_id: int,
         *,
         redirect_uri: str | None = None,
-    ) -> str: ...
+    ) -> str:
+        pass
 
     async def get_effective_pkce_client_id(
         self,
         *,
         redirect_uri: str | None = None,
-    ) -> str: ...
+    ) -> str:
+        pass
 
-    def extract_tenant_id_from_token(self, token: str) -> str: ...
+    def extract_tenant_id_from_token(self, token: str) -> str:
+        pass
 
     async def validate_microsoft_id_token(
         self, id_token: str, *, client_id: str
-    ) -> dict[str, Any]: ...
+    ) -> dict[str, Any]:
+        pass
 
 
 class M365MailOAuthService(Protocol):
@@ -52,9 +56,11 @@ class M365MailOAuthService(Protocol):
         account_id_claim: str | None,
         scopes: str,
         connection_version: int | None,
-    ) -> None: ...
+    ) -> None:
+        pass
 
-    async def get_account(self, account_id: int) -> dict[str, Any] | None: ...
+    async def get_account(self, account_id: int) -> dict[str, Any] | None:
+        pass
 
     async def validate_mailbox_access(
         self,
@@ -62,20 +68,24 @@ class M365MailOAuthService(Protocol):
         mailbox: str,
         *,
         signed_in_address: str | None = None,
-    ) -> None: ...
+    ) -> None:
+        pass
 
 
 class AsyncPostClient(Protocol):
-    async def __aenter__(self) -> "AsyncPostClient": ...
+    async def __aenter__(self) -> "AsyncPostClient":
+        pass
 
     async def __aexit__(
         self,
         _exc_type: type[BaseException] | None,
         exc: BaseException | None,
         _tb: TracebackType | None,
-    ) -> bool | None: ...
+    ) -> bool | None:
+        pass
 
-    async def post(self, url: str, *, data: dict[str, Any]) -> Any: ...
+    async def post(self, url: str, *, data: dict[str, Any]) -> Any:
+        pass
 
 
 HttpClientFactory: TypeAlias = Callable[..., AsyncPostClient]
