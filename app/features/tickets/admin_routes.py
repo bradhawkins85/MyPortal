@@ -1099,8 +1099,7 @@ async def admin_create_ticket(request: Request):
             initial_reply_author_id=current_user.get("id"),
         )
         await tickets_repo.add_watcher(created["id"], current_user.get("id"))
-        await tickets_service.refresh_ticket_ai_summary(created["id"])
-        await tickets_service.refresh_ticket_ai_tags(created["id"])
+        tickets_service.schedule_ticket_ai_refresh(created["id"])
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create ticket", error=str(exc))
         if isinstance(exc, ValueError):
@@ -1153,8 +1152,7 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
     await tickets_repo.set_ticket_status(ticket_id, status_value)
     if status_value in {"resolved", "closed"}:
         await tickets_service.refresh_ticket_resolution_steps(ticket_id)
-    await tickets_service.refresh_ticket_ai_summary(ticket_id)
-    await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    tickets_service.schedule_ticket_ai_refresh(ticket_id)
     await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
     await tickets_service.emit_ticket_updated_event(
         ticket_id,
@@ -1352,8 +1350,7 @@ async def admin_update_ticket_description(ticket_id: int, request: Request):
     return_url = str(return_url_raw).strip() if isinstance(return_url_raw, str) else ""
 
     await tickets_service.update_ticket_description(ticket_id, description_value)
-    await tickets_service.refresh_ticket_ai_summary(ticket_id)
-    await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    tickets_service.schedule_ticket_ai_refresh(ticket_id)
 
     message = "Ticket description updated."
     destination = f"/admin/tickets/{ticket_id}"
@@ -1747,8 +1744,7 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
         await shipment_watch_service.set_watch_active(ticket_id, False)
     if description_raw is not None:
         await tickets_service.update_ticket_description(ticket_id, description_value)
-    await tickets_service.refresh_ticket_ai_summary(ticket_id)
-    await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    tickets_service.schedule_ticket_ai_refresh(ticket_id)
     await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
     await tickets_service.emit_ticket_details_updated_event(
         ticket_id,
@@ -1809,33 +1805,23 @@ async def admin_reprocess_ticket_ai(ticket_id: int, request: Request):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
     is_closed = str(ticket.get("status") or "").strip().lower() == "closed"
-    if not is_closed:
-        try:
-            await tickets_service.refresh_ticket_ai_summary(ticket_id)
-        except Exception as exc:  # pragma: no cover - defensive against unexpected failures
-            log_error(
-                "Failed to queue ticket AI summary refresh",
-                ticket_id=ticket_id,
-                user_id=current_user.get("id"),
-                error=str(exc),
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Unable to refresh AI summary.",
-            ) from exc
-
+    # An explicit reprocess runs now, so any debounced refresh is redundant.
+    tickets_service.cancel_pending_ticket_ai_refresh(ticket_id)
     try:
-        await tickets_service.refresh_ticket_ai_tags(ticket_id)
+        if is_closed:
+            await tickets_service.refresh_ticket_ai_tags(ticket_id)
+        else:
+            await tickets_service.refresh_ticket_ai_insights(ticket_id)
     except Exception as exc:  # pragma: no cover - defensive against unexpected failures
         log_error(
-            "Failed to queue ticket AI tags refresh",
+            "Failed to queue ticket AI refresh",
             ticket_id=ticket_id,
             user_id=current_user.get("id"),
             error=str(exc),
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to refresh AI tags.",
+            detail="Unable to refresh AI tags." if is_closed else "Unable to refresh AI summary and tags.",
         ) from exc
 
     message = (
@@ -2435,8 +2421,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             await tickets_repo.set_ticket_status(ticket_id, reply_status)
             if reply_status in {"resolved", "closed"}:
                 await tickets_service.refresh_ticket_resolution_steps(ticket_id)
-        await tickets_service.refresh_ticket_ai_summary(ticket_id)
-        await tickets_service.refresh_ticket_ai_tags(ticket_id)
+        tickets_service.schedule_ticket_ai_refresh(ticket_id)
         await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
         reply_event_payload = dict(created_reply)
         if reply_attachments:

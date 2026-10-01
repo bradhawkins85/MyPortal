@@ -683,6 +683,17 @@ class Settings(BaseSettings):
         validation_alias="AI_TAG_THRESHOLD",
         ge=1,
     )
+    ticket_ai_refresh_debounce_seconds: float = Field(
+        default=45,
+        validation_alias="TICKET_AI_REFRESH_DEBOUNCE_SECONDS",
+        ge=0,
+        le=3600,
+        description=(
+            "Seconds a ticket must be quiet before its combined AI summary and "
+            "tags refresh runs. Each new reply restarts the timer; 0 runs it "
+            "straight away in the background."
+        ),
+    )
     bcp_enabled: bool = Field(
         default=True,
         validation_alias="BCP_ENABLED",

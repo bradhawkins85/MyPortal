@@ -1,0 +1,7 @@
+{
+  "guid": "e8174ffc-1da4-4d40-9577-598c153c90d0",
+  "occurred_at": "2026-10-01T11:00Z",
+  "change_type": "Feature",
+  "summary": "Combine ticket AI summary and tags into one model call, debounced per ticket until replies go quiet (TICKET_AI_REFRESH_DEBOUNCE_SECONDS, default 45).",
+  "content_hash": "97dfc95553b589dc0fc2dce5a461e741f498aa6abd6493b0cbc53423b8060845"
+}

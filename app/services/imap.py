@@ -1956,22 +1956,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             cc_addresses,
                             exclude_addresses=[from_email_addr] if from_email_addr else None,
                         )
-                        try:
-                            await tickets_service.refresh_ticket_ai_summary(int(ticket_id))
-                        except RuntimeError as exc:
-                            log_error(
-                                "IMAP ticket AI summary refresh skipped",
-                                ticket_id=int(ticket_id),
-                                error=str(exc),
-                            )
-                        try:
-                            await tickets_service.refresh_ticket_ai_tags(int(ticket_id))
-                        except Exception as exc:
-                            log_error(
-                                "IMAP ticket AI tag refresh skipped",
-                                ticket_id=int(ticket_id),
-                                error=str(exc),
-                            )
+                        tickets_service.schedule_ticket_ai_refresh(int(ticket_id))
             except Exception as exc:  # pragma: no cover - defensive logging
                 error_text = str(exc)
                 errors.append({"uid": uid, "error": error_text})

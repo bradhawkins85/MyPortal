@@ -431,9 +431,11 @@ async def test_invoke_reprocess_ai_summary_and_tags(monkeypatch, mock_webhook_mo
     """Test that reprocess-ai module triggers both summary and tags refresh."""
     from app.services import tickets as tickets_service
     
+    mock_insights = AsyncMock()
     mock_summary = AsyncMock()
     mock_tags = AsyncMock()
     mock_resolution = AsyncMock()
+    monkeypatch.setattr(tickets_service, "refresh_ticket_ai_insights", mock_insights)
     monkeypatch.setattr(tickets_service, "refresh_ticket_ai_summary", mock_summary)
     monkeypatch.setattr(tickets_service, "refresh_ticket_ai_tags", mock_tags)
     monkeypatch.setattr(tickets_service, "refresh_ticket_resolution_steps", mock_resolution)
@@ -448,8 +450,10 @@ async def test_invoke_reprocess_ai_summary_and_tags(monkeypatch, mock_webhook_mo
     assert "summary" in result["processed"]
     assert "tags" in result["processed"]
     assert "resolution_steps" in result["processed"]
-    mock_summary.assert_called_once_with(1)
-    mock_tags.assert_called_once_with(1)
+    # Summary and tags share one combined model call.
+    mock_insights.assert_called_once_with(1)
+    mock_summary.assert_not_called()
+    mock_tags.assert_not_called()
     mock_resolution.assert_called_once_with(1)
 
 

@@ -796,14 +796,7 @@ async def create_ticket(
     # Add the requester as a watcher (if we have a valid requester_id)
     if requester_id is not None:
         await tickets_repo.add_watcher(ticket["id"], requester_id)
-    try:
-        await tickets_service.refresh_ticket_ai_summary(ticket["id"])
-    except RuntimeError as exc:
-        log_error(
-            f"Failed to refresh AI summary for ticket {ticket['id']}: {exc}",
-            exc_info=True,
-        )
-    await tickets_service.refresh_ticket_ai_tags(ticket["id"])
+    tickets_service.schedule_ticket_ai_refresh(ticket["id"])
     # For API key requests, pass a minimal user dict for building ticket detail
     detail_user = current_user or {"id": requester_id, "is_super_admin": False}
     await audit_service.record(
@@ -908,14 +901,7 @@ async def create_tacticalrmm_ticket(
     if asset:
         await tickets_repo.replace_ticket_assets(ticket["id"], [int(asset["id"])])
 
-    try:
-        await tickets_service.refresh_ticket_ai_summary(ticket["id"])
-    except RuntimeError as exc:
-        log_error(
-            f"Failed to refresh AI summary for ticket {ticket['id']}: {exc}",
-            exc_info=True,
-        )
-    await tickets_service.refresh_ticket_ai_tags(ticket["id"])
+    tickets_service.schedule_ticket_ai_refresh(ticket["id"])
 
     current_user = actor.get("user")
     api_key_record = actor.get("api_key")
@@ -1090,15 +1076,7 @@ async def update_ticket(
         await tickets_repo.update_ticket(ticket_id, **fields)
     if description_value is not description_marker:
         await tickets_service.update_ticket_description(ticket_id, description_value)
-    try:
-        await tickets_service.refresh_ticket_ai_summary(ticket_id)
-    except RuntimeError as exc:
-        log_error(
-            "Ticket AI summary refresh skipped after create",
-            ticket_id=ticket_id,
-            error=str(exc),
-        )
-    await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    tickets_service.schedule_ticket_ai_refresh(ticket_id)
     await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
     await tickets_service.emit_ticket_updated_event(
         ticket_id,
@@ -1290,15 +1268,7 @@ async def add_reply(
         is_billable=payload.is_billable if has_helpdesk_access else False,
         labour_type_id=labour_type_id,
     )
-    try:
-        await tickets_service.refresh_ticket_ai_summary(ticket_id)
-    except RuntimeError as exc:
-        log_error(
-            "Ticket AI summary refresh skipped after reply",
-            ticket_id=ticket_id,
-            error=str(exc),
-        )
-    await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    tickets_service.schedule_ticket_ai_refresh(ticket_id)
     await tickets_service.emit_ticket_updated_event(
         ticket_id,
         actor_type="technician" if has_helpdesk_access else "requester",
