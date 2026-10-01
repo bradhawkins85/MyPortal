@@ -99,3 +99,95 @@ async def link_article(ticket_id: int, article_id: int, user_id: int) -> None:
         sql,
         (ticket_id, article_id, user_id),
     )
+
+
+async def list_recurring_issue_links() -> list[tuple[int, int]]:
+    """Return ticket id pairs the relationship engine matched as DUPLICATE or KNOWN_ISSUE."""
+    rows = await db.fetch_all(
+        """
+        SELECT s.source_id AS source_ticket_id, t.source_id AS target_ticket_id
+        FROM rag_relationships r
+        JOIN rag_documents s ON s.id = r.source_document_id
+        JOIN rag_documents t ON t.id = r.target_document_id
+        WHERE r.match_status = 'MATCH'
+          AND r.relationship_type IN ('DUPLICATE', 'KNOWN_ISSUE')
+          AND s.source_type = 'tickets' AND t.source_type = 'tickets'
+          AND s.is_active = 1 AND t.is_active = 1
+        """,
+    )
+    pairs = []
+    for row in rows or []:
+        try:
+            source, target = int(row["source_ticket_id"]), int(row["target_ticket_id"])
+        except (TypeError, ValueError):
+            continue
+        if source != target:
+            pairs.append((source, target))
+    return pairs
+
+
+def _ticket_ids(value: Any) -> list[int]:
+    try:
+        decoded = json.loads(value or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(decoded, list):
+        return []
+    return [int(item) for item in decoded if isinstance(item, int) or str(item).isdigit()]
+
+
+async def list_recurring_reviews() -> dict[int, dict[str, Any]]:
+    rows = await db.fetch_all(
+        "SELECT anchor_ticket_id, ignored, article_id, ticket_ids FROM knowledge_base_recurring_issue_reviews",
+    )
+    reviews = {}
+    for row in rows or []:
+        anchor = int(row["anchor_ticket_id"])
+        reviews[anchor] = {
+            "ignored": bool(row.get("ignored")),
+            "article_id": row.get("article_id"),
+            "ticket_ids": _ticket_ids(row.get("ticket_ids")),
+        }
+    return reviews
+
+
+async def set_recurring_ignored(anchor_ticket_id: int, ignored: bool, user_id: int) -> None:
+    if db.is_sqlite():
+        sql = """
+            INSERT INTO knowledge_base_recurring_issue_reviews (anchor_ticket_id, ignored, updated_by)
+            VALUES (%s, %s, %s)
+            ON CONFLICT(anchor_ticket_id) DO UPDATE SET ignored = excluded.ignored,
+              updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP
+        """
+    else:
+        sql = """
+            INSERT INTO knowledge_base_recurring_issue_reviews (anchor_ticket_id, ignored, updated_by)
+            VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE ignored = VALUES(ignored),
+              updated_by = VALUES(updated_by), updated_at = CURRENT_TIMESTAMP
+        """
+    await db.execute(sql, (anchor_ticket_id, 1 if ignored else 0, user_id))
+
+
+async def link_recurring_article(
+    anchor_ticket_id: int, article_id: int, ticket_ids: list[int], user_id: int
+) -> None:
+    if db.is_sqlite():
+        sql = """
+            INSERT INTO knowledge_base_recurring_issue_reviews
+              (anchor_ticket_id, ignored, article_id, ticket_ids, updated_by)
+            VALUES (%s, 0, %s, %s, %s)
+            ON CONFLICT(anchor_ticket_id) DO UPDATE SET article_id = excluded.article_id,
+              ticket_ids = excluded.ticket_ids, updated_by = excluded.updated_by,
+              updated_at = CURRENT_TIMESTAMP
+        """
+    else:
+        sql = """
+            INSERT INTO knowledge_base_recurring_issue_reviews
+              (anchor_ticket_id, ignored, article_id, ticket_ids, updated_by)
+            VALUES (%s, 0, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE article_id = VALUES(article_id),
+              ticket_ids = VALUES(ticket_ids), updated_by = VALUES(updated_by),
+              updated_at = CURRENT_TIMESTAMP
+        """
+    await db.execute(sql, (anchor_ticket_id, article_id, json.dumps(sorted(ticket_ids)), user_id))
