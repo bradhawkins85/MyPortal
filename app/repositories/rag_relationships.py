@@ -695,6 +695,7 @@ async def list_relationship_evidence(
     return await db.fetch_all(
         """
         SELECT r.*, r.id AS relationship_id, d.source_type, d.source_id, d.title, d.url,
+               d.company_id AS target_company_id,
                d.permission_scope_json, d.metadata_json,
                CASE WHEN d.id IS NOT NULL AND d.is_active = 1 THEN 1 ELSE 0 END AS target_available,
                GROUP_CONCAT(c.chunk_text, '\n') AS content,

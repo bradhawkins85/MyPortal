@@ -1688,6 +1688,22 @@ async def list_replies(
     return [_normalise_reply(row) for row in rows]
 
 
+
+async def list_ticket_categories(*, limit: int = 50) -> list[str]:
+    """Return the most used non-empty ticket categories."""
+    rows = await db.fetch_all(
+        """
+        SELECT category, COUNT(*) AS usage_count
+        FROM tickets
+        WHERE category IS NOT NULL AND TRIM(category) <> ''
+        GROUP BY category
+        ORDER BY usage_count DESC, category ASC
+        LIMIT %s
+        """,
+        (int(limit),),
+    )
+    return [str(row["category"]).strip() for row in rows if row.get("category")]
+
 async def count_time_entries(ticket_id: int) -> int:
     """Count the number of time entries (replies with minutes_spent > 0) for a ticket."""
     row = await db.fetch_one(

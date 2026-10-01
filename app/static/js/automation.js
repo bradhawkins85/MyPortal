@@ -320,6 +320,41 @@
         }),
       },
     ],
+    'ai-classify-ticket': [
+      {
+        label: 'Classify category, priority and duplicates',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          allowed_categories: 'Networking, Printing, Email, Hardware, Accounts',
+        }),
+      },
+      {
+        label: 'Set priority only',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          classify_category: false,
+          detect_duplicates: false,
+        }),
+      },
+    ],
+    'ai-link-related': [
+      {
+        label: 'Attach top related items as an internal note',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          limit: 5,
+        }),
+      },
+    ],
+    'ai-request-missing-info': [
+      {
+        label: 'Draft a follow-up for missing device, error or user',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          required_details: 'device, error_text, affected_user',
+        }),
+      },
+    ],
     'reprocess-ai': [
       {
         label: 'Refresh all ticket AI',

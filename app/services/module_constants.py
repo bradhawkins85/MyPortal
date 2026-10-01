@@ -7,6 +7,9 @@ ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS = {
     "update-ticket",
     "update-ticket-description",
     "ai-rename-ticket",
+    "ai-classify-ticket",
+    "ai-link-related",
+    "ai-request-missing-info",
     "add-ticket-reply",
     "smart-attachment-removal",
 }
