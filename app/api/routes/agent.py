@@ -100,6 +100,16 @@ async def quality_export(_: dict = Depends(require_super_admin)) -> Response:
                     headers={"Content-Disposition": "attachment; filename=ai-quality-summary.csv"})
 
 
+@router.get("/quality/related-labels.json")
+async def quality_related_labels(_: dict = Depends(require_super_admin)) -> Response:
+    """Export technician 👍/👎 labels on ticket Related items for evals/ai_quality."""
+    dataset = rag_relationship_repo.build_related_feedback_dataset(
+        await rag_relationship_repo.list_relationship_feedback_labels()
+    )
+    return Response(json.dumps(dataset, indent=2), media_type="application/json",
+                    headers={"Content-Disposition": "attachment; filename=related_feedback.json"})
+
+
 @router.post("/query/stream", dependencies=[Depends(require_llm_search)])
 async def stream_agent_query(
     payload: AgentQueryRequest,

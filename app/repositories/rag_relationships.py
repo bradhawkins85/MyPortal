@@ -677,26 +677,209 @@ async def fail_queue_item(
 
 
 async def list_relationship_evidence(
-    document_id: int, *, limit: int
+    document_id: int,
+    *,
+    limit: int,
+    ticket_id: int | None = None,
+    user_id: int | None = None,
 ) -> list[dict[str, Any]]:
+    """Return positive relationships for ``document_id``.
+
+    When ``ticket_id`` is given, relationships a technician voted down from
+    that ticket are excluded and ``my_rating`` carries ``user_id``'s vote.
+    """
+    # Without a ticket the feedback joins match nothing (ticket ids are positive),
+    # which keeps the SQL static for every caller.
+    feedback_ticket_id = ticket_id if ticket_id is not None else -1
+    feedback_user_id = user_id if user_id is not None else 0
     return await db.fetch_all(
         """
-        SELECT r.*, d.source_type, d.source_id, d.title, d.url,
+        SELECT r.*, r.id AS relationship_id, d.source_type, d.source_id, d.title, d.url,
                d.permission_scope_json, d.metadata_json,
                CASE WHEN d.id IS NOT NULL AND d.is_active = 1 THEN 1 ELSE 0 END AS target_available,
-               GROUP_CONCAT(c.chunk_text, '\n') AS content
+               GROUP_CONCAT(c.chunk_text, '\n') AS content,
+               MAX(mine.rating) AS my_rating
         FROM rag_relationships r
+        LEFT JOIN rag_relationship_feedback mine ON mine.relationship_id = r.id
+            AND mine.ticket_id = ? AND mine.user_id = ?
         LEFT JOIN rag_documents d ON d.id = CASE WHEN r.source_document_id = ? THEN r.target_document_id ELSE r.source_document_id END
         LEFT JOIN rag_chunks c ON c.document_id = d.id AND c.is_active = 1
         WHERE (r.source_document_id = ? OR r.target_document_id = ?)
           AND r.match_status = 'MATCH'
           AND r.relationship_type IN ('DIRECT_MATCH','RELATED','SUPPORTING','DUPLICATE','FOLLOW_UP','KNOWN_ISSUE','PARENT_CHILD')
+          AND NOT EXISTS (
+              SELECT 1 FROM rag_relationship_feedback down_vote
+              WHERE down_vote.relationship_id = r.id AND down_vote.ticket_id = ?
+                AND down_vote.rating = 'down'
+          )
         GROUP BY r.id, d.id
         ORDER BY r.relevance_score DESC, r.confidence DESC
         LIMIT ?
         """,
-        (document_id, document_id, document_id, limit),
+        (
+            feedback_ticket_id,
+            feedback_user_id,
+            document_id,
+            document_id,
+            document_id,
+            feedback_ticket_id,
+            limit,
+        ),
     )
+
+
+FEEDBACK_RATINGS = frozenset({"up", "down"})
+
+
+async def get_relationship_for_document(
+    relationship_id: int, document_id: int
+) -> dict[str, Any] | None:
+    """Return the relationship only when ``document_id`` is one of its ends."""
+    return await db.fetch_one(
+        """
+        SELECT r.*, d.source_type AS other_source_type
+        FROM rag_relationships r
+        LEFT JOIN rag_documents d ON d.id = CASE WHEN r.source_document_id = ? THEN r.target_document_id ELSE r.source_document_id END
+        WHERE r.id = ? AND (r.source_document_id = ? OR r.target_document_id = ?)
+        """,
+        (document_id, relationship_id, document_id, document_id),
+    )
+
+
+async def save_relationship_feedback(
+    *,
+    relationship: Mapping[str, Any],
+    ticket_id: int,
+    user_id: int,
+    rating: str | None,
+) -> None:
+    """Record, replace or (with ``rating=None``) clear one technician's vote.
+
+    The judged score, confidence, type and model are snapshotted so the label
+    still describes what the technician saw after the row is re-evaluated.
+    """
+    relationship_id = int(relationship["id"])
+    if rating is None:
+        await db.execute(
+            "DELETE FROM rag_relationship_feedback WHERE relationship_id = ? AND ticket_id = ? AND user_id = ?",
+            (relationship_id, ticket_id, user_id),
+        )
+        return
+    if rating not in FEEDBACK_RATINGS:
+        raise ValueError(f"Unsupported rating: {rating}")
+    snapshot = (
+        rating,
+        relationship.get("relationship_type"),
+        relationship.get("relevance_score"),
+        relationship.get("confidence"),
+        relationship.get("evaluated_model"),
+        relationship.get("other_source_type"),
+    )
+    existing = await db.fetch_one(
+        "SELECT id FROM rag_relationship_feedback WHERE relationship_id = ? AND ticket_id = ? AND user_id = ?",
+        (relationship_id, ticket_id, user_id),
+    )
+    if existing:
+        await db.execute(
+            """
+            UPDATE rag_relationship_feedback
+            SET rating = ?, relationship_type = ?, relevance_score = ?, confidence = ?,
+                evaluated_model = ?, target_source_type = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            snapshot + (int(existing["id"]),),
+        )
+        return
+    await db.execute(
+        """
+        INSERT INTO rag_relationship_feedback
+            (rating, relationship_type, relevance_score, confidence, evaluated_model,
+             target_source_type, relationship_id, ticket_id, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        snapshot + (relationship_id, ticket_id, user_id),
+    )
+
+
+async def relationships_for_targets(
+    document_id: int, target_document_ids: list[int], *, ticket_id: int
+) -> dict[int, dict[str, Any]]:
+    """Map target document id to its relationship id and downvote state."""
+    targets = sorted({int(value) for value in target_document_ids if value})
+    if not targets:
+        return {}
+    # Filter in Python so the SQL stays static; a document has few relationships.
+    rows = await db.fetch_all(
+        """
+        SELECT r.id AS relationship_id,
+               CASE WHEN r.source_document_id = ? THEN r.target_document_id ELSE r.source_document_id END AS other_document_id,
+               EXISTS (SELECT 1 FROM rag_relationship_feedback f WHERE f.relationship_id = r.id
+                       AND f.ticket_id = ? AND f.rating = 'down') AS voted_down
+        FROM rag_relationships r
+        WHERE r.source_document_id = ? OR r.target_document_id = ?
+        """,
+        (document_id, ticket_id, document_id, document_id),
+    )
+    wanted = set(targets)
+    rows = [row for row in rows if int(row["other_document_id"]) in wanted]
+    return {
+        int(row["other_document_id"]): {
+            "relationship_id": int(row["relationship_id"]),
+            "voted_down": bool(row.get("voted_down")),
+        }
+        for row in rows
+    }
+
+
+async def list_relationship_feedback_labels() -> list[dict[str, Any]]:
+    """Return content-free labels for evals/ai_quality.
+
+    Votes on the same relationship from the same ticket are collapsed to one
+    label; any 👎 wins so a disputed item counts as not relevant.
+    """
+    return await db.fetch_all(
+        """
+        SELECT f.relationship_id,
+               MAX(f.relationship_type) AS relationship_type,
+               MAX(f.relevance_score) AS relevance_score,
+               MAX(f.confidence) AS confidence,
+               MAX(f.evaluated_model) AS evaluated_model,
+               MAX(f.target_source_type) AS target_source_type,
+               SUM(CASE WHEN f.rating = 'up' THEN 1 ELSE 0 END) AS up_votes,
+               SUM(CASE WHEN f.rating = 'down' THEN 1 ELSE 0 END) AS down_votes,
+               MAX(f.updated_at) AS labelled_at
+        FROM rag_relationship_feedback f
+        GROUP BY f.relationship_id, f.ticket_id
+        ORDER BY f.relationship_id, MAX(f.updated_at)
+        """
+    )
+
+
+RELATED_FEEDBACK_DATASET_VERSION = 1
+
+
+def build_related_feedback_dataset(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+    """Shape exported labels for ``scripts/evaluate_ai_quality.py --related-labels``.
+
+    Only identifiers, scores, types and model names leave the database; ticket
+    text, titles and reasons never do.
+    """
+    labels = []
+    for row in rows:
+        labels.append({
+            "id": f"rel:{int(row['relationship_id'])}",
+            "relationship_type": row.get("relationship_type"),
+            "relevance_score": float(row.get("relevance_score") or 0),
+            "confidence": float(row.get("confidence") or 0),
+            "evaluated_model": row.get("evaluated_model"),
+            "target_source_type": row.get("target_source_type"),
+            "relevant": int(row.get("down_votes") or 0) == 0,
+        })
+    return {
+        "version": RELATED_FEEDBACK_DATASET_VERSION,
+        "kind": "related_feedback",
+        "labels": labels,
+    }
 
 
 async def metrics() -> dict[str, Any]:

@@ -126,6 +126,24 @@ async def m365_spam_process_once(args: argparse.Namespace) -> None:
         await db.disconnect()
 
 
+async def export_related_feedback(args: argparse.Namespace) -> None:
+    import json
+    from pathlib import Path
+
+    from app.repositories import rag_relationships as rel_repo
+
+    await db.connect()
+    try:
+        await db.run_migrations()
+        dataset = rel_repo.build_related_feedback_dataset(
+            await rel_repo.list_relationship_feedback_labels()
+        )
+    finally:
+        await db.disconnect()
+    Path(args.output).write_text(json.dumps(dataset, indent=2) + "\n")
+    print(f"labels={len(dataset['labels'])} output={args.output}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="manage.py")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -160,6 +178,11 @@ def main() -> None:
         "m365-spam-process-once",
         help="process all currently queued M365 spam requests and exit (for cron)",
     )
+    export_parser = sub.add_parser(
+        "export-related-feedback",
+        help="write technician Related-item votes as an evals/ai_quality dataset",
+    )
+    export_parser.add_argument("--output", default="evals/ai_quality/related_feedback.json")
     args = parser.parse_args()
     if args.command == "migrate":
         asyncio.run(migrate(args))
@@ -171,6 +194,8 @@ def main() -> None:
         asyncio.run(m365_spam_worker(args))
     elif args.command == "m365-spam-process-once":
         asyncio.run(m365_spam_process_once(args))
+    elif args.command == "export-related-feedback":
+        asyncio.run(export_related_feedback(args))
 
 
 if __name__ == "__main__":

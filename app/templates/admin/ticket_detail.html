@@ -665,6 +665,12 @@
                     <div class="ticket-related__meta">
                       <span class="status status--info">{{ item.relationship_label }}</span>
                       <span class="status status--neutral">{{ item.confidence_band }}{% if item.score is defined %} · {{ item.score }}%{% endif %}</span>
+                      {% if item.relationship_id %}
+                        <span class="ticket-related__vote" role="group" aria-label="Was this related item useful?" data-ticket-related-vote data-relationship-id="{{ item.relationship_id }}">
+                          <button type="button" class="ticket-related__vote-button" data-vote="up" aria-pressed="{{ 'true' if item.my_rating == 'up' else 'false' }}" title="Useful for this ticket" aria-label="Mark as useful">👍</button>
+                          <button type="button" class="ticket-related__vote-button" data-vote="down" aria-pressed="false" title="Not relevant: hide from this ticket" aria-label="Mark as not relevant and hide">👎</button>
+                        </span>
+                      {% endif %}
                     </div>
                     {% if item.available %}
                       <a

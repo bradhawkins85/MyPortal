@@ -18210,6 +18210,53 @@ body.scf-modal-open {
   margin-top: 0.2rem;
 }
 
+.ticket-related__vote {
+  display: inline-flex;
+  gap: 0.15rem;
+  margin-left: auto;
+}
+
+.ticket-related__vote-button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  opacity: 0.55;
+  padding: 0.2rem 0.35rem;
+}
+
+.ticket-related__vote-button:hover,
+.ticket-related__vote-button:focus-visible {
+  border-color: var(--color-border);
+  opacity: 1;
+}
+
+.ticket-related__vote-button[aria-pressed="true"] {
+  background: var(--color-surface-muted, rgba(100, 116, 139, 0.12));
+  border-color: var(--color-border);
+  opacity: 1;
+}
+
+.ticket-related__vote-button:disabled {
+  cursor: progress;
+}
+
+.ticket-related__hidden {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.ticket-related__undo {
+  background: none;
+  border: 0;
+  color: var(--color-link, inherit);
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
 .rag-stat-strip {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }

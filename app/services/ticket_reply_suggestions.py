@@ -110,7 +110,10 @@ async def collect_reply_sources(
     )
     if not document:
         return []
-    rows = await rag_relationship_repo.list_relationship_evidence(int(document["id"]), limit=24)
+    # Items a technician voted down from this ticket must not feed the draft.
+    rows = await rag_relationship_repo.list_relationship_evidence(
+        int(document["id"]), limit=24, ticket_id=ticket_id, user_id=int(user.get("id") or 0)
+    )
     rows = [
         row
         for row in rows
