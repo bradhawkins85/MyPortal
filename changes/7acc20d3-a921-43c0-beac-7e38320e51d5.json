@@ -1,0 +1,7 @@
+{
+  "guid": "7acc20d3-a921-43c0-beac-7e38320e51d5",
+  "occurred_at": "2026-10-16T00:00Z",
+  "change_type": "Fix",
+  "summary": "Privacy Policy: list the ticket reply draft cookie in section 6 and remove unsent reply drafts from the local storage description",
+  "content_hash": "11b9e95e00b7a698e6643e647513aaf1f684d53f081b59a88a6d2ed73610e0f7"
+}

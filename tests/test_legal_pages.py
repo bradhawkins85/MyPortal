@@ -128,6 +128,20 @@ def test_privacy_policy_mentions_ticket_email_tracking(client):
     assert "block remote images" in response.text
 
 
+def test_privacy_policy_lists_ticket_reply_draft_cookie(client):
+    """The cookie list must include the encrypted ticket reply draft cookie."""
+    response = client.get("/legal/privacy")
+
+    assert response.status_code == 200
+    # Section 6: the reply draft cookie is listed
+    assert "Reply draft cookie" in response.text
+    assert "encrypted copy of a ticket reply you haven't sent yet" in response.text
+    assert "expires after 7 days" in response.text
+    # The draft is kept in a cookie, not local storage, so it must not be
+    # described as part of the browser's local storage.
+    assert "unsent reply drafts" not in response.text
+
+
 def test_terms_disclaim_warranty_and_developer_liability(client):
     response = client.get("/legal/terms")
 
