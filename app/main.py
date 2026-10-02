@@ -112,6 +112,7 @@ from uuid import uuid4
 from app.core.config import get_settings, get_templates_config
 from app.core.database import db
 from app.core.features import init_registry
+from app.core.legal import LEGAL_POLICIES, LEGAL_POLICIES_UPDATED
 from app.core.plugin_loader import get_plugin_loader, init_plugin_loader
 from app.core.logging import configure_logging, log_error, log_info, log_warning
 from loguru import logger
@@ -7022,9 +7023,45 @@ async def admin_profile_page(request: Request):
             "profile_totp_devices": totp_devices,
             "profile_passkeys": profile_passkeys,
             "profile_m365_contacts": m365_contacts_status,
+            "profile_sales_opt_out": await _profile_sales_opt_out_status(user),
         },
     )
     return templates.TemplateResponse(context["request"], "admin/profile.html", context)
+
+
+async def _profile_sales_opt_out_status(user: Mapping[str, Any]) -> bool:
+    """Return True if the user's email has a sales-category marketing opt-out."""
+    try:
+        from app.repositories import marketing_campaigns as campaign_repo
+        from app.services import marketing_campaigns as campaign_service
+
+        email = campaign_service.normalise_email(user.get("email"))
+        if not email:
+            return False
+        opted_out = await campaign_repo.list_opted_out([email], campaign_service.CATEGORY_SALES)
+        return bool(opted_out)
+    except Exception:  # pragma: no cover - defensive: profile still renders
+        return False
+
+
+@app.post("/admin/profile/marketing-opt-out")
+async def profile_marketing_opt_out(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    enabled = str(form.get("enabled") or "").strip().lower() not in {"", "0", "false", "off"}
+    from app.repositories import marketing_campaigns as campaign_repo
+    from app.services import marketing_campaigns as campaign_service
+
+    email = campaign_service.normalise_email(user.get("email"))
+    if not email:
+        return flash_redirect("/admin/profile", "Could not determine your email address.", "error")
+    if enabled:
+        await campaign_repo.remove_opt_out(email, campaign_service.CATEGORY_SALES)
+        return flash_redirect("/admin/profile#security", "You will now receive sales and marketing emails.", "success")
+    await campaign_repo.add_opt_out(email, campaign_service.CATEGORY_SALES, None)
+    return flash_redirect("/admin/profile#security", "You will no longer receive sales and marketing emails. Service updates will still be sent.", "success")
 
 
 @app.get("/admin/profile/m365-contacts/connect")
@@ -11783,25 +11820,6 @@ async def register_page(request: Request):
     )
     return templates.TemplateResponse(context["request"], "auth/register.html", context)
 
-
-LEGAL_POLICIES: dict[str, dict[str, str]] = {
-    "privacy": {
-        "title": "Privacy Policy",
-        "summary": "What information the portal collects, why, who it is shared with and your rights.",
-        "template": "legal/_privacy.html",
-    },
-    "acceptable-use": {
-        "title": "Acceptable Use Policy",
-        "summary": "What you may and may not do when using the portal and its connected services.",
-        "template": "legal/_acceptable_use.html",
-    },
-    "terms": {
-        "title": "Terms and Conditions",
-        "summary": "The agreement that applies when you create an account and use the portal.",
-        "template": "legal/_terms.html",
-    },
-}
-LEGAL_POLICIES_UPDATED = "2026-10-10"
 
 
 def _legal_context_extra(policy_slug: str | None) -> dict[str, Any]:
