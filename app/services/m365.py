@@ -1664,6 +1664,14 @@ async def _exchange_token(
             error_code = str(response.json().get("error") or "")
         except (TypeError, ValueError):
             error_code = ""
+        try:
+            # The AADSTS code and first sentence say exactly why Entra refused
+            # (consent missing, admin approval required, token revoked...).
+            error_description = " ".join(
+                str(response.json().get("error_description") or "").split()
+            ).split(" Trace ID:")[0][:300]
+        except (TypeError, ValueError):
+            error_description = ""
         if error_code in {"invalid_grant", "interaction_required", "consent_required"}:
             failure_kind = "reauthentication_required"
         elif response.status_code == 429:
@@ -1682,7 +1690,8 @@ async def _exchange_token(
             body=response.text,
         )
         raise M365Error(
-            "Unable to acquire Microsoft 365 access token",
+            "Unable to acquire Microsoft 365 access token"
+            + (f" ({error_description})" if error_description else ""),
             http_status=response.status_code,
             graph_error_code=error_code or None,
             failure_kind=failure_kind,
@@ -2273,7 +2282,7 @@ async def _acquire_delegated_access_token(
         # *and* a refresh token issued before the scope was consented
         # (consent_required).  Both are fixed by the same reconnect.
         if getattr(exc, "failure_kind", None) == "reauthentication_required":
-            raise error_factory(missing_reason) from exc
+            raise error_factory(missing_reason + f"Microsoft reported: {exc} ") from exc
         raise
 
     if new_refresh:
