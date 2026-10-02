@@ -362,6 +362,105 @@
   </section>
   {% endif %}
 
+  {# ------------------------------------------------------------------ #}
+  {# Secure Score – achievable goals for the tenant's license           #}
+  {# ------------------------------------------------------------------ #}
+  {% set ss = secure_score_guidance %}
+  {% if ss and ss.available %}
+  <section class="panel">
+    <header class="panel__header">
+      <div>
+        <h3 class="panel__title">Secure Score — achievable goals for your license</h3>
+        <p class="text-muted" style="margin:var(--space-1) 0 0">
+          The Microsoft Secure Score maximum is scoped to the services this tenant has
+          licensed, so <strong>100% is always reachable</strong> by completing every
+          applicable improvement below. They are ranked by the points each one adds.
+        </p>
+      </div>
+    </header>
+    <div class="panel__body">
+      <div style="display:flex;flex-wrap:wrap;gap:1rem;align-items:baseline;margin-bottom:0.75rem">
+        <div>
+          <span class="text-muted" style="font-size:0.85rem">Current</span><br />
+          <strong style="font-size:1.5rem">{{ ss.current | round(1) }}</strong>
+        </div>
+        <div>
+          <span class="text-muted" style="font-size:0.85rem">Max for this license</span><br />
+          <strong style="font-size:1.5rem">{{ ss.maximum | round(1) }}</strong>
+        </div>
+        <div>
+          <span class="text-muted" style="font-size:0.85rem">Score</span><br />
+          <strong style="font-size:1.5rem">{{ ss.percentage | round(1) }}%</strong>
+        </div>
+        {% if not ss.at_maximum %}
+        <div>
+          <span class="text-muted" style="font-size:0.85rem">Gap to close</span><br />
+          <strong style="font-size:1.5rem">{{ ss.gap | round(1) }} pts</strong>
+        </div>
+        {% endif %}
+      </div>
+      <div style="height:0.6rem;background:rgba(0,0,0,0.08);border-radius:999px;overflow:hidden;margin-bottom:1rem">
+        <div style="height:100%;width:{{ ss.percentage if ss.percentage is not none else 0 }}%;background:var(--color-success,#16a34a)"></div>
+      </div>
+
+      {% if ss.at_maximum %}
+        <p style="margin:0 0 0.5rem"><span class="badge badge--success">Achieved</span>
+          This tenant has reached the maximum Secure Score possible for its licensed
+          services. Keep the checks below green to maintain it.</p>
+      {% elif not ss.recommendations %}
+        <p class="text-muted" style="margin:0">No pending Secure Score improvement
+          activities were returned for this tenant.</p>
+      {% else %}
+        {% if ss.by_category %}
+        <div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:1rem">
+          {% for cat in ss.by_category %}
+          <span class="badge badge--info" title="{{ cat.pending_count }} pending of {{ cat.activity_count }} improvements">
+            {{ cat.category_display }} · {{ cat.pending | round(0) }} pts to go
+          </span>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="width:2.5rem">#</th>
+              <th>Improvement</th>
+              <th style="width:6rem;white-space:nowrap">Points</th>
+              <th style="width:9rem;white-space:nowrap">Category</th>
+              <th style="width:8rem;white-space:nowrap">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for rec in ss.recommendations %}
+            <tr>
+              <td style="text-align:center" class="text-muted">{{ loop.index }}</td>
+              <td>
+                <strong>{{ rec.name }}</strong>
+                <br /><small class="text-muted">{{ rec.remediation }}</small>
+              </td>
+              <td style="white-space:nowrap"><strong>+{{ rec.score | round(0) }}</strong></td>
+              <td style="white-space:nowrap">{{ rec.category_display }}</td>
+              <td style="white-space:nowrap">
+                {% if rec.status == 'pending' %}
+                  <span class="badge badge--warning">{{ rec.status_display }}</span>
+                {% else %}
+                  <span class="badge badge--info">{{ rec.status_display }}</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="text-muted" style="margin:0.75rem 0 0">
+          {{ ss.recommendations | length }} improvement(s) worth
+          {{ ss.pending_points | round(0) }} point(s) remain. The best-practice checks
+          below cover many of these automatically.
+        </p>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
   {% if is_super_admin and batch_scopes %}
   <section class="panel">
     <header class="panel__header">

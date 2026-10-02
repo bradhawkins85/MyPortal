@@ -1,0 +1,7 @@
+{
+  "guid": "fd5bef6f-144b-4da5-a77e-3135ad542bb1",
+  "occurred_at": "2026-10-03T00:00Z",
+  "change_type": "Fix",
+  "summary": "Privacy Policy: disclose open/click tracking on ticket notification emails",
+  "content_hash": "da232d8a0d8104b33401f2e8440c0fc4b933dc21d86bb3849a1003e7f1460def"
+}

@@ -188,6 +188,7 @@ from app.services.m365_connection_health import build_connection_health
 from app.repositories import m365_connections as m365_connection_repo
 from app.services import cis_benchmark as cis_benchmark_service
 from app.services import m365_best_practices as m365_best_practices_service
+from app.services import m365_secure_score as m365_secure_score_service
 from app.services import modules as modules_service
 from app.services import passkeys as passkeys_service
 from app.services import message_templates as message_templates_service
@@ -4031,6 +4032,15 @@ async def m365_best_practices_page(request: Request):
     credentials = await m365_service.get_credentials(company_id)
     results = await m365_best_practices_service.get_last_results(company_id)
     secure_score = m365_best_practices_service.get_secure_score_summary(results)
+    # Fetch the license-aware Secure Score guidance (current score, achievable
+    # maximum, and ranked improvement activities).  This is defensive: the
+    # service never raises, but we guard anyway so the page always renders.
+    secure_score_guidance = None
+    if credentials:
+        try:
+            secure_score_guidance = await m365_secure_score_service.get_secure_score_guidance(company_id)
+        except Exception:  # pragma: no cover - defensive, service is already safe
+            secure_score_guidance = None
     catalog = m365_best_practices_service.list_best_practices()
     enabled_ids = await m365_best_practices_service.get_enabled_check_ids()
     enabled_catalog = [bp for bp in catalog if bp["id"] in enabled_ids]
@@ -4056,6 +4066,7 @@ async def m365_best_practices_page(request: Request):
         "company": company,
         "results": [*results, *excluded_results],
         "secure_score": secure_score,
+        "secure_score_guidance": secure_score_guidance,
         "catalog": enabled_catalog,
         "batch_scopes": m365_best_practices_service.get_batch_remediation_scopes(results),
         "has_credentials": bool(credentials),
@@ -11790,7 +11801,7 @@ LEGAL_POLICIES: dict[str, dict[str, str]] = {
         "template": "legal/_terms.html",
     },
 }
-LEGAL_POLICIES_UPDATED = "2026-10-02"
+LEGAL_POLICIES_UPDATED = "2026-10-03"
 
 
 def _legal_context_extra(policy_slug: str | None) -> dict[str, Any]:

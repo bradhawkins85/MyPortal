@@ -13,6 +13,7 @@ def _render_best_practices(
     can_submit_tickets=True,
     is_super_admin=False,
     batch_scopes=None,
+    secure_score_guidance=None,
 ):
     templates = Path(__file__).parents[1] / "app" / "templates"
     loader = ChoiceLoader(
@@ -45,6 +46,7 @@ def _render_best_practices(
         can_edit_notes=can_edit_notes,
         can_submit_tickets=can_submit_tickets,
         batch_scopes=batch_scopes or [],
+        secure_score_guidance=secure_score_guidance,
     )
 
 
@@ -456,3 +458,72 @@ def test_settings_policy_alternatives_are_grouped_for_mutual_exclusion():
 
     assert 'data-policy-group="teams_global_lobby"' in html
     assert "/static/js/m365_best_practices_settings.js" in html
+
+
+def test_secure_score_guidance_panel_renders_ranked_recommendations():
+    guidance = {
+        "available": True,
+        "current": 42.5,
+        "maximum": 80.0,
+        "percentage": 53.1,
+        "gap": 37.5,
+        "at_maximum": False,
+        "pending_points": 30.0,
+        "activity_count": 4,
+        "recommendations": [
+            {
+                "id": "a2",
+                "name": "Enable DLP policies",
+                "score": 20.0,
+                "status": "pending",
+                "status_display": "Pending",
+                "category": "data",
+                "category_display": "Data",
+                "remediation": "Enable Data Loss Prevention policies.",
+            },
+        ],
+        "by_category": [
+            {
+                "category": "data",
+                "category_display": "Data",
+                "total": 20.0,
+                "applied": 0.0,
+                "pending": 20.0,
+                "activity_count": 1,
+                "pending_count": 1,
+            }
+        ],
+    }
+    html = _render_best_practices([], secure_score_guidance=guidance)
+
+    assert "Secure Score — achievable goals for your license" in html
+    assert "100% is always reachable" in html
+    assert "Enable DLP policies" in html
+    assert "Data" in html
+    assert "53.1%" in html
+
+
+def test_secure_score_guidance_panel_hidden_when_not_available():
+    guidance = {
+        "available": False,
+        "reason": "The app registration does not have SecurityEvents.Read.All.",
+        "current": None,
+        "maximum": None,
+        "percentage": None,
+        "gap": None,
+        "at_maximum": False,
+        "pending_points": 0.0,
+        "activity_count": 0,
+        "recommendations": [],
+        "by_category": [],
+        "activities": [],
+    }
+    html = _render_best_practices([], secure_score_guidance=guidance)
+
+    assert "Secure Score — achievable goals for your license" not in html
+
+
+def test_secure_score_guidance_panel_hidden_when_guidance_absent():
+    html = _render_best_practices([])
+
+    assert "Secure Score — achievable goals for your license" not in html

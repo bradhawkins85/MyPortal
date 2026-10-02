@@ -110,6 +110,24 @@ def test_every_policy_page_shows_no_warranty_notice(client, path):
     assert "No liability lies with the developers or contributors" in response.text
 
 
+def test_privacy_policy_mentions_ticket_email_tracking(client):
+    """The privacy page must disclose open/click tracking on ticket notification emails."""
+    response = client.get("/legal/privacy")
+
+    assert response.status_code == 200
+    # Section 2: ticket emails are tracked
+    assert "emails about your tickets and replies" in response.text
+    assert "tracking image and tracked links" in response.text
+    # What is recorded for ticket emails
+    assert "IP address" in response.text
+    assert "browser and device details" in response.text
+    # Section 3: purpose — confirming support updates received
+    assert "confirm that support updates about your tickets have been received" in response.text
+    # Section 6: tracking image is not a cookie; blocking remote images prevents open tracking
+    assert "it does not rely on cookies" in response.text
+    assert "block remote images" in response.text
+
+
 def test_terms_disclaim_warranty_and_developer_liability(client):
     response = client.get("/legal/terms")
 

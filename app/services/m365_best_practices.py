@@ -52,6 +52,7 @@ from app.repositories import m365_best_practices as bp_repo
 from app.repositories import tickets as tickets_repo
 from app.services import hudu as hudu_service
 from app.services import tickets as tickets_service
+from app.services import m365_secure_score as m365_secure_score_service
 from app.services.cis_benchmark import (
     STATUS_FAIL,
     STATUS_PASS,
@@ -4711,6 +4712,28 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "implement recommended improvement actions."
         ),
         "source": _check_monitor_secure_score,
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "bp_secure_score_max_reached",
+        "name": "Secure Score has reached the maximum for the tenant's licensed services",
+        "description": (
+            "Microsoft Secure Score's maximum is scoped to the services licensed "
+            "for the tenant, so this passes only when the tenant has achieved the "
+            "highest score possible with the licences it holds. Until then, the "
+            "'Achievable goals for your license' panel lists the exact improvements "
+            "(ranked by the points they add) needed to close the gap. Every "
+            "applicable improvement is achievable, so every tenant can reach 100%."
+        ),
+        "remediation": (
+            "Work through the Secure Score improvement activities shown on the "
+            "Best Practices page, in order of the points they add. Each is "
+            "available with the tenant's current licence, so finishing them all "
+            "reaches the tenant's achievable maximum Secure Score."
+        ),
+        "source": m365_secure_score_service.check_secure_score_max_reached,
+        "source_type": "graph",
         "default_enabled": True,
         "has_remediation": False,
     },
