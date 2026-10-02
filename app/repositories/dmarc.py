@@ -1,6 +1,7 @@
 """Tenant-scoped persistence for DMARC reporting."""
 
 from __future__ import annotations
+from datetime import datetime, timedelta
 from typing import Any
 from app.core.database import db
 
@@ -359,3 +360,62 @@ async def get_record(company_id: int, record_id: int) -> dict[str, Any] | None:
         "SELECT r.*,p.report_id external_report_id FROM dmarc_records r JOIN dmarc_reports p ON p.id=r.report_id WHERE r.company_id=%s AND r.id=%s",
         (company_id, record_id),
     )
+
+
+_PRUNE_BATCH_SIZE = 5000
+
+
+async def prune_reports(*, retention_days: int) -> int:
+    """Delete DMARC report rows older than ``retention_days`` days.
+
+    Removes expired rows from the two report roots: ``dmarc_forensic_reports``
+    (RUF) and ``dmarc_reports`` (RUA aggregate).  ``dmarc_records`` and
+    ``dmarc_auth_results`` are removed automatically through their
+    ``ON DELETE CASCADE`` foreign keys, matching how :func:`save_report`
+    replaces a resent aggregate report.  Age is measured from ``created_at``
+    (the ingestion timestamp present on both roots).
+
+    Deletes in batches of ``_PRUNE_BATCH_SIZE`` rows so a first run on a large
+    table does not hold a table-level lock for an extended period.  Returns
+    the total number of root report rows removed.  Set ``retention_days`` to 0
+    (or less) to disable pruning - the function becomes a no-op in that case.
+    Mirrors :func:`app.repositories.audit_logs.prune_audit_logs`.
+    """
+
+    if retention_days is None or retention_days <= 0:
+        return 0
+    cutoff = datetime.utcnow() - timedelta(days=int(retention_days))
+    total_removed = 0
+    for sql in (
+        """
+        DELETE FROM dmarc_forensic_reports
+        WHERE id IN (
+            SELECT id FROM (
+                SELECT id FROM dmarc_forensic_reports
+                WHERE created_at < %s
+                ORDER BY created_at ASC
+                LIMIT %s
+            ) AS _batch
+        )
+        """,
+        """
+        DELETE FROM dmarc_reports
+        WHERE id IN (
+            SELECT id FROM (
+                SELECT id FROM dmarc_reports
+                WHERE created_at < %s
+                ORDER BY created_at ASC
+                LIMIT %s
+            ) AS _batch
+        )
+        """,
+    ):
+        while True:
+            removed = await db.execute_rowcount(
+                sql,
+                (cutoff, _PRUNE_BATCH_SIZE),
+            )
+            total_removed += removed
+            if removed < _PRUNE_BATCH_SIZE:
+                break
+    return total_removed
