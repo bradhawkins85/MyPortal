@@ -44,6 +44,7 @@ _SUBMISSIONS_PORTAL_URL = "https://security.microsoft.com/reportsubmission?viewi
 SUBMISSION_PREFIX = "submission:"
 AUDIT_PREFIX = "audit:"
 _AUDIT_OPERATION = "UserSubmission"
+_AUDIT_RECORD_TYPE = "MailSubmission"
 _AUDIT_RESULT_SIZE = 1000
 _AUDIT_LOOKUP_MINUTES = 10
 _AUDIT_CATEGORIES = {
@@ -345,22 +346,59 @@ def summarise_audit_record(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _audit_date(value: datetime) -> str:
+    """Format a UTC time the way the Exchange admin API parses audit dates.
+
+    InvokeCommand rejects ISO 8601 ``...Z`` values for this cmdlet; it takes
+    the en-US ``M/d/yyyy HH:mm:ss`` form, which it reads as UTC.
+    """
+    return f"{value.month}/{value.day}/{value.year} {value:%H:%M:%S}"
+
+
+def _is_user_submission_record(row: dict[str, Any]) -> bool:
+    operation = str(row.get("Operations") or _audit_data(row).get("Operation") or "")
+    return operation.strip().lower() == _AUDIT_OPERATION.lower()
+
+
 async def _search_audit(company_id: int, start: datetime, end: datetime) -> list[dict[str, Any]]:
-    """Run ``Search-UnifiedAuditLog`` for user submissions between two UTC times."""
+    """Run ``Search-UnifiedAuditLog`` for user submissions between two UTC times.
+
+    The user's report is filtered by operation first.  Exchange has answered
+    that filter with ``400 Invalid Operation`` on some tenants, so the search
+    is retried by record type (MailSubmission, type 29) and the
+    ``UserSubmission`` rows are kept locally.
+    """
+    window = {
+        "StartDate": _audit_date(start),
+        "EndDate": _audit_date(end),
+        "ResultSize": _AUDIT_RESULT_SIZE,
+    }
+    attempts = (
+        {**window, "Operations": [_AUDIT_OPERATION]},
+        {**window, "RecordType": _AUDIT_RECORD_TYPE},
+    )
     try:
         token, tenant = await m365_service._acquire_exo_access_token(company_id)
-        payload = await m365_service._exo_invoke_command(token, tenant, "Search-UnifiedAuditLog", {
-            "StartDate": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "EndDate": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "Operations": _AUDIT_OPERATION,
-            "ResultSize": _AUDIT_RESULT_SIZE,
-        })
+        errors: list[m365_service.M365Error] = []
+        payload: dict[str, Any] | None = None
+        for parameters in attempts:
+            try:
+                payload = await m365_service._exo_invoke_command(
+                    token, tenant, "Search-UnifiedAuditLog", parameters,
+                )
+                break
+            except m365_service.M365Error as exc:
+                if exc.http_status != 400:
+                    raise
+                errors.append(exc)
+        if payload is None:
+            raise errors[-1]
     except m365_service.M365Error as exc:
         raise _failure(exc, _AUDIT_HINT) from exc
     rows = payload.get("value") or []
     if isinstance(rows, dict):
         rows = [rows]
-    return [row for row in rows if isinstance(row, dict)]
+    return [row for row in rows if isinstance(row, dict) and _is_user_submission_record(row)]
 
 
 async def list_reported_audit_records(

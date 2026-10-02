@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -503,8 +504,8 @@ async def test_load_reported_emails_uses_audit_log_on_business_standard(monkeypa
     assert len(warnings) == 1
     cmdlet, params = service._exo_calls[0]
     assert cmdlet == "Search-UnifiedAuditLog"
-    assert params["Operations"] == "UserSubmission"
-    assert params["StartDate"].endswith("Z") and params["EndDate"].endswith("Z")
+    assert params["Operations"] == ["UserSubmission"]
+    assert re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4} \d{2}:\d{2}:\d{2}", params["StartDate"])
 
 
 @pytest.mark.anyio
@@ -533,8 +534,8 @@ async def test_get_reported_alert_finds_audit_record_near_its_creation_time(monk
     summary = await service.get_reported_alert(4, summary_id)
     assert summary["id"] == summary_id
     _, params = service._exo_calls[0]
-    assert params["StartDate"] == "2026-10-01T22:55:10Z"
-    assert params["EndDate"] == "2026-10-01T23:15:10Z"
+    assert params["StartDate"] == "10/1/2026 22:55:10"
+    assert params["EndDate"] == "10/1/2026 23:15:10"
 
 
 @pytest.mark.anyio
@@ -559,3 +560,43 @@ def test_reported_emails_template_collapses_warnings_when_rows_exist():
     assert "2 report sources unavailable for this tenant" in body
     assert 'class="alert alert--warning"' not in body
     assert "Reported by Scarlett@example.com.au" in body
+
+
+@pytest.mark.anyio
+async def test_search_audit_retries_by_record_type_after_invalid_operation(monkeypatch):
+    """Exchange answered the Operations filter with 400 Invalid Operation."""
+    calls: list[dict] = []
+
+    async def fake_exo_token(company_id):
+        return "exo-token", "tenant-id"
+
+    async def fake_exo(token, tenant, cmdlet, params=None):
+        calls.append(params)
+        if "Operations" in params:
+            raise m365_service.M365Error(
+                "Exchange Online Search-UnifiedAuditLog failed (400): Invalid Operation", http_status=400,
+            )
+        other = _audit_record(Operation="AdminSubmission", Id="other")
+        other["Operations"] = "AdminSubmission"
+        return {"value": [_audit_record(), other]}
+
+    monkeypatch.setattr(m365_service, "_acquire_exo_access_token", fake_exo_token)
+    monkeypatch.setattr(m365_service, "_exo_invoke_command", fake_exo)
+    rows = await service._search_audit(4, datetime(2026, 10, 1, 22), datetime(2026, 10, 2, 0))
+    assert [service._audit_data(row)["Id"] for row in rows] == ["4278982f-c627-443e-63f7-08df201071be"]
+    assert calls[1]["RecordType"] == "MailSubmission" and "Operations" not in calls[1]
+    assert calls[1]["StartDate"] == "10/1/2026 22:00:00"
+
+
+@pytest.mark.anyio
+async def test_search_audit_reports_error_when_both_filters_fail(monkeypatch):
+    async def fake_exo_token(company_id):
+        return "exo-token", "tenant-id"
+
+    async def fake_exo(token, tenant, cmdlet, params=None):
+        raise m365_service.M365Error("Exchange Online Search-UnifiedAuditLog failed (400): Invalid Operation", http_status=400)
+
+    monkeypatch.setattr(m365_service, "_acquire_exo_access_token", fake_exo_token)
+    monkeypatch.setattr(m365_service, "_exo_invoke_command", fake_exo)
+    with pytest.raises(service.ReportedEmailError, match="Invalid Operation"):
+        await service._search_audit(4, datetime(2026, 10, 1), datetime(2026, 10, 2))
