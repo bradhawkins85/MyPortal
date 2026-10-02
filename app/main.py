@@ -5722,13 +5722,95 @@ async def _complete_connect_with_scc_consent(
     message: str | None = None,
     variant: str = "success",
 ) -> Response:
-    """Finish the connect flow, chaining the Security & Compliance consent.
+    """Finish the connect flow, chaining the remaining consents.
 
-    The freshly stored refresh token is probed with the delegated SCC token
-    exchange: when it already issues a Security & Compliance token the
-    consent was captured in an earlier connect, so the flow completes
-    normally with no extra consent screen.  Otherwise the administrator is
-    sent through one additional (chained) consent screen.
+    The freshly stored refresh token is probed for an eDiscovery token first:
+    a dynamic consent screen only grants ``eDiscovery.ReadWrite.All`` when the
+    administrator ticks "Consent on behalf of your organization", so when the
+    probe fails the administrator is sent to Microsoft's admin-consent page,
+    which grants it tenant-wide.  The Security & Compliance consent follows
+    (see :func:`_continue_to_scc_consent`).
+    """
+    try:
+        await m365_service._acquire_ediscovery_access_token(company_id)
+    except m365_service.M365Error as exc:
+        if getattr(exc.__cause__, "failure_kind", None) == "reauthentication_required":
+            return await _start_ediscovery_admin_consent(
+                request,
+                company_id=company_id,
+                destination=destination,
+                chained_message=message,
+                chained_variant=variant,
+            )
+        log_warning(
+            "eDiscovery token probe failed during connect; continuing",
+            company_id=company_id,
+            error=str(exc),
+        )
+    return await _continue_to_scc_consent(
+        request, company_id=company_id, destination=destination, message=message, variant=variant,
+    )
+
+
+async def _start_ediscovery_admin_consent(
+    request: Request,
+    *,
+    company_id: int,
+    destination: str,
+    chained_message: str | None = None,
+    chained_variant: str = "success",
+) -> RedirectResponse:
+    """Send the administrator to Microsoft's tenant-wide admin-consent page.
+
+    ``/.default`` consents to every Microsoft Graph permission listed on the
+    app registration, including ``eDiscovery.ReadWrite.All`` that the connect
+    callback adds (:func:`m365_service.ensure_ediscovery_delegated_permission`).
+    This is the same grant as "Grant admin consent" in the Entra portal and
+    needs no additional delegated scope on MyPortal's side.
+    """
+    credentials = await m365_service.get_credentials(company_id)
+    if not credentials:
+        return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+    context: dict[str, Any] = {
+        "company_id": company_id,
+        "flow": "ediscovery_admin_consent",
+        "tenant_id": credentials["tenant_id"],
+        "client_id": credentials["client_id"],
+        "redirect_uri": _build_m365_redirect_uri(request),
+        "destination": destination,
+    }
+    if chained_message:
+        context["chained_message"] = chained_message
+        context["chained_variant"] = chained_variant
+    state = await _new_m365_oauth_state(request, **context)
+    params = {
+        "client_id": credentials["client_id"],
+        "scope": "https://graph.microsoft.com/.default",
+        "redirect_uri": context["redirect_uri"],
+        "state": state,
+    }
+    consent_url = (
+        f"https://login.microsoftonline.com/{credentials['tenant_id']}/v2.0/adminconsent"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=consent_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+async def _continue_to_scc_consent(
+    request: Request,
+    *,
+    company_id: int,
+    destination: str,
+    message: str | None = None,
+    variant: str = "success",
+) -> Response:
+    """Chain the Security & Compliance consent when it is still missing.
+
+    The stored refresh token is probed with the delegated SCC token exchange:
+    when it already issues a Security & Compliance token the consent was
+    captured in an earlier connect, so the flow completes normally with no
+    extra consent screen.  Otherwise the administrator is sent through one
+    additional (chained) consent screen.
     """
     try:
         await m365_service._acquire_scc_access_token(company_id)
@@ -5773,6 +5855,15 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
 
     if error:
         message = request.query_params.get("error_description", error)
+        if flow == "ediscovery_admin_consent":
+            # The connection itself is unaffected; only the tenant-wide
+            # eDiscovery grant is missing.  Flash messages are capped at 200
+            # characters, so the AAD detail is bounded.
+            aad_detail = " ".join(message.split())[:80]
+            message = (
+                "eDiscovery admin consent was not granted, so spam search "
+                f"cannot run. Reconnect as a Global Administrator. AAD error: {aad_detail}"
+            )
         if flow == "scc_consent":
             # A denied/expired Security & Compliance consent leaves the
             # company fully connected; only the second consent is missing.
@@ -5805,6 +5896,36 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 "No settings were changed. Repair the affected company connection and try again."
             )
         return flash_redirect(error_redirect, message, "error")
+    if flow == "ediscovery_admin_consent":
+        # Microsoft's admin-consent endpoint returns no code, only
+        # admin_consent=True and the consenting tenant.
+        returned_tenant = str(request.query_params.get("tenant") or "").strip().lower()
+        if (
+            str(request.query_params.get("admin_consent") or "").lower() != "true"
+            or (returned_tenant and returned_tenant != str(state_data.get("tenant_id") or "").lower())
+        ):
+            return flash_redirect("/m365", "Microsoft returned an invalid admin-consent response.", "error")
+        destination = (
+            state_data.get("destination")
+            if state_data.get("destination") in {"/m365", "/m365/diagnostics"}
+            else "/m365"
+        )
+        variant = (
+            state_data.get("chained_variant")
+            if state_data.get("chained_variant") in {"success", "warning"}
+            else "success"
+        )
+        chained = str(state_data.get("chained_message") or "").strip()
+        granted = "eDiscovery access was granted for spam search and purge."
+        log_info("Microsoft 365 eDiscovery admin consent granted", company_id=company_id)
+        return await _continue_to_scc_consent(
+            request,
+            company_id=company_id,
+            destination=destination,
+            message=f"{chained} {granted}" if chained else granted,
+            variant=variant,
+        )
+
     if not code:
         return flash_redirect(error_redirect, "Microsoft returned an invalid response.", "error")
 
@@ -6246,9 +6367,9 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         )
         chained = str(state_data.get("chained_message") or "").strip()
         message = (
-            chained + " Security & Compliance access was captured for spam search and purge."
+            chained + " Security & Compliance access was captured."
             if chained
-            else "Security & Compliance access was captured for spam search and purge."
+            else "Security & Compliance access was captured."
         )
         log_info("Microsoft 365 Security & Compliance consent captured", company_id=company_id)
         return flash_redirect(destination, message, variant)
@@ -6328,6 +6449,10 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # ``/.default`` scope, which fails with AADSTS650057 unless the app
         # registration lists that resource.  Add it before the consent step.
         await m365_service.ensure_scc_delegated_permission(company_id, access_token)
+        # Spam Search & Purge needs eDiscovery.ReadWrite.All granted
+        # tenant-wide; listing it on the manifest lets the admin-consent step
+        # in _complete_connect_with_scc_consent grant it.
+        await m365_service.ensure_ediscovery_delegated_permission(company_id, access_token)
     if access_token and not compliance_setup:
         new_permissions_granted = await m365_service.try_grant_missing_permissions(
             company_id=company_id,

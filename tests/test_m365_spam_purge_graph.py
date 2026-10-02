@@ -299,3 +299,40 @@ async def test_ediscovery_reconnect_error_includes_entra_reason(monkeypatch):
     assert "AADSTS65001: The user or administrator has not consented" in message
     assert "Trace ID" not in message
     assert "eDiscovery.ReadWrite.All" in message
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ensure_ediscovery_permission_adds_graph_scope_and_keeps_roles(monkeypatch):
+    scope_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    app_object = "11111111-2222-3333-4444-555555555555"
+    required = [{"resourceAppId": m365_service._GRAPH_APP_ID,
+                 "resourceAccess": [{"id": "graph-role", "type": "Role"}]}]
+    patches: list = []
+
+    async def fake_get(_token, url, **_kwargs):
+        if "servicePrincipals" in url:
+            return {"value": [{"id": "graph-sp", "appId": m365_service._GRAPH_APP_ID,
+                               "oauth2PermissionScopes": [
+                                   {"id": "other", "value": "User.Read"},
+                                   {"id": scope_id, "value": "eDiscovery.ReadWrite.All"},
+                               ]}]}
+        return {"value": [{"id": app_object, "requiredResourceAccess": required}]}
+
+    async def fake_patch(_token, url, payload, **_kwargs):
+        patches.append((url, payload))
+        return {}
+
+    monkeypatch.setattr(m365_service, "get_credentials", AsyncMock(return_value={"client_id": "client"}))
+    monkeypatch.setattr(m365_service, "_graph_get", fake_get)
+    monkeypatch.setattr(m365_service, "_graph_patch", fake_patch)
+
+    assert await m365_service.ensure_ediscovery_delegated_permission(1, "token") is True
+    (_url, payload), = patches
+    graph = payload["requiredResourceAccess"][0]["resourceAccess"]
+    assert {"id": "graph-role", "type": "Role"} in graph
+    assert {"id": scope_id, "type": "Scope"} in graph
+
+    patches.clear()
+    required[0]["resourceAccess"] = graph
+    assert await m365_service.ensure_ediscovery_delegated_permission(1, "token") is False
+    assert patches == []

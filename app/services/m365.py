@@ -239,7 +239,8 @@ CONNECT_SCOPE = (
 # Compliance InvokeCommand route now requires an undocumented search-only
 # session (Connect-IPPSSession -EnableSearchOnlySession) and fails with
 # "Value cannot be null. Parameter name: orgUnit" without it.
-EDISCOVERY_SCOPE = "https://graph.microsoft.com/eDiscovery.ReadWrite.All"
+EDISCOVERY_SCOPE_NAME = "eDiscovery.ReadWrite.All"
+EDISCOVERY_SCOPE = f"https://graph.microsoft.com/{EDISCOVERY_SCOPE_NAME}"
 
 # Security & Compliance delegated scope, requested in its own authorization
 # request (the connect flow chains it after :data:`CONNECT_SCOPE`).  The
@@ -2070,6 +2071,107 @@ def _scc_delegated_reconnect_error(reason: str) -> M365Error:
 _SCC_RESOURCE_URI = "https://ps.compliance.protection.outlook.com"
 
 
+async def _merge_manifest_scopes(
+    access_token: str, client_id: str, resource_app_id: str, scope_ids: list[str],
+) -> int:
+    """Merge delegated *scope_ids* for one resource into the app's manifest.
+
+    Existing ``requiredResourceAccess`` entries (including application roles
+    on the same resource) are kept.  Returns how many scopes were added; the
+    manifest is only patched when that is non-zero.  Raises :class:`M365Error`.
+    """
+    applications = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/applications"
+        f"?$filter=appId eq '{quote(client_id, safe='')}'&$select=id,requiredResourceAccess",
+    )
+    application = next(iter(applications.get("value") or []), None)
+    if not application or not application.get("id"):
+        return 0
+    resource_app_id = resource_app_id.lower()
+    required = [dict(entry) for entry in application.get("requiredResourceAccess") or []]
+    entry = next(
+        (
+            item for item in required
+            if str(item.get("resourceAppId") or "").lower() == resource_app_id
+        ),
+        None,
+    )
+    if entry is None:
+        entry = {"resourceAppId": resource_app_id, "resourceAccess": []}
+        required.append(entry)
+    access = list(entry.get("resourceAccess") or [])
+    present = {
+        str(item.get("id") or "").lower()
+        for item in access
+        if str(item.get("type") or "").lower() == "scope"
+    }
+    missing = [scope_id.lower() for scope_id in scope_ids if scope_id.lower() not in present]
+    if not missing:
+        return 0
+    entry["resourceAccess"] = access + [{"id": scope_id, "type": "Scope"} for scope_id in missing]
+    await _graph_patch(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(application['id'])}",
+        {"requiredResourceAccess": required},
+    )
+    return len(missing)
+
+
+async def ensure_ediscovery_delegated_permission(company_id: int, access_token: str) -> bool:
+    """Add Microsoft Graph ``eDiscovery.ReadWrite.All`` (delegated) to the app manifest.
+
+    Spam Search & Purge exchanges the stored refresh token for this scope.
+    Requesting it dynamically on the connect consent screen only records the
+    administrator's personal consent when they tick "Consent on behalf of your
+    organization"; without that the exchange fails with AADSTS65001.  Listing
+    it statically lets the admin-consent step that follows the connect flow
+    (``https://graph.microsoft.com/.default``) grant it tenant-wide, which is
+    what granting admin consent in the Entra portal does.
+
+    *access_token* is the administrator's delegated Graph token from the
+    connect flow (``Application.ReadWrite.All``).  Returns ``True`` when the
+    manifest was changed.  Failures are logged, never raised.
+    """
+    creds = await get_credentials(company_id)
+    client_id = str((creds or {}).get("client_id") or "").strip()
+    if not client_id:
+        return False
+    try:
+        resources = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/servicePrincipals"
+            f"?$filter=appId eq '{_GRAPH_APP_ID}'&$select=id,appId,oauth2PermissionScopes",
+        )
+        graph = next(iter(resources.get("value") or []), None) or {}
+        scope_id = next(
+            (
+                str(scope.get("id"))
+                for scope in graph.get("oauth2PermissionScopes") or []
+                if scope.get("value") == EDISCOVERY_SCOPE_NAME and scope.get("id")
+            ),
+            None,
+        )
+        if not scope_id:
+            log_warning(
+                "Microsoft Graph does not expose eDiscovery.ReadWrite.All in this tenant; "
+                "app manifest left unchanged",
+                company_id=company_id,
+            )
+            return False
+        added = await _merge_manifest_scopes(access_token, client_id, _GRAPH_APP_ID, [scope_id])
+    except M365Error as exc:
+        log_warning(
+            "Could not add eDiscovery.ReadWrite.All to the app manifest",
+            company_id=company_id,
+            error=str(exc),
+        )
+        return False
+    if added:
+        log_info("Added eDiscovery.ReadWrite.All to the app manifest", company_id=company_id)
+    return bool(added)
+
+
 async def ensure_scc_delegated_permission(company_id: int, access_token: str) -> bool:
     """Add the Security & Compliance delegated scopes to the company's app manifest.
 
@@ -2120,40 +2222,9 @@ async def ensure_scc_delegated_permission(company_id: int, access_token: str) ->
                 company_id=company_id,
             )
             return False
-        applications = await _graph_get(
-            access_token,
-            "https://graph.microsoft.com/v1.0/applications"
-            f"?$filter=appId eq '{quote(client_id, safe='')}'&$select=id,requiredResourceAccess",
-        )
-        application = next(iter(applications.get("value") or []), None)
-        if not application or not application.get("id"):
-            return False
-        required = [dict(entry) for entry in application.get("requiredResourceAccess") or []]
-        entry = next(
-            (
-                item for item in required
-                if str(item.get("resourceAppId") or "").lower() == resource_app_id
-            ),
-            None,
-        )
-        if entry is None:
-            entry = {"resourceAppId": resource_app_id, "resourceAccess": []}
-            required.append(entry)
-        access = list(entry.get("resourceAccess") or [])
-        present = {
-            str(item.get("id") or "").lower()
-            for item in access
-            if str(item.get("type") or "").lower() == "scope"
-        }
-        missing = [scope_id for scope_id in scope_ids if scope_id not in present]
+        missing = await _merge_manifest_scopes(access_token, client_id, resource_app_id, scope_ids)
         if not missing:
             return False
-        entry["resourceAccess"] = access + [{"id": scope_id, "type": "Scope"} for scope_id in missing]
-        await _graph_patch(
-            access_token,
-            f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(application['id'])}",
-            {"requiredResourceAccess": required},
-        )
     except M365Error as exc:
         log_warning(
             "Could not add Security & Compliance delegated scopes to the app manifest",
@@ -2164,7 +2235,7 @@ async def ensure_scc_delegated_permission(company_id: int, access_token: str) ->
     log_info(
         "Added Security & Compliance delegated scopes to the app manifest",
         company_id=company_id,
-        scopes=len(missing),
+        scopes=missing,
     )
     return True
 
