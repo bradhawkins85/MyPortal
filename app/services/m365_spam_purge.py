@@ -74,7 +74,9 @@ def build_content_match_query(
 
 
 async def create_request(company_id: int, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
-    query = build_content_match_query(
+    # ``query_override`` is a query already built by a trusted caller (such as
+    # the reported-email alerts page, which needs hour-level received times).
+    query = data.get("query_override") or build_content_match_query(
         sender=data.get("sender"), subject=data.get("subject"),
         received_from=data.get("received_from"), received_to=data.get("received_to"),
         advanced_query=data.get("content_match_query"),

@@ -19,6 +19,7 @@ from app.services import m365_signature_deployment as signature_deploy_service
 from app.services import m365_signatures as signatures_service
 from app.services import m365_spam_purge as purge_service
 from app.services import m365_out_of_office as oof_service
+from app.services import m365_reported_emails as reported_service
 
 
 router = APIRouter(tags=["Office365 Spam Purge"])
@@ -657,3 +658,65 @@ async def retry_failed_search(request_id: int, request: Request):
         after={"search_status": item.get("search_status")},
     )
     return flash_redirect("/m365/spam-purge", "Compliance search retry queued.", "success")
+
+
+_REPORTED_KINDS = {"all", "phish", "junk"}
+
+
+@router.get("/m365/reported-emails", response_class=HTMLResponse)
+async def reported_emails_page(request: Request):
+    user, company_id, redirect = await _context(request)
+    if redirect:
+        return redirect
+    kind = str(request.query_params.get("kind") or "all").lower()
+    if kind not in _REPORTED_KINDS:
+        kind = "all"
+    try:
+        days = int(request.query_params.get("days") or reported_service.DEFAULT_LOOKBACK_DAYS)
+    except ValueError:
+        days = reported_service.DEFAULT_LOOKBACK_DAYS
+    days = max(1, min(days, reported_service.MAX_LOOKBACK_DAYS))
+    alerts: list[dict] = []
+    load_error = None
+    try:
+        alerts = await reported_service.list_reported_alerts(company_id, days=days)
+    except (reported_service.ReportedEmailError, m365_service.M365Error) as exc:
+        load_error = str(exc)
+    if kind != "all":
+        alerts = [alert for alert in alerts if alert["kind"] == kind]
+    searches = await purge_repo.list_by_source_alerts(company_id)
+    for alert in alerts:
+        alert["search"] = searches.get(alert["id"])
+    return await _main()._render_template("m365/reported_emails.html", request, user, extra={
+        "title": "Reported emails", "alerts": alerts, "load_error": load_error,
+        "kind": kind, "days": days,
+    })
+
+
+@router.post("/m365/reported-emails/{alert_id}/search")
+async def create_search_from_reported_email(alert_id: str, request: Request):
+    user, company_id, redirect = await _context(request)
+    if redirect:
+        return redirect
+    try:
+        item, created = await reported_service.create_search_from_alert(
+            company_id, int(user["id"]), alert_id,
+        )
+    except (LookupError, ValueError, reported_service.ReportedEmailError, m365_service.M365Error) as exc:
+        return flash_redirect("/m365/reported-emails", str(exc), "error")
+    if not created:
+        return flash_redirect(
+            "/m365/spam-purge",
+            "A search already exists for this alert. Review it below.",
+            "info",
+        )
+    await audit_service.record(
+        action="m365.spam_search.start", request=request, user_id=int(user["id"]),
+        entity_type="m365_spam_purge_request", entity_id=int(item["id"]),
+        after={"query": item["content_match_query"], "source_alert_id": alert_id},
+    )
+    return flash_redirect(
+        "/m365/spam-purge",
+        "Compliance search queued from the reported email. Review the matches before purging.",
+        "success",
+    )
