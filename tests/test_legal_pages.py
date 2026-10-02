@@ -116,3 +116,20 @@ def test_terms_disclaim_warranty_and_developer_liability(client):
     assert 'id="terms-liability"' in response.text
     assert "No warranty and limitation of liability" in response.text
     assert "No liability lies with the developers or contributors" in response.text
+
+
+@pytest.mark.parametrize(
+    ("path", "section_id", "heading"),
+    [
+        ("/legal/privacy", "privacy-ai", "Artificial intelligence (AI) features"),
+        ("/legal/acceptable-use", "aup-ai", "Using AI features"),
+        ("/legal/terms", "terms-ai", "Artificial intelligence features"),
+    ],
+)
+def test_every_policy_covers_ai_use(client, path, section_id, heading):
+    response = client.get(path)
+
+    assert response.status_code == 200
+    assert f'<section id="{section_id}"' in response.text
+    assert f'href="#{section_id}"' in response.text
+    assert heading in response.text

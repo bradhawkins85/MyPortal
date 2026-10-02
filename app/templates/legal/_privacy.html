@@ -5,7 +5,7 @@
     <li><a href="#privacy-who">Who we are</a></li>
     <li><a href="#privacy-collect">Information we collect</a></li>
     <li><a href="#privacy-use">How we use it</a></li>
-    <li><a href="#privacy-ai">Automated processing and AI features</a></li>
+    <li><a href="#privacy-ai">Artificial intelligence (AI) features</a></li>
     <li><a href="#privacy-share">Who we share it with</a></li>
     <li><a href="#privacy-cookies">Cookies and browser storage</a></li>
     <li><a href="#privacy-security">How we protect it</a></li>
@@ -98,6 +98,12 @@
       choose to keep in the portal. Stored credentials are encrypted.
     </dd>
 
+    <dt>AI assistant questions and outputs</dt>
+    <dd>
+      Questions you ask the AI assistant, searches you save, and AI-generated content such as ticket summaries, tags,
+      suggested replies and call transcripts (see section 4).
+    </dd>
+
     <dt>Marketing and email engagement</dt>
     <dd>
       If you receive our newsletters or campaign emails, whether you opened them or clicked a link (using a tracking image and
@@ -129,13 +135,47 @@
 </section>
 
 <section id="privacy-ai" aria-labelledby="privacy-ai-title">
-  <h3 id="privacy-ai-title">4. Automated processing and AI features</h3>
+  <h3 id="privacy-ai-title">4. Artificial intelligence (AI) features</h3>
   <p>
-    Some features use automated processing, including artificial intelligence, to help our team: for example to summarise and
-    tag tickets, suggest replies and knowledge base articles, transcribe call recordings, and search our documentation.
-    These features process the content of tickets, chats, calls and documents. Where possible we use AI models hosted on
-    infrastructure we control. AI output is used to assist our staff; it is not used to make decisions that have legal or
-    similarly significant effects on you without human involvement.
+    {{ app_name }} includes optional features that use artificial intelligence, including large language models and speech
+    recognition. Depending on what is enabled, AI may be used to:
+  </p>
+  <ul>
+    <li>answer questions you ask the portal's AI assistant or search, using only information your account is allowed to see;</li>
+    <li>suggest knowledge base articles and similar resolved tickets while you raise a ticket;</li>
+    <li>summarise, title, tag, categorise and prioritise tickets, spot likely duplicates and related records, and draft follow-up questions or resolution steps for our staff;</li>
+    <li>suggest replies that our staff review before sending;</li>
+    <li>respond to you in chat while you wait for a technician (you will be talking to an automated assistant, and you can ask for a person at any time);</li>
+    <li>transcribe call recordings and voicemail; and</li>
+    <li>let our staff look up tickets from approved AI tools through secure connectors.</li>
+  </ul>
+  <p>
+    <strong>What information is used.</strong> These features process the content you give us — ticket and chat text,
+    attachments' extracted text, call audio and transcripts, and knowledge base content — together with related account,
+    company and asset details. To make search and suggestions work, this content is also turned into a searchable index
+    (including numerical "embeddings"). The index follows the same permissions as the portal, so it never shows you
+    information you could not otherwise see.
+  </p>
+  <p>
+    <strong>Where it is processed.</strong> Where possible, we run AI models on infrastructure we control, so your information
+    does not leave our systems. Some features may use a third-party AI provider (for example OpenAI). When they do, the
+    relevant content is sent to that provider to generate a response and is handled under its terms and privacy policy, which
+    may involve processing outside Australia. Where a provider offers the option, we choose settings that do not allow it to
+    use our customers' information to train its models.
+  </p>
+  <p>
+    <strong>No training on your data by us.</strong> We do not use your personal information to train or fine-tune AI models.
+  </p>
+  <p>
+    <strong>Human oversight.</strong> AI output assists our team; it can be inaccurate. We do not use AI to make decisions that
+    have legal or similarly significant effects on you without a person reviewing them. We apply safeguards to keep AI
+    features from following instructions hidden in submitted content and from revealing information to people who should not
+    see it.
+  </p>
+  <p>
+    <strong>Your choices.</strong> You can ask to speak to a person instead of the chat assistant, and you can ask us not to
+    process your requests with AI features where practical — contact us using the details in section 11. Some features,
+    such as transcription, may be essential to the service your organisation has chosen.
   </p>
 </section>
 
@@ -145,6 +185,7 @@
   <ul>
     <li><strong>Your organisation</strong> — administrators at your company can see tickets, staff records, assets and other information relating to their organisation.</li>
     <li><strong>Service providers</strong> who run parts of the service for us, such as hosting, email delivery, SMS and telephony, accounting and invoicing, remote monitoring and management, endpoint security, documentation, project management, time tracking and notification services.</li>
+    <li><strong>AI providers</strong> — where an AI feature uses a third-party model rather than one we host ourselves, the content needed to generate the response (see section 4).</li>
     <li><strong>Microsoft and other platforms</strong> your organisation asks us to manage, when we act on those systems on its behalf.</li>
     <li><strong>Suppliers and couriers</strong> when we fulfil an order you place.</li>
     <li><strong>Professional advisers, insurers and authorities</strong> where required by law, to protect our rights or safety, or in connection with a sale or restructure of our business.</li>
@@ -212,7 +253,7 @@
   <h3 id="privacy-overseas-title">10. Where it is stored</h3>
   <p>
     The portal's database and files are stored on servers chosen by {{ legal_entity_name }}. Some of our service providers,
-    such as Microsoft, email, SMS and accounting providers, may store or process information in other countries, including the
+    such as Microsoft, email, SMS, accounting and AI providers, may store or process information in other countries, including the
     United States. Where we disclose information overseas we take reasonable steps to make sure it is protected to a standard
     comparable to this policy.
   </p>

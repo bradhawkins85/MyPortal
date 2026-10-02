@@ -14,8 +14,15 @@ signed-in users from the document icon in the sidebar footer.
 
 Every policy page ends with a **No warranty** notice: the portal is provided
 "as is", without warranty of any kind, and no liability lies with the
-developers or contributors of the MyPortal software. Section 10 of the Terms
+developers or contributors of the MyPortal software. Section 11 of the Terms
 and Conditions sets this out in full.
+
+Each policy also has an AI section: how AI features process information and
+which providers may be used (Privacy Policy section 4), rules for using AI
+features such as no prompt injection and checking output before relying on it
+(Acceptable Use Policy section 8), and that AI output may be wrong and is used
+at the user's own risk (Terms and Conditions section 4). If you enable a
+third-party AI provider, make sure the Privacy Policy wording matches it.
 
 ## Operator details
 
