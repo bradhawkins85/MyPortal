@@ -199,6 +199,40 @@ async def test_scc_invoke_uses_initial_domain_in_route_and_anchor(monkeypatch):
     )
 
 
+@pytest.mark.anyio("asyncio")
+async def test_scc_invoke_anchors_delegated_token_to_admin_upn(monkeypatch):
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "RS256"}).encode()).rstrip(b"=").decode()
+    payload = base64.urlsafe_b64encode(json.dumps({
+        "appid": "client-id", "scp": "user_impersonation",
+        "upn": "admin@contoso.onmicrosoft.com",
+    }).encode()).rstrip(b"=").decode()
+    token = f"{header}.{payload}.signature"
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            captured.update(headers=headers)
+            return httpx.Response(200, json={"value": []})
+
+    monkeypatch.setattr(m365_service.httpx, "AsyncClient", FakeClient)
+
+    await m365_service._scc_invoke_command(
+        token, "08fa9092-c049-429b-bd82-28119ef5dd7f", "New-ComplianceSearch",
+        organization="contoso.onmicrosoft.com",
+    )
+
+    assert captured["headers"]["X-AnchorMailbox"] == "UPN:admin@contoso.onmicrosoft.com"
+
+
 def _scc_client_factory(results: list):
     """Build a FakeClient whose post() yields results in order (call or raise)."""
 
