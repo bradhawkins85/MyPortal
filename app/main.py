@@ -5782,11 +5782,20 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             # never fix.  Flash messages are capped at 200 characters, so
             # the base text is kept short and the detail is bounded.
             aad_detail = " ".join(message.split())[:94]
-            message = (
-                "Security & Compliance access was not captured; the "
-                "connection is unaffected; retry the capture. "
-                f"AAD error: {aad_detail}"
-            )
+            if "AADSTS650057" in message:
+                # The app registration does not list the Purview resource.
+                # A full reconnect adds it (ensure_scc_delegated_permission).
+                message = (
+                    "Security & Compliance access was not captured: the "
+                    "MyPortal app lacks the Purview permission (AADSTS650057). "
+                    "Reconnect the company to add it, then consent."
+                )
+            else:
+                message = (
+                    "Security & Compliance access was not captured; the "
+                    "connection is unaffected; retry the capture. "
+                    f"AAD error: {aad_detail}"
+                )
         if "AADSTS700016" in message:
             # Never mutate shared/global configuration from an error callback.
             # The verified transaction identifies the affected client so the
@@ -6314,6 +6323,11 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     # when an administrator re-runs "Authorize portal access".
     # The focused Purview remediation intentionally does not grant other API
     # permissions or administrator roles; those remain separate setup checks.
+    if access_token:
+        # The chained Security & Compliance consent requests the Purview
+        # ``/.default`` scope, which fails with AADSTS650057 unless the app
+        # registration lists that resource.  Add it before the consent step.
+        await m365_service.ensure_scc_delegated_permission(company_id, access_token)
     if access_token and not compliance_setup:
         new_permissions_granted = await m365_service.try_grant_missing_permissions(
             company_id=company_id,

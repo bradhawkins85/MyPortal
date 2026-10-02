@@ -103,6 +103,10 @@ def _patch_connect_common(monkeypatch, update_tokens_calls, *, grant_result=True
         AsyncMock(return_value=grant_result),
     )
     monkeypatch.setattr(
+        "app.main.m365_service.ensure_scc_delegated_permission",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
         "app.main.m365_service.validate_microsoft_id_token",
         AsyncMock(return_value={"tid": "tenant-123"}),
     )
