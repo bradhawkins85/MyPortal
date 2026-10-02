@@ -1,0 +1,227 @@
+{% set contact %}{% if legal_contact_email %}<a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a>{% else %}raising a ticket in {{ app_name }} or contacting your usual support representative{% endif %}{% endset %}
+
+<nav class="legal__toc" aria-label="On this page">
+  <ol>
+    <li><a href="#privacy-who">Who we are</a></li>
+    <li><a href="#privacy-collect">Information we collect</a></li>
+    <li><a href="#privacy-use">How we use it</a></li>
+    <li><a href="#privacy-ai">Automated processing and AI features</a></li>
+    <li><a href="#privacy-share">Who we share it with</a></li>
+    <li><a href="#privacy-cookies">Cookies and browser storage</a></li>
+    <li><a href="#privacy-security">How we protect it</a></li>
+    <li><a href="#privacy-retention">How long we keep it</a></li>
+    <li><a href="#privacy-rights">Your rights and choices</a></li>
+    <li><a href="#privacy-overseas">Where it is stored</a></li>
+    <li><a href="#privacy-changes">Changes and contact</a></li>
+  </ol>
+</nav>
+
+<section id="privacy-who" aria-labelledby="privacy-who-title">
+  <h3 id="privacy-who-title">1. Who we are</h3>
+  <p>
+    {{ app_name }} is a customer support and service portal operated by {{ legal_entity_name }} ("we", "us", "our").
+    We use it to provide IT support, manage the services and products we supply to your organisation, and keep you informed.
+    This policy explains how we handle personal information collected through the portal, its desktop tray app, its email,
+    chat, phone and SMS channels, and the services connected to it.
+  </p>
+  <p>
+    In most cases your organisation (our customer) decides which of its people and systems we look after, and we handle
+    information about you on its behalf. Where we do, your organisation's own privacy policy also applies. We aim to comply
+    with applicable privacy laws, including the Australian Privacy Principles in the <em>Privacy Act 1988</em> (Cth) and,
+    where it applies, the EU and UK General Data Protection Regulation (GDPR).
+  </p>
+</section>
+
+<section id="privacy-collect" aria-labelledby="privacy-collect-title">
+  <h3 id="privacy-collect-title">2. Information we collect</h3>
+  <p>Depending on which features your organisation uses, we may collect:</p>
+  <dl class="legal__list">
+    <dt>Account and contact details</dt>
+    <dd>Your name, email address, mobile phone number, job title, the companies you belong to and your role and permissions in each.</dd>
+
+    <dt>Sign-in and security information</dt>
+    <dd>
+      A one-way (bcrypt) hash of your password — never the password itself — your encrypted authenticator (two-factor) secret,
+      the public key of any passkeys you register, email verification and password reset tokens, and the date and time of your
+      sign-ins.
+    </dd>
+
+    <dt>Usage, device and log information</dt>
+    <dd>
+      Your IP address, browser and device type (user agent), the pages and actions you use, and an audit trail of changes made
+      in the portal, including changes made by our staff while acting on your account. We use this for security, fraud
+      prevention and troubleshooting.
+    </dd>
+
+    <dt>Support requests and communications</dt>
+    <dd>
+      The tickets you raise and their replies, attachments and history; emails sent to our support mailboxes; chat
+      conversations; time recorded against your requests; and form submissions.
+    </dd>
+
+    <dt>Calls, voicemail and SMS</dt>
+    <dd>
+      If our phone and SMS services are enabled, call details (numbers, times and durations), call recordings and voicemail,
+      automatic transcripts of those recordings, and the content of SMS messages sent to or from us.
+    </dd>
+
+    <dt>Staff and organisation records</dt>
+    <dd>
+      Information your organisation gives us about its staff so we can manage their accounts and access, such as names,
+      contact details, departments, managers, start and finish dates and onboarding or offboarding details.
+    </dd>
+
+    <dt>Devices, assets and networks we manage</dt>
+    <dd>
+      Device names, serial numbers, hardware and software inventory, the signed-in user, operating system and security status,
+      network addresses (IP and MAC), photos of equipment, and information from our remote monitoring and management,
+      endpoint security, uptime and website monitoring tools. The {{ app_name }} tray app installed on managed computers
+      reports device details so we can match the computer to your organisation's assets and let you raise tickets and chat with us.
+    </dd>
+
+    <dt>Microsoft 365 and email security information</dt>
+    <dd>
+      Where your organisation connects its Microsoft 365 tenant, directory information about users and mailboxes, licences,
+      sign-in and security settings, email signatures, out-of-office settings, emails reported as suspicious, and DMARC
+      reports about email sent using your organisation's domains.
+    </dd>
+
+    <dt>Orders, billing and subscriptions</dt>
+    <dd>
+      Products, quotes, orders, subscriptions, licences, invoices, delivery details and billing contacts. If card payments are
+      offered they are processed by the payment provider; {{ app_name }} does not store full card numbers.
+    </dd>
+
+    <dt>Credentials and documentation you store with us</dt>
+    <dd>
+      Passwords, business continuity plans, compliance evidence, processes and other documentation you or your organisation
+      choose to keep in the portal. Stored credentials are encrypted.
+    </dd>
+
+    <dt>Marketing and email engagement</dt>
+    <dd>
+      If you receive our newsletters or campaign emails, whether you opened them or clicked a link (using a tracking image and
+      tracked links) and your unsubscribe preferences.
+    </dd>
+  </dl>
+  <p>
+    Most of this information comes from you, your organisation, or the systems your organisation asks us to manage. You do not
+    have to give us personal information, but without it we may not be able to provide support or create an account for you.
+  </p>
+</section>
+
+<section id="privacy-use" aria-labelledby="privacy-use-title">
+  <h3 id="privacy-use-title">3. How we use it</h3>
+  <p>We use personal information to:</p>
+  <ul>
+    <li>create and secure your account, verify your identity and keep the portal safe from misuse;</li>
+    <li>receive, route, answer and track your support requests, chats, calls and messages;</li>
+    <li>manage, monitor and protect the devices, accounts, networks and services we look after for your organisation;</li>
+    <li>process quotes, orders, subscriptions, invoices and payments, and keep business records;</li>
+    <li>send you service notifications, ticket updates and, where permitted, newsletters (which you can unsubscribe from);</li>
+    <li>produce reports for your organisation, measure service levels and improve our services; and</li>
+    <li>meet our legal, tax, audit and insurance obligations and resolve disputes.</li>
+  </ul>
+  <p>
+    Where the GDPR applies, we rely on performing our contract with you or your organisation, our legitimate interests in
+    running a secure and effective support service, compliance with legal obligations and, for marketing, your consent.
+  </p>
+</section>
+
+<section id="privacy-ai" aria-labelledby="privacy-ai-title">
+  <h3 id="privacy-ai-title">4. Automated processing and AI features</h3>
+  <p>
+    Some features use automated processing, including artificial intelligence, to help our team: for example to summarise and
+    tag tickets, suggest replies and knowledge base articles, transcribe call recordings, and search our documentation.
+    These features process the content of tickets, chats, calls and documents. Where possible we use AI models hosted on
+    infrastructure we control. AI output is used to assist our staff; it is not used to make decisions that have legal or
+    similarly significant effects on you without human involvement.
+  </p>
+</section>
+
+<section id="privacy-share" aria-labelledby="privacy-share-title">
+  <h3 id="privacy-share-title">5. Who we share it with</h3>
+  <p>We do not sell your personal information. We share it only as needed to provide our services:</p>
+  <ul>
+    <li><strong>Your organisation</strong> — administrators at your company can see tickets, staff records, assets and other information relating to their organisation.</li>
+    <li><strong>Service providers</strong> who run parts of the service for us, such as hosting, email delivery, SMS and telephony, accounting and invoicing, remote monitoring and management, endpoint security, documentation, project management, time tracking and notification services.</li>
+    <li><strong>Microsoft and other platforms</strong> your organisation asks us to manage, when we act on those systems on its behalf.</li>
+    <li><strong>Suppliers and couriers</strong> when we fulfil an order you place.</li>
+    <li><strong>Professional advisers, insurers and authorities</strong> where required by law, to protect our rights or safety, or in connection with a sale or restructure of our business.</li>
+  </ul>
+  <p>Our service providers may only use the information to provide services to us and must protect it.</p>
+</section>
+
+<section id="privacy-cookies" aria-labelledby="privacy-cookies-title">
+  <h3 id="privacy-cookies-title">6. Cookies and browser storage</h3>
+  <p>{{ app_name }} uses only the cookies it needs to work. It does not use advertising or third-party tracking cookies.</p>
+  <ul>
+    <li><strong>Session cookie</strong> — keeps you signed in. It expires when your session ends or after the maximum session length.</li>
+    <li><strong>Security (CSRF) cookie</strong> — protects your forms and actions from being submitted by other websites.</li>
+    <li><strong>Passkey sign-in cookie</strong> — briefly links the steps of a passkey sign-in.</li>
+    <li><strong>Message cookie</strong> — shows a one-off confirmation message on the next page and expires within a minute.</li>
+    <li><strong>Tray app chat cookie</strong> — keeps a chat window opened from the tray app connected for a short time.</li>
+  </ul>
+  <p>
+    Your browser's local storage is also used to remember display preferences such as table columns, collapsed panels and
+    unsent reply drafts. This stays on your device and you can clear it at any time in your browser settings.
+  </p>
+</section>
+
+<section id="privacy-security" aria-labelledby="privacy-security-title">
+  <h3 id="privacy-security-title">7. How we protect it</h3>
+  <p>
+    We take reasonable steps to protect personal information from misuse, interference, loss and unauthorised access,
+    including encrypted connections (HTTPS), hashed passwords, two-factor authentication and passkeys, encryption of stored
+    secrets and credentials, role-based access controls, rate limiting, audit logging and regular backups. When our staff
+    sign in as you to help with a problem, this is recorded in the audit log. No system is perfectly secure; if we become
+    aware of a data breach likely to cause serious harm we will notify you and the relevant regulator as required by law.
+  </p>
+</section>
+
+<section id="privacy-retention" aria-labelledby="privacy-retention-title">
+  <h3 id="privacy-retention-title">8. How long we keep it</h3>
+  <p>
+    We keep personal information for as long as we provide services to you or your organisation and afterwards for as long
+    as needed for legal, tax, accounting and dispute purposes. Audit logs are kept for 12 months by default, application logs
+    are rotated automatically, and DMARC reports and monitoring data are pruned on a schedule. When information is no longer
+    needed we delete or de-identify it. Backups are overwritten on a rolling basis.
+  </p>
+</section>
+
+<section id="privacy-rights" aria-labelledby="privacy-rights-title">
+  <h3 id="privacy-rights-title">9. Your rights and choices</h3>
+  <p>You can:</p>
+  <ul>
+    <li>view and update your name, contact details, password, two-factor and passkey settings and notification preferences from your profile;</li>
+    <li>ask for access to, or correction of, the personal information we hold about you;</li>
+    <li>ask us to delete or restrict use of your information, or object to how we use it, where the law allows;</li>
+    <li>ask for a copy of your information in a portable format where the GDPR applies;</li>
+    <li>unsubscribe from marketing emails using the link in any email (service and security notifications will still be sent); and</li>
+    <li>withdraw consent where we rely on it.</li>
+  </ul>
+  <p>
+    Where we handle your information on behalf of your organisation, we may refer your request to it. To make a request or
+    complaint, contact us by {{ contact }}. We will respond within 30 days. If you are not satisfied, you can complain to the
+    Office of the Australian Information Commissioner (<a href="https://www.oaic.gov.au" rel="noopener noreferrer" target="_blank">oaic.gov.au</a>)
+    or your local data protection authority.
+  </p>
+</section>
+
+<section id="privacy-overseas" aria-labelledby="privacy-overseas-title">
+  <h3 id="privacy-overseas-title">10. Where it is stored</h3>
+  <p>
+    The portal's database and files are stored on servers chosen by {{ legal_entity_name }}. Some of our service providers,
+    such as Microsoft, email, SMS and accounting providers, may store or process information in other countries, including the
+    United States. Where we disclose information overseas we take reasonable steps to make sure it is protected to a standard
+    comparable to this policy.
+  </p>
+</section>
+
+<section id="privacy-changes" aria-labelledby="privacy-changes-title">
+  <h3 id="privacy-changes-title">11. Changes and contact</h3>
+  <p>
+    We may update this policy as our services change. The date at the top shows when it was last updated, and we will let you
+    know about significant changes. For any privacy question, contact us by {{ contact }}.
+  </p>
+</section>

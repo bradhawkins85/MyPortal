@@ -11773,6 +11773,58 @@ async def register_page(request: Request):
     return templates.TemplateResponse(context["request"], "auth/register.html", context)
 
 
+LEGAL_POLICIES: dict[str, dict[str, str]] = {
+    "privacy": {
+        "title": "Privacy Policy",
+        "summary": "What information the portal collects, why, who it is shared with and your rights.",
+        "template": "legal/_privacy.html",
+    },
+    "acceptable-use": {
+        "title": "Acceptable Use Policy",
+        "summary": "What you may and may not do when using the portal and its connected services.",
+        "template": "legal/_acceptable_use.html",
+    },
+    "terms": {
+        "title": "Terms and Conditions",
+        "summary": "The agreement that applies when you create an account and use the portal.",
+        "template": "legal/_terms.html",
+    },
+}
+LEGAL_POLICIES_UPDATED = "2026-10-02"
+
+
+def _legal_context_extra(policy_slug: str | None) -> dict[str, Any]:
+    policy = LEGAL_POLICIES.get(policy_slug) if policy_slug else None
+    return {
+        "title": policy["title"] if policy else "Policies",
+        "legal_policies": LEGAL_POLICIES,
+        "legal_policy_slug": policy_slug if policy else None,
+        "legal_policy": policy,
+        "legal_updated": LEGAL_POLICIES_UPDATED,
+        "legal_entity_name": (settings.legal_entity_name or "").strip() or settings.app_name,
+        "legal_contact_email": (settings.legal_contact_email or "").strip()
+        or (settings.smtp_from or "").strip(),
+    }
+
+
+async def _render_legal_page(request: Request, policy_slug: str | None) -> HTMLResponse:
+    user, _ = await _get_optional_user(request)
+    context = await _build_portal_context(request, user, extra=_legal_context_extra(policy_slug))
+    return templates.TemplateResponse(context["request"], "legal/policy.html", context)
+
+
+@app.get("/legal", response_class=HTMLResponse, include_in_schema=False)
+async def legal_index_page(request: Request):
+    return await _render_legal_page(request, None)
+
+
+@app.get("/legal/{policy_slug}", response_class=HTMLResponse, include_in_schema=False)
+async def legal_policy_page(request: Request, policy_slug: str):
+    if policy_slug not in LEGAL_POLICIES:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Policy not found")
+    return await _render_legal_page(request, policy_slug)
+
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}

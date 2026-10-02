@@ -1079,6 +1079,28 @@
           {% endif %}
           <a
             class="sidebar__footer-link"
+            href="/legal"
+            title="Privacy Policy, Acceptable Use Policy and Terms and Conditions"
+            {% if request is defined and request.url.path.startswith('/legal') %}aria-current="page"{% endif %}
+          >
+            <svg
+              class="sidebar__footer-icon"
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              preserveAspectRatio="xMidYMid meet"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path
+                d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm8 1.5V8h4.5L14 3.5zM8 12v2h8v-2H8zm0 4v2h8v-2H8zm0-8v2h4V8H8z"
+                fill="currentColor"
+              />
+            </svg>
+            <span class="sr-only">Policies</span>
+          </a>
+          <a
+            class="sidebar__footer-link"
             href="https://github.com/bradhawkins85/MyPortal"
             target="_blank"
             rel="noopener noreferrer"

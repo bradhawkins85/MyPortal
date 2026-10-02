@@ -63,3 +63,14 @@
   <span class="auth-brand__name">{{ app_name }}</span>
 </div>
 {%- endmacro %}
+
+{# Links to the published policies, shown under each sign-in card. #}
+{% macro legal_links() -%}
+<nav class="auth-legal" aria-label="Policies">
+  <a href="/legal/privacy">Privacy Policy</a>
+  <span aria-hidden="true">·</span>
+  <a href="/legal/acceptable-use">Acceptable Use Policy</a>
+  <span aria-hidden="true">·</span>
+  <a href="/legal/terms">Terms and Conditions</a>
+</nav>
+{%- endmacro %}

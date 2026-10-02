@@ -101,6 +101,23 @@ class Settings(BaseSettings):
     """
 
     app_name: str = "MyPortal"
+    legal_entity_name: str = Field(
+        default="",
+        validation_alias="LEGAL_ENTITY_NAME",
+        description=(
+            "Name of the organisation operating this portal, shown in the "
+            "Privacy Policy, Acceptable Use Policy and Terms and Conditions. "
+            "Falls back to the application name when empty."
+        ),
+    )
+    legal_contact_email: str = Field(
+        default="",
+        validation_alias="LEGAL_CONTACT_EMAIL",
+        description=(
+            "Contact address for privacy and policy enquiries shown on the "
+            "legal pages. Falls back to SMTP_FROM when empty."
+        ),
+    )
     environment: str = "development"
     app_instance_id: str = Field(default="", validation_alias="APP_INSTANCE_ID")
     secret_key: str = Field(
