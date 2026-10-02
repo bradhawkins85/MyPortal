@@ -7058,8 +7058,6 @@ async def profile_ai_features_update(request: Request):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return redirect
-    from app.services import ai_consent
-
     form = await request.form()
     # A hidden "0" precedes the checkbox so an unticked box still submits.
     opt_out = any(
@@ -7069,9 +7067,7 @@ async def profile_ai_features_update(request: Request):
     target = await user_repo.get_user_by_id(int(user["id"]))
     if not target:
         return flash_redirect("/admin/profile#privacy", "Your account could not be found.", "error")
-    await ai_consent.set_user_ai_opt_out(
-        target, opt_out, actor_user_id=int(user["id"]), request=request, source="profile"
-    )
+    await _apply_user_ai_opt_out(request, user, target, opt_out=opt_out, source="profile")
     message = (
         "We won't use AI to process your requests."
         if opt_out
@@ -7306,19 +7302,46 @@ async def admin_benchmarking_page(request: Request):
     )
 
 
+async def _apply_user_ai_opt_out(
+    request: Request,
+    actor: dict[str, Any],
+    target: dict[str, Any],
+    *,
+    opt_out: bool,
+    source: str,
+) -> dict[str, Any] | None:
+    """Save an AI opt-out change and record it in the audit log."""
+
+    from app.services import ai_consent
+    from app.services import audit as audit_service
+
+    updated = await ai_consent.set_user_ai_opt_out(target, opt_out)
+    if updated is None:
+        return None
+    await audit_service.record(
+        action="user.ai_opt_out" if opt_out else "user.ai_opt_in",
+        request=request,
+        user_id=int(actor["id"]),
+        entity_type="user",
+        entity_id=int(target["id"]),
+        before=ai_consent.audit_snapshot(target),
+        after=ai_consent.audit_snapshot(updated),
+        metadata={"changed_by_self": int(actor["id"]) == int(target["id"]), "source": source},
+    )
+    return updated
+
+
 async def _admin_set_user_ai_opt_out(
     request: Request, current_user: dict[str, Any], user_id: int, *, opt_out: bool
 ) -> RedirectResponse:
     """Record an AI opt-out (or opt-in) a user asked for by email or phone."""
 
-    from app.services import ai_consent
-
     target = await user_repo.get_user_by_id(user_id)
     if not target:
         return flash_redirect("/admin/users", "User not found.", "error")
     label = target.get("email") or "this user"
-    updated = await ai_consent.set_user_ai_opt_out(
-        target, opt_out, actor_user_id=int(current_user["id"]), request=request, source="admin_users"
+    updated = await _apply_user_ai_opt_out(
+        request, current_user, target, opt_out=opt_out, source="admin_users"
     )
     if updated is None:
         state = "has already opted out of" if opt_out else "already allows"

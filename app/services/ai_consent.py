@@ -282,35 +282,25 @@ def opt_out_updates(opt_out: bool, previous: Mapping[str, Any] | None) -> dict[s
 async def set_user_ai_opt_out(
     target: Mapping[str, Any],
     opt_out: bool,
-    *,
-    actor_user_id: int,
-    request: Any = None,
-    source: str,
 ) -> dict[str, Any] | None:
-    """Store a change of the opt-out flag, audit it and purge the AI index.
+    """Store a change of the opt-out flag and purge the AI index on opt-out.
 
     Returns the updated user, or None when the flag already had that value.
+    Callers record the audit entry, since they hold the request and actor.
     """
-
-    from app.services import audit as audit_service
 
     if is_opted_out_record(target) == bool(opt_out):
         return None
     user_id = int(target["id"])
     updated = await user_repo.update_user(user_id, **opt_out_updates(bool(opt_out), target))
-    await audit_service.record(
-        action="user.ai_opt_out" if opt_out else "user.ai_opt_in",
-        request=request,
-        user_id=int(actor_user_id),
-        entity_type="user",
-        entity_id=user_id,
-        before={"ai_opt_out": bool(target.get("ai_opt_out")), "ai_opt_out_at": target.get("ai_opt_out_at")},
-        after={"ai_opt_out": bool(updated.get("ai_opt_out")), "ai_opt_out_at": updated.get("ai_opt_out_at")},
-        metadata={"changed_by_self": int(actor_user_id) == user_id, "source": source},
-    )
     if opt_out:
         try:
             await purge_user_from_rag_index(user_id)
         except Exception as exc:  # pragma: no cover - the opt-out itself is saved
             log_error("Failed to purge opted-out user from the AI index", user_id=user_id, error=str(exc))
     return updated
+
+
+def audit_snapshot(user: Mapping[str, Any] | None) -> dict[str, Any]:
+    user = user or {}
+    return {"ai_opt_out": is_opted_out_record(user), "ai_opt_out_at": user.get("ai_opt_out_at")}

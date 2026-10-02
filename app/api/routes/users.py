@@ -221,14 +221,23 @@ async def update_user(
             metadata=metadata,
         )
     if requested_opt_out is not None:
-        opted = await ai_consent.set_user_ai_opt_out(
-            updated,
-            bool(requested_opt_out),
-            actor_user_id=int(current_user["id"]),
-            request=request,
-            source="profile" if int(current_user["id"]) == user_id else "admin_api",
-        )
-        updated = opted or updated
+        opted = await ai_consent.set_user_ai_opt_out(updated, bool(requested_opt_out))
+        if opted is not None:
+            changed_by_self = int(current_user["id"]) == user_id
+            await audit_service.record(
+                action="user.ai_opt_out" if requested_opt_out else "user.ai_opt_in",
+                request=request,
+                user_id=int(current_user["id"]),
+                entity_type="user",
+                entity_id=user_id,
+                before=ai_consent.audit_snapshot(updated),
+                after=ai_consent.audit_snapshot(opted),
+                metadata={
+                    "changed_by_self": changed_by_self,
+                    "source": "profile" if changed_by_self else "admin_api",
+                },
+            )
+            updated = opted
     return updated
 
 

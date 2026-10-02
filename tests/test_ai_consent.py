@@ -86,41 +86,66 @@ def test_opt_out_updates_records_timestamp_once():
 
 
 @pytest.mark.anyio
-async def test_set_user_ai_opt_out_audits_and_purges(monkeypatch):
+async def test_set_user_ai_opt_out_saves_and_purges(monkeypatch):
     updates: list[dict[str, Any]] = []
-    audits: list[dict[str, Any]] = []
     purged: list[int] = []
 
     async def fake_update(user_id, **fields):
         updates.append(fields)
         return {"id": user_id, **fields}
 
-    async def fake_record(**kwargs):
-        audits.append(kwargs)
-
     async def fake_purge(user_id):
         purged.append(user_id)
         return {}
 
-    from app.services import audit as audit_service
-
     monkeypatch.setattr(ai_consent.user_repo, "update_user", fake_update)
-    monkeypatch.setattr(audit_service, "record", fake_record)
     monkeypatch.setattr(ai_consent, "purge_user_from_rag_index", fake_purge)
 
-    result = await ai_consent.set_user_ai_opt_out(
-        {"id": 4, "ai_opt_out": 0}, True, actor_user_id=4, source="profile"
-    )
+    result = await ai_consent.set_user_ai_opt_out({"id": 4, "ai_opt_out": 0}, True)
 
     assert result["ai_opt_out"] == 1
-    assert audits[0]["action"] == "user.ai_opt_out"
-    assert audits[0]["metadata"] == {"changed_by_self": True, "source": "profile"}
     assert purged == [4]
     # Saving the same value again is a no-op.
-    assert await ai_consent.set_user_ai_opt_out(
-        {"id": 4, "ai_opt_out": 1}, True, actor_user_id=1, source="admin_users"
-    ) is None
-    assert len(updates) == 1
+    assert await ai_consent.set_user_ai_opt_out({"id": 4, "ai_opt_out": 1}, True) is None
+    # Opting back in does not purge anything.
+    assert (await ai_consent.set_user_ai_opt_out({"id": 4, "ai_opt_out": 1}, False))["ai_opt_out"] == 0
+    assert purged == [4]
+    assert len(updates) == 2
+
+
+@pytest.mark.anyio
+async def test_user_update_api_audits_opt_out(monkeypatch):
+    from app.api.routes import users as users_route
+    from app.schemas.users import UserUpdate
+
+    audits: list[dict[str, Any]] = []
+    stored = {"id": 4, "email": "user@example.test", "ai_opt_out": 0, "ai_opt_out_at": None}
+
+    async def fake_get(user_id):
+        return dict(stored)
+
+    async def fake_update(user_id, **fields):
+        stored.update(fields)
+        return dict(stored)
+
+    async def fake_record(**kwargs):
+        audits.append(kwargs)
+
+    async def fake_purge(user_id):
+        return {}
+
+    monkeypatch.setattr(users_route.user_repo, "get_user_by_id", fake_get)
+    monkeypatch.setattr(users_route.user_repo, "update_user", fake_update)
+    monkeypatch.setattr(users_route.audit_service, "record", fake_record)
+    monkeypatch.setattr(ai_consent, "purge_user_from_rag_index", fake_purge)
+
+    result = await users_route.update_user(
+        4, UserUpdate(ai_opt_out=True), request=None, current_user={"id": 4}
+    )
+
+    assert result["ai_opt_out"] == 1 and result["ai_opt_out_at"] is not None
+    assert [entry["action"] for entry in audits] == ["user.ai_opt_out"]
+    assert audits[0]["metadata"] == {"changed_by_self": True, "source": "profile"}
 
 
 @pytest.mark.anyio
