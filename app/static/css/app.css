@@ -11125,6 +11125,15 @@ dialog.dialog::backdrop {
   box-shadow: inset 2px 0 0 var(--hf-accent);
 }
 
+.menu__subitem a .menu__icon svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.menu__subitem a[aria-current='page'] .menu__icon {
+  color: var(--hf-accent);
+}
+
 .menu__submenu--custom {
   padding-left: 0.75rem;
 }
