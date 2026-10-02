@@ -267,6 +267,33 @@ def test_out_of_office_renders_mailbox_cards_and_editor():
     assert "read-only access" in read_only
 
 
+def test_out_of_office_hides_accounts_without_mailbox_by_default():
+    mailboxes = [
+        {"display_name": "Jane Doe", "user_principal_name": "jane@example.com"},
+        {"display_name": "Shared Room", "user_principal_name": "room@example.com"},
+    ]
+    states = [
+        {"mailbox": "jane@example.com", "success": True, "error": None, "no_mailbox": False,
+         "setting": {"status": "disabled"}},
+        {"mailbox": "room@example.com", "success": False, "setting": None, "no_mailbox": True,
+         "error": "Microsoft Graph request failed (404): The mailbox is either inactive"},
+    ]
+    html = _page_env().get_template("m365/out_of_office.html").render(
+        mailboxes=mailboxes, states=states, state_error=None, outcomes=[], submitted={},
+        can_write=True, csrf_token="t",
+    )
+
+    assert 'data-oof-show-all' in html
+    assert '1 without a mailbox hidden' in html
+    assert '<dd data-oof-stat="total">1</dd>' in html
+    room = html.split('data-mailbox="room@example.com"', 1)[1].split("</li>", 1)[0]
+    assert "data-oof-no-mailbox hidden" in room
+    assert "Couldn't read" not in html.split('data-mailbox="room@example.com"', 1)[1].split("data-oof-item", 1)[0]
+    assert 'value="room@example.com" data-oof-select' not in html
+    assert 'name="mailboxes" value="room@example.com"' not in html
+    assert 'name="mailboxes" value="jane@example.com"' in html
+
+
 def _auth_env() -> jinja2.Environment:
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(TEMPLATES)), autoescape=True)
     env.globals.update(

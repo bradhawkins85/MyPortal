@@ -128,7 +128,7 @@ async def test_reads_state_and_retains_per_mailbox_failure(monkeypatch):
 
     result = await m365_out_of_office.get_automatic_replies(7)
     assert result[0]["setting"]["externalAudience"] == "contactsOnly"
-    assert result[1] == {"mailbox": "two@example.com", "success": False, "setting": None, "error": "Microsoft Graph request failed (403): denied"}
+    assert result[1] == {"mailbox": "two@example.com", "success": False, "setting": None, "error": "Microsoft Graph request failed (403): denied", "no_mailbox": False}
 
 
 @pytest.mark.anyio
@@ -330,3 +330,20 @@ async def test_slow_reads_stop_at_time_budget_so_page_still_renders(monkeypatch)
 
     assert [item["success"] for item in result] == [False] * 3
     assert result[0]["error"] == m365_out_of_office._READ_TIMEOUT_ERROR
+
+
+@pytest.mark.anyio
+async def test_accounts_without_mailbox_are_flagged(monkeypatch):
+    _patch_common(monkeypatch, _many_mailboxes(2))
+
+    def handler(method, url, body):
+        if "user1" in url:
+            return 404, {"error": {"message": "The mailbox is either inactive, soft-deleted, or is hosted on-premise."}}
+        return 200, {"automaticRepliesSetting": {"status": "disabled"}}
+
+    monkeypatch.setattr(m365_out_of_office.m365_service, "_graph_post", _fake_batch(handler))
+
+    result = await m365_out_of_office.get_automatic_replies(7)
+
+    assert [item["no_mailbox"] for item in result] == [False, True]
+    assert result[1]["success"] is False

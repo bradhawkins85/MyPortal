@@ -24,6 +24,7 @@
 {% block content %}
 {% set oof_states = {} %}
 {% for state in states %}{% set _ = oof_states.update({(state.mailbox | lower): state}) %}{% endfor %}
+{% set oof_no_mailbox = states | selectattr('no_mailbox') | list %}
 {% set oof_audience_labels = {'none': 'Colleagues only', 'contactsOnly': 'Colleagues + external contacts', 'all': 'Colleagues + everyone external'} %}
 
 {% if state_error %}<div class="alert alert--error" role="alert">Current Microsoft 365 state could not be loaded: {{ state_error }}</div>{% endif %}
@@ -63,7 +64,7 @@
   <div class="card__body card__body--stacked">
     {% if mailboxes %}
       <dl class="sif-stats" aria-label="Automatic reply summary" data-oof-stats>
-        <div class="sif-stats__item"><dt>Mailboxes</dt><dd data-oof-stat="total">{{ mailboxes | length }}</dd></div>
+        <div class="sif-stats__item"><dt>Mailboxes</dt><dd data-oof-stat="total">{{ mailboxes | length - oof_no_mailbox | length }}</dd></div>
         <div class="sif-stats__item"><dt>Replying now</dt><dd data-oof-stat="on">—</dd></div>
         <div class="sif-stats__item"><dt>Scheduled</dt><dd data-oof-stat="scheduled">—</dd></div>
         <div class="sif-stats__item"><dt>Off</dt><dd data-oof-stat="off">—</dd></div>
@@ -78,7 +79,15 @@
           <option value="scheduled">Scheduled</option>
           <option value="off">Off</option>
           <option value="error">Couldn't read</option>
+          {% if oof_no_mailbox %}<option value="nomailbox">No mailbox</option>{% endif %}
         </select>
+        {% if oof_no_mailbox %}
+          <label class="scf-switch oof__show-all">
+            <input type="checkbox" data-oof-show-all />
+            <span class="scf-switch__track" aria-hidden="true"></span>
+            <span>Show all accounts <span class="text-muted">({{ oof_no_mailbox | length }} without a mailbox hidden)</span></span>
+          </label>
+        {% endif %}
         {% if can_write %}
           <button type="button" class="button button--ghost button--small" data-oof-select-visible>Select all shown</button>
           <button type="button" class="button button--small" data-oof-new aria-haspopup="dialog" aria-controls="oof-modal">Set replies</button>
@@ -106,8 +115,9 @@
             data-mailbox="{{ upn }}"
             data-name="{{ mailbox.display_name or upn }}"
             data-search-text="{{ mailbox.display_name }} {{ upn }}"
+            {% if state and state.no_mailbox %}data-oof-no-mailbox hidden{% endif %}
           >
-            {% if can_write %}
+            {% if can_write and not (state and state.no_mailbox) %}
               <label class="oof-item__select">
                 <input type="checkbox" data-oof-select value="{{ upn }}" />
                 <span class="visually-hidden">Select {{ mailbox.display_name or upn }}</span>
@@ -120,7 +130,9 @@
                 <span class="scf-item__key">{{ upn }}</span>
               </div>
               <ul class="scf-item__chips" aria-label="Automatic reply status">
-                {% if state and not state.success %}
+                {% if state and state.no_mailbox %}
+                  <li class="scf-chip scf-chip--muted" data-oof-status title="{{ state.error }}">No mailbox</li>
+                {% elif state and not state.success %}
                   <li class="scf-chip sif-chip--warning" data-oof-status title="{{ state.error }}">Couldn't read: {{ state.error | truncate(60) }}</li>
                 {% elif not state %}
                   <li class="scf-chip scf-chip--muted" data-oof-status>Status unknown</li>
@@ -201,10 +213,13 @@
             <input type="search" class="form-input" placeholder="Filter mailboxes" aria-label="Filter mailboxes" data-oof-who-search />
             <div class="oof-who__list">
               {% for mailbox in mailboxes %}
+                {% set who_state = oof_states.get(mailbox.user_principal_name | lower) %}
+                {% if not (who_state and who_state.no_mailbox) %}
                 <label class="oof-who__row" data-oof-who-row data-search-text="{{ mailbox.display_name }} {{ mailbox.user_principal_name }}">
                   <input type="checkbox" name="mailboxes" value="{{ mailbox.user_principal_name }}" data-oof-mailbox />
                   <span><strong>{{ mailbox.display_name or mailbox.user_principal_name }}</strong><small class="text-muted">{{ mailbox.user_principal_name }}</small></span>
                 </label>
+                {% endif %}
               {% endfor %}
             </div>
           </div>

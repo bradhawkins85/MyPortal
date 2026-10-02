@@ -312,9 +312,17 @@ async def get_automatic_replies(company_id: int) -> list[dict[str, object]]:
     for mailbox, (status, body, error) in zip(names, responses):
         if error is None:
             setting = (body or {}).get("automaticRepliesSetting") or {}
-            results.append({"mailbox": mailbox, "success": True, "setting": setting, "error": None})
+            results.append({
+                "mailbox": mailbox, "success": True, "setting": setting, "error": None,
+                "no_mailbox": False,
+            })
         else:
-            results.append({"mailbox": mailbox, "success": False, "setting": None, "error": error})
+            # Graph answers 404 for accounts with no Exchange mailbox (unlicensed,
+            # inactive, soft-deleted or hosted on-premises).
+            results.append({
+                "mailbox": mailbox, "success": False, "setting": None, "error": error,
+                "no_mailbox": status == 404,
+            })
     return results
 
 
