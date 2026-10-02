@@ -231,6 +231,7 @@ class AgentQueryRequest(BaseModel):
     source_filters: list[constr(strip_whitespace=True, min_length=1, max_length=40)] = (
         Field(default_factory=list)
     )
+    conversation_id: str | None = Field(default=None, max_length=64)
 
     @field_validator("source_filters")
     @classmethod
@@ -284,6 +285,10 @@ class AgentQueryResponse(BaseModel):
     sources: AgentSources
     context: AgentContext
     quality_response_id: int | None = None
+    conversation_id: str | None = None
+    needs_clarification: bool = False
+    clarifying_question: str | None = None
+    clarification_options: list[str] = Field(default_factory=list)
 
 
 class AgentFeedbackRequest(BaseModel):

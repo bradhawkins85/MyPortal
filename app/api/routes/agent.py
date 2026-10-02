@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -21,9 +22,11 @@ from app.schemas.agent import (
 from app.services import agent as agent_service
 from app.services import modules as modules_service
 from app.core.database import db
+from app.core.logging import logger
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
 from app.repositories import agent_saved_searches as saved_search_repo
+from app.repositories import agent_conversations as agent_conversations_repo
 from app.repositories import ai_quality as quality_repo
 from app.services import audit as audit_service
 from app.services import rag_outbox, rag_relationships as rag_relationship_service
@@ -42,6 +45,104 @@ async def require_llm_search() -> None:
         )
 
 
+async def _load_agent_conversation(
+    payload: AgentQueryRequest,
+    current_user: dict,
+    active_company_id: int | None,
+) -> tuple[str, list[dict[str, Any]], str, str]:
+    """Resolve (or mint) a conversation for this user turn.
+
+    Returns ``(conversation_id, prior_turns, original_query, effective_query)``
+    where ``effective_query`` combines the original question with every user
+    refinement so retrieval can use the full conversational intent.
+    """
+
+    user_id = int(current_user["id"])
+    incoming_id = str(payload.conversation_id or "").strip()
+    conversation_id = incoming_id or uuid.uuid4().hex
+    prior_turns: list[dict[str, Any]] = []
+    original_query = payload.query
+
+    if incoming_id:
+        existing = await agent_conversations_repo.get(
+            incoming_id, user_id=user_id, company_id=active_company_id
+        )
+        if existing:
+            prior_turns = list(existing.get("turns") or [])
+            original_query = str(existing.get("original_query") or "") or payload.query
+
+    await agent_conversations_repo.create(
+        conversation_id,
+        user_id=user_id,
+        company_id=active_company_id,
+        original_query=original_query,
+        source_filters=list(payload.source_filters or []),
+    )
+
+    user_parts: list[str] = []
+
+    def _push(text: str | None) -> None:
+        text = (text or "").strip()
+        if text and text not in user_parts:
+            user_parts.append(text)
+
+    _push(original_query)
+    for turn in prior_turns:
+        if str(turn.get("role") or "") == "user":
+            _push(str(turn.get("content") or ""))
+    _push(payload.query)
+
+    effective_query = " ".join(user_parts)
+    return conversation_id, prior_turns, original_query, effective_query
+
+
+async def _persist_agent_turns(
+    conversation_id: str,
+    prior_turns: list[dict[str, Any]],
+    *,
+    user_query: str,
+    original_query: str,
+    source_filters: list[str] | None,
+    result: dict[str, Any],
+) -> None:
+    """Persist this user turn and the agent reply. Best-effort: a persistence
+    failure is logged rather than raised so it never breaks the answer."""
+
+    base_turn = len(prior_turns)
+    try:
+        await agent_conversations_repo.append_turn(
+            conversation_id,
+            turn_number=base_turn + 1,
+            role="user",
+            content=user_query,
+            payload={
+                "original_query": original_query,
+                "source_filters": list(source_filters or []),
+            },
+        )
+        agent_content = (
+            result.get("clarifying_question")
+            or result.get("answer")
+            or result.get("message")
+            or ""
+        )
+        await agent_conversations_repo.append_turn(
+            conversation_id,
+            turn_number=base_turn + 2,
+            role="agent",
+            content=str(agent_content),
+            payload={
+                "needs_clarification": bool(result.get("needs_clarification")),
+                "clarifying_question": result.get("clarifying_question"),
+                "status": result.get("status"),
+            },
+        )
+    except Exception:
+        logger.exception(
+            "agent_conversation persist failed conversation_id=%s", conversation_id
+        )
+
+
 @router.post("/query", response_model=AgentQueryResponse, dependencies=[Depends(require_llm_search)])
 async def query_agent(
     payload: AgentQueryRequest,
@@ -51,12 +152,17 @@ async def query_agent(
     active_company_id = getattr(request.state, "active_company_id", None)
     memberships = getattr(request.state, "available_companies", None)
     started = time.monotonic()
+    conversation_id, prior_turns, original_query, effective_query = (
+        await _load_agent_conversation(payload, current_user, active_company_id)
+    )
     result = await agent_service.execute_agent_query(
-        payload.query,
+        effective_query,
         current_user,
         active_company_id=active_company_id,
         memberships=memberships,
         source_filters=payload.source_filters,
+        conversation_id=conversation_id,
+        prior_turns=prior_turns,
     )
     try:
         result["quality_response_id"] = await quality_repo.record_response(
@@ -68,6 +174,14 @@ async def query_agent(
         )
     except Exception:
         result["quality_response_id"] = None
+    await _persist_agent_turns(
+        conversation_id,
+        prior_turns,
+        user_query=payload.query,
+        original_query=original_query,
+        source_filters=list(payload.source_filters or []),
+        result=result,
+    )
     return AgentQueryResponse(**result)
 
 
@@ -126,12 +240,19 @@ async def stream_agent_query(
 
         async def run_query() -> None:
             try:
+                conversation_id, prior_turns, original_query, effective_query = (
+                    await _load_agent_conversation(
+                        payload, current_user, active_company_id
+                    )
+                )
                 result = await agent_service.execute_agent_query(
-                    payload.query,
+                    effective_query,
                     current_user,
                     active_company_id=active_company_id,
                     memberships=memberships,
                     source_filters=payload.source_filters,
+                    conversation_id=conversation_id,
+                    prior_turns=prior_turns,
                     event_callback=publish,
                 )
                 try:
@@ -148,6 +269,14 @@ async def stream_agent_query(
                     )
                 except Exception:
                     result["quality_response_id"] = None
+                await _persist_agent_turns(
+                    conversation_id,
+                    prior_turns,
+                    user_query=payload.query,
+                    original_query=original_query,
+                    source_filters=list(payload.source_filters or []),
+                    result=result,
+                )
                 await queue.put({"event": "result", **result})
                 await queue.put({"event": "done", "metrics": result.get("metrics")})
             except asyncio.CancelledError:

@@ -414,6 +414,10 @@
     let lastAnswer = '';
     let qualityResponseId = null;
     let activeQueryController = null;
+    // Conversation id to continue on the next submit, set only while a
+    // clarifying question is on screen. A fresh (non-reply) question starts a
+    // new conversation because this stays null.
+    let pendingConversationId = null;
 
     function selectedSourceFilters() {
       return filterInputs.filter((inputEl) => inputEl.checked).map((inputEl) => inputEl.value);
@@ -445,6 +449,39 @@
       }
       if (results) results.hidden = true;
       if (createTicketButton) createTicketButton.hidden = true;
+    }
+
+    function renderClarification(question, options) {
+      if (!answer) return;
+      answer.hidden = false;
+      if (results) results.hidden = false;
+      if (!answerBody) return;
+      answerBody.innerHTML = '';
+      const heading = document.createElement('p');
+      heading.className = 'agent-answer__paragraph agent-answer__clarification';
+      heading.textContent = question || 'Could you add a little more detail so I can find the right information?';
+      answerBody.appendChild(heading);
+      const list = document.createElement('div');
+      list.className = 'agent-clarification-options';
+      (Array.isArray(options) ? options : []).forEach((option) => {
+        const label = String(option || '').trim();
+        if (!label) return;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'agent-clarification-option';
+        button.textContent = label;
+        button.addEventListener('click', () => {
+          if (!input || !form) return;
+          input.value = label;
+          if (typeof form.requestSubmit === 'function') {
+            form.requestSubmit();
+          } else {
+            form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+          }
+        });
+        list.appendChild(button);
+      });
+      if (list.children.length) answerBody.appendChild(list);
     }
 
     function openTicketModal() {
@@ -550,13 +587,16 @@
       lastQuery = query;
       lastAnswer = '';
 
+      const conversationId = pendingConversationId;
+      pendingConversationId = null;
+
       const controller = new AbortController();
       activeQueryController = controller;
       try {
         const response = await fetch('/api/agent/query/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query, source_filters: sourceFilters }),
+          body: JSON.stringify({ query, source_filters: sourceFilters, ...(conversationId ? { conversation_id: conversationId } : {}) }),
           signal: controller.signal,
         });
 
@@ -593,6 +633,7 @@
               if (results) results.hidden = false;
               if (status) status.textContent = 'Generating answer…';
             }
+            if (item.event === 'clarification' && status) status.textContent = 'Let me ask a quick question…';
             if (item.event === 'result') payload = item;
             if (item.event === 'error') throw new Error(item.message || 'Agent request failed');
           });
@@ -612,6 +653,12 @@
             if (feedback) feedback.hidden = !qualityResponseId;
           } else if (answer) {
             answer.hidden = true;
+          }
+          if (payload.needs_clarification) {
+            pendingConversationId = payload.conversation_id || null;
+            renderClarification(payload.clarifying_question, payload.clarification_options);
+          } else {
+            pendingConversationId = null;
           }
 
           if (payload.sources) {

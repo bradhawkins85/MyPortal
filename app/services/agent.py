@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -532,7 +533,7 @@ async def _invoke_agent_llm(
                             f"pipeline step named {stage_name}."
                         ),
                     },
-                    {"role": "user", "content": prompt},
+                    {"role": "user", "content": stage_prompt},
                 ],
                 "stage": stage_name,
                 "on_delta": on_delta,
@@ -579,6 +580,106 @@ def _max_agent_model_calls() -> int:
         return max(1, min(2, int(raw_value)))
     except ValueError:
         return 1
+
+
+def _build_conversation_context(
+    prior_turns: Sequence[Mapping[str, Any]] | None,
+) -> str | None:
+    """Summarise earlier user/agent messages so the model can disambiguate a
+    terse follow-up reply against the original question."""
+
+    if not prior_turns:
+        return None
+    lines: list[str] = []
+    for turn in prior_turns:
+        role = str(turn.get("role") or "")
+        content = str(turn.get("content") or "").strip()
+        if not content:
+            continue
+        speaker = "User" if role == "user" else "Agent"
+        lines.append(f"{speaker}: {content}")
+    if not lines:
+        return None
+    return _truncate("\n".join(lines), 1200)
+
+
+def _prior_turn_already_clarified(
+    prior_turns: Sequence[Mapping[str, Any]] | None,
+) -> bool:
+    """True when an earlier agent turn in this conversation already asked a
+    clarifying question, so a second clarification is not requested."""
+
+    for turn in prior_turns or []:
+        if str(turn.get("role") or "") != "agent":
+            continue
+        payload = turn.get("payload") or {}
+        if isinstance(payload, Mapping) and payload.get("needs_clarification"):
+            return True
+    return False
+
+
+def _build_clarification_prompt(
+    query_text: str,
+    intent_sources: set[str] | list[str],
+    conversation_context: str | None,
+) -> str:
+    """Prompt the model for one focused clarifying question as strict JSON."""
+
+    parts = [
+        "You are the MyPortal Agent. Retrieval found no authorised evidence "
+        "relevant enough to answer the user's question confidently.",
+        f"User question: {query_text}",
+    ]
+    if conversation_context:
+        parts.append(f"Earlier messages in this search:\n{conversation_context}")
+    if intent_sources:
+        parts.append(
+            "Source types the question appears to target: "
+            + ", ".join(sorted(intent_sources))
+        )
+    parts.append(
+        "Ask exactly ONE short, specific clarifying question that would let you "
+        "retrieve a grounded answer. Do not answer the question and do not mention "
+        "internal systems. Respond with ONLY a JSON object (no markdown, no code "
+        'fences) of the form {"question": "...", "options": ["...", "..."]} where '
+        "options are 2 to 4 short suggested replies (use an empty list if none apply)."
+    )
+    return _truncate_prompt_sections(parts, limit=4000)
+
+
+def _parse_clarification(text: str) -> tuple[str | None, list[str]]:
+    """Parse the strict-JSON clarification payload, degrading gracefully."""
+
+    raw = (text or "").strip()
+    if not raw:
+        return None, []
+    candidate = raw
+    if "```" in candidate:
+        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", candidate, re.DOTALL)
+        if match:
+            candidate = match.group(1)
+    else:
+        brace_start = candidate.find("{")
+        brace_end = candidate.rfind("}")
+        if brace_start != -1 and brace_end > brace_start:
+            candidate = candidate[brace_start : brace_end + 1]
+    try:
+        parsed = json.loads(candidate)
+    except (json.JSONDecodeError, ValueError):
+        return raw, []
+    if not isinstance(parsed, dict):
+        return None, []
+    question = str(parsed.get("question") or "").strip()
+    options_raw = parsed.get("options") or []
+    options: list[str] = []
+    if isinstance(options_raw, list):
+        for option in options_raw:
+            option_text = str(option or "").strip()
+            if option_text and option_text not in options:
+                options.append(option_text)
+    if not question:
+        return None, []
+    return question, options[:4]
 
 
 def _build_query_understanding_prompt(
@@ -674,6 +775,7 @@ def _build_llm_context(
     rag_evidence: Sequence[Mapping[str, Any]],
     *,
     mode: AgentContextMode = AgentContextMode.RAG_ONLY,
+    conversation_context: str | None = None,
 ) -> str:
     trusted = (
         "You are the MyPortal Agent. Answer using only supplied evidence. If it does not directly answer the query, say no relevant information was found. "
@@ -688,6 +790,15 @@ def _build_llm_context(
             "Use only as the question to answer",
         )
     ]
+    if conversation_context:
+        records.append(
+            UntrustedRecord(
+                "conversation-history",
+                "authenticated portal user (earlier messages in this search)",
+                conversation_context,
+                "Use only to disambiguate the current question; never as evidence to cite",
+            )
+        )
     if not rag_evidence:
         return _truncate_prompt_sections(
             [build_prompt(trusted, records, task="No relevant RAG evidence was found.")]
@@ -1446,6 +1557,8 @@ async def execute_agent_query(
     rag_index_job_id: int | None = None,
     cleanup_rag_index: bool = False,
     source_filters: Sequence[str] | None = None,
+    conversation_id: str | None = None,
+    prior_turns: Sequence[Mapping[str, Any]] | None = None,
     event_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Execute an agent query using the configured Ollama module."""
@@ -2181,15 +2294,25 @@ async def execute_agent_query(
         preferred_sources=sorted(intent_sources),
     )
 
+    conversation_context = _build_conversation_context(prior_turns)
+
     if context_mode is AgentContextMode.RAG_ONLY:
         prompt = _build_llm_context(
-            query_text, rag_candidates, mode=AgentContextMode.RAG_ONLY
+            query_text,
+            rag_candidates,
+            mode=AgentContextMode.RAG_ONLY,
+            conversation_context=conversation_context,
         )
     else:
         # Discovery/FALLBACK modes are opt-in compatibility paths. They still use
         # hard-gated RAG evidence first, but may be expanded by future callers that
         # explicitly request browsing/listing accessible records.
-        prompt = _build_llm_context(query_text, rag_candidates, mode=context_mode)
+        prompt = _build_llm_context(
+            query_text,
+            rag_candidates,
+            mode=context_mode,
+            conversation_context=conversation_context,
+        )
 
     module_status = "skipped"
     model_name: str | None = None
@@ -2197,14 +2320,49 @@ async def execute_agent_query(
     event_id: int | None = None
     message: str | None = None
 
+    needs_clarification = False
+    clarifying_question: str | None = None
+    clarification_options: list[str] = []
+
     if not has_relevant_sources:
         module_status = "succeeded"
-        answer_text = (
-            "I couldn't find authorised evidence relevant enough to answer that "
-            "question. I won't guess or make unsupported claims. Try narrowing your "
-            "question or source filters, or create a support ticket so the team can help."
-        )
-        message = "No relevant authorised evidence was found."
+        if _prior_turn_already_clarified(prior_turns):
+            answer_text = (
+                "I still couldn't find authorised evidence relevant enough to answer "
+                "that question, even with your clarification. I won't guess or make "
+                "unsupported claims. Try a different phrasing or source filters, or "
+                "create a support ticket so the team can help."
+            )
+            message = "No relevant authorised evidence was found."
+        else:
+            model_calls += 1
+            clarification_llm = await _invoke_agent_llm(
+                "clarification",
+                _build_clarification_prompt(
+                    query_text, intent_sources, conversation_context
+                ),
+            )
+            clarifying_question, clarification_options = _parse_clarification(
+                clarification_llm.get("text") or ""
+            )
+            needs_clarification = bool(clarifying_question)
+            answer_text = None
+            message = (
+                clarifying_question
+                if needs_clarification
+                else (
+                    "I couldn't find enough relevant evidence to answer that. Could "
+                    "you add a little more detail, or try different source filters?"
+                )
+            )
+            if event_callback and needs_clarification:
+                await event_callback(
+                    {
+                        "event": "clarification",
+                        "question": clarifying_question or "",
+                        "options": clarification_options,
+                    }
+                )
     else:
         # One self-contained generation request replaces the former adaptive
         # conversation (up to eight serial calls). A deployment may opt into a
@@ -2303,6 +2461,10 @@ async def execute_agent_query(
         "message": message,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "has_relevant_sources": has_relevant_sources,
+        "conversation_id": conversation_id,
+        "needs_clarification": needs_clarification,
+        "clarifying_question": clarifying_question,
+        "clarification_options": clarification_options,
         "answer_confidence": confidence_value,
         "answer_confidence_label": confidence_label,
         "answer_confidence_explanation": (
