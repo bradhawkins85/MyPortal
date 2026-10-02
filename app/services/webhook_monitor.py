@@ -527,14 +527,49 @@ async def force_retry(event_id: int) -> dict[str, Any] | None:
     return await webhook_repo.get_event(event_id)
 
 
+_OLLAMA_EVENT_PREFIX = "module.ollama."
+
+
+async def _prepare_ollama_retry(
+    headers: dict[str, str], payload: Any
+) -> tuple[dict[str, str], Any]:
+    """Rebuild a replayable request for an Ollama/OpenAI/llama.cpp module event.
+
+    Older events wrapped the provider body as ``{"request_body": body}`` and the
+    stored ``Authorization`` header is always redacted, so replaying the stored
+    values verbatim produces an invalid request (e.g. "model name is missing").
+    """
+
+    if (
+        isinstance(payload, Mapping)
+        and set(payload.keys()) == {"request_body"}
+        and isinstance(payload["request_body"], Mapping)
+    ):
+        payload = dict(payload["request_body"])
+    auth_key = next((k for k in headers if k.lower() == "authorization"), None)
+    if auth_key is not None:
+        headers.pop(auth_key)
+        api_key = ""
+        with suppress(Exception):
+            settings = await import_module("app.services.modules").get_module_settings(
+                "ollama"
+            )
+            api_key = str((settings or {}).get("api_key") or "").strip()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+    return headers, payload
+
+
 async def _attempt_event(event: dict[str, Any]) -> None:
     event_id = int(event["id"])
     attempt = int(event.get("attempt_count") or 0) + 1
     max_attempts = int(event.get("max_attempts") or 1)
     backoff_seconds = int(event.get("backoff_seconds") or 300)
     headers = {str(key): str(value) for key, value in (event.get("headers") or {}).items()}
-    safe_headers = _redact_headers(headers, sensitive=_SENSITIVE_HEADERS)
     payload = event.get("payload")
+    if str(event.get("name") or "").startswith(_OLLAMA_EVENT_PREFIX):
+        headers, payload = await _prepare_ollama_retry(headers, payload)
+    safe_headers = _redact_headers(headers, sensitive=_SENSITIVE_HEADERS)
     request_body = _prepare_request_body(payload)
     log_info(
         "Delivering webhook",
