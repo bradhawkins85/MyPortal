@@ -728,6 +728,14 @@ body.navigation--top .menu__toggle {
   white-space: nowrap;
 }
 
+/* Drop-down sub-items already carry their own icon, so drop the sidebar's
+ * indent and line them up with the custom-group drop-downs (e.g. Assets). */
+body.navigation--top .menu__subitem a {
+  min-height: 2.4rem;
+  font-size: 0.925rem;
+  padding: var(--space-gap-tight) var(--space-compact);
+}
+
 body.navigation--top .menu__item > a[aria-current='page'] {
   box-shadow: inset 0 -2px 0 var(--hf-accent);
 }
