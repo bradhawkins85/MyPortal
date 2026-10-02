@@ -173,7 +173,10 @@ def test_relationship_evaluator_uses_configured_module_model_by_default():
     assert _evaluation_payload("compare", "") == {
         "prompt": "compare",
         "format": "json",
+        "temperature": 0,
+        "max_tokens": 1024,
     }
+    assert _evaluation_payload("compare", "", max_tokens=256)["max_tokens"] == 256
     assert _evaluation_payload("compare", "  specialist-model  ")["model"] == (
         "specialist-model"
     )
@@ -810,3 +813,86 @@ async def test_kb_articles_needing_update_is_empty_when_rag_disabled(monkeypatch
         fail,
     )
     assert await rag_relationships_service.kb_articles_needing_update() == {}
+
+
+@pytest.mark.anyio
+async def test_context_overflow_retries_smaller_then_fails_only_that_job(monkeypatch):
+    from app.services import rag_relationships
+
+    payloads: list[dict] = []
+    reset_calls: list[int] = []
+    failed_calls: list[tuple[int, str]] = []
+
+    async def fake_matching_paused():
+        return False
+
+    async def fake_get_module(slug, *, redact=True):
+        return {"slug": slug, "enabled": True}
+
+    async def fake_claim_jobs(limit):
+        return [
+            {
+                "id": 11,
+                "source_document_id": 1,
+                "target_document_id": 2,
+                "claim_token": "claim-11",
+            }
+        ]
+
+    async def fake_get_document_with_content(document_id):
+        return {
+            "id": document_id,
+            "source_type": "knowledge_base",
+            "source_id": document_id,
+            "title": f"Doc {document_id}",
+            "content": "word " * 5000,
+            "content_hash": f"hash-{document_id}",
+        }
+
+    async def fake_relationship_current(source_id, target_id):
+        return False
+
+    async def fake_trigger_module(slug, payload, **kwargs):
+        payloads.append(payload)
+        return {
+            "status": "failed",
+            "last_error": "HTTP 500",
+            "response": {
+                "error": {
+                    "code": 500,
+                    "message": "Context size has been exceeded.",
+                    "type": "server_error",
+                }
+            },
+        }
+
+    async def fake_reset_queue_item(queue_id, claim_token, note=None):
+        reset_calls.append(queue_id)
+
+    async def fake_fail_queue_item(queue_id, claim_token, error, *, max_retries):
+        failed_calls.append((queue_id, error))
+
+    monkeypatch.setattr(rag_relationships, "_evaluator_retry_after", 0.0)
+    monkeypatch.setattr(rag_relationships.rel_repo, "matching_paused", fake_matching_paused)
+    monkeypatch.setattr(rag_relationships.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(rag_relationships.rel_repo, "claim_jobs", fake_claim_jobs)
+    monkeypatch.setattr(
+        rag_relationships.rel_repo,
+        "get_document_with_content",
+        fake_get_document_with_content,
+    )
+    monkeypatch.setattr(
+        rag_relationships.rel_repo, "relationship_current", fake_relationship_current
+    )
+    monkeypatch.setattr(rag_relationships.modules_service, "trigger_module", fake_trigger_module)
+    monkeypatch.setattr(rag_relationships.rel_repo, "reset_queue_item", fake_reset_queue_item)
+    monkeypatch.setattr(rag_relationships.rel_repo, "fail_queue_item", fake_fail_queue_item)
+
+    assert await rag_relationships.evaluate_next_batch(limit=1) == 0
+    assert len(payloads) == 2
+    assert all(p["max_tokens"] >= 64 for p in payloads)
+    assert len(payloads[1]["prompt"]) < len(payloads[0]["prompt"])
+    assert reset_calls == []
+    assert len(failed_calls) == 1
+    assert "context size exceeded" in failed_calls[0][1]
+    assert not rag_relationships._evaluator_in_backoff()

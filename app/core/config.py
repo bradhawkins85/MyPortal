@@ -567,6 +567,16 @@ class Settings(BaseSettings):
         le=20000,
         description="Maximum input tokens sent to the relationship evaluator.",
     )
+    rag_relationship_max_output_tokens: int = Field(
+        default=1024,
+        validation_alias="RAG_RELATIONSHIP_MAX_OUTPUT_TOKENS",
+        ge=64,
+        le=8192,
+        description=(
+            "Maximum completion tokens the relationship evaluator may generate. "
+            "Prevents runaway output from exhausting the model context window."
+        ),
+    )
     rag_relationship_min_score: float = Field(
         default=0.55, validation_alias="RAG_RELATIONSHIP_MIN_SCORE", ge=0.0, le=1.0
     )

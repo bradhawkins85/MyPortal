@@ -78,10 +78,39 @@ _TRUNCATION_NOTICE = (
     "\n[Document content truncated to fit the relationship context window.]"
 )
 _CHARS_PER_TOKEN = 3
+# Bound the completion so a runaway generation (a JSON grammar looping on
+# whitespace, or a reasoning model thinking at length) cannot fill the model's
+# context window and fail with "Context size has been exceeded".
+_DEFAULT_MAX_OUTPUT_TOKENS = 1024
+_CONTEXT_EXCEEDED_MARKERS = (
+    "context size has been exceeded",
+    "exceed_context_size",
+    "exceeds the available context size",
+    "context length",
+    "context window",
+)
 
 
 class RelationshipEvaluatorUnavailable(RuntimeError):
     """Raised when the configured relationship LLM cannot currently run."""
+
+
+class RelationshipContextExceeded(RuntimeError):
+    """Raised when one pair overflows the evaluator's context window."""
+
+
+def _relationship_context_exceeded(response: Any) -> bool:
+    """Return whether a failed module response reports a context overflow."""
+
+    if not isinstance(response, Mapping):
+        return False
+    if str(response.get("status") or "").lower() not in {"error", "failed"}:
+        return False
+    try:
+        text = json.dumps(response, default=str).lower()
+    except (TypeError, ValueError):
+        text = str(response).lower()
+    return any(marker in text for marker in _CONTEXT_EXCEEDED_MARKERS)
 
 
 def _relationship_evaluator_unavailable_reason(response: Any) -> str | None:
@@ -311,10 +340,20 @@ Return JSON only:
     )
 
 
-def _evaluation_payload(prompt: str, model_override: str) -> dict[str, Any]:
+def _evaluation_payload(
+    prompt: str,
+    model_override: str,
+    *,
+    max_tokens: int = _DEFAULT_MAX_OUTPUT_TOKENS,
+) -> dict[str, Any]:
     """Build a request without masking the module's configured default model."""
 
-    payload: dict[str, Any] = {"prompt": prompt, "format": "json"}
+    payload: dict[str, Any] = {
+        "prompt": prompt,
+        "format": "json",
+        "temperature": 0,
+        "max_tokens": max_tokens,
+    }
     if model := model_override.strip():
         payload["model"] = model
     return payload
@@ -470,17 +509,31 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
                         int(job["id"]), "SKIPPED", claim_token
                     )
                     return
-                evaluation_payload = _evaluation_payload(
-                    _prompt(
-                        source,
-                        target,
-                        token_budget=settings.rag_relationship_max_context_tokens,
-                    ),
-                    settings.rag_relationship_model,
-                )
-                response = await modules_service.trigger_module(
-                    "ollama", evaluation_payload, background=False
-                )
+                token_budget = settings.rag_relationship_max_context_tokens
+                response: Any = None
+                # A pair that overflows the context is retried once with half
+                # the document budget before the job is failed on its own;
+                # it must not pause the evaluator for every other pair.
+                for attempt in range(2):
+                    evaluation_payload = _evaluation_payload(
+                        _prompt(source, target, token_budget=token_budget),
+                        settings.rag_relationship_model,
+                        max_tokens=settings.rag_relationship_max_output_tokens,
+                    )
+                    response = await modules_service.trigger_module(
+                        "ollama", evaluation_payload, background=False
+                    )
+                    if not _relationship_context_exceeded(response):
+                        break
+                    if attempt == 0:
+                        token_budget = max(500, token_budget // 2)
+                        continue
+                    raise RelationshipContextExceeded(
+                        "Relationship evaluator context size exceeded; lower "
+                        "RAG_RELATIONSHIP_MAX_CONTEXT_TOKENS or "
+                        "RAG_RELATIONSHIP_MAX_OUTPUT_TOKENS, or increase the "
+                        "model server's per-slot context size"
+                    )
                 unavailable_reason = _relationship_evaluator_unavailable_reason(
                     response
                 )
