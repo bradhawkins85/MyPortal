@@ -2165,7 +2165,7 @@ def _scc_token_claim_digest(token: str) -> str:
     app_id = str(claims.get("appid") or claims.get("azp") or "").strip()
     return (
         f"aud={claims.get('aud')!r} appid={app_id!r} "
-        f"scope={claims.get('scope')!r} "
+        f"scp={claims.get('scp') or claims.get('scope')!r} "
         f"adminconsenttoken={claims.get('adminconsenttoken')!r} "
         f"upn={claims.get('preferred_username') or claims.get('upn')!r} "
         f"oid={claims.get('oid')!r}"
@@ -2182,6 +2182,27 @@ def _jwt_appid(token: str) -> str | None:
     claims = _jwt_claims(token)
     app_id = str(claims.get("appid") or claims.get("azp") or "").strip()
     return app_id or None
+
+
+def _scc_anchor_mailbox(token: str, route_organization: str) -> str | None:
+    """Return the ``X-AnchorMailbox`` routing hint matching the token kind.
+
+    Purview authorizes the anchor identity together with the token, so the
+    anchor must describe the same principal.  A delegated (user) token carries
+    an ``scp`` claim and is anchored to the signed-in administrator's UPN, as
+    ``Connect-IPPSSession -UserPrincipalName`` does.  Sending the app-style
+    anchor with a delegated token makes Purview reject an otherwise valid
+    Compliance Administrator with 401.  App-only tokens keep the app anchor.
+    """
+    claims = _jwt_claims(token)
+    if claims.get("scp"):
+        upn = str(claims.get("upn") or claims.get("preferred_username") or "").strip()
+        if upn and "@" in upn:
+            return f"UPN:{upn}"
+    app_id = str(claims.get("appid") or claims.get("azp") or "").strip()
+    if app_id and route_organization:
+        return f"app:{app_id}@{route_organization}"
+    return None
 
 
 async def _scc_invoke_command(
@@ -2202,10 +2223,10 @@ async def _scc_invoke_command(
     Administrator (or Global Administrator) role so that cmdlets such as
     ``Get-ProtectionAlert`` and ``New-ProtectionAlert`` succeed.
 
-    An ``X-AnchorMailbox`` header is included when the ``appid`` claim can be
-    decoded from *scc_token*. Compliance-search callers must supply the tenant's
-    initial domain because using the tenant GUID in the route can make Purview
-    look for ``CN={tenant GUID}`` in the FFO test forest.
+    An ``X-AnchorMailbox`` header matching the token kind is included (the
+    administrator's UPN for delegated tokens, the app for app-only tokens).
+    Compliance-search callers must supply the tenant's initial domain because
+    using the tenant GUID in the route can make Purview look for ``CN={tenant GUID}`` in the FFO test forest.
 
     Returns the raw JSON response body on success.  Raises :exc:`M365Error` on any
     non-200 HTTP status.
@@ -2229,9 +2250,9 @@ async def _scc_invoke_command(
         "Accept-Encoding": "identity",
         "Content-Type": "application/json; charset=utf-8",
     }
-    appid = _jwt_appid(scc_token)
-    if appid and route_organization:
-        headers["X-AnchorMailbox"] = f"app:{appid}@{route_organization}"
+    anchor = _scc_anchor_mailbox(scc_token, route_organization)
+    if anchor:
+        headers["X-AnchorMailbox"] = anchor
     for attempt in range(_SCC_CONNECT_RETRIES + 1):
         try:
             async with monitored_client(httpx.AsyncClient, timeout=_SCC_TIMEOUT, follow_redirects=False) as client:
