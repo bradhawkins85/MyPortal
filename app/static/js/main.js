@@ -3,27 +3,59 @@
 
   // When the session expires the server answers script-driven requests with
   // 401 and an X-Session-Expired header. Send the user back to sign in rather
-  // than surfacing a raw error message.
+  // than surfacing a raw error message. Covers both fetch and XMLHttpRequest.
   (function installSessionExpiryRedirect() {
-    if (typeof window === 'undefined' || typeof window.fetch !== 'function' || window.__sessionExpiryFetchPatched) {
+    if (typeof window === 'undefined' || window.__sessionExpiryRedirectInstalled) {
       return;
     }
-    window.__sessionExpiryFetchPatched = true;
-    const originalFetch = window.fetch.bind(window);
+    window.__sessionExpiryRedirectInstalled = true;
     let redirecting = false;
-    window.fetch = function (...args) {
-      return originalFetch(...args).then((response) => {
-        if (!redirecting && response && response.status === 401 && response.headers.get('X-Session-Expired') === '1') {
-          redirecting = true;
-          const path = window.location.pathname + window.location.search;
-          const target = path && path !== '/' && !path.startsWith('/login')
-            ? '/login?next=' + encodeURIComponent(path)
-            : '/login';
-          window.location.assign(target);
-        }
-        return response;
-      });
-    };
+
+    function redirectToLogin() {
+      if (redirecting) {
+        return;
+      }
+      redirecting = true;
+      const path = window.location.pathname + window.location.search;
+      const target = path && path !== '/' && !path.startsWith('/login')
+        ? '/login?next=' + encodeURIComponent(path)
+        : '/login';
+      window.location.assign(target);
+    }
+
+    function isSessionExpired(status, headerValue) {
+      return status === 401 && headerValue === '1';
+    }
+
+    if (typeof window.fetch === 'function') {
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = function (...args) {
+        return originalFetch(...args).then((response) => {
+          if (response && isSessionExpired(response.status, response.headers.get('X-Session-Expired'))) {
+            redirectToLogin();
+          }
+          return response;
+        });
+      };
+    }
+
+    if (typeof window.XMLHttpRequest === 'function' && window.XMLHttpRequest.prototype) {
+      const originalSend = window.XMLHttpRequest.prototype.send;
+      window.XMLHttpRequest.prototype.send = function (...args) {
+        this.addEventListener('load', () => {
+          let header = null;
+          try {
+            header = this.getResponseHeader('X-Session-Expired');
+          } catch (error) {
+            header = null;
+          }
+          if (isSessionExpired(this.status, header)) {
+            redirectToLogin();
+          }
+        });
+        return originalSend.apply(this, args);
+      };
+    }
   })();
 
   const TOAST_CLASSES = [
