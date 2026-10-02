@@ -417,7 +417,7 @@ async def get_device_config(
 @router.post(
     "/outlook-signatures",
     response_model=TrayOutlookSignaturesResponse,
-    summary="Render the active signature for this device's Classic Outlook accounts",
+    summary="Render the signatures available to this device's Classic Outlook accounts",
 )
 async def get_outlook_signatures(
     payload: TrayOutlookSignaturesRequest,

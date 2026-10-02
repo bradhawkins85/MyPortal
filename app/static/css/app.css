@@ -17245,6 +17245,75 @@ body.scf-modal-open {
   font-size: 0.8rem;
 }
 
+.sig-choice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.sig-choice__option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.sig-choice__option input {
+  margin-top: 0.2rem;
+}
+
+.sig-rules {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+  padding: var(--space-gap-base);
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+}
+
+.sig-rules__match {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.sig-editor select.sig-rules__match-select {
+  width: auto;
+}
+
+.sig-rules__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sig-rule {
+  display: grid;
+  grid-template-columns: minmax(0, 11rem) minmax(0, 9rem) minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .sig-rule {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .sig-rule [data-sig-rule-values] {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 900px) {
   .sig-editor__body.modal__body {
     grid-template-columns: minmax(0, 1fr);

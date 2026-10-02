@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import date, datetime, timezone
 from contextlib import suppress
+import json
 from typing import Any
 
 from app.core.database import db
@@ -61,7 +62,28 @@ def _normalise_record(row: Mapping[str, Any] | None) -> SignatureTemplateRecord 
         record["priority"] = int(record["priority"])
     if "is_default" in record:
         record["is_default"] = bool(record["is_default"])
+    if "targeting_rules" in record:
+        record["targeting_rules"] = _decode_rules(record.get("targeting_rules"))
     return record
+
+
+def _decode_rules(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if not value:
+        return []
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(decoded, list):
+        return []
+    return [item for item in decoded if isinstance(item, dict)]
+
+
+def _encode_rules(rules: Any) -> str | None:
+    items = _decode_rules(rules)
+    return json.dumps(items) if items else None
 
 
 async def list_templates(company_id: int) -> list[SignatureTemplateRecord]:
@@ -70,6 +92,7 @@ async def list_templates(company_id: int) -> list[SignatureTemplateRecord]:
         """
         SELECT id, company_id, slug, name, description, html_content, text_content, status,
                priority, is_default, schedule_start_on, schedule_end_on,
+               signature_role, targeting_match, targeting_rules,
                created_by_user_id, updated_by_user_id, published_at, disabled_at,
                created_at, updated_at
         FROM m365_signature_templates
@@ -87,6 +110,7 @@ async def get_template(company_id: int, template_id: int) -> SignatureTemplateRe
         """
         SELECT id, company_id, slug, name, description, html_content, text_content, status,
                priority, is_default, schedule_start_on, schedule_end_on,
+               signature_role, targeting_match, targeting_rules,
                created_by_user_id, updated_by_user_id, published_at, disabled_at,
                created_at, updated_at
         FROM m365_signature_templates
@@ -103,6 +127,7 @@ async def get_template_by_slug(company_id: int, slug: str) -> SignatureTemplateR
         """
         SELECT id, company_id, slug, name, description, html_content, text_content, status,
                priority, is_default, schedule_start_on, schedule_end_on,
+               signature_role, targeting_match, targeting_rules,
                created_by_user_id, updated_by_user_id, published_at, disabled_at,
                created_at, updated_at
         FROM m365_signature_templates
@@ -128,6 +153,9 @@ async def create_template(
     schedule_end_on: date | None,
     created_by_user_id: int | None,
     updated_by_user_id: int | None,
+    signature_role: str = "primary",
+    targeting_match: str = "all",
+    targeting_rules: list[dict[str, Any]] | None = None,
     published_at: datetime | None = None,
     disabled_at: datetime | None = None,
 ) -> SignatureTemplateRecord:
@@ -137,9 +165,10 @@ async def create_template(
         INSERT INTO m365_signature_templates (
             company_id, slug, name, description, html_content, text_content, status,
             priority, is_default, schedule_start_on, schedule_end_on,
+            signature_role, targeting_match, targeting_rules,
             created_by_user_id, updated_by_user_id, published_at, disabled_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -153,6 +182,9 @@ async def create_template(
             1 if is_default else 0,
             schedule_start_on,
             schedule_end_on,
+            signature_role,
+            targeting_match,
+            _encode_rules(targeting_rules),
             created_by_user_id,
             updated_by_user_id,
             published_at.replace(tzinfo=None) if isinstance(published_at, datetime) else published_at,
@@ -185,6 +217,9 @@ async def update_template(
         "is_default",
         "schedule_start_on",
         "schedule_end_on",
+        "signature_role",
+        "targeting_match",
+        "targeting_rules",
         "created_by_user_id",
         "updated_by_user_id",
         "published_at",
@@ -196,7 +231,9 @@ async def update_template(
     await _ensure_connection()
     for key, value in fields.items():
         assignments.append(f"{key} = %s")
-        if isinstance(value, datetime):
+        if key == "targeting_rules":
+            params.append(_encode_rules(value))
+        elif isinstance(value, datetime):
             params.append(value.replace(tzinfo=None))
         else:
             params.append(value)

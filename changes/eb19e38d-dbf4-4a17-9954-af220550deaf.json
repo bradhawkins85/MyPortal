@@ -1,0 +1,7 @@
+{
+  "guid": "eb19e38d-dbf4-4a17-9954-af220550deaf",
+  "occurred_at": "2026-10-02T00:00Z",
+  "change_type": "Feature",
+  "summary": "Target M365 signatures at specific staff, job titles, departments, sites or custom fields, and give staff several signatures with one primary plus additional signatures synced to Classic Outlook.",
+  "content_hash": "f1fd7dcef9e3b171708a08763adfd85b881a4a65b9117f7ba6d2a4eca0e5c240"
+}

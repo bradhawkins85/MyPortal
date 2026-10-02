@@ -125,10 +125,73 @@
 
         <section class="scf-panel sig-panel" id="sig-panel-schedule" role="tabpanel" aria-labelledby="sig-tab-schedule" data-sig-panel="schedule">
           <div class="scf-grid">
+            <fieldset class="form-field scf-grid__full sig-choice">
+              <legend class="form-label">Signature type</legend>
+              <label class="sig-choice__option">
+                <input type="radio" name="signature_role" value="primary" {% if form_values.signature_role != 'additional' %}checked{% endif %} data-sig-role />
+                <span><strong>Primary</strong> — can be chosen as the person's primary signature, added automatically to new messages and replies.</span>
+              </label>
+              <label class="sig-choice__option">
+                <input type="radio" name="signature_role" value="additional" {% if form_values.signature_role == 'additional' %}checked{% endif %} data-sig-role />
+                <span><strong>Additional</strong> — available for the person to pick in Outlook, but never their primary signature.</span>
+              </label>
+              <p class="form-help">Everyone can have several signatures. Each person gets every active signature that applies to them; the highest-priority primary signature becomes their primary and the rest are available as additional signatures.</p>
+            </fieldset>
+
+            <fieldset class="form-field scf-grid__full sig-choice" data-sig-targeting>
+              <legend class="form-label">Who it applies to</legend>
+              <label class="sig-choice__option">
+                <input type="radio" name="target_mode" value="everyone" {% if form_values.target_mode != 'conditions' %}checked{% endif %} data-sig-target-mode />
+                <span><strong>Everyone</strong> in the company</span>
+              </label>
+              <label class="sig-choice__option">
+                <input type="radio" name="target_mode" value="conditions" {% if form_values.target_mode == 'conditions' %}checked{% endif %} data-sig-target-mode />
+                <span><strong>Only staff who match conditions</strong> — for example specific staff, job titles, departments or sites</span>
+              </label>
+
+              <div class="sig-rules" data-sig-rules-block>
+                <p class="sig-rules__match">
+                  <label for="signature-targeting-match">Staff must match</label>
+                  <select class="form-input sig-rules__match-select" id="signature-targeting-match" name="targeting_match" data-sig-match>
+                    <option value="all" {% if form_values.targeting_match != 'any' %}selected{% endif %}>all conditions</option>
+                    <option value="any" {% if form_values.targeting_match == 'any' %}selected{% endif %}>any condition</option>
+                  </select>
+                </p>
+                {% macro rule_row(rule) %}
+                  <li class="sig-rule" data-sig-rule>
+                    <select class="form-input" name="rule_field" aria-label="Staff attribute" data-sig-rule-field>
+                      {% for field in targeting_fields %}
+                        <option value="{{ field.key }}" {% if rule.field == field.key %}selected{% endif %}>{{ field.label }}</option>
+                      {% endfor %}
+                    </select>
+                    <select class="form-input" name="rule_operator" aria-label="Comparison" data-sig-rule-operator>
+                      {% for key, label in targeting_operators.items() %}
+                        <option value="{{ key }}" {% if rule.operator == key %}selected{% endif %}>{{ label }}</option>
+                      {% endfor %}
+                    </select>
+                    <input class="form-input" name="rule_values" value="{{ rule['values'] or '' }}" placeholder="Values, separated by commas" aria-label="Values, separated by commas" autocomplete="off" list="sig-suggest-{{ (rule.field or targeting_fields[0].key) | replace('.', '-') }}" data-sig-rule-values />
+                    <button type="button" class="button button--ghost button--small" data-sig-rule-remove hidden>Remove<span class="visually-hidden"> condition</span></button>
+                  </li>
+                {% endmacro %}
+                <ul class="sig-rules__list" data-sig-rules>
+                  {% for rule in form_values.targeting_rules %}{{ rule_row(rule) }}{% endfor %}
+                  {{ rule_row({"field": "job_title", "operator": "in", "values": ""}) }}
+                </ul>
+                <button type="button" class="button button--ghost button--small" data-sig-rule-add hidden>+ Add condition</button>
+                <p class="form-help">Matching ignores letter case. Separate several values with commas — for example <em>Sales Manager, Account Manager</em>. Use <strong>Staff member (email)</strong> to pick specific people and <strong>Site / city</strong> or a custom staff field for locations. Conditions without values are ignored.</p>
+                <p class="scf-error" data-sig-error="targeting" hidden></p>
+                {% for field in targeting_fields %}
+                  <datalist id="sig-suggest-{{ field.key | replace('.', '-') }}">
+                    {% for value in field.suggestions %}<option value="{{ value }}"></option>{% endfor %}
+                  </datalist>
+                {% endfor %}
+              </div>
+            </fieldset>
+
             <div class="form-field">
               <label class="form-label" for="signature-priority">Priority</label>
               <input class="form-input sig-editor__narrow" id="signature-priority" name="priority" type="number" min="0" step="1" value="{{ form_values.priority or '0' }}" data-sig-priority />
-              <p class="form-help">Higher numbers win while the template is active.</p>
+              <p class="form-help">When several primary signatures apply to someone, the highest number becomes their primary. Additional signatures are listed in priority order.</p>
             </div>
             <div class="form-field">
               <span class="form-label">Fallback</span>
@@ -137,7 +200,7 @@
                 <span class="scf-switch__track" aria-hidden="true"></span>
                 <span>Use as the default primary template</span>
               </label>
-              <p class="form-help">The default is used as the fallback when no higher-priority active template applies.</p>
+              <p class="form-help">The default is used as the fallback when no higher-priority active template applies. Only primary signatures can be the default.</p>
             </div>
             <div class="form-field">
               <label class="form-label" for="signature-schedule-start">Activation start date <span class="scf-optional">optional</span></label>
@@ -149,7 +212,7 @@
               <p class="scf-error" data-sig-error="schedule" hidden></p>
             </div>
             <p class="scf-sentence scf-grid__full" role="status" aria-live="polite" data-sig-schedule-summary>Dates use {{ schedule_timezone }}.</p>
-            <p class="form-help scf-grid__full">Dates use <strong>{{ schedule_timezone }}</strong>. When several published templates are active, MyPortal picks by priority, then the default, then the earliest start date. Publishing doesn't deploy to Outlook; client deployment is not configured.</p>
+            <p class="form-help scf-grid__full">Dates use <strong>{{ schedule_timezone }}</strong>. When several published primary templates apply to a person, MyPortal picks by priority, then the default, then the earliest start date. Publishing doesn't deploy to Outlook on the web; use Deploy for that. Classic Outlook sync (when enabled) installs the primary and additional signatures on devices.</p>
           </div>
         </section>
       </div>
@@ -177,6 +240,9 @@
         {% if preview %}
           <section class="sig-preview__result" aria-labelledby="sig-preview-title" data-sig-server-preview>
             <p class="scf-preview__eyebrow" id="sig-preview-title">As they'll see it</p>
+            {% if preview.targeted is defined and not preview.targeted %}
+              <div class="alert alert--warning" role="status">This person doesn't match the conditions under <strong>When it's used</strong>, so they won't receive this signature.</div>
+            {% endif %}
             {% if preview.missing_tokens %}
               <div class="sig-preview__missing" role="alert">
                 <p><strong>Missing values</strong> — these variables have no value for this person:</p>

@@ -33,7 +33,7 @@
         <div class="card__body">
           <strong>Classic Outlook (tray agent):</strong>
           {% if classic_outlook_enabled %}
-            Enabled — the MyPortal tray agent on Windows devices writes the current primary template into Classic Outlook for each signed-in user's company mailboxes and makes it the default, re-checking hourly.
+            Enabled — the MyPortal tray agent on Windows devices writes each signed-in user's signatures into Classic Outlook for their company mailboxes, makes their primary signature the default and adds their additional signatures to the signature picker, re-checking hourly.
           {% else %}
             Disabled — Classic Outlook signatures on devices are not managed.
           {% endif %}
@@ -49,7 +49,8 @@
       {% if current_primary %}
         <div class="card card--panel">
           <div class="card__body">
-            <strong>Current primary template:</strong> {{ current_primary.name }} <code>{{ current_primary.slug }}</code>
+            <strong>Primary for everyone:</strong> {{ current_primary.name }} <code>{{ current_primary.slug }}</code>
+            <br><small class="text-muted">Staff matched by a higher-priority targeted signature get that one as their primary instead.</small>
           </div>
         </div>
       {% endif %}
@@ -61,6 +62,7 @@
                 <th scope="col">Name</th>
                 <th scope="col">Slug</th>
                 <th scope="col">MyPortal publication</th>
+                <th scope="col">Applies to</th>
                 <th scope="col">Priority</th>
                 <th scope="col">Schedule</th>
                 <th scope="col">Updated</th>
@@ -74,9 +76,11 @@
                     {{ item.name }}
                     {% if current_primary and current_primary.id == item.id %}<span class="badge badge--success">Primary</span>{% endif %}
                     {% if item.is_default %}<span class="badge badge--info">Default</span>{% endif %}
+                    {% if item.signature_role == 'additional' %}<span class="badge">Additional</span>{% endif %}
                   </td>
                   <td><code>{{ item.slug }}</code></td>
                   <td>{{ item.status|replace('_', ' ')|title }}{% if item.status == 'published' %}<br><small class="text-muted">{{ 'Active for MyPortal' if current_primary and current_primary.id == item.id else 'Scheduled/available for MyPortal' }}</small>{% endif %}</td>
+                  <td>{{ item.audience }}</td>
                   <td>{{ item.priority or 0 }}</td>
                   <td>
                     {% if item.schedule_start_on or item.schedule_end_on %}
@@ -114,7 +118,7 @@
               {% else %}{% set state, state_label = 'published', 'Published' %}{% endif %}
             {% elif item.status == 'disabled' %}{% set state, state_label = 'disabled', 'Disabled' %}
             {% else %}{% set state, state_label = 'draft', 'Draft' %}{% endif %}
-            <li class="sig-card{% if item.status != 'published' %} sig-card--muted{% endif %}" data-sig-item data-sig-search-text="{{ [item.name, item.slug, item.description or ''] | join(' ') }}">
+            <li class="sig-card{% if item.status != 'published' %} sig-card--muted{% endif %}" data-sig-item data-sig-search-text="{{ [item.name, item.slug, item.description or '', item.audience] | join(' ') }}">
               <a class="sig-card__thumb" href="/m365/signatures/{{ item.id }}/edit" tabindex="-1" aria-hidden="true">
                 {% if item.html_content %}
                   <iframe class="sig-card__frame" sandbox="" loading="lazy" title="" srcdoc="<!doctype html><meta charset='utf-8'><style>body{margin:12px;font:13px/1.4 Arial,sans-serif;color:#1f2937;background:#fff}img{max-width:100%;height:auto}</style>{{ item.html_content }}"></iframe>
@@ -131,6 +135,8 @@
                 <ul class="scf-item__chips" aria-label="Signature summary">
                   <li class="scf-chip sig-state sig-state--{{ state }}">{{ state_label }}</li>
                   {% if item.is_default %}<li class="scf-chip scf-chip--logic">Default</li>{% endif %}
+                  {% if item.signature_role == 'additional' %}<li class="scf-chip">Additional</li>{% endif %}
+                  {% if item.targeting_rules %}<li class="scf-chip" title="{{ item.audience }}">Targeted: {{ item.targeting_rules | length }} condition{{ '' if item.targeting_rules | length == 1 else 's' }}</li>{% endif %}
                   {% if item.priority %}<li class="scf-chip">Priority {{ item.priority }}</li>{% endif %}
                   {% if starts or ends %}
                     <li class="scf-chip">{% if starts %}<time datetime="{{ starts.isoformat() }}" data-sig-date>{{ starts.isoformat() }}</time>{% else %}Now{% endif %} → {% if ends %}<time datetime="{{ ends.isoformat() }}" data-sig-date>{{ ends.isoformat() }}</time>{% else %}no end{% endif %}</li>
@@ -176,7 +182,8 @@
         <li>Preview uses live staff, company, custom-variable, and automation-token data before publication.</li>
         <li>Deployed signatures are used by Outlook on the web and the new Outlook. Classic Outlook for Windows keeps signatures on each device; enable Classic Outlook sync above so the MyPortal tray agent keeps them up to date. Outlook for Mac is not managed.</li>
         <li>If roaming signatures are active in the tenant, Exchange ignores deployed signatures; the Deploy page shows this and can switch the tenant to Exchange-managed signatures.</li>
-        <li>Deploying replaces each selected mailbox's current signature.</li>
+        <li>Deploying replaces each selected mailbox's current signature. Outlook on the web and the new Outlook hold one MyPortal signature per mailbox, so additional signatures reach users through Classic Outlook sync.</li>
+        <li>Use <strong>When it's used</strong> on a signature to target staff by name, job title, department, site or custom field, and to make it a primary or additional signature.</li>
       </ul>
     </div>
   </section>
