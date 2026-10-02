@@ -128,6 +128,16 @@ def test_privacy_policy_mentions_ticket_email_tracking(client):
     assert "block remote images" in response.text
 
 
+def test_privacy_policy_discloses_automatic_ticket_routing_updates(client):
+    response = client.get("/legal/privacy")
+
+    assert response.status_code == 200
+    assert "automatically rename a ticket with a more descriptive subject" in response.text
+    assert "set its category and priority" in response.text
+    assert "easier to identify and route" in response.text
+    assert "tell us and we will review it" in response.text
+
+
 def test_privacy_policy_lists_ticket_reply_draft_cookie(client):
     """The cookie list must include the encrypted ticket reply draft cookie."""
     response = client.get("/legal/privacy")
@@ -140,6 +150,15 @@ def test_privacy_policy_lists_ticket_reply_draft_cookie(client):
     # The draft is kept in a cookie, not local storage, so it must not be
     # described as part of the browser's local storage.
     assert "unsent reply drafts" not in response.text
+
+
+def test_terms_disclose_automatic_ticket_subject_updates(client):
+    response = client.get("/legal/terms")
+
+    assert response.status_code == 200
+    assert "AI may automatically update a ticket's subject, category and priority" in response.text
+    assert "for identification and routing" in response.text
+    assert "Our staff can review and correct these changes at any time" in response.text
 
 
 def test_terms_disclaim_warranty_and_developer_liability(client):
