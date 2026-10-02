@@ -677,9 +677,10 @@ async def reported_emails_page(request: Request):
         days = reported_service.DEFAULT_LOOKBACK_DAYS
     days = max(1, min(days, reported_service.MAX_LOOKBACK_DAYS))
     alerts: list[dict] = []
+    warnings: list[str] = []
     load_error = None
     try:
-        alerts = await reported_service.list_reported_alerts(company_id, days=days)
+        alerts, warnings = await reported_service.load_reported_emails(company_id, days=days)
     except (reported_service.ReportedEmailError, m365_service.M365Error) as exc:
         load_error = str(exc)
     if kind != "all":
@@ -689,6 +690,7 @@ async def reported_emails_page(request: Request):
         alert["search"] = searches.get(alert["id"])
     return await _main()._render_template("m365/reported_emails.html", request, user, extra={
         "title": "Reported emails", "alerts": alerts, "load_error": load_error,
+        "load_warnings": warnings,
         "kind": kind, "days": days,
     })
 

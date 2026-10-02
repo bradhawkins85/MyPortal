@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -259,3 +260,302 @@ def test_reported_emails_template_renders_alert_rows():
     assert "2026-10-01 22:04" in body and "2026-10-02 00:04" in body
     assert "4 matched" in body
     assert "Review search" in body
+
+
+def _submission(**overrides):
+    item = {
+        "@odata.type": "#microsoft.graph.security.emailContentThreatSubmission",
+        "id": "49c5ef5b-1f65-444a-e6b9-08d772ea2059",
+        "category": "phishing",
+        "source": "user",
+        "status": "succeeded",
+        "createdDateTime": "2026-10-01T23:05:00Z",
+        "receivedDateTime": "2026-10-01T23:04:00Z",
+        "recipientEmailAddress": "Scarlett@example.com.au",
+        "sender": "Storage Notice <service.kJz@breaking87ddb171.tulsipurkhabar.com>",
+        "subject": "Storage full",
+        "internetMessageId": "<abc@mail.example>",
+        "createdBy": {"user": {"email": "scarlett@example.com.au"}},
+    }
+    item.update(overrides)
+    return item
+
+
+def test_summarise_submission_maps_category_sender_and_window():
+    summary = service.summarise_submission(_submission())
+    assert summary["id"] == "submission:49c5ef5b-1f65-444a-e6b9-08d772ea2059"
+    assert summary["source"] == "submission"
+    assert summary["kind"] == "phish"
+    assert summary["report_label"] == "Phish"
+    assert summary["p1_sender"] == "service.kJz@breaking87ddb171.tulsipurkhabar.com"
+    assert summary["window_start"] == datetime(2026, 10, 1, 22, 4)
+    assert summary["window_end"] == datetime(2026, 10, 2, 0, 4)
+    assert service.build_alert_query(summary).startswith(
+        '(Received>=2026-10-01T22:04:00 AND Received<=2026-10-02T00:04:00) AND '
+        '(From:"service.kJz@breaking87ddb171.tulsipurkhabar.com")'
+    )
+
+
+@pytest.mark.parametrize(
+    ("category", "kind", "label"),
+    [("spam", "junk", "Junk"), ("malware", "phish", "Malware"), ("notJunk", "other", "Not junk")],
+)
+def test_summarise_submission_categories(category, kind, label):
+    summary = service.summarise_submission(_submission(category=category))
+    assert (summary["kind"], summary["report_label"]) == (kind, label)
+
+
+def _fake_graph(monkeypatch, responses, audit_rows=None):
+    calls: list[str] = []
+    exo_calls: list[tuple[str, dict]] = []
+
+    async def fake_exo_token(company_id):
+        return "exo-token", "tenant-id"
+
+    async def fake_exo(token, tenant, cmdlet, params=None):
+        exo_calls.append((cmdlet, params or {}))
+        if isinstance(audit_rows, Exception):
+            raise audit_rows
+        return {"value": list(audit_rows or [])}
+
+    monkeypatch.setattr(m365_service, "_acquire_exo_access_token", fake_exo_token)
+    monkeypatch.setattr(m365_service, "_exo_invoke_command", fake_exo)
+    monkeypatch.setattr(service, "_exo_calls", exo_calls, raising=False)
+
+    async def fake_token(company_id, *, force_client_credentials=False, force_refresh=False):
+        return "token"
+
+    async def fake_get(token, url):
+        calls.append(url)
+        for prefix, response in responses:
+            if url.startswith(prefix):
+                if isinstance(response, Exception):
+                    raise response
+                return response
+        raise AssertionError(url)
+
+    monkeypatch.setattr(m365_service, "acquire_access_token", fake_token)
+    monkeypatch.setattr(m365_service, "_graph_get", fake_get)
+    return calls
+
+
+def _recent(value: str) -> str:
+    """Shift a fixture timestamp to yesterday so the lookback filter keeps it."""
+    return (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%dT") + value
+
+
+@pytest.mark.anyio
+async def test_load_reported_emails_uses_submissions_when_alerts_are_empty(monkeypatch):
+    """Plan 1 tenants: alerts_v2 has nothing, submissions hold the user reports."""
+    _fake_graph(monkeypatch, [
+        (service._ALERTS_URL, {"value": []}),
+        (service._SUBMISSIONS_URL, {"value": [
+            _submission(createdDateTime=_recent("23:05:00Z")),
+            _submission(id="admin", source="administrator", createdDateTime=_recent("23:05:00Z")),
+        ]}),
+    ])
+    items, warnings = await service.load_reported_emails(4, days=7)
+    assert [item["id"] for item in items] == ["submission:49c5ef5b-1f65-444a-e6b9-08d772ea2059"]
+    assert warnings == []
+
+
+@pytest.mark.anyio
+async def test_load_reported_emails_prefers_alert_over_matching_submission(monkeypatch):
+    alert = _alert(createdDateTime=_recent("23:05:10Z"))
+    alert["evidence"][1]["internetMessageId"] = "<ABC@mail.example>"
+    _fake_graph(monkeypatch, [
+        (service._ALERTS_URL, {"value": [alert]}),
+        (service._SUBMISSIONS_URL, {"value": [_submission(createdDateTime=_recent("23:06:00Z"))]}),
+    ])
+    items, _ = await service.load_reported_emails(4, days=7)
+    assert [item["source"] for item in items] == ["alert"]
+
+
+@pytest.mark.anyio
+async def test_load_reported_emails_reports_a_failed_source_as_warning(monkeypatch):
+    _fake_graph(monkeypatch, [
+        (service._ALERTS_URL, {"value": []}),
+        (service._SUBMISSIONS_URL, m365_service.M365Error("Microsoft Graph request failed (403)", http_status=403)),
+    ])
+    items, warnings = await service.load_reported_emails(4)
+    assert items == []
+    assert len(warnings) == 1 and "ThreatSubmission.Read.All" in warnings[0]
+    assert warnings[0].startswith("Threat submissions:")
+
+
+@pytest.mark.anyio
+async def test_load_reported_emails_raises_when_every_source_fails(monkeypatch):
+    error = m365_service.M365Error("Microsoft Graph request failed (500)", http_status=500)
+    _fake_graph(
+        monkeypatch, [(service._ALERTS_URL, error), (service._SUBMISSIONS_URL, error)],
+        audit_rows=m365_service.M365Error("Exchange Online failed (500)", http_status=500),
+    )
+    with pytest.raises(service.ReportedEmailError):
+        await service.load_reported_emails(4)
+
+
+@pytest.mark.anyio
+async def test_list_reported_submissions_retries_without_rejected_filter(monkeypatch):
+    calls = _fake_graph(monkeypatch, [
+        (service._SUBMISSIONS_URL + "?", m365_service.M365Error("bad filter", http_status=400)),
+        (service._SUBMISSIONS_URL, {"value": [
+            _submission(createdDateTime=_recent("23:05:00Z")),
+            _submission(id="old", createdDateTime="2020-01-01T00:00:00Z"),
+        ]}),
+    ])
+    items = await service.list_reported_submissions(4, days=7)
+    assert [item["id"] for item in items] == ["submission:49c5ef5b-1f65-444a-e6b9-08d772ea2059"]
+    assert calls[-1] == service._SUBMISSIONS_URL
+
+
+@pytest.mark.anyio
+async def test_get_reported_alert_loads_submission_by_prefixed_id(monkeypatch):
+    calls = _fake_graph(monkeypatch, [(service._SUBMISSIONS_URL + "/", _submission())])
+    summary = await service.get_reported_alert(4, "submission:49c5ef5b-1f65-444a-e6b9-08d772ea2059")
+    assert summary["source"] == "submission"
+    assert calls == [service._SUBMISSIONS_URL + "/49c5ef5b-1f65-444a-e6b9-08d772ea2059"]
+
+
+def test_reported_emails_template_shows_source_warnings():
+    stub_base = "{% block header_actions %}{% endblock %}{% block styles %}{% endblock %}{% block content %}{% endblock %}"
+    env = Environment(
+        loader=ChoiceLoader([DictLoader({"base.html": stub_base}), FileSystemLoader(TEMPLATES_DIR)]),
+        autoescape=select_autoescape(("html",)),
+    )
+    row = service.summarise_submission(_submission())
+    row["search"] = None
+    body = env.get_template("m365/reported_emails.html").render(
+        alerts=[row], load_error=None, load_warnings=["Submissions unavailable"], kind="all", days=30,
+    )
+    assert "Submissions unavailable" in body
+    assert 'action="/m365/reported-emails/submission%3A49c5ef5b-1f65-444a-e6b9-08d772ea2059/search"' in body
+    assert ">Submissions</a>" in body
+
+
+def _audit_record(**overrides):
+    data = {
+        "CreationTime": "2026-10-01T23:05:10",
+        "Id": "4278982f-c627-443e-63f7-08df201071be",
+        "Operation": "UserSubmission",
+        "RecordType": 29,
+        "UserId": "Scarlett@example.com.au",
+        "MessageDate": "2026-10-01T23:04:00",
+        "P1Sender": "service.kJz@breaking87ddb171.tulsipurkhabar.com",
+        "P2Sender": '"-Storage Service Notice-" <email.DZ3lH@breaking87ddb171.tulsipurkhabar.com>',
+        "Recipients": ["Scarlett@example.com.au"],
+        "Subject": "Storage full",
+        "SubmissionContent": [
+            {"Name": "SubmissionType", "Value": "Phish"},
+            {"Name": "SubmissionSource", "Value": "Microsoft"},
+            {"Name": "OriginalVerdict", "Value": "NotSpam"},
+        ],
+        "RescanResult": {"RescanVerdict": "Phish"},
+    }
+    data.update(overrides)
+    return {"CreationDate": data["CreationTime"], "UserIds": data["UserId"], "AuditData": json.dumps(data)}
+
+
+def test_summarise_audit_record_reads_user_submission():
+    summary = service.summarise_audit_record(_audit_record())
+    assert summary["source"] == "audit"
+    assert summary["id"] == "audit:4278982f-c627-443e-63f7-08df201071be:" + str(
+        int(datetime(2026, 10, 1, 23, 5, 10, tzinfo=timezone.utc).timestamp())
+    )
+    assert summary["kind"] == "phish" and summary["report_label"] == "Phish"
+    assert summary["p1_sender"] == "service.kJz@breaking87ddb171.tulsipurkhabar.com"
+    assert summary["p2_sender"] == "email.DZ3lH@breaking87ddb171.tulsipurkhabar.com"
+    assert summary["p2_sender_name"] == "-Storage Service Notice-"
+    assert summary["recipient"] == "Scarlett@example.com.au"
+    assert summary["window_start"] == datetime(2026, 10, 1, 22, 4)
+    assert summary["window_end"] == datetime(2026, 10, 2, 0, 4)
+
+
+@pytest.mark.parametrize(
+    ("value", "kind", "label"),
+    [("Junk", "junk", "Junk"), ("NotJunk", "other", "Not junk"), ("Malware", "phish", "Malware")],
+)
+def test_summarise_audit_record_category_ignores_microsoft_verdicts(value, kind, label):
+    record = _audit_record(SubmissionContent=[
+        {"Name": "OriginalVerdict", "Value": "Phish"},
+        {"Name": "SubmissionType", "Value": value},
+    ])
+    summary = service.summarise_audit_record(record)
+    assert (summary["kind"], summary["report_label"]) == (kind, label)
+
+
+@pytest.mark.anyio
+async def test_load_reported_emails_uses_audit_log_on_business_standard(monkeypatch):
+    """No Defender for Office 365: Graph sources fail or are empty, audit has the report."""
+    yesterday = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%dT")
+    _fake_graph(
+        monkeypatch,
+        [
+            (service._ALERTS_URL, {"value": []}),
+            (service._SUBMISSIONS_URL, m365_service.M365Error("Microsoft Graph request failed (403)", http_status=403)),
+        ],
+        audit_rows=[
+            _audit_record(CreationTime=yesterday + "23:05:10", MessageDate=yesterday + "23:04:00"),
+            _audit_record(CreationTime=yesterday + "23:05:10", MessageDate=yesterday + "23:04:00"),
+        ],
+    )
+    items, warnings = await service.load_reported_emails(4, days=7)
+    assert [item["source"] for item in items] == ["audit"]
+    assert len(warnings) == 1
+    cmdlet, params = service._exo_calls[0]
+    assert cmdlet == "Search-UnifiedAuditLog"
+    assert params["Operations"] == "UserSubmission"
+    assert params["StartDate"].endswith("Z") and params["EndDate"].endswith("Z")
+
+
+@pytest.mark.anyio
+async def test_load_reported_emails_drops_audit_record_matching_submission(monkeypatch):
+    yesterday = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%dT")
+    _fake_graph(
+        monkeypatch,
+        [
+            (service._ALERTS_URL, {"value": []}),
+            (service._SUBMISSIONS_URL, {"value": [_submission(
+                createdDateTime=yesterday + "23:05:00Z", receivedDateTime=yesterday + "23:04:00Z",
+            )]}),
+        ],
+        audit_rows=[_audit_record(CreationTime=yesterday + "23:05:10", MessageDate=yesterday + "23:04:00")],
+    )
+    items, warnings = await service.load_reported_emails(4, days=7)
+    assert [item["source"] for item in items] == ["submission"]
+    assert warnings == []
+
+
+@pytest.mark.anyio
+async def test_get_reported_alert_finds_audit_record_near_its_creation_time(monkeypatch):
+    record = _audit_record()
+    summary_id = service.summarise_audit_record(record)["id"]
+    _fake_graph(monkeypatch, [], audit_rows=[_audit_record(Id="other"), record])
+    summary = await service.get_reported_alert(4, summary_id)
+    assert summary["id"] == summary_id
+    _, params = service._exo_calls[0]
+    assert params["StartDate"] == "2026-10-01T22:55:10Z"
+    assert params["EndDate"] == "2026-10-01T23:15:10Z"
+
+
+@pytest.mark.anyio
+async def test_get_reported_alert_rejects_malformed_audit_reference(monkeypatch):
+    _fake_graph(monkeypatch, [], audit_rows=[])
+    with pytest.raises(LookupError):
+        await service.get_reported_alert(4, "audit:no-timestamp")
+
+
+def test_reported_emails_template_collapses_warnings_when_rows_exist():
+    stub_base = "{% block header_actions %}{% endblock %}{% block styles %}{% endblock %}{% block content %}{% endblock %}"
+    env = Environment(
+        loader=ChoiceLoader([DictLoader({"base.html": stub_base}), FileSystemLoader(TEMPLATES_DIR)]),
+        autoescape=select_autoescape(("html",)),
+    )
+    row = service.summarise_audit_record(_audit_record())
+    row["search"] = None
+    body = env.get_template("m365/reported_emails.html").render(
+        alerts=[row], load_error=None, load_warnings=["Defender alerts: x", "Threat submissions: y"],
+        kind="all", days=30,
+    )
+    assert "2 report sources unavailable for this tenant" in body
+    assert 'class="alert alert--warning"' not in body
+    assert "Reported by Scarlett@example.com.au" in body
