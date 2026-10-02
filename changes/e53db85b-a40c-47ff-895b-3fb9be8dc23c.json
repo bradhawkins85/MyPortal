@@ -1,0 +1,7 @@
+{
+  "guid": "e53db85b-a40c-47ff-895b-3fb9be8dc23c",
+  "occurred_at": "2026-10-02T00:00Z",
+  "change_type": "Maintenance",
+  "summary": "MyPortal is now licensed under the Prosperity Public License 3.0.0 with an additional permission that allows free personal and commercial use but not resale, replacing the GNU AGPL v3.",
+  "content_hash": "f14b0827a650d794abde08210d7794317702462d4ac94410afc5e74a1be6c29a"
+}
