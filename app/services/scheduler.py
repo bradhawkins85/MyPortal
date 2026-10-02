@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import functools
+import inspect
 import json
 import os
 import re
@@ -175,10 +177,51 @@ def _is_rag_command(command: object) -> bool:
     return str(command or "").startswith("rag_")
 
 
+def _slot_gated(func: Any) -> Any:
+    """Wrap a job so it does nothing on the blue/green standby slot.
+
+    Coroutine functions stay coroutines and plain functions stay plain, so
+    APScheduler keeps running sync jobs in its executor instead of on the loop.
+    """
+    if getattr(func, "_slot_gated", False) or not callable(func):
+        return func
+    from app.services import deployment_slot
+
+    if inspect.iscoroutinefunction(func):
+        @functools.wraps(func)
+        async def gated_async(*args: Any, **kwargs: Any) -> Any:
+            if not deployment_slot.is_serving_slot():
+                return None
+            return await func(*args, **kwargs)
+
+        gated_async._slot_gated = True  # type: ignore[attr-defined]
+        return gated_async
+
+    @functools.wraps(func)
+    def gated(*args: Any, **kwargs: Any) -> Any:
+        if not deployment_slot.is_serving_slot():
+            return None
+        return func(*args, **kwargs)
+
+    gated._slot_gated = True  # type: ignore[attr-defined]
+    return gated
+
+
+class _SlotGatedScheduler(AsyncIOScheduler):
+    """Scheduler whose jobs only run on the slot nginx routes traffic to.
+
+    After a blue/green cutover the previous slot stays up for rollback on the
+    old release; without this gate its jobs keep running stale code.
+    """
+
+    def add_job(self, func: Any, *args: Any, **kwargs: Any) -> Any:  # type: ignore[override]
+        return super().add_job(_slot_gated(func), *args, **kwargs)
+
+
 class SchedulerService:
     def __init__(self) -> None:
         settings = get_settings()
-        self._scheduler = AsyncIOScheduler(timezone=settings.default_timezone)
+        self._scheduler = _SlotGatedScheduler(timezone=settings.default_timezone)
         self._started = False
         self._refresh_task: asyncio.Task[None] | None = None
 
