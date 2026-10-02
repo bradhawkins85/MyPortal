@@ -178,3 +178,69 @@ func TestSignatureFileBaseRemovesInvalidCharacters(t *testing.T) {
 		t.Fatalf("expected empty base, got %q", got)
 	}
 }
+
+func TestSyncWritesAdditionalSignaturesAndRemovesOnesThatNoLongerApply(t *testing.T) {
+	platform := newFakePlatform(t,
+		outlookAccount{Key: "k1", Address: "ada@example.com"},
+		outlookAccount{Key: "k2", Address: "grace@example.com"},
+	)
+	response := outlookSignaturesResponse{
+		Enabled: true,
+		Signatures: []outlookSignature{{
+			Address: "ada@example.com", Name: "MyPortal (ada@example.com)", HTML: "<p>main</p>", Text: "main", Hash: "p1",
+		}},
+		AdditionalSignatures: []outlookSignature{
+			{Address: "ada@example.com", Name: "MyPortal - Short reply (ada@example.com)", HTML: "<p>short</p>", Text: "short", Hash: "a1"},
+			{Address: "grace@example.com", Name: "MyPortal - Sales (grace@example.com)", HTML: "<p>sales</p>", Text: "sales", Hash: "a2"},
+		},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	if err := syncOutlookSignatures(context.Background(), platform, server.URL, "token"); err != nil {
+		t.Fatal(err)
+	}
+	for _, base := range []string{"MyPortal - Short reply (ada@example.com)", "MyPortal - Sales (grace@example.com)"} {
+		if !signatureFilesExist(platform.sigDir, base) {
+			t.Fatalf("additional signature %q was not written", base)
+		}
+	}
+	if platform.accountDefaults["k1"] != "MyPortal (ada@example.com)" || platform.defaultName != "MyPortal (ada@example.com)" {
+		t.Fatalf("primary must stay the default: accounts=%v default=%q", platform.accountDefaults, platform.defaultName)
+	}
+	if _, ok := platform.accountDefaults["k2"]; ok {
+		t.Fatal("an additional signature must never be made an account default")
+	}
+
+	// Grace is skipped this time (left alone) and Ada's short reply no
+	// longer applies (removed).
+	response.AdditionalSignatures = nil
+	response.Skipped = map[string]string{"grace@example.com": "No active staff record matches this address"}
+	if err := syncOutlookSignatures(context.Background(), platform, server.URL, "token"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(platform.sigDir, "MyPortal - Short reply (ada@example.com).htm")); !os.IsNotExist(err) {
+		t.Fatal("additional signature that no longer applies must be removed")
+	}
+	if !signatureFilesExist(platform.sigDir, "MyPortal - Sales (grace@example.com)") {
+		t.Fatal("signatures for a skipped address must be left in place")
+	}
+	if !signatureFilesExist(platform.sigDir, "MyPortal (ada@example.com)") {
+		t.Fatal("primary signature must be kept")
+	}
+
+	// Nothing applies to anyone any more: Grace's signature goes too.
+	response.Signatures = nil
+	response.Skipped = nil
+	if err := syncOutlookSignatures(context.Background(), platform, server.URL, "token"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(platform.sigDir, "MyPortal - Sales (grace@example.com).htm")); !os.IsNotExist(err) {
+		t.Fatal("additional signatures must be removed when none apply")
+	}
+	if state := loadOutlookSignatureState(platform); len(state.Additional) != 0 {
+		t.Fatalf("state still tracks removed signatures: %v", state.Additional)
+	}
+}

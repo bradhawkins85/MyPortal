@@ -69,6 +69,7 @@
       <div>
         <h2 class="card__title">{{ template_record.name }} <code>{{ template_record.slug }}</code></h2>
         <p class="card__subtitle">Each mailbox receives the signature rendered with its matching staff record, then applied through Exchange Online. Existing mailbox signatures are replaced.</p>
+        <p class="card__subtitle"><strong>Applies to:</strong> {{ targeting_summary }}{% if template_record.signature_role == 'additional' %} · <strong>Additional signature</strong> — deploying it replaces the mailbox's primary signature in Outlook on the web{% endif %}</p>
       </div>
     </header>
     <div class="card__body">
@@ -80,10 +81,11 @@
         <div class="sig-deploy-tools">
           <input class="input" id="deploy-filter" type="search" placeholder="Filter mailboxes" aria-label="Filter mailboxes">
           <button class="button button--ghost button--small" type="button" id="deploy-select-all">Select all</button>
+          {% if template_record.targeting_rules %}<button class="button button--ghost button--small" type="button" id="deploy-select-targeted">Select staff this signature applies to</button>{% endif %}
         </div>
         <div class="sig-deploy-mailboxes">
           {% for target in targets %}
-            <label class="sig-deploy-mailbox" data-deploy-row>
+            <label class="sig-deploy-mailbox" data-deploy-row {% if target.targeted %}data-deploy-targeted{% endif %}>
               <input type="checkbox" name="mailboxes" value="{{ target.user_principal_name }}"
                 {% if target.user_principal_name in (submitted.mailboxes or []) %}checked{% endif %}
                 {% if not target.staff_id or not is_published %}disabled{% endif %}>
@@ -92,6 +94,7 @@
                 <small class="text-muted">{{ target.user_principal_name }}</small><br>
                 {% if target.staff_id %}
                   <small>Staff record: {{ target.staff_label }}</small>
+                  {% if not target.targeted %}<br><small class="text-muted">Not covered by this signature's conditions</small>{% endif %}
                 {% else %}
                   <small class="text-danger">No matching staff record — add a staff member with this email to deploy.</small>
                 {% endif %}
@@ -124,6 +127,11 @@
     const visible = [...document.querySelectorAll('[data-deploy-row]:not([hidden]) input:not(:disabled)')];
     const shouldSelect = visible.some(input => !input.checked);
     visible.forEach(input => { input.checked = shouldSelect; });
+  });
+  document.getElementById('deploy-select-targeted')?.addEventListener('click', () => {
+    document.querySelectorAll('[data-deploy-row] input:not(:disabled)').forEach(input => {
+      input.checked = input.closest('[data-deploy-row]').hasAttribute('data-deploy-targeted');
+    });
   });
   document.getElementById('signature-deploy-form')?.addEventListener('submit', event => {
     const selected = document.querySelectorAll('input[name="mailboxes"]:checked').length;

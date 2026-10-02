@@ -128,7 +128,11 @@ class TrayOutlookSignature(BaseModel):
 class TrayOutlookSignaturesResponse(BaseModel):
     enabled: bool
     template_slug: Optional[str] = None
+    # Primary signature per account; the agent makes it the account default.
     signatures: list[TrayOutlookSignature] = Field(default_factory=list)
+    # Other signatures available to the account's staff member; written so
+    # they can be picked in Outlook but never set as the default.
+    additional_signatures: list[TrayOutlookSignature] = Field(default_factory=list)
     skipped: dict[str, str] = Field(default_factory=dict)
 
 

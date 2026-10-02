@@ -26,9 +26,19 @@ MAX_CLASSIC_OUTLOOK_ADDRESSES = 20
 _DEPLOY_CONCURRENCY = 4
 
 
-async def list_deployment_targets(company_id: int) -> list[dict[str, Any]]:
-    """Return company user mailboxes with the staff record used to render each signature."""
+async def list_deployment_targets(
+    company_id: int, template: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """Return company user mailboxes with the staff record used to render each signature.
+
+    When ``template`` is given each target reports in ``targeted`` whether the
+    template's targeting conditions include that mailbox's staff member.
+    """
     mailboxes = await oof_service.get_selectable_mailboxes(company_id)
+    needs_custom_fields = bool(template) and any(
+        str(rule.get("field") or "").startswith("custom.")
+        for rule in (template or {}).get("targeting_rules") or []
+    )
     targets: list[dict[str, Any]] = []
     for mailbox in mailboxes:
         upn = str(mailbox.get("user_principal_name") or "").strip()
@@ -45,12 +55,19 @@ async def list_deployment_targets(company_id: int) -> list[dict[str, Any]]:
                 )
                 if part
             ) or str(staff.get("email") or upn)
+            if needs_custom_fields:
+                staff = await signatures_service.with_custom_fields(company_id, staff)
         targets.append(
             {
                 "user_principal_name": upn,
                 "display_name": str(mailbox.get("display_name") or upn),
                 "staff_id": int(staff["id"]) if staff else None,
                 "staff_label": staff_label,
+                "targeted": (
+                    signatures_service.template_applies_to_staff(template, staff)
+                    if template
+                    else True
+                ),
             }
         )
     return targets
@@ -185,14 +202,26 @@ def classic_outlook_signature_name(address: str) -> str:
     return f"MyPortal ({address})"
 
 
+def classic_outlook_additional_signature_name(template: dict[str, Any], address: str) -> str:
+    """Outlook name for an additional (non-default) signature template."""
+    label = str(template.get("name") or template.get("slug") or "Signature").strip()
+    return f"MyPortal - {label} ({address})"
+
+
 async def render_classic_outlook_signatures(
     company_id: int, addresses: list[str]
 ) -> dict[str, Any]:
-    """Render the company's active signature for Outlook accounts on a tray device.
+    """Render the signatures available to each Outlook account on a tray device.
 
-    Only addresses on the company's email domains that match an active staff
-    record are rendered; every other address is reported in ``skipped`` with a
-    reason so the agent can log why it left that account untouched.
+    Each address gets its primary signature in ``signatures`` (the agent makes
+    it the account default) and any other signatures that apply to the staff
+    member in ``additional_signatures`` (written so they can be picked in
+    Outlook, never set as the default). Only addresses on the company's email
+    domains that match an active staff record are rendered; every other
+    address is reported in ``skipped`` with a reason so the agent can log why
+    it left that account untouched. An address with no applicable template is
+    neither rendered nor skipped, which tells the agent that the signatures it
+    previously added for that account no longer apply.
     """
     domains = {
         domain.casefold()
@@ -207,15 +236,12 @@ async def render_classic_outlook_signatures(
             requested.append(value)
 
     skipped: dict[str, str] = {}
-    template = await signatures_service.get_primary_template(company_id)
-    if not template:
-        return {
-            "template_slug": None,
-            "signatures": [],
-            "skipped": {address: "No active signature template" for address in requested},
-        }
+    templates = await signatures_service.list_templates(company_id)
+    on_date = signatures_service.current_schedule_date()
 
     signatures: list[dict[str, str]] = []
+    additional_signatures: list[dict[str, str]] = []
+    primary_slugs: list[str] = []
     for address in requested:
         _, separator, domain = address.rpartition("@")
         if not separator or domain.casefold() not in domains:
@@ -225,33 +251,66 @@ async def render_classic_outlook_signatures(
         if not staff or not staff.get("enabled", True) or staff.get("is_ex_staff"):
             skipped[address] = "No active staff record matches this address"
             continue
-        try:
-            rendered = await signatures_service.render_preview(
-                company_id,
-                html_content=str(template.get("html_content") or ""),
-                text_content=str(template.get("text_content") or ""),
-                staff_id=int(staff["id"]),
+        staff = await signatures_service.with_custom_fields(company_id, staff)
+        resolved = signatures_service.resolve_staff_signatures(
+            templates, staff=staff, on_date=on_date
+        )
+        entries: list[tuple[dict[str, Any], str, list[dict[str, str]]]] = []
+        if resolved["primary"]:
+            entries.append(
+                (resolved["primary"], classic_outlook_signature_name(address), signatures)
             )
+        used_names = {classic_outlook_signature_name(address).casefold()}
+        for template in resolved["additional"]:
+            name = classic_outlook_additional_signature_name(template, address)
+            if name.casefold() in used_names:
+                name = f"MyPortal - {template.get('slug')} ({address})"
+            used_names.add(name.casefold())
+            entries.append((template, name, additional_signatures))
+        rendered_entries: list[tuple[list[dict[str, str]], dict[str, str]]] = []
+        try:
+            for template, name, bucket in entries:
+                rendered = await signatures_service.render_preview(
+                    company_id,
+                    html_content=str(template.get("html_content") or ""),
+                    text_content=str(template.get("text_content") or ""),
+                    staff_id=int(staff["id"]),
+                )
+                digest = hashlib.sha256(
+                    "\x00".join(
+                        (
+                            str(template.get("id")),
+                            address.casefold(),
+                            rendered["html"],
+                            rendered["text"],
+                        )
+                    ).encode("utf-8")
+                ).hexdigest()
+                rendered_entries.append(
+                    (
+                        bucket,
+                        {
+                            "address": address,
+                            "name": name,
+                            "html": rendered["html"],
+                            "text": rendered["text"],
+                            "hash": digest,
+                        },
+                    )
+                )
         except (TypeError, ValueError) as exc:
             skipped[address] = f"Signature could not be rendered: {exc}"
             continue
-        digest = hashlib.sha256(
-            "\x00".join(
-                (str(template.get("id")), address.casefold(), rendered["html"], rendered["text"])
-            ).encode("utf-8")
-        ).hexdigest()
-        signatures.append(
-            {
-                "address": address,
-                "name": classic_outlook_signature_name(address),
-                "html": rendered["html"],
-                "text": rendered["text"],
-                "hash": digest,
-            }
-        )
+        for bucket, entry in rendered_entries:
+            bucket.append(entry)
+        if resolved["primary"]:
+            slug = str(resolved["primary"].get("slug") or "")
+            if slug and slug not in primary_slugs:
+                primary_slugs.append(slug)
     return {
-        "template_slug": template.get("slug"),
+        "template_slug": ", ".join(primary_slugs) or None,
         "signatures": signatures,
+        "additional_signatures": additional_signatures,
         "skipped": skipped,
     }
 
@@ -259,6 +318,7 @@ async def render_classic_outlook_signatures(
 __all__ = [
     "MAX_CLASSIC_OUTLOOK_ADDRESSES",
     "MAX_DEPLOY_MAILBOXES",
+    "classic_outlook_additional_signature_name",
     "classic_outlook_signature_name",
     "deploy_template",
     "get_roaming_signature_status",

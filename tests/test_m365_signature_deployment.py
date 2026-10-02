@@ -126,20 +126,37 @@ async def test_roaming_status_and_postpone(exchange, monkeypatch):
     assert await deployment.get_roaming_signature_status(7) == {"postponed": None, "error": "forbidden"}
 
 
+def _template(template_id, slug, **extra):
+    return {
+        "id": template_id,
+        "slug": slug,
+        "name": slug.title(),
+        "status": "published",
+        "priority": 0,
+        "is_default": False,
+        "schedule_start_on": None,
+        "schedule_end_on": None,
+        "signature_role": "primary",
+        "targeting_match": "all",
+        "targeting_rules": [],
+        "html_content": slug,
+        "text_content": slug,
+        **extra,
+    }
+
+
 @pytest.mark.anyio
 async def test_classic_outlook_renders_only_company_staff_addresses(exchange, monkeypatch):
     monkeypatch.setattr(
         deployment.companies_repo, "get_email_domains_for_company", _async(["example.com"])
     )
     monkeypatch.setattr(
-        deployment.signatures_service,
-        "get_primary_template",
-        _async({"id": 9, "slug": "standard", "html_content": "H", "text_content": "T"}),
+        deployment.signatures_service, "list_templates", _async([_template(9, "standard")])
     )
 
     async def fake_staff(company_id, email):
         return {
-            "ada@example.com": {"id": 1, "enabled": True, "is_ex_staff": False},
+            "ada@example.com": {"id": 1, "enabled": True, "is_ex_staff": False, "custom_fields": {}},
             "former@example.com": {"id": 3, "enabled": True, "is_ex_staff": True},
         }.get(email.casefold())
 
@@ -151,26 +168,102 @@ async def test_classic_outlook_renders_only_company_staff_addresses(exchange, mo
 
     assert result["template_slug"] == "standard"
     assert [(s["address"], s["name"], s["html"], s["text"]) for s in result["signatures"]] == [
-        ("Ada@Example.com", "MyPortal (Ada@Example.com)", "<p>H:1</p>", "T:1")
+        ("Ada@Example.com", "MyPortal (Ada@Example.com)", "<p>standard:1</p>", "standard:1")
     ]
+    assert result["additional_signatures"] == []
     assert len(result["signatures"][0]["hash"]) == 64
     assert set(result["skipped"]) == {"someone@other.com", "former@example.com", "nobody@example.com"}
 
 
 @pytest.mark.anyio
-async def test_classic_outlook_without_active_template_skips_everything(exchange, monkeypatch):
+async def test_classic_outlook_returns_targeted_primary_and_additional_signatures(exchange, monkeypatch):
     monkeypatch.setattr(
         deployment.companies_repo, "get_email_domains_for_company", _async(["example.com"])
     )
-    monkeypatch.setattr(deployment.signatures_service, "get_primary_template", _async(None))
+    sales_rule = [{"field": "department", "operator": "in", "values": ["Sales"]}]
+    monkeypatch.setattr(
+        deployment.signatures_service,
+        "list_templates",
+        _async(
+            [
+                _template(1, "standard", is_default=True),
+                _template(2, "sales", priority=5, targeting_rules=sales_rule),
+                _template(3, "short-reply", signature_role="additional"),
+                _template(4, "draft", status="draft"),
+            ]
+        ),
+    )
+
+    async def fake_staff(company_id, email):
+        return {
+            "ada@example.com": {"id": 1, "department": "Sales", "custom_fields": {}},
+            "grace@example.com": {"id": 2, "department": "Engineering", "custom_fields": {}},
+        }.get(email.casefold())
+
+    monkeypatch.setattr(deployment.staff_repo, "get_staff_by_company_and_email", fake_staff)
+
+    result = await deployment.render_classic_outlook_signatures(
+        7, ["ada@example.com", "grace@example.com"]
+    )
+
+    assert [(s["address"], s["html"]) for s in result["signatures"]] == [
+        ("ada@example.com", "<p>sales:1</p>"),
+        ("grace@example.com", "<p>standard:2</p>"),
+    ]
+    assert [(s["address"], s["name"]) for s in result["additional_signatures"]] == [
+        ("ada@example.com", "MyPortal - Standard (ada@example.com)"),
+        ("ada@example.com", "MyPortal - Short-Reply (ada@example.com)"),
+        ("grace@example.com", "MyPortal - Short-Reply (grace@example.com)"),
+    ]
+    assert result["template_slug"] == "sales, standard"
+    assert result["skipped"] == {}
+
+
+@pytest.mark.anyio
+async def test_classic_outlook_without_active_template_returns_nothing(exchange, monkeypatch):
+    monkeypatch.setattr(
+        deployment.companies_repo, "get_email_domains_for_company", _async(["example.com"])
+    )
+    monkeypatch.setattr(
+        deployment.signatures_service, "list_templates", _async([_template(1, "old", status="disabled")])
+    )
+
+    async def fake_staff(company_id, email):
+        return {"id": 1, "custom_fields": {}}
+
+    monkeypatch.setattr(deployment.staff_repo, "get_staff_by_company_and_email", fake_staff)
 
     result = await deployment.render_classic_outlook_signatures(7, ["ada@example.com"])
 
+    # Not skipped: the agent removes additional signatures it added earlier.
     assert result == {
         "template_slug": None,
         "signatures": [],
-        "skipped": {"ada@example.com": "No active signature template"},
+        "additional_signatures": [],
+        "skipped": {},
     }
+
+
+@pytest.mark.anyio
+async def test_targets_report_whether_template_conditions_match(exchange, monkeypatch):
+    async def fake_staff(company_id, email):
+        return {
+            "ada@example.com": {"id": 1, "first_name": "Ada", "job_title": "CTO", "custom_fields": {}},
+            "grace@example.com": {"id": 2, "first_name": "Grace", "job_title": "Engineer", "custom_fields": {}},
+        }.get(email.casefold())
+
+    monkeypatch.setattr(deployment.staff_repo, "get_staff_by_company_and_email", fake_staff)
+    template = _template(
+        1, "execs", targeting_rules=[{"field": "job_title", "operator": "in", "values": ["cto"]}]
+    )
+
+    targets = await deployment.list_deployment_targets(7, template)
+
+    assert [(t["user_principal_name"], t["targeted"]) for t in targets] == [
+        ("Ada@example.com", True),
+        ("grace@example.com", False),
+        ("shared@example.com", False),
+    ]
 
 
 @pytest.mark.anyio

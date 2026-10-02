@@ -291,3 +291,171 @@ async def test_delete_template_reports_affected_rows(monkeypatch):
     assert await signatures_repo.delete_template(7, 3) is True
     assert await signatures_repo.delete_template(7, 4) is False
     assert calls == [(7, 3), (7, 4)]
+
+
+def _published(template_id, **extra):
+    return {
+        "id": template_id,
+        "status": "published",
+        "priority": 0,
+        "is_default": False,
+        "schedule_start_on": None,
+        "schedule_end_on": None,
+        "signature_role": "primary",
+        "targeting_match": "all",
+        "targeting_rules": [],
+        **extra,
+    }
+
+
+def test_normalise_targeting_rules_splits_values_and_drops_blank_rows():
+    rules = m365_signatures.normalise_targeting_rules(
+        [
+            {"field": "job_title", "operator": "in", "values": "Sales Manager, account manager;Sales Manager"},
+            {"field": "department", "operator": "in", "values": "  "},
+            {"field": "custom.site", "operator": "contains", "values": ["Brisbane"]},
+        ]
+    )
+
+    assert rules == [
+        {"field": "job_title", "operator": "in", "values": ["Sales Manager", "account manager"]},
+        {"field": "custom.site", "operator": "contains", "values": ["Brisbane"]},
+    ]
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        {"field": "password", "operator": "in", "values": "x"},
+        {"field": "job_title", "operator": "regex", "values": "x"},
+        {"field": "custom.bad name", "operator": "in", "values": "x"},
+    ],
+)
+def test_normalise_targeting_rules_rejects_unknown_fields_and_operators(rule):
+    with pytest.raises(ValueError):
+        m365_signatures.normalise_targeting_rules([rule])
+
+
+def test_template_applies_to_staff_matches_all_or_any_conditions():
+    staff = {
+        "email": "Ada@Example.com",
+        "job_title": "Sales Manager",
+        "department": "Sales",
+        "city": "Brisbane",
+        "custom_fields": {"site": "Head office, Warehouse", "remote": True},
+    }
+    rules = [
+        {"field": "job_title", "operator": "in", "values": ["sales manager"]},
+        {"field": "city", "operator": "not_in", "values": ["Sydney"]},
+        {"field": "email_domain", "operator": "in", "values": ["example.com"]},
+        {"field": "custom.site", "operator": "in", "values": ["Warehouse"]},
+        {"field": "custom.remote", "operator": "in", "values": ["yes"]},
+        {"field": "department", "operator": "contains", "values": ["sal"]},
+    ]
+    template = {"targeting_rules": rules, "targeting_match": "all"}
+
+    assert m365_signatures.template_applies_to_staff(template, staff) is True
+    assert m365_signatures.template_applies_to_staff(template, {**staff, "city": "Sydney"}) is False
+
+    any_template = {
+        "targeting_match": "any",
+        "targeting_rules": [
+            {"field": "email", "operator": "in", "values": ["grace@example.com"]},
+            {"field": "department", "operator": "not_contains", "values": ["eng"]},
+        ],
+    }
+    assert m365_signatures.template_applies_to_staff(any_template, staff) is True
+    assert m365_signatures.template_applies_to_staff(
+        any_template, {"email": "x@example.com", "department": "Engineering"}
+    ) is False
+
+
+def test_untargeted_templates_apply_to_everyone_and_targeted_need_staff():
+    assert m365_signatures.template_applies_to_staff({"targeting_rules": []}, None) is True
+    targeted = {"targeting_rules": [{"field": "job_title", "operator": "in", "values": ["CEO"]}]}
+    assert m365_signatures.template_applies_to_staff(targeted, None) is False
+
+
+def test_resolve_staff_signatures_picks_primary_and_lists_additional():
+    templates = [
+        _published(1, is_default=True),
+        _published(
+            2,
+            priority=5,
+            targeting_rules=[{"field": "department", "operator": "in", "values": ["Sales"]}],
+        ),
+        _published(3, priority=9, signature_role="additional"),
+        _published(4, priority=20, status="draft"),
+        _published(
+            5,
+            targeting_rules=[{"field": "department", "operator": "in", "values": ["Finance"]}],
+            signature_role="additional",
+        ),
+    ]
+
+    sales = m365_signatures.resolve_staff_signatures(
+        templates, staff={"department": "Sales"}, on_date=date(2026, 9, 16)
+    )
+    other = m365_signatures.resolve_staff_signatures(
+        templates, staff={"department": "Engineering"}, on_date=date(2026, 9, 16)
+    )
+
+    assert sales["primary"]["id"] == 2
+    assert [item["id"] for item in sales["additional"]] == [3, 1]
+    assert other["primary"]["id"] == 1
+    assert [item["id"] for item in other["additional"]] == [3]
+    # Company-wide primary ignores targeted and additional-only templates.
+    assert m365_signatures.pick_primary_template(templates, on_date=date(2026, 9, 16))["id"] == 1
+
+
+def test_describe_targeting_reads_naturally():
+    assert m365_signatures.describe_targeting({"targeting_rules": []}) == "Everyone"
+    assert m365_signatures.describe_targeting(
+        {
+            "targeting_match": "any",
+            "targeting_rules": [
+                {"field": "job_title", "operator": "in", "values": ["CEO", "CFO"]},
+                {"field": "custom.office_site", "operator": "not_in", "values": ["Remote"]},
+            ],
+        }
+    ) == "Job title is one of CEO, CFO or office site is not one of Remote"
+
+
+@pytest.mark.anyio
+async def test_additional_template_cannot_be_the_default(monkeypatch):
+    created = {}
+
+    async def fake_get_by_slug(company_id, slug):
+        return None
+
+    async def fake_create(**kwargs):
+        created.update(kwargs)
+        return {"id": 3, **kwargs}
+
+    async def fail_set_default(*args, **kwargs):
+        raise AssertionError("an additional signature must not become the default")
+
+    monkeypatch.setattr(m365_signatures.signatures_repo, "get_template_by_slug", fake_get_by_slug)
+    monkeypatch.setattr(m365_signatures.signatures_repo, "create_template", fake_create)
+    monkeypatch.setattr(m365_signatures.signatures_repo, "set_default_template", fail_set_default)
+
+    await m365_signatures.create_template(
+        company_id=7,
+        slug="short-reply",
+        name="Short reply",
+        description=None,
+        html_content="<p>Hi</p>",
+        text_content="Hi",
+        is_default=True,
+        signature_role="additional",
+        targeting_match="any",
+        targeting_rules=[{"field": "email", "operator": "in", "values": "ada@example.com"}],
+        user_id=1,
+    )
+
+    assert created["is_default"] is False
+    assert created["signature_role"] == "additional"
+    assert created["targeting_match"] == "any"
+    assert created["targeting_rules"] == [
+        {"field": "email", "operator": "in", "values": ["ada@example.com"]}
+    ]

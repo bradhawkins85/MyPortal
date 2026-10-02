@@ -10,11 +10,38 @@ from app.repositories import companies as companies_repo
 from app.repositories import company_variables as company_variables_repo
 from app.repositories import m365_signatures as signatures_repo
 from app.repositories import staff as staff_repo
+from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.services import value_templates
 from app.services.sanitization import sanitize_rich_text
 
 _SLUG_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,118}[a-z0-9])?$")
 _TOKEN_PATTERN = re.compile(r"\{\{\s*([^\s{}]+)\s*\}\}")
+_CUSTOM_FIELD_PATTERN = re.compile(r"^custom\.[A-Za-z0-9_.-]{1,100}$")
+
+SIGNATURE_ROLES = ("primary", "additional")
+TARGETING_MATCHES = ("all", "any")
+TARGETING_OPERATORS = {
+    "in": "is one of",
+    "not_in": "is not one of",
+    "contains": "contains",
+    "not_contains": "does not contain",
+}
+# Staff attributes a signature can be targeted on. Custom staff fields are
+# added per company as ``custom.<name>``.
+TARGETING_FIELDS = {
+    "email": "Staff member (email)",
+    "email_domain": "Email domain",
+    "job_title": "Job title",
+    "department": "Department",
+    "city": "Site / city",
+    "state": "State",
+    "country": "Country",
+    "org_company": "Organisation",
+    "manager_name": "Manager",
+}
+MAX_TARGETING_RULES = 20
+MAX_TARGETING_VALUES = 100
+_MAX_TARGETING_VALUE_LENGTH = 255
 
 
 def _normalise_slug(slug: str) -> str:
@@ -55,6 +82,132 @@ def _validate_schedule_dates(start_on: date | None, end_on: date | None) -> None
         raise ValueError("Schedule start date must be on or before the end date")
 
 
+def _normalise_role(role: Any) -> str:
+    candidate = str(role or "primary").strip().lower()
+    return candidate if candidate in SIGNATURE_ROLES else "primary"
+
+
+def _normalise_match(match: Any) -> str:
+    candidate = str(match or "all").strip().lower()
+    return candidate if candidate in TARGETING_MATCHES else "all"
+
+
+def _split_values(values: Any) -> list[str]:
+    if isinstance(values, str):
+        raw = re.split(r"[\n,;]", values)
+    elif isinstance(values, (list, tuple)):
+        raw = [str(item) for item in values]
+    else:
+        raw = []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        value = item.strip()[:_MAX_TARGETING_VALUE_LENGTH]
+        if value and value.casefold() not in seen:
+            seen.add(value.casefold())
+            cleaned.append(value)
+    return cleaned
+
+
+def normalise_targeting_rules(rules: Any) -> list[dict[str, Any]]:
+    """Validate targeting rules, dropping rows that have no values.
+
+    Each rule is ``{"field": ..., "operator": ..., "values": [...]}``.  Raises
+    ``ValueError`` for an unknown field or operator or too many rules/values.
+    """
+    if not rules:
+        return []
+    if not isinstance(rules, (list, tuple)):
+        raise ValueError("Targeting conditions must be a list")
+    cleaned: list[dict[str, Any]] = []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        values = _split_values(rule.get("values"))
+        if not values:
+            continue
+        field = str(rule.get("field") or "").strip()
+        if field not in TARGETING_FIELDS and not _CUSTOM_FIELD_PATTERN.fullmatch(field):
+            raise ValueError(f"Unknown targeting field: {field or '(blank)'}")
+        operator = str(rule.get("operator") or "in").strip().lower()
+        if operator not in TARGETING_OPERATORS:
+            raise ValueError(f"Unknown targeting operator: {operator}")
+        if len(values) > MAX_TARGETING_VALUES:
+            raise ValueError(f"Each condition can list at most {MAX_TARGETING_VALUES} values")
+        cleaned.append({"field": field, "operator": operator, "values": values})
+    if len(cleaned) > MAX_TARGETING_RULES:
+        raise ValueError(f"Use at most {MAX_TARGETING_RULES} targeting conditions")
+    return cleaned
+
+
+def _staff_values(staff: dict[str, Any], field: str) -> list[str]:
+    if field == "email_domain":
+        _, separator, domain = str(staff.get("email") or "").rpartition("@")
+        raw: Any = domain if separator else ""
+    elif field.startswith("custom."):
+        raw = dict(staff.get("custom_fields") or {}).get(field[len("custom."):])
+    else:
+        raw = staff.get(field)
+    if raw is None:
+        return []
+    if isinstance(raw, bool):
+        return ["true", "yes"] if raw else ["false", "no"]
+    if isinstance(raw, (list, tuple, set)):
+        items = [str(item) for item in raw]
+    else:
+        items = [str(raw)]
+        if field.startswith("custom.") and "," in items[0]:
+            # Multi-select custom fields are stored as comma-separated text.
+            items.extend(items[0].split(","))
+    return [item.strip().casefold() for item in items if item and item.strip()]
+
+
+def _rule_matches(rule: dict[str, Any], staff: dict[str, Any]) -> bool:
+    staff_values = _staff_values(staff, str(rule.get("field") or ""))
+    wanted = [value.casefold() for value in _split_values(rule.get("values"))]
+    operator = rule.get("operator")
+    if operator in ("contains", "not_contains"):
+        found = any(term in value for value in staff_values for term in wanted)
+        return found if operator == "contains" else not found
+    found = any(value in wanted for value in staff_values)
+    return not found if operator == "not_in" else found
+
+
+def is_targeted(template: dict[str, Any]) -> bool:
+    return bool(template.get("targeting_rules"))
+
+
+def template_applies_to_staff(template: dict[str, Any], staff: dict[str, Any] | None) -> bool:
+    """Whether the template's targeting conditions include this staff member.
+
+    A template without conditions applies to everyone.  Without a staff
+    record only untargeted templates apply.
+    """
+    rules = template.get("targeting_rules") or []
+    if not rules:
+        return True
+    if not staff:
+        return False
+    results = (_rule_matches(rule, staff) for rule in rules if isinstance(rule, dict))
+    if _normalise_match(template.get("targeting_match")) == "any":
+        return any(results)
+    return all(results)
+
+
+def describe_targeting(template: dict[str, Any]) -> str:
+    rules = template.get("targeting_rules") or []
+    if not rules:
+        return "Everyone"
+    joiner = " or " if _normalise_match(template.get("targeting_match")) == "any" else " and "
+    parts = []
+    for rule in rules:
+        field = str(rule.get("field") or "")
+        label = TARGETING_FIELDS.get(field) or field.removeprefix("custom.").replace("_", " ")
+        operator = TARGETING_OPERATORS.get(str(rule.get("operator") or ""), "is one of")
+        parts.append(f"{label} {operator} {', '.join(_split_values(rule.get('values')))}")
+    return joiner.join(parts)
+
+
 def get_schedule_timezone_name() -> str:
     return str(get_settings().default_timezone or "UTC").strip() or "UTC"
 
@@ -88,25 +241,58 @@ def is_template_active(
     return True
 
 
+def _rank(template: dict[str, Any]) -> tuple[int, int, int, int]:
+    return (
+        _normalise_priority(template.get("priority")),
+        1 if template.get("is_default") else 0,
+        -((_normalise_date(template.get("schedule_start_on")) or date.max).toordinal()),
+        -int(template.get("id") or 0),
+    )
+
+
 def pick_primary_template(
     templates: list[dict[str, Any]],
     *,
     on_date: date | None = None,
+    staff: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
+    """Pick the primary signature for a staff member.
+
+    Only active, primary-role templates whose targeting includes the staff
+    member are candidates; without ``staff`` only templates for everyone are.
+    """
+    return resolve_staff_signatures(templates, staff=staff, on_date=on_date)["primary"]
+
+
+def resolve_staff_signatures(
+    templates: list[dict[str, Any]],
+    *,
+    staff: dict[str, Any] | None = None,
+    on_date: date | None = None,
+) -> dict[str, Any]:
+    """Return ``{"primary": template | None, "additional": [templates]}``.
+
+    Every active template that applies to the staff member is available to
+    them; the highest ranked primary-role template is their primary signature
+    and the rest are additional signatures, highest ranked first.
+    """
     effective_date = on_date or current_schedule_date()
-    active = [template for template in templates if is_template_active(template, on_date=effective_date)]
-    if not active:
-        return None
-
-    def _sort_key(template: dict[str, Any]) -> tuple[int, int, int, int]:
-        return (
-            _normalise_priority(template.get("priority")),
-            1 if template.get("is_default") else 0,
-            -((_normalise_date(template.get("schedule_start_on")) or date.max).toordinal()),
-            -int(template.get("id") or 0),
-        )
-
-    return max(active, key=_sort_key)
+    applicable = sorted(
+        (
+            template
+            for template in templates
+            if is_template_active(template, on_date=effective_date)
+            and template_applies_to_staff(template, staff)
+        ),
+        key=_rank,
+        reverse=True,
+    )
+    primary = next(
+        (template for template in applicable if _normalise_role(template.get("signature_role")) == "primary"),
+        None,
+    )
+    additional = [template for template in applicable if template is not primary]
+    return {"primary": primary, "additional": additional}
 
 
 def generate_initial_text(html_content: str | None) -> str:
@@ -146,6 +332,9 @@ async def create_template(
     is_default: bool = False,
     schedule_start_on: Any = None,
     schedule_end_on: Any = None,
+    signature_role: Any = "primary",
+    targeting_match: Any = "all",
+    targeting_rules: Any = None,
     user_id: int | None,
 ) -> dict[str, Any]:
     normalised_slug = _normalise_slug(slug)
@@ -157,6 +346,10 @@ async def create_template(
     parsed_start_on = _normalise_date(schedule_start_on)
     parsed_end_on = _normalise_date(schedule_end_on)
     _validate_schedule_dates(parsed_start_on, parsed_end_on)
+    rules = normalise_targeting_rules(targeting_rules)
+    role = _normalise_role(signature_role)
+    # Only a primary-role template can be the fallback primary signature.
+    is_default = bool(is_default) and role == "primary"
     created = await signatures_repo.create_template(
         company_id=company_id,
         slug=normalised_slug,
@@ -169,6 +362,9 @@ async def create_template(
         is_default=bool(is_default),
         schedule_start_on=parsed_start_on,
         schedule_end_on=parsed_end_on,
+        signature_role=role,
+        targeting_match=_normalise_match(targeting_match),
+        targeting_rules=rules,
         created_by_user_id=user_id,
         updated_by_user_id=user_id,
     )
@@ -196,6 +392,9 @@ async def update_template(
     is_default: bool = False,
     schedule_start_on: Any = None,
     schedule_end_on: Any = None,
+    signature_role: Any = "primary",
+    targeting_match: Any = "all",
+    targeting_rules: Any = None,
     user_id: int | None,
 ) -> dict[str, Any] | None:
     current = await get_template(company_id, template_id)
@@ -210,6 +409,10 @@ async def update_template(
     parsed_start_on = _normalise_date(schedule_start_on)
     parsed_end_on = _normalise_date(schedule_end_on)
     _validate_schedule_dates(parsed_start_on, parsed_end_on)
+    rules = normalise_targeting_rules(targeting_rules)
+    role = _normalise_role(signature_role)
+    # Only a primary-role template can be the fallback primary signature.
+    is_default = bool(is_default) and role == "primary"
     updated = await signatures_repo.update_template(
         company_id,
         template_id,
@@ -222,6 +425,9 @@ async def update_template(
         is_default=bool(is_default),
         schedule_start_on=parsed_start_on,
         schedule_end_on=parsed_end_on,
+        signature_role=role,
+        targeting_match=_normalise_match(targeting_match),
+        targeting_rules=rules,
         updated_by_user_id=user_id,
         disabled_at=None if current.get("status") != "disabled" else current.get("disabled_at"),
     )
@@ -258,6 +464,9 @@ async def clone_template(company_id: int, template_id: int, *, user_id: int | No
         is_default=False,
         schedule_start_on=_normalise_date(source.get("schedule_start_on")),
         schedule_end_on=_normalise_date(source.get("schedule_end_on")),
+        signature_role=_normalise_role(source.get("signature_role")),
+        targeting_match=_normalise_match(source.get("targeting_match")),
+        targeting_rules=list(source.get("targeting_rules") or []),
         created_by_user_id=user_id,
         updated_by_user_id=user_id,
     )
@@ -413,12 +622,75 @@ async def get_primary_template(
     *,
     now: datetime | None = None,
 ) -> dict[str, Any] | None:
+    """Primary signature for staff not covered by any targeted template."""
     templates = await list_templates(company_id)
     return pick_primary_template(templates, on_date=current_schedule_date(now=now))
 
 
+async def with_custom_fields(company_id: int, staff: dict[str, Any]) -> dict[str, Any]:
+    """Return the staff record with ``custom_fields`` loaded for targeting."""
+    if "custom_fields" in staff or staff.get("id") is None:
+        return staff
+    values = await staff_custom_fields_repo.get_all_staff_field_values(company_id, [int(staff["id"])])
+    return {**staff, "custom_fields": values.get(int(staff["id"]), {})}
+
+
+async def list_targeting_fields(company_id: int) -> list[dict[str, Any]]:
+    """Fields offered by the targeting editor, with value suggestions."""
+    staff_rows = await staff_repo.list_staff(company_id, enabled=True, exclude_ex_staff=True, page_size=500)
+    domains = await companies_repo.get_email_domains_for_company(company_id)
+    definitions = await staff_custom_fields_repo.list_field_definitions(company_id)
+
+    def _distinct(values: list[Any]) -> list[str]:
+        seen: dict[str, str] = {}
+        for value in values:
+            text = str(value or "").strip()
+            if text and text.casefold() not in seen:
+                seen[text.casefold()] = text
+        return sorted(seen.values(), key=str.casefold)
+
+    fields: list[dict[str, Any]] = []
+    for key, label in TARGETING_FIELDS.items():
+        if key == "email_domain":
+            suggestions = _distinct(
+                [*domains, *(str(row.get("email") or "").rpartition("@")[2] for row in staff_rows)]
+            )
+        else:
+            suggestions = _distinct([row.get(key) for row in staff_rows])
+        fields.append({"key": key, "label": label, "suggestions": suggestions})
+    for definition in definitions:
+        name = str(definition.get("name") or "").strip()
+        key = f"custom.{name}"
+        if not name or not _CUSTOM_FIELD_PATTERN.fullmatch(key):
+            continue
+        options = [option.get("value") for option in definition.get("options") or []]
+        values: list[Any] = list(options)
+        for row in staff_rows:
+            value = dict(row.get("custom_fields") or {}).get(name)
+            if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+                values.append(value)
+        fields.append(
+            {
+                "key": key,
+                "label": str(definition.get("display_name") or name).strip(),
+                "suggestions": _distinct(values)[:500],
+            }
+        )
+    return fields
+
+
 __all__ = [
+    "SIGNATURE_ROLES",
+    "TARGETING_FIELDS",
+    "TARGETING_OPERATORS",
     "build_preview_context",
+    "describe_targeting",
+    "is_targeted",
+    "list_targeting_fields",
+    "normalise_targeting_rules",
+    "resolve_staff_signatures",
+    "template_applies_to_staff",
+    "with_custom_fields",
     "clone_template",
     "create_template",
     "delete_template",

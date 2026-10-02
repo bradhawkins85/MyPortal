@@ -113,6 +113,12 @@
     const generateText = form.querySelector('[data-sig-generate-text]');
     const serverPreview = form.querySelector('[data-sig-server-preview]');
     const staleNote = form.querySelector('[data-sig-preview-stale]');
+    const roleInputs = Array.from(form.querySelectorAll('[data-sig-role]'));
+    const targetModeInputs = Array.from(form.querySelectorAll('[data-sig-target-mode]'));
+    const rulesBlock = form.querySelector('[data-sig-rules-block]');
+    const rulesList = form.querySelector('[data-sig-rules]');
+    const addRuleButton = form.querySelector('[data-sig-rule-add]');
+    const matchSelect = form.querySelector('[data-sig-match]');
     const errors = {};
     form.querySelectorAll('[data-sig-error]').forEach((node) => {
       errors[node.dataset.sigError] = node;
@@ -184,6 +190,121 @@
       }, 120);
     }
 
+    // ----- targeting --------------------------------------------------------
+
+    const blankRule = rulesList ? rulesList.lastElementChild.cloneNode(true) : null;
+
+    function checkedValue(inputs, fallback) {
+      const checked = inputs.find((input) => input.checked);
+      return checked ? checked.value : fallback;
+    }
+
+    function isAdditional() {
+      return checkedValue(roleInputs, 'primary') === 'additional';
+    }
+
+    function usesConditions() {
+      return checkedValue(targetModeInputs, 'everyone') === 'conditions';
+    }
+
+    function ruleRows() {
+      return rulesList ? Array.from(rulesList.querySelectorAll('[data-sig-rule]')) : [];
+    }
+
+    function filledRules() {
+      return ruleRows()
+        .map((row) => {
+          const field = row.querySelector('[data-sig-rule-field]');
+          const operator = row.querySelector('[data-sig-rule-operator]');
+          const values = row.querySelector('[data-sig-rule-values]').value
+            .split(/[\n,;]/)
+            .map((value) => value.trim())
+            .filter(Boolean);
+          return {
+            field: field.options[field.selectedIndex].text,
+            operator: operator.options[operator.selectedIndex].text,
+            values,
+          };
+        })
+        .filter((rule) => rule.values.length);
+    }
+
+    function syncRuleRow(row) {
+      const field = row.querySelector('[data-sig-rule-field]');
+      row.querySelector('[data-sig-rule-values]')
+        .setAttribute('list', `sig-suggest-${field.value.replace(/\./g, '-')}`);
+    }
+
+    function syncTargeting() {
+      if (!rulesBlock) {
+        return;
+      }
+      rulesBlock.hidden = !usesConditions();
+      const rows = ruleRows();
+      rows.forEach((row) => {
+        row.querySelector('[data-sig-rule-remove]').hidden = rows.length < 2;
+      });
+      if (defaultInput) {
+        defaultInput.disabled = isAdditional();
+        if (isAdditional()) {
+          defaultInput.checked = false;
+        }
+      }
+    }
+
+    function describeAudience() {
+      if (!usesConditions()) {
+        return 'everyone';
+      }
+      const rules = filledRules();
+      if (!rules.length) {
+        return 'staff matching conditions (none added yet)';
+      }
+      const joiner = matchSelect && matchSelect.value === 'any' ? ' or ' : ' and ';
+      return 'staff where ' + rules
+        .map((rule) => `${rule.field} ${rule.operator} ${rule.values.join(', ')}`)
+        .join(joiner);
+    }
+
+    if (rulesList) {
+      addRuleButton.hidden = false;
+      addRuleButton.addEventListener('click', () => {
+        const row = blankRule.cloneNode(true);
+        rulesList.append(row);
+        syncRuleRow(row);
+        syncTargeting();
+        row.querySelector('[data-sig-rule-field]').focus();
+        refresh();
+      });
+      rulesList.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-sig-rule-remove]');
+        if (!button) {
+          return;
+        }
+        const row = button.closest('[data-sig-rule]');
+        const next = row.nextElementSibling || row.previousElementSibling;
+        row.remove();
+        syncTargeting();
+        if (next) {
+          next.querySelector('[data-sig-rule-values]').focus();
+        }
+        refresh();
+      });
+      rulesList.addEventListener('change', (event) => {
+        if (event.target.matches('[data-sig-rule-field]')) {
+          syncRuleRow(event.target.closest('[data-sig-rule]'));
+        }
+      });
+      ruleRows().forEach(syncRuleRow);
+      // Drop the spare blank row the server adds for no-JavaScript editing
+      // when saved conditions are already listed.
+      const rows = ruleRows();
+      if (rows.length > 1 && !rows[rows.length - 1].querySelector('[data-sig-rule-values]').value.trim()) {
+        rows[rows.length - 1].remove();
+      }
+      syncTargeting();
+    }
+
     function describeSchedule() {
       const start = startInput.value;
       const end = endInput.value;
@@ -196,10 +317,13 @@
       } else if (end) {
         when = `Used until ${formatDate(end)} once published`;
       }
-      const rank = defaultInput.checked
-        ? `, as the default fallback (priority ${priority})`
-        : `, with priority ${priority}`;
-      scheduleSummary.textContent = `${when}${rank}.`;
+      let rank = `, with priority ${priority}`;
+      if (isAdditional()) {
+        rank = ` as an additional signature (priority ${priority})`;
+      } else if (defaultInput.checked) {
+        rank = `, as the default fallback (priority ${priority})`;
+      }
+      scheduleSummary.textContent = `${when}${rank}, for ${describeAudience()}.`;
       if (start && end && start > end) {
         setError('schedule', 'The end date must be on or after the start date.');
       } else {
@@ -208,7 +332,10 @@
     }
 
     function refresh() {
-      title.textContent = nameInput.value.trim() || (isNew ? 'New signature' : 'Edit signature');
+      if (title) {
+        title.textContent = nameInput.value.trim() || (isNew ? 'New signature' : 'Edit signature');
+      }
+      syncTargeting();
       if (!slugTouched) {
         slugInput.value = slugify(nameInput.value);
       }
@@ -313,6 +440,11 @@
       }
       if (startInput.value && endInput.value && startInput.value > endInput.value) {
         problems.push({ tab: 'schedule', focus: endInput });
+      }
+      setError('targeting', '');
+      if (rulesList && usesConditions() && !filledRules().length) {
+        setError('targeting', 'Add at least one condition with a value, or choose Everyone.');
+        problems.push({ tab: 'schedule', focus: ruleRows()[0].querySelector('[data-sig-rule-values]') });
       }
       return problems;
     }

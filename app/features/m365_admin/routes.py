@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from app.repositories import companies as companies_repo
 from app.repositories import m365_reported_email_ignores as ignores_repo
 from app.repositories import m365_spam_purge as purge_repo
+from app.repositories import staff as staff_repo
 from app.schemas.m365_spam_purge import SpamPurgeRequestCreate
 from app.schemas.m365_out_of_office import OutOfOfficeCreate, OutOfOfficeDisable
 from app.security.flash import flash_redirect
@@ -88,6 +89,45 @@ def _empty_signature_form() -> dict[str, str]:
         "is_default": "",
         "schedule_start_on": "",
         "schedule_end_on": "",
+        "signature_role": "primary",
+        "target_mode": "everyone",
+        "targeting_match": "all",
+        "targeting_rules": [],
+    }
+
+
+def _form_targeting_rules(form) -> list[dict]:
+    fields = form.getlist("rule_field")
+    operators = form.getlist("rule_operator")
+    values = form.getlist("rule_values")
+    rules = []
+    for index, field in enumerate(fields):
+        rules.append(
+            {
+                "field": str(field or "").strip(),
+                "operator": str(operators[index] if index < len(operators) else "in").strip(),
+                "values": str(values[index] if index < len(values) else "").strip(),
+            }
+        )
+    return rules
+
+
+def _signature_targeting_args(form_values: dict) -> dict:
+    """Service arguments for the submitted role and targeting.
+
+    Raises ``ValueError`` when targeting is chosen without any condition.
+    """
+    rules = []
+    if form_values["target_mode"] == "conditions":
+        rules = signatures_service.normalise_targeting_rules(form_values["targeting_rules"])
+        if not rules:
+            raise ValueError(
+                "Add at least one condition with a value, or choose Everyone under Who it applies to."
+            )
+    return {
+        "signature_role": form_values["signature_role"],
+        "targeting_match": form_values["targeting_match"],
+        "targeting_rules": rules,
     }
 
 
@@ -112,6 +152,10 @@ def _signature_form_values(record: dict | None = None, *, form=None) -> dict[str
             "is_default": "on" if form.get("is_default") == "on" else "",
             "schedule_start_on": str(form.get("schedule_start_on") or "").strip(),
             "schedule_end_on": str(form.get("schedule_end_on") or "").strip(),
+            "signature_role": "additional" if form.get("signature_role") == "additional" else "primary",
+            "target_mode": "conditions" if form.get("target_mode") == "conditions" else "everyone",
+            "targeting_match": "any" if form.get("targeting_match") == "any" else "all",
+            "targeting_rules": _form_targeting_rules(form),
         }
     if not record:
         return _empty_signature_form()
@@ -125,6 +169,17 @@ def _signature_form_values(record: dict | None = None, *, form=None) -> dict[str
         "is_default": "on" if record.get("is_default") else "",
         "schedule_start_on": record["schedule_start_on"].isoformat() if record.get("schedule_start_on") else "",
         "schedule_end_on": record["schedule_end_on"].isoformat() if record.get("schedule_end_on") else "",
+        "signature_role": "additional" if record.get("signature_role") == "additional" else "primary",
+        "target_mode": "conditions" if record.get("targeting_rules") else "everyone",
+        "targeting_match": "any" if record.get("targeting_match") == "any" else "all",
+        "targeting_rules": [
+            {
+                "field": str(rule.get("field") or ""),
+                "operator": str(rule.get("operator") or "in"),
+                "values": ", ".join(str(value) for value in rule.get("values") or []),
+            }
+            for rule in record.get("targeting_rules") or []
+        ],
     }
 
 
@@ -148,8 +203,31 @@ async def _render_signature_form(
         "selected_staff_id": selected_staff_id,
         "schedule_timezone": signatures_service.get_schedule_timezone_name(),
         "variable_suggestions": await signatures_service.list_variable_suggestions(company_id),
+        "targeting_fields": await signatures_service.list_targeting_fields(company_id),
+        "targeting_operators": signatures_service.TARGETING_OPERATORS,
     }
     return await _main()._render_template("m365/signatures_form.html", request, user, extra=extra)
+
+
+async def _signature_preview(company_id: int, form_values: dict, staff_id: int) -> dict:
+    """Render the submitted signature for a staff member and report whether
+    the submitted targeting includes them."""
+    preview = await signatures_service.render_preview(
+        company_id,
+        html_content=form_values["html_content"],
+        text_content=form_values["text_content"],
+        staff_id=staff_id,
+    )
+    rules = []
+    if form_values["target_mode"] == "conditions":
+        rules = signatures_service.normalise_targeting_rules(form_values["targeting_rules"])
+    staff = await signatures_service.with_custom_fields(
+        company_id, await staff_repo.get_staff_by_id(staff_id) or {}
+    )
+    preview["targeted"] = signatures_service.template_applies_to_staff(
+        {"targeting_rules": rules, "targeting_match": form_values["targeting_match"]}, staff
+    )
+    return preview
 
 
 @router.get("/m365/out-of-office", response_class=HTMLResponse)
@@ -236,7 +314,10 @@ async def signatures_page(request: Request):
     user, company_id, redirect = await _signature_context(request)
     if redirect:
         return redirect
-    templates = await signatures_service.list_templates(company_id)
+    templates = [
+        {**template, "audience": signatures_service.describe_targeting(template)}
+        for template in await signatures_service.list_templates(company_id)
+    ]
     current_primary = await signatures_service.get_primary_template(company_id)
     company = await companies_repo.get_company_by_id(company_id) or {}
     can_write = await _main()._has_menu_page_access(
@@ -303,12 +384,7 @@ async def create_signature_template(request: Request):
         if not preview_staff_id:
             return flash_redirect("/m365/signatures/new", "Choose a staff member to preview this signature.", "error")
         try:
-            preview = await signatures_service.render_preview(
-                company_id,
-                html_content=form_values["html_content"],
-                text_content=form_values["text_content"],
-                staff_id=preview_staff_id,
-            )
+            preview = await _signature_preview(company_id, form_values, preview_staff_id)
         except (TypeError, ValueError) as exc:
             return flash_redirect("/m365/signatures/new", str(exc), "error")
         return await _render_signature_form(
@@ -332,6 +408,7 @@ async def create_signature_template(request: Request):
             schedule_start_on=form_values["schedule_start_on"] or None,
             schedule_end_on=form_values["schedule_end_on"] or None,
             user_id=int(user["id"]),
+            **_signature_targeting_args(form_values),
         )
     except ValueError as exc:
         return flash_redirect("/m365/signatures/new", str(exc), "error")
@@ -341,7 +418,13 @@ async def create_signature_template(request: Request):
         user_id=int(user["id"]),
         entity_type="m365_signature_template",
         entity_id=int(created["id"]),
-        after={"slug": created["slug"], "status": created["status"]},
+        after={
+            "slug": created["slug"],
+            "status": created["status"],
+            "signature_role": created.get("signature_role"),
+            "targeting_match": created.get("targeting_match"),
+            "targeting_rules": created.get("targeting_rules") or [],
+        },
     )
     return flash_redirect(f"/m365/signatures/{created['id']}/edit", "Signature template created.", "success")
 
@@ -372,12 +455,7 @@ async def update_signature_template(template_id: int, request: Request):
         if not preview_staff_id:
             return flash_redirect(f"/m365/signatures/{template_id}/edit", "Choose a staff member to preview this signature.", "error")
         try:
-            preview = await signatures_service.render_preview(
-                company_id,
-                html_content=form_values["html_content"],
-                text_content=form_values["text_content"],
-                staff_id=preview_staff_id,
-            )
+            preview = await _signature_preview(company_id, form_values, preview_staff_id)
         except (TypeError, ValueError) as exc:
             return flash_redirect(f"/m365/signatures/{template_id}/edit", str(exc), "error")
         template_record = dict(template_record)
@@ -405,6 +483,7 @@ async def update_signature_template(template_id: int, request: Request):
             schedule_start_on=form_values["schedule_start_on"] or None,
             schedule_end_on=form_values["schedule_end_on"] or None,
             user_id=int(user["id"]),
+            **_signature_targeting_args(form_values),
         )
     except ValueError as exc:
         return flash_redirect(f"/m365/signatures/{template_id}/edit", str(exc), "error")
@@ -416,7 +495,13 @@ async def update_signature_template(template_id: int, request: Request):
         user_id=int(user["id"]),
         entity_type="m365_signature_template",
         entity_id=int(updated["id"]),
-        after={"slug": updated["slug"], "status": updated["status"]},
+        after={
+            "slug": updated["slug"],
+            "status": updated["status"],
+            "signature_role": updated.get("signature_role"),
+            "targeting_match": updated.get("targeting_match"),
+            "targeting_rules": updated.get("targeting_rules") or [],
+        },
     )
     return flash_redirect(f"/m365/signatures/{template_id}/edit", "Signature template updated.", "success")
 
@@ -470,7 +555,10 @@ async def _render_signature_deploy(
         extra={
             "title": "Deploy signature",
             "template_record": template_record,
-            "targets": await signature_deploy_service.list_deployment_targets(company_id),
+            "targets": await signature_deploy_service.list_deployment_targets(
+                company_id, template_record
+            ),
+            "targeting_summary": signatures_service.describe_targeting(template_record),
             "roaming": await signature_deploy_service.get_roaming_signature_status(company_id),
             "max_mailboxes": signature_deploy_service.MAX_DEPLOY_MAILBOXES,
             "outcomes": outcomes or [],

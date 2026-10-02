@@ -8,12 +8,13 @@
 // it:
 //
 //  1. discovers the email addresses of the user's Outlook accounts;
-//  2. asks the portal to render the company's active signature for them
+//  2. asks the portal to render the signatures available to each of them
 //     (the portal returns nothing unless the company opted in);
 //  3. writes the .htm, .rtf and .txt signature files when their content
-//     changed; and
-//  4. makes the signature the default for new messages and replies on the
-//     matching Outlook accounts.
+//     changed;
+//  4. makes each account's primary signature the default for new messages
+//     and replies, leaving additional signatures available in the picker; and
+//  5. removes additional signatures it wrote earlier that no longer apply.
 //
 // Existing signatures created by the user are never modified or deleted.
 package main
@@ -76,16 +77,23 @@ type outlookSignature struct {
 }
 
 type outlookSignaturesResponse struct {
-	Enabled      bool               `json:"enabled"`
-	TemplateSlug string             `json:"template_slug"`
-	Signatures   []outlookSignature `json:"signatures"`
-	Skipped      map[string]string  `json:"skipped"`
+	Enabled      bool   `json:"enabled"`
+	TemplateSlug string `json:"template_slug"`
+	// Signatures holds each account's primary signature.
+	Signatures []outlookSignature `json:"signatures"`
+	// AdditionalSignatures are available to the account but never made the
+	// default.
+	AdditionalSignatures []outlookSignature `json:"additional_signatures"`
+	Skipped              map[string]string  `json:"skipped"`
 }
 
 // outlookSignatureState records the content hash written for each signature
-// file so unchanged signatures are not rewritten every hour.
+// file so unchanged signatures are not rewritten every hour, and which
+// additional signatures were written for which address so they can be
+// removed once they no longer apply.
 type outlookSignatureState struct {
-	Hashes map[string]string `json:"hashes"`
+	Hashes     map[string]string `json:"hashes"`
+	Additional map[string]string `json:"additional,omitempty"`
 }
 
 var (
@@ -158,7 +166,12 @@ func syncOutlookSignatures(ctx context.Context, platform outlookPlatform, portal
 	for address, reason := range response.Skipped {
 		logger.Info("Outlook signatures: skipped %s: %s", address, reason)
 	}
-	if len(response.Signatures) == 0 {
+	state := loadOutlookSignatureState(platform)
+	if len(response.Signatures) == 0 && len(response.AdditionalSignatures) == 0 {
+		if dir, err := platform.SignaturesDir(); err == nil &&
+			pruneAdditionalSignatures(dir, &state, addresses, response, nil) > 0 {
+			saveOutlookSignatureState(platform, state)
+		}
 		return nil
 	}
 
@@ -173,7 +186,6 @@ func syncOutlookSignatures(ctx context.Context, platform outlookPlatform, portal
 		return fmt.Errorf("create signatures folder: %w", err)
 	}
 
-	state := loadOutlookSignatureState(platform)
 	written := 0
 	var defaultName string
 	for _, signature := range response.Signatures {
@@ -207,10 +219,67 @@ func syncOutlookSignatures(ctx context.Context, platform outlookPlatform, portal
 			logger.Warn("Outlook signatures: set default for new accounts: %v", err)
 		}
 	}
+	current := map[string]bool{}
+	for _, signature := range response.AdditionalSignatures {
+		base := signatureFileBase(signature.Name)
+		if base == "" {
+			logger.Warn("Outlook signatures: ignoring signature with an unusable name for %s", signature.Address)
+			continue
+		}
+		current[base] = true
+		state.Additional[base] = strings.ToLower(strings.TrimSpace(signature.Address))
+		if state.Hashes[base] != signature.Hash || !signatureFilesExist(dir, base) {
+			if err := writeSignatureFiles(dir, base, signature); err != nil {
+				logger.Warn("Outlook signatures: write %s: %v", base, err)
+				continue
+			}
+			state.Hashes[base] = signature.Hash
+			written++
+		}
+	}
+	removed := pruneAdditionalSignatures(dir, &state, addresses, response, current)
 	saveOutlookSignatureState(platform, state)
-	logger.Info("Outlook signatures: template %q applied to %d account(s), %d file set(s) updated",
-		response.TemplateSlug, len(response.Signatures), written)
+	logger.Info("Outlook signatures: template %q applied to %d account(s), %d additional signature(s), %d file set(s) updated, %d removed",
+		response.TemplateSlug, len(response.Signatures), len(current), written, removed)
 	return nil
+}
+
+// pruneAdditionalSignatures deletes additional signatures written by an
+// earlier sync that the portal no longer returns. Only addresses the portal
+// answered for in this sync are considered: a skipped address may just be
+// temporarily unmatched, so its signatures are left alone.
+func pruneAdditionalSignatures(dir string, state *outlookSignatureState, requested []string,
+	response *outlookSignaturesResponse, current map[string]bool) int {
+	answered := map[string]bool{}
+	for _, address := range requested {
+		answered[strings.ToLower(address)] = true
+	}
+	for address := range response.Skipped {
+		delete(answered, strings.ToLower(strings.TrimSpace(address)))
+	}
+	removed := 0
+	for base, address := range state.Additional {
+		if current[base] || !answered[address] {
+			continue
+		}
+		failed := false
+		for _, ext := range []string{".htm", ".rtf", ".txt"} {
+			if err := os.Remove(filepath.Join(dir, base+ext)); err != nil && !os.IsNotExist(err) {
+				logger.Warn("Outlook signatures: remove %s%s: %v", base, ext, err)
+				failed = true
+			}
+		}
+		// Outlook keeps images and other assets for an HTML signature in a
+		// "<name>_files" folder next to it.
+		_ = os.RemoveAll(filepath.Join(dir, base+"_files"))
+		if failed {
+			continue
+		}
+		delete(state.Additional, base)
+		delete(state.Hashes, base)
+		removed++
+	}
+	return removed
 }
 
 func uniqueAddresses(accounts []outlookAccount) []string {
@@ -373,7 +442,7 @@ func writeFileAtomic(path string, data []byte) error {
 }
 
 func loadOutlookSignatureState(platform outlookPlatform) outlookSignatureState {
-	state := outlookSignatureState{Hashes: map[string]string{}}
+	state := outlookSignatureState{Hashes: map[string]string{}, Additional: map[string]string{}}
 	dir, err := platform.StateDir()
 	if err != nil {
 		return state
@@ -383,7 +452,10 @@ func loadOutlookSignatureState(platform outlookPlatform) outlookSignatureState {
 		return state
 	}
 	if err := json.Unmarshal(data, &state); err != nil || state.Hashes == nil {
-		return outlookSignatureState{Hashes: map[string]string{}}
+		return outlookSignatureState{Hashes: map[string]string{}, Additional: map[string]string{}}
+	}
+	if state.Additional == nil {
+		state.Additional = map[string]string{}
 	}
 	return state
 }
