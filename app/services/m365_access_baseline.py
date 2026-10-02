@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CONTRACT_VERSION = "2026-09-30.1"
+CONTRACT_VERSION = "2026-10-02.1"
 
 
 @dataclass(frozen=True)
@@ -78,6 +78,9 @@ GRAPH_APPLICATION_PERMISSION_IDS = {
     "IdentityRiskyUser.Read.All": "dc5007c0-2d7d-4c42-879c-2dab87571379",
     "Application.Read.All": "9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30",
     "SecurityEvents.Read.All": "bf394140-e372-4bf9-a898-299cfc7564e5",
+    # Reported Emails page: reads Defender "Email reported by user as ..."
+    # alerts and their message evidence from /security/alerts_v2.
+    "SecurityAlert.Read.All": "472e4a4d-bb4a-4026-98d1-0b0d74cb74a5",
     "SharePointTenantSettings.ReadWrite.All": "19b94e34-907c-4f43-bde9-38b1909ed408",
     "Sites.Read.All": "332a536c-c7ef-4017-ab91-336970924f0d",
     "Sites.ReadWrite.All": "9492366f-7969-46a4-8d15-ed1a20078fff",
@@ -101,6 +104,7 @@ _PROVISION_ONLY = {
     "Mail.Send": ("m365_notification_send", "POST /users/{sender}/sendMail", "write", "optional"),
     "IdentityRiskyUser.Read.All": ("security_monitoring", "GET /identityProtection/riskyUsers", "read", "optional"),
     "Application.Read.All": ("application_monitoring", "GET /applications", "read", "required"),
+    "SecurityAlert.Read.All": ("reported_email_alerts", "GET /security/alerts_v2", "read", "optional"),
     "Sites.ReadWrite.All": ("offboarding_export", "PUT /sites/{id}/drive/items", "write", "optional"),
 }
 

@@ -61,5 +61,6 @@ def test_disabled_feature_pack_links_are_not_rendered(monkeypatch):
         "/m365/out-of-office",
         "/m365/signatures",
         "/m365/spam-purge",
+        "/m365/reported-emails",
     ):
         assert f'href="{path}"' not in body

@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/tables.html" import data_table, table_toolbar %}
+
+{% block title %}Reported emails{% endblock %}
+{% block header_title %}Reported emails{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Spam Search & Purge", "type": "link", "href": "/m365/spam-purge"}
+  ]) }}
+{% endblock %}
+
+{% block styles %}
+<style>
+  .reported-filters { display:flex; flex-wrap:wrap; align-items:flex-end; gap:var(--space-3); margin:0 0 var(--space-4); }
+  .reported-filters .form-field { margin:0; min-width:10rem; }
+  .reported-message { display:grid; gap:var(--space-1, .25rem); max-width:30rem; overflow-wrap:anywhere; }
+  .reported-message__subject { font-weight:600; }
+  .reported-message__meta { color:var(--color-text-muted); font-size:.85rem; }
+  .reported-window { font-size:.85rem; white-space:nowrap; }
+  .reported-actions { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); }
+  .reported-actions form { margin:0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="card card--panel">
+  <header class="card__header">
+    <div>
+      <h2 class="card__title">User-reported email alerts</h2>
+      <p class="card__subtitle">Microsoft Defender alerts raised when a user reports a message as phish, malware or junk. Creating a search runs a non-destructive compliance search for the P1 sender and subject, received one hour either side of the reported message. Nothing is purged until you confirm it on the Spam Search &amp; Purge page.</p>
+    </div>
+  </header>
+  <div class="card__body">
+    <form method="get" action="/m365/reported-emails" class="reported-filters">
+      <div class="form-field">
+        <label for="kind">Report type</label>
+        <select class="input" id="kind" name="kind">
+          <option value="all" {% if kind == 'all' %}selected{% endif %}>All reports</option>
+          <option value="phish" {% if kind == 'phish' %}selected{% endif %}>Malware or phish</option>
+          <option value="junk" {% if kind == 'junk' %}selected{% endif %}>Junk</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label for="days">Created in the last</label>
+        <select class="input" id="days" name="days">
+          {% for option in [1, 7, 14, 30, 60, 90] %}
+          <option value="{{ option }}" {% if days == option %}selected{% endif %}>{{ option }} day{{ '' if option == 1 else 's' }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button class="button button--secondary" type="submit">Apply</button>
+    </form>
+
+    {% if load_error %}<p class="alert alert--error" role="alert">{{ load_error }}</p>{% endif %}
+
+    {% set columns = [
+      {"key":"created", "label":"Alert created", "sort_type":"date", "mobile_priority":"essential", "width":"12%"},
+      {"key":"report", "label":"Report", "width":"14%"},
+      {"key":"message", "label":"Reported message", "mobile_priority":"essential", "width":"32%"},
+      {"key":"window", "label":"Search window (UTC)"},
+      {"key":"status", "label":"Alert status", "default_visible":false},
+      {"key":"search", "label":"Search"},
+      {"key":"actions", "label":"Actions", "sortable":false, "mobile_priority":"essential", "width":"16%"}
+    ] %}
+    {{ table_toolbar("reported-emails", search=true, search_placeholder="Filter alerts", columns=columns) }}
+    {% call data_table(columns, table_id="reported-emails", columns=columns, aria_label="User-reported email alerts") %}
+      {% for alert in alerts %}
+      {% set search = alert.search %}
+      {% set report_variant = 'danger' if alert.kind == 'phish' else 'warning' if alert.kind == 'junk' else 'neutral' %}
+      <tr>
+        <td data-column-key="created" data-sort-value="{{ alert.created_at or '' }}">{% if alert.created_at %}<span data-utc="{{ alert.created_at }}">{{ alert.created_at }}</span>{% else %}&mdash;{% endif %}</td>
+        <td data-column-key="report"><span class="status status--{{ report_variant }}">{{ alert.report_label }}</span></td>
+        <td data-column-key="message">
+          <div class="reported-message">
+            <span class="reported-message__subject">{{ alert.subject or '(no subject in alert evidence)' }}</span>
+            <span class="reported-message__meta">From {{ alert.p1_sender or 'unknown sender' }}{% if alert.p2_sender and alert.p2_sender|lower != (alert.p1_sender or '')|lower %} &middot; display {{ alert.p2_sender_name or '' }} &lt;{{ alert.p2_sender }}&gt;{% endif %}</span>
+            {% if alert.recipient %}<span class="reported-message__meta">Reported by {{ alert.recipient }}</span>{% endif %}
+          </div>
+        </td>
+        <td data-column-key="window" data-sort-value="{{ alert.anchor_at or '' }}">
+          {% if alert.window_start %}
+          <div class="reported-window">{{ alert.window_start.strftime('%Y-%m-%d %H:%M') }}<br>to {{ alert.window_end.strftime('%Y-%m-%d %H:%M') }}</div>
+          {% else %}&mdash;{% endif %}
+        </td>
+        <td data-column-key="status">{{ alert.status|replace('_',' ')|title }}</td>
+        <td data-column-key="search">
+          {% if search %}
+          {% set search_variant = 'success' if search.search_status == 'completed' else 'danger' if search.search_status == 'failed' else 'warning' if search.search_status in ['queued','starting','running'] else 'neutral' %}
+          <span class="status status--{{ search_variant }}">{{ search.search_status|replace('_',' ')|title }}</span>
+          {% if search.search_status == 'completed' %}<div class="reported-message__meta">{{ search.matched_items }} matched{% if search.purge_status != 'not_started' %} &middot; purge {{ search.purge_status|replace('_',' ') }}{% endif %}</div>{% endif %}
+          {% else %}<span class="text-muted">Not created</span>{% endif %}
+        </td>
+        <td data-column-key="actions">
+          <div class="reported-actions">
+            {% if search %}
+            <a class="button button--ghost button--small" href="/m365/spam-purge">Review search</a>
+            {% elif alert.p1_sender or alert.subject %}
+            <form method="post" action="/m365/reported-emails/{{ alert.id|urlencode }}/search">
+              {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+              <button class="button button--primary button--small" type="submit">Create search</button>
+            </form>
+            {% else %}
+            <span class="text-muted">No message evidence</span>
+            {% endif %}
+            {% if alert.alert_url %}<a class="button button--ghost button--small" href="{{ alert.alert_url }}" target="_blank" rel="noopener noreferrer">Defender</a>{% endif %}
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="table__empty">{% if load_error %}Alerts could not be loaded.{% else %}No user-reported email alerts in this period.{% endif %}</td></tr>
+      {% endfor %}
+    {% endcall %}
+  </div>
+</section>
+{% endblock %}

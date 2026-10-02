@@ -30,13 +30,15 @@ async def create_request(data: dict[str, Any]) -> dict[str, Any]:
         """
         INSERT INTO m365_spam_purge_requests (
             company_id, created_by, search_name, action_name,
-            content_match_query, sender, subject, received_from, received_to
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            content_match_query, sender, subject, received_from, received_to,
+            source_alert_id
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             data["company_id"], data["created_by"], data["search_name"],
             data["action_name"], data["content_match_query"], data.get("sender"),
             data.get("subject"), data.get("received_from"), data.get("received_to"),
+            data.get("source_alert_id"),
         ),
     )
     result = await get_request(request_id)
@@ -64,6 +66,31 @@ async def list_requests(company_id: int, *, limit: int = 200) -> list[dict[str, 
         (company_id, max(1, min(limit, 500))),
     )
     return [_normalise(row) or {} for row in rows]
+
+
+async def find_by_source_alert(company_id: int, alert_id: str) -> dict[str, Any] | None:
+    """Return the newest request created from a Defender alert, if any."""
+    return _normalise(await db.fetch_one(
+        """
+        SELECT * FROM m365_spam_purge_requests
+        WHERE company_id = %s AND source_alert_id = %s
+        ORDER BY id DESC LIMIT 1
+        """,
+        (company_id, alert_id),
+    ))
+
+
+async def list_by_source_alerts(company_id: int) -> dict[str, dict[str, Any]]:
+    """Map Defender alert IDs to the newest request created from each."""
+    rows = await db.fetch_all(
+        """
+        SELECT * FROM m365_spam_purge_requests
+        WHERE company_id = %s AND source_alert_id IS NOT NULL
+        ORDER BY id
+        """,
+        (company_id,),
+    )
+    return {str(row["source_alert_id"]): _normalise(row) or {} for row in rows}
 
 
 async def update_request(request_id: int, updates: dict[str, Any]) -> dict[str, Any] | None:

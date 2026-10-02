@@ -30,6 +30,7 @@ TARGET_BCP_TEMPLATES = [
 ]
 MAILBOX_TEMPLATES = [
     "m365/shared_mailboxes.html",
+    "m365/reported_emails.html",
     "m365/spam_purge.html",
     "m365/user_mailboxes.html",
 ]

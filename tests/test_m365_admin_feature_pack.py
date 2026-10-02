@@ -26,6 +26,8 @@ def test_m365_admin_pack_owns_spam_purge_routes():
     assert "/m365/spam-purge/api/requests" in paths
     assert "/m365/spam-purge/api/requests/{request_id}/purge" in paths
     assert "/m365/spam-purge/{request_id}/retry" in paths
+    assert "/m365/reported-emails" in paths
+    assert "/m365/reported-emails/{alert_id}/search" in paths
 
 
 def test_m365_admin_pack_is_enabled_by_default():

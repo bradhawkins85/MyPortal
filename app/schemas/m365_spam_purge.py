@@ -36,6 +36,7 @@ class SpamPurgeRequestResponse(BaseModel):
     subject: str | None = None
     received_from: date | None = None
     received_to: date | None = None
+    source_alert_id: str | None = None
     search_status: str
     purge_status: str
     matched_items: int = 0
