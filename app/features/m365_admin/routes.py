@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import date
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from pydantic import ValidationError
 
 from app.repositories import companies as companies_repo
+from app.repositories import m365_reported_email_ignores as ignores_repo
 from app.repositories import m365_spam_purge as purge_repo
 from app.schemas.m365_spam_purge import SpamPurgeRequestCreate
 from app.schemas.m365_out_of_office import OutOfOfficeCreate, OutOfOfficeDisable
@@ -661,6 +663,27 @@ async def retry_failed_search(request_id: int, request: Request):
 
 
 _REPORTED_KINDS = {"all", "phish", "junk"}
+_REPORTED_IGNORED_FILTERS = {"hide", "show", "only"}
+
+
+def _reported_filters(values) -> tuple[str, int, str]:
+    """Return validated (kind, days, ignored) filters from query or form values."""
+    kind = str(values.get("kind") or "all").lower()
+    if kind not in _REPORTED_KINDS:
+        kind = "all"
+    try:
+        days = int(values.get("days") or reported_service.DEFAULT_LOOKBACK_DAYS)
+    except (TypeError, ValueError):
+        days = reported_service.DEFAULT_LOOKBACK_DAYS
+    days = max(1, min(days, reported_service.MAX_LOOKBACK_DAYS))
+    ignored = str(values.get("ignored") or "hide").lower()
+    if ignored not in _REPORTED_IGNORED_FILTERS:
+        ignored = "hide"
+    return kind, days, ignored
+
+
+def _reported_emails_url(kind: str, days: int, ignored: str) -> str:
+    return "/m365/reported-emails?" + urlencode({"kind": kind, "days": days, "ignored": ignored})
 
 
 @router.get("/m365/reported-emails", response_class=HTMLResponse)
@@ -668,14 +691,7 @@ async def reported_emails_page(request: Request):
     user, company_id, redirect = await _context(request)
     if redirect:
         return redirect
-    kind = str(request.query_params.get("kind") or "all").lower()
-    if kind not in _REPORTED_KINDS:
-        kind = "all"
-    try:
-        days = int(request.query_params.get("days") or reported_service.DEFAULT_LOOKBACK_DAYS)
-    except ValueError:
-        days = reported_service.DEFAULT_LOOKBACK_DAYS
-    days = max(1, min(days, reported_service.MAX_LOOKBACK_DAYS))
+    kind, days, ignored = _reported_filters(request.query_params)
     alerts: list[dict] = []
     warnings: list[str] = []
     load_error = None
@@ -686,13 +702,55 @@ async def reported_emails_page(request: Request):
     if kind != "all":
         alerts = [alert for alert in alerts if alert["kind"] == kind]
     searches = await purge_repo.list_by_source_alerts(company_id)
+    ignores = await ignores_repo.list_ignored(company_id)
     for alert in alerts:
         alert["search"] = searches.get(alert["id"])
+        alert["ignored"] = alert["id"] in ignores
+    ignored_count = sum(1 for alert in alerts if alert["ignored"])
+    if ignored == "hide":
+        alerts = [alert for alert in alerts if not alert["ignored"]]
+    elif ignored == "only":
+        alerts = [alert for alert in alerts if alert["ignored"]]
     return await _main()._render_template("m365/reported_emails.html", request, user, extra={
         "title": "Reported emails", "alerts": alerts, "load_error": load_error,
         "load_warnings": warnings,
-        "kind": kind, "days": days,
+        "kind": kind, "days": days, "ignored": ignored, "ignored_count": ignored_count,
     })
+
+
+async def _set_reported_email_ignored(alert_id: str, request: Request, *, ignore: bool):
+    user, company_id, redirect = await _context(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    back = _reported_emails_url(*_reported_filters(form))
+    if not reported_service.is_valid_alert_id(alert_id):
+        return flash_redirect(back, "Reported email not found.", "error")
+    if ignore:
+        changed = await ignores_repo.ignore(company_id, alert_id, int(user["id"]))
+        message = "Report ignored. Show ignored reports to see it again."
+    else:
+        await ignores_repo.unignore(company_id, alert_id)
+        changed = True
+        message = "Report restored."
+    if changed:
+        await audit_service.record(
+            action="m365.reported_email." + ("ignore" if ignore else "unignore"),
+            request=request, user_id=int(user["id"]),
+            entity_type="m365_reported_email", entity_id=None,
+            after={"alert_id": alert_id, "ignored": ignore},
+        )
+    return flash_redirect(back, message, "success")
+
+
+@router.post("/m365/reported-emails/{alert_id}/ignore")
+async def ignore_reported_email(alert_id: str, request: Request):
+    return await _set_reported_email_ignored(alert_id, request, ignore=True)
+
+
+@router.post("/m365/reported-emails/{alert_id}/unignore")
+async def unignore_reported_email(alert_id: str, request: Request):
+    return await _set_reported_email_ignored(alert_id, request, ignore=False)
 
 
 @router.post("/m365/reported-emails/{alert_id}/search")
