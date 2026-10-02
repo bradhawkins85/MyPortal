@@ -1,0 +1,7 @@
+{
+  "guid": "25262b60-fe9d-41e7-8b00-9011f910156a",
+  "occurred_at": "2026-10-02T00:00Z",
+  "change_type": "Fixed",
+  "summary": "Out of Office now hides accounts without an Exchange mailbox by default, with a Show all accounts toggle and a No mailbox filter to reveal them",
+  "content_hash": "5bb10fff4b9c99e79e4432ff2ccce1fc219d1c23791060543f07170420b787e6"
+}
