@@ -28,7 +28,7 @@ def _request() -> Request:
 
 
 def _payload(email: str = "sam@example.com") -> RegistrationRequest:
-    return RegistrationRequest(email=email, password="a-long-password-123")
+    return RegistrationRequest(email=email, password="a-long-password-123", accept_policies=True)
 
 
 @pytest.fixture

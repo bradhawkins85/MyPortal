@@ -113,7 +113,13 @@
         <p data-account-setup-reset-message></p>
         <button type="button" class="button button--secondary" data-account-setup-reset-submit>Send password reset</button>
       </div>
-      <p class="form-help auth-card__fineprint">By creating an account you agree to the <a href="/legal/terms">Terms and Conditions</a> and <a href="/legal/acceptable-use">Acceptable Use Policy</a>, and acknowledge the <a href="/legal/privacy">Privacy Policy</a>.</p>
+      <div class="form-field">
+        <div class="form-checkbox">
+          <input id="register-accept-policies" class="form-checkbox__input" type="checkbox" name="accept_policies" value="on" />
+          <label class="form-checkbox__label" for="register-accept-policies">I agree to the <a href="/legal/terms" target="_blank" rel="noopener">Terms and Conditions</a> and <a href="/legal/acceptable-use" target="_blank" rel="noopener">Acceptable Use Policy</a>, and I have read the <a href="/legal/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</label>
+        </div>
+        <p class="form-error" data-policy-error aria-live="polite" hidden></p>
+      </div>
       <button type="submit" class="button auth-card__wide" data-auth-submit>{{ 'Create administrator account' if is_first else 'Create account' }}</button>
       <p class="form-help auth-card__fineprint">Passwords are stored using bcrypt hashing{% if not is_first %}. After signing in you'll be able to submit tickets and follow your own conversations with the team{% endif %}.</p>
     </form>

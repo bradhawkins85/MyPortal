@@ -23,6 +23,8 @@ _ALLOWED_UPDATE_COLUMNS = {
     "email_verified_at",
     "force_password_change",
     "passkey_user_handle",
+    "policies_accepted_version",
+    "policies_accepted_at",
 }
 
 
