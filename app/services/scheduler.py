@@ -56,6 +56,7 @@ from app.repositories import rag_relationships as rag_relationship_repo
 from app.repositories import integration_modules as module_repo
 from app.repositories import websites as websites_repo
 from app.repositories import audit_logs as audit_logs_repo
+from app.repositories import dmarc as dmarc_repo
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SYSTEM_UPDATE_LOCK = asyncio.Lock()
@@ -529,6 +530,18 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        # Prune DMARC aggregate (RUA) and forensic (RUF) report rows older than
+        # DMARC_RETENTION_DAYS. Runs daily at 04:15 store-local time. No-op when
+        # DMARC_RETENTION_DAYS<=0. Mirrors the audit-log prune job above.
+        if not self._scheduler.get_job("dmarc-report-prune"):
+            self._scheduler.add_job(
+                self._run_dmarc_report_prune,
+                CronTrigger(hour=4, minute=15, timezone=self._scheduler.timezone),
+                id="dmarc-report-prune",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
 
     async def _run_audit_log_prune(self) -> None:
         """Prune expired audit log rows with distributed lock.
@@ -555,6 +568,34 @@ class SchedulerService:
                     )
             except Exception as exc:
                 log_error("Audit log prune failed", error=str(exc))
+
+    async def _run_dmarc_report_prune(self) -> None:
+        """Prune expired DMARC report rows with a distributed lock.
+
+        Daily job that removes rows from ``dmarc_forensic_reports`` and
+        ``dmarc_reports`` older than ``DMARC_RETENTION_DAYS``.  Mirrors
+        ``_run_audit_log_prune`` so a single worker runs the prune across a
+        multi-process deployment.
+        """
+        settings = get_settings()
+        if settings.dmarc_retention_days <= 0:
+            return
+        async with db.acquire_lock("dmarc_report_prune", timeout=1) as lock_acquired:
+            if not lock_acquired:
+                log_info("DMARC report prune already running on another worker, skipping")
+                return
+            try:
+                removed = await dmarc_repo.prune_reports(
+                    retention_days=settings.dmarc_retention_days
+                )
+                if removed:
+                    log_info(
+                        "DMARC report prune completed",
+                        removed=removed,
+                        retention_days=settings.dmarc_retention_days,
+                    )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_error("DMARC report prune failed", error=str(exc))
 
     async def _run_webhook_monitor(self) -> None:
         """Run webhook monitoring with distributed lock to prevent duplicate execution."""
