@@ -2050,6 +2050,108 @@ def _scc_delegated_reconnect_error(reason: str) -> M365Error:
     )
 
 
+_SCC_RESOURCE_URI = "https://ps.compliance.protection.outlook.com"
+
+
+async def ensure_scc_delegated_permission(company_id: int, access_token: str) -> bool:
+    """Add the Security & Compliance delegated scopes to the company's app manifest.
+
+    The chained Security & Compliance consent requests
+    ``https://ps.compliance.protection.outlook.com/.default``.  A ``/.default``
+    request only resolves against resources listed in the app registration's
+    ``requiredResourceAccess``; when the resource is absent Microsoft rejects
+    the consent with AADSTS650057 ("Invalid resource") and any token it still
+    issues carries no usable delegated permission, so Purview answers 401.
+
+    Scope identifiers are resolved from the tenant's own resource service
+    principal rather than copied.  Existing entries for the resource (such as
+    an application role) are kept; only missing delegated scopes are merged in.
+    *access_token* is the administrator's delegated Graph token from the
+    connect flow (``Application.ReadWrite.All``).  Returns ``True`` when the
+    manifest was changed.  Failures are logged, never raised: the connect flow
+    must not be interrupted by this best-effort repair.
+    """
+    creds = await get_credentials(company_id)
+    client_id = str((creds or {}).get("client_id") or "").strip()
+    if not client_id:
+        return False
+    try:
+        resources = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/servicePrincipals"
+            f"?$filter=servicePrincipalNames/any(n:n eq '{_SCC_RESOURCE_URI}')"
+            "&$select=id,appId,oauth2PermissionScopes",
+        )
+        resource = next(iter(resources.get("value") or []), None)
+        if not resource:
+            resources = await _graph_get(
+                access_token,
+                "https://graph.microsoft.com/v1.0/servicePrincipals"
+                f"?$filter=appId eq '{_SCC_APP_ID}'&$select=id,appId,oauth2PermissionScopes",
+            )
+            resource = next(iter(resources.get("value") or []), None)
+        resource_app_id = str((resource or {}).get("appId") or "").strip().lower()
+        scope_ids = [
+            str(scope.get("id")).lower()
+            for scope in (resource or {}).get("oauth2PermissionScopes") or []
+            if scope.get("id") and scope.get("isEnabled", True)
+        ]
+        if not resource_app_id or not scope_ids:
+            log_warning(
+                "Security & Compliance resource exposes no delegated scopes; "
+                "app manifest left unchanged",
+                company_id=company_id,
+            )
+            return False
+        applications = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/applications"
+            f"?$filter=appId eq '{quote(client_id, safe='')}'&$select=id,requiredResourceAccess",
+        )
+        application = next(iter(applications.get("value") or []), None)
+        if not application or not application.get("id"):
+            return False
+        required = [dict(entry) for entry in application.get("requiredResourceAccess") or []]
+        entry = next(
+            (
+                item for item in required
+                if str(item.get("resourceAppId") or "").lower() == resource_app_id
+            ),
+            None,
+        )
+        if entry is None:
+            entry = {"resourceAppId": resource_app_id, "resourceAccess": []}
+            required.append(entry)
+        access = list(entry.get("resourceAccess") or [])
+        present = {
+            str(item.get("id") or "").lower()
+            for item in access
+            if str(item.get("type") or "").lower() == "scope"
+        }
+        missing = [scope_id for scope_id in scope_ids if scope_id not in present]
+        if not missing:
+            return False
+        entry["resourceAccess"] = access + [{"id": scope_id, "type": "Scope"} for scope_id in missing]
+        await _graph_patch(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(application['id'])}",
+            {"requiredResourceAccess": required},
+        )
+    except M365Error as exc:
+        log_warning(
+            "Could not add Security & Compliance delegated scopes to the app manifest",
+            company_id=company_id,
+            error=str(exc),
+        )
+        return False
+    log_info(
+        "Added Security & Compliance delegated scopes to the app manifest",
+        company_id=company_id,
+        scopes=len(missing),
+    )
+    return True
+
+
 async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
     """Acquire a delegated Security & Compliance access token.
 

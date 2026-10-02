@@ -737,3 +737,76 @@ async def test_scc_access_token_persists_rotated_refresh_token(monkeypatch):
     persisted = update_tokens.await_args.kwargs["refresh_token"]
     assert m365_service.decrypt_secret(persisted) == "rotated-rt"
     assert persisted != "old-rt"
+
+
+_EOP_SCOPE_ID = "7953c94e-23e3-4f4b-ba94-1bf0b07c7a83"
+_EOP_ROLE_ID = "dc50a0fb-09a3-484d-be87-e023b12c6440"
+
+
+def _manifest_graph(required: list, patches: list):
+    async def fake_get(_token, url, **_kwargs):
+        if "servicePrincipalNames/any" in url:
+            return {"value": [{
+                "id": "eop-sp", "appId": m365_service._SCC_APP_ID,
+                "oauth2PermissionScopes": [{"id": _EOP_SCOPE_ID, "value": "x", "isEnabled": True}],
+            }]}
+        if "/applications?" in url:
+            return {"value": [{"id": "11111111-2222-3333-4444-555555555555", "requiredResourceAccess": required}]}
+        raise AssertionError(url)
+
+    async def fake_patch(_token, url, payload, **_kwargs):
+        patches.append((url, payload))
+        return {}
+
+    return fake_get, fake_patch
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ensure_scc_delegated_permission_adds_scope_and_keeps_existing(monkeypatch):
+    required = [
+        {"resourceAppId": "00000003-0000-0000-c000-000000000000",
+         "resourceAccess": [{"id": "graph-role", "type": "Role"}]},
+        {"resourceAppId": m365_service._SCC_APP_ID,
+         "resourceAccess": [{"id": _EOP_ROLE_ID, "type": "Role"}]},
+    ]
+    patches: list = []
+    fake_get, fake_patch = _manifest_graph(required, patches)
+    monkeypatch.setattr(m365_service, "get_credentials", AsyncMock(return_value={"client_id": "client-id"}))
+    monkeypatch.setattr(m365_service, "_graph_get", fake_get)
+    monkeypatch.setattr(m365_service, "_graph_patch", fake_patch)
+
+    assert await m365_service.ensure_scc_delegated_permission(1, "token") is True
+
+    (url, payload), = patches
+    assert url.endswith("/applications/11111111-2222-3333-4444-555555555555")
+    by_resource = {e["resourceAppId"]: e["resourceAccess"] for e in payload["requiredResourceAccess"]}
+    assert by_resource["00000003-0000-0000-c000-000000000000"] == [{"id": "graph-role", "type": "Role"}]
+    assert by_resource[m365_service._SCC_APP_ID] == [
+        {"id": _EOP_ROLE_ID, "type": "Role"},
+        {"id": _EOP_SCOPE_ID, "type": "Scope"},
+    ]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ensure_scc_delegated_permission_is_noop_when_present(monkeypatch):
+    required = [{"resourceAppId": m365_service._SCC_APP_ID,
+                 "resourceAccess": [{"id": _EOP_SCOPE_ID, "type": "Scope"}]}]
+    patches: list = []
+    fake_get, fake_patch = _manifest_graph(required, patches)
+    monkeypatch.setattr(m365_service, "get_credentials", AsyncMock(return_value={"client_id": "client-id"}))
+    monkeypatch.setattr(m365_service, "_graph_get", fake_get)
+    monkeypatch.setattr(m365_service, "_graph_patch", fake_patch)
+
+    assert await m365_service.ensure_scc_delegated_permission(1, "token") is False
+    assert patches == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ensure_scc_delegated_permission_never_raises(monkeypatch):
+    async def failing_get(*_args, **_kwargs):
+        raise M365Error("Microsoft Graph request failed (403)", http_status=403)
+
+    monkeypatch.setattr(m365_service, "get_credentials", AsyncMock(return_value={"client_id": "client-id"}))
+    monkeypatch.setattr(m365_service, "_graph_get", failing_get)
+
+    assert await m365_service.ensure_scc_delegated_permission(1, "token") is False
