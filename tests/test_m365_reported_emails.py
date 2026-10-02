@@ -600,3 +600,112 @@ async def test_search_audit_reports_error_when_both_filters_fail(monkeypatch):
     monkeypatch.setattr(m365_service, "_exo_invoke_command", fake_exo)
     with pytest.raises(service.ReportedEmailError, match="Invalid Operation"):
         await service._search_audit(4, datetime(2026, 10, 1), datetime(2026, 10, 2))
+
+
+def _render_reported(**context):
+    stub_base = "{% block header_actions %}{% endblock %}{% block styles %}{% endblock %}{% block content %}{% endblock %}"
+    env = Environment(
+        loader=ChoiceLoader([DictLoader({"base.html": stub_base}), FileSystemLoader(TEMPLATES_DIR)]),
+        autoescape=select_autoescape(("html",)),
+    )
+    values = {"load_error": None, "kind": "all", "days": 30, "csrf_token": "tok"}
+    values.update(context)
+    return env.get_template("m365/reported_emails.html").render(**values)
+
+
+def test_reported_emails_template_offers_ignore_and_restore():
+    active = service.summarise_alert(_alert())
+    active.update(search=None, ignored=False)
+    ignored = service.summarise_alert(_alert(id="junk", title="Email reported by user as junk"))
+    ignored.update(search=None, ignored=True)
+    body = _render_reported(alerts=[active, ignored], ignored="show", ignored_count=1)
+    assert 'action="/m365/reported-emails/da638123456789_-123456/ignore"' in body
+    assert 'action="/m365/reported-emails/junk/unignore"' in body
+    assert ">Ignore</button>" in body and ">Restore</button>" in body
+    assert 'name="ignored" value="show"' in body
+    assert '<option value="show" selected>' in body
+
+
+def test_reported_emails_template_notes_hidden_ignored_reports():
+    body = _render_reported(alerts=[], ignored="hide", ignored_count=2)
+    assert "2 ignored reports hidden" in body
+    assert "ignored=show" in body
+    assert "Every report in this period is ignored." in body
+
+
+def test_reported_filters_default_to_hiding_ignored_reports():
+    from app.features.m365_admin import routes
+
+    assert routes._reported_filters({}) == ("all", service.DEFAULT_LOOKBACK_DAYS, "hide")
+    assert routes._reported_filters({"kind": "JUNK", "days": "7", "ignored": "only"}) == ("junk", 7, "only")
+    assert routes._reported_filters({"kind": "x", "days": "abc", "ignored": "x"})[::2] == ("all", "hide")
+    assert routes._reported_emails_url("phish", 14, "show") == "/m365/reported-emails?kind=phish&days=14&ignored=show"
+
+
+class _FakeForm(dict):
+    pass
+
+
+class _FakeRequest:
+    def __init__(self, form):
+        self._form = _FakeForm(form)
+        self.state = type("State", (), {"active_company_id": 7})()
+
+    async def form(self):
+        return self._form
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("ignore", [True, False])
+async def test_ignore_routes_store_audit_and_return_to_filters(monkeypatch, ignore):
+    from app.features.m365_admin import routes
+
+    calls = []
+
+    async def fake_context(request):
+        return {"id": 3}, 7, None
+
+    async def fake_ignore(company_id, alert_id, user_id):
+        calls.append(("ignore", company_id, alert_id, user_id))
+        return True
+
+    async def fake_unignore(company_id, alert_id):
+        calls.append(("unignore", company_id, alert_id))
+
+    async def fake_record(**kwargs):
+        calls.append(("audit", kwargs["action"], kwargs["after"]))
+
+    monkeypatch.setattr(routes, "_context", fake_context)
+    monkeypatch.setattr(routes.ignores_repo, "ignore", fake_ignore)
+    monkeypatch.setattr(routes.ignores_repo, "unignore", fake_unignore)
+    monkeypatch.setattr(routes.audit_service, "record", fake_record)
+
+    handler = routes.ignore_reported_email if ignore else routes.unignore_reported_email
+    response = await handler("submission:abc", _FakeRequest({"kind": "junk", "days": "7", "ignored": "show"}))
+
+    assert response.headers["location"] == "/m365/reported-emails?kind=junk&days=7&ignored=show"
+    if ignore:
+        assert calls[0] == ("ignore", 7, "submission:abc", 3)
+        assert calls[1] == ("audit", "m365.reported_email.ignore", {"alert_id": "submission:abc", "ignored": True})
+    else:
+        assert calls[0] == ("unignore", 7, "submission:abc")
+        assert calls[1][1] == "m365.reported_email.unignore"
+
+
+@pytest.mark.anyio
+async def test_ignore_route_rejects_malformed_alert_id(monkeypatch):
+    from app.features.m365_admin import routes
+
+    async def fake_context(request):
+        return {"id": 3}, 7, None
+
+    async def fail(*args, **kwargs):
+        raise AssertionError("must not store an invalid alert id")
+
+    monkeypatch.setattr(routes, "_context", fake_context)
+    monkeypatch.setattr(routes.ignores_repo, "ignore", fail)
+
+    response = await routes.ignore_reported_email("../bad id", _FakeRequest({}))
+    assert response.headers["location"] == "/m365/reported-emails?kind=all&days=30&ignored=hide".replace(
+        "days=30", f"days={service.DEFAULT_LOOKBACK_DAYS}"
+    )

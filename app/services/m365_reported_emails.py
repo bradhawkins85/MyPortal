@@ -601,8 +601,13 @@ async def _get_submission(company_id: int, submission_id: str) -> dict[str, Any]
     return summarise_submission(item)
 
 
+def is_valid_alert_id(alert_id: str | None) -> bool:
+    """Return whether ``alert_id`` has the shape of a reported-email ID."""
+    return bool(_ALERT_ID_PATTERN.fullmatch(alert_id or ""))
+
+
 async def get_reported_alert(company_id: int, alert_id: str) -> dict[str, Any]:
-    if not _ALERT_ID_PATTERN.fullmatch(alert_id or ""):
+    if not is_valid_alert_id(alert_id):
         raise LookupError("Alert not found")
     if alert_id.startswith(AUDIT_PREFIX):
         return await _get_audit_record(company_id, alert_id[len(AUDIT_PREFIX):])

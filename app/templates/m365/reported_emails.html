@@ -22,6 +22,8 @@
   .reported-actions { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); }
   .reported-actions form { margin:0; }
   .reported-sources { margin:0 0 var(--space-3); color:var(--color-text-muted); }
+  .reported-ignored-note { margin:0 0 var(--space-3); }
+  .reported-row--ignored .reported-message { opacity:.7; }
 </style>
 {% endblock %}
 
@@ -51,8 +53,17 @@
           {% endfor %}
         </select>
       </div>
+      <div class="form-field">
+        <label for="ignored">Ignored reports</label>
+        <select class="input" id="ignored" name="ignored">
+          <option value="hide" {% if ignored == 'hide' %}selected{% endif %}>Hide ignored</option>
+          <option value="show" {% if ignored == 'show' %}selected{% endif %}>Show ignored</option>
+          <option value="only" {% if ignored == 'only' %}selected{% endif %}>Only ignored</option>
+        </select>
+      </div>
       <button class="button button--secondary" type="submit">Apply</button>
     </form>
+    {% if ignored == 'hide' and ignored_count %}<p class="form-help reported-ignored-note">{{ ignored_count }} ignored report{{ '' if ignored_count == 1 else 's' }} hidden. <a href="/m365/reported-emails?kind={{ kind|urlencode }}&amp;days={{ days }}&amp;ignored=show">Show ignored</a></p>{% endif %}
 
     {% if load_error %}<p class="alert alert--error" role="alert">{{ load_error }}</p>{% endif %}
     {% set source_warnings = load_warnings | default([]) %}
@@ -79,9 +90,9 @@
       {% for alert in alerts %}
       {% set search = alert.search %}
       {% set report_variant = 'danger' if alert.kind == 'phish' else 'warning' if alert.kind == 'junk' else 'neutral' %}
-      <tr>
+      <tr{% if alert.ignored %} class="reported-row--ignored"{% endif %}>
         <td data-column-key="created" data-sort-value="{{ alert.created_at or '' }}">{% if alert.created_at %}<span data-utc="{{ alert.created_at }}">{{ alert.created_at }}</span>{% else %}&mdash;{% endif %}</td>
-        <td data-column-key="report"><span class="status status--{{ report_variant }}">{{ alert.report_label }}</span></td>
+        <td data-column-key="report"><span class="status status--{{ report_variant }}">{{ alert.report_label }}</span>{% if alert.ignored %} <span class="status status--neutral">Ignored</span>{% endif %}</td>
         <td data-column-key="message">
           <div class="reported-message">
             <span class="reported-message__subject">{{ alert.subject or '(no subject in alert evidence)' }}</span>
@@ -114,12 +125,19 @@
             {% else %}
             <span class="text-muted">No message evidence</span>
             {% endif %}
+            <form method="post" action="/m365/reported-emails/{{ alert.id|urlencode }}/{{ 'unignore' if alert.ignored else 'ignore' }}">
+              {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+              <input type="hidden" name="kind" value="{{ kind }}">
+              <input type="hidden" name="days" value="{{ days }}">
+              <input type="hidden" name="ignored" value="{{ ignored }}">
+              <button class="button button--ghost button--small" type="submit">{{ 'Restore' if alert.ignored else 'Ignore' }}</button>
+            </form>
             {% if alert.alert_url %}<a class="button button--ghost button--small" href="{{ alert.alert_url }}" target="_blank" rel="noopener noreferrer">{{ 'Submissions' if alert.source == 'submission' else 'Defender' }}</a>{% endif %}
           </div>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="7" class="table__empty">{% if load_error %}Alerts could not be loaded.{% else %}No user-reported email alerts in this period.{% endif %}</td></tr>
+      <tr><td colspan="7" class="table__empty">{% if load_error %}Alerts could not be loaded.{% elif ignored == 'only' %}No ignored reports in this period.{% elif ignored_count %}Every report in this period is ignored.{% else %}No user-reported email alerts in this period.{% endif %}</td></tr>
       {% endfor %}
     {% endcall %}
   </div>
