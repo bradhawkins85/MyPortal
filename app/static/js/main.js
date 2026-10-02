@@ -1,6 +1,31 @@
 (function () {
   'use strict';
 
+  // When the session expires the server answers script-driven requests with
+  // 401 and an X-Session-Expired header. Send the user back to sign in rather
+  // than surfacing a raw error message.
+  (function installSessionExpiryRedirect() {
+    if (typeof window === 'undefined' || typeof window.fetch !== 'function' || window.__sessionExpiryFetchPatched) {
+      return;
+    }
+    window.__sessionExpiryFetchPatched = true;
+    const originalFetch = window.fetch.bind(window);
+    let redirecting = false;
+    window.fetch = function (...args) {
+      return originalFetch(...args).then((response) => {
+        if (!redirecting && response && response.status === 401 && response.headers.get('X-Session-Expired') === '1') {
+          redirecting = true;
+          const path = window.location.pathname + window.location.search;
+          const target = path && path !== '/' && !path.startsWith('/login')
+            ? '/login?next=' + encodeURIComponent(path)
+            : '/login';
+          window.location.assign(target);
+        }
+        return response;
+      });
+    };
+  })();
+
   const TOAST_CLASSES = [
     'notification-toast--info',
     'notification-toast--success',

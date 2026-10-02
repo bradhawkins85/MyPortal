@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import secrets
 from typing import Iterable
+from urllib.parse import quote, urlsplit
 
 from fastapi import Request
 from starlette.datastructures import FormData
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from app.core.config import get_settings
 from app.core.logging import log_warning
@@ -27,6 +28,61 @@ DEFAULT_EXEMPT_PREFIXES = (
     "/auth/password/reset",
     "/api/knowledge-base/search",
 )
+
+
+LOGIN_PATH = "/login"
+SESSION_EXPIRED_HEADER = "X-Session-Expired"
+
+
+def _is_browser_navigation(request: Request) -> bool:
+    """Return True for top-level browser form submissions (not fetch/XHR/htmx)."""
+
+    fetch_mode = request.headers.get("sec-fetch-mode", "").lower()
+    if fetch_mode:
+        return fetch_mode == "navigate"
+    if request.headers.get("hx-request") or request.headers.get("x-requested-with"):
+        return False
+    return "text/html" in request.headers.get("accept", "").lower()
+
+
+def _login_url_for(request: Request) -> str:
+    """Build the login URL, returning the user to the page they submitted from."""
+
+    referer = request.headers.get("referer")
+    if not referer:
+        return LOGIN_PATH
+    try:
+        parts = urlsplit(referer)
+    except ValueError:
+        return LOGIN_PATH
+    if parts.netloc and parts.netloc != request.url.netloc:
+        return LOGIN_PATH
+    target = parts.path or "/"
+    if not target.startswith("/") or target.startswith("//") or "\\" in target:
+        return LOGIN_PATH
+    if target == "/" or target == LOGIN_PATH or target.startswith(("/login/", "/logout")):
+        return LOGIN_PATH
+    if parts.query:
+        target = f"{target}?{parts.query}"
+    return f"{LOGIN_PATH}?next={quote(target, safe='')}"
+
+
+def session_expired_response(request: Request) -> Response:
+    """Send the user back to sign in when their session has expired.
+
+    Browser form submissions are redirected straight to the login page. Script
+    driven requests (fetch/XHR/htmx) receive a 401 with headers that the
+    frontend uses to redirect, since a redirect would be followed silently.
+    """
+
+    login_url = _login_url_for(request)
+    if _is_browser_navigation(request):
+        return RedirectResponse(url=login_url, status_code=303)
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "Session expired. Please sign in again.", "login_url": login_url},
+        headers={SESSION_EXPIRED_HEADER: "1", "HX-Redirect": login_url},
+    )
 
 
 async def parse_csrf_form(request: Request) -> FormData:
@@ -104,7 +160,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         session = await self._session_manager.load_session(request, allow_inactive=False)
         if not session:
             log_warning("CSRF validation failed - no session", path=path, method=request.method)
-            return JSONResponse(status_code=403, content={"detail": "CSRF validation failed"})
+            return session_expired_response(request)
 
         if not header_token:
             log_warning(

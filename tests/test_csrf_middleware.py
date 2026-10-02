@@ -150,3 +150,62 @@ def test_main_app_exempts_public_callback_paths():
     assert "/api/tray/popup-chat" in exempt_paths
     assert "/api/tray/ticket-form" in exempt_paths
     assert "/api/staff/workflow-webhooks" in exempt_paths
+
+
+class _NoSessionManager:
+    async def load_session(self, request, allow_inactive: bool = False):  # noqa: D401
+        return None
+
+
+_expired_app = FastAPI()
+_expired_app.add_middleware(CSRFMiddleware, manager=_NoSessionManager())
+
+
+@_expired_app.post("/tickets/1/reply")
+async def _expired_endpoint() -> JSONResponse:  # pragma: no cover - never reached
+    return JSONResponse({"ok": True})
+
+
+_expired_client = TestClient(_expired_app, base_url="http://testserver")
+
+
+def test_expired_session_form_submission_redirects_to_login():
+    response = _expired_client.post(
+        "/tickets/1/reply",
+        data={"body": "hello"},
+        headers={
+            "Sec-Fetch-Mode": "navigate",
+            "Accept": "text/html",
+            "Referer": "http://testserver/tickets/1?tab=replies",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login?next=%2Ftickets%2F1%3Ftab%3Dreplies"
+
+
+def test_expired_session_redirect_ignores_cross_origin_referer():
+    response = _expired_client.post(
+        "/tickets/1/reply",
+        data={"body": "hello"},
+        headers={"Accept": "text/html", "Referer": "https://evil.example/phish"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
+
+
+def test_expired_session_fetch_request_gets_session_expired_401():
+    response = _expired_client.post(
+        "/tickets/1/reply",
+        json={"body": "hello"},
+        headers={"Sec-Fetch-Mode": "cors", "Accept": "application/json"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 401
+    assert response.headers["X-Session-Expired"] == "1"
+    assert response.headers["HX-Redirect"] == "/login"
+    assert response.json()["login_url"] == "/login"
