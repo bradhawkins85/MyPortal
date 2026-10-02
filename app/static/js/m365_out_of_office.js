@@ -134,7 +134,7 @@
     items.forEach((item) => {
       const record = byMailbox.get(normalize(item.dataset.mailbox));
       const state = describeState(record && record.success ? record.setting || {} : null, now);
-      item.dataset.state = state.key;
+      item.dataset.state = 'oofNoMailbox' in item.dataset ? 'nomailbox' : state.key;
       counts[state.key] = (counts[state.key] || 0) + 1;
       const excerpt = item.querySelector('[data-oof-excerpt]');
       if (excerpt && record && record.setting) {
@@ -157,13 +157,16 @@
     const search = root.querySelector('[data-oof-search]');
     const filter = root.querySelector('[data-oof-filter]');
     const noResults = root.querySelector('[data-oof-no-results]');
+    const showAll = root.querySelector('[data-oof-show-all]');
     function applyFilter() {
       const terms = normalize(search && search.value).split(/\s+/).filter(Boolean);
       const wanted = filter ? filter.value : '';
       let visible = 0;
       items.forEach((item) => {
         const text = normalize(item.dataset.searchText);
-        const match = terms.every((term) => text.includes(term)) && (!wanted || item.dataset.state === wanted);
+        // Accounts without an Exchange mailbox stay hidden unless "Show all" is on.
+        const included = !('oofNoMailbox' in item.dataset) || (showAll && showAll.checked) || wanted === 'nomailbox';
+        const match = included && terms.every((term) => text.includes(term)) && (!wanted || item.dataset.state === wanted);
         item.hidden = !match;
         visible += match ? 1 : 0;
       });
@@ -176,6 +179,9 @@
     }
     if (filter) {
       filter.addEventListener('change', applyFilter);
+    }
+    if (showAll) {
+      showAll.addEventListener('change', applyFilter);
     }
 
     const modal = document.getElementById('oof-modal');
