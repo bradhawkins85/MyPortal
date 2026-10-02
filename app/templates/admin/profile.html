@@ -44,6 +44,7 @@
     {% if show_integrations %}
     <button type="button" class="scf-tab" role="tab" id="profile-tab-integrations" aria-controls="profile-panel-integrations" aria-selected="false" tabindex="-1" data-profile-tab="integrations">Integrations</button>
     {% endif %}
+    <button type="button" class="scf-tab" role="tab" id="profile-tab-privacy" aria-controls="profile-panel-privacy" aria-selected="false" tabindex="-1" data-profile-tab="privacy">Privacy</button>
     <button type="button" class="scf-tab" role="tab" id="profile-tab-menu" aria-controls="profile-panel-menu" aria-selected="false" tabindex="-1" data-profile-tab="menu">Navigation menu<span class="scf-tab__dot" aria-hidden="true"></span></button>
   </nav>
 
@@ -268,6 +269,46 @@
     </div>
   </section>
   {% endif %}
+
+  {# ── Privacy ──────────────────────────────────────────────────────────── #}
+  {% set ai_opted_out = current_user.ai_opt_out | default(false) %}
+  <section class="profile-panel" id="profile-panel-privacy" role="tabpanel" aria-labelledby="profile-tab-privacy" data-profile-panel="privacy">
+    <div class="profile-grid profile-grid--wide">
+      <section class="card card--panel" aria-labelledby="profile-ai-title">
+        <header class="card__header card__header--stacked">
+          <div>
+            <h2 class="card__title" id="profile-ai-title">AI features</h2>
+            <p class="card__subtitle">Choose whether the portal may use AI to help with your requests.</p>
+          </div>
+          <span class="status {{ 'status--warning' if ai_opted_out else 'status--neutral' }}" data-profile-ai-status role="status" aria-live="polite">{{ 'AI turned off' if ai_opted_out else 'AI allowed' }}</span>
+        </header>
+        <form class="card__body form profile-form" id="profile-ai-form" method="post" action="/admin/profile/ai-features">
+          {% include "partials/csrf.html" %}
+          <input type="hidden" name="aiOptOut" value="0" />
+          <div class="form-field">
+            <label class="form-checkbox" for="profile-ai-opt-out">
+              <input type="checkbox" id="profile-ai-opt-out" name="aiOptOut" value="1" aria-describedby="profile-ai-help"{% if ai_opted_out %} checked{% endif %} />
+              Don't use AI to process my requests
+            </label>
+            <div class="form-help" id="profile-ai-help">
+              <p>When this is on:</p>
+              <ul>
+                <li>Your tickets won't be summarised, tagged or renamed by AI, and staff can't run AI actions on them.</li>
+                <li>The AI chat assistant won't reply in your chats, and the AI assistant is turned off for you.</li>
+                <li>Your tickets, replies and chats are left out of the AI search index, and anything already in it is removed.</li>
+                <li>Calls won't be transcribed or summarised by AI when we can tell the call is with you.</li>
+              </ul>
+              <p>Our staff still read and answer your requests as usual. You can change this at any time.</p>
+            </div>
+          </div>
+          <footer class="form-actions profile-form__actions">
+            <span class="profile-form__status" data-profile-ai-save-status aria-live="polite"></span>
+            <button type="submit" class="button">Save AI preference</button>
+          </footer>
+        </form>
+      </section>
+    </div>
+  </section>
 
   {# ── Navigation menu ────────────────────────────────────────────────────── #}
   <section class="profile-panel" id="profile-panel-menu" role="tabpanel" aria-labelledby="profile-tab-menu" data-profile-panel="menu">

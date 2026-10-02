@@ -8,7 +8,7 @@ from app.core.logging import log_error, log_info
 from app.repositories import knowledge_base as kb_repo
 from app.repositories import rag_index as rag_repo
 from app.repositories import tickets as tickets_repo
-from app.services import rag_index
+from app.services import ai_consent, rag_index
 
 SUPPORTED_SOURCES = frozenset({"tickets", "knowledge_base"})
 MAX_ATTEMPTS = 8
@@ -76,6 +76,13 @@ async def _load_source(source_type: str, source_id: str) -> dict[str, Any] | Non
         if item:
             item = dict(item)
             item["replies"] = await tickets_repo.list_replies(numeric_id)
+            # Requesters who opted out of AI processing stay out of the index,
+            # as do replies written by people who opted out.
+            prepared = await ai_consent.prepare_rag_source(source_type, item)
+            if prepared is None:
+                await rag_repo.delete_documents_for_sources(source_type, [str(source_id)])
+                return None
+            item = dict(prepared)
         return item
     item = await kb_repo.get_article_by_id(numeric_id)
     if item:

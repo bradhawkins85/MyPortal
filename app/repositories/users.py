@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, Iterable, List, Optional
 
 from app.core.database import db
 from app.core.logging import log_error, log_info
@@ -23,6 +23,8 @@ _ALLOWED_UPDATE_COLUMNS = {
     "email_verified_at",
     "force_password_change",
     "passkey_user_handle",
+    "ai_opt_out",
+    "ai_opt_out_at",
 }
 
 
@@ -92,6 +94,7 @@ async def list_active_users_for_admin() -> List[dict[str, Any]]:
         """
         SELECT u.id, u.email, u.first_name, u.last_name, u.mobile_phone,
                u.company_id, u.is_super_admin, u.last_login_at,
+               u.ai_opt_out, u.ai_opt_out_at,
                c.name AS company_name
         FROM users AS u
         LEFT JOIN companies AS c ON c.id = u.company_id
@@ -184,6 +187,46 @@ async def update_user(user_id: int, **updates: Any) -> dict[str, Any]:
         raise ValueError("User not found after update")
     log_info("User updated successfully", user_id=user_id)
     return updated
+
+
+def _clean_user_ids(user_ids: Iterable[Any]) -> list[int]:
+    cleaned: set[int] = set()
+    for value in user_ids:
+        try:
+            identifier = int(value)
+        except (TypeError, ValueError):
+            continue
+        if identifier > 0:
+            cleaned.add(identifier)
+    return sorted(cleaned)
+
+
+async def list_ai_opted_out_user_ids(user_ids: Iterable[Any]) -> set[int]:
+    """Return the subset of ``user_ids`` that have opted out of AI processing."""
+
+    identifiers = _clean_user_ids(user_ids)
+    if not identifiers or not db.is_connected():
+        return set()
+    placeholders = ", ".join(["%s"] * len(identifiers))
+    # Only "%s" placeholders are interpolated; every identifier stays bound.
+    rows = await db.fetch_all(
+        "SELECT id FROM users WHERE ai_opt_out = 1 AND id IN (" + placeholders + ")",  # nosec B608
+        tuple(identifiers),
+    )
+    return {int(row["id"]) for row in rows or []}
+
+
+async def ai_opt_out_exists_for_email(email: str | None) -> bool:
+    """Return True when any user with ``email`` has opted out of AI processing."""
+
+    clean_email = str(email or "").strip()
+    if not clean_email or not db.is_connected():
+        return False
+    row = await db.fetch_one(
+        "SELECT id FROM users WHERE ai_opt_out = 1 AND LOWER(email) = LOWER(%s) LIMIT 1",
+        (clean_email,),
+    )
+    return bool(row)
 
 
 async def record_login(user_id: int, logged_in_at: datetime) -> dict[str, Any]:

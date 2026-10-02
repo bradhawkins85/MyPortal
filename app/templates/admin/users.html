@@ -15,7 +15,7 @@
     <header class="card__header">
       <div>
         <h2 class="card__title">Active MyPortal users</h2>
-        <p class="card__description">Review active portal accounts and remove access that is no longer needed.</p>
+        <p class="card__description">Review active portal accounts, record AI opt-out requests received by email or phone, and remove access that is no longer needed.</p>
       </div>
     </header>
     <div class="table-wrapper">
@@ -25,6 +25,7 @@
           <th scope="col" data-sort="string" data-column-key="email">Email</th>
           <th scope="col" data-sort="string" data-column-key="company">Company</th>
           <th scope="col" data-sort="date" data-column-key="last_login">Last login</th>
+          <th scope="col" data-sort="string" data-column-key="ai_processing">AI processing</th>
           <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
         </tr></thead>
         <tbody>
@@ -43,7 +44,28 @@
                   data-sort-value="{{ entry.last_login_at.isoformat() if entry.last_login_at else '' }}">
                 {{ entry.last_login_at.strftime('%d %b %Y, %H:%M') if entry.last_login_at else 'Never' }}
               </td>
+              <td data-label="AI processing" data-column-key="ai_processing" data-sort-value="{{ 'opted out' if entry.ai_opt_out else 'allowed' }}">
+                {% if entry.ai_opt_out %}
+                  <span class="status status--warning" title="This person asked not to have their requests processed by AI.">Opted out</span>
+                  {% if entry.ai_opt_out_at %}<span class="text-muted">since <span data-utc="{{ entry.ai_opt_out_at.isoformat() if entry.ai_opt_out_at is not string else entry.ai_opt_out_at }}">{{ entry.ai_opt_out_at }}</span></span>{% endif %}
+                {% else %}
+                  <span class="status status--neutral">Allowed</span>
+                {% endif %}
+              </td>
               <td class="table__actions" data-column-key="actions">
+                {% if entry.ai_opt_out %}
+                <form action="/admin/users/{{ entry.id }}/ai-opt-in" method="post" class="inline-form"
+                      onsubmit="return confirm({{ ('Turn AI processing back on for ' ~ entry.email ~ '? Only do this if they asked you to.') | tojson | forceescape }});">
+                  {% include "partials/csrf.html" %}
+                  <button type="submit" class="button button--ghost" title="Use when the person asks by email or phone to allow AI again">Allow AI</button>
+                </form>
+                {% else %}
+                <form action="/admin/users/{{ entry.id }}/ai-opt-out" method="post" class="inline-form"
+                      onsubmit="return confirm({{ ('Stop using AI to process requests from ' ~ entry.email ~ '? Their tickets, chats and calls will no longer be sent to AI services, and their content will be removed from the AI search index.') | tojson | forceescape }});">
+                  {% include "partials/csrf.html" %}
+                  <button type="submit" class="button button--ghost" title="Use when the person asks by email or phone not to have their requests processed by AI">Opt out of AI</button>
+                </form>
+                {% endif %}
                 <form action="/admin/users/{{ entry.id }}/deactivate" method="post" class="inline-form"
                       onsubmit="return confirm({{ ('Deactivate ' ~ entry.email ~ '? They will no longer be able to sign in.') | tojson | forceescape }});">
                   {% include "partials/csrf.html" %}
@@ -57,7 +79,7 @@
               </td>
             </tr>
           {% else %}
-            <tr><td colspan="5" class="table__empty">No active users were found.</td></tr>
+            <tr><td colspan="6" class="table__empty">No active users were found.</td></tr>
           {% endfor %}
         </tbody>
       </table>

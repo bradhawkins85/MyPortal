@@ -793,6 +793,12 @@
             </div>
           </details>
 
+          {% if ticket_ai_opted_out %}
+            <div class="alert alert--warning" role="status" data-ticket-ai-opted-out>
+              <strong>No AI on this ticket.</strong> The requester has asked not to have their requests processed by AI, so
+              summaries, tags, suggested replies, related-item scans and AI actions are turned off for this ticket.
+            </div>
+          {% endif %}
           {% if ticket.ai_summary or ticket.ai_summary_status or can_reprocess_ticket_ai %}
             <details class="card card--panel card-collapsible" data-ticket-ai-card open>
               <summary class="card__header card__header--collapsible">

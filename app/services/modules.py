@@ -3072,6 +3072,19 @@ async def trigger_module(
     handler = handler_map.get(slug)
     if not handler:
         raise ValueError(f"No handler registered for module {slug}")
+    if slug in _AI_TICKET_MODULE_SLUGS:
+        consent_block = await _ai_consent_block(slug, payload or {})
+        if consent_block:
+            if on_complete:
+                try:
+                    await on_complete(consent_block)
+                except Exception as callback_exc:  # pragma: no cover - defensive logging
+                    logger.error(
+                        "Module completion callback failed",
+                        module=slug,
+                        error=str(callback_exc),
+                    )
+            return consent_block
 
     async def _invoke_handler(
         *,
@@ -6239,6 +6252,46 @@ _AI_RELATIONSHIP_LABELS = {
     "RELATED": "Related",
     "SUPPORTING": "Supporting evidence",
 }
+
+
+# Modules that send a ticket's content to an LLM or transcription service.
+_AI_TICKET_MODULE_SLUGS = frozenset(
+    {
+        "ai-rename-ticket",
+        "ai-classify-ticket",
+        "ai-link-related",
+        "ai-request-missing-info",
+        "reprocess-ai",
+        "whisperx",
+    }
+)
+
+
+def _payload_ticket_id(payload: Mapping[str, Any]) -> Any:
+    context = (
+        payload.get("context") if isinstance(payload.get("context"), Mapping) else {}
+    )
+    context_ticket = (
+        context.get("ticket") if isinstance(context.get("ticket"), Mapping) else {}
+    )
+    return payload.get("ticket_id") or context_ticket.get("id") or context.get("ticket_id")
+
+
+async def _ai_consent_block(slug: str, payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Return a skipped result when the ticket's requester opted out of AI."""
+
+    ai_consent = import_module("app.services.ai_consent")
+    ticket_id = _payload_ticket_id(payload)
+    if await ai_consent.is_ai_allowed_for_ticket_id(ticket_id):
+        return None
+    logger.info("AI module skipped: requester opted out of AI processing", module=slug, ticket_id=ticket_id)
+    return {
+        "status": "skipped",
+        "reason": ai_consent.TICKET_OPTED_OUT_REASON,
+        "ai_opt_out": True,
+        "module": slug,
+        "ticket_id": ticket_id,
+    }
 
 
 async def _load_ai_action_ticket(

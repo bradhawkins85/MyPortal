@@ -13,6 +13,7 @@ from app.repositories import sidebar_preferences as sidebar_preferences_repo
 from app.repositories import user_preferences as user_preferences_repo
 from app.repositories import users as user_repo
 from app.schemas.users import UserCreate, UserResponse, UserUpdate
+from app.services import ai_consent
 from app.services import audit as audit_service
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
@@ -203,20 +204,31 @@ async def update_user(
         # in, so only super admins may change it.
         data.pop("is_super_admin", None)
         data.pop("company_id", None)
+    requested_opt_out = data.pop("ai_opt_out", None)
     updated = await user_repo.update_user(user_id, **data)
     metadata: dict[str, object] | None = None
     if "is_super_admin" in data and bool(user.get("is_super_admin")) != bool(data["is_super_admin"]):
         metadata = {"role_changed": True}
-    await audit_service.record(
-        action="user.update",
-        request=request,
-        user_id=int(current_user["id"]),
-        entity_type="user",
-        entity_id=user_id,
-        before=_audit_user_view(user),
-        after=_audit_user_view(updated),
-        metadata=metadata,
-    )
+    if data or requested_opt_out is None:
+        await audit_service.record(
+            action="user.update",
+            request=request,
+            user_id=int(current_user["id"]),
+            entity_type="user",
+            entity_id=user_id,
+            before=_audit_user_view(user),
+            after=_audit_user_view(updated),
+            metadata=metadata,
+        )
+    if requested_opt_out is not None:
+        opted = await ai_consent.set_user_ai_opt_out(
+            updated,
+            bool(requested_opt_out),
+            actor_user_id=int(current_user["id"]),
+            request=request,
+            source="profile" if int(current_user["id"]) == user_id else "admin_api",
+        )
+        updated = opted or updated
     return updated
 
 

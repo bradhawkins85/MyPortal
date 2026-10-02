@@ -8,7 +8,7 @@ from typing import Any, Mapping
 import nh3
 
 from app.repositories import resolution_step_reviews as review_repo
-from app.services import knowledge_base, modules
+from app.services import ai_consent, knowledge_base, modules
 from app.services.ai_prompt_security import UntrustedRecord, build_prompt
 
 
@@ -81,6 +81,14 @@ async def _generate_title(records: list[UntrustedRecord], *, fallback: str) -> s
     return _extract_title(_response_text(result)) or fallback or "Resolution guide"
 
 
+async def _ai_allowed_ticket_ids(ticket_ids: list[int]) -> set[int]:
+    allowed: set[int] = set()
+    for ticket_id in ticket_ids:
+        if await ai_consent.is_ai_allowed_for_ticket_id(ticket_id):
+            allowed.add(int(ticket_id))
+    return allowed
+
+
 async def generate_article(ticket_id: int, *, author_id: int) -> dict[str, Any]:
     entry = await review_repo.get_entry(ticket_id)
     if not entry:
@@ -92,14 +100,17 @@ async def generate_article(ticket_id: int, *, author_id: int) -> dict[str, Any]:
         raise ValueError("No usable resolution steps were found")
     subject = str(entry.get("subject") or "Resolved support issue").strip()
     summary = " ".join(steps)[:1000]
-    title = await _generate_title(
-        [UntrustedRecord(
-            f"ticket:{ticket_id}", "resolved helpdesk ticket",
-            {"subject": subject, "resolution_summary": summary},
-            "Use only to describe the problem in the title",
-        )],
-        fallback=subject,
-    )
+    # The requester may have opted out of AI processing; keep the subject.
+    title = subject
+    if await _ai_allowed_ticket_ids([ticket_id]):
+        title = await _generate_title(
+            [UntrustedRecord(
+                f"ticket:{ticket_id}", "resolved helpdesk ticket",
+                {"subject": subject, "resolution_summary": summary},
+                "Use only to describe the problem in the title",
+            )],
+            fallback=subject,
+        )
     sections = [
         {"heading": f"Step {index}", "content": f"<p>{escape(step)}</p>"}
         for index, step in enumerate(steps, start=1)
@@ -222,7 +233,14 @@ async def generate_recurring_article(group_id: int, *, author_id: int) -> dict[s
     summary = (
         f"Recurring issue seen in {len(tickets)} tickets. " + " ".join(steps)
     )[:1000]
-    title = await _generate_title(
+    allowed_ids = await _ai_allowed_ticket_ids(
+        [int(ticket["ticket_id"]) for ticket in tickets[:_RECURRING_PROMPT_TICKET_LIMIT]]
+    )
+    prompt_tickets = [
+        ticket for ticket in tickets[:_RECURRING_PROMPT_TICKET_LIMIT]
+        if int(ticket["ticket_id"]) in allowed_ids
+    ]
+    title = group["subject"] if not prompt_tickets else await _generate_title(
         [
             UntrustedRecord(
                 f"ticket:{ticket['ticket_id']}", "resolved helpdesk ticket for a recurring issue",
@@ -234,7 +252,7 @@ async def generate_recurring_article(group_id: int, *, author_id: int) -> dict[s
                 },
                 "Use only to describe the shared problem in the title",
             )
-            for ticket in tickets[:_RECURRING_PROMPT_TICKET_LIMIT]
+            for ticket in prompt_tickets
         ],
         fallback=group["subject"],
     )

@@ -7051,6 +7051,35 @@ async def profile_m365_contacts_connect(request: Request):
     )
 
 
+@app.post("/admin/profile/ai-features")
+async def profile_ai_features_update(request: Request):
+    """No-JavaScript fallback for the profile "AI features" card."""
+
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    from app.services import ai_consent
+
+    form = await request.form()
+    # A hidden "0" precedes the checkbox so an unticked box still submits.
+    opt_out = any(
+        str(value or "").strip().lower() in {"1", "true", "on", "yes"}
+        for value in form.getlist("aiOptOut")
+    )
+    target = await user_repo.get_user_by_id(int(user["id"]))
+    if not target:
+        return flash_redirect("/admin/profile#privacy", "Your account could not be found.", "error")
+    await ai_consent.set_user_ai_opt_out(
+        target, opt_out, actor_user_id=int(user["id"]), request=request, source="profile"
+    )
+    message = (
+        "We won't use AI to process your requests."
+        if opt_out
+        else "AI features can process your requests again."
+    )
+    return flash_redirect("/admin/profile#privacy", message, "success")
+
+
 @app.post("/admin/profile/m365-contacts/disconnect")
 async def profile_m365_contacts_disconnect(request: Request):
     user, redirect = await _require_authenticated_user(request)
@@ -7277,11 +7306,37 @@ async def admin_benchmarking_page(request: Request):
     )
 
 
+async def _admin_set_user_ai_opt_out(
+    request: Request, current_user: dict[str, Any], user_id: int, *, opt_out: bool
+) -> RedirectResponse:
+    """Record an AI opt-out (or opt-in) a user asked for by email or phone."""
+
+    from app.services import ai_consent
+
+    target = await user_repo.get_user_by_id(user_id)
+    if not target:
+        return flash_redirect("/admin/users", "User not found.", "error")
+    label = target.get("email") or "this user"
+    updated = await ai_consent.set_user_ai_opt_out(
+        target, opt_out, actor_user_id=int(current_user["id"]), request=request, source="admin_users"
+    )
+    if updated is None:
+        state = "has already opted out of" if opt_out else "already allows"
+        return flash_redirect("/admin/users", f"{label} {state} AI processing.", "info")
+    if opt_out:
+        return flash_redirect("/admin/users", f"AI processing is now turned off for {label}.", "success")
+    return flash_redirect("/admin/users", f"AI processing is turned back on for {label}.", "success")
+
+
 @app.post("/admin/users/{user_id}/{action}", response_class=HTMLResponse)
 async def admin_users_action(request: Request, user_id: int, action: str):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
+    if action in {"ai-opt-out", "ai-opt-in"}:
+        return await _admin_set_user_ai_opt_out(
+            request, current_user, user_id, opt_out=action == "ai-opt-out"
+        )
     if action not in {"deactivate", "delete"}:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Unknown user action"
@@ -11445,6 +11500,9 @@ async def _render_ticket_detail(
         except Exception as exc:
             log_error("Failed to load linked chat room for ticket", ticket_id=ticket_id, error=str(exc))
 
+    from app.services import ai_consent
+
+    ticket_ai_opted_out = not await ai_consent.is_ai_allowed_for_ticket(ticket)
     extra = {
         "title": f"Ticket #{ticket_id}",
         "ticket": ticket,
@@ -11467,7 +11525,7 @@ async def _render_ticket_detail(
         "ticket_expense_total": ticket_expense_total,
         "ticket_related_auto_scan": False,
         "ticket_related_items": ticket_related_items,
-        "ticket_suggest_reply_available": any(
+        "ticket_suggest_reply_available": not ticket_ai_opted_out and any(
             item.get("available")
             and item.get("relationship_type") in {"DIRECT_MATCH", "KNOWN_ISSUE"}
             and item.get("type") in {"knowledge_base", "tickets"}
@@ -11514,7 +11572,8 @@ async def _render_ticket_detail(
         "hudu_company_url": hudu_company_url,
         "solidtime_links": solidtime_links,
         "can_delete_ticket": bool(user.get("is_super_admin")),
-        "can_reprocess_ticket_ai": bool(user.get("is_super_admin")),
+        "can_reprocess_ticket_ai": bool(user.get("is_super_admin")) and not ticket_ai_opted_out,
+        "ticket_ai_opted_out": ticket_ai_opted_out,
         "relevant_kb_articles": relevant_articles,
         "relevant_services": relevant_services,
         "service_status_lookup": service_status_lookup,
@@ -11801,7 +11860,7 @@ LEGAL_POLICIES: dict[str, dict[str, str]] = {
         "template": "legal/_terms.html",
     },
 }
-LEGAL_POLICIES_UPDATED = "2026-10-10"
+LEGAL_POLICIES_UPDATED = "2026-10-11"
 
 
 def _legal_context_extra(policy_slug: str | None) -> dict[str, Any]:
