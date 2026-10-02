@@ -104,3 +104,23 @@ def test_module_result_succeeded_uses_canonical_status(
     result: dict[str, Any] | None, expected: bool
 ) -> None:
     assert modules_service.module_result_succeeded(result) is expected
+
+
+@pytest.mark.anyio
+async def test_injected_or_malformed_tag_values_are_discarded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _event_result(
+        {"response": 'good tag, "bad tag; rm -rf /", ok-1, 12cloud'}
+    )
+
+    async def fake_trigger(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return result
+
+    monkeypatch.setattr(tag_generator.modules_service, "trigger_module", fake_trigger)
+
+    tags = await tag_generator.generate_tags_for_service("Managed service")
+    assert "good tag" in tags
+    assert "ok-1" in tags
+    assert "12cloud" in tags
+    assert all(";" not in tag and "/" not in tag for tag in tags)

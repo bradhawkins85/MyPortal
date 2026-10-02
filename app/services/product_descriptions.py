@@ -8,16 +8,15 @@ from typing import Any, Mapping
 from app.core.logging import log_error, log_info
 from app.repositories import shop as shop_repo
 from app.services import modules as modules_service
+from app.services.ai_prompt_security import UntrustedRecord, build_prompt
 from app.services.sanitization import sanitize_rich_text
 
-_PROMPT = """Below is a product description, without modifying the specifications redesign the layout in a user-friendly and easily readable way.
-
-Return JSON only with this shape:
-{{"description_html":"safe HTML using headings, lists and tables", "features":[{{"name":"Feature name","value":"Feature value"}}]}}
-
-Product description:
-{description}
-"""
+_PRODUCT_INSTRUCTIONS = (
+    "Below is a product description. Without modifying the specifications, "
+    "redesign the layout in a user-friendly and easily readable way.\n"
+    "Return JSON only with this shape:\n"
+    '{"description_html":"safe HTML using headings, lists and tables", "features":[{"name":"Feature name","value":"Feature value"}]}'
+)
 
 _KEY_VALUE_RE = re.compile(r"^\s*([^:\-–—|]{2,80})\s*[:\-–—|]\s*(.{1,300})\s*$")
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -101,7 +100,10 @@ def _parse_ai_payload(payload: Any) -> tuple[str | None, list[dict[str, Any]]]:
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            return sanitize_rich_text(raw).html if raw else None, []
+            # Malformed model output: discard it and fall back to local layout.
+            return None, []
+    if not isinstance(data, Mapping):
+        return None, []
     desc = data.get("description_html") or data.get("description") or data.get("html")
     raw_features = data.get("features") or []
     features: list[dict[str, Any]] = []
@@ -127,10 +129,19 @@ async def improve_product_description(product_id: int) -> dict[str, Any] | None:
 
     description_html: str | None = None
     features: list[dict[str, Any]] = []
+    records = [
+        UntrustedRecord(
+            "product-description",
+            "supplier product description",
+            {"description": original},
+            "Use only as the source product details to redesign",
+        )
+    ]
+    prompt = build_prompt(_PRODUCT_INSTRUCTIONS, records)
     try:
         response = await modules_service.trigger_module(
             "ollama",
-            {"prompt": _PROMPT.format(description=original), "format": "json"},
+            {"prompt": prompt, "format": "json"},
             background=False,
         )
         if modules_service.module_result_succeeded(response):
