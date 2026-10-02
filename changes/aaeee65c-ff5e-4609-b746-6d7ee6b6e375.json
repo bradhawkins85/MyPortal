@@ -1,0 +1,7 @@
+{
+  "guid": "aaeee65c-ff5e-4609-b746-6d7ee6b6e375",
+  "occurred_at": "2026-10-02T00:00Z",
+  "change_type": "Fixed",
+  "summary": "Reported Emails no longer tells you to reconnect Microsoft 365 when the app token already holds SecurityAlert.Read.All or ThreatSubmission.Read.All; it now explains the tenant is not licensed for that Defender source or the grant is still propagating",
+  "content_hash": "9cb4863cb8543fa409f07ac89f86e6cb84901aef33d1cf352066efaf05a900df"
+}
