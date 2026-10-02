@@ -71,6 +71,14 @@ def test_privacy_policy_falls_back_without_contact_email(client, monkeypatch):
     assert "raising a ticket in" in response.text
 
 
+def test_privacy_policy_matches_profile_self_service_options(client):
+    response = client.get("/legal/privacy")
+
+    assert response.status_code == 200
+    assert "view your details and update your password, two-factor and passkey settings, mobile number and notification preferences from your profile" in response.text
+    assert "to change your name or email address, contact us or your organisation's administrator" in response.text
+
+
 @pytest.mark.parametrize("path", ["/login", "/register", "/forgot-password"])
 def test_sign_in_pages_link_to_policies(client, path):
     response = client.get(path)
