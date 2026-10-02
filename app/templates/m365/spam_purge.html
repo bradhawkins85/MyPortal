@@ -68,7 +68,7 @@
         <div><dt>Service limit</dt><dd>Up to 10 items/mailbox/action</dd></div>
       </dl>
       <p class="form-help">Searches run against all Exchange locations in the selected company tenant. Holds and retention can preserve recoverable copies; this workflow does not bypass them.</p>
-      <p class="form-help"><strong>Execution unavailable:</strong> Microsoft does not support app-only eDiscovery PowerShell. Use the licensed, delegated administrator workflow shown in <a href="/m365/diagnostics">Office 365 Diagnostics</a>. The legacy app-only code is retained only for controlled migration and is not reported as ready.</p>
+      <p class="form-help"><strong>How it runs:</strong> searches and purges use the Microsoft Graph eDiscovery API under the delegated sign-in of the Microsoft admin who last reconnected this company. That admin needs the eDiscovery Manager role group (search) and the Search And Purge role (purge) in Microsoft Purview. Searches are kept in the Purview eDiscovery case "MyPortal spam removal". If items remain after a purge, run the search and purge again.</p>
     </div>
   </aside>
 </div>

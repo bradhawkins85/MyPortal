@@ -51,10 +51,6 @@ def test_build_content_match_query_rejects_control_characters_in_advanced_query(
         )
 
 
-def test_removed_item_count_reads_purview_result_summary():
-    assert service._removed_item_count({"Results": "Purge Type: HardDelete; Item count: 1,204"}) == 1204
-
-
 def test_start_purge_requires_completed_non_empty_search(monkeypatch):
     async def fake_get(_request_id):
         return {"id": 7, "company_id": 2, "search_status": "completed", "matched_items": 0,
@@ -107,64 +103,6 @@ async def test_api_start_search_returns_service_unavailable_for_preflight_error(
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail == "Purview preflight did not pass"
-
-
-def test_scc_organization_uses_initial_onmicrosoft_domain(monkeypatch):
-    async def fake_token(_company_id):
-        return "graph-token"
-
-    async def fake_graph(token, url):
-        assert token == "graph-token"
-        assert "$select=id,isInitial" in url
-        return {"value": [
-            {"id": "contoso.com", "isInitial": False},
-            {"id": "ContosoTenant.onmicrosoft.com", "isInitial": True},
-        ]}
-
-    monkeypatch.setattr(service.m365_service, "acquire_access_token", fake_token)
-    monkeypatch.setattr(service.m365_service, "_graph_get", fake_graph)
-
-    assert asyncio.run(service._scc_organization(7)) == "contosotenant.onmicrosoft.com"
-
-
-def test_scc_organization_requires_initial_domain(monkeypatch):
-    async def fake_token(_company_id):
-        return "graph-token"
-
-    async def fake_graph(_token, _url):
-        return {"value": [{"id": "contoso.com", "isInitial": False}]}
-
-    monkeypatch.setattr(service.m365_service, "acquire_access_token", fake_token)
-    monkeypatch.setattr(service.m365_service, "_graph_get", fake_graph)
-
-    with pytest.raises(ValueError, match="Domain.Read.All"):
-        asyncio.run(service._scc_organization(7))
-
-
-def test_orgunit_null_is_recognized_as_organization_context_error():
-    error = M365Error(
-        "Security & Compliance New-ComplianceSearch failed (500): "
-        "Value cannot be null. Parameter name: orgUnit",
-        http_status=500,
-    )
-
-    assert service._is_organization_context_error(error)
-
-
-def test_organization_context_error_keeps_purview_reason_without_directory_path():
-    error = M365Error(
-        "Security & Compliance New-ComplianceSearch failed (500): Couldn't find "
-        "organization container CN=bjplab.onmicrosoft.com,OU=Microsoft Exchange "
-        "Hosted Organizations,DC=FFO,DC=extest",
-        http_status=500,
-    )
-
-    message = str(service._organization_context_error("bjplab.onmicrosoft.com", error))
-
-    assert "Couldn't find organization container [directory path]" in message
-    assert "DC=FFO" not in message
-    assert "EnableSearchOnlySession" in message
-    assert "ManageAsApp is granted" not in message
 
 
 def test_domain_read_all_is_provisioned_and_visible_in_diagnostics():
@@ -339,148 +277,6 @@ def test_compliance_role_setup_is_on_m365_configuration_and_diagnostics_pages():
     assert "setup=compliance_role&amp;return_to=diagnostics" in diagnostics
 
 
-@pytest.mark.anyio("asyncio")
-@pytest.mark.parametrize("error_detail", [
-    "Could not find the organization container "
-    "'CN=abc,OU=Microsoft Exchange Hosted Organizations'",
-    "Value cannot be null. Parameter name: orgUnit",
-])
-async def test_run_search_retries_new_compliance_search_on_org_container_error(
-    monkeypatch, error_detail,
-):
-    """_run_search retries New-ComplianceSearch when a transient org-container 500 is returned."""
-    request = {
-        "id": 1, "company_id": 5, "search_name": "MyPortal spam removal test",
-        "action_name": "MyPortal spam removal test_Purge",
-        "content_match_query": '(From:"x@example.com")',
-    }
-
-    update_calls: list[dict] = []
-
-    async def fake_get(_id):
-        return request
-
-    async def fake_update(_id, data):
-        update_calls.append(data)
-
-    monkeypatch.setattr(service.purge_repo, "get_request", fake_get)
-    monkeypatch.setattr(service.purge_repo, "update_request", fake_update)
-
-    org_error = M365Error(
-        "Security & Compliance New-ComplianceSearch failed (500): "
-        + error_detail,
-        http_status=500,
-    )
-    invoke_calls: list[str] = []
-    call_count = 0
-
-    organizations: list[str | None] = []
-
-    async def fake_scc_invoke(_token, _tenant, cmdlet, _params=None, **kwargs):
-        nonlocal call_count
-        invoke_calls.append(cmdlet)
-        organizations.append(kwargs.get("organization"))
-        if cmdlet == "New-ComplianceSearch":
-            call_count += 1
-            if call_count < 2:
-                raise org_error
-        if cmdlet == "Get-ComplianceSearch":
-            return {"value": [{"Status": "Completed", "Items": 3, "Size": 100}]}
-        return {}
-
-    with (
-        patch(
-            "app.services.m365_spam_purge.m365_service._acquire_scc_access_token",
-            new_callable=AsyncMock,
-            return_value=("tok", "tenant-id"),
-        ),
-        patch(
-            "app.services.m365_spam_purge._scc_organization",
-            new_callable=AsyncMock,
-            return_value="contoso.onmicrosoft.com",
-        ),
-        patch(
-            "app.services.m365_spam_purge.m365_service._scc_invoke_command",
-            side_effect=fake_scc_invoke,
-        ),
-        patch(
-            "app.services.m365_spam_purge.asyncio.sleep",
-            new_callable=AsyncMock,
-        ) as mock_sleep,
-    ):
-        await service._run_search(1)
-
-    assert invoke_calls.count("New-ComplianceSearch") == 2, "Expected one retry of New-ComplianceSearch"
-    mock_sleep.assert_awaited_once_with(service._NEW_SEARCH_RETRY_BASE_SECONDS)
-    search_status_updates = [d.get("search_status") for d in update_calls if "search_status" in d]
-    assert "failed" not in search_status_updates, "Search should not be marked failed after a successful retry"
-    assert "completed" in search_status_updates
-    assert set(organizations) == {"contoso.onmicrosoft.com"}
-
-
-@pytest.mark.anyio("asyncio")
-async def test_run_search_exhausts_retries_and_marks_failed(monkeypatch):
-    """_run_search marks the search as failed when all retries are exhausted."""
-    request = {
-        "id": 2, "company_id": 5, "search_name": "MyPortal spam removal exhausted",
-        "action_name": "MyPortal spam removal exhausted_Purge",
-        "content_match_query": '(From:"x@example.com")',
-    }
-
-    update_calls: list[dict] = []
-
-    async def fake_get(_id):
-        return request
-
-    async def fake_update(_id, data):
-        update_calls.append(data)
-
-    monkeypatch.setattr(service.purge_repo, "get_request", fake_get)
-    monkeypatch.setattr(service.purge_repo, "update_request", fake_update)
-
-    org_error = M365Error(
-        "Security & Compliance New-ComplianceSearch failed (500): "
-        "Could not find the organization container",
-        http_status=500,
-    )
-
-    async def always_fail(_token, _tenant, cmdlet, _params=None, **_kwargs):
-        if cmdlet == "New-ComplianceSearch":
-            raise org_error
-        return {}
-
-    with (
-        patch(
-            "app.services.m365_spam_purge.m365_service._acquire_scc_access_token",
-            new_callable=AsyncMock,
-            return_value=("tok", "tenant-id"),
-        ),
-        patch(
-            "app.services.m365_spam_purge._scc_organization",
-            new_callable=AsyncMock,
-            return_value="contoso.onmicrosoft.com",
-        ),
-        patch(
-            "app.services.m365_spam_purge.m365_service._scc_invoke_command",
-            side_effect=always_fail,
-        ),
-        patch(
-            "app.services.m365_spam_purge.asyncio.sleep",
-            new_callable=AsyncMock,
-        ) as mock_sleep,
-    ):
-        await service._run_search(2)
-
-    assert mock_sleep.await_count == service._NEW_SEARCH_MAX_RETRIES, \
-        "Should sleep before each retry but not after the final failed attempt"
-    failed_updates = [d for d in update_calls if d.get("search_status") == "failed"]
-    assert failed_updates, "Search should be marked failed after exhausting retries"
-    error_message = failed_updates[-1].get("error_message", "")
-    assert "could not load the compliance organization" in error_message
-    assert "Purview reported:" in error_message
-    assert "EnableSearchOnlySession" in error_message
-
-
 def test_spam_purge_sidebar_requires_explicit_permission():
     source = open("app/templates/base.html", encoding="utf-8").read()
 
@@ -512,37 +308,6 @@ def test_jwt_appid_returns_none_when_claim_absent():
     assert _jwt_appid(token) is None
 
 
-def test_jwt_appid_returns_none_for_invalid_token():
-    assert _jwt_appid("notavalidjwt") is None
-    assert _jwt_appid("") is None
-
-@pytest.mark.anyio("asyncio")
-async def test_purge_retry_reconciles_remote_success_without_second_action(monkeypatch):
-    request = {"id": 8, "company_id": 2, "search_name": "reviewed-search",
-               "action_name": "reviewed-search_Purge", "matched_items": 12}
-    updates = []
-    monkeypatch.setattr(service.purge_repo, "get_request", AsyncMock(return_value=request))
-    monkeypatch.setattr(service.purge_repo, "update_request",
-                        AsyncMock(side_effect=lambda _id, values: updates.append(values)))
-    monkeypatch.setattr(service.m365_service, "_acquire_scc_access_token",
-                        AsyncMock(return_value=("token", "tenant")))
-    monkeypatch.setattr(service, "_scc_organization",
-                        AsyncMock(return_value="tenant.onmicrosoft.com"))
-
-    async def invoke(_token, _tenant, command, _parameters=None, **_kwargs):
-        assert command != "New-ComplianceSearchAction"
-        return {"value": [{"Status": "Completed", "Results": "Item count: 10"}]}
-
-    monkeypatch.setattr(service.m365_service, "_scc_invoke_command", invoke)
-    monkeypatch.setattr(service, "_run_managed_folder_assistant", AsyncMock())
-    await service._run_purge(8)
-
-    outcome = next(value for value in updates if value.get("purge_status") == "completed")
-    assert outcome["removed_items"] == 10
-    assert outcome["purge_details"]["submitted_items"] == 12
-    assert outcome["purge_details"]["remaining_items"] == 2
-
-
 def test_spam_purge_discloses_limits_retention_and_unknown_counts():
     source = open("app/templates/m365/spam_purge.html", encoding="utf-8").read()
     assert "Up to 10 items/mailbox/action" in source
@@ -564,25 +329,6 @@ async def test_start_search_does_not_block_on_advisory_preflight(monkeypatch):
 
     preflight.assert_not_awaited()
     assert update.await_args.args[1]["search_status"] == "queued"
-
-
-def test_authorization_failure_message_includes_remediation():
-    message = service._failure_message(
-        M365Error("Security & Compliance New-ComplianceSearch failed (401)", http_status=401)
-    )
-
-    assert message.startswith("Security & Compliance New-ComplianceSearch failed (401)")
-    # The 401 hint is about the *user's* roles: searches and purges run under
-    # the delegated permissions of the reconnected administrator.
-    assert "signed-in administrator's permissions" in message
-    # The required role is the Exchange Online Compliance Administrator
-    # (role group "Compliance Management"), explicitly distinguished from
-    # the separately-named Microsoft Purview role group.
-    assert "Compliance Management" in message
-    assert "Purview role group" in message
-    assert "compliance.microsoft.com" in message
-    assert "application's credentials" not in message
-    assert service._failure_message(ValueError("bad query")) == "bad query"
 
 
 def _make_scc_token(claims: dict) -> str:

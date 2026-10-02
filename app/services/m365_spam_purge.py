@@ -1,9 +1,8 @@
-"""Orchestrate reviewed Microsoft Purview compliance searches and purges."""
+"""Orchestrate reviewed Microsoft Purview searches and purges via Graph eDiscovery."""
 
 from __future__ import annotations
 
 import asyncio
-import re
 import uuid
 from contextlib import suppress
 from datetime import date, datetime, timezone
@@ -12,63 +11,24 @@ from typing import Any
 from app.core.logging import log_error, log_info
 from app.repositories import m365_spam_purge as purge_repo
 from app.services import m365 as m365_service
+from app.services import m365_ediscovery as ediscovery
 
 
 POLL_INTERVAL_SECONDS = 30
 MAX_POLL_ATTEMPTS = 120
-TERMINAL_STATUSES = frozenset({"completed", "failed", "partiallysucceeded", "stopped"})
-# SCC reports both messages below when the request has reached a worker before
-# its Purview organization context is available.  Keep the matching deliberately
-# narrow: retries must not hide unrelated validation or authorization failures.
-_ORG_CONTEXT_ERRORS = ("organization container", "parameter name: orgunit")
-_NEW_SEARCH_MAX_RETRIES = 3
-_NEW_SEARCH_RETRY_BASE_SECONDS = 30
-
-
-def _is_organization_context_error(exc: Exception) -> bool:
-    message = str(exc).lower()
-    return any(marker in message for marker in _ORG_CONTEXT_ERRORS)
-
-
-_DIRECTORY_PATH = re.compile(r"\b(?:CN|OU|DC)=[^,\s]+(?:\s*,\s*(?:CN|OU|DC)=[^,\s]+)*", re.IGNORECASE)
-
-
-def _organization_context_error(organization: str, exc: Exception) -> m365_service.M365Error:
-    """Return an operator-facing error that keeps Purview's own reason.
-
-    Purview's message is kept (directory paths redacted) because it is the only
-    evidence of why the organization did not load; a generic hint alone sent
-    operators after unrelated app-only permission fixes.
-    """
-    detail = _DIRECTORY_PATH.sub("[directory path]", " ".join(str(exc).split()))[:600]
-    return m365_service.M365Error(
-        "Microsoft Purview could not load the compliance organization for "
-        f"{organization}. Purview reported: {detail} "
-        "Spam search runs under the delegated sign-in of the Microsoft admin who "
-        "last reconnected this company, so app-only Exchange.ManageAsApp or "
-        "service principal role groups do not affect it. Microsoft now requires "
-        "eDiscovery cmdlets to run in a search-only Security & Compliance session "
-        "(Connect-IPPSSession -EnableSearchOnlySession). To separate a tenant "
-        "problem from a MyPortal one, have that admin run Connect-IPPSSession "
-        "-UserPrincipalName <admin UPN> -EnableSearchOnlySession followed by "
-        "New-ComplianceSearch in PowerShell (ExchangeOnlineManagement 3.9 or later).",
-        http_status=503,
-    )
+_API = "graph_ediscovery"
 
 
 _AUTH_HINT = (
-    " Purview rejected the signed-in administrator's permissions. In the "
-    "customer tenant, confirm the Microsoft admin who last reconnected this "
-    "company holds the Exchange Online 'Compliance Administrator' role "
-    "(the M365 admin center lists it under Roles → Exchange; the Exchange "
-    "Online role group is 'Compliance Management') — note that the "
-    "separately-named Compliance Administrator under Roles → Compliance is "
-    "a Microsoft Purview role group and does NOT authorize this cmdlet. "
-    "Quickest check: sign in to compliance.microsoft.com (Microsoft Purview "
-    "compliance portal) as that admin and confirm Search and purge is "
-    "usable in eDiscovery. Role changes can take up to an hour to reach "
-    "Purview. If that admin is no longer available, reconnect the company "
-    "from the Spam Search & Purge page as another Compliance Administrator."
+    " Microsoft Graph rejected the eDiscovery request under the signed-in "
+    "administrator's permissions. Spam search and purge run as the Microsoft "
+    "admin who last reconnected this company. In the customer tenant's "
+    "Microsoft Purview portal, confirm that admin is a member of the "
+    "eDiscovery Manager role group (search) and holds the Search And Purge "
+    "role (purge; included in Organization Management), and that the tenant "
+    "has an eDiscovery licence. Role changes can take up to an hour to apply. "
+    "If that admin is no longer available, reconnect the company from "
+    "Microsoft 365 settings as another such admin."
 )
 
 
@@ -111,38 +71,6 @@ def build_content_match_query(
     if not clauses:
         raise ValueError("At least one search criterion is required")
     return " AND ".join(clauses)
-
-
-def _first_row(payload: dict[str, Any]) -> dict[str, Any]:
-    rows = payload.get("value") or payload.get("Value") or []
-    if isinstance(rows, dict):
-        return rows
-    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
-        return rows[0]
-    return payload if isinstance(payload, dict) else {}
-
-
-def _int_value(row: dict[str, Any], *keys: str) -> int:
-    for key in keys:
-        value = row.get(key)
-        if value is None:
-            continue
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            match = re.search(r"\d+", str(value).replace(",", ""))
-            if match:
-                return int(match.group(0))
-    return 0
-
-
-def _removed_item_count(result: dict[str, Any]) -> int:
-    direct = _int_value(result, "Items", "ItemCount")
-    if direct:
-        return direct
-    summary = str(result.get("Results") or result.get("Result") or "")
-    match = re.search(r"(?:item\s*count|items?)\s*[:=]\s*([\d,]+)", summary, re.IGNORECASE)
-    return int(match.group(1).replace(",", "")) if match else 0
 
 
 async def create_request(company_id: int, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
@@ -195,93 +123,88 @@ async def _owned_request(request_id: int, company_id: int) -> dict[str, Any]:
     return request
 
 
-async def _poll_command(
-    token: str, tenant: str, cmdlet: str, identity: str, *, organization: str,
-) -> dict[str, Any]:
-    row: dict[str, Any] = {}
+def _count(value: Any) -> int:
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+async def _estimate(token: str, case_id: str, search_id: str) -> dict[str, Any]:
+    """Run estimate statistics for a search and wait for that run to finish.
+
+    ``lastEstimateStatisticsOperation`` keeps returning the previous run until
+    the new one is registered, so the new run is recognised by a changed ID.
+    """
+    previous_id = None
+    with suppress(m365_service.M365Error):
+        previous_id = (await ediscovery.get_estimate(token, case_id, search_id)).get("id")
+    await ediscovery.start_estimate(token, case_id, search_id)
     for _ in range(MAX_POLL_ATTEMPTS):
-        payload = await m365_service._scc_invoke_command(
-            token, tenant, cmdlet, {"Identity": identity},
-            organization=organization,
-        )
-        row = _first_row(payload)
-        if str(row.get("Status") or "").lower() in TERMINAL_STATUSES:
-            return row
         await asyncio.sleep(POLL_INTERVAL_SECONDS)
-    raise TimeoutError(f"{cmdlet} did not finish before the polling timeout")
+        try:
+            operation = await ediscovery.get_estimate(token, case_id, search_id)
+        except m365_service.M365Error as exc:
+            if exc.http_status == 404:
+                continue
+            raise
+        if (
+            operation.get("id")
+            and operation.get("id") != previous_id
+            and ediscovery.operation_status(operation) in ediscovery.TERMINAL_OPERATION_STATUSES
+        ):
+            return operation
+    raise TimeoutError("Estimate statistics did not finish before the polling timeout")
 
 
-async def _scc_organization(company_id: int) -> str:
-    """Resolve the initial domain used as the Purview routing organization."""
-    graph_token = await m365_service.acquire_access_token(company_id)
-    payload = await m365_service._graph_get(
-        graph_token,
-        "https://graph.microsoft.com/v1.0/domains?$select=id,isInitial",
-    )
-    domains = payload.get("value") or []
-    for domain in domains if isinstance(domains, list) else []:
-        if not isinstance(domain, dict) or not domain.get("isInitial"):
-            continue
-        name = str(domain.get("id") or "").strip().lower()
-        if name.endswith(".onmicrosoft.com"):
-            return name
-    raise ValueError(
-        "Microsoft 365 initial domain could not be resolved; grant the app "
-        "Domain.Read.All and reconnect the tenant"
-    )
+def _local_status(operation: dict[str, Any]) -> str:
+    status = ediscovery.operation_status(operation)
+    return "completed" if status == "succeeded" else (status or "failed")
+
+
+def _operation_error(operation: dict[str, Any], default: str) -> str:
+    detail = operation.get("resultInfo") or operation.get("error") or default
+    if isinstance(detail, dict):
+        detail = detail.get("message") or detail.get("code") or default
+    return str(detail)[:2000]
 
 
 async def _run_search(request_id: int, *, retry: bool = False) -> None:
     request = await purge_repo.get_request(request_id)
     if not request:
         return
+    company_id = int(request["company_id"])
     try:
         await purge_repo.update_request(request_id, {"search_status": "starting"})
-        company_id = int(request["company_id"])
-        token, tenant_id = await m365_service._acquire_scc_access_token(company_id)
-        organization = await _scc_organization(company_id)
-        if retry:
-            # A prior attempt can fail after Purview persisted the object. Remove
-            # only this request's unique, non-destructive search before recreating it.
+        token = await m365_service._acquire_ediscovery_access_token(company_id)
+        previous = _dict(request.get("search_details"))
+        case_id = await ediscovery.ensure_case(token)
+        if retry and previous.get("case_id") and previous.get("search_id"):
+            # A prior attempt may have created the search before failing.
+            # Remove only this request's own, non-destructive search.
             with suppress(Exception):
-                await m365_service._scc_invoke_command(token, tenant_id, "Remove-ComplianceSearch", {
-                    "Identity": request["search_name"], "Confirm": False,
-                }, organization=organization)
-        for attempt in range(_NEW_SEARCH_MAX_RETRIES + 1):
-            try:
-                await m365_service._scc_invoke_command(token, tenant_id, "New-ComplianceSearch", {
-                    "Name": request["search_name"], "ExchangeLocation": "All",
-                    "ContentMatchQuery": request["content_match_query"],
-                }, organization=organization)
-                break
-            except m365_service.M365Error as exc:
-                if _is_organization_context_error(exc) and attempt < _NEW_SEARCH_MAX_RETRIES:
-                    wait = _NEW_SEARCH_RETRY_BASE_SECONDS * (2 ** attempt)
-                    log_info(
-                        "New-ComplianceSearch transient org-container error; retrying",
-                        request_id=request_id, company_id=company_id, attempt=attempt + 1, wait_seconds=wait,
-                    )
-                    await asyncio.sleep(wait)
-                elif _is_organization_context_error(exc):
-                    raise _organization_context_error(organization, exc) from exc
-                else:
-                    raise
-        await m365_service._scc_invoke_command(token, tenant_id, "Start-ComplianceSearch", {
-            "Identity": request["search_name"],
-        }, organization=organization)
-        await purge_repo.update_request(request_id, {"search_status": "running"})
-        result = await _poll_command(
-            token, tenant_id, "Get-ComplianceSearch", request["search_name"],
-            organization=organization,
+                await ediscovery.delete_search(token, str(previous["case_id"]), str(previous["search_id"]))
+        search_id = await ediscovery.create_search(
+            token, case_id, request["search_name"], request["content_match_query"],
         )
-        status = str(result.get("Status") or "failed").lower()
-        updates = {
-            "search_status": status, "matched_items": _int_value(result, "Items", "ItemCount"),
-            "matched_size": _int_value(result, "Size", "SizeInBytes"), "search_details": result,
+        details: dict[str, Any] = {"api": _API, "case_id": case_id, "search_id": search_id}
+        await purge_repo.update_request(request_id, {"search_status": "running", "search_details": details})
+        estimate = await _estimate(token, case_id, search_id)
+        status = _local_status(estimate)
+        details["estimate"] = estimate
+        updates: dict[str, Any] = {
+            "search_status": status,
+            "matched_items": _count(estimate.get("indexedItemCount")),
+            "matched_size": _count(estimate.get("indexedItemsSize")),
+            "search_details": details,
             "search_completed_at": _utcnow(),
         }
         if status != "completed":
-            updates["error_message"] = str(result.get("Errors") or "Compliance search did not complete")[:2000]
+            updates["error_message"] = _operation_error(estimate, "Compliance search did not complete")
         await purge_repo.update_request(request_id, updates)
     except Exception as exc:  # noqa: BLE001 - background boundary records safe error
         log_error("M365 spam search failed", request_id=request_id, company_id=company_id, error=str(exc))
@@ -295,57 +218,67 @@ async def _run_purge(request_id: int) -> None:
     request = await purge_repo.get_request(request_id)
     if not request:
         return
+    company_id = int(request["company_id"])
     try:
         await purge_repo.update_request(request_id, {"purge_status": "starting"})
-        company_id = int(request["company_id"])
-        token, tenant_id = await m365_service._acquire_scc_access_token(company_id)
-        organization = await _scc_organization(company_id)
-        # Reconcile first. A previous request can have succeeded remotely and then
-        # timed out locally; issuing New-ComplianceSearchAction again would create
-        # a second destructive operation.
-        result: dict[str, Any] | None = None
-        try:
-            existing = await m365_service._scc_invoke_command(
-                token, tenant_id, "Get-ComplianceSearchAction",
-                {"Identity": request["action_name"]}, organization=organization,
-            )
-            existing_row = _first_row(existing)
-            if existing_row and existing_row.get("Status"):
-                result = existing_row
-        except m365_service.M365Error as exc:
-            if exc.http_status != 404:
-                raise
-        if result is None:
-            await m365_service._scc_invoke_command(token, tenant_id, "New-ComplianceSearchAction", {
-                "SearchName": request["search_name"], "Purge": True,
-                "PurgeType": "HardDelete", "Confirm": False,
-            }, organization=organization)
-        await purge_repo.update_request(request_id, {"purge_status": "running"})
-        if result is None or str(result.get("Status") or "").lower() not in TERMINAL_STATUSES:
-            result = await _poll_command(
-                token, tenant_id, "Get-ComplianceSearchAction", request["action_name"],
-                organization=organization,
-            )
-        status = str(result.get("Status") or "failed").lower()
-        removed = _removed_item_count(result)
+        search = _dict(request.get("search_details"))
+        case_id, search_id = search.get("case_id"), search.get("search_id")
+        if not case_id or not search_id:
+            raise ValueError("This search predates Graph eDiscovery; run the search again before purging")
+        case_id, search_id = str(case_id), str(search_id)
+        token = await m365_service._acquire_ediscovery_access_token(company_id)
+        details = _dict(request.get("purge_details"))
+        operation: dict[str, Any] | None = None
+        # Reconcile first. A previous attempt can have been accepted remotely and
+        # then failed locally; submitting purgeData again would start a second
+        # destructive operation.  Only a purge Graph reports as failed is resubmitted.
+        if details.get("operation_url"):
+            operation = await ediscovery.get_operation(token, str(details["operation_url"]))
+            if ediscovery.operation_status(operation) == "failed":
+                operation = None
+                details = {}
+        if operation is None:
+            operation_url = await ediscovery.start_purge(token, case_id, search_id)
+            details = {"api": _API, "operation_url": operation_url, "purge_type": "HardDelete"}
+            await purge_repo.update_request(request_id, {"purge_status": "running", "purge_details": details})
+            operation = {}
+        else:
+            await purge_repo.update_request(request_id, {"purge_status": "running"})
+        attempts = 0
+        while ediscovery.operation_status(operation) not in ediscovery.TERMINAL_OPERATION_STATUSES:
+            if attempts >= MAX_POLL_ATTEMPTS:
+                raise TimeoutError("Purge did not finish before the polling timeout")
+            attempts += 1
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+            operation = await ediscovery.get_operation(token, str(details["operation_url"]))
+        status = _local_status(operation)
         matched = int(request.get("matched_items") or 0)
-        result = dict(result)
-        result.update({
+        remaining: int | None = None
+        if status == "completed":
+            # Graph does not report a deleted-item count; re-estimate the same
+            # search so the operator sees what is still left to remove.
+            try:
+                remaining = _count((await _estimate(token, case_id, search_id)).get("indexedItemCount"))
+            except Exception as exc:  # noqa: BLE001 - purge succeeded; counts stay unknown
+                log_error("Post-purge estimate failed", request_id=request_id, error=str(exc))
+        removed = max(matched - remaining, 0) if remaining is not None else 0
+        details.update({
+            "operation": operation,
             "submitted_items": matched,
             "removed_items": removed,
-            "remaining_items": max(matched - removed, 0) if removed else None,
-            "remaining_items_unknown": removed == 0,
+            "remaining_items": remaining,
+            "remaining_items_unknown": remaining is None,
             "purge_type": "HardDelete",
         })
         updates = {
-            "purge_status": status, "removed_items": removed, "purge_details": result,
+            "purge_status": status, "removed_items": removed, "purge_details": details,
             "purge_completed_at": _utcnow(),
         }
         if status != "completed":
-            updates["error_message"] = str(result.get("Errors") or "Purge did not complete")[:2000]
+            updates["error_message"] = _operation_error(operation, "Purge did not complete")
         await purge_repo.update_request(request_id, updates)
         if status == "completed":
-            await _run_managed_folder_assistant(token, tenant_id, request_id)
+            await _run_managed_folder_assistant(request_id)
     except Exception as exc:  # noqa: BLE001 - background boundary records safe error
         log_error("M365 spam purge failed", request_id=request_id, company_id=company_id, error=str(exc))
         await purge_repo.update_request(request_id, {
@@ -354,7 +287,7 @@ async def _run_purge(request_id: int) -> None:
         })
 
 
-async def _run_managed_folder_assistant(_scc_token: str, _tenant: str, request_id: int) -> None:
+async def _run_managed_folder_assistant(request_id: int) -> None:
     request = await purge_repo.get_request(request_id)
     if not request:
         return
@@ -390,7 +323,7 @@ async def process_queued() -> int:
 
     This is the entry point for the server-shell worker.  It finds all requests
     with ``search_status = 'queued'`` or ``purge_status = 'queued'`` and executes
-    them sequentially via the SCC pipeline.  Safe to call repeatedly; each
+    them sequentially via the Graph eDiscovery pipeline.  Safe to call repeatedly; each
     invocation processes whatever is currently queued and returns.
 
     Each request is validated against its company before processing.  If the
@@ -423,7 +356,7 @@ async def process_queued() -> int:
             })
             continue
         log_info("Worker processing queued search", request_id=request_id, company_id=company_id, company=str(company.get("name") or ""))
-        # Always retry: the Remove-ComplianceSearch cleanup is a no-op for
+        # Always retry: removing the previous Graph search is a no-op for
         # first-time searches (suppressed), but essential for re-runs.
         await _run_search(request_id, retry=True)
         processed += 1

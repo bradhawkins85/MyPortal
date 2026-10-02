@@ -230,8 +230,16 @@ CONNECT_SCOPE = (
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
     "https://graph.microsoft.com/Directory.Read.All "
     "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory "
+    "https://graph.microsoft.com/eDiscovery.ReadWrite.All "
     "openid profile offline_access"
 )
+
+# Delegated Microsoft Graph scope for Spam Search & Purge.  Microsoft supports
+# eDiscovery search and purge through the Graph eDiscovery API; the Security &
+# Compliance InvokeCommand route now requires an undocumented search-only
+# session (Connect-IPPSSession -EnableSearchOnlySession) and fails with
+# "Value cannot be null. Parameter name: orgUnit" without it.
+EDISCOVERY_SCOPE = "https://graph.microsoft.com/eDiscovery.ReadWrite.All"
 
 # Security & Compliance delegated scope, requested in its own authorization
 # request (the connect flow chains it after :data:`CONNECT_SCOPE`).  The
@@ -2178,6 +2186,66 @@ async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
 
     :returns: A tuple of ``(access_token, tenant_id)``.
     """
+    return await _acquire_delegated_access_token(
+        company_id,
+        scope=_SCC_SCOPE,
+        missing_reason=(
+            "The stored delegated sign-in can no longer issue a Security "
+            "& Compliance token (it is expired, was revoked, or predates "
+            "the Security & Compliance consent). "
+        ),
+        error_factory=_scc_delegated_reconnect_error,
+        label="SCC",
+    )
+
+
+def _ediscovery_reconnect_error(reason: str) -> M365Error:
+    """Actionable error raised when no delegated eDiscovery token is available."""
+    return M365Error(
+        "Spam search and purge run through the Microsoft Graph eDiscovery API "
+        "under the delegated permissions of the Microsoft admin who last "
+        "reconnected this company. " + reason +
+        " Reconnect from Microsoft 365 settings as an admin who holds the "
+        "eDiscovery Manager and Search And Purge roles in Microsoft Purview, "
+        "consent to eDiscovery.ReadWrite.All when prompted, then retry.",
+        http_status=503,
+    )
+
+
+async def _acquire_ediscovery_access_token(company_id: int) -> str:
+    """Acquire a delegated Microsoft Graph token carrying eDiscovery.ReadWrite.All.
+
+    Like :func:`_acquire_scc_access_token` this always uses the stored refresh
+    token of the administrator who last connected the company, because the
+    Graph eDiscovery API authorizes the signed-in user's Purview roles.
+    """
+    token, _ = await _acquire_delegated_access_token(
+        company_id,
+        scope=EDISCOVERY_SCOPE,
+        missing_reason=(
+            "The stored delegated sign-in can no longer issue an eDiscovery "
+            "token (it is expired, was revoked, or predates the "
+            "eDiscovery.ReadWrite.All consent). "
+        ),
+        error_factory=_ediscovery_reconnect_error,
+        label="eDiscovery",
+    )
+    return token
+
+
+async def _acquire_delegated_access_token(
+    company_id: int,
+    *,
+    scope: str,
+    missing_reason: str,
+    error_factory: Any,
+    label: str,
+) -> tuple[str, str]:
+    """Exchange the stored delegated refresh token for *scope*.
+
+    The rotated refresh token returned by the grant is persisted so the next
+    exchange does not fail with a stale (already-rotated) token.
+    """
     creds = await get_credentials(company_id)
     if not creds:
         raise M365Error("Microsoft 365 credentials have not been configured")
@@ -2188,7 +2256,7 @@ async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
 
     refresh_token = creds.get("refresh_token")
     if not refresh_token:
-        raise _scc_delegated_reconnect_error(
+        raise error_factory(
             "No delegated administrator sign-in is stored for this company. "
         )
 
@@ -2198,19 +2266,14 @@ async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
             client_id=client_id,
             client_secret=client_secret,
             refresh_token=refresh_token,
-            scope=_SCC_SCOPE,
+            scope=scope,
         )
     except M365Error as exc:
         # ``reauthentication_required`` covers expired/revoked refresh tokens
-        # *and* a refresh token that was issued before the Security &
-        # Compliance scope was added to CONNECT_SCOPE (consent_required).
-        # Both cases are fixed by the same reconnect.
+        # *and* a refresh token issued before the scope was consented
+        # (consent_required).  Both are fixed by the same reconnect.
         if getattr(exc, "failure_kind", None) == "reauthentication_required":
-            raise _scc_delegated_reconnect_error(
-                "The stored delegated sign-in can no longer issue a Security "
-                "& Compliance token (it is expired, was revoked, or predates "
-                "the Security & Compliance consent). "
-            ) from exc
+            raise error_factory(missing_reason) from exc
         raise
 
     if new_refresh:
@@ -2224,7 +2287,7 @@ async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
         )
 
     log_info(
-        "SCC access token acquired via delegated (refresh_token) grant",
+        f"{label} access token acquired via delegated (refresh_token) grant",
         company_id=company_id,
         tenant_id=tenant_id,
     )
