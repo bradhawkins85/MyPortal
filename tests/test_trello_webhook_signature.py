@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -14,6 +15,9 @@ from app.api.routes import trello as trello_routes
 CALLBACK_URL = "https://portal.example.com/api/integration-modules/trello/webhook"
 SECRET = "trello-app-secret"
 BODY = json.dumps({"action": {"type": "updateBoard", "data": {}}}).encode("utf-8")
+BOARD_BODY = json.dumps(
+    {"action": {"type": "createCard", "data": {"board": {"id": "board-123"}}}}
+).encode("utf-8")
 
 
 def _request(body: bytes, signature: str | None) -> Request:
@@ -38,12 +42,24 @@ def _request(body: bytes, signature: str | None) -> Request:
     return Request(scope, receive)
 
 
-async def _call(signature: str | None, secret: str = SECRET):
+def _settings(secret: str = SECRET) -> SimpleNamespace:
+    return SimpleNamespace(
+        trello_webhook_secret=secret,
+        trello_api_secret="",
+        public_base_url="https://portal.example.com",
+        portal_url="https://portal.example.com",
+    )
+
+
+async def _call(signature: str | None, secret: str = SECRET, body: bytes = BODY):
     with patch(
+        "app.api.routes.trello.get_settings",
+        return_value=_settings(secret),
+    ), patch(
         "app.services.modules.get_module_settings",
-        AsyncMock(return_value={"api_secret": secret}),
+        AsyncMock(return_value={}),
     ), patch.object(trello_routes.webhook_monitor, "log_incoming_webhook", AsyncMock()):
-        return await trello_routes.trello_webhook_receive(_request(BODY, signature))
+        return await trello_routes.trello_webhook_receive(_request(body, signature))
 
 
 @pytest.mark.anyio
@@ -67,3 +83,28 @@ async def test_rejected_when_no_secret_configured():
     with pytest.raises(HTTPException) as exc_info:
         await _call(signature, secret="")
     assert exc_info.value.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_board_specific_api_key_secret_map_is_used():
+    company = {"id": 7, "trello_api_key": "company-key"}
+    module_settings = {
+        "api_secret": {"by_api_key": {"company-key": "company-secret"}},
+    }
+    signature = trello_routes.compute_trello_signature(
+        "company-secret", BOARD_BODY, CALLBACK_URL
+    )
+    with patch(
+        "app.api.routes.trello.get_settings",
+        return_value=_settings(""),
+    ), patch(
+        "app.services.modules.get_module_settings",
+        AsyncMock(return_value=module_settings),
+    ), patch(
+        "app.services.trello.get_company_for_board",
+        AsyncMock(return_value=company),
+    ), patch.object(trello_routes.webhook_monitor, "log_incoming_webhook", AsyncMock()):
+        response = await trello_routes.trello_webhook_receive(
+            _request(BOARD_BODY, signature)
+        )
+    assert response.status_code == 200

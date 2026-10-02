@@ -67,18 +67,28 @@ async def trello_webhook_receive(request: Request) -> JSONResponse:
     request_headers = dict(request.headers)
 
     raw_body = await request.body()
-    if not await _verify_trello_signature(request, raw_body):
+    payload_for_signature: dict[str, Any] | None = None
+    try:
+        decoded_payload = json.loads(raw_body)
+        if isinstance(decoded_payload, dict):
+            payload_for_signature = decoded_payload
+    except Exception:
+        payload_for_signature = None
+
+    if not await _verify_trello_webhook_signature(
+        request, raw_body, payload_for_signature
+    ):
         await webhook_monitor.log_incoming_webhook(
-            name="Trello Webhook - Signature Verification Failed",
+            name="Trello Webhook - Unauthorized",
             source_url=source_url,
             headers=request_headers,
             response_status=401,
-            response_body="Invalid webhook signature",
-            error_message="Trello webhook signature verification failed",
+            response_body="Invalid Trello webhook signature",
+            error_message="Invalid Trello webhook signature",
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid webhook signature",
+            detail="Invalid Trello webhook signature",
         )
 
     try:
@@ -337,6 +347,99 @@ def _build_public_callback_url(request: Request) -> str:
         return f"{str(request.base_url).rstrip('/')}{_WEBHOOK_PATH}"
 
     return f"{scheme}://{host}{_WEBHOOK_PATH}"
+
+
+def _extract_trello_board_id(payload: dict[str, Any] | None) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    action = payload.get("action") or {}
+    if not isinstance(action, dict):
+        return ""
+    data = action.get("data") or {}
+    if not isinstance(data, dict):
+        return ""
+
+    board = data.get("board") or {}
+    if isinstance(board, dict):
+        board_id = str(board.get("id") or "").strip()
+        if board_id:
+            return board_id
+
+    card = data.get("card") or {}
+    if isinstance(card, dict):
+        board_id = str(card.get("idBoard") or "").strip()
+        if board_id:
+            return board_id
+    return ""
+
+
+async def _verify_trello_webhook_signature(
+    request: Request,
+    raw_body: bytes,
+    payload: dict[str, Any] | None = None,
+) -> bool:
+    """Validate Trello's ``X-Trello-Webhook`` HMAC signature for POST events."""
+    from app.services import modules as modules_service
+
+    settings = get_settings()
+    secrets: list[str] = []
+
+    def _add_secret(value: Any) -> None:
+        secret = str(value or "").strip()
+        if secret and secret not in secrets:
+            secrets.append(secret)
+
+    _add_secret(
+        getattr(settings, "trello_webhook_secret", None)
+    )
+    _add_secret(getattr(settings, "trello_api_secret", None))
+
+    module_settings = await modules_service.get_module_settings("trello") or {}
+    api_secret_setting = module_settings.get("api_secret")
+    board_id = _extract_trello_board_id(payload)
+    company_api_key = ""
+    if board_id:
+        company = await trello_service.get_company_for_board(board_id)
+        if company:
+            company_api_key = str(company.get("trello_api_key") or "").strip()
+
+    if isinstance(api_secret_setting, dict):
+        # Optional per-company/per-board secret map for installations where
+        # companies use different Trello API keys (and therefore secrets).
+        if board_id:
+            board_secrets = api_secret_setting.get("by_board_id")
+            if isinstance(board_secrets, dict):
+                _add_secret(board_secrets.get(board_id))
+        if company_api_key:
+            key_secrets = api_secret_setting.get("by_api_key")
+            if isinstance(key_secrets, dict):
+                _add_secret(key_secrets.get(company_api_key))
+        _add_secret(api_secret_setting.get("default"))
+    else:
+        _add_secret(api_secret_setting)
+
+    if not secrets:
+        logger.error(
+            "Rejecting Trello webhook because neither TRELLO_WEBHOOK_SECRET nor "
+            "TRELLO_API_SECRET is configured"
+        )
+        return False
+
+    supplied_signature = str(request.headers.get("x-trello-webhook") or "").strip()
+    if not supplied_signature:
+        return False
+
+    callback_url = _build_public_callback_url(request)
+    for secret in secrets:
+        mac = hmac.new(
+            secret.encode("utf-8"),
+            raw_body + callback_url.encode("utf-8"),
+            hashlib.sha1,
+        )
+        expected_signature = base64.b64encode(mac.digest()).decode("ascii")
+        if hmac.compare_digest(supplied_signature, expected_signature):
+            return True
+    return False
 
 
 _MAX_TICKET_SUBJECT_LENGTH = 255
