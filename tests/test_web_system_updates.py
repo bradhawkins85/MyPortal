@@ -319,6 +319,30 @@ def test_baremetal_changes_list_commits_newest_first(monkeypatch):
     assert changes["truncated"] is False
 
 
+def test_baremetal_changes_merge_pull_request_with_its_branch_commit(monkeypatch):
+    monkeypatch.delenv("MYPORTAL_DEPLOYMENT", raising=False)
+    installed, latest = "a" * 40, "b" * 40
+    commit = lambda sha, message, login: {
+        "sha": sha, "html_url": f"https://github.com/o/r/commit/{sha}",
+        "author": {"login": login},
+        "commit": {"message": message, "author": {"name": login, "date": "2026-10-01T00:00:00Z"}},
+    }
+    _github_transport(monkeypatch, {f"/repos/bradhawkins85/MyPortal/compare/{installed}...{latest}": {
+        "html_url": "https://github.com/o/r/compare/x...y", "total_commits": 2,
+        "commits": [
+            commit("1" * 40, "Cap RAG output\n\nDetails", "claude"),
+            commit("2" * 40, "Merge pull request #4540 from o/feature\n\nCap RAG output", "bradhawkins85"),
+        ],
+    }})
+    check = {"deployment": "baremetal", "installed": installed, "latest": latest, "available": True}
+    changes = asyncio.run(system_updates.list_changes(check))
+    assert [(c["title"], c["number"], c["sha"], c["author"]) for c in changes["commits"]] == [
+        ("Cap RAG output", 4540, "2" * 40, "bradhawkins85, claude"),
+    ]
+    assert changes["change_count"] == 1
+    assert changes["total"] == 2
+
+
 def test_changes_are_not_fetched_when_up_to_date_and_failures_are_reported(monkeypatch):
     seen = _github_transport(monkeypatch, {})
     up_to_date = {"deployment": "docker", "installed": "v1", "latest": "v1", "available": False}

@@ -259,13 +259,26 @@ async def _commit_changes(client: httpx.AsyncClient, installed: str, latest: str
         if pull and len(lines) > 1:
             title = lines[1]
         html_url = str(entry.get("html_url") or "")
+        author = str((entry.get("author") or {}).get("login") or (commit.get("author") or {}).get("name") or "")
+        number = int(pull.group("number")) if pull else None
+        # A pull request's merge commit repeats its branch commit's title, so
+        # list them as one change crediting everyone who worked on it.
+        same = next((c for c in commits if c["title"].casefold() == title.casefold()), None)
+        if same is not None:
+            if author and author not in same["authors"]:
+                same["authors"].append(author)
+                same["author"] = ", ".join(same["authors"])
+            if same["number"] is None:
+                same["number"] = number
+            continue
         commits.append({
             "sha": sha,
             "title": title,
-            "author": str((entry.get("author") or {}).get("login") or (commit.get("author") or {}).get("name") or ""),
+            "author": author,
+            "authors": [author] if author else [],
             "date": str((commit.get("author") or {}).get("date") or ""),
             "url": html_url if html_url.startswith("https://") else "",
-            "number": int(pull.group("number")) if pull else None,
+            "number": number,
         })
     total = int(data.get("total_commits") or len(raw_commits))
     compare_url = str(data.get("html_url") or "")
