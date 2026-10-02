@@ -5776,11 +5776,16 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         if flow == "scc_consent":
             # A denied/expired Security & Compliance consent leaves the
             # company fully connected; only the second consent is missing.
+            # Keep the AAD error code/description: the operator needs it to
+            # tell a user denial (login_required) from a configuration
+            # problem (AADSTS65001, AADSTS700021, ...) that retrying will
+            # never fix.  Flash messages are capped at 200 characters, so
+            # the base text is kept short and the detail is bounded.
+            aad_detail = " ".join(message.split())[:94]
             message = (
-                "Security & Compliance access was not captured (the consent "
-                "was denied or the sign-in expired). The Microsoft 365 "
-                "connection is unaffected; capture Security & Compliance "
-                "access again or reconnect."
+                "Security & Compliance access was not captured; the "
+                "connection is unaffected; retry the capture. "
+                f"AAD error: {aad_detail}"
             )
         if "AADSTS700016" in message:
             # Never mutate shared/global configuration from an error callback.

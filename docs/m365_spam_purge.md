@@ -33,10 +33,14 @@ action on the Microsoft 365 settings page runs that step on its own.
 
 Consequences for tenant setup:
 
-- The signed-in administrator's **own account** must hold the Compliance
-  Administrator role in the customer tenant — eDiscoveryManager membership for
-  search, and Search And Purge for purge. Directory/Entra roles alone are not
-  sufficient.
+- The signed-in administrator's **own account** must hold the Exchange
+  Online **Compliance Administrator** role in the customer tenant (M365
+  admin center → Roles → Exchange → Compliance Administrator; Exchange
+  Online role group "Compliance Management"). The separately-named
+  Compliance Administrator under Roles → Compliance is a Microsoft Purview
+  role group and does **not** authorize `New-ComplianceSearch`. Quickest
+  verification: sign in to compliance.microsoft.com as that admin and
+  confirm Search and purge is usable in eDiscovery.
 - Reconnecting as a different administrator switches which user's permissions
   the workflow runs under.
 - If the stored sign-in expires, is revoked, or predates the Security &

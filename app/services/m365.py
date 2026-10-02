@@ -2129,6 +2129,49 @@ async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
     return access_token, tenant_id
 
 
+def _jwt_claims(token: str) -> dict[str, Any]:
+    """Decode the payload of a JWT access token without verification.
+
+    Returns an empty dict when the token is not a decodable JWT.  Used for
+    ``X-AnchorMailbox`` routing hints and for 401/403 diagnostics: the claims
+    (``adminconsenttoken``, ``scope``, ``upn``) are what tell an operator
+    whether Purview rejected the *consent kind* of the token (missing admin
+    consent) versus the administrator's *tenant role* (which the claims cannot
+    show and must be checked in the tenant).
+    """
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {}
+        padding = 4 - len(parts[1]) % 4
+        payload_bytes = base64.urlsafe_b64decode(parts[1] + "=" * padding)
+        claims = json.loads(payload_bytes)
+        return claims if isinstance(claims, dict) else {}
+    except Exception:  # noqa: BLE001 - best-effort; absence is non-fatal
+        return {}
+
+
+def _scc_token_claim_digest(token: str) -> str:
+    """One-line diagnostic digest of the claims that determine Purview access.
+
+    Entra v1 access tokens expose the client application as ``appid``; v2
+    tokens use ``azp``.  Supporting both is important because the SCC endpoint
+    requires the value in X-AnchorMailbox to establish the organization
+    context before it runs a cmdlet.
+    """
+    claims = _jwt_claims(token)
+    if not claims:
+        return "token claims undecodable"
+    app_id = str(claims.get("appid") or claims.get("azp") or "").strip()
+    return (
+        f"aud={claims.get('aud')!r} appid={app_id!r} "
+        f"scope={claims.get('scope')!r} "
+        f"adminconsenttoken={claims.get('adminconsenttoken')!r} "
+        f"upn={claims.get('preferred_username') or claims.get('upn')!r} "
+        f"oid={claims.get('oid')!r}"
+    )
+
+
 def _jwt_appid(token: str) -> str | None:
     """Extract the ``appid`` claim from a JWT access token without verification.
 
@@ -2136,21 +2179,9 @@ def _jwt_appid(token: str) -> str | None:
     that requests reach the correct Exchange/Purview forest rather than the
     Microsoft-internal FFO pre-production environment (DC=FFO,DC=extest).
     """
-    try:
-        parts = token.split(".")
-        if len(parts) < 2:
-            return None
-        padding = 4 - len(parts[1]) % 4
-        payload_bytes = base64.urlsafe_b64decode(parts[1] + "=" * padding)
-        claims = json.loads(payload_bytes)
-        # Entra v1 access tokens expose the client application as ``appid``;
-        # v2 tokens use ``azp``.  Supporting both is important because the SCC
-        # endpoint requires this value in X-AnchorMailbox to establish the
-        # organization context before it runs a cmdlet.
-        app_id = str(claims.get("appid") or claims.get("azp") or "").strip()
-        return app_id or None
-    except Exception:  # noqa: BLE001 - best-effort; absence is non-fatal
-        return None
+    claims = _jwt_claims(token)
+    app_id = str(claims.get("appid") or claims.get("azp") or "").strip()
+    return app_id or None
 
 
 async def _scc_invoke_command(
@@ -2236,13 +2267,44 @@ async def _scc_invoke_command(
             ) from exc
     if response.status_code not in (200, 201, 204):
         error_detail = _exo_error_detail(response)
+        raw_body = " ".join(getattr(response, "text", "") or "").split()
+        raw_detail = " ".join(raw_body)[:2000]
         log_error(
             "Security & Compliance InvokeCommand failed",
             cmdlet=cmdlet_name,
             status=response.status_code,
             error=error_detail,
+            # Purview 401 bodies are often empty or HTML the extractor cannot
+            # parse, so keep the raw body too; without it the rejection reason
+            # is lost entirely.
+            raw_body=raw_detail or None,
         )
+        claim_digest: str | None = None
+        if response.status_code in (401, 403):
+            claim_digest = _scc_token_claim_digest(scc_token)
+            log_warning(
+                "Security & Compliance call rejected; token claims recorded",
+                cmdlet=cmdlet_name,
+                status=response.status_code,
+                claims=claim_digest,
+            )
         detail_suffix = f": {error_detail}" if error_detail else ""
+        if response.status_code in (401, 403):
+            claims = _jwt_claims(scc_token)
+            if claims and claims.get("adminconsenttoken"):
+                interpretation = (
+                    "adminconsenttoken present = the consent is valid; the "
+                    "rejection is the administrator's tenant-side role"
+                )
+            else:
+                interpretation = (
+                    "adminconsenttoken missing = the tenant granted user "
+                    "consent, not admin consent; have a Global Administrator "
+                    "re-capture Security & Compliance access or grant admin "
+                    "consent for the app's Microsoft Exchange Online "
+                    "Protection delegated permissions"
+                )
+            detail_suffix += f" Token claims: {claim_digest} ({interpretation})"
         raise M365Error(
             f"Security & Compliance {cmdlet_name} failed ({response.status_code}){detail_suffix}",
             http_status=response.status_code,

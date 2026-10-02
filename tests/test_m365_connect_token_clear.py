@@ -431,6 +431,9 @@ async def test_scc_consent_denied_reports_actionable_error(async_client, monkeyp
     assert flash is not None and flash["variant"] == "error"
     assert "Security & Compliance access was not captured" in flash["message"]
     assert "unaffected" in flash["message"]
+    # The AAD error code/description is preserved so the operator can tell a
+    # user denial from a configuration problem that retrying never fixes.
+    assert flash["message"].endswith("AAD error: User denied")
 
 
 # ---------------------------------------------------------------------------

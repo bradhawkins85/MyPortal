@@ -526,10 +526,89 @@ def test_authorization_failure_message_includes_remediation():
     # The 401 hint is about the *user's* roles: searches and purges run under
     # the delegated permissions of the reconnected administrator.
     assert "signed-in administrator's permissions" in message
-    assert "eDiscoveryManager" in message and "Search And Purge" in message
-    assert "Compliance Administrator" in message
+    # The required role is the Exchange Online Compliance Administrator
+    # (role group "Compliance Management"), explicitly distinguished from
+    # the separately-named Microsoft Purview role group.
+    assert "Compliance Management" in message
+    assert "Purview role group" in message
+    assert "compliance.microsoft.com" in message
     assert "application's credentials" not in message
     assert service._failure_message(ValueError("bad query")) == "bad query"
+
+
+def _make_scc_token(claims: dict) -> str:
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "RS256"}).encode()).rstrip(b"=").decode()
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
+    return f"{header}.{payload}.signature"
+
+
+def _fake_scc_client(results: list):
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            return results.pop(0)
+
+    return FakeClient
+
+
+@pytest.mark.anyio("asyncio")
+async def test_scc_invoke_401_without_admin_consent_points_at_consent_kind(monkeypatch):
+    # Purview 401 bodies are often opaque; the operator-facing message must
+    # carry the token claims so consent-kind vs tenant-role is decidable.
+    token = _make_scc_token({
+        "aud": "00000007-0000-0ff1-ce00-000000000000",
+        "azp": "client-id",
+        "scope": "https://ps.compliance.protection.outlook.com/.default",
+        "preferred_username": "admin@contoso.com",
+        "oid": "user-oid",
+    })
+    monkeypatch.setattr(
+        m365_service.httpx, "AsyncClient", _fake_scc_client([httpx.Response(401, text="")])
+    )
+
+    with pytest.raises(M365Error) as excinfo:
+        await m365_service._scc_invoke_command(
+            token, "08fa9092-c049-429b-bd82-28119ef5dd7f", "New-ComplianceSearch",
+            {"Name": "test"}, organization="contoso.onmicrosoft.com",
+        )
+
+    assert excinfo.value.http_status == 401
+    message = str(excinfo.value)
+    assert "Token claims:" in message
+    assert "admin@contoso.com" in message
+    assert "not admin consent" in message
+
+
+@pytest.mark.anyio("asyncio")
+async def test_scc_invoke_401_with_admin_consent_points_at_tenant_role(monkeypatch):
+    token = _make_scc_token({
+        "aud": "00000007-0000-0ff1-ce00-000000000000",
+        "azp": "client-id",
+        "scope": "https://ps.compliance.protection.outlook.com/.default",
+        "adminconsenttoken": True,
+        "preferred_username": "admin@contoso.com",
+        "oid": "user-oid",
+    })
+    monkeypatch.setattr(
+        m365_service.httpx, "AsyncClient", _fake_scc_client([httpx.Response(403, text="")])
+    )
+
+    with pytest.raises(M365Error) as excinfo:
+        await m365_service._scc_invoke_command(
+            token, "08fa9092-c049-429b-bd82-28119ef5dd7f", "New-ComplianceSearch",
+            {"Name": "test"}, organization="contoso.onmicrosoft.com",
+        )
+
+    assert excinfo.value.http_status == 403
+    assert "tenant-side role" in str(excinfo.value)
 
 
 def test_delegated_reconnect_error_is_not_app_hints():
