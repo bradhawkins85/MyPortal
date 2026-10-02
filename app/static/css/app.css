@@ -818,30 +818,34 @@ body.navigation--top .layout__header {
 
 /* Compact top menu: on standard resolution displays (1080p or lower) the
  * labelled menu overflows the screen, so it collapses to icons only. Each
- * item carries a hover tooltip (set from base.html) naming it. */
-body.navigation--top.navigation--top-compact .menu__item > a .menu__label,
-body.navigation--top.navigation--top-compact .menu__toggle .menu__label {
+ * top-level item carries a hover tooltip (set from base.html) naming it.
+ * The rules stay scoped to direct children of the top menu so expanded
+ * drop-downs keep their item labels and stay readable. */
+body.navigation--top.navigation--top-compact .menu > .menu__item > a .menu__label,
+body.navigation--top.navigation--top-compact .menu > .menu__item--expandable > .menu__toggle .menu__label {
   display: none;
 }
 
-body.navigation--top.navigation--top-compact .menu__item > a,
-body.navigation--top.navigation--top-compact .menu__toggle {
+body.navigation--top.navigation--top-compact .menu > .menu__item > a,
+body.navigation--top.navigation--top-compact .menu > .menu__item--expandable > .menu__toggle {
   padding: var(--space-gap-tight);
   gap: 0.125rem;
 }
 
-body.navigation--top.navigation--top-compact .menu__icon {
+body.navigation--top.navigation--top-compact .menu > .menu__item > a .menu__icon,
+body.navigation--top.navigation--top-compact .menu > .menu__item--expandable > .menu__toggle .menu__icon {
   width: 1.5rem;
   height: 1.5rem;
 }
 
-body.navigation--top.navigation--top-compact .menu__icon svg {
+body.navigation--top.navigation--top-compact .menu > .menu__item > a .menu__icon svg,
+body.navigation--top.navigation--top-compact .menu > .menu__item--expandable > .menu__toggle .menu__icon svg {
   width: 1.5rem;
   height: 1.5rem;
 }
 
 /* Unread counts move out of the hidden label next to the icon. */
-body.navigation--top.navigation--top-compact .menu__item > a > .menu__badge {
+body.navigation--top.navigation--top-compact .menu > .menu__item > a > .menu__badge {
   margin-left: 0;
 }
 

@@ -179,6 +179,18 @@ def test_profile_offers_always_show_top_menu_labels():
     assert "top_menu_labels" in base_template
 
 
+def test_compact_top_menu_only_hides_top_level_labels():
+    from pathlib import Path
+
+    css = Path("app/static/css/app.css").read_text()
+
+    # The compact mode must stay scoped to direct children of the top menu;
+    # expanded drop-downs keep their item labels so people know what they
+    # are opening.
+    assert ".menu > .menu__item > a .menu__label" in css
+    assert "navigation--top-compact .menu__item > a .menu__label" not in css
+
+
 def test_profile_menu_offers_role_switcher_modes_to_super_admins_only():
     from pathlib import Path
 
