@@ -799,6 +799,15 @@ install_sip_client
 if [[ "$ENVIRONMENT" == "production" ]]; then
   run_first_deployment
   install_update_cron
+  # Install the daily backup timer so scheduled backups start on first boot.
+  # The timer unit is idempotent: upgrade.sh refreshes it on every deploy.
+  if [[ -f "${PROJECT_ROOT}/deploy/systemd/myportal-backup.service" ]]; then
+    install -m 0644 "${PROJECT_ROOT}/deploy/systemd/myportal-backup.service" /etc/systemd/system/myportal-backup.service
+    install -m 0644 "${PROJECT_ROOT}/deploy/systemd/myportal-backup.timer" /etc/systemd/system/myportal-backup.timer
+    systemctl daemon-reload
+    systemctl enable myportal-backup.timer 2>/dev/null || true
+    echo "Backup timer installed and enabled (daily by default)."
+  fi
 
   cat <<MESSAGE
 MyPortal production environment is ready.

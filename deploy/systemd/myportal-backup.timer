@@ -1,0 +1,10 @@
+[Unit]
+Description=MyPortal daily backup timer
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=3600
+
+[Install]
+WantedBy=timers.target

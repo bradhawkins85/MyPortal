@@ -1013,6 +1013,71 @@ install_upgrade_command() {
   mv -f "$staging" "$command_path"
 }
 
+install_backup_command() {
+  # Install a stable myportal-backup command so the systemd timer and
+  # administrators do not need to know the control checkout path.
+  local command_path="${MYPORTAL_BACKUP_COMMAND:-/usr/local/sbin/myportal-backup}" staging
+  install -d -m 0755 "$(dirname "$command_path")" 2>/dev/null || return 0
+  staging=$(mktemp "${command_path}.XXXXXX") || return 0
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf '# Installed by scripts/upgrade.sh: run the MyPortal backup script from\n'
+    printf '# the current release.\n'
+    printf 'release="$(readlink -f %q 2>/dev/null || true)"\n' "$CURRENT_LINK"
+    printf '[[ -n "$release" && -x "$release/scripts/backup.sh" ]] || {\n'
+    printf '  echo "Error: cannot resolve the current MyPortal release for backup." >&2\n'
+    printf '  exit 1\n'
+    printf '}\n'
+    printf 'exec "$release/scripts/backup.sh" "$@"\n'
+  } >"$staging"
+  chmod 0755 "$staging"
+  mv -f "$staging" "$command_path"
+}
+
+install_backup_timer() {
+  # Install (or refresh) the myportal-backup.service/.timer units from the
+  # release's deploy/systemd/ directory and enable the timer. Safe to call
+  # on every upgrade: it is idempotent.
+  local release_dir="$1"
+  local unit_dir="/etc/systemd/system"
+  local service_src="${release_dir}/deploy/systemd/myportal-backup.service"
+  local timer_src="${release_dir}/deploy/systemd/myportal-backup.timer"
+  if [[ ! -f "$service_src" || ! -f "$timer_src" ]]; then
+    echo "Warning: backup systemd units not found in release; skipping timer install." >&2
+    return 0
+  fi
+  install -m 0644 "$service_src" "${unit_dir}/myportal-backup.service"
+  install -m 0644 "$timer_src" "${unit_dir}/myportal-backup.timer"
+  systemctl daemon-reload
+  systemctl enable myportal-backup.timer 2>/dev/null || true
+  systemctl restart myportal-backup.timer 2>/dev/null || true
+  echo "Backup timer installed and enabled (daily by default)." >&2
+}
+
+run_pre_upgrade_backup() {
+  # Take a pre-upgrade database backup before migrations run. Aborts the
+  # upgrade on failure unless SKIP_PRE_UPGRADE_BACKUP=true.
+  if [[ "${SKIP_PRE_UPGRADE_BACKUP:-false}" == "true" ]]; then
+    return 0
+  fi
+  local backup_script="${SCRIPT_DIR}/backup.sh"
+  if [[ ! -f "$backup_script" ]]; then
+    echo "Warning: backup script not found at ${backup_script}; skipping pre-upgrade backup." >&2
+    return 0
+  fi
+  echo "Taking pre-upgrade backup before revision ${TARGET_REVISION:0:12}…" >&2
+  if ! MYPORTAL_ENV_FILE="$ENV_FILE" \
+       BACKUP_DIR="${BACKUP_DIR:-${SHARED_ROOT}/backups}" \
+       MYPORTAL_BACKUPS_TO_KEEP="${MYPORTAL_BACKUPS_TO_KEEP:-10}" \
+       MYPORTAL_SHARED_ROOT="$SHARED_ROOT" \
+       bash "$backup_script" --db-only --label "before-${TARGET_REVISION:0:12}"; then
+    echo "Error: Pre-upgrade backup failed. The upgrade has been aborted." >&2
+    echo "Set SKIP_PRE_UPGRADE_BACKUP=true in ${ENV_FILE} to skip this check." >&2
+    write_upgrade_status failed "Pre-upgrade backup failed; release was not activated."
+    return 1
+  fi
+}
+
 migrate_update_cron_log() {
   # Older installers appended this root job's output to a file inside
   # /var/log/myportal, which the service account owns and could replace with
@@ -1060,6 +1125,7 @@ exec 9>"$UPDATER_STATE_DIR/upgrade.lock"
 flock 9
 migrate_update_cron_log || echo "Warning: could not move the update cron log out of /var/log/myportal." >&2
 install_upgrade_command || echo "Warning: could not install the myportal-upgrade command." >&2
+install_backup_command || echo "Warning: could not install the myportal-backup command." >&2
 record_control_checkout || echo "Warning: could not record MYPORTAL_CONTROL_CHECKOUT in ${ENV_FILE}." >&2
 validate_origin_remote "$(git config --get remote.origin.url)"
 validate_required_configuration
@@ -1212,6 +1278,7 @@ fi
 # can start or roll back either one; otherwise an old worker loops while trying
 # to create private_uploads inside its read-only release directory.
 repair_assigned_release_uploads
+run_pre_upgrade_backup || exit 1
 run_migration_phase "$RELEASE_DIR" "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"
 if is_additive_migration_only_release "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"; then
   # Schema-only expands need no worker signal: the serving revision was
@@ -1224,6 +1291,7 @@ if is_additive_migration_only_release "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISIO
   exit 0
 fi
 install_blue_green_service_unit "$RELEASE_DIR"
+install_backup_timer "$RELEASE_DIR"
 run_rolling_restart "$TARGET_REVISION" "$RELEASE_DIR"
 retire_legacy_service
 write_upgrade_status succeeded "Release ${TARGET_REVISION} is serving; previous release retained."
