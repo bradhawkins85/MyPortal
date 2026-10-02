@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from app.services import ai_consent
+from app.services import ai_consent, ai_opt_out
 
 
 @pytest.fixture
@@ -79,10 +79,10 @@ async def test_filter_replies_for_ai_drops_opted_out_authors(monkeypatch):
 
 
 def test_opt_out_updates_records_timestamp_once():
-    turned_on = ai_consent.opt_out_updates(True, {"ai_opt_out": 0})
+    turned_on = ai_opt_out.opt_out_updates(True, {"ai_opt_out": 0})
     assert turned_on["ai_opt_out"] == 1 and turned_on["ai_opt_out_at"] is not None
-    assert ai_consent.opt_out_updates(True, {"ai_opt_out": 1, "ai_opt_out_at": "2026-01-01"}) == {"ai_opt_out": 1}
-    assert ai_consent.opt_out_updates(False, {"ai_opt_out": 1}) == {"ai_opt_out": 0, "ai_opt_out_at": None}
+    assert ai_opt_out.opt_out_updates(True, {"ai_opt_out": 1, "ai_opt_out_at": "2026-01-01"}) == {"ai_opt_out": 1}
+    assert ai_opt_out.opt_out_updates(False, {"ai_opt_out": 1}) == {"ai_opt_out": 0, "ai_opt_out_at": None}
 
 
 @pytest.mark.anyio
@@ -98,17 +98,17 @@ async def test_set_user_ai_opt_out_saves_and_purges(monkeypatch):
         purged.append(user_id)
         return {}
 
-    monkeypatch.setattr(ai_consent.user_repo, "update_user", fake_update)
-    monkeypatch.setattr(ai_consent, "purge_user_from_rag_index", fake_purge)
+    monkeypatch.setattr(ai_opt_out.user_repo, "update_user", fake_update)
+    monkeypatch.setattr(ai_opt_out, "purge_user_from_rag_index", fake_purge)
 
-    result = await ai_consent.set_user_ai_opt_out({"id": 4, "ai_opt_out": 0}, True)
+    result = await ai_opt_out.set_user_ai_opt_out({"id": 4, "ai_opt_out": 0}, True)
 
     assert result["ai_opt_out"] == 1
     assert purged == [4]
     # Saving the same value again is a no-op.
-    assert await ai_consent.set_user_ai_opt_out({"id": 4, "ai_opt_out": 1}, True) is None
+    assert await ai_opt_out.set_user_ai_opt_out({"id": 4, "ai_opt_out": 1}, True) is None
     # Opting back in does not purge anything.
-    assert (await ai_consent.set_user_ai_opt_out({"id": 4, "ai_opt_out": 1}, False))["ai_opt_out"] == 0
+    assert (await ai_opt_out.set_user_ai_opt_out({"id": 4, "ai_opt_out": 1}, False))["ai_opt_out"] == 0
     assert purged == [4]
     assert len(updates) == 2
 
@@ -137,7 +137,7 @@ async def test_user_update_api_audits_opt_out(monkeypatch):
     monkeypatch.setattr(users_route.user_repo, "get_user_by_id", fake_get)
     monkeypatch.setattr(users_route.user_repo, "update_user", fake_update)
     monkeypatch.setattr(users_route.audit_service, "record", fake_record)
-    monkeypatch.setattr(ai_consent, "purge_user_from_rag_index", fake_purge)
+    monkeypatch.setattr(ai_opt_out, "purge_user_from_rag_index", fake_purge)
 
     result = await users_route.update_user(
         4, UserUpdate(ai_opt_out=True), request=None, current_user={"id": 4}
@@ -175,13 +175,13 @@ async def test_purge_removes_tickets_comments_and_chats(monkeypatch):
     from app.repositories import rag_index as rag_repo
     from app.services import rag_outbox
 
-    monkeypatch.setattr(ai_consent.ai_consent_repo, "list_requested_ticket_ids", fake_requested)
-    monkeypatch.setattr(ai_consent.ai_consent_repo, "list_ticket_replies_involving_user", fake_replies)
-    monkeypatch.setattr(ai_consent.ai_consent_repo, "list_created_chat_room_ids", fake_chats)
+    monkeypatch.setattr(ai_opt_out.ai_consent_repo, "list_requested_ticket_ids", fake_requested)
+    monkeypatch.setattr(ai_opt_out.ai_consent_repo, "list_ticket_replies_involving_user", fake_replies)
+    monkeypatch.setattr(ai_opt_out.ai_consent_repo, "list_created_chat_room_ids", fake_chats)
     monkeypatch.setattr(rag_repo, "delete_documents_for_sources", fake_delete)
     monkeypatch.setattr(rag_outbox, "enqueue", fake_enqueue)
 
-    counts = await ai_consent.purge_user_from_rag_index(4)
+    counts = await ai_opt_out.purge_user_from_rag_index(4)
 
     assert deleted == {
         "tickets": ["10"],

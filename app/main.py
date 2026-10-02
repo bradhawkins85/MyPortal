@@ -7349,10 +7349,10 @@ async def _apply_user_ai_opt_out(
 ) -> dict[str, Any] | None:
     """Save an AI opt-out change and record it in the audit log."""
 
-    from app.services import ai_consent
+    from app.services import ai_opt_out
     from app.services import audit as audit_service
 
-    updated = await ai_consent.set_user_ai_opt_out(target, opt_out)
+    updated = await ai_opt_out.set_user_ai_opt_out(target, opt_out)
     if updated is None:
         return None
     await audit_service.record(
@@ -7361,8 +7361,8 @@ async def _apply_user_ai_opt_out(
         user_id=int(actor["id"]),
         entity_type="user",
         entity_id=int(target["id"]),
-        before=ai_consent.audit_snapshot(target),
-        after=ai_consent.audit_snapshot(updated),
+        before=ai_opt_out.audit_snapshot(target),
+        after=ai_opt_out.audit_snapshot(updated),
         metadata={"changed_by_self": int(actor["id"]) == int(target["id"]), "source": source},
     )
     return updated

@@ -13,7 +13,7 @@ from app.repositories import sidebar_preferences as sidebar_preferences_repo
 from app.repositories import user_preferences as user_preferences_repo
 from app.repositories import users as user_repo
 from app.schemas.users import UserCreate, UserResponse, UserUpdate
-from app.services import ai_consent
+from app.services import ai_opt_out
 from app.services import audit as audit_service
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
@@ -221,7 +221,7 @@ async def update_user(
             metadata=metadata,
         )
     if requested_opt_out is not None:
-        opted = await ai_consent.set_user_ai_opt_out(updated, bool(requested_opt_out))
+        opted = await ai_opt_out.set_user_ai_opt_out(updated, bool(requested_opt_out))
         if opted is not None:
             changed_by_self = int(current_user["id"]) == user_id
             await audit_service.record(
@@ -230,8 +230,8 @@ async def update_user(
                 user_id=int(current_user["id"]),
                 entity_type="user",
                 entity_id=user_id,
-                before=ai_consent.audit_snapshot(updated),
-                after=ai_consent.audit_snapshot(opted),
+                before=ai_opt_out.audit_snapshot(updated),
+                after=ai_opt_out.audit_snapshot(opted),
                 metadata={
                     "changed_by_self": changed_by_self,
                     "source": "profile" if changed_by_self else "admin_api",

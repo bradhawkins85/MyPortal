@@ -2189,7 +2189,6 @@ async def execute_agent_query(
     # People who opted out of AI processing must not reach the model or index.
     assembled_sources = await ai_consent.filter_agent_sources(assembled_sources)
     ticket_sources = assembled_sources["tickets"]
-    internal_note_sources = assembled_sources["ticket_comments"]
     chat_sources = assembled_sources["chats"]
     stages.append(
         _stage(
