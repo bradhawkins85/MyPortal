@@ -24,9 +24,14 @@
   .purge-summary div { display:flex; justify-content:space-between; align-items:flex-start; gap:var(--space-3); min-height:1.75rem; border-bottom:1px solid var(--color-border); padding-bottom:var(--space-2); }
   .purge-summary dt { color:var(--color-text-muted); } .purge-summary dd { margin:0; font-weight:600; }
   .purge-query { max-width:28rem; overflow-wrap:anywhere; font-family:monospace; font-size:.8rem; }
-  .purge-actions { display:flex; align-items:center; gap:var(--space-2); min-width:15rem; }
-  .purge-actions .input { width:6rem; }
-  .purge-details { max-width:36rem; white-space:pre-wrap; overflow-wrap:anywhere; font-size:.8rem; }
+  .purge-row-actions { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); }
+  .purge-row-actions form { margin:0; }
+  .purge-actions { display:flex; align-items:center; gap:var(--space-2); flex-wrap:wrap; }
+  .purge-actions .input { width:7rem; }
+  .purge-modal .modal__content { width:min(46rem, 100%); max-height:calc(100vh - 4rem); overflow-y:auto; }
+  .purge-modal__section + .purge-modal__section { margin-top:var(--space-4); padding-top:var(--space-4); border-top:1px solid var(--color-border); }
+  .purge-modal__section h3 { margin:0 0 var(--space-2); font-size:1rem; }
+  .purge-raw pre { max-height:20rem; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:.75rem; margin:var(--space-2) 0 0; }
   .purge-summary + .form-help { margin-top:var(--space-4); }
   @media (max-width: 900px) { .purge-grid { grid-template-columns:1fr; } }
   @media (max-width: 600px) { .purge-form-grid { grid-template-columns:1fr; } .purge-form-grid .form-field--wide { grid-column:auto; } }
@@ -84,7 +89,7 @@
       {"key":"purge", "label":"Purge status"},
       {"key":"removed", "label":"Removed", "sort_type":"number"},
       {"key":"requested_by", "label":"Requested by", "default_visible":false},
-      {"key":"actions", "label":"Review / action", "sortable":false, "mobile_priority":"essential", "width":"15%"}
+      {"key":"actions", "label":"Actions", "sortable":false, "mobile_priority":"essential", "width":"15%"}
     ] %}
     {{ table_toolbar("spam-purge-history", search=true, search_placeholder="Filter requests", columns=columns) }}
     {% call data_table(columns, table_id="spam-purge-history", columns=columns, aria_label="Spam purge request history") %}
@@ -100,34 +105,19 @@
         <td data-column-key="removed" data-sort-value="{{ item.removed_items }}">{{ item.removed_items }}</td>
         <td data-column-key="requested_by">{{ item.requested_by_email or item.created_by }}</td>
         <td data-column-key="actions">
-          <details>
-            <summary class="button button--ghost button--small">Review</summary>
-            <div class="purge-details">
-              <strong>Search name</strong><br>{{ item.search_name }}<br><br>
-              {% if item.error_message %}<span class="status status--danger">Error</span> {{ item.error_message }}<br><br>{% endif %}
-              {% if item.search_details %}<strong>Search details</strong><br>{{ item.search_details|tojson(indent=2) }}<br><br>{% endif %}
-              {% if item.purge_details %}<strong>Purge outcome</strong><br>
-                Submitted: {{ item.purge_details.submitted_items|default(item.matched_items) }}<br>
-                Removed: {{ item.purge_details.removed_items|default(item.removed_items) }}<br>
-                Remaining: {% if item.purge_details.remaining_items_unknown|default(true) %}Unknown{% else %}{{ item.purge_details.remaining_items }}{% endif %}<br>
-                <span class="text-muted">Completed means the remote action ended; it does not guarantee every match was removed.</span><br><br>
-                <strong>Remote details</strong><br>{{ item.purge_details|tojson(indent=2) }}<br><br>{% endif %}
-              {% if item.search_status == 'failed' %}
-              <form method="post" action="/m365/spam-purge/{{ item.id }}/retry" class="purge-actions">
-                {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
-                <button class="button button--primary button--small" type="submit">Retry search</button>
-              </form>
-              {% endif %}
-              {% if item.search_status == 'completed' and item.matched_items > 0 and item.purge_status in ['not_started','failed'] %}
-              <form method="post" action="/m365/spam-purge/{{ item.id }}/purge" class="purge-actions">
-                {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
-                <label class="visually-hidden" for="confirmation-{{ item.id }}">Type PURGE</label>
-                <input class="input" id="confirmation-{{ item.id }}" name="confirmation" required pattern="PURGE" autocomplete="off" placeholder="PURGE">
-                <button class="button button--danger button--small" type="submit">Hard delete {{ item.matched_items }}</button>
-              </form>
-              {% elif item.search_status == 'completed' and item.matched_items == 0 %}<span class="text-muted">Nothing to purge.</span>{% endif %}
-            </div>
-          </details>
+          {% set can_purge = item.search_status == 'completed' and item.matched_items > 0 and item.purge_status in ['not_started','failed'] %}
+          <div class="purge-row-actions">
+            <button type="button" class="button button--ghost button--small" data-purge-details-open="purge-details-{{ item.id }}" aria-haspopup="dialog" aria-controls="purge-details-{{ item.id }}">Details</button>
+            {% if item.search_status == 'failed' %}
+            <form method="post" action="/m365/spam-purge/{{ item.id }}/retry">
+              {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+              <button class="button button--primary button--small" type="submit">Retry search</button>
+            </form>
+            {% endif %}
+            {% if can_purge %}
+            <button type="button" class="button button--danger button--small" data-purge-details-open="purge-details-{{ item.id }}" data-purge-focus="confirmation-{{ item.id }}" aria-haspopup="dialog" aria-controls="purge-details-{{ item.id }}">Purge&hellip;</button>
+            {% endif %}
+          </div>
         </td>
       </tr>
       {% else %}
@@ -136,6 +126,71 @@
     {% endcall %}
   </div>
 </section>
+
+{% for item in requests %}
+{% set search = item.search_details if item.search_details is mapping else {} %}
+{% set estimate = search.estimate if search.estimate is mapping else {} %}
+{% set purge = item.purge_details if item.purge_details is mapping else {} %}
+<div class="modal purge-modal" id="purge-details-{{ item.id }}" role="dialog" aria-modal="true" aria-labelledby="purge-details-title-{{ item.id }}" aria-hidden="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close><span class="visually-hidden">Close search details</span>&times;</button>
+    <h2 class="modal__title" id="purge-details-title-{{ item.id }}">Search details</h2>
+    <div class="modal__body">
+      {% if item.error_message %}<p class="alert alert--error" role="alert">{{ item.error_message }}</p>{% endif %}
+      <section class="purge-modal__section">
+        <h3>Search</h3>
+        <dl class="purge-summary">
+          <div><dt>Name</dt><dd>{{ item.search_name }}</dd></div>
+          <div><dt>Criteria</dt><dd class="purge-query">{{ item.content_match_query }}</dd></div>
+          <div><dt>Status</dt><dd>{{ item.search_status|replace('_',' ')|title }}</dd></div>
+          <div><dt>Matched items</dt><dd>{{ item.matched_items }}</dd></div>
+          <div><dt>Matched size</dt><dd>{{ (item.matched_size or 0)|filesizeformat }}</dd></div>
+          {% if estimate.mailboxCount is not none and estimate.mailboxCount is defined %}<div><dt>Mailboxes with matches</dt><dd>{{ estimate.mailboxCount }}</dd></div>{% endif %}
+          {% if estimate.unindexedItemCount %}<div><dt>Unindexed items (not purged)</dt><dd>{{ estimate.unindexedItemCount }}</dd></div>{% endif %}
+          {% if item.search_completed_at %}<div><dt>Completed</dt><dd><span data-utc="{{ item.search_completed_at }}">{{ item.search_completed_at }}</span></dd></div>{% endif %}
+          <div><dt>Requested by</dt><dd>{{ item.requested_by_email or item.created_by }}</dd></div>
+        </dl>
+      </section>
+      {% if purge %}
+      <section class="purge-modal__section">
+        <h3>Purge outcome</h3>
+        <dl class="purge-summary">
+          <div><dt>Status</dt><dd>{{ item.purge_status|replace('_',' ')|title }}</dd></div>
+          <div><dt>Submitted</dt><dd>{{ purge.submitted_items|default(item.matched_items) }}</dd></div>
+          <div><dt>Removed</dt><dd>{{ purge.removed_items|default(item.removed_items) }}</dd></div>
+          <div><dt>Remaining:</dt><dd>{% if purge.remaining_items_unknown|default(true) %}Unknown{% else %}{{ purge.remaining_items }}{% endif %}</dd></div>
+          {% if item.purge_completed_at %}<div><dt>Completed</dt><dd><span data-utc="{{ item.purge_completed_at }}">{{ item.purge_completed_at }}</span></dd></div>{% endif %}
+        </dl>
+        <p class="form-help">Completed means the remote action ended; it does not guarantee every match was removed.</p>
+      </section>
+      {% endif %}
+      {% if item.search_status == 'completed' and item.matched_items > 0 and item.purge_status in ['not_started','failed'] %}
+      <section class="purge-modal__section">
+        <h3>Hard delete</h3>
+        <p class="form-help">Permanently deletes the {{ item.matched_items }} matched item{{ '' if item.matched_items == 1 else 's' }} from every mailbox. Type PURGE to confirm.</p>
+        <form method="post" action="/m365/spam-purge/{{ item.id }}/purge" class="purge-actions">
+          {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+          <label class="visually-hidden" for="confirmation-{{ item.id }}">Type PURGE</label>
+          <input class="input" id="confirmation-{{ item.id }}" name="confirmation" required pattern="PURGE" autocomplete="off" placeholder="PURGE">
+          <button class="button button--danger button--small" type="submit">Hard delete {{ item.matched_items }}</button>
+        </form>
+      </section>
+      {% elif item.search_status == 'completed' and item.matched_items == 0 %}
+      <p class="text-muted">Nothing to purge.</p>
+      {% endif %}
+      {% if item.search_details or item.purge_details %}
+      <section class="purge-modal__section">
+        <details class="purge-raw">
+          <summary>Raw details</summary>
+          {% if item.search_details %}<pre>{{ item.search_details|tojson(indent=2) }}</pre>{% endif %}
+          {% if item.purge_details %}<pre>{{ item.purge_details|tojson(indent=2) }}</pre>{% endif %}
+        </details>
+      </section>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endfor %}
 {% endblock %}
 
 {% block scripts %}
