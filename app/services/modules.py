@@ -3375,7 +3375,9 @@ async def _invoke_ollama(
     event = await _webhook_monitor().create_manual_event(
         name=f"module.ollama.{provider}.generate",
         target_url=endpoint,
-        payload={"request_body": body},
+        # Store the exact JSON body sent to the provider so a retry from the
+        # webhook monitor replays a valid request.
+        payload=body,
         headers={
             k: ("********" if k.lower() == "authorization" else v)
             for k, v in request_headers.items()
