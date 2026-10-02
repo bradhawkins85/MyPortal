@@ -145,6 +145,59 @@ async def test_list_reported_alerts_explains_missing_permission(monkeypatch):
         await service.list_reported_alerts(4)
 
 
+def _app_token(*roles: str) -> str:
+    import base64
+
+    payload = base64.urlsafe_b64encode(json.dumps({"roles": list(roles)}).encode()).decode().rstrip("=")
+    return f"header.{payload}.signature"
+
+
+@pytest.mark.anyio
+async def test_list_reported_alerts_403_with_role_granted_is_not_a_permission_error(monkeypatch):
+    """A refusal while the token already holds the role must not say "reconnect"."""
+    async def fake_token(company_id, *, force_client_credentials=False, force_refresh=False):
+        return _app_token("SecurityAlert.Read.All", "Mail.Read")
+
+    async def fake_get(token, url):
+        raise m365_service.M365Error("Microsoft Graph request failed (403)", http_status=403)
+
+    monkeypatch.setattr(m365_service, "acquire_access_token", fake_token)
+    monkeypatch.setattr(m365_service, "_graph_get", fake_get)
+    with pytest.raises(service.ReportedEmailError) as excinfo:
+        await service.list_reported_alerts(4)
+    message = str(excinfo.value)
+    assert "already carries SecurityAlert.Read.All" in message
+    assert "Reconnect" not in message
+
+
+@pytest.mark.anyio
+async def test_list_reported_alerts_403_without_role_asks_to_reconnect(monkeypatch):
+    async def fake_token(company_id, *, force_client_credentials=False, force_refresh=False):
+        return _app_token("Mail.Read")
+
+    async def fake_get(token, url):
+        raise m365_service.M365Error("Microsoft Graph request failed (403)", http_status=403)
+
+    monkeypatch.setattr(m365_service, "acquire_access_token", fake_token)
+    monkeypatch.setattr(m365_service, "_graph_get", fake_get)
+    with pytest.raises(service.ReportedEmailError, match="Reconnect the company"):
+        await service.list_reported_alerts(4)
+
+
+@pytest.mark.anyio
+async def test_list_reported_submissions_403_with_role_granted(monkeypatch):
+    async def fake_token(company_id, *, force_client_credentials=False, force_refresh=False):
+        return _app_token("ThreatSubmission.Read.All")
+
+    async def fake_get(token, url):
+        raise m365_service.M365Error("Microsoft Graph request failed (403)", http_status=403)
+
+    monkeypatch.setattr(m365_service, "acquire_access_token", fake_token)
+    monkeypatch.setattr(m365_service, "_graph_get", fake_get)
+    with pytest.raises(service.ReportedEmailError, match="already carries ThreatSubmission.Read.All"):
+        await service.list_reported_submissions(4)
+
+
 @pytest.mark.anyio
 async def test_list_reported_alerts_retries_403_with_fresh_token(monkeypatch):
     """A role granted after the cached app token was issued needs a new token."""

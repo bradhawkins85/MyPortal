@@ -89,14 +89,43 @@ _AUDIT_HINT = (
 )
 
 
+_ALERT_ROLES = frozenset({"SecurityAlert.Read.All", "SecurityAlert.ReadWrite.All"})
+_SUBMISSION_ROLES = frozenset({"ThreatSubmission.Read.All", "ThreatSubmission.ReadWrite.All"})
+# Set on a 403 whose app-only token already carries the needed role, so the
+# refusal is not a missing permission and reconnecting cannot fix it.
+_ROLE_PRESENT = "role_present"
+
+_ALERT_ROLE_PRESENT_HINT = (
+    " The app token already carries SecurityAlert.Read.All, so this is not a "
+    "missing permission and reconnecting will not fix it. Microsoft Defender "
+    "refuses alerts for tenants without Defender alerts in Microsoft Graph "
+    "(Defender for Office 365 Plan 2 / E5), and a newly granted permission "
+    "can take a while to reach Defender. Reports still load from threat "
+    "submissions and the audit log."
+)
+
+
+_SUBMISSION_ROLE_PRESENT_HINT = (
+    " The app token already carries ThreatSubmission.Read.All, so this is not "
+    "a missing permission and reconnecting will not fix it. The tenant is "
+    "usually not licensed for Defender for Office 365 threat submissions, or "
+    "a newly granted permission has not reached Defender yet. Reports still "
+    "load from the audit log."
+)
+
+
 class ReportedEmailError(Exception):
     """A reported-email alert could not be loaded or turned into a search."""
 
 
-def _failure(exc: m365_service.M365Error, hint: str = _PERMISSION_HINT) -> ReportedEmailError:
+def _failure(
+    exc: m365_service.M365Error,
+    hint: str = _PERMISSION_HINT,
+    role_present_hint: str = _ALERT_ROLE_PRESENT_HINT,
+) -> ReportedEmailError:
     message = str(exc)
     if exc.http_status in (401, 403):
-        message += hint
+        message += role_present_hint if exc.failure_kind == _ROLE_PRESENT else hint
     return ReportedEmailError(message)
 
 
@@ -460,12 +489,21 @@ def build_alert_query(summary: dict[str, Any]) -> str:
     return " AND ".join(clauses)
 
 
-async def _alerts_get(company_id: int, url: str) -> dict[str, Any]:
+def _token_roles(token: str) -> set[str]:
+    roles = m365_service._jwt_claims(token).get("roles")
+    return {str(role) for role in roles} if isinstance(roles, list) else set()
+
+
+async def _alerts_get(
+    company_id: int, url: str, roles: frozenset[str] = _ALERT_ROLES,
+) -> dict[str, Any]:
     """GET an alerts URL app-only, retrying a 403 once with a fresh token.
 
     A cached app-only token keeps the roles it was issued with, so a
     permission granted moments ago (by reconnecting) is not visible until a
-    new token is requested.
+    new token is requested.  When the fresh token is still refused but
+    already carries one of *roles*, the 403 is tagged so the page does not
+    send the technician to reconnect for a permission that is granted.
     """
     token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
     try:
@@ -476,7 +514,12 @@ async def _alerts_get(company_id: int, url: str) -> dict[str, Any]:
     token = await m365_service.acquire_access_token(
         company_id, force_client_credentials=True, force_refresh=True,
     )
-    return await m365_service._graph_get(token, url)
+    try:
+        return await m365_service._graph_get(token, url)
+    except m365_service.M365Error as exc:
+        if exc.http_status == 403 and _token_roles(token) & roles:
+            exc.failure_kind = _ROLE_PRESENT
+        raise
 
 
 async def list_reported_alerts(
@@ -520,12 +563,12 @@ async def list_reported_submissions(
     items: list[dict[str, Any]] = []
     try:
         try:
-            page = await _alerts_get(company_id, url)
+            page = await _alerts_get(company_id, url, _SUBMISSION_ROLES)
         except m365_service.M365Error as exc:
             if exc.http_status != 400:
                 raise
             # The beta endpoint may reject the date filter; filter locally.
-            page = await _alerts_get(company_id, _SUBMISSIONS_URL)
+            page = await _alerts_get(company_id, _SUBMISSIONS_URL, _SUBMISSION_ROLES)
         for _ in range(_MAX_PAGES):
             items.extend(
                 summarise_submission(item) for item in page.get("value") or []
@@ -534,9 +577,9 @@ async def list_reported_submissions(
             next_url = page.get("@odata.nextLink")
             if not next_url:
                 break
-            page = await _alerts_get(company_id, next_url)
+            page = await _alerts_get(company_id, next_url, _SUBMISSION_ROLES)
     except m365_service.M365Error as exc:
-        raise _failure(exc, _SUBMISSION_PERMISSION_HINT) from exc
+        raise _failure(exc, _SUBMISSION_PERMISSION_HINT, _SUBMISSION_ROLE_PRESENT_HINT) from exc
     return [item for item in items if item["created_at"] is None or item["created_at"] >= since_dt]
 
 
@@ -593,11 +636,13 @@ async def load_reported_emails(
 
 async def _get_submission(company_id: int, submission_id: str) -> dict[str, Any]:
     try:
-        item = await _alerts_get(company_id, _SUBMISSIONS_URL + "/" + quote(submission_id, safe=""))
+        item = await _alerts_get(
+            company_id, _SUBMISSIONS_URL + "/" + quote(submission_id, safe=""), _SUBMISSION_ROLES,
+        )
     except m365_service.M365Error as exc:
         if exc.http_status == 404:
             raise LookupError("Reported email not found") from exc
-        raise _failure(exc, _SUBMISSION_PERMISSION_HINT) from exc
+        raise _failure(exc, _SUBMISSION_PERMISSION_HINT, _SUBMISSION_ROLE_PRESENT_HINT) from exc
     return summarise_submission(item)
 
 
