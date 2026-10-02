@@ -1,0 +1,7 @@
+{
+  "guid": "ff42acf3-3e7f-4ad3-8b37-451fe41b2299",
+  "occurred_at": "2026-10-23T00:00Z",
+  "change_type": "Fix",
+  "summary": "Privacy Policy: correct which profile details users can change themselves",
+  "content_hash": "591602cdaf784f219c6f66105f2960cfe5d718ef5f36453bc546ce694944a650"
+}

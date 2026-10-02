@@ -29,4 +29,4 @@ LEGAL_POLICIES: dict[str, dict[str, str]] = {
 #: ISO date string that changes whenever any legal policy text is updated.
 #: Stored on each user's ``policies_accepted_version`` at registration so
 #: the system can detect users who need to re-accept revised policies.
-LEGAL_POLICIES_UPDATED = "2026-10-17"
+LEGAL_POLICIES_UPDATED = "2026-10-23"
