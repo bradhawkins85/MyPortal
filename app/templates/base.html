@@ -1363,7 +1363,7 @@
         const SIDEBAR_GROUP_KEY_PREFIX = '__group__:';
         const enabledModules = {{ module_enabled | default({}) | tojson }};
         const sidebarItemRegistry = new Map();
-        let activeSidebarPreferences = { navigation_style: 'top', role_switcher_display: 'full', order: [], hidden: [], groups: [] };
+        let activeSidebarPreferences = { navigation_style: 'top', role_switcher_display: 'full', top_menu_labels: 'auto', order: [], hidden: [], groups: [] };
         const sidebarDefaultPreferences = {{ (sidebar_default_preferences() if sidebar_default_preferences is defined else {'order': [], 'hidden': [], 'groups': []}) | tojson }};
 
         // Shared with the profile page editor so both render the same glyphs.
@@ -1550,11 +1550,25 @@
             role_switcher_display: ['full', 'icon', 'hidden'].includes(preferences?.role_switcher_display)
               ? preferences.role_switcher_display
               : 'full',
+            top_menu_labels: ['auto', 'always'].includes(preferences?.top_menu_labels)
+              ? preferences.top_menu_labels
+              : 'auto',
             order: Array.isArray(preferences?.order) ? preferences.order : [],
             hidden: Array.isArray(preferences?.hidden) ? preferences.hidden : [],
             groups: Array.isArray(preferences?.groups) ? preferences.groups : [],
           };
           document.body.classList.toggle('navigation--top', activeSidebarPreferences.navigation_style === 'top');
+          // On standard resolution displays (1080p or lower) the labelled
+          // top menu runs past the edge of the screen, so collapse it to icons
+          // only with hover tooltips unless the user opted into always
+          // showing the labels.
+          const standardResolutionDisplay =
+            window.screen && Number.isFinite(window.screen.height) && window.screen.height <= 1080;
+          const compactTopMenu =
+            activeSidebarPreferences.navigation_style === 'top' &&
+            activeSidebarPreferences.top_menu_labels !== 'always' &&
+            standardResolutionDisplay;
+          document.body.classList.toggle('navigation--top-compact', compactTopMenu);
           const roleSwitcherContainer = document.querySelector('[data-role-switcher-container]');
           if (roleSwitcherContainer) {
             // While viewing as another role a hidden switcher falls back to the
@@ -1630,6 +1644,33 @@
               setMenuItemExpanded(item, false);
             });
           }
+          // In the compact top menu the labels are hidden by CSS, so each
+          // top-level item needs a hover tooltip naming it (which doubles as
+          // its accessible name) and any unread badge moves out of the hidden
+          // label to stay visible next to the icon.
+          sidebarMenuRoot.querySelectorAll(':scope > .menu__item, :scope > .menu__item--expandable').forEach((item) => {
+            const target = item.querySelector(':scope > a, :scope > [data-menu-toggle]');
+            const labelElement = item.querySelector(':scope > .menu__label');
+            if (!target || !labelElement) {
+              return;
+            }
+            if (compactTopMenu) {
+              const label = (item.dataset.menuLabel || readMenuLabel(item)).trim();
+              if (label) {
+                target.setAttribute('title', label);
+              }
+              const badge = labelElement.querySelector('.menu__badge');
+              if (badge && badge.parentElement === labelElement) {
+                target.insertBefore(badge, labelElement);
+              }
+            } else {
+              target.removeAttribute('title');
+              const badge = target.querySelector(':scope > .menu__badge');
+              if (badge && badge.parentElement === target) {
+                labelElement.appendChild(badge);
+              }
+            }
+          });
           document.dispatchEvent(new CustomEvent('myportal:sidebar-updated'));
         };
 

@@ -533,6 +533,15 @@
       : 'full';
     roleSwitcherDisplayInputs.forEach((input) => { input.checked = input.value === roleSwitcherDisplay; });
   };
+  const topMenuLabelsInput = root.querySelector('input[name="top-menu-labels"]');
+  const TOP_MENU_LABEL_MODES = ['auto', 'always'];
+  let topMenuLabels = 'auto';
+  const syncTopMenuLabelsInput = (preferences) => {
+    topMenuLabels = TOP_MENU_LABEL_MODES.includes(preferences?.top_menu_labels)
+      ? preferences.top_menu_labels
+      : 'auto';
+    if (topMenuLabelsInput) topMenuLabelsInput.checked = topMenuLabels === 'always';
+  };
   const sidebarResetButton = root.querySelector('[data-sidebar-reset]');
   const sidebarAddDividerButton = root.querySelector('[data-sidebar-add-divider]');
   const sidebarAddSpacerButton = root.querySelector('[data-sidebar-add-spacer]');
@@ -1172,6 +1181,7 @@
     return {
       navigation_style: navigationStyle,
       role_switcher_display: roleSwitcherDisplay,
+      top_menu_labels: topMenuLabels,
       order: sidebarEntries.map((entry) => entry.key),
       hidden: Array.from(hidden),
       groups,
@@ -1183,6 +1193,7 @@
     navigationStyle = initialPreferences.navigation_style === 'sidebar' ? 'sidebar' : 'top';
     navigationStyleInputs.forEach((input) => { input.checked = input.value === navigationStyle; });
     syncRoleSwitcherInputs(initialPreferences);
+    syncTopMenuLabelsInput(initialPreferences);
     buildSidebarState(initialPreferences);
     renderSidebarItems();
 
@@ -1198,6 +1209,11 @@
       setSidebarDirty(true);
     }));
 
+    topMenuLabelsInput?.addEventListener('change', () => {
+      topMenuLabels = topMenuLabelsInput.checked ? 'always' : 'auto';
+      setSidebarDirty(true);
+    });
+
     // The sidebar may first render from cache or the defaults; pick up the
     // server copy when it lands, unless the user has already started editing.
     document.addEventListener('myportal:sidebar-updated', () => {
@@ -1206,6 +1222,7 @@
         navigationStyle = preferences.navigation_style === 'sidebar' ? 'sidebar' : 'top';
         navigationStyleInputs.forEach((input) => { input.checked = input.value === navigationStyle; });
         syncRoleSwitcherInputs(preferences);
+        syncTopMenuLabelsInput(preferences);
         buildSidebarState(preferences);
         renderSidebarItems();
       }

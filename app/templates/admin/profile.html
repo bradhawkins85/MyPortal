@@ -307,6 +307,13 @@
             <span><strong>Top menu</strong><small>Keep a horizontal menu at the top, with grouped items in drop-down menus.</small></span>
           </label>
         </fieldset>
+        <fieldset class="navigation-style" data-top-menu-labels-preference>
+          <legend class="form-label">Top menu labels</legend>
+          <label class="navigation-style__option">
+            <input type="checkbox" name="top-menu-labels" />
+            <span><strong>Always show menu labels</strong><small>On standard resolution displays (1080p or lower) the top menu shows icons only, with a hover tooltip for each item. Turn this on to keep the labels visible at every resolution.</small></span>
+          </label>
+        </fieldset>
         {% if role_switcher_allowed | default(false) %}
         <fieldset class="navigation-style navigation-style--modes" data-role-switcher-preference>
           <legend class="form-label">Role switcher</legend>

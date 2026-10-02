@@ -172,6 +172,11 @@ _DEFAULT_LAYOUT: tuple[tuple[str, ...] | tuple[str, str, str, tuple[str, ...]], 
 
 
 ROLE_SWITCHER_DISPLAY_MODES = ("full", "icon", "hidden")
+# Top-menu label modes. "auto" shows full labels on high-resolution displays
+# but collapses the top menu to icons only (with hover tooltips) on standard
+# resolution displays (1080p or lower) where the labelled menu overflows the
+# screen. "always" keeps the labels visible at every resolution.
+TOP_MENU_LABEL_MODES = ("auto", "always")
 
 
 def build_default_sidebar_preferences() -> dict[str, Any]:
@@ -188,6 +193,7 @@ def build_default_sidebar_preferences() -> dict[str, Any]:
         "version": SIDEBAR_LAYOUT_VERSION,
         "navigation_style": "top",
         "role_switcher_display": "full",
+        "top_menu_labels": "auto",
         "order": order,
         "hidden": [],
         "groups": groups,
@@ -211,6 +217,7 @@ def _coerce_preferences(payload: Any) -> dict[str, Any]:
             "version": SIDEBAR_LAYOUT_VERSION,
             "navigation_style": "top",
             "role_switcher_display": "full",
+            "top_menu_labels": "auto",
             "order": [],
             "hidden": [],
             "groups": [],
@@ -222,6 +229,11 @@ def _coerce_preferences(payload: Any) -> dict[str, Any]:
     role_switcher_display = payload.get("role_switcher_display")
     if role_switcher_display not in ROLE_SWITCHER_DISPLAY_MODES:
         role_switcher_display = "full"
+    # Standard-resolution displays get an icon-only top menu unless the user
+    # asked for the labels at every resolution.
+    top_menu_labels = payload.get("top_menu_labels")
+    if top_menu_labels not in TOP_MENU_LABEL_MODES:
+        top_menu_labels = "auto"
 
     order_values = payload.get("order") if isinstance(payload.get("order"), list) else []
     hidden_values = payload.get("hidden") if isinstance(payload.get("hidden"), list) else []
@@ -287,6 +299,7 @@ def _coerce_preferences(payload: Any) -> dict[str, Any]:
         "version": SIDEBAR_LAYOUT_VERSION,
         "navigation_style": navigation_style,
         "role_switcher_display": role_switcher_display,
+        "top_menu_labels": top_menu_labels,
         "order": order,
         "hidden": hidden,
         "groups": groups,

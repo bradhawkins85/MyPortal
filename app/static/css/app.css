@@ -816,12 +816,42 @@ body.navigation--top .layout__header {
   }
 }
 
+/* Compact top menu: on standard resolution displays (1080p or lower) the
+ * labelled menu overflows the screen, so it collapses to icons only. Each
+ * item carries a hover tooltip (set from base.html) naming it. */
+body.navigation--top.navigation--top-compact .menu__item > a .menu__label,
+body.navigation--top.navigation--top-compact .menu__toggle .menu__label {
+  display: none;
+}
+
+body.navigation--top.navigation--top-compact .menu__item > a,
+body.navigation--top.navigation--top-compact .menu__toggle {
+  padding: var(--space-gap-tight);
+  gap: 0.125rem;
+}
+
+body.navigation--top.navigation--top-compact .menu__icon {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+body.navigation--top.navigation--top-compact .menu__icon svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+/* Unread counts move out of the hidden label next to the icon. */
+body.navigation--top.navigation--top-compact .menu__item > a > .menu__badge {
+  margin-left: 0;
+}
+
 @media (max-width: 720px) {
   .navigation-style {
     grid-template-columns: 1fr;
   }
 
-  body.navigation--top .menu__icon {
+  /* The compact top menu has no visible labels, so keep its icons. */
+  body.navigation--top:not(.navigation--top-compact) .menu__icon {
     display: none;
   }
 }

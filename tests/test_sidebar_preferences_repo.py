@@ -155,6 +155,30 @@ def test_role_switcher_display_defaults_to_full_and_accepts_known_modes():
     assert _coerce_preferences({"role_switcher_display": "hidden"})["role_switcher_display"] == "hidden"
 
 
+def test_top_menu_labels_defaults_to_auto_and_accepts_known_modes():
+    from app.repositories.sidebar_preferences import build_default_sidebar_preferences
+
+    assert build_default_sidebar_preferences()["top_menu_labels"] == "auto"
+    assert _coerce_preferences({})["top_menu_labels"] == "auto"
+    assert _coerce_preferences(None)["top_menu_labels"] == "auto"
+    assert _coerce_preferences({"top_menu_labels": "bogus"})["top_menu_labels"] == "auto"
+    assert _coerce_preferences({"top_menu_labels": "always"})["top_menu_labels"] == "always"
+
+
+def test_profile_offers_always_show_top_menu_labels():
+    from pathlib import Path
+
+    profile_template = Path("app/templates/admin/profile.html").read_text()
+    profile_script = Path("app/static/js/profile.js").read_text()
+    base_template = Path("app/templates/base.html").read_text()
+
+    assert 'name="top-menu-labels"' in profile_template
+    assert "Always show menu labels" in profile_template
+    assert "top_menu_labels" in profile_script
+    assert "navigation--top-compact" in base_template
+    assert "top_menu_labels" in base_template
+
+
 def test_profile_menu_offers_role_switcher_modes_to_super_admins_only():
     from pathlib import Path
 
