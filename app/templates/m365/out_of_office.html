@@ -25,6 +25,7 @@
 {% set oof_states = {} %}
 {% for state in states %}{% set _ = oof_states.update({(state.mailbox | lower): state}) %}{% endfor %}
 {% set oof_no_mailbox = states | selectattr('no_mailbox') | list %}
+{% set oof_mailbox_total = (mailboxes | length) - (oof_no_mailbox | length) %}
 {% set oof_audience_labels = {'none': 'Colleagues only', 'contactsOnly': 'Colleagues + external contacts', 'all': 'Colleagues + everyone external'} %}
 
 {% if state_error %}<div class="alert alert--error" role="alert">Current Microsoft 365 state could not be loaded: {{ state_error }}</div>{% endif %}
@@ -64,7 +65,7 @@
   <div class="card__body card__body--stacked">
     {% if mailboxes %}
       <dl class="sif-stats" aria-label="Automatic reply summary" data-oof-stats>
-        <div class="sif-stats__item"><dt>Mailboxes</dt><dd data-oof-stat="total">{{ mailboxes | length - oof_no_mailbox | length }}</dd></div>
+        <div class="sif-stats__item"><dt>Mailboxes</dt><dd data-oof-stat="total">{{ oof_mailbox_total }}</dd></div>
         <div class="sif-stats__item"><dt>Replying now</dt><dd data-oof-stat="on">—</dd></div>
         <div class="sif-stats__item"><dt>Scheduled</dt><dd data-oof-stat="scheduled">—</dd></div>
         <div class="sif-stats__item"><dt>Off</dt><dd data-oof-stat="off">—</dd></div>
