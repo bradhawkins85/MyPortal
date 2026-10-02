@@ -36,9 +36,11 @@ from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import modules as modules_service
 from app.services.m365_access_baseline import (
+    GRAPH_APPLICATION_PERMISSION_IDS,
     PERMISSION_CONTRACT,
     REQUIRED_DIRECTORY_ROLES,
     RESOURCE_APP_IDS,
+    TENANT_OPTIONAL_GRAPH_PERMISSIONS,
     permissions_by_resource,
 )
 
@@ -293,7 +295,11 @@ _MISSING_PERMISSION_ERROR_CODE = "Authentication_MSGraphPermissionMissing"
 # SharePointTenantSettings.ReadWrite.All is assignable in tenants where the Entra
 # portal can add it manually, but Graph service-principal lookups can omit it;
 # filtering it out here caused diagnostics repair/re-authorisation to leave the
-# permission missing while still reporting it as an actionable failure.
+# permission missing while still reporting it as an actionable failure.  The
+# same omission was later seen for Mail.Send and SecurityAlert.Read.All, so
+# every long-standing Graph application permission in the access baseline is
+# forced.  Roles some tenants genuinely lack (the staff lifecycle roles) are
+# still only requested where the tenant's Graph resource lists them.
 _FORCE_GRANT_GRAPH_APP_ROLES: frozenset[str] = frozenset(
     {
         _SHAREPOINT_TENANT_SETTINGS_ROLE,
@@ -301,6 +307,11 @@ _FORCE_GRANT_GRAPH_APP_ROLES: frozenset[str] = frozenset(
         # rotation.  Never silently omit it because a tenant's Graph service
         # principal projection is stale or incomplete.
         "18a4783c-866b-4cc7-a460-3d5e5662c884",
+        *(
+            role_id
+            for name, role_id in GRAPH_APPLICATION_PERMISSION_IDS.items()
+            if name not in TENANT_OPTIONAL_GRAPH_PERMISSIONS
+        ),
     }
 )
 
@@ -2077,12 +2088,14 @@ _SCC_RESOURCE_URI = "https://ps.compliance.protection.outlook.com"
 
 async def _merge_manifest_scopes(
     access_token: str, client_id: str, resource_app_id: str, scope_ids: list[str],
+    *, access_type: str = "Scope",
 ) -> int:
-    """Merge delegated *scope_ids* for one resource into the app's manifest.
+    """Merge *scope_ids* for one resource into the app's manifest.
 
-    Existing ``requiredResourceAccess`` entries (including application roles
-    on the same resource) are kept.  Returns how many scopes were added; the
-    manifest is only patched when that is non-zero.  Raises :class:`M365Error`.
+    *access_type* is ``"Scope"`` for delegated permissions or ``"Role"`` for
+    application permissions.  Existing ``requiredResourceAccess`` entries are
+    kept.  Returns how many entries were added; the manifest is only patched
+    when that is non-zero.  Raises :class:`M365Error`.
     """
     applications = await _graph_get(
         access_token,
@@ -2108,12 +2121,14 @@ async def _merge_manifest_scopes(
     present = {
         str(item.get("id") or "").lower()
         for item in access
-        if str(item.get("type") or "").lower() == "scope"
+        if str(item.get("type") or "").lower() == access_type.lower()
     }
-    missing = [scope_id.lower() for scope_id in scope_ids if scope_id.lower() not in present]
+    missing = list(dict.fromkeys(
+        scope_id.lower() for scope_id in scope_ids if scope_id.lower() not in present
+    ))
     if not missing:
         return 0
-    entry["resourceAccess"] = access + [{"id": scope_id, "type": "Scope"} for scope_id in missing]
+    entry["resourceAccess"] = access + [{"id": scope_id, "type": access_type} for scope_id in missing]
     await _graph_patch(
         access_token,
         f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(application['id'])}",
@@ -2183,6 +2198,43 @@ async def _ensure_delegated_scope_on_manifest(
     if added:
         log_info("Added delegated scope to the app manifest", company_id=company_id, scope=scope_name)
     return bool(added)
+
+
+async def ensure_graph_app_roles_on_manifest(company_id: int, access_token: str) -> int:
+    """List every baseline Graph application permission on the app manifest.
+
+    Re-authorisation grants missing roles directly (see
+    :func:`try_grant_missing_permissions`), but apps provisioned before a
+    permission joined the baseline never listed it in ``requiredResourceAccess``.
+    Entra then shows it only under "Other permissions granted", and the
+    ``/.default`` admin consent that follows the connect flow cannot grant it.
+    Returns how many roles were added.  Failures are logged, never raised.
+    """
+    creds = await get_credentials(company_id)
+    client_id = str((creds or {}).get("client_id") or "").strip()
+    if not client_id:
+        return 0
+    try:
+        # Listing a role the tenant's Graph resource does not define makes the
+        # manifest invalid, so filter exactly as provisioning does.
+        _, graph_sp_role_ids = await _get_sp_app_role_ids(access_token, _GRAPH_APP_ID)
+        roles = [r for r in _PROVISION_APP_ROLES if _is_graph_role_grantable(r, graph_sp_role_ids)]
+        added = await _merge_manifest_scopes(
+            access_token, client_id, _GRAPH_APP_ID, roles, access_type="Role",
+        )
+    except M365Error as exc:
+        log_warning(
+            "Could not add Graph application permissions to the app manifest",
+            company_id=company_id,
+            **_safe_m365_error_fields(exc),
+        )
+        return 0
+    if added:
+        log_info(
+            "Added Graph application permissions to the app manifest",
+            company_id=company_id, added=added,
+        )
+    return added
 
 
 async def ensure_ediscovery_delegated_permission(company_id: int, access_token: str) -> bool:
@@ -6126,6 +6178,7 @@ async def try_grant_missing_permissions(
     access_token: str,
     *,
     raise_on_consent_error: bool = False,
+    failures: list[str] | None = None,
 ) -> bool:
     """Best-effort: grant any missing ``_PROVISION_APP_ROLES`` to the company's
     enterprise app service principal using the provided *access_token*.
@@ -6139,7 +6192,9 @@ async def try_grant_missing_permissions(
     Returns ``True`` if one or more previously-missing permissions were
     successfully granted, ``False`` otherwise (no grants needed, or all
     attempts failed).  Failures are logged but never raised – the connect flow
-    must not be interrupted by a permission-grant error.
+    must not be interrupted by a permission-grant error.  When *failures* is
+    given, a readable entry is appended for each Graph role that could not be
+    granted so the caller can show it to the administrator.
     """
     creds = await get_credentials(company_id)
     if not creds:
@@ -6260,6 +6315,10 @@ async def try_grant_missing_permissions(
                             role_id=role_id,
                             **_safe_m365_error_fields(exc),
                         )
+                        if failures is not None:
+                            failures.append(
+                                f"{_GRAPH_ROLE_NAMES.get(role_id, role_id)} ({exc})"
+                            )
 
             if granted:
                 log_info(
@@ -6267,6 +6326,19 @@ async def try_grant_missing_permissions(
                     company_id=company_id,
                     granted_roles=granted,
                 )
+                # App-only tokens carry the roles granted when they were
+                # issued.  Drop the cached one so the next call picks up the
+                # new permissions instead of failing for up to an hour.
+                try:
+                    await m365_repo.update_app_token(
+                        company_id=company_id, access_token=None, token_expires_at=None,
+                        cache_tenant_id="", cache_client_id="",
+                    )
+                except Exception as exc:  # noqa: BLE001 - grants already succeeded
+                    log_warning(
+                        "Could not clear cached app token after granting permissions",
+                        company_id=company_id, error=str(exc),
+                    )
 
         # Best-effort: also grant Exchange.ManageAsApp if not already assigned.
         if exo_needed:

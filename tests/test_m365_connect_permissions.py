@@ -1039,3 +1039,88 @@ async def test_try_grant_missing_permissions_grants_eop_manage_as_app_by_role_va
     assert result is True
     eop_posts = [payload for url, payload in posts if payload.get("resourceId") == "eop-sp-id"]
     assert eop_posts == [{"principalId": _SP_OBJECT_ID, "resourceId": "eop-sp-id", "appRoleId": eop_role}]
+
+
+_MAIL_SEND_ROLE = "798ee544-9d2d-430c-a058-570e29e34338"
+_SECURITY_ALERT_READ_ALL_ROLE = "472e4a4d-bb4a-4026-98d1-0b0d74cb74a5"
+
+
+def test_baseline_graph_roles_are_granted_even_when_role_lookup_omits_them():
+    """Graph's appRoles projection can omit long-standing roles such as Mail.Send."""
+    for role_id in (_MAIL_SEND_ROLE, _SECURITY_ALERT_READ_ALL_ROLE):
+        assert role_id in _PROVISION_APP_ROLES
+        assert m365_service._is_graph_role_grantable(role_id, set()) is True
+
+
+@pytest.mark.anyio("asyncio")
+async def test_try_grant_missing_permissions_reports_failed_roles():
+    """Grant failures are returned to the caller instead of only being logged."""
+    async def fake_get(token, url, **kwargs):
+        if "appRoleAssignments" in url:
+            return {"value": []}
+        if f"appId eq '{_GRAPH_APP_ID}'" in url:
+            return {"value": [{"id": "graph-sp-id", "appRoles": []}]}
+        if "servicePrincipals?$filter=appId" in url:
+            return {"value": [{"id": _SP_OBJECT_ID}]}
+        return {"value": []}
+
+    async def fake_post(token, url, payload, **kwargs):
+        if payload.get("appRoleId") == _MAIL_SEND_ROLE:
+            raise M365Error("Microsoft Graph POST failed (403)", http_status=403)
+        return {}
+
+    failures: list[str] = []
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=_fake_creds())),
+        patch.object(m365_service, "_graph_get", side_effect=fake_get),
+        patch.object(m365_service, "_graph_post", side_effect=fake_post),
+        patch.object(m365_service, "_post_app_role_assignment_with_retry", AsyncMock()),
+        patch.object(m365_service, "_ensure_exchange_admin_role", AsyncMock(return_value=False)),
+        patch.object(m365_service, "_ensure_teams_service_admin_role", AsyncMock(return_value=False)),
+        patch.object(m365_service.m365_repo, "update_app_token", AsyncMock()) as clear_token,
+    ):
+        result = await m365_service.try_grant_missing_permissions(
+            company_id=1, access_token="tok", failures=failures,
+        )
+
+    assert result is True
+    assert any(entry.startswith("Mail.Send (") for entry in failures)
+    assert not any(entry.startswith("SecurityAlert.Read.All") for entry in failures)
+    clear_token.assert_awaited_once()
+    assert clear_token.await_args.kwargs["access_token"] is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ensure_graph_app_roles_on_manifest_adds_missing_roles():
+    patched: dict = {}
+
+    async def fake_get(token, url, **kwargs):
+        if url.startswith("https://graph.microsoft.com/v1.0/applications"):
+            return {"value": [{
+                "id": "11111111-1111-1111-1111-111111111111",
+                "requiredResourceAccess": [{
+                    "resourceAppId": _GRAPH_APP_ID,
+                    "resourceAccess": [{"id": "df021288-bdef-4463-88db-98f22de89214", "type": "Role"}],
+                }],
+            }]}
+        return {"value": [{"id": "graph-sp-id", "appRoles": []}]}
+
+    async def fake_patch(token, url, payload, **kwargs):
+        patched.update(payload)
+        return {}
+
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=_fake_creds())),
+        patch.object(m365_service, "_graph_get", side_effect=fake_get),
+        patch.object(m365_service, "_graph_patch", side_effect=fake_patch),
+    ):
+        added = await m365_service.ensure_graph_app_roles_on_manifest(1, "tok")
+
+    access = patched["requiredResourceAccess"][0]["resourceAccess"]
+    ids = [item["id"] for item in access]
+    assert added > 0
+    assert _MAIL_SEND_ROLE in ids and _SECURITY_ALERT_READ_ALL_ROLE in ids
+    assert ids.count("df021288-bdef-4463-88db-98f22de89214") == 1
+    assert all(item["type"] == "Role" for item in access)
+    # Roles the tenant's Graph resource does not list stay out of the manifest.
+    assert "cc117bb9-00cf-4eb8-b580-ea2a878fe8f7" not in ids
