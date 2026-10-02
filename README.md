@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue" /></a>
+  <a href="LICENSE"><img alt="License: Prosperity 3.0.0" src="https://img.shields.io/badge/license-Prosperity%203.0.0-blue" /></a>
   <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white" />
   <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white" />
   <img alt="MariaDB 10.10+" src="https://img.shields.io/badge/MariaDB-10.10%2B-003545?logo=mariadb&logoColor=white" />
@@ -265,4 +265,12 @@ automatically. It's useful for exploring the UI, and it's what the screenshots a
 
 ## License
 
-MyPortal is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+MyPortal is licensed under the [Prosperity Public License 3.0.0](LICENSE), with an additional permission
+from the contributor:
+
+- **Free for personal and commercial use.** You can run MyPortal for free, with no time limit, including to
+  operate your business and serve your own customers.
+- **No resale.** You may not sell, rent, sublicense, or resell MyPortal (or a modified version), offer it as a
+  paid hosted product, or bundle it into a product you sell, without a separate written license.
+
+See [LICENSE](LICENSE) for the full terms.

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Python implementation of the MyPortal backend"
 authors = [{name = "MyPortal Team"}]
 readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.10"
 dependencies = [
     "fastapi",
