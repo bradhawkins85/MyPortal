@@ -263,3 +263,39 @@ async def test_ediscovery_token_requires_reconnect_without_consent(monkeypatch):
 
 def test_connect_scope_requests_ediscovery_consent():
     assert m365_service.EDISCOVERY_SCOPE in m365_service.CONNECT_SCOPE.split()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ediscovery_reconnect_error_includes_entra_reason(monkeypatch):
+    monkeypatch.setattr(m365_service, "get_credentials", AsyncMock(return_value={
+        "tenant_id": "t", "client_id": "c", "client_secret": "s", "refresh_token": "rt",
+    }))
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, _url, data=None, **_kwargs):
+            return httpx.Response(400, json={
+                "error": "invalid_grant",
+                "error_description": (
+                    "AADSTS65001: The user or administrator has not consented to use the "
+                    "application. Trace ID: abc Correlation ID: def"
+                ),
+            })
+
+    monkeypatch.setattr(m365_service.httpx, "AsyncClient", FakeClient)
+
+    with pytest.raises(M365Error) as exc_info:
+        await m365_service._acquire_ediscovery_access_token(3)
+
+    message = str(exc_info.value)
+    assert "AADSTS65001: The user or administrator has not consented" in message
+    assert "Trace ID" not in message
+    assert "eDiscovery.ReadWrite.All" in message
