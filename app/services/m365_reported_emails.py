@@ -163,6 +163,25 @@ def build_alert_query(summary: dict[str, Any]) -> str:
     return " AND ".join(clauses)
 
 
+async def _alerts_get(company_id: int, url: str) -> dict[str, Any]:
+    """GET an alerts URL app-only, retrying a 403 once with a fresh token.
+
+    A cached app-only token keeps the roles it was issued with, so a
+    permission granted moments ago (by reconnecting) is not visible until a
+    new token is requested.
+    """
+    token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
+    try:
+        return await m365_service._graph_get(token, url)
+    except m365_service.M365Error as exc:
+        if exc.http_status != 403:
+            raise
+    token = await m365_service.acquire_access_token(
+        company_id, force_client_credentials=True, force_refresh=True,
+    )
+    return await m365_service._graph_get(token, url)
+
+
 async def list_reported_alerts(
     company_id: int, *, days: int = DEFAULT_LOOKBACK_DAYS,
 ) -> list[dict[str, Any]]:
@@ -174,10 +193,9 @@ async def list_reported_alerts(
         + "&$top=200"
     )
     try:
-        token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
         alerts: list[dict[str, Any]] = []
         for _ in range(_MAX_PAGES):
-            page = await m365_service._graph_get(token, url)
+            page = await _alerts_get(company_id, url)
             alerts.extend(
                 summarise_alert(item) for item in page.get("value") or []
                 if isinstance(item, dict) and is_reported_email_alert(item)
@@ -195,8 +213,7 @@ async def get_reported_alert(company_id: int, alert_id: str) -> dict[str, Any]:
     if not _ALERT_ID_PATTERN.fullmatch(alert_id or ""):
         raise LookupError("Alert not found")
     try:
-        token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
-        alert = await m365_service._graph_get(token, _ALERTS_URL + "/" + quote(alert_id, safe=""))
+        alert = await _alerts_get(company_id, _ALERTS_URL + "/" + quote(alert_id, safe=""))
     except m365_service.M365Error as exc:
         if exc.http_status == 404:
             raise LookupError("Alert not found") from exc

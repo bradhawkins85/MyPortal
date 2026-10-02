@@ -117,6 +117,10 @@ def _patch_connect_common(
         AsyncMock(return_value=False),
     )
     monkeypatch.setattr(
+        "app.main.m365_service.ensure_graph_app_roles_on_manifest",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
         "app.main.m365_service._acquire_ediscovery_download_token",
         AsyncMock(return_value="download-token"),
     )
@@ -178,7 +182,7 @@ async def test_connect_callback_clears_access_token_when_permissions_granted(
     update_tokens_calls: list[dict] = []
     grant_calls: list[dict] = []
 
-    async def fake_grant(company_id, access_token):
+    async def fake_grant(company_id, access_token, **kwargs):
         grant_calls.append({"company_id": company_id, "access_token": access_token})
         return True  # permissions were granted
 

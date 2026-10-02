@@ -116,6 +116,12 @@ _STAFF_LIFECYCLE = {
 }
 
 
+# Graph application permissions that some tenants' Microsoft Graph resource
+# does not expose yet.  These are only requested where the tenant lists them;
+# every other baseline ID is a long-standing global Graph role.
+TENANT_OPTIONAL_GRAPH_PERMISSIONS = frozenset(_STAFF_LIFECYCLE)
+
+
 def _metadata(resource: str, permission_type: str, name: str) -> tuple[str, str, str, str, tuple[str, ...]]:
     feature = "legacy_baseline"
     operation = {

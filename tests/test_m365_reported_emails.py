@@ -131,7 +131,7 @@ async def test_list_reported_alerts_filters_titles_and_pages(monkeypatch):
 
 @pytest.mark.anyio
 async def test_list_reported_alerts_explains_missing_permission(monkeypatch):
-    async def fake_token(company_id, *, force_client_credentials=False):
+    async def fake_token(company_id, *, force_client_credentials=False, force_refresh=False):
         return "token"
 
     async def fake_get(token, url):
@@ -141,6 +141,27 @@ async def test_list_reported_alerts_explains_missing_permission(monkeypatch):
     monkeypatch.setattr(m365_service, "_graph_get", fake_get)
     with pytest.raises(service.ReportedEmailError, match="SecurityAlert.Read.All"):
         await service.list_reported_alerts(4)
+
+
+@pytest.mark.anyio
+async def test_list_reported_alerts_retries_403_with_fresh_token(monkeypatch):
+    """A role granted after the cached app token was issued needs a new token."""
+    refreshes: list[bool] = []
+
+    async def fake_token(company_id, *, force_client_credentials=False, force_refresh=False):
+        refreshes.append(force_refresh)
+        return "fresh" if force_refresh else "stale"
+
+    async def fake_get(token, url):
+        if token == "stale":
+            raise m365_service.M365Error("Microsoft Graph request failed (403)", http_status=403)
+        return {"value": [_alert()]}
+
+    monkeypatch.setattr(m365_service, "acquire_access_token", fake_token)
+    monkeypatch.setattr(m365_service, "_graph_get", fake_get)
+    alerts = await service.list_reported_alerts(4)
+    assert len(alerts) == 1
+    assert refreshes == [False, True]
 
 
 @pytest.mark.anyio

@@ -6487,10 +6487,15 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # in _complete_connect_with_scc_consent grant it.
         await m365_service.ensure_ediscovery_delegated_permission(company_id, access_token)
         await m365_service.ensure_ediscovery_download_permission(company_id, access_token)
+    grant_failures: list[str] = []
     if access_token and not compliance_setup:
+        # List every baseline application permission on the app registration
+        # so Entra shows it as configured and admin consent covers it.
+        await m365_service.ensure_graph_app_roles_on_manifest(company_id, access_token)
         new_permissions_granted = await m365_service.try_grant_missing_permissions(
             company_id=company_id,
             access_token=access_token,
+            failures=grant_failures,
         )
         if new_permissions_granted:
             log_info(
@@ -6546,7 +6551,24 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             request,
             company_id=company_id,
             destination="/m365/diagnostics",
-            message="Permissions and Purview configuration repaired and re-checked",
+            message=(
+                "Permissions and Purview configuration repaired and re-checked"
+                if not grant_failures
+                else "Re-checked, but these Microsoft Graph permissions could not be granted: "
+                + "; ".join(grant_failures)[:1500]
+            ),
+            variant="warning" if grant_failures else "success",
+        )
+    if grant_failures:
+        return await _complete_connect_with_scc_consent(
+            request, company_id=company_id, destination="/m365",
+            message=(
+                "Connected, but these Microsoft Graph permissions could not be "
+                "granted: " + "; ".join(grant_failures)[:1500]
+                + ". Grant them in Entra (App registrations > API permissions > "
+                "Grant admin consent) or reconnect as a Global Administrator."
+            ),
+            variant="warning",
         )
     return await _complete_connect_with_scc_consent(
         request, company_id=company_id, destination="/m365"
