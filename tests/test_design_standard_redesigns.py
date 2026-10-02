@@ -953,3 +953,49 @@ def test_webhook_monitor_empty_states():
     filtered = _render_webhooks(webhook_search="abc", webhook_status="failed")
     assert "No webhook events match" in filtered
     assert "Dead-letter queue" in filtered
+
+
+def _render_campaign_form(**context) -> str:
+    stub_base = (
+        "{% block header_title %}{% endblock %}{% block header_actions %}{% endblock %}"
+        "{% block content %}{% endblock %}"
+    )
+    env = jinja2.Environment(
+        loader=jinja2.ChoiceLoader(
+            [jinja2.DictLoader({"base.html": stub_base}), jinja2.FileSystemLoader(str(TEMPLATES))]
+        ),
+        autoescape=True,
+    )
+    defaults = {
+        "campaign": None,
+        "campaign_values": {},
+        "audience": {"company_mode": "selected", "company_ids": [], "exclude_company_ids": [],
+                     "asset_field_ids": [], "product_ids": [], "contact_scope": "billing",
+                     "job_titles": [], "departments": [], "include_emails": [], "exclude_emails": []},
+        "campaign_variables": [],
+        "csrf_token": "t",
+    }
+    defaults.update(context)
+    return env.get_template("admin/marketing_campaign_form.html").render(**defaults)
+
+
+def test_campaign_form_puts_title_status_and_save_in_header_bar():
+    html = _render_campaign_form()
+    header = html[: html.index("<form")]
+    assert 'page-header-bar page-header-bar--record' in header
+    assert ">New campaign</span>" in header
+    assert 'status status--neutral">Draft' in header
+    # Back link sits left of the primary Save, which submits the page form.
+    assert header.index("Back to campaigns") < header.index("Save and preview recipients")
+    assert 'type="submit" class="button button--primary" form="campaign-form"' in header
+    assert 'id="campaign-form"' in html
+    # The drafts note and the Save button are not repeated in the content.
+    body = html[html.index("<form"):]
+    assert "Save and preview recipients" not in body
+    assert "stay as drafts" not in body
+
+    edit = _render_campaign_form(campaign={"id": 7, "name": "Spring update", "status": "draft"})
+    edit_header = edit[: edit.index("<form")]
+    assert ">Spring update</span>" in edit_header
+    assert 'href="/admin/marketing/campaigns/7">Back to campaign' in edit_header
+    assert 'action="/admin/marketing/campaigns/7"' in edit
