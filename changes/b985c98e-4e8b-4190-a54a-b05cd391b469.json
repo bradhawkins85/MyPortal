@@ -1,0 +1,7 @@
+{
+  "guid": "b985c98e-4e8b-4190-a54a-b05cd391b469",
+  "occurred_at": "2026-10-10T00:00Z",
+  "change_type": "Fix",
+  "summary": "Correct privacy policy section 8 retention wording for data that is not automatically deleted",
+  "content_hash": "b2a28000f78a3e4ffd2f6be471506b4829c8b2af621dfb66084b7401b638834e"
+}

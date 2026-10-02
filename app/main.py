@@ -11801,7 +11801,7 @@ LEGAL_POLICIES: dict[str, dict[str, str]] = {
         "template": "legal/_terms.html",
     },
 }
-LEGAL_POLICIES_UPDATED = "2026-10-03"
+LEGAL_POLICIES_UPDATED = "2026-10-10"
 
 
 def _legal_context_extra(policy_slug: str | None) -> dict[str, Any]:
