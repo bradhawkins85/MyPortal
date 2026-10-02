@@ -55,6 +55,7 @@ from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
 from app.repositories import integration_modules as module_repo
 from app.repositories import websites as websites_repo
+from app.repositories import audit_logs as audit_logs_repo
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SYSTEM_UPDATE_LOCK = asyncio.Lock()
@@ -517,6 +518,43 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        # Prune audit log rows older than AUDIT_RETENTION_DAYS. Runs daily at
+        # 02:00 store-local time. Disabled (no-op) when AUDIT_RETENTION_DAYS=0.
+        if not self._scheduler.get_job("audit-log-prune"):
+            self._scheduler.add_job(
+                self._run_audit_log_prune,
+                CronTrigger(hour=2, minute=0, timezone=self._scheduler.timezone),
+                id="audit-log-prune",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
+
+    async def _run_audit_log_prune(self) -> None:
+        """Prune expired audit log rows with distributed lock.
+
+        Calls ``audit_logs_repo.prune_audit_logs`` using the configured
+        ``AUDIT_RETENTION_DAYS``. When the setting is 0, pruning is a no-op.
+        """
+        settings = get_settings()
+        if settings.audit_retention_days == 0:
+            return
+        async with db.acquire_lock("audit_log_prune", timeout=1) as lock_acquired:
+            if not lock_acquired:
+                log_info("Audit log prune already running on another worker, skipping")
+                return
+            try:
+                removed = await audit_logs_repo.prune_audit_logs(
+                    retention_days=settings.audit_retention_days,
+                )
+                if removed:
+                    log_info(
+                        "Audit log prune completed",
+                        removed=removed,
+                        retention_days=settings.audit_retention_days,
+                    )
+            except Exception as exc:
+                log_error("Audit log prune failed", error=str(exc))
 
     async def _run_webhook_monitor(self) -> None:
         """Run webhook monitoring with distributed lock to prevent duplicate execution."""
