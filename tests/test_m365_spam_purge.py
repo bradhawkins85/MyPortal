@@ -151,6 +151,22 @@ def test_orgunit_null_is_recognized_as_organization_context_error():
     assert service._is_organization_context_error(error)
 
 
+def test_organization_context_error_keeps_purview_reason_without_directory_path():
+    error = M365Error(
+        "Security & Compliance New-ComplianceSearch failed (500): Couldn't find "
+        "organization container CN=bjplab.onmicrosoft.com,OU=Microsoft Exchange "
+        "Hosted Organizations,DC=FFO,DC=extest",
+        http_status=500,
+    )
+
+    message = str(service._organization_context_error("bjplab.onmicrosoft.com", error))
+
+    assert "Couldn't find organization container [directory path]" in message
+    assert "DC=FFO" not in message
+    assert "EnableSearchOnlySession" in message
+    assert "ManageAsApp is granted" not in message
+
+
 def test_domain_read_all_is_provisioned_and_visible_in_diagnostics():
     domain_read_all = "dbb9058a-0e50-45d7-ae91-66909b5d4664"
 
@@ -460,10 +476,9 @@ async def test_run_search_exhausts_retries_and_marks_failed(monkeypatch):
     failed_updates = [d for d in update_calls if d.get("search_status") == "failed"]
     assert failed_updates, "Search should be marked failed after exhausting retries"
     error_message = failed_updates[-1].get("error_message", "")
-    assert "administrator-role check is separate" in error_message
-    assert "Microsoft Exchange Online Protection" in error_message
-    assert "eDiscoveryManager" in error_message
-    assert "organization container" not in error_message
+    assert "could not load the compliance organization" in error_message
+    assert "Purview reported:" in error_message
+    assert "EnableSearchOnlySession" in error_message
 
 
 def test_spam_purge_sidebar_requires_explicit_permission():

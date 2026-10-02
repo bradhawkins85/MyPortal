@@ -30,17 +30,28 @@ def _is_organization_context_error(exc: Exception) -> bool:
     return any(marker in message for marker in _ORG_CONTEXT_ERRORS)
 
 
-def _organization_context_error(organization: str) -> m365_service.M365Error:
-    """Return a useful operator-facing error without exposing directory paths."""
+_DIRECTORY_PATH = re.compile(r"\b(?:CN|OU|DC)=[^,\s]+(?:\s*,\s*(?:CN|OU|DC)=[^,\s]+)*", re.IGNORECASE)
+
+
+def _organization_context_error(organization: str, exc: Exception) -> m365_service.M365Error:
+    """Return an operator-facing error that keeps Purview's own reason.
+
+    Purview's message is kept (directory paths redacted) because it is the only
+    evidence of why the organization did not load; a generic hint alone sent
+    operators after unrelated app-only permission fixes.
+    """
+    detail = _DIRECTORY_PATH.sub("[directory path]", " ".join(str(exc).split()))[:600]
     return m365_service.M365Error(
         "Microsoft Purview could not load the compliance organization for "
-        f"{organization}. The Entra administrator-role check is separate from this "
-        "failure and does not prove Purview readiness. In M365 diagnostics, confirm "
-        "Exchange.ManageAsApp is granted specifically on Microsoft Exchange Online "
-        "Protection (not only Office 365 Exchange Online). Then register the enterprise "
-        "application service principal in Purview, add it to the eDiscoveryManager "
-        "role group, and confirm the tenant has completed Purview provisioning before "
-        "retrying.",
+        f"{organization}. Purview reported: {detail} "
+        "Spam search runs under the delegated sign-in of the Microsoft admin who "
+        "last reconnected this company, so app-only Exchange.ManageAsApp or "
+        "service principal role groups do not affect it. Microsoft now requires "
+        "eDiscovery cmdlets to run in a search-only Security & Compliance session "
+        "(Connect-IPPSSession -EnableSearchOnlySession). To separate a tenant "
+        "problem from a MyPortal one, have that admin run Connect-IPPSSession "
+        "-UserPrincipalName <admin UPN> -EnableSearchOnlySession followed by "
+        "New-ComplianceSearch in PowerShell (ExchangeOnlineManagement 3.9 or later).",
         http_status=503,
     )
 
@@ -252,7 +263,7 @@ async def _run_search(request_id: int, *, retry: bool = False) -> None:
                     )
                     await asyncio.sleep(wait)
                 elif _is_organization_context_error(exc):
-                    raise _organization_context_error(organization) from exc
+                    raise _organization_context_error(organization, exc) from exc
                 else:
                     raise
         await m365_service._scc_invoke_command(token, tenant_id, "Start-ComplianceSearch", {
