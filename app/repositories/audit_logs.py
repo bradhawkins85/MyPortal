@@ -191,25 +191,42 @@ async def list_distinct_actions(limit: int = 200) -> list[str]:
     return [str(row.get("action")) for row in rows if row.get("action")]
 
 
+_PRUNE_BATCH_SIZE = 5000
+
+
 async def prune_audit_logs(*, retention_days: int) -> int:
     """Delete audit_logs rows older than ``retention_days`` days.
 
-    Returns the number of rows removed. Set ``retention_days`` to 0 (or less)
-    to disable pruning - the function becomes a no-op in that case.
+    Deletes in batches of ``_PRUNE_BATCH_SIZE`` rows so a first run on a
+    large table does not hold a table-level lock for an extended period.
+
+    Returns the total number of rows removed. Set ``retention_days`` to 0
+    (or less) to disable pruning - the function becomes a no-op in that case.
     """
 
     if retention_days is None or retention_days <= 0:
         return 0
     cutoff = datetime.utcnow() - timedelta(days=int(retention_days))
-    result = await db.execute(
-        "DELETE FROM audit_logs WHERE created_at < %s",
-        (cutoff,),
-    )
-    if isinstance(result, int):
-        return result
-    if isinstance(result, dict):
-        return int(result.get("rowcount") or 0)
-    return 0
+    total_removed = 0
+    while True:
+        removed = await db.execute_rowcount(
+            """
+            DELETE FROM audit_logs
+            WHERE id IN (
+                SELECT id FROM (
+                    SELECT id FROM audit_logs
+                    WHERE created_at < %s
+                    ORDER BY created_at ASC
+                    LIMIT %s
+                ) AS _batch
+            )
+            """,
+            (cutoff, _PRUNE_BATCH_SIZE),
+        )
+        total_removed += removed
+        if removed < _PRUNE_BATCH_SIZE:
+            break
+    return total_removed
 
 
 async def get_audit_log(log_id: int) -> dict[str, Any] | None:

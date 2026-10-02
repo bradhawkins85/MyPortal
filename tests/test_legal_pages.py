@@ -71,6 +71,14 @@ def test_privacy_policy_falls_back_without_contact_email(client, monkeypatch):
     assert "raising a ticket in" in response.text
 
 
+def test_privacy_policy_matches_profile_self_service_options(client):
+    response = client.get("/legal/privacy")
+
+    assert response.status_code == 200
+    assert "view your details and update your password, two-factor and passkey settings, mobile number and notification preferences from your profile" in response.text
+    assert "to change your name or email address, contact us or your organisation's administrator" in response.text
+
+
 @pytest.mark.parametrize("path", ["/login", "/register", "/forgot-password"])
 def test_sign_in_pages_link_to_policies(client, path):
     response = client.get(path)
@@ -126,6 +134,39 @@ def test_privacy_policy_mentions_ticket_email_tracking(client):
     # Section 6: tracking image is not a cookie; blocking remote images prevents open tracking
     assert "it does not rely on cookies" in response.text
     assert "block remote images" in response.text
+
+
+def test_privacy_policy_discloses_automatic_ticket_routing_updates(client):
+    response = client.get("/legal/privacy")
+
+    assert response.status_code == 200
+    assert "automatically rename a ticket with a more descriptive subject" in response.text
+    assert "set its category and priority" in response.text
+    assert "easier to identify and route" in response.text
+    assert "tell us and we will review it" in response.text
+
+
+def test_privacy_policy_lists_ticket_reply_draft_cookie(client):
+    """The cookie list must include the encrypted ticket reply draft cookie."""
+    response = client.get("/legal/privacy")
+
+    assert response.status_code == 200
+    # Section 6: the reply draft cookie is listed
+    assert "Reply draft cookie" in response.text
+    assert "encrypted copy of a ticket reply you haven't sent yet" in response.text
+    assert "expires after 7 days" in response.text
+    # The draft is kept in a cookie, not local storage, so it must not be
+    # described as part of the browser's local storage.
+    assert "unsent reply drafts" not in response.text
+
+
+def test_terms_disclose_automatic_ticket_subject_updates(client):
+    response = client.get("/legal/terms")
+
+    assert response.status_code == 200
+    assert "AI may automatically update a ticket's subject, category and priority" in response.text
+    assert "for identification and routing" in response.text
+    assert "Our staff can review and correct these changes at any time" in response.text
 
 
 def test_terms_disclaim_warranty_and_developer_liability(client):

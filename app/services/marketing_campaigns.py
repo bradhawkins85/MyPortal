@@ -475,6 +475,14 @@ def _sales_footer(url: str) -> str:
     )
 
 
+def _updates_footer() -> str:
+    return (
+        '<p style="margin-top:24px;font-size:12px;color:#6b7280;">'
+        "This is a critical service notice sent to all users about changes to your products or services."
+        "</p>"
+    )
+
+
 def html_to_text(value: str) -> str:
     text = re.sub(r"(?i)<br\s*/?>|</p>|</div>|</li>|</h[1-6]>", "\n", value)
     text = html.unescape(_TAG_PATTERN.sub("", text))
@@ -498,6 +506,8 @@ async def render_email(
         body_html = message_templates_service.render_content(content, context, escape_html=True)
     if campaign.get("category") == CATEGORY_SALES:
         body_html += _sales_footer(context["unsubscribe_url"])
+    elif campaign.get("category") == CATEGORY_UPDATES:
+        body_html += _updates_footer()
     return {"subject": subject, "html": body_html, "text": html_to_text(body_html)}
 
 

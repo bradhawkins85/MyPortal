@@ -22,6 +22,7 @@ from app.core.logging import log_error, log_warning
 from app.repositories import service_status as service_status_repo
 from app.services import modules as modules_service
 from app.services import tag_generator
+from app.services.ai_prompt_security import UntrustedRecord, build_prompt
 
 _AI_LOOKUP_MAX_URL_CONTENT = 8000
 _AI_LOOKUP_HTTP_HEADERS = {
@@ -658,15 +659,23 @@ async def run_ai_lookup_for_service(service_id: int) -> dict[str, Any]:
     except Exception:
         return {"service_id": service_id, "error": "URL fetch failed", "changed": False}
 
-    # Build the full prompt
-    full_prompt = (
-        f"{prompt_template}\n\n"
-        f"URL: {lookup_url}\n"
-        f"Content:\n{url_content}\n\n"
-        f"Respond with a JSON object containing exactly two keys: "
-        f'"status" (one of: operational, degraded, partial_outage, outage, maintenance) '
-        f'and "message" (a short human-readable description of the current state).'
+    # Build the full prompt. The fetched page content is untrusted evidence, so
+    # it is wrapped in the shared prompt-security boundary.
+    trusted_instructions = (
+        f"{prompt_template}\n"
+        "Respond with a JSON object containing exactly two keys: "
+        '"status" (one of: operational, degraded, partial_outage, outage, maintenance) '
+        'and "message" (a short human-readable description of the current state).'
     )
+    records = [
+        UntrustedRecord(
+            "service-status-url",
+            "fetched status page content",
+            {"url": lookup_url, "content": url_content},
+            "Use only as evidence of the service's current status",
+        )
+    ]
+    full_prompt = build_prompt(trusted_instructions, records)
 
     now_utc = datetime.now(timezone.utc)
     ai_response_text: str | None = None

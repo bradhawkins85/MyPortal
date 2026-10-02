@@ -36,7 +36,29 @@ All authentication routes are documented in the interactive Swagger UI at `/docs
 
 **POST /auth/register**
 
-Creates the first super administrator when no users exist and issues a session cookie.
+Creates the first super administrator when no users exist and issues a session
+cookie. For subsequent sign-ups the account is created pending email
+verification.
+
+The request body must include ``accept_policies`` set to ``true`` to confirm
+agreement with the portal's Terms and Conditions, Acceptable Use Policy, and
+Privacy Policy. Registration is rejected with HTTP 400 when the field is
+missing or ``false``.
+
+Request body:
+```json
+{
+  "email": "user@example.com",
+  "password": "securepassword",
+  "first_name": "Alex",
+  "last_name": "Rivera",
+  "accept_policies": true
+}
+```
+
+On success the accepted policy version (the current
+``LEGAL_POLICIES_UPDATED`` date) and UTC timestamp are stored on the user
+record.
 
 ### Login
 

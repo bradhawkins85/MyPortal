@@ -480,7 +480,7 @@ async def test_call_transcription_skipped_for_opted_out_caller(monkeypatch):
 def test_migration_is_idempotent_and_sqlite_compatible():
     from app.core.database import Database
 
-    sql = (Path(__file__).resolve().parent.parent / "migrations" / "457_user_ai_opt_out.sql").read_text()
+    sql = (Path(__file__).resolve().parent.parent / "migrations" / "458_user_ai_opt_out.sql").read_text()
     statements = [line for line in sql.splitlines() if line.startswith("ALTER TABLE")]
     assert statements and all("ADD COLUMN IF NOT EXISTS" in line for line in statements)
     adapted = Database._adapt_sql_for_sqlite(Database.__new__(Database), sql)

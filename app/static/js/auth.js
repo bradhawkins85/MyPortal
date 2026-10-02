@@ -97,6 +97,8 @@ class AuthForm {
     this.submitButton = form.querySelector('[data-auth-submit]');
     this.errorContainer = form.querySelector('[data-auth-error]');
     this.successContainer = form.querySelector('[data-auth-success]');
+    this.policyCheckbox = form.querySelector('input[name="accept_policies"]');
+    this.policyError = form.querySelector('[data-policy-error]');
     this.accountSetupResetPrompt = form.querySelector('[data-account-setup-reset]');
     this.accountSetupResetMessage = form.querySelector('[data-account-setup-reset-message]');
     this.accountSetupResetButton = form.querySelector('[data-account-setup-reset-submit]');
@@ -114,6 +116,10 @@ class AuthForm {
     if (this.totpToggle && this.totpField) {
       this.syncTotpVisibility();
       this.totpToggle.addEventListener('click', (event) => this.toggleTotp(event));
+    }
+
+    if (this.policyCheckbox) {
+      this.policyCheckbox.addEventListener('change', () => this.clearPolicyError());
     }
   }
 
@@ -137,6 +143,7 @@ class AuthForm {
     this.showError('');
     this.showSuccess('');
     this.hideAccountSetupReset();
+    this.clearPolicyError();
 
     const payload = this.buildPayload();
     if (!payload) {
@@ -208,6 +215,13 @@ class AuthForm {
     const formData = new FormData(this.form);
     const payload = {};
 
+    // Validate the mandatory policy-agreement checkbox before building the
+    // rest of the payload.
+    if (this.policyCheckbox && !this.policyCheckbox.checked) {
+      this.showPolicyError('You must agree to the terms before creating your account.');
+      return null;
+    }
+
     for (const [key, value] of formData.entries()) {
       if (typeof value !== 'string') {
         continue;
@@ -241,6 +255,11 @@ class AuthForm {
         if (!Number.isNaN(numeric)) {
           payload[key] = numeric;
         }
+        continue;
+      }
+
+      if (key === 'accept_policies') {
+        payload[key] = true;
         continue;
       }
 
@@ -306,6 +325,23 @@ class AuthForm {
 
   showSuccess(message) {
     this.showMessage(this.successContainer, message);
+  }
+
+  showPolicyError(message) {
+    if (!this.policyError) {
+      return;
+    }
+    if (!message) {
+      this.policyError.setAttribute('hidden', '');
+      this.policyError.textContent = '';
+      return;
+    }
+    this.policyError.removeAttribute('hidden');
+    this.policyError.textContent = message;
+  }
+
+  clearPolicyError() {
+    this.showPolicyError('');
   }
 
   showAccountSetupReset(message, email) {

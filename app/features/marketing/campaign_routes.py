@@ -379,6 +379,30 @@ async def admin_marketing_remove_opt_out(request: Request):
     return flash_redirect("/admin/marketing/campaigns", "Contact will receive sales emails again.", "success")
 
 
+@router.post("/admin/marketing/opt-outs/add", response_class=HTMLResponse)
+async def admin_marketing_add_opt_out(request: Request):
+    current_user, company_ids, redirect = await _require_marketing_scope(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    email = campaign_service.normalise_email(form.get("email"))
+    if not email:
+        return flash_redirect("/admin/marketing/campaigns", "Enter a valid email address to opt out.", "error")
+    if company_ids is not None:
+        contacts = await campaign_repo.find_staff_by_emails([email])
+        if not any(contact.get("company_id") in company_ids for contact in contacts):
+            return flash_redirect("/admin/marketing/campaigns", "No contact with that email in your scope.", "error")
+    await campaign_repo.add_opt_out(email, campaign_service.CATEGORY_SALES, None)
+    await audit_service.record(
+        action="marketing.opt_out.add",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="marketing_opt_out",
+        metadata={"email": email},
+    )
+    return flash_redirect("/admin/marketing/campaigns", f"{email} will no longer receive sales emails.", "success")
+
+
 async def _render_unsubscribe(request: Request, *, recipient: dict[str, Any] | None, done: bool):
     context = await _main()._build_public_context(
         request,

@@ -515,3 +515,8 @@ def test_run_ai_lookup_sends_browser_headers(monkeypatch):
     assert "User-Agent" in headers
     assert "Mozilla" in headers["User-Agent"]
     assert "Accept" in headers
+
+
+def test_parse_ai_status_response_malformed_json_is_discarded():
+    # Non-JSON, non-keyword model output must be discarded (fail closed).
+    assert service_status_svc._parse_ai_status_response("not valid json") == (None, None)

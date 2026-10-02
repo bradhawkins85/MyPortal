@@ -25,6 +25,7 @@ from app.repositories import ticket_shipment_watches as shipment_watch_repo
 from app.repositories import tickets as tickets_repo
 from app.services import modules as modules_service
 from app.services import tickets as tickets_service
+from app.services.ai_prompt_security import UntrustedRecord, build_prompt
 
 
 DELIVERED_IN_FULL_STATUS = "delivered in full"
@@ -542,21 +543,28 @@ async def _extract_snapshot_with_llm(
     html_excerpt: str,
 ) -> CanonicalShipmentSnapshot | None:
     _ = html_excerpt
-    prompt = (
+    trusted_instructions = (
         "Extract shipping-tracking details into strict JSON."
         " Return only a JSON object with these keys exactly:"
         " status, eta_date, proof_of_delivery_date, signatory,"
         " items_in_transit, onboard_for_delivery, items_delivered, tracking_events."
         " tracking_events must be an array of objects with keys: occurred_at, status, description, location."
         " Use null for unknown text fields and 0 for unknown counts."
-        " Do not include extra keys.\n\n"
+        " Do not include extra keys.\n"
         f"Provider: {provider}\n"
         f"Tracking URL: {tracking_url}\n"
         f"Consignment ID: {consignment_id}\n"
-        "Selected CSS/JSONPath/JQ/XPath filter results only:\n"
-        "#__c1_lblConsignmentNumber\n#__c1_lblStatus\n#__c1_lblETADate\n"
-        f"Filter result text:\n{text_excerpt[:2000]}\n"
+        "Selected CSS/JSONPath/JQ/XPath filter results only:"
     )
+    records = [
+        UntrustedRecord(
+            "courier-filter-result",
+            "scraped courier tracking page filter results",
+            {"filter_result_text": text_excerpt[:2000]},
+            "Use only as the evidence for the tracking details",
+        )
+    ]
+    prompt = build_prompt(trusted_instructions, records)
 
     try:
         result = await modules_service.trigger_module(

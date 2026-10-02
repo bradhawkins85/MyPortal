@@ -25,6 +25,8 @@ _ALLOWED_UPDATE_COLUMNS = {
     "passkey_user_handle",
     "ai_opt_out",
     "ai_opt_out_at",
+    "policies_accepted_version",
+    "policies_accepted_at",
 }
 
 

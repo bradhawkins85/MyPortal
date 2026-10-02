@@ -1,0 +1,7 @@
+{
+  "guid": "01a0fd14-f131-76d3-8b5a-aeec1aae8538",
+  "occurred_at": "2026-10-02T14:46Z",
+  "change_type": "Security",
+  "summary": "Route LLM prompt-building for call recording summaries, ticket shipment tracking, service status lookups, tag generation, and product descriptions through the shared ai_prompt_security boundary (UntrustedRecord envelope + validated model output), fixing prompt-injection exposure (issue #4555).",
+  "content_hash": "6043dfdf291749dc8a03effab4ca83a6abc4753ee78b39f333cb5c318f89c04e"
+}

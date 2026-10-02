@@ -19,6 +19,10 @@ class RegistrationRequest(BaseModel):
     last_name: Optional[str] = None
     mobile_phone: Optional[str] = None
     company_id: Optional[int] = None
+    #: The user must tick the policy-agreement checkbox before an account can
+    #: be created.  Defaults to ``False`` so a missing field is treated as
+    #: "not accepted" and the route returns a 400.
+    accept_policies: bool = False
 
 
 class LoginRequest(BaseModel):

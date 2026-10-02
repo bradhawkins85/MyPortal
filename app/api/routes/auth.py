@@ -25,6 +25,7 @@ from app.api.dependencies.auth import (
 )
 from app.api.dependencies.database import require_database
 from app.core.config import get_settings
+from app.core.legal import LEGAL_POLICIES_UPDATED
 from app.core.logging import log_error, log_info
 from app.repositories import auth as auth_repo
 from app.repositories import companies as company_repo
@@ -578,6 +579,19 @@ async def _register_first_user(payload: RegistrationRequest, request: Request) -
         company_id=first_user_company_id,
         is_super_admin=True,
     )
+    await user_repo.update_user(
+        created["id"],
+        policies_accepted_version=LEGAL_POLICIES_UPDATED,
+        policies_accepted_at=datetime.utcnow(),
+    )
+    await audit_service.record(
+        action="auth.register.policy_accepted",
+        request=request,
+        user_id=created["id"],
+        entity_type="user",
+        entity_id=created["id"],
+        metadata={"policies_version": LEGAL_POLICIES_UPDATED},
+    )
     await staff_access_service.apply_pending_access_for_user(created)
 
     active_company_id = await _determine_active_company_id(created)
@@ -605,6 +619,14 @@ async def _register_first_user(payload: RegistrationRequest, request: Request) -
     response_model=LoginResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Register a new account",
+    description=(
+        "Creates the first super administrator when no users exist and issues a "
+        "session cookie. For subsequent sign-ups the account is created pending "
+        "email verification. The caller must set ``accept_policies`` to ``true`` "
+        "to confirm agreement with the portal's Terms and Conditions, Acceptable "
+        "Use Policy, and Privacy Policy; registration is rejected with HTTP 400 "
+        "when it is missing or ``false``."
+    ),
     responses={
         status.HTTP_202_ACCEPTED: {
             "model": RegistrationPendingResponse,
@@ -612,6 +634,9 @@ async def _register_first_user(payload: RegistrationRequest, request: Request) -
                 "Registration accepted; next steps were emailed. The same response "
                 "is returned whether or not the email already has an account."
             ),
+        },
+        status.HTTP_400_BAD_REQUEST: {
+            "description": "Policy agreement not accepted.",
         },
     },
 )
@@ -621,6 +646,15 @@ async def register(
     background_tasks: BackgroundTasks,
     _: None = Depends(require_database),
 ) -> Response:
+    # The policy-agreement checkbox is mandatory before any account can be
+    # created, including the first super-administrator bootstrap.  A 400
+    # response with a clear message is returned when it is false or missing.
+    if not payload.accept_policies:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You must agree to the Terms and Conditions and Acceptable Use Policy before creating an account.",
+        )
+
     # Only one request may create the initial super administrator. Serialise
     # the bootstrap on a database lock and re-check inside it; a request that
     # loses the race continues as an ordinary self-registration.
@@ -648,6 +682,19 @@ async def register(
         mobile_phone=payload.mobile_phone or (matched_staff or {}).get("mobile_phone"),
         company_id=matched_company_id,
         is_super_admin=False,
+    )
+    await user_repo.update_user(
+        created["id"],
+        policies_accepted_version=LEGAL_POLICIES_UPDATED,
+        policies_accepted_at=datetime.utcnow(),
+    )
+    await audit_service.record(
+        action="auth.register.policy_accepted",
+        request=request,
+        user_id=created["id"],
+        entity_type="user",
+        entity_id=created["id"],
+        metadata={"policies_version": LEGAL_POLICIES_UPDATED},
     )
     await user_company_repo.assign_user_to_company(
         user_id=created["id"],

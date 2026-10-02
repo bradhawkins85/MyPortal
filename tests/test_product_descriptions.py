@@ -126,3 +126,9 @@ async def test_bulk_refresh_shop_product_descriptions_refreshes_active_products(
         == "shop.product.description_bulk_refresh"
     )
     assert audit_record.await_args.kwargs["metadata"]["refreshed_count"] == 2
+
+
+def test_parse_ai_payload_fails_closed_on_malformed_or_nonobject_output():
+    assert product_descriptions._parse_ai_payload("not valid json") == (None, [])
+    assert product_descriptions._parse_ai_payload("[1, 2, 3]") == (None, [])
+    assert product_descriptions._parse_ai_payload('{"unrelated":"value"}') == (None, [])

@@ -61,6 +61,11 @@
         <h2 class="card__title">Unsubscribed from sales emails</h2>
         <p class="card__subtitle">These contacts still receive Updates campaigns.</p>
       </div>
+      <form method="post" action="/admin/marketing/opt-outs/add" class="inline-form">
+        {% include "partials/csrf.html" %}
+        <input type="email" name="email" required placeholder="contact@example.com" class="form-input form-input--small" aria-label="Email to opt out" />
+        <button type="submit" class="button button--ghost button--small">Opt out</button>
+      </form>
     </header>
     <div class="table-wrapper">
       <table class="table">

@@ -201,9 +201,15 @@ This is enforced by a regression test
 
 ## Retention
 
-`audit_logs` rows older than `AUDIT_RETENTION_DAYS` (default 365) can be
-pruned via `app.repositories.audit_logs.prune_audit_logs(...)`. Disk logs
-rotate and expire automatically through the Loguru `LOG_RETENTION` setting.
+`audit_logs` rows older than `AUDIT_RETENTION_DAYS` (default 365) are pruned
+automatically by a daily scheduler job (runs at 02:00 store-local time) that
+calls `app.repositories.audit_logs.prune_audit_logs(...)`. The job uses a
+distributed lock so only one worker instance executes the prune, and deletes
+in batches of 5 000 rows to avoid long table locks on large databases.
+
+Set `AUDIT_RETENTION_DAYS=0` to disable pruning entirely.
+
+Disk logs rotate and expire automatically through the Loguru `LOG_RETENTION` setting.
 
 ---
 

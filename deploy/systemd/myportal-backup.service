@@ -1,0 +1,17 @@
+[Unit]
+Description=MyPortal database and uploads backup
+After=network-online.target mariadb.service mysql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Runs as root to access the protected environment file and write backups.
+User=root
+NoNewPrivileges=true
+PrivateTmp=true
+# Resolve the current release at execution time so the script is always
+# the latest version without requiring a unit-file update per release.
+ExecStart=/bin/bash -c 'release="$(readlink -f /opt/myportal/current 2>/dev/null || true)"; [[ -n "$release" && -x "$release/scripts/backup.sh" ]] || { echo "Error: cannot resolve the current MyPortal release." >&2; exit 1; }; exec "$release/scripts/backup.sh"'
+
+[Install]
+WantedBy=multi-user.target

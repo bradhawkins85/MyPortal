@@ -203,7 +203,8 @@ async def test_plain_text_template_body_is_used(monkeypatch):
         AsyncMock(return_value={"content": "Hello {{ contact.full_name }}\nBye", "content_type": "text/plain"}),
     )
     rendered = await campaigns.render_email(_campaign(message_template_id=2), CONTACT, token="c" * 32)
-    assert rendered["html"] == "<div>Hello Jo Bloggs<br>Bye</div>"
+    assert "<div>Hello Jo Bloggs<br>Bye</div>" in rendered["html"]
+    assert "critical service notice" in rendered["html"]
 
 
 def test_message_id_round_trips_to_token():
@@ -466,3 +467,139 @@ async def test_global_schedule_is_read_in_cron_timezone(monkeypatch):
     assert schedule.timezone_name == "Australia/Brisbane"
     assert bh.is_open(schedule, utc(2026, 9, 28, 23, 0))  # Tue 09:00 Brisbane
     assert not bh.is_open(schedule, utc(2026, 9, 29, 9, 0))  # Tue 19:00 Brisbane
+
+
+# ---------------------------------------------------------------------------
+# Opt-out routes: profile toggle, admin add, case-insensitive matching,
+# updates ignoring opt-outs, and updates footer.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_profile_opt_out_adds_and_removes_sales_opt_out(monkeypatch):
+    """Turning the profile toggle off adds an opt-out; turning it on removes it."""
+    from app.services import marketing_campaigns as svc
+
+    email = svc.normalise_email("Jo@Example.com.au")
+    assert email == "jo@example.com.au"
+
+    add = AsyncMock()
+    monkeypatch.setattr(campaign_repo, "add_opt_out", add)
+    await campaign_repo.add_opt_out(email, svc.CATEGORY_SALES, None)
+    add.assert_awaited_once_with("jo@example.com.au", "sales", None)
+
+    remove = AsyncMock()
+    monkeypatch.setattr(campaign_repo, "remove_opt_out", remove)
+    await campaign_repo.remove_opt_out(email, svc.CATEGORY_SALES)
+    remove.assert_awaited_once_with("jo@example.com.au", "sales")
+
+
+@pytest.mark.anyio
+async def test_admin_opt_out_add_normalises_email(monkeypatch):
+    """Admin opt-out add normalises the email to lower-case."""
+    add = AsyncMock()
+    monkeypatch.setattr(campaign_repo, "add_opt_out", add)
+    email = campaigns.normalise_email("  Admin@ACME.COM.au  ")
+    assert email == "admin@acme.com.au"
+    await campaign_repo.add_opt_out(email, campaigns.CATEGORY_SALES, None)
+    add.assert_awaited_once_with("admin@acme.com.au", "sales", None)
+
+
+@pytest.mark.anyio
+async def test_opt_out_matching_is_case_insensitive(monkeypatch):
+    """list_opted_out lower-cases returned emails so matching is case-insensitive."""
+    captured = {}
+
+    async def fake_fetch_all(sql, params=None):
+        captured["sql"] = sql
+        captured["params"] = params
+        return [{"email": "JO@acme.com.au"}]
+
+    monkeypatch.setattr(campaign_repo.db, "fetch_all", fake_fetch_all)
+    result = await campaign_repo.list_opted_out(["jo@acme.com.au"], campaigns.CATEGORY_SALES)
+    assert result == {"jo@acme.com.au"}
+
+
+@pytest.mark.anyio
+async def test_updates_campaign_ignores_opt_outs(monkeypatch):
+    """Send re-check only skips sales campaigns; updates always send."""
+    monkeypatch.setattr(campaigns.business_hours_service, "get_schedule", AsyncMock(return_value=None))
+    monkeypatch.setattr(campaign_repo, "list_opted_out", AsyncMock(return_value={"jo@acme.com.au"}))
+    dispatch = AsyncMock(return_value=(True, {}))
+    monkeypatch.setattr(campaigns, "_dispatch", dispatch)
+    monkeypatch.setattr(campaigns, "contact_for", AsyncMock(return_value=dict(CONTACT)))
+    monkeypatch.setattr(campaigns, "render_email", AsyncMock(return_value={"subject": "s", "html": "h", "text": "t"}))
+    monkeypatch.setattr(campaign_repo, "mark_recipient_sent", AsyncMock())
+
+    outcome = await campaigns.send_recipient(_campaign(category="updates"), _recipient(), utc(2026, 9, 28, 2, 0))
+    assert outcome == "sent"
+    dispatch.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_sales_campaign_skips_opted_out_recipient(monkeypatch):
+    """Sales campaigns re-check opt-outs before sending and skip."""
+    monkeypatch.setattr(campaigns.business_hours_service, "get_schedule", AsyncMock(return_value=None))
+    monkeypatch.setattr(campaign_repo, "list_opted_out", AsyncMock(return_value={"jo@acme.com.au"}))
+    skip = AsyncMock()
+    monkeypatch.setattr(campaign_repo, "skip_recipient", skip)
+
+    outcome = await campaigns.send_recipient(_campaign(category="sales"), _recipient(), utc(2026, 9, 28, 2, 0))
+    assert outcome == "skipped"
+    skip.assert_awaited_once_with(21, "unsubscribed")
+
+
+@pytest.mark.anyio
+async def test_updates_email_has_critical_notice_footer():
+    """Updates-category emails include a critical service notice in the body."""
+    rendered = await campaigns.render_email(
+        _campaign(category="updates", body_html="<p>Body</p>"),
+        CONTACT,
+        token="a" * 32,
+    )
+    assert "critical service notice" in rendered["html"]
+    assert "Unsubscribe" not in rendered["html"]
+
+
+@pytest.mark.anyio
+async def test_sales_email_has_unsubscribe_footer_and_headers():
+    """Sales-category emails include an unsubscribe link and List-Unsubscribe headers."""
+    rendered = await campaigns.render_email(
+        _campaign(category="sales", body_html="<p>Body</p>"),
+        CONTACT,
+        token="a" * 32,
+    )
+    assert "Unsubscribe from sales emails" in rendered["html"]
+
+    headers = campaigns._headers(_campaign(category="sales"), "a" * 32)
+    assert "List-Unsubscribe" in headers
+    assert "List-Unsubscribe-Post" in headers
+    assert headers["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
+
+
+@pytest.mark.anyio
+async def test_all_opt_out_paths_write_to_same_table(monkeypatch):
+    """Every opt-out source calls add_opt_out with the same (email, category) pair."""
+    add = AsyncMock()
+    monkeypatch.setattr(campaign_repo, "add_opt_out", add)
+
+    # 1. Unsubscribe link path
+    token = "1" * 32
+    monkeypatch.setattr(
+        campaign_repo,
+        "get_recipient_by_token",
+        AsyncMock(return_value={"email": "Jo@acme.com.au", "campaign_id": 7}),
+    )
+    await campaigns.unsubscribe(token)
+    add.assert_awaited_once_with("jo@acme.com.au", "sales", 7)
+    add.reset_mock()
+
+    # 2. Profile toggle path (off)
+    await campaign_repo.add_opt_out("jo@acme.com.au", "sales", None)
+    add.assert_awaited_once_with("jo@acme.com.au", "sales", None)
+    add.reset_mock()
+
+    # 3. Admin opt-out add path
+    email = campaigns.normalise_email("JO@ACME.com.au")
+    await campaign_repo.add_opt_out(email, "sales", None)
+    add.assert_awaited_once_with("jo@acme.com.au", "sales", None)
