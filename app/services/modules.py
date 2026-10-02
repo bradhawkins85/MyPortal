@@ -3347,6 +3347,13 @@ async def _invoke_ollama(
         payload_format = payload.get("format")
         if payload_format is not None:
             body["format"] = payload_format
+        options: dict[str, Any] = {}
+        if payload.get("temperature") is not None:
+            options["temperature"] = payload.get("temperature")
+        if payload.get("max_tokens") is not None:
+            options["num_predict"] = payload.get("max_tokens")
+        if options:
+            body["options"] = options
     else:
         endpoint = urljoin(f"{base_url}/", "v1/chat/completions")
         messages = payload.get("messages")
