@@ -1,0 +1,7 @@
+{
+  "guid": "a79eb7c5-d212-4e54-b9e7-2cbd25cba628",
+  "occurred_at": "2026-10-02T00:00Z",
+  "change_type": "Fixed",
+  "summary": "M365 connect and diagnostics repair now grant the Mail.Send application permission instead of Calendars.Read, clearing the missing Mail.Send diagnostic",
+  "content_hash": "a803fefbe33085c832442d8e0b472438cccb2bcb20b85db9e1ca1d900d9b898a"
+}

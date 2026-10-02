@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.services import m365 as m365_service
+from app.services.m365_access_baseline import GRAPH_APPLICATION_PERMISSION_IDS
 from app.services.m365 import (
     _GRAPH_APP_ID,
     _PROVISION_APP_ROLES,
@@ -1041,7 +1042,7 @@ async def test_try_grant_missing_permissions_grants_eop_manage_as_app_by_role_va
     assert eop_posts == [{"principalId": _SP_OBJECT_ID, "resourceId": "eop-sp-id", "appRoleId": eop_role}]
 
 
-_MAIL_SEND_ROLE = "798ee544-9d2d-430c-a058-570e29e34338"
+_MAIL_SEND_ROLE = "b633e1c5-b582-4048-a93e-9f11b44c7e96"
 _SECURITY_ALERT_READ_ALL_ROLE = "472e4a4d-bb4a-4026-98d1-0b0d74cb74a5"
 
 
@@ -1050,6 +1051,12 @@ def test_baseline_graph_roles_are_granted_even_when_role_lookup_omits_them():
     for role_id in (_MAIL_SEND_ROLE, _SECURITY_ALERT_READ_ALL_ROLE):
         assert role_id in _PROVISION_APP_ROLES
         assert m365_service._is_graph_role_grantable(role_id, set()) is True
+
+
+def test_mail_send_uses_the_graph_mail_send_role_id():
+    """798ee544-... is Calendars.Read; granting it left Mail.Send missing."""
+    assert GRAPH_APPLICATION_PERMISSION_IDS["Mail.Send"] == _MAIL_SEND_ROLE
+    assert "798ee544-9d2d-430c-a058-570e29e34338" not in GRAPH_APPLICATION_PERMISSION_IDS.values()
 
 
 @pytest.mark.anyio("asyncio")

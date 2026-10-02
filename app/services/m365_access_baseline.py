@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CONTRACT_VERSION = "2026-10-02.2"
+CONTRACT_VERSION = "2026-10-02.3"
 
 
 @dataclass(frozen=True)
@@ -73,7 +73,10 @@ GRAPH_APPLICATION_PERMISSION_IDS = {
     # authorize the report-settings remediation PATCH.
     "ReportSettings.ReadWrite.All": "2a60023f-3219-47ad-baa4-40e17cd02a1d",
     "Mail.ReadWrite": "e2a3a72e-5f79-4c64-b1b1-878b674786c9",
-    "Mail.Send": "798ee544-9d2d-430c-a058-570e29e34338",
+    # 798ee544-9d2d-430c-a058-570e29e34338 is Calendars.Read, not Mail.Send.
+    # Using it granted the wrong role, so diagnostics (which resolve the role
+    # by name in the tenant) kept reporting Mail.Send as missing.
+    "Mail.Send": "b633e1c5-b582-4048-a93e-9f11b44c7e96",
     "GroupMember.ReadWrite.All": "dbaae8cf-10b5-4b86-a4a1-f871c94c6695",
     "IdentityRiskyUser.Read.All": "dc5007c0-2d7d-4c42-879c-2dab87571379",
     "Application.Read.All": "9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30",
