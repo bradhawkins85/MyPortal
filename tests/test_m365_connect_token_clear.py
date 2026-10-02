@@ -71,7 +71,9 @@ async def async_client():
         yield client
 
 
-def _patch_connect_common(monkeypatch, update_tokens_calls, *, grant_result=True, scc_probe_ok=True):
+def _patch_connect_common(
+    monkeypatch, update_tokens_calls, *, grant_result=True, scc_probe_ok=True, ediscovery_probe_ok=True,
+):
     """Patch everything the standard connect callback touches."""
     fake_creds = {
         "tenant_id": "tenant-123",
@@ -106,6 +108,24 @@ def _patch_connect_common(monkeypatch, update_tokens_calls, *, grant_result=True
         "app.main.m365_service.ensure_scc_delegated_permission",
         AsyncMock(return_value=False),
     )
+    monkeypatch.setattr(
+        "app.main.m365_service.ensure_ediscovery_delegated_permission",
+        AsyncMock(return_value=False),
+    )
+    if ediscovery_probe_ok:
+        monkeypatch.setattr(
+            "app.main.m365_service._acquire_ediscovery_access_token",
+            AsyncMock(return_value="ediscovery-token"),
+        )
+    else:
+        cause = m365_service.M365Error("AADSTS65001: not consented")
+        cause.failure_kind = "reauthentication_required"
+        error = m365_service.M365Error("reconnect required", http_status=503)
+        error.__cause__ = cause
+        monkeypatch.setattr(
+            "app.main.m365_service._acquire_ediscovery_access_token",
+            AsyncMock(side_effect=error),
+        )
     monkeypatch.setattr(
         "app.main.m365_service.validate_microsoft_id_token",
         AsyncMock(return_value={"tid": "tenant-123"}),
@@ -492,3 +512,117 @@ def test_scc_connect_scope_is_standalone():
     )
     assert "offline_access" in m365_service.SCC_CONNECT_SCOPE
     assert "graph.microsoft.com" not in m365_service.SCC_CONNECT_SCOPE
+
+
+# ---------------------------------------------------------------------------
+# eDiscovery admin consent (tenant-wide eDiscovery.ReadWrite.All)
+# ---------------------------------------------------------------------------
+
+
+def _patch_callback_session(monkeypatch, state_data, new_states):
+    async def fake_new_state(request, **context):
+        new_states.append(context)
+        return "chained-state-token"
+
+    async def fake_consume_state(request, state):
+        return state_data
+
+    async def fake_authenticated_user(request):
+        return {"id": 1, "is_super_admin": True}, None
+
+    monkeypatch.setattr("app.main._new_m365_oauth_state", fake_new_state)
+    monkeypatch.setattr("app.main._consume_m365_oauth_state", fake_consume_state)
+    monkeypatch.setattr("app.main._require_authenticated_user", fake_authenticated_user)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_connect_callback_sends_admin_to_ediscovery_admin_consent(async_client, monkeypatch):
+    """Without a tenant-wide eDiscovery grant the connect flow chains
+    Microsoft's admin-consent page for the app's Graph permissions."""
+    state_data = {
+        "company_id": 1, "flow": "connect", "tenant_id": "tenant-123",
+        "client_id": "app-client-id", "redirect_uri": "https://portal.example/m365/callback",
+    }
+    _patch_connect_common(monkeypatch, [], ediscovery_probe_ok=False)
+    new_states: list[dict] = []
+    _patch_callback_session(monkeypatch, state_data, new_states)
+    monkeypatch.setattr(
+        "app.main.httpx.AsyncClient",
+        _make_token_client({"access_token": "delegated", "refresh_token": "rt", "expires_in": 3600}),
+    )
+
+    response = await async_client.get("/m365/callback?code=c&state=s", follow_redirects=False)
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert location.startswith("https://login.microsoftonline.com/tenant-123/v2.0/adminconsent?"), location
+    assert "client_id=app-client-id" in location
+    assert "https%3A%2F%2Fgraph.microsoft.com%2F.default" in location
+    assert new_states[-1]["flow"] == "ediscovery_admin_consent"
+    m365_service.ensure_ediscovery_delegated_permission.assert_awaited_once_with(1, "delegated")
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ediscovery_admin_consent_callback_continues_to_scc_consent(async_client, monkeypatch):
+    state_data = {
+        "company_id": 1, "flow": "ediscovery_admin_consent", "tenant_id": "tenant-123",
+        "client_id": "app-client-id", "redirect_uri": "https://portal.example/m365/callback",
+        "destination": "/m365",
+    }
+    _patch_connect_common(monkeypatch, [], scc_probe_ok=False)
+    new_states: list[dict] = []
+    _patch_callback_session(monkeypatch, state_data, new_states)
+
+    response = await async_client.get(
+        "/m365/callback?admin_consent=True&tenant=tenant-123&state=s", follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "ps.compliance.protection.outlook.com%2F.default" in response.headers["location"]
+    assert new_states[-1]["flow"] == "scc_consent"
+    assert "eDiscovery access was granted" in new_states[-1]["chained_message"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ediscovery_admin_consent_rejects_other_tenant(async_client, monkeypatch):
+    state_data = {
+        "company_id": 1, "flow": "ediscovery_admin_consent", "tenant_id": "tenant-123",
+        "client_id": "app-client-id", "redirect_uri": "https://portal.example/m365/callback",
+    }
+    _patch_connect_common(monkeypatch, [])
+    _patch_callback_session(monkeypatch, state_data, [])
+
+    response = await async_client.get(
+        "/m365/callback?admin_consent=True&tenant=other-tenant&state=s", follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/m365"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ediscovery_admin_consent_denial_keeps_aad_reason(async_client, monkeypatch):
+    state_data = {
+        "company_id": 1, "flow": "ediscovery_admin_consent", "tenant_id": "tenant-123",
+        "client_id": "app-client-id", "redirect_uri": "https://portal.example/m365/callback",
+    }
+    _patch_connect_common(monkeypatch, [])
+    _patch_callback_session(monkeypatch, state_data, [])
+    flashed: list[str] = []
+    real_flash = __import__("app.main", fromlist=["flash_redirect"]).flash_redirect
+
+    def capture(url, message, variant="info"):
+        flashed.append(message)
+        return real_flash(url, message, variant)
+
+    monkeypatch.setattr("app.main.flash_redirect", capture)
+
+    response = await async_client.get(
+        "/m365/callback?error=access_denied&error_description=AADSTS65004%3A+User+declined&state=s",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert flashed and "eDiscovery admin consent was not granted" in flashed[0]
+    assert "AADSTS65004" in flashed[0]
+    assert len(flashed[0]) <= 200
