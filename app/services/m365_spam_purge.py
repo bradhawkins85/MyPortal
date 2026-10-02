@@ -173,6 +173,26 @@ def _operation_error(operation: dict[str, Any], default: str) -> str:
     return str(detail)[:2000]
 
 
+async def _record_locations(company_id: int, estimate: dict[str, Any], details: dict[str, Any]) -> None:
+    """Store the mailboxes with matches from the search statistics report.
+
+    The report is best effort: a missing grant or a report that is not ready
+    is recorded in ``locations_error`` and never fails the search itself.
+    """
+    url = ediscovery.report_download_url(estimate)
+    if not url:
+        details["locations_error"] = "Microsoft did not return a statistics report for this search."
+        return
+    try:
+        token = await m365_service._acquire_ediscovery_download_token(company_id)
+        details["locations"] = ediscovery.locations_with_matches(
+            await ediscovery.download_report(token, url)
+        )
+    except Exception as exc:  # noqa: BLE001 - report is optional detail
+        log_error("Spam search report download failed", company_id=company_id, error=str(exc))
+        details["locations_error"] = _failure_message(exc)[:500]
+
+
 async def _run_search(request_id: int, *, retry: bool = False) -> None:
     request = await purge_repo.get_request(request_id)
     if not request:
@@ -196,6 +216,8 @@ async def _run_search(request_id: int, *, retry: bool = False) -> None:
         estimate = await _estimate(token, case_id, search_id)
         status = _local_status(estimate)
         details["estimate"] = estimate
+        if status == "completed":
+            await _record_locations(company_id, estimate, details)
         updates: dict[str, Any] = {
             "search_status": status,
             "matched_items": _count(estimate.get("indexedItemCount")),
@@ -288,32 +310,59 @@ async def _run_purge(request_id: int) -> None:
 
 
 async def _run_managed_folder_assistant(request_id: int) -> None:
+    """Start the Managed Folder Assistant on the mailboxes the purge touched.
+
+    The mailboxes come from the search's statistics report (locations with a
+    count above 0).  When that list is unavailable every mailbox is processed,
+    as before, so recoverable items are still cleaned up promptly.
+    """
     request = await purge_repo.get_request(request_id)
     if not request:
         return
+    details = request.get("purge_details") or {}
+    if not isinstance(details, dict):
+        details = {"results": details}
+    search = request.get("search_details") if isinstance(request.get("search_details"), dict) else {}
+    locations = search.get("locations") if isinstance(search.get("locations"), list) else None
     try:
         exo_token, exo_tenant = await m365_service._acquire_exo_access_token(int(request["company_id"]))
-        payload = await m365_service._exo_invoke_command(exo_token, exo_tenant, "Get-Mailbox", {"ResultSize": "Unlimited"})
-        rows = payload.get("value") or []
-        if isinstance(rows, dict):
-            rows = [rows]
-        count = 0
-        for mailbox in rows if isinstance(rows, list) else []:
-            identity = mailbox.get("UserPrincipalName") if isinstance(mailbox, dict) else None
-            if identity:
+        if locations is not None:
+            identities = [
+                str(item.get("location") or "").strip()
+                for item in locations
+                if isinstance(item, dict) and str(item.get("location") or "").strip()
+            ]
+            scope = "matched_mailboxes"
+        else:
+            payload = await m365_service._exo_invoke_command(exo_token, exo_tenant, "Get-Mailbox", {"ResultSize": "Unlimited"})
+            rows = payload.get("value") or []
+            if isinstance(rows, dict):
+                rows = [rows]
+            identities = [
+                str(mailbox.get("UserPrincipalName"))
+                for mailbox in (rows if isinstance(rows, list) else [])
+                if isinstance(mailbox, dict) and mailbox.get("UserPrincipalName")
+            ]
+            scope = "all_mailboxes"
+        started: list[str] = []
+        failed: dict[str, str] = {}
+        for identity in identities:
+            try:
                 await m365_service._exo_invoke_command(exo_token, exo_tenant, "Start-ManagedFolderAssistant", {"Identity": identity})
-                count += 1
-        details = request.get("purge_details") or {}
-        if not isinstance(details, dict):
-            details = {"results": details}
-        details["managed_folder_assistant_mailboxes"] = count
+                started.append(identity)
+            except m365_service.M365Error as exc:
+                failed[identity] = str(exc)[:300]
+        details["managed_folder_assistant_scope"] = scope
+        details["managed_folder_assistant_mailboxes"] = started if scope == "matched_mailboxes" else len(started)
+        if failed:
+            details["managed_folder_assistant_failures"] = failed
         await purge_repo.update_request(request_id, {"purge_details": details})
-        log_info("Managed Folder Assistant started after M365 purge", request_id=request_id, mailboxes=count)
+        log_info(
+            "Managed Folder Assistant started after M365 purge",
+            request_id=request_id, mailboxes=len(started), failures=len(failed), scope=scope,
+        )
     except Exception as exc:  # purge succeeded; record cleanup warning without changing status
         log_error("Managed Folder Assistant follow-up failed", request_id=request_id, error=str(exc))
-        details = request.get("purge_details") or {}
-        if not isinstance(details, dict):
-            details = {"results": details}
         details["managed_folder_assistant_warning"] = str(exc)[:500]
         await purge_repo.update_request(request_id, {"purge_details": details})
 

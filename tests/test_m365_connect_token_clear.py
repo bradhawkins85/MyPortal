@@ -112,6 +112,14 @@ def _patch_connect_common(
         "app.main.m365_service.ensure_ediscovery_delegated_permission",
         AsyncMock(return_value=False),
     )
+    monkeypatch.setattr(
+        "app.main.m365_service.ensure_ediscovery_download_permission",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        "app.main.m365_service._acquire_ediscovery_download_token",
+        AsyncMock(return_value="download-token"),
+    )
     if ediscovery_probe_ok:
         monkeypatch.setattr(
             "app.main.m365_service._acquire_ediscovery_access_token",
@@ -626,3 +634,53 @@ async def test_ediscovery_admin_consent_denial_keeps_aad_reason(async_client, mo
     assert flashed and "eDiscovery admin consent was not granted" in flashed[0]
     assert "AADSTS65004" in flashed[0]
     assert len(flashed[0]) <= 200
+
+
+@pytest.mark.anyio("asyncio")
+async def test_admin_consent_chain_continues_with_ediscovery_download_step(async_client, monkeypatch):
+    """After the Graph admin consent, a missing eDiscovery.Download.Read grant
+    chains a second admin consent for the Purview eDiscovery resource."""
+    state_data = {
+        "company_id": 1, "flow": "ediscovery_admin_consent", "consent_step": 0,
+        "tenant_id": "tenant-123", "client_id": "app-client-id",
+        "redirect_uri": "https://portal.example/m365/callback", "destination": "/m365",
+    }
+    _patch_connect_common(monkeypatch, [])
+    cause = m365_service.M365Error("AADSTS65001")
+    cause.failure_kind = "reauthentication_required"
+    error = m365_service.M365Error("reconnect", http_status=503)
+    error.__cause__ = cause
+    monkeypatch.setattr(
+        "app.main.m365_service._acquire_ediscovery_download_token", AsyncMock(side_effect=error),
+    )
+    new_states: list[dict] = []
+    _patch_callback_session(monkeypatch, state_data, new_states)
+
+    response = await async_client.get(
+        "/m365/callback?admin_consent=True&tenant=tenant-123&state=s", follow_redirects=False,
+    )
+
+    location = response.headers["location"]
+    assert "/v2.0/adminconsent?" in location
+    assert "b26e684c-5068-4120-a679-64a5d2c909d9%2F.default" in location
+    assert new_states[-1]["consent_step"] == 1
+    assert "eDiscovery access was granted" in new_states[-1]["chained_message"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_last_admin_consent_step_continues_to_scc(async_client, monkeypatch):
+    state_data = {
+        "company_id": 1, "flow": "ediscovery_admin_consent", "consent_step": 1,
+        "tenant_id": "tenant-123", "client_id": "app-client-id",
+        "redirect_uri": "https://portal.example/m365/callback", "destination": "/m365",
+    }
+    _patch_connect_common(monkeypatch, [], scc_probe_ok=False)
+    new_states: list[dict] = []
+    _patch_callback_session(monkeypatch, state_data, new_states)
+
+    response = await async_client.get(
+        "/m365/callback?admin_consent=True&tenant=tenant-123&state=s", follow_redirects=False,
+    )
+
+    assert "ps.compliance.protection.outlook.com%2F.default" in response.headers["location"]
+    assert "report download access was granted" in new_states[-1]["chained_message"]
