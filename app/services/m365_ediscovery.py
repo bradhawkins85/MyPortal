@@ -8,8 +8,12 @@ request against that user's eDiscovery Manager / Search And Purge roles.
 
 from __future__ import annotations
 
+import csv
+import io
+import zipfile
+from pathlib import PurePosixPath
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -164,3 +168,111 @@ async def get_operation(token: str, operation_url: str) -> dict[str, Any]:
 
 def operation_status(operation: dict[str, Any]) -> str:
     return str(operation.get("status") or "").lower()
+
+
+# eDiscovery report/export downloads are served by a regional proxy, for
+# example apc.proxyservice.ediscovery.svc.cloud.microsoft (older tenants:
+# *.proxyservice.ediscovery.office365.com).  The download token is only ever
+# sent to these hosts.
+_DOWNLOAD_HOST_SUFFIXES = (
+    ".proxyservice.ediscovery.svc.cloud.microsoft",
+    ".proxyservice.ediscovery.office365.com",
+)
+MAX_REPORT_BYTES = 50 * 1024 * 1024
+
+
+def report_download_url(estimate: dict[str, Any]) -> str | None:
+    """Return the statistics report URL from an estimate operation, if any."""
+    for item in estimate.get("reportFileMetadata") or []:
+        if isinstance(item, dict) and item.get("downloadUrl"):
+            return str(item["downloadUrl"])
+    return None
+
+
+def _validate_download_url(url: str) -> None:
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    if (
+        parsed.scheme != "https"
+        or parsed.username
+        or parsed.password
+        or parsed.port is not None
+        or not host.endswith(_DOWNLOAD_HOST_SUFFIXES)
+    ):
+        raise m365_service.M365Error("eDiscovery report URL is not a Microsoft eDiscovery download host")
+
+
+async def download_report(token: str, url: str) -> bytes:
+    """Download a search statistics report ZIP from the eDiscovery proxy."""
+    _validate_download_url(url)
+    headers = {"Authorization": f"Bearer {token}", "X-AllowWithAADToken": "true"}
+    try:
+        async with monitored_client(httpx.AsyncClient, timeout=120, follow_redirects=True) as client:
+            response = await client.get(url, headers=headers)
+    except httpx.HTTPError as exc:
+        raise m365_service.M365Error(
+            f"eDiscovery report download failed ({type(exc).__name__})"
+        ) from exc
+    if response.status_code != 200:
+        raise _error_from_response("report download", response)
+    if len(response.content) > MAX_REPORT_BYTES:
+        raise m365_service.M365Error("eDiscovery report is larger than the supported size")
+    return response.content
+
+
+def _decode_csv(raw: bytes) -> str:
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16")
+    return raw.decode("utf-8-sig", errors="replace")
+
+
+def _parse_count(value: Any) -> int:
+    digits = "".join(ch for ch in str(value or "") if ch.isdigit())
+    return int(digits) if digits else 0
+
+
+def locations_with_matches(report_zip: bytes) -> list[dict[str, Any]]:
+    """Return ``[{"location", "count"}]`` for every location with a count above 0.
+
+    The statistics report ZIP contains ``Locations-<date>_<time>.csv`` listing
+    every searched mailbox with a ``Count`` column.  Column names are matched
+    case-insensitively so header wording changes do not drop the data.
+    """
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(report_zip))
+    except zipfile.BadZipFile as exc:
+        raise m365_service.M365Error("eDiscovery report is not a ZIP file") from exc
+    with archive:
+        member = next(
+            (
+                name for name in archive.namelist()
+                if PurePosixPath(name).name.lower().startswith("locations")
+                and name.lower().endswith(".csv")
+            ),
+            None,
+        )
+        if member is None:
+            raise m365_service.M365Error("eDiscovery report has no Locations CSV")
+        if archive.getinfo(member).file_size > MAX_REPORT_BYTES:
+            raise m365_service.M365Error("eDiscovery Locations CSV is larger than the supported size")
+        text = _decode_csv(archive.read(member))
+    reader = csv.DictReader(io.StringIO(text))
+    headers = [header for header in (reader.fieldnames or []) if header]
+    count_header = next((h for h in headers if h.strip().lower() == "count"), None) or next(
+        (h for h in headers if "count" in h.strip().lower()), None
+    )
+    location_header = next((h for h in headers if h.strip().lower() == "location"), None) or next(
+        (h for h in headers if "location" in h.lower() and "type" not in h.lower()), None
+    ) or (headers[0] if headers else None)
+    if not count_header or not location_header:
+        raise m365_service.M365Error("eDiscovery Locations CSV has no Location/Count columns")
+    totals: dict[str, int] = {}
+    for row in reader:
+        location = str(row.get(location_header) or "").strip()
+        count = _parse_count(row.get(count_header))
+        if location and count > 0:
+            totals[location] = totals.get(location, 0) + count
+    return [
+        {"location": location, "count": count}
+        for location, count in sorted(totals.items(), key=lambda item: (-item[1], item[0].lower()))
+    ]

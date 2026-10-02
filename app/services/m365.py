@@ -241,6 +241,10 @@ CONNECT_SCOPE = (
 # "Value cannot be null. Parameter name: orgUnit" without it.
 EDISCOVERY_SCOPE_NAME = "eDiscovery.ReadWrite.All"
 EDISCOVERY_SCOPE = f"https://graph.microsoft.com/{EDISCOVERY_SCOPE_NAME}"
+# MicrosoftPurviewEDiscovery: serves eDiscovery report and export downloads.
+PURVIEW_EDISCOVERY_APP_ID = "b26e684c-5068-4120-a679-64a5d2c909d9"
+EDISCOVERY_DOWNLOAD_SCOPE_NAME = "eDiscovery.Download.Read"
+EDISCOVERY_DOWNLOAD_SCOPE = f"{PURVIEW_EDISCOVERY_APP_ID}/.default"
 
 # Security & Compliance delegated scope, requested in its own authorization
 # request (the connect flow chains it after :data:`CONNECT_SCOPE`).  The
@@ -2118,6 +2122,69 @@ async def _merge_manifest_scopes(
     return len(missing)
 
 
+async def _ensure_delegated_scope_on_manifest(
+    company_id: int,
+    access_token: str,
+    *,
+    resource_app_id: str,
+    scope_name: str,
+    create_service_principal: bool = False,
+) -> bool:
+    """Add one named delegated scope of *resource_app_id* to the app manifest.
+
+    The scope identifier is resolved from the tenant's own resource service
+    principal.  When *create_service_principal* is set and the resource has no
+    service principal yet (first-party APIs are only instantiated on first
+    use), it is created so the scope can be resolved and consented.  Returns
+    ``True`` when the manifest was changed.  Failures are logged, never raised.
+    """
+    creds = await get_credentials(company_id)
+    client_id = str((creds or {}).get("client_id") or "").strip()
+    if not client_id:
+        return False
+    try:
+        lookup = (
+            "https://graph.microsoft.com/v1.0/servicePrincipals"
+            f"?$filter=appId eq '{resource_app_id}'&$select=id,appId,oauth2PermissionScopes"
+        )
+        resource = next(iter((await _graph_get(access_token, lookup)).get("value") or []), None)
+        if resource is None and create_service_principal:
+            await _graph_post(
+                access_token,
+                "https://graph.microsoft.com/v1.0/servicePrincipals",
+                {"appId": resource_app_id},
+            )
+            resource = next(iter((await _graph_get(access_token, lookup)).get("value") or []), None)
+        scope_id = next(
+            (
+                str(scope.get("id"))
+                for scope in (resource or {}).get("oauth2PermissionScopes") or []
+                if scope.get("value") == scope_name and scope.get("id")
+            ),
+            None,
+        )
+        if not scope_id:
+            log_warning(
+                "Delegated scope is not exposed in this tenant; app manifest left unchanged",
+                company_id=company_id,
+                resource_app_id=resource_app_id,
+                scope=scope_name,
+            )
+            return False
+        added = await _merge_manifest_scopes(access_token, client_id, resource_app_id, [scope_id])
+    except M365Error as exc:
+        log_warning(
+            "Could not add delegated scope to the app manifest",
+            company_id=company_id,
+            scope=scope_name,
+            error=str(exc),
+        )
+        return False
+    if added:
+        log_info("Added delegated scope to the app manifest", company_id=company_id, scope=scope_name)
+    return bool(added)
+
+
 async def ensure_ediscovery_delegated_permission(company_id: int, access_token: str) -> bool:
     """Add Microsoft Graph ``eDiscovery.ReadWrite.All`` (delegated) to the app manifest.
 
@@ -2130,46 +2197,27 @@ async def ensure_ediscovery_delegated_permission(company_id: int, access_token: 
     what granting admin consent in the Entra portal does.
 
     *access_token* is the administrator's delegated Graph token from the
-    connect flow (``Application.ReadWrite.All``).  Returns ``True`` when the
-    manifest was changed.  Failures are logged, never raised.
+    connect flow (``Application.ReadWrite.All``).
     """
-    creds = await get_credentials(company_id)
-    client_id = str((creds or {}).get("client_id") or "").strip()
-    if not client_id:
-        return False
-    try:
-        resources = await _graph_get(
-            access_token,
-            "https://graph.microsoft.com/v1.0/servicePrincipals"
-            f"?$filter=appId eq '{_GRAPH_APP_ID}'&$select=id,appId,oauth2PermissionScopes",
-        )
-        graph = next(iter(resources.get("value") or []), None) or {}
-        scope_id = next(
-            (
-                str(scope.get("id"))
-                for scope in graph.get("oauth2PermissionScopes") or []
-                if scope.get("value") == EDISCOVERY_SCOPE_NAME and scope.get("id")
-            ),
-            None,
-        )
-        if not scope_id:
-            log_warning(
-                "Microsoft Graph does not expose eDiscovery.ReadWrite.All in this tenant; "
-                "app manifest left unchanged",
-                company_id=company_id,
-            )
-            return False
-        added = await _merge_manifest_scopes(access_token, client_id, _GRAPH_APP_ID, [scope_id])
-    except M365Error as exc:
-        log_warning(
-            "Could not add eDiscovery.ReadWrite.All to the app manifest",
-            company_id=company_id,
-            error=str(exc),
-        )
-        return False
-    if added:
-        log_info("Added eDiscovery.ReadWrite.All to the app manifest", company_id=company_id)
-    return bool(added)
+    return await _ensure_delegated_scope_on_manifest(
+        company_id, access_token,
+        resource_app_id=_GRAPH_APP_ID, scope_name=EDISCOVERY_SCOPE_NAME,
+    )
+
+
+async def ensure_ediscovery_download_permission(company_id: int, access_token: str) -> bool:
+    """Add Microsoft Purview eDiscovery ``eDiscovery.Download.Read`` to the app manifest.
+
+    Search statistics reports (``reportFileMetadata.downloadUrl``) are served
+    by the eDiscovery proxy, which only accepts a token for the
+    MicrosoftPurviewEDiscovery resource carrying this scope.
+    """
+    return await _ensure_delegated_scope_on_manifest(
+        company_id, access_token,
+        resource_app_id=PURVIEW_EDISCOVERY_APP_ID,
+        scope_name=EDISCOVERY_DOWNLOAD_SCOPE_NAME,
+        create_service_principal=True,
+    )
 
 
 async def ensure_scc_delegated_permission(company_id: int, access_token: str) -> bool:
@@ -2309,6 +2357,26 @@ async def _acquire_ediscovery_access_token(company_id: int) -> str:
         ),
         error_factory=_ediscovery_reconnect_error,
         label="eDiscovery",
+    )
+    return token
+
+
+async def _acquire_ediscovery_download_token(company_id: int) -> str:
+    """Acquire a delegated token for downloading eDiscovery reports.
+
+    The eDiscovery proxy behind ``reportFileMetadata.downloadUrl`` accepts a
+    MicrosoftPurviewEDiscovery token with ``eDiscovery.Download.Read`` (sent
+    with ``X-AllowWithAADToken: true``), not a Microsoft Graph token.
+    """
+    token, _ = await _acquire_delegated_access_token(
+        company_id,
+        scope=EDISCOVERY_DOWNLOAD_SCOPE,
+        missing_reason=(
+            "The stored delegated sign-in cannot download eDiscovery reports "
+            "(eDiscovery.Download.Read has not been granted). "
+        ),
+        error_factory=_ediscovery_reconnect_error,
+        label="eDiscovery download",
     )
     return token
 

@@ -31,6 +31,9 @@
   .purge-modal .modal__content { width:min(46rem, 100%); max-height:calc(100vh - 4rem); overflow-y:auto; }
   .purge-modal__section + .purge-modal__section { margin-top:var(--space-4); padding-top:var(--space-4); border-top:1px solid var(--color-border); }
   .purge-modal__section h3 { margin:0 0 var(--space-2); font-size:1rem; }
+  .purge-locations { width:100%; border-collapse:collapse; font-size:.875rem; }
+  .purge-locations th, .purge-locations td { text-align:left; padding:var(--space-1, .25rem) var(--space-2, .5rem); border-bottom:1px solid var(--color-border); overflow-wrap:anywhere; }
+  .purge-locations th:last-child, .purge-locations td:last-child { text-align:right; width:6rem; }
   .purge-raw pre { max-height:20rem; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:.75rem; margin:var(--space-2) 0 0; }
   .purge-summary + .form-help { margin-top:var(--space-4); }
   @media (max-width: 900px) { .purge-grid { grid-template-columns:1fr; } }
@@ -145,12 +148,30 @@
           <div><dt>Status</dt><dd>{{ item.search_status|replace('_',' ')|title }}</dd></div>
           <div><dt>Matched items</dt><dd>{{ item.matched_items }}</dd></div>
           <div><dt>Matched size</dt><dd>{{ (item.matched_size or 0)|filesizeformat }}</dd></div>
-          {% if estimate.mailboxCount is not none and estimate.mailboxCount is defined %}<div><dt>Mailboxes with matches</dt><dd>{{ estimate.mailboxCount }}</dd></div>{% endif %}
+          {% if estimate.mailboxCount is not none and estimate.mailboxCount is defined %}<div><dt>Mailbox count</dt><dd>{{ estimate.mailboxCount }}</dd></div>{% endif %}
           {% if estimate.unindexedItemCount %}<div><dt>Unindexed items (not purged)</dt><dd>{{ estimate.unindexedItemCount }}</dd></div>{% endif %}
           {% if item.search_completed_at %}<div><dt>Completed</dt><dd><span data-utc="{{ item.search_completed_at }}">{{ item.search_completed_at }}</span></dd></div>{% endif %}
           <div><dt>Requested by</dt><dd>{{ item.requested_by_email or item.created_by }}</dd></div>
         </dl>
       </section>
+      {% if search.locations is defined or search.locations_error %}
+      <section class="purge-modal__section">
+        <h3>Mailboxes with matches</h3>
+        {% if search.locations %}
+        <table class="purge-locations">
+          <thead><tr><th scope="col">Mailbox</th><th scope="col">Items</th></tr></thead>
+          <tbody>
+            {% for location in search.locations %}
+            <tr><td>{{ location.location }}</td><td>{{ location.count }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% elif search.locations is defined %}
+        <p class="text-muted">The search report lists no mailbox with matches.</p>
+        {% endif %}
+        {% if search.locations_error %}<p class="form-help">Mailbox breakdown unavailable: {{ search.locations_error }}</p>{% endif %}
+      </section>
+      {% endif %}
       {% if purge %}
       <section class="purge-modal__section">
         <h3>Purge outcome</h3>
@@ -160,6 +181,10 @@
           <div><dt>Removed</dt><dd>{{ purge.removed_items|default(item.removed_items) }}</dd></div>
           <div><dt>Remaining:</dt><dd>{% if purge.remaining_items_unknown|default(true) %}Unknown{% else %}{{ purge.remaining_items }}{% endif %}</dd></div>
           {% if item.purge_completed_at %}<div><dt>Completed</dt><dd><span data-utc="{{ item.purge_completed_at }}">{{ item.purge_completed_at }}</span></dd></div>{% endif %}
+          {% if purge.managed_folder_assistant_scope == 'matched_mailboxes' %}<div><dt>Managed Folder Assistant</dt><dd>{{ purge.managed_folder_assistant_mailboxes|join(', ') or 'No mailboxes' }}</dd></div>
+          {% elif purge.managed_folder_assistant_mailboxes is defined %}<div><dt>Managed Folder Assistant</dt><dd>{{ purge.managed_folder_assistant_mailboxes }} mailboxes</dd></div>{% endif %}
+          {% if purge.managed_folder_assistant_failures %}<div><dt>Assistant failures</dt><dd>{{ purge.managed_folder_assistant_failures|length }}</dd></div>{% endif %}
+          {% if purge.managed_folder_assistant_warning %}<div><dt>Assistant warning</dt><dd>{{ purge.managed_folder_assistant_warning }}</dd></div>{% endif %}
         </dl>
         <p class="form-help">Completed means the remote action ended; it does not guarantee every match was removed.</p>
       </section>

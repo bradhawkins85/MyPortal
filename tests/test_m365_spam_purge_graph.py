@@ -336,3 +336,218 @@ async def test_ensure_ediscovery_permission_adds_graph_scope_and_keeps_roles(mon
     required[0]["resourceAccess"] = graph
     assert await m365_service.ensure_ediscovery_delegated_permission(1, "token") is False
     assert patches == []
+
+
+# ---------------------------------------------------------------------------
+# Statistics report: mailboxes with matches
+# ---------------------------------------------------------------------------
+
+import io
+import zipfile
+
+REPORT_URL = (
+    "https://apc.proxyservice.ediscovery.svc.cloud.microsoft/ediscovery/api/proxy/"
+    "exportaedblobFileResult(abc)?downloadType=Report"
+)
+
+
+def _report_zip(csv_text: str, *, bom: bool = True, name: str = "Locations-2026-10-02_06-19-06.csv") -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("Summary-2026-10-02_06-19-06.csv", "Name,Value\nItems,6\n")
+        archive.writestr(name, (("﻿" if bom else "") + csv_text).encode("utf-8"))
+    return buffer.getvalue()
+
+
+def test_locations_with_matches_lists_only_positive_counts():
+    report = _report_zip(
+        "Location,Location type,Count,Size\n"
+        "alice@bjp.example,Mailbox,4,1000\n"
+        "bob@bjp.example,Mailbox,0,0\n"
+        "carol@bjp.example,Mailbox,\"1,202\",900\n"
+        "dave@bjp.example,Mailbox,2,10\n"
+    )
+
+    assert ediscovery.locations_with_matches(report) == [
+        {"location": "carol@bjp.example", "count": 1202},
+        {"location": "alice@bjp.example", "count": 4},
+        {"location": "dave@bjp.example", "count": 2},
+    ]
+
+
+def test_locations_with_matches_requires_locations_csv():
+    with pytest.raises(M365Error, match="no Locations CSV"):
+        ediscovery.locations_with_matches(_report_zip("a,b\n", name="Other.csv"))
+
+
+@pytest.mark.anyio("asyncio")
+async def test_download_report_sends_purview_token_only_to_ediscovery_proxy(monkeypatch):
+    seen: dict = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            seen["kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, url, *, headers):
+            seen.update(url=url, headers=headers)
+            return httpx.Response(200, content=b"zip-bytes")
+
+    monkeypatch.setattr(ediscovery.httpx, "AsyncClient", FakeClient)
+
+    assert await ediscovery.download_report("dl-token", REPORT_URL) == b"zip-bytes"
+    assert seen["headers"] == {"Authorization": "Bearer dl-token", "X-AllowWithAADToken": "true"}
+
+    for bad in (
+        "https://evil.example/ediscovery/api/proxy/x",
+        "http://apc.proxyservice.ediscovery.svc.cloud.microsoft/x",
+        "https://apc.proxyservice.ediscovery.svc.cloud.microsoft.evil.example/x",
+    ):
+        with pytest.raises(M365Error, match="not a Microsoft eDiscovery download host"):
+            await ediscovery.download_report("dl-token", bad)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_search_records_mailboxes_from_report(monkeypatch, repo):
+    repo["request"] = {"id": 1, "company_id": 5, "search_name": "n", "content_match_query": "q"}
+    monkeypatch.setattr(ediscovery, "ensure_case", AsyncMock(return_value=CASE))
+    monkeypatch.setattr(ediscovery, "create_search", AsyncMock(return_value=SEARCH))
+    monkeypatch.setattr(service, "_estimate", AsyncMock(return_value={
+        "id": "e", "status": "succeeded", "indexedItemCount": 6,
+        "reportFileMetadata": [{"downloadUrl": REPORT_URL, "fileName": "Reports.zip"}],
+    }))
+    monkeypatch.setattr(
+        service.m365_service, "_acquire_ediscovery_download_token", AsyncMock(return_value="dl"),
+    )
+    download = AsyncMock(return_value=_report_zip("Location,Count\nalice@bjp.example,6\nbob@bjp.example,0\n"))
+    monkeypatch.setattr(ediscovery, "download_report", download)
+
+    await service._run_search(1)
+
+    download.assert_awaited_once_with("dl", REPORT_URL)
+    final = repo["updates"][-1]
+    assert final["search_status"] == "completed"
+    assert final["search_details"]["locations"] == [{"location": "alice@bjp.example", "count": 6}]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_report_failure_does_not_fail_the_search(monkeypatch, repo):
+    repo["request"] = {"id": 1, "company_id": 5, "search_name": "n", "content_match_query": "q"}
+    monkeypatch.setattr(ediscovery, "ensure_case", AsyncMock(return_value=CASE))
+    monkeypatch.setattr(ediscovery, "create_search", AsyncMock(return_value=SEARCH))
+    monkeypatch.setattr(service, "_estimate", AsyncMock(return_value={
+        "id": "e", "status": "succeeded", "indexedItemCount": 6,
+        "reportFileMetadata": [{"downloadUrl": REPORT_URL}],
+    }))
+    monkeypatch.setattr(
+        service.m365_service, "_acquire_ediscovery_download_token",
+        AsyncMock(side_effect=M365Error("AADSTS65001: not consented", http_status=503)),
+    )
+
+    await service._run_search(1)
+
+    final = repo["updates"][-1]
+    assert final["search_status"] == "completed"
+    assert "AADSTS65001" in final["search_details"]["locations_error"]
+    assert "locations" not in final["search_details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_managed_folder_assistant_targets_only_matched_mailboxes(monkeypatch, repo):
+    repo["request"] = {
+        "id": 8, "company_id": 2, "purge_details": {"purge_type": "HardDelete"},
+        "search_details": {"locations": [
+            {"location": "alice@bjp.example", "count": 4},
+            {"location": "carol@bjp.example", "count": 2},
+        ]},
+    }
+    monkeypatch.setattr(
+        service.m365_service, "_acquire_exo_access_token", AsyncMock(return_value=("exo", "tenant")),
+    )
+    calls: list = []
+
+    async def invoke(_token, _tenant, cmdlet, params=None, **_kwargs):
+        calls.append((cmdlet, params))
+        if params == {"Identity": "carol@bjp.example"}:
+            raise M365Error("mailbox not found")
+        return {}
+
+    monkeypatch.setattr(service.m365_service, "_exo_invoke_command", invoke)
+
+    await service._run_managed_folder_assistant(8)
+
+    assert calls == [
+        ("Start-ManagedFolderAssistant", {"Identity": "alice@bjp.example"}),
+        ("Start-ManagedFolderAssistant", {"Identity": "carol@bjp.example"}),
+    ]
+    details = repo["updates"][-1]["purge_details"]
+    assert details["managed_folder_assistant_scope"] == "matched_mailboxes"
+    assert details["managed_folder_assistant_mailboxes"] == ["alice@bjp.example"]
+    assert "carol@bjp.example" in details["managed_folder_assistant_failures"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_managed_folder_assistant_falls_back_to_all_mailboxes(monkeypatch, repo):
+    repo["request"] = {"id": 8, "company_id": 2, "purge_details": {}, "search_details": {"locations_error": "x"}}
+    monkeypatch.setattr(
+        service.m365_service, "_acquire_exo_access_token", AsyncMock(return_value=("exo", "tenant")),
+    )
+    calls: list = []
+
+    async def invoke(_token, _tenant, cmdlet, params=None, **_kwargs):
+        calls.append(cmdlet)
+        if cmdlet == "Get-Mailbox":
+            return {"value": [{"UserPrincipalName": "a@x"}, {"UserPrincipalName": "b@x"}]}
+        return {}
+
+    monkeypatch.setattr(service.m365_service, "_exo_invoke_command", invoke)
+
+    await service._run_managed_folder_assistant(8)
+
+    assert calls == ["Get-Mailbox", "Start-ManagedFolderAssistant", "Start-ManagedFolderAssistant"]
+    details = repo["updates"][-1]["purge_details"]
+    assert details["managed_folder_assistant_scope"] == "all_mailboxes"
+    assert details["managed_folder_assistant_mailboxes"] == 2
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ensure_download_permission_creates_purview_service_principal(monkeypatch):
+    scope_id = "99999999-8888-7777-6666-555555555555"
+    app_object = "11111111-2222-3333-4444-555555555555"
+    state = {"created": False}
+    patches: list = []
+    posts: list = []
+
+    async def fake_get(_token, url, **_kwargs):
+        if "servicePrincipals" in url:
+            if not state["created"]:
+                return {"value": []}
+            return {"value": [{"id": "sp", "appId": m365_service.PURVIEW_EDISCOVERY_APP_ID,
+                               "oauth2PermissionScopes": [{"id": scope_id, "value": "eDiscovery.Download.Read"}]}]}
+        return {"value": [{"id": app_object, "requiredResourceAccess": []}]}
+
+    async def fake_post(_token, url, payload):
+        posts.append(payload)
+        state["created"] = True
+        return {}
+
+    async def fake_patch(_token, url, payload, **_kwargs):
+        patches.append(payload)
+        return {}
+
+    monkeypatch.setattr(m365_service, "get_credentials", AsyncMock(return_value={"client_id": "client"}))
+    monkeypatch.setattr(m365_service, "_graph_get", fake_get)
+    monkeypatch.setattr(m365_service, "_graph_post", fake_post)
+    monkeypatch.setattr(m365_service, "_graph_patch", fake_patch)
+
+    assert await m365_service.ensure_ediscovery_download_permission(1, "token") is True
+    assert posts == [{"appId": m365_service.PURVIEW_EDISCOVERY_APP_ID}]
+    assert patches[0]["requiredResourceAccess"] == [{
+        "resourceAppId": m365_service.PURVIEW_EDISCOVERY_APP_ID,
+        "resourceAccess": [{"id": scope_id, "type": "Scope"}],
+    }]
