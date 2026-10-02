@@ -62,3 +62,16 @@ redacted. Update scripts must nevertheless avoid printing credentials. A failed
 coordinator still exits non-zero, preserving the existing cron/systemd alerting
 and log behavior. Rollback remains the coordinator's automatic restoration of
 the previous blue/green upstream; history records the resulting failure output.
+
+## Changes per update
+
+Every completed update also records the changes it applied: Docker upgrades
+list the published releases between their starting release and their target
+(with the releases' notes), and rolling updates list the commits they merged.
+The System updates page lists the pending changes between the installed and
+the latest release, and when the installation is already up to date it shows
+what the last successful upgrade brought instead. Each history row and
+result page carries its change list back to GitHub, and finished updates
+that predate a recorded starting version are backfilled from the previous
+successful update. Opening the page backfills the whole recorded history in
+one pass; records GitHub could not reach are left for the next page load.

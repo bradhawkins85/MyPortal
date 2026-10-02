@@ -389,15 +389,45 @@ async def changes_for_update(
     return changes
 
 
-async def backfill_changes(history: list[dict[str, Any]], *, limit: int = 5) -> None:
-    """Record the change list for a few finished updates that do not have one yet."""
+def latest_succeeded_update(history: list[dict[str, Any]], deployment: str | None = None) -> dict[str, Any] | None:
+    """Return the newest succeeded update, optionally restricted to one deployment.
+
+    ``deployment`` is the value from :func:`deployment_type` (``"docker"`` or
+    ``"baremetal"``); a ``None`` deployment accepts any update mode.
+    """
+    docker = deployment == "docker"
+    for record in history:  # newest first
+        if record.get("status") != "succeeded":
+            continue
+        if deployment is not None and (record.get("mode") == "docker") != docker:
+            continue
+        return record
+    return None
+
+
+async def backfill_changes(history: list[dict[str, Any]], *, limit: int | None = None) -> None:
+    """Record the change list for finished updates that do not have one yet.
+
+    ``limit=None`` (the default) backfills the whole recorded history, so the
+    oldest entries catch up on the first page load; a positive value bounds
+    how many are fetched in one pass.  Failed GitHub lookups are left for the
+    next pass and never stored.
+    """
     missing = [
         record for record in history
         if record.get("status") in {"succeeded", "failed"} and not isinstance(record.get("changes"), dict)
-    ][:limit]
-    results = await asyncio.gather(
-        *(changes_for_update(record, history) for record in missing), return_exceptions=True,
-    )
+    ]
+    if limit is not None:
+        missing = missing[:limit]
+    semaphore = asyncio.Semaphore(8)
+
+    async def fetch(record: dict[str, Any]) -> dict[str, Any] | None:
+        # A bounded number of concurrent GitHub calls: one pass covers the
+        # whole history without bursting the unauthenticated rate limit.
+        async with semaphore:
+            return await changes_for_update(record, history)
+
+    results = await asyncio.gather(*(fetch(record) for record in missing), return_exceptions=True)
     for record, result in zip(missing, results):
         if isinstance(result, dict) and not result.get("error"):
             record["changes"] = result

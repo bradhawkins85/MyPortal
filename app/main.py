@@ -7619,6 +7619,13 @@ async def admin_system_updates(request: Request):
         "failed": sum(1 for update in updates if update.get("status") == "failed"),
         "active": sum(1 for update in updates if update.get("status") in {"pending", "running"}),
     }
+    # With nothing pending, the card shows what the last upgrade brought instead.
+    last_update = system_updates_service.latest_succeeded_update(
+        updates, str(update_check.get("deployment") or ""),
+    )
+    last_update_changes = None
+    if last_update and not update_check.get("error") and not update_check.get("available"):
+        last_update_changes = await system_updates_service.changes_for_update(last_update, updates)
     return await _render_template(
         "admin/system_updates.html", request, current_user,
         extra={
@@ -7626,6 +7633,7 @@ async def admin_system_updates(request: Request):
             "update_check": update_check, "pending_changes": pending_changes,
             "status_counts": status_counts,
             "active_update": system_update_history.find_active(),
+            "last_update": last_update, "last_update_changes": last_update_changes,
         },
     )
 

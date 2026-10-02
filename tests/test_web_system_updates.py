@@ -397,6 +397,165 @@ def test_backfill_infers_the_start_from_the_previous_successful_update(monkeypat
     assert [item["tag"] for item in latest_changes["releases"]] == ["v1.3.0", "v1.2.0"]
 
 
+def test_backfill_covers_the_whole_recorded_history(monkeypatch, history):
+    """The default backfill no longer stops after five old updates."""
+    monkeypatch.setenv("MYPORTAL_DEPLOYMENT", "docker")
+    _github_transport(monkeypatch, {"/repos/bradhawkins85/MyPortal/releases": [
+        _release(f"v1.{number}.0") for number in range(1, 9)
+    ]})
+
+    def old_update(day, target):
+        record = system_update_history.create_pending(
+            requested_at=f"2026-09-{day:02d}T00:00:00+00:00", target_revision=target,
+            source="web", mode="docker",
+        )
+        return system_update_history.update(record["id"], status="succeeded", completed=True)
+
+    updates = [old_update(day, f"v1.{day}.0") for day in range(1, 9)]  # 8 > old limit of 5
+    asyncio.run(system_updates.backfill_changes(system_update_history.list_updates()))
+
+    for record in updates:
+        stored = system_update_history.get(record["id"])
+        assert stored["changes"]["releases"] and stored["changes"]["releases"][0]["tag"] == record["target_revision"]
+
+
+def test_latest_succeeded_update_ignores_statuses_and_other_deployments(history):
+    def terminal(day, target, status, mode):
+        record = system_update_history.create_pending(
+            requested_at=f"2026-09-{day:02d}T00:00:00+00:00", target_revision=target,
+            source="web", mode=mode,
+        )
+        return system_update_history.update(record["id"], status=status, completed=status != "succeeded")
+
+    docker_newest = terminal(12, "v1.3.0", "succeeded", "docker")
+    terminal(10, "v1.2.0", "failed", "docker")
+    rolling = terminal(5, "a" * 40, "succeeded", "rolling")
+
+    updates = system_update_history.list_updates()
+    assert system_updates.latest_succeeded_update(updates, "docker")["id"] == docker_newest["id"]
+    assert system_updates.latest_succeeded_update(updates, "baremetal")["id"] == rolling["id"]
+    assert system_updates.latest_succeeded_update(updates) is not None
+    assert system_updates.latest_succeeded_update([], "docker") is None
+
+
+def test_list_page_shows_the_last_upgrade_when_up_to_date():
+    history_page = (ROOT / "app/templates/admin/system_updates.html").read_text()
+    assert "What changed in your last upgrade" in history_page
+    assert "last_update_changes" in history_page
+    assert 'href="/admin/system-updates/{{ last_update.id }}"' in history_page
+
+
+def _admin_updates_client(monkeypatch, *, check, fetch):
+    """A TestClient on /admin/system-updates for one super-admin with faked checks."""
+    from fastapi.testclient import TestClient
+
+    import app.main as main_module
+    from app.core.database import db
+    from app.main import app
+
+    async def _noop(*args, **kwargs):
+        return None
+
+    async def _fake_get_module(slug, *, redact=True):
+        return None
+
+    monkeypatch.setattr(db, "connect", _noop)
+    monkeypatch.setattr(db, "disconnect", _noop)
+    monkeypatch.setattr(db, "run_migrations", _noop)
+    monkeypatch.setattr(main_module.change_log_service, "sync_change_log_sources", _noop)
+    monkeypatch.setattr(main_module.modules_service, "ensure_default_modules", _noop)
+    monkeypatch.setattr(main_module.modules_service, "get_module", _fake_get_module)
+    monkeypatch.setattr(main_module.automations_service, "refresh_all_schedules", _noop)
+    monkeypatch.setattr(main_module.scheduler_service, "start", _noop)
+    monkeypatch.setattr(main_module.scheduler_service, "stop", _noop)
+    monkeypatch.setattr(main_module.m365_jobs_service, "start_worker", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main_module.m365_jobs_service, "stop_worker", _noop)
+    monkeypatch.setattr(main_module.settings, "enable_csrf", False)
+
+    async def fake_require(request):
+        return {"id": 1, "email": "admin@example.com", "is_super_admin": True}, None
+
+    monkeypatch.setattr(main_module, "_require_super_admin_page", fake_require)
+    monkeypatch.setattr(system_updates, "check_for_update", check)
+    if fetch is not None:
+        monkeypatch.setattr(system_updates, "_fetch_changes", fetch)
+    return TestClient(app)
+
+
+def _release_changes_payload(tag, from_tag):
+    return {
+        "kind": "releases",
+        "releases": [{
+            "tag": tag, "name": tag, "published_at": "2026-09-28T00:00:00Z",
+            "url": f"https://github.com/o/r/releases/tag/{tag}",
+            "changes": [{"title": "Shinier system updates", "author": "brad",
+                         "url": "https://github.com/o/r/pull/9", "number": 9}],
+            "notes": "",
+        }],
+        "total": 1, "truncated": False, "change_count": 1,
+        "compare_url": f"https://github.com/o/r/compare/{from_tag}...{tag}",
+    }
+
+
+def test_list_page_renders_last_upgrade_changes_when_docker_is_up_to_date(monkeypatch, history):
+    # One finished Docker upgrade (v1.1.0 -> v1.2.0) and an up-to-date install.
+    record = system_update_history.create_pending(
+        requested_at="2026-09-28T00:00:00+00:00", target_revision="v1.2.0",
+        source="web", mode="docker", from_revision="v1.1.0",
+    )
+    system_update_history.update(record["id"], status="succeeded", completed=True)
+
+    async def fake_check(*, refresh=False):
+        return {
+            "deployment": "docker", "installed": "v1.2.0", "latest": "v1.2.0",
+            "available": False, "error": None, "checked_at": "2026-09-29T00:00:00+00:00",
+        }
+
+    fetched: list[tuple[str, str, str]] = []
+
+    async def fake_fetch(deployment, installed, latest, *, refresh=False):
+        fetched.append((deployment, installed, latest))
+        return _release_changes_payload(latest, installed)
+
+    client = _admin_updates_client(monkeypatch, check=fake_check, fetch=fake_fetch)
+    with client:
+        response = client.get("/admin/system-updates")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "What changed in your last upgrade" in body
+    assert "Shinier system updates" in body
+    assert f"/admin/system-updates/{record['id']}" in body  # "See this upgrade"
+    assert "What's new since your version" not in body
+    assert '<span class="tag tag--success">Up to date</span>' in body
+    assert "MyPortal is already up to date" in body  # "Update now" is disabled
+    assert fetched == [("docker", "v1.1.0", "v1.2.0")]  # fetched once, then reused
+    assert "changes" in system_update_history.get(record["id"])  # stored for the history row
+
+
+def test_list_page_still_shows_pending_changes_when_upgrade_available(monkeypatch, history):
+    async def fake_check(*, refresh=False):
+        return {
+            "deployment": "docker", "installed": "v1.1.0", "latest": "v1.2.0",
+            "available": True, "error": None, "checked_at": "2026-09-29T00:00:00+00:00",
+        }
+
+    async def fake_fetch(deployment, installed, latest, *, refresh=False):
+        return _release_changes_payload(latest, installed)
+
+    client = _admin_updates_client(monkeypatch, check=fake_check, fetch=fake_fetch)
+    with client:
+        body = client.get("/admin/system-updates").text
+
+    assert "What's new since your version" in body
+    assert "between v1.1.0 and v1.2.0" in body
+    assert '<span class="tag tag--warning">Update available</span>' in body
+    assert "Shinier system updates" in body
+    assert "Compare on GitHub" in body
+    assert "What changed in your last upgrade" not in body
+    assert "MyPortal is already up to date" not in body  # "Update now" is enabled
+
+
 def test_backfill_does_not_store_github_failures(monkeypatch, history):
     monkeypatch.setenv("MYPORTAL_DEPLOYMENT", "docker")
     _github_transport(monkeypatch, {})

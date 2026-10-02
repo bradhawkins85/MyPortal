@@ -4,7 +4,10 @@
 
 {% set check = update_check | default({}, true) %}
 {% set changes = pending_changes | default({}, true) %}
+{% set last_changes = last_update_changes if last_update_changes is mapping else none %}
 {% set is_docker = check.deployment == 'docker' %}
+{% set show_pending = check.available and not check.error and not changes.error %}
+{% set show_last = not check.error and not check.available and last_changes and (last_changes.releases or last_changes.commits) %}
 {% set counts = status_counts | default({}, true) %}
 {% set system_update_columns = [
   {"key": "started", "label": "Started"},
@@ -90,9 +93,10 @@
 <section class="card card--panel" data-system-update-changes>
   <header class="card__header">
     <div>
-      <h2 class="card__title">What's new since your version</h2>
+      <h2 class="card__title">{% if show_last %}What changed in your last upgrade{% else %}What's new since your version{% endif %}</h2>
       <p class="card__subtitle">
         {% if check.error %}Changes can't be listed until the update check succeeds.
+        {% elif show_last %}You're on the latest {{ 'release' if is_docker else 'revision' }}, so there's nothing new to install. Your last upgrade brought: {% if is_docker %}{{ last_changes.total }} release{{ '' if last_changes.total == 1 else 's' }} and {{ last_changes.change_count }} change{{ '' if last_changes.change_count == 1 else 's' }} between {{ last_changes.from_revision or 'an earlier release' }} and {{ last_update.target_revision }}.{% else %}{{ last_changes.total }} commit{{ '' if last_changes.total == 1 else 's' }} on main between <code>{{ (last_changes.from_revision or '')[:12] }}</code> and <code>{{ (last_update.target_revision or '')[:12] }}</code>.{% endif %}
         {% elif not check.available %}You're on the latest {{ 'release' if is_docker else 'revision' }}, so there's nothing new to install.
         {% elif changes.error %}{{ changes.error }}
         {% elif is_docker %}{{ changes.total }} release{{ '' if changes.total == 1 else 's' }} and {{ changes.change_count }} change{{ '' if changes.change_count == 1 else 's' }} between {{ check.installed or 'your version' }} and {{ check.latest }}.
@@ -100,9 +104,15 @@
       </p>
     </div>
   </header>
-  {% if check.available and not check.error and not changes.error %}
+  {% if show_pending %}
   <div class="card__body">
     {% include "partials/system_update_changes.html" %}
+  </div>
+  {% elif show_last %}
+  <div class="card__body">
+    {% set changes = last_changes %}
+    {% include "partials/system_update_changes.html" %}
+    <p><a href="/admin/system-updates/{{ last_update.id }}">See this upgrade</a></p>
   </div>
   {% endif %}
 </section>
