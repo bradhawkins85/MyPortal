@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "auth/_auth_macros.html" import auth_hero, password_input %}
+{% from "auth/_auth_macros.html" import auth_hero, password_input, legal_links %}
 
 {% set is_first = is_first_user | default(False) %}
 {% set title = "Create super administrator" if is_first else "Create your account" %}
@@ -113,6 +113,7 @@
         <p data-account-setup-reset-message></p>
         <button type="button" class="button button--secondary" data-account-setup-reset-submit>Send password reset</button>
       </div>
+      <p class="form-help auth-card__fineprint">By creating an account you agree to the <a href="/legal/terms">Terms and Conditions</a> and <a href="/legal/acceptable-use">Acceptable Use Policy</a>, and acknowledge the <a href="/legal/privacy">Privacy Policy</a>.</p>
       <button type="submit" class="button auth-card__wide" data-auth-submit>{{ 'Create administrator account' if is_first else 'Create account' }}</button>
       <p class="form-help auth-card__fineprint">Passwords are stored using bcrypt hashing{% if not is_first %}. After signing in you'll be able to submit tickets and follow your own conversations with the team{% endif %}.</p>
     </form>
@@ -120,6 +121,7 @@
     {% if not is_first %}
       <p class="auth-card__footer">Already have an account? <a href="/login">Sign in</a></p>
     {% endif %}
+    {{ legal_links() }}
   </section>
 </div>
 <noscript><p class="alert alert--warning auth-noscript">Creating an account needs JavaScript. Turn it on in your browser to continue.</p></noscript>

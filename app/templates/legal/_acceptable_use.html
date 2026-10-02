@@ -1,0 +1,128 @@
+{% set contact %}{% if legal_contact_email %}<a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a>{% else %}raising a ticket in {{ app_name }}{% endif %}{% endset %}
+
+<nav class="legal__toc" aria-label="On this page">
+  <ol>
+    <li><a href="#aup-scope">Scope</a></li>
+    <li><a href="#aup-account">Your account</a></li>
+    <li><a href="#aup-permitted">Using the portal properly</a></li>
+    <li><a href="#aup-prohibited">What is not allowed</a></li>
+    <li><a href="#aup-content">Content you submit</a></li>
+    <li><a href="#aup-credentials">Credentials, vault and shared secrets</a></li>
+    <li><a href="#aup-automation">API, integrations and automation</a></li>
+    <li><a href="#aup-ai">Using AI features</a></li>
+    <li><a href="#aup-monitoring">Monitoring and enforcement</a></li>
+    <li><a href="#aup-reporting">Reporting problems</a></li>
+  </ol>
+</nav>
+
+<section id="aup-scope" aria-labelledby="aup-scope-title">
+  <h3 id="aup-scope-title">1. Scope</h3>
+  <p>
+    This policy applies to everyone who uses {{ app_name }}, operated by {{ legal_entity_name }}, including the web portal,
+    the tray app, chat, email-to-ticket, SMS, the API and any integrations connected to it. It forms part of our
+    <a href="/legal/terms">Terms and Conditions</a>. If you are an administrator for your organisation, you are responsible
+    for making sure the people you give access to follow it.
+  </p>
+</section>
+
+<section id="aup-account" aria-labelledby="aup-account-title">
+  <h3 id="aup-account-title">2. Your account</h3>
+  <ul>
+    <li>Your account is personal to you. Do not share your password, authenticator codes, passkeys or session with anyone, including colleagues.</li>
+    <li>Use a strong, unique password and turn on two-factor authentication or a passkey where offered.</li>
+    <li>Keep your contact details accurate so we can reach you about your requests and your account's security.</li>
+    <li>Tell us straight away if you think your account or a device with the tray app installed has been lost or compromised.</li>
+    <li>Sign out of shared or public computers when you have finished.</li>
+  </ul>
+</section>
+
+<section id="aup-permitted" aria-labelledby="aup-permitted-title">
+  <h3 id="aup-permitted-title">3. Using the portal properly</h3>
+  <p>
+    Use {{ app_name }} only for legitimate business purposes connected with the services we provide to your organisation, such
+    as raising and following support requests, chatting with our team, ordering products, managing your organisation's staff,
+    assets, licences and subscriptions, and reading our knowledge base. Only access companies, records and features that you
+    have been given permission to use.
+  </p>
+</section>
+
+<section id="aup-prohibited" aria-labelledby="aup-prohibited-title">
+  <h3 id="aup-prohibited-title">4. What is not allowed</h3>
+  <p>You must not use {{ app_name }}, or help anyone else use it, to:</p>
+  <ul>
+    <li>access, or try to access, accounts, companies, data or systems you are not authorised to use, including by guessing passwords, reusing someone else's session or bypassing two-factor authentication;</li>
+    <li>probe, scan or test the security of the portal, or exploit a vulnerability, without our written permission;</li>
+    <li>interfere with or overload the service, for example by sending excessive requests, deliberately triggering rate limits, or flooding tickets, chats or SMS;</li>
+    <li>upload or send malware, or files and links designed to harm, deceive or track people;</li>
+    <li>send spam, phishing, or unsolicited bulk messages, or use our email, SMS or marketing features in breach of anti-spam laws;</li>
+    <li>upload content that is unlawful, defamatory, harassing, threatening, discriminatory, obscene, or that infringes anyone's intellectual property or privacy;</li>
+    <li>impersonate another person or organisation, or misrepresent your authority to act for your organisation;</li>
+    <li>collect or harvest information about other users, or copy, scrape or resell portal content except as allowed for your own organisation's use;</li>
+    <li>reverse engineer, tamper with or disable the tray app, or use it on devices not owned or managed by your organisation;</li>
+    <li>abuse our staff in tickets, chats, calls or messages; or</li>
+    <li>break any law or regulation, or help anyone else do so.</li>
+  </ul>
+</section>
+
+<section id="aup-content" aria-labelledby="aup-content-title">
+  <h3 id="aup-content-title">5. Content you submit</h3>
+  <ul>
+    <li>Only submit personal information about other people (such as staff details) where you are entitled to do so and they have been told how it will be used.</li>
+    <li>Avoid putting sensitive information — such as health, financial or government identifier details — in tickets or chats unless it is needed to resolve your request.</li>
+    <li>Do not paste passwords or other secrets into ticket replies or chats. Use the secure credential sharing features instead.</li>
+    <li>Attachments should be relevant to your request and free of malware.</li>
+  </ul>
+</section>
+
+<section id="aup-credentials" aria-labelledby="aup-credentials-title">
+  <h3 id="aup-credentials-title">6. Credentials, vault and shared secrets</h3>
+  <p>
+    Shared credential links and verification codes are meant only for their intended recipient. Do not forward them, store
+    them insecurely, or use them after they expire. Only store credentials in the portal that belong to your organisation
+    and that you are authorised to hold.
+  </p>
+</section>
+
+<section id="aup-automation" aria-labelledby="aup-automation-title">
+  <h3 id="aup-automation-title">7. API, integrations and automation</h3>
+  <ul>
+    <li>Keep API keys and webhook secrets confidential, give them only the permissions they need, and rotate them if they may have been exposed.</li>
+    <li>Respect rate limits and do not use automation to work around access controls.</li>
+    <li>Integrations and AI connectors may only be connected with your organisation's authority and used for its own business purposes.</li>
+  </ul>
+</section>
+
+<section id="aup-ai" aria-labelledby="aup-ai-title">
+  <h3 id="aup-ai-title">8. Using AI features</h3>
+  <p>
+    {{ app_name }}'s AI features (such as the AI assistant, chat assistant, suggested articles, summaries and transcripts) are
+    there to help you get support faster. When you use them:
+  </p>
+  <ul>
+    <li><strong>Check before you rely on it.</strong> AI output can be wrong, incomplete or out of date. Do not act on it for anything important — such as changing systems, security settings or finances — without confirming with our team.</li>
+    <li><strong>Do not try to manipulate it.</strong> Do not use prompts, hidden instructions in tickets, emails, attachments or documents, or other techniques ("prompt injection" or "jailbreaking") to make an AI feature ignore its rules, reveal information you are not allowed to see, act outside your permissions, or disclose its configuration.</li>
+    <li><strong>Only share what is needed.</strong> Do not give AI features passwords, payment card details, health information or other sensitive data unless it is needed for your request, and only submit content you have the right to share.</li>
+    <li><strong>Do not use it to cause harm.</strong> Do not use AI features to create unlawful, deceptive, harassing or malicious content, including phishing messages or malware, or to impersonate others.</li>
+    <li><strong>Do not misuse outputs.</strong> Do not present AI output as advice from our staff, and do not use AI features or their outputs to scrape the portal, or to build or train other AI models.</li>
+    <li><strong>Connect AI tools responsibly.</strong> Only connect external AI tools or connectors to the portal with your organisation's authority, keep their access tokens secret, and give them the minimum access they need. You are responsible for what those tools do with information they retrieve.</li>
+    <li><strong>Ask for a person when you need one.</strong> If an automated assistant cannot help, ask for a technician rather than repeatedly re-prompting it.</li>
+  </ul>
+</section>
+
+<section id="aup-monitoring" aria-labelledby="aup-monitoring-title">
+  <h3 id="aup-monitoring-title">9. Monitoring and enforcement</h3>
+  <p>
+    To keep the service secure, we log access and activity as described in our <a href="/legal/privacy">Privacy Policy</a>.
+    If we reasonably believe this policy has been broken, we may remove content, revoke sessions, API keys or shared links,
+    suspend or close accounts, notify your organisation, and report unlawful activity to the authorities. Where practical we
+    will tell you first, but we may act immediately to protect people, data or the service.
+  </p>
+</section>
+
+<section id="aup-reporting" aria-labelledby="aup-reporting-title">
+  <h3 id="aup-reporting-title">10. Reporting problems</h3>
+  <p>
+    If you find a security issue or see the portal being misused, please report it by {{ contact }}. Do not test or share
+    the issue further while we look into it.
+  </p>
+</section>

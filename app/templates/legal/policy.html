@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block sidebar_menu %}
+  {% if has_authenticated_user %}
+    {{ super() }}
+  {% else %}
+    <li class="menu__item">
+      <a href="/login">
+        <span class="menu__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false"><path d="M10 4h10a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H10a1 1 0 0 1-1-1v-3h2v2h8V6h-8v2H9V5a1 1 0 0 1 1-1zm-1.707 7.293 2.586-2.586L12.293 10.12 10.414 12l1.879 1.879-1.414 1.414-2.586-2.586a1 1 0 0 1 0-1.414z"/></svg>
+        </span>
+        <span class="menu__label">Sign in</span>
+      </a>
+    </li>
+    <li class="menu__item">
+      <a href="/knowledge-base">
+        <span class="menu__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false"><path d="M6 3a3 3 0 0 1 3-3h9a2 2 0 0 1 2 2v19.5a.5.5 0 0 1-.74.44L15 20l-4.26 1.94A.5.5 0 0 1 10 21.5V5a1 1 0 0 0-1-1H6v15.5a.5.5 0 0 1-.74.44L3 19.94V4a1 1 0 0 1 1-1z"/></svg>
+        </span>
+        <span class="menu__label">Knowledge base</span>
+      </a>
+    </li>
+    <li class="menu__item">
+      <a href="/legal" aria-current="page">
+        <span class="menu__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm8 1.5V8h4.5L14 3.5zM8 12v2h8v-2H8zm0 4v2h8v-2H8zm0-8v2h4V8H8z"/></svg>
+        </span>
+        <span class="menu__label">Policies</span>
+      </a>
+    </li>
+  {% endif %}
+{% endblock %}
+
+{% macro no_warranty_notice() -%}
+<aside class="legal__notice" aria-labelledby="legal-notice-title">
+  <h3 class="legal__notice-title" id="legal-notice-title">No warranty</h3>
+  <p>
+    {{ app_name }} is provided "as is", without warranty of any kind, express or implied, to the fullest extent permitted by law.
+    No liability lies with the developers or contributors of the MyPortal software. See section 11 of the
+    <a href="/legal/terms#terms-liability">Terms and Conditions</a>.
+  </p>
+</aside>
+{%- endmacro %}
+
+{% block content %}
+<div class="legal">
+  <nav class="legal__tabs" aria-label="Policies">
+    <a class="legal__tab" href="/legal"{% if not legal_policy_slug %} aria-current="page"{% endif %}>Overview</a>
+    {% for slug, policy in legal_policies.items() %}
+      <a class="legal__tab" href="/legal/{{ slug }}"{% if slug == legal_policy_slug %} aria-current="page"{% endif %}>{{ policy.title }}</a>
+    {% endfor %}
+  </nav>
+
+  {% if legal_policy %}
+    <article class="card card--panel legal__document" aria-labelledby="legal-document-title">
+      <header class="legal__header">
+        <h2 class="legal__title" id="legal-document-title">{{ legal_policy.title }}</h2>
+        <p class="legal__meta">
+          {{ legal_entity_name }} · Last updated <time datetime="{{ legal_updated }}">{{ legal_updated }}</time>
+        </p>
+        <p class="legal__summary">{{ legal_policy.summary }}</p>
+      </header>
+      <div class="legal__body">
+        {% include legal_policy.template %}
+      </div>
+      {{ no_warranty_notice() }}
+    </article>
+  {% else %}
+    <section class="card card--panel legal__overview" aria-labelledby="legal-overview-title">
+      <h2 class="legal__title" id="legal-overview-title">Our policies</h2>
+      <p class="legal__summary">
+        These policies explain how {{ legal_entity_name }} runs {{ app_name }}, what information it keeps about you and the rules for using it.
+        They apply whether or not you are signed in.
+      </p>
+      <ul class="legal__cards">
+        {% for slug, policy in legal_policies.items() %}
+          <li class="legal__card">
+            <a class="legal__card-link" href="/legal/{{ slug }}">
+              <span class="legal__card-title">{{ policy.title }}</span>
+              <span class="legal__card-summary">{{ policy.summary }}</span>
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
+      {{ no_warranty_notice() }}
+      <p class="legal__meta">Last updated <time datetime="{{ legal_updated }}">{{ legal_updated }}</time></p>
+    </section>
+  {% endif %}
+</div>
+{% endblock %}
