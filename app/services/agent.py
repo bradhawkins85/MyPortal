@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import os
@@ -12,7 +13,7 @@ from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from app.core.database import db
 from app.core.features import get_registry, module_name_for_slug
-from app.core.logging import log_error, log_warning
+from app.core.logging import log_error, log_info, log_warning
 from app.repositories import m365_best_practices as m365_bp_repo
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import reporting as reporting_repo
@@ -67,6 +68,14 @@ _LLM_RAG_CANDIDATE_LIMIT = 30
 _LLM_PROMPT_CHAR_LIMIT = 64000
 _LLM_SNIPPET_LENGTH = 500
 _DEFAULT_CONTEXT_TOKEN_BUDGET = 12000
+# Defensive timeouts so the SSE stream cannot stall indefinitely.
+# The RAG retrieval involves DB queries (no command_timeout in the aiomysql
+# pool) and a possible remote embedding call; 60 s is generous but bounded.
+_RAG_RETRIEVAL_TIMEOUT_S = 60.0
+# The LLM call uses a 15 s httpx timeout for non-streaming, but streaming
+# responses can keep the socket alive. 120 s covers slow local models with
+# large prompts while still preventing an infinite hang.
+_LLM_INVOKE_TIMEOUT_S = 120.0
 _MAX_TICKET_ID_QUERY_LENGTH = 1000
 _TICKET_MARKER_KEYWORD = "ticket"
 _MIN_MARKED_TICKET_ID_DIGITS = 3
@@ -2170,6 +2179,7 @@ async def execute_agent_query(
     )
     if event_callback:
         await event_callback({"event": "stage", **stages[-1]})
+    # --- RAG retrieval (guarded by a timeout so the SSE stream cannot stall) ---
     try:
         # Full scans are persisted only by the explicit background maintenance
         # job. Interactive queries consume the current durable index and never
@@ -2190,20 +2200,73 @@ async def execute_agent_query(
         if "feature_packs" in retrieval_sources:
             retrieval_sources.remove("feature_packs")
             retrieval_sources.update(f"feature:{slug}" for slug in feature_pack_sources)
-        raw_rag_candidates = await rag_retrieval.retrieve_candidates(
-            query_text,
-            user,
-            active_company_id=active_company_id,
-            memberships=resolved_memberships,
+        log_info(
+            "Agent RAG retrieval starting",
+            query_len=len(query_text),
             source_filters=sorted(retrieval_sources),
         )
+        if event_callback:
+            await event_callback(
+                {"event": "stage", "name": "rag_retrieval", "status": "running"}
+            )
+        rag_retrieval_started = time.monotonic()
+        raw_rag_candidates = await asyncio.wait_for(
+            rag_retrieval.retrieve_candidates(
+                query_text,
+                user,
+                active_company_id=active_company_id,
+                memberships=resolved_memberships,
+                source_filters=sorted(retrieval_sources),
+            ),
+            timeout=_RAG_RETRIEVAL_TIMEOUT_S,
+        )
+        rag_retrieval_ms = int((time.monotonic() - rag_retrieval_started) * 1000)
+        log_info(
+            "Agent RAG retrieval complete",
+            candidates=len(raw_rag_candidates),
+            elapsed_ms=rag_retrieval_ms,
+        )
+        if event_callback:
+            await event_callback(
+                {
+                    "event": "stage",
+                    "name": "rag_retrieval",
+                    "status": "complete",
+                    "data": {"candidates": len(raw_rag_candidates), "elapsed_ms": rag_retrieval_ms},
+                }
+            )
     except rag_index_service.RagIndexCancelled:
         # Cancellation is job control, not a retrieval failure.  Let the job
         # runner record the terminal cancelled state instead of continuing into
         # answer generation.
         raise
+    except asyncio.TimeoutError:
+        log_error(
+            "Agent RAG retrieval timed out",
+            timeout_s=_RAG_RETRIEVAL_TIMEOUT_S,
+            source_filters=sorted(retrieval_sources),
+        )
+        if event_callback:
+            await event_callback(
+                {
+                    "event": "stage",
+                    "name": "rag_retrieval",
+                    "status": "error",
+                    "data": {"reason": f"timed out after {_RAG_RETRIEVAL_TIMEOUT_S:.0f}s"},
+                }
+            )
+        raw_rag_candidates = []
     except Exception as exc:  # pragma: no cover - defensive guard
         log_error("Agent RAG retrieval failed", error=str(exc))
+        if event_callback:
+            await event_callback(
+                {
+                    "event": "stage",
+                    "name": "rag_retrieval",
+                    "status": "error",
+                    "data": {"reason": str(exc)[:200]},
+                }
+            )
         raw_rag_candidates = []
 
     rag_candidates = direct_ticket_evidence + _filter_rag_candidates(
@@ -2382,14 +2445,39 @@ async def execute_agent_query(
             if event_callback and text:
                 await event_callback({"event": "answer_delta", "text": text})
 
-        final_llm = await _invoke_agent_llm(
-            "final_answer",
-            final_prompt,
-            on_delta=(
-                emit_delta
-                if event_callback and _max_agent_model_calls() == 1
-                else None
-            ),
+        log_info("Agent LLM invoke starting", stage="final_answer", prompt_chars=len(final_prompt))
+        try:
+            final_llm = await asyncio.wait_for(
+                _invoke_agent_llm(
+                    "final_answer",
+                    final_prompt,
+                    on_delta=(
+                        emit_delta
+                        if event_callback and _max_agent_model_calls() == 1
+                        else None
+                    ),
+                ),
+                timeout=_LLM_INVOKE_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            log_error(
+                "Agent LLM invoke timed out",
+                timeout_s=_LLM_INVOKE_TIMEOUT_S,
+                prompt_chars=len(final_prompt),
+            )
+            final_llm = {
+                "status": "error",
+                "message": "The language model did not respond in time.",
+                "text": None,
+                "model": "timeout",
+                "event_id": None,
+                "usage": {},
+            }
+        log_info(
+            "Agent LLM invoke complete",
+            stage="final_answer",
+            status=final_llm["status"],
+            elapsed_ms=int((time.monotonic() - llm_started) * 1000),
         )
         if _max_agent_model_calls() == 2 and final_llm.get("text"):
             refinement_prompt = _truncate_prompt_sections(
@@ -2401,10 +2489,35 @@ async def execute_agent_query(
             )
             model_calls += 1
             model_input_tokens += _count_tokens(refinement_prompt)
-            final_llm = await _invoke_agent_llm(
-                "final_answer_refinement",
-                refinement_prompt,
-                on_delta=emit_delta if event_callback else None,
+            log_info("Agent LLM invoke starting", stage="final_answer_refinement", prompt_chars=len(refinement_prompt))
+            try:
+                final_llm = await asyncio.wait_for(
+                    _invoke_agent_llm(
+                        "final_answer_refinement",
+                        refinement_prompt,
+                        on_delta=emit_delta if event_callback else None,
+                    ),
+                    timeout=_LLM_INVOKE_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                log_error(
+                    "Agent LLM refinement timed out",
+                    timeout_s=_LLM_INVOKE_TIMEOUT_S,
+                )
+                # Keep the original (non-refined) answer rather than losing it.
+                final_llm = {
+                    "status": "succeeded",
+                    "message": "Refinement step timed out; using original answer.",
+                    "text": final_llm.get("text"),
+                    "model": final_llm.get("model"),
+                    "event_id": final_llm.get("event_id"),
+                    "usage": final_llm.get("usage") or {},
+                }
+            log_info(
+                "Agent LLM invoke complete",
+                stage="final_answer_refinement",
+                status=final_llm["status"],
+                elapsed_ms=int((time.monotonic() - llm_started) * 1000),
             )
         model_latency_ms += int((time.monotonic() - llm_started) * 1000)
         usage = final_llm.get("usage") or {}
