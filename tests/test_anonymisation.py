@@ -630,6 +630,12 @@ def test_users_page_offers_anonymise_modal():
         users=[{"id": 7, "email": EMAIL, "first_name": "Jane", "last_name": "Doe", "is_super_admin": False,
                 "last_login_at": None, "ai_opt_out": False, "company_name": "Acme"}],
     )
-    assert 'data-anonymise-action="/admin/users/7/anonymise"' in html
+    assert 'data-anonymise-user-id="7"' in html
     assert 'id="anonymise-user-modal"' in html and 'name="confirm"' in html
     assert "anonymisation_admin.js" in html
+
+
+def test_anonymise_modal_script_builds_action_from_numeric_id_only():
+    source = (Path(__file__).resolve().parent.parent / "app/static/js/anonymisation_admin.js").read_text()
+    assert "data-anonymise-action" not in source
+    assert "Number.parseInt" in source and "/admin/users/${userId}/anonymise" in source

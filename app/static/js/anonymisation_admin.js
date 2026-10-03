@@ -7,8 +7,12 @@
     const form = modal.querySelector('form');
     if (form) {
       form.reset();
-      const action = trigger.getAttribute('data-anonymise-action');
-      if (action) form.setAttribute('action', action);
+      // The Users page shares one modal; point it at the chosen account. Only
+      // a numeric id is taken from the page, never a URL.
+      const userId = Number.parseInt(trigger.getAttribute('data-anonymise-user-id') || '', 10);
+      if (Number.isInteger(userId) && userId > 0) {
+        form.setAttribute('action', `/admin/users/${userId}/anonymise`);
+      }
     }
     const label = trigger.getAttribute('data-anonymise-label');
     modal.querySelectorAll('[data-anonymise-target]').forEach((node) => {

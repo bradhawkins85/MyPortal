@@ -73,7 +73,7 @@
                 </form>
                 <button type="button" class="button button--ghost" {% if is_self %}disabled{% endif %}
                         data-anonymise-open="anonymise-user-modal" aria-haspopup="dialog" aria-controls="anonymise-user-modal"
-                        data-anonymise-action="/admin/users/{{ entry.id }}/anonymise" data-anonymise-label="{{ entry.email }}"
+                        data-anonymise-user-id="{{ entry.id }}" data-anonymise-label="{{ entry.email }}"
                         title="Use when the person asks by email or phone to have their account anonymised">Anonymise</button>
                 <form action="/admin/users/{{ entry.id }}/delete" method="post" class="inline-form"
                       onsubmit="return confirm({{ ('Permanently delete ' ~ entry.email ~ '? This cannot be undone.') | tojson | forceescape }});">
