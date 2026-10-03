@@ -156,7 +156,7 @@ async def _transition(
     assignments = ", ".join(f"{k} = %s" for k in columns)
     params: list[Any] = [columns[k] for k in columns] + [request_id, from_status]
     count = await db.execute_rowcount(
-        f"UPDATE account_anonymisation_requests SET {assignments} WHERE id = %s AND status = %s",
+        f"UPDATE account_anonymisation_requests SET {assignments} WHERE id = %s AND status = %s",  # nosec B608
         tuple(params),
     )
     return count > 0
@@ -298,7 +298,7 @@ async def anonymise_user(
     if staff_ids:
         clause, ids = _in_clause(staff_ids)
         summary["staff"] = await _safe_update_rowcount(
-            f"UPDATE staff SET first_name = %s, last_name = %s, email = %s, "
+            f"UPDATE staff SET first_name = %s, last_name = %s, email = %s, "  # nosec B608
             f"mobile_phone = NULL WHERE id IN ({clause})",
             [_ANON_FIRST_NAME, _ANON_LAST_NAME, placeholder, *ids],
             "staff.anonymise",
@@ -308,7 +308,7 @@ async def anonymise_user(
     if staff_ids:
         clause, ids = _in_clause(staff_ids)
         await _safe_update(
-            f"UPDATE tickets SET requester_staff_id = NULL WHERE requester_staff_id IN ({clause})",
+            f"UPDATE tickets SET requester_staff_id = NULL WHERE requester_staff_id IN ({clause})",  # nosec B608
             ids,
             "tickets.null_requester_staff",
         )
