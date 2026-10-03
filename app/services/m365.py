@@ -147,20 +147,6 @@ _TEAMS_ADMIN_ROLE_TEMPLATE_ID = "69091246-20e8-4a56-aa4d-066075b2a7a8"
 # Microsoft Graph application permission required for SharePoint Online best-practice checks.
 # Grants access to GET and PATCH /admin/sharepoint/settings via the Graph API.
 _SHAREPOINT_TENANT_SETTINGS_ROLE = "19b94e34-907c-4f43-bde9-38b1909ed408"
-# Microsoft Graph application permission required to enumerate SharePoint sites
-# and read their default document libraries for OneDrive export destinations.
-_SITES_READ_ALL_ROLE = "332a536c-c7ef-4017-ab91-336970924f0d"
-# Microsoft Graph application permission required to create OneDrive export
-# folders and copy OneDrive content into the selected SharePoint document library.
-# Sites.ReadWrite.All is preferred over Files.ReadWrite.All because it is scoped
-# to SharePoint site content rather than all files across the tenant.
-_SITES_READWRITE_ALL_ROLE = "9492366f-7969-46a4-8d15-ed1a20078fff"
-# Microsoft Graph application permission required to create the backing Microsoft
-# 365 group for the default Offboarded Staff SharePoint export site.
-_GROUP_READWRITE_ALL_ROLE = "62a82d76-70ea-41e2-9197-370581804d09"
-# Microsoft Graph application permission required to resolve the tenant's
-# initial *.onmicrosoft.com domain for Purview app-only connections.
-_DOMAIN_READ_ALL_ROLE = "dbb9058a-0e50-45d7-ae91-66909b5d4664"
 
 # Pattern matching auto-generated package mailbox names, e.g. package_9024cbae-6e9a-4cee-934e-5f05143cd7ae
 PACKAGE_MAILBOX_RE = re.compile(
@@ -5563,6 +5549,7 @@ async def run_purview_preflight(
                             for row in recheck_rows if isinstance(row, dict)
                         )
                     except M365Error:
+                        # Registration recheck not authoritative on error; keep prior result.
                         pass
                     try:
                         recheck_roles = await _scc_invoke_command(
@@ -5590,6 +5577,7 @@ async def run_purview_preflight(
                                 membership_ok = True
                                 break
                     except M365Error:
+                        # Role-membership recheck not authoritative on error; keep prior result.
                         pass
         except M365Error as exc:
             scc_error = str(exc)

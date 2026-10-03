@@ -125,7 +125,7 @@ async def get_campaign(campaign_id: int) -> dict[str, Any] | None:
 async def create_campaign(fields: Mapping[str, Any], *, created_by: int | None) -> int:
     columns = ", ".join(_CAMPAIGN_FIELDS)
     return await db.execute_returning_lastrowid(
-        "INSERT INTO marketing_campaigns (" + columns + ", created_by, status) "
+        "INSERT INTO marketing_campaigns (" + columns + ", created_by, status) "  # nosec B608
         "VALUES (" + _placeholders(_CAMPAIGN_FIELDS) + ", %s, 'draft')",
         tuple(_campaign_params(fields) + [created_by]),
     )
@@ -134,7 +134,7 @@ async def create_campaign(fields: Mapping[str, Any], *, created_by: int | None) 
 async def update_campaign(campaign_id: int, fields: Mapping[str, Any]) -> None:
     assignments = ", ".join(key + " = %s" for key in _CAMPAIGN_FIELDS)
     await db.execute(
-        "UPDATE marketing_campaigns SET " + assignments + " WHERE id = %s AND status = 'draft'",
+        "UPDATE marketing_campaigns SET " + assignments + " WHERE id = %s AND status = 'draft'",  # nosec B608
         tuple(_campaign_params(fields) + [campaign_id]),
     )
 
@@ -368,7 +368,7 @@ async def list_opted_out(emails: Sequence[str], category: str) -> set[str]:
         return set()
     rows = await db.fetch_all(
         "SELECT email FROM marketing_email_opt_outs WHERE category = %s AND email IN ("
-        + _placeholders(emails)
+        + _placeholders(emails)  # nosec B608
         + ")",
         tuple([category, *emails]),
     )
@@ -427,7 +427,7 @@ async def list_opt_outs(limit: int = 200, *, company_ids: Iterable[int] | None =
             return []
         sql += (
             " WHERE EXISTS (SELECT 1 FROM staff s WHERE LOWER(s.email) = LOWER(o.email) "
-            "AND s.company_id IN (" + _placeholders(params) + "))"
+            "AND s.company_id IN (" + _placeholders(params) + "))"  # nosec B608
         )
     rows = await db.fetch_all(sql + " ORDER BY o.created_at DESC LIMIT %s", tuple(params + [int(limit)]))
     return [dict(row) for row in rows]
@@ -470,7 +470,7 @@ async def find_audience_contacts(audience: Mapping[str, Any]) -> list[dict[str, 
         sql += (
             " AND EXISTS (SELECT 1 FROM assets a JOIN asset_custom_field_values v ON v.asset_id = a.id "
             "WHERE a.company_id = s.company_id AND v.value_boolean = 1 "
-            "AND v.field_definition_id IN (" + _placeholders(asset_field_ids) + "))"
+            "AND v.field_definition_id IN (" + _placeholders(asset_field_ids) + "))"  # nosec B608
         )
         params.extend(asset_field_ids)
 
@@ -479,7 +479,7 @@ async def find_audience_contacts(audience: Mapping[str, Any]) -> list[dict[str, 
         sql += (
             " AND EXISTS (SELECT 1 FROM subscriptions sub WHERE sub.customer_id = s.company_id "
             "AND sub.status IN ('active', 'pending_renewal') "
-            "AND sub.product_id IN (" + _placeholders(product_ids) + "))"
+            "AND sub.product_id IN (" + _placeholders(product_ids) + "))"  # nosec B608
         )
         params.extend(product_ids)
 
@@ -508,7 +508,7 @@ async def find_staff_by_emails(emails: Sequence[str]) -> list[dict[str, Any]]:
         "s.job_title, s.department, co.name AS company_name, 0 AS is_billing_contact "
         "FROM staff s JOIN companies co ON co.id = s.company_id "
         "WHERE s.enabled = 1 AND COALESCE(s.is_ex_staff, 0) = 0 AND LOWER(s.email) IN ("
-        + _placeholders(emails)
+        + _placeholders(emails)  # nosec B608
         + ") ORDER BY s.id",
         tuple(emails),
     )

@@ -98,13 +98,14 @@
         <div class="card__body">
           <form method="post" action="/admin/profile/marketing-opt-out" class="profile-form" data-profile-marketing>
             {% include "partials/csrf.html" %}
-            <label class="form-field form-field--inline">
-              <input type="hidden" name="enabled" value="{{ '1' if not profile_sales_opt_out else '0' }}" />
-              <button type="submit" class="toggle" aria-pressed="{{ 'true' if not profile_sales_opt_out else 'false' }}" data-profile-marketing-toggle{% if profile_sales_opt_out %} aria-label="Turn on sales and marketing emails"{% else %} aria-label="Turn off sales and marketing emails"{% endif %}>
-                <span class="toggle__thumb" aria-hidden="true"></span>
-              </button>
-              <span class="form-label">Send me sales and marketing emails</span>
-            </label>
+            <input type="hidden" name="enabled" value="0" />
+            <div class="profile-marketing">
+              <label class="toggle">
+                <input type="checkbox" name="enabled" value="1"{% if not profile_sales_opt_out %} checked{% endif %} data-profile-marketing-toggle />
+                <span>Send me sales and marketing emails</span>
+              </label>
+              <button type="submit" class="button button--ghost button--small" data-profile-marketing-save>Save</button>
+            </div>
           </form>
         </div>
       </section>

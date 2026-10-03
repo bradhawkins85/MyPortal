@@ -947,6 +947,7 @@ def _release_manifest() -> dict[str, Any]:
         if isinstance(loaded, dict):
             policy = loaded
     except (OSError, ValueError):
+        # Missing/corrupt release policy: keep the default empty policy.
         pass
     compatibility = str(policy.get("compatibility", "soft")).lower()
     if compatibility not in {"none", "soft", "optional", "mandatory"}:
@@ -6050,7 +6051,6 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # ── Tenant-discovery flow ──────────────────────────────────────────
         # Exchange the auth code to get a token, then extract the tid claim.
         return_to_company_edit = state_data.get("return_to") == "company_edit"
-        redirect_uri = str(state_data.get("redirect_uri") or "")
 
         def _discover_error(msg: str) -> RedirectResponse:
             if return_to_company_edit:

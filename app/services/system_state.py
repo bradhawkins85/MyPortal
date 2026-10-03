@@ -21,8 +21,8 @@ _ACTIVE_PHASES = {"preparing", "migrating", "draining", "restarting", "verifying
 _MAINTENANCE_PHASES = {"draining", "restarting"}
 _TERMINAL_PHASES = {"succeeded", "failed", "rolled_back", "interrupted"}
 _STALE_SECONDS = 30 * 60
-_STATE_DIR_MODE = 0o750
-_STATE_FILE_MODE = 0o640
+_STATE_DIR_MODE = 0o700
+_STATE_FILE_MODE = 0o600
 
 
 def _utc_now() -> datetime:

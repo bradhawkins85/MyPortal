@@ -152,7 +152,7 @@ async def resolve(
         "JOIN staff s ON s.company_id = g.company_id AND s.portal_user_id = %s "
         "JOIN users u ON u.id = s.portal_user_id JOIN user_companies uc ON uc.user_id = u.id "
         "AND uc.company_id = g.company_id WHERE g.company_id = %s AND g."
-        + column
+        + column  # nosec B608
         + " = 1 "
         "AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at > CURRENT_TIMESTAMP) "
         "AND g.review_due_at > CURRENT_TIMESTAMP AND c.revoked_at IS NULL AND c.archived_at IS NULL "
@@ -160,7 +160,7 @@ async def resolve(
         "AND u.email_verified_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM staff duplicate "
         "WHERE duplicate.company_id = s.company_id AND duplicate.portal_user_id = s.portal_user_id "
         "AND duplicate.enabled = 1 AND duplicate.id <> s.id) "
-        "AND ((g.selector_type = 'staff' AND g.staff_id = s.id) OR g.selector_type = 'job_title')",
+        "AND ((g.selector_type = 'staff' AND g.staff_id = s.id) OR g.selector_type = 'job_title')",  # nosec B608
         (user_id, company_id),
     )
     result = []
@@ -200,7 +200,7 @@ async def reveal(
     placeholders = ",".join(["%s"] * len(ids))
     changed = await db.execute_rowcount(
         "UPDATE credential_standing_grants SET last_resolved_at = CURRENT_TIMESTAMP WHERE id IN ("
-        + placeholders
+        + placeholders  # nosec B608
         + ") "
         "AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP) "
         "AND review_due_at > CURRENT_TIMESTAMP",

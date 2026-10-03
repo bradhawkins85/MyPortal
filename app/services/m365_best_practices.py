@@ -1989,16 +1989,6 @@ _TEAMS_PERMISSION_HINT = (
 # Get-CsTeamsClientConfiguration) are marked with ``"requires_teams_manage_as_app": True``
 # in the catalog.  The ``Teams.ManageAsApp`` application role cannot be programmatically
 # assigned to an app registration, so these checks are permanently not applicable.
-_TEAMS_PS_NOT_APPLICABLE_DETAILS = (
-    "Not applicable – this check calls a Teams PowerShell cmdlet via the "
-    "Exchange Online InvokeCommand endpoint, which requires the "
-    "Teams.ManageAsApp application role. This role cannot be programmatically "
-    "assigned to an app registration and must be granted manually by a Global "
-    "Administrator in Microsoft Entra ID. Until then, this check cannot be "
-    "evaluated automatically."
-)
-
-
 def _teams_ps_error_detail(exc: M365Error, cmdlet: str) -> str:
     """Return a user-facing error detail string for a Teams PowerShell cmdlet failure.
 

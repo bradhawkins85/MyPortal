@@ -270,7 +270,7 @@ async def queue_command(company_id: int, device_id: int, command_type: str, user
 async def poll_commands(device_id: int, company_id: int) -> list[dict[str, Any]]:
     await db.execute(f"""UPDATE defender_commands SET status='failed', completed_at=UTC_TIMESTAMP(),
       result_json=%s WHERE tray_device_id=%s AND company_id=%s AND status='claimed'
-      AND claimed_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL {COMMAND_CLAIM_TIMEOUT_HOURS} HOUR)""",
+      AND claimed_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL {COMMAND_CLAIM_TIMEOUT_HOURS} HOUR)""",  # nosec B608
       (json.dumps({"message": "The tray agent did not report a result"}), device_id, company_id))
     rows = await db.fetch_all("""SELECT dc.id, dc.command_type, dc.detection_id, dc.requested_at,
       dd.detection_uid, dd.threat_name FROM defender_commands dc

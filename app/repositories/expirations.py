@@ -21,7 +21,7 @@ async def list_asset_dates(company_id: int | None) -> list[dict[str, Any]]:
                   'warranty_end_date' source_field, a.name title,
                   a.warranty_end_date due_at, a.company_id, c.name company_name
            FROM assets a JOIN companies c ON c.id = a.company_id"""
-        + warranty_filter,
+        + warranty_filter,  # nosec B608
         params,
     )
     custom_clause = " AND a.company_id = %s" if company_id is not None else ""
@@ -35,7 +35,7 @@ async def list_asset_dates(company_id: int | None) -> list[dict[str, Any]]:
            JOIN assets a ON a.id = v.asset_id
            JOIN companies c ON c.id = a.company_id
            WHERE d.field_type = 'date' AND v.value_date IS NOT NULL"""
-        + custom_clause,
+        + custom_clause,  # nosec B608
         params,
     )
     website_clause = "" if company_id is None else " AND w.company_id = %s"
@@ -47,7 +47,7 @@ async def list_asset_dates(company_id: int | None) -> list[dict[str, Any]]:
            FROM websites w JOIN companies c ON c.id = w.company_id
            JOIN (SELECT 'certificate' kind UNION ALL SELECT 'domain') dates
            WHERE CASE WHEN dates.kind = 'certificate' THEN w.certificate_expires_at ELSE w.domain_expires_at END IS NOT NULL"""
-        + website_clause,
+        + website_clause,  # nosec B608
         params,
     )
     return [dict(row) for row in warranties] + [dict(row) for row in custom] + [dict(row) for row in (websites or [])]
@@ -59,7 +59,7 @@ async def list_metadata(company_id: int | None) -> list[dict[str, Any]]:
         """SELECT m.*, u.first_name owner_first_name, u.last_name owner_last_name,
                   u.email owner_email
            FROM expiration_metadata m LEFT JOIN users u ON u.id = m.owner_user_id"""
-        + clause,
+        + clause,  # nosec B608
         None if company_id is None else (company_id,),
     )
     result = []

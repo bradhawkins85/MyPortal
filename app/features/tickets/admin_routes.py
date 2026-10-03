@@ -777,8 +777,17 @@ async def admin_suggest_ticket_reply(ticket_id: int, request: Request):
             memberships=getattr(request.state, "available_companies", None) or [],
         )
     except reply_suggestion_service.ReplySuggestionError as exc:
+        # Log the underlying cause server-side and return a generic message so
+        # internal details (file paths, IDs, provider responses) never leak to
+        # the client.
+        log_error(
+            "Failed to generate ticket reply suggestion",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
         return JSONResponse(
-            {"detail": str(exc)}, status_code=status.HTTP_422_UNPROCESSABLE_ENTITY
+            {"detail": "Could not generate a reply suggestion for this ticket."},
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
     return JSONResponse(result)
 
