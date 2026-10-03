@@ -127,6 +127,39 @@
           <p class="form-help">Removing a passkey stops it signing in to {{ app_name | default('MyPortal') }}. Also delete it from your device or password manager, and sign out anywhere it's still in use.</p>
         </div>
       </section>
+      <section class="card card--panel profile-card profile-card--full" aria-labelledby="profile-anonymise-title">
+        <header class="card__header profile-card__header">
+          <span class="profile-card__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false"><path d="M9 3v1H4v2h16V4h-5V3H9zM6 7l1 13h10l1-13H6zm2 2h2v9H8V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9z"/></svg>
+          </span>
+          <div class="profile-card__heading">
+            <h2 class="card__title" id="profile-anonymise-title">Danger zone</h2>
+            <p class="card__subtitle">Permanently delete your account and all of your personal data.</p>
+          </div>
+        </header>
+        <div class="card__body">
+          {% if profile_anonymisation_request %}
+            {% set ar = profile_anonymisation_request %}
+            {% if ar.status in ("pending", "executing") %}
+              <p><span class="badge badge--warning">Anonymisation {{ ar.status | replace("_", " ") }}</span></p>
+              <p class="form-help">You have requested account deletion. An administrator will verify your email and complete the process, which can take a few days.</p>
+            {% elif ar.status == "completed" %}
+              <p><span class="badge badge--success">Anonymised</span></p>
+              <p class="form-help">Your personal data has been deleted. You can sign up again at any time to create a new account.</p>
+            {% else %}
+              <p><span class="badge badge--danger">Request failed</span></p>
+              {% if ar.error_message %}<p class="form-help">{{ ar.error_message }}</p>{% endif %}
+              <p class="form-help">Please contact support if you would like to request deletion again.</p>
+            {% endif %}
+          {% else %}
+            <p class="form-help">Requesting anonymisation permanently removes your account, content, and personal data after an administrator verifies your email. This cannot be undone.</p>
+            <form method="post" action="/admin/profile/anonymisation" id="profile-anonymise-form" class="profile-form">
+              {% include "partials/csrf.html" %}
+              <button type="submit" class="button button--danger">Request account deletion</button>
+            </form>
+          {% endif %}
+        </div>
+      </section>
     </div>
   </section>
 
@@ -610,4 +643,25 @@
   <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>
   {% endif %}
   <script src="{{ static_url('/static/js/profile.js') }}" defer></script>
+  <script>
+    // Danger Zone: inline confirm for the anonymisation request form.
+    // admin.js (which provides the global data-confirm handler) is not loaded
+    // on the profile page, so bind a lightweight confirm here.
+    (function () {
+      function bind() {
+        var form = document.getElementById('profile-anonymise-form');
+        if (!form) return;
+        form.addEventListener('submit', function (event) {
+          if (!window.confirm('Request permanent deletion of your account and all of your personal data? This cannot be undone.')) {
+            event.preventDefault();
+          }
+        });
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bind);
+      } else {
+        bind();
+      }
+    })();
+  </script>
 {% endblock %}
