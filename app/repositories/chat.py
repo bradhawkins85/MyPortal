@@ -777,7 +777,7 @@ async def update_ai_queue_item(queue_id: int, **fields: Any) -> None:
     set_clauses = ", ".join(f"{key} = %s" for key in fields)
     # Queue columns are constrained by the explicit local allowlist and values remain bound.
     await db.execute(  # nosec B608
-        "UPDATE matrix_ai_analysis_queue SET " + set_clauses + " WHERE id = %s",
+        "UPDATE matrix_ai_analysis_queue SET " + set_clauses + " WHERE id = %s",  # nosec B608
         tuple(fields.values()) + (queue_id,),
     )
 

@@ -538,7 +538,7 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
                 return data
         except (json.JSONDecodeError, ValueError):
             # Invalid/non-object model output intentionally falls back to None.
-            data = None
+            pass
 
     return None
 

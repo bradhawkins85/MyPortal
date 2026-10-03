@@ -91,6 +91,7 @@ def sanitise_body(content: bytes | str | None, content_type: str = "") -> Any:
         if "application/x-www-form-urlencoded" in content_type.lower():
             return _truncate(urlencode([(k, REDACTED if _is_sensitive(k) else v) for k, v in parse_qsl(text, keep_blank_values=True)]))
     except (TypeError, ValueError, json.JSONDecodeError):
+        # Malformed body: fall back to the truncated plain-text return below.
         pass
     return _truncate(text)
 

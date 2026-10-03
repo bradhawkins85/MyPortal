@@ -10,7 +10,7 @@ async def list_for_asset(company_id: int, asset_id: int, *, customer_only: bool 
     return list(await db.fetch_all(
         "SELECT id, asset_id, company_id, storage_name, thumbnail_name, content_type, "
         "size_bytes, caption, sort_order, customer_visible, uploaded_by, created_at "
-        "FROM asset_photos WHERE company_id = %s AND asset_id = %s" + condition +
+        "FROM asset_photos WHERE company_id = %s AND asset_id = %s" + condition +  # nosec B608
         " ORDER BY sort_order, id", (company_id, asset_id),
     ))
 

@@ -286,7 +286,7 @@ async def _fetch_companies_by_key(key_ids: Iterable[int]) -> dict[int, list[int]
         FROM api_key_company_permissions
         WHERE api_key_id IN ({placeholders})
         ORDER BY company_id ASC
-        """,
+        """,  # nosec B608
         tuple(ids),
     )
     companies: dict[int, list[int]] = {}

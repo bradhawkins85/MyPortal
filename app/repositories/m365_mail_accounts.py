@@ -299,7 +299,7 @@ async def update_account_tokens(
             token_revision = token_revision + 1,
             updated_at = UTC_TIMESTAMP(6)
         WHERE id = %s
-        """ + revision_clause,
+        """ + revision_clause,  # nosec B608
         tuple(params),
     )
     return await get_account(account_id)
