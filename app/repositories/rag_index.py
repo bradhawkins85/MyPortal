@@ -425,6 +425,25 @@ async def delete_documents_by_ids(document_ids: Sequence[int]) -> int:
     return len(ids)
 
 
+async def list_document_ids_for_source(source_type: str, source_ids: Sequence[str | int]) -> list[int]:
+    """Return the ids of indexed RAG documents for *source_type* whose ``source_id``
+    is one of *source_ids*.
+
+    Used to clean up documents derived from a user's tickets during
+    anonymisation (``source_type='tickets'``). Returns an empty list when there
+    are no matching source ids.
+    """
+    normalised = [str(value) for value in source_ids if value is not None and str(value) != ""]
+    if not normalised:
+        return []
+    placeholders = ",".join("?" for _ in normalised)
+    rows = await db.fetch_all(
+        f"SELECT id FROM rag_documents WHERE source_type = ? AND source_id IN ({placeholders})",  # nosec B608
+        tuple([source_type, *normalised]),
+    )
+    return [int(row["id"]) for row in rows if row.get("id") is not None]
+
+
 async def cleanup_missing_documents(
     active_sources: Mapping[str, set[str]], *, embedding_model: str
 ) -> int:

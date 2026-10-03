@@ -1,0 +1,25 @@
+{% set dd_contact %}{% if legal_contact_email %}<a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a>{% else %}contacting your usual support representative{% endif %}{% endset %}
+<div id="legal-data-deletion" class="legal__data-deletion" aria-labelledby="legal-data-deletion-title">
+  <h4 id="legal-data-deletion-title">Account anonymisation (the right to be forgotten)</h4>
+  <p>
+    You can ask us to <strong>anonymise your account</strong>, permanently removing your personal information from the
+    portal. To request this, use the "Danger zone" at the bottom of your profile in {{ app_name }}, or {{ dd_contact }}.
+    Before we action the request we will verify who you are, and we can refuse or defer it where the law requires us to
+    keep the information (for example for tax, accounting, legal or security obligations).
+  </p>
+  <p>When your request is processed we will, among other things:</p>
+  <ul>
+    <li>replace your name with a generic placeholder and change your email address to an undeliverable one, so your account can no longer be identified from them;</li>
+    <li>delete your password, two-factor authentication, passkey and mobile phone details, and deactivate the account so it can no longer be signed in to;</li>
+    <li>remove or de-identify the personal information in your tickets, replies, chats, call and SMS records and attachments;</li>
+    <li>delete any artificial-intelligence (AI) documents that were created from your information; and</li>
+    <li>remove you from sales and marketing communications.</li>
+  </ul>
+  <p>
+    This is permanent and cannot be undone, so please save any information you need before you ask. Because our backups are
+    overwritten on a rolling basis, they stop containing your personal information over time. We may keep a small amount of
+    information where we are required to by law. We also keep a record that your account was anonymised so that we can honour
+    your request and meet our compliance obligations; that record does not include your name or email address — it references
+    your account using an irreversible, one-way code that cannot be turned back into your details.
+  </p>
+</div>

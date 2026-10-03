@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{# Map a request status to a badge class + human label. #}
+{% macro anon_status_badge(status) -%}
+  {%- set cls = {"pending": "badge--warning", "executing": "badge--info", "completed": "badge--success", "failed": "badge--danger", "cancelled": "badge--muted"} -%}
+  {%- set label = {"pending": "Pending", "executing": "Executing", "completed": "Completed", "failed": "Failed", "cancelled": "Cancelled"} -%}
+  <span class="badge {{ cls.get(status, 'badge--muted') }}">{{ label.get(status, (status or 'Unknown') | capitalize) }}</span>
+{%- endmacro %}
+
+{% block header_title %}{% if anonymisation_request %}Anonymisation request #{{ anonymisation_request.id }}{% else %}Account anonymisation{% endif %}{% endblock %}
+
+{% block header_actions %}
+  {% if anonymisation_request %}
+    {{ page_header_actions([
+      {"label": "All anonymisation requests", "type": "link", "href": "/admin/anonymisation"}
+    ]) }}
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+{% if anonymisation_request %}
+  {% set req = anonymisation_request %}
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Request details</h2>
+        <p class="card__subtitle">A permanent deletion request for a user account.</p>
+      </div>
+    </header>
+    <div class="card__body">
+      <p class="card__status-line">{{ anon_status_badge(req.status) }}</p>
+      <div class="table-wrapper">
+        <table class="table">
+          <tbody>
+            <tr>
+              <th scope="row">Requested by</th>
+              <td>{{ req.request_user_email or "Unknown" }}</td>
+            </tr>
+            <tr>
+              <th scope="row">User ID</th>
+              <td>#{{ req.user_id }}</td>
+            </tr>
+            <tr>
+              <th scope="row">Requested at</th>
+              <td>{% if req.requested_at %}<span data-utc="{{ req.requested_at.isoformat() }}">{{ req.requested_at }}</span>{% else %}-{% endif %}</td>
+            </tr>
+            <tr>
+              <th scope="row">Reason</th>
+              <td>{{ req.reason or "-" }}</td>
+            </tr>
+            <tr>
+              <th scope="row">Support ticket</th>
+              <td>{% if req.support_ticket_id %}<a href="/admin/tickets/{{ req.support_ticket_id }}">#{{ req.support_ticket_id }}</a>{% else %}-{% endif %}</td>
+            </tr>
+            {% if req.executed_by_user_id %}
+            <tr>
+              <th scope="row">Executed by</th>
+              <td>{{ req.executed_by_email or ("User #" ~ req.executed_by_user_id) }}</td>
+            </tr>
+            <tr>
+              <th scope="row">Executed at</th>
+              <td>{% if req.executed_at %}<span data-utc="{{ req.executed_at.isoformat() }}">{{ req.executed_at }}</span>{% else %}-{% endif %}</td>
+            </tr>
+            {% endif %}
+            {% if req.ip_address %}
+            <tr>
+              <th scope="row">Request IP</th>
+              <td>{{ req.ip_address }}</td>
+            </tr>
+            {% endif %}
+            {% if req.error_message %}
+            <tr>
+              <th scope="row">Error</th>
+              <td class="table__error">{{ req.error_message }}</td>
+            </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  {% if req.status == "pending" %}
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Actions</h2>
+        <p class="card__subtitle">Executing a request permanently removes the user's personal data. This action cannot be undone.</p>
+      </div>
+    </header>
+    <div class="card__body">
+      <div class="detail-actions">
+        <form method="post" action="/admin/anonymisation/{{ req.id }}/execute" class="inline-form">
+          {% include "partials/csrf.html" %}
+          <button type="submit" class="button button--danger" data-confirm="Execute anonymisation for {{ req.request_user_email or ('user #' ~ req.user_id) }}? This permanently deletes their personal data and cannot be undone.">Execute anonymisation</button>
+        </form>
+        <form method="post" action="/admin/anonymisation/{{ req.id }}/cancel" class="inline-form">
+          {% include "partials/csrf.html" %}
+          <button type="submit" class="button button--ghost" data-confirm="Cancel this anonymisation request? The user will be able to request it again later.">Cancel request</button>
+        </form>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+{% else %}
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Anonymisation requests</h2>
+        <p class="card__subtitle">Users can request permanent deletion of their account and personal data from their profile. Requests are verified and executed here.</p>
+      </div>
+    </header>
+    <div class="table-wrapper">
+      <table class="table" data-table>
+        <thead>
+          <tr>
+            <th data-sort="number">ID</th>
+            <th data-sort="string">Requested by</th>
+            <th data-sort="string">Status</th>
+            <th data-sort="string">Requested</th>
+            <th data-sort="string">Executed</th>
+            <th class="table__actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for req in anonymisation_requests %}
+            <tr>
+              <td data-label="ID">#{{ req.id }}</td>
+              <td data-label="Requested by">{{ req.request_user_email or "Unknown" }}</td>
+              <td data-label="Status">{{ anon_status_badge(req.status) }}</td>
+              <td data-label="Requested">{% if req.requested_at %}<span data-utc="{{ req.requested_at.isoformat() }}">{{ req.requested_at }}</span>{% else %}-{% endif %}</td>
+              <td data-label="Executed">{% if req.executed_at %}<span data-utc="{{ req.executed_at.isoformat() }}">{{ req.executed_at }}</span>{% else %}-{% endif %}</td>
+              <td class="table__actions">
+                <a href="/admin/anonymisation/{{ req.id }}" class="button button--ghost button--small">View</a>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="table__empty">No anonymisation requests yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/admin.js') }}?v=20260426c" defer></script>
+  <script src="{{ static_url('/static/js/tables.js') }}?v=20260416c" defer></script>
+{% endblock %}

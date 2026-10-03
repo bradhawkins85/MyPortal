@@ -79,6 +79,25 @@ def test_privacy_policy_matches_profile_self_service_options(client):
     assert "to change your name or email address, contact us or your organisation's administrator" in response.text
 
 
+def test_privacy_policy_discloses_account_anonymisation(client):
+    """The privacy page must document the anonymisation / right-to-be-forgotten flow."""
+    response = client.get("/legal/privacy")
+
+    assert response.status_code == 200
+    assert "anonymise your account" in response.text
+    assert "right to be forgotten" in response.text
+    assert "danger zone" in response.text.lower()
+    assert "irreversible" in response.text
+
+
+def test_terms_disclose_account_anonymisation(client):
+    response = client.get("/legal/terms")
+
+    assert response.status_code == 200
+    assert "anonymise your account" in response.text
+    assert "right to be forgotten" in response.text
+
+
 @pytest.mark.parametrize("path", ["/login", "/register", "/forgot-password"])
 def test_sign_in_pages_link_to_policies(client, path):
     response = client.get(path)
