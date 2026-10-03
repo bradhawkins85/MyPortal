@@ -863,7 +863,7 @@ def test_profile_modals_follow_the_gold_standard():
     modal_ids = re.findall(r'<div class="modal scf-modal" id="([\w-]+)" role="dialog" aria-modal="true" aria-labelledby="[\w-]+"[^>]* hidden>', html)
     assert modal_ids == [
         "profile-password-modal", "profile-totp-modal", "profile-passkey-modal",
-        "profile-rename-modal", "profile-confirm-modal",
+        "profile-rename-modal", "profile-confirm-modal", "profile-anonymise-modal",
     ]
     assert "<dialog" not in html
     for hook in (
@@ -871,6 +871,7 @@ def test_profile_modals_follow_the_gold_standard():
         "data-totp-qr", "data-totp-manual-toggle", 'id="totp-verify-form"', 'id="totp-code"',
         'id="passkey-add-form"', 'id="passkey-rename-form"', 'id="profile-confirm-form"',
         "auth_ui.js", "passkey_utils.js", "profile.js",
+        'id="profile-anonymise-form"', 'name="confirm_email"', 'name="acknowledge"',
     ):
         assert hook in html, hook
 

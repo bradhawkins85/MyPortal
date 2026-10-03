@@ -1,25 +1,33 @@
-{% set dd_contact %}{% if legal_contact_email %}<a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a>{% else %}contacting your usual support representative{% endif %}{% endset %}
+{% set dd_contact %}{% if legal_contact_email %}<a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a>{% else %}your usual support contact{% endif %}{% endset %}
 <div id="legal-data-deletion" class="legal__data-deletion" aria-labelledby="legal-data-deletion-title">
-  <h4 id="legal-data-deletion-title">Account anonymisation (the right to be forgotten)</h4>
+  <h4 id="legal-data-deletion-title">Deleting or anonymising your account</h4>
   <p>
-    You can ask us to <strong>anonymise your account</strong>, permanently removing your personal information from the
-    portal. To request this, use the "Danger zone" at the bottom of your profile in {{ app_name }}, or {{ dd_contact }}.
-    Before we action the request we will verify who you are, and we can refuse or defer it where the law requires us to
-    keep the information (for example for tax, accounting, legal or security obligations).
+    {% if current_user %}
+    You can ask us to delete or anonymise your account using the
+    <a href="/admin/profile#security">Delete or anonymise my account form on your profile</a>.
+    {% else %}
+    You can ask us to delete or anonymise your account. Once you've signed in, use the "Delete or anonymise my account"
+    form on your profile.
+    {% endif %}
+    You can also email {{ dd_contact }}. We'll confirm who you are before we act, and we'll email you when your request has
+    been approved or, with a reason, if we can't action it.
   </p>
-  <p>When your request is processed we will, among other things:</p>
+  <p>
+    Some records have to be kept for business, legal or tax reasons, such as invoices, orders and support tickets. We don't
+    delete those records. Instead we anonymise them by removing your personal details. When your request is approved we:
+  </p>
   <ul>
-    <li>replace your name with a generic placeholder and change your email address to an undeliverable one, so your account can no longer be identified from them;</li>
-    <li>delete your password, two-factor authentication, passkey and mobile phone details, and deactivate the account so it can no longer be signed in to;</li>
-    <li>remove or de-identify the personal information in your tickets, replies, chats, call and SMS records and attachments;</li>
-    <li>delete any artificial-intelligence (AI) documents that were created from your information; and</li>
-    <li>remove you from sales and marketing communications.</li>
+    <li>replace your name with "Anonymised user" and your email address with an address that can't receive email;</li>
+    <li>remove your phone numbers and email signature, delete your password, two-factor authentication and passkeys, sign you out everywhere, and close the account so it can't be signed in to;</li>
+    <li>remove your name, email address and phone number from your tickets, replies, chats, SMS and call records, and from staff records linked to you;</li>
+    <li>delete your call recordings, voicemail and their transcripts, and email open and click tracking;</li>
+    <li>remove your information from our artificial intelligence (AI) search index; and</li>
+    <li>stop all sales and marketing emails to you.</li>
   </ul>
   <p>
-    This is permanent and cannot be undone, so please save any information you need before you ask. Because our backups are
-    overwritten on a rolling basis, they stop containing your personal information over time. We may keep a small amount of
-    information where we are required to by law. We also keep a record that your account was anonymised so that we can honour
-    your request and meet our compliance obligations; that record does not include your name or email address — it references
-    your account using an irreversible, one-way code that cannot be turned back into your details.
+    This can't be undone, so save anything you need before you ask. Backups are overwritten on a rolling basis, so they stop
+    holding your personal information over time. To keep you off future marketing lists, we keep a one-way code made from your
+    email address that can't be turned back into the address. Our security records note that an account was anonymised but
+    don't hold your name or email address.
   </p>
 </div>

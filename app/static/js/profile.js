@@ -359,6 +359,17 @@
     });
   }
 
+  // ── Account anonymisation ──────────────────────────────────────────────
+  const anonymiseModal = document.getElementById('profile-anonymise-modal');
+  const anonymiseForm = document.getElementById('profile-anonymise-form');
+
+  document.querySelectorAll('[data-profile-open="profile-anonymise-modal"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (anonymiseForm) anonymiseForm.reset();
+      openModal(anonymiseModal, { trigger: button, focus: '#anonymise-reason' });
+    });
+  });
+
   // ── Password ───────────────────────────────────────────────────────────
   const passwordModal = document.getElementById('profile-password-modal');
   const passwordForm = document.getElementById('password-form');

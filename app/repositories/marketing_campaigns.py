@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.core.database import db
+from app.repositories import anonymisation as anonymisation_repo
 
 _CAMPAIGN_FIELDS = (
     "name",
@@ -371,7 +372,25 @@ async def list_opted_out(emails: Sequence[str], category: str) -> set[str]:
         + ")",
         tuple([category, *emails]),
     )
-    return {str(row["email"]).lower() for row in rows}
+    opted_out = {str(row["email"]).lower() for row in rows}
+    return opted_out | await _anonymised_emails(emails)
+
+
+async def _anonymised_emails(emails: Sequence[str]) -> set[str]:
+    """Addresses of anonymised accounts, matched by their stored one-way hash.
+
+    This keeps an anonymised person out of future campaigns even if their
+    opt-out row is later removed.
+    """
+    try:
+        hashes = await anonymisation_repo.list_anonymised_email_hashes(emails)
+    except Exception:  # pragma: no cover - table missing on an old schema
+        return set()
+    return {
+        str(email).lower()
+        for email in emails
+        if anonymisation_repo.email_hash(email) in hashes
+    }
 
 
 async def add_opt_out(email: str, category: str, campaign_id: int | None) -> None:
