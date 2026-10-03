@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 
 from app.services.monitored_http import monitored_client
+from app.services.outbound_url_guard import redirect_guard_hooks, validate_outbound_url_async
 
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
@@ -1335,8 +1336,15 @@ async def _execute_policy_step(
                 "webhook_status": event.get("status"),
             }
         timeout_seconds = max(1, int(step.get("timeout_seconds") or 30))
+        # The URL was template-resolved from staff data, so re-validate it at
+        # fetch time (scheme plus loopback/link-local/metadata literals are
+        # rejected up front).  Full DNS resolution happens per request via the
+        # redirect guard hooks below, which also cover every redirect hop.
+        await validate_outbound_url_async(url, check_dns=False)
         async with monitored_client(
-            httpx.AsyncClient, timeout=timeout_seconds
+            httpx.AsyncClient,
+            timeout=timeout_seconds,
+            event_hooks=redirect_guard_hooks(),
         ) as client:
             response = await client.request(
                 method,
@@ -1359,12 +1367,17 @@ async def _execute_policy_step(
             _resolve_template_value(step.get("url"), vars_map=vars_map),
             field_name="url",
         )
+        # Re-validate the template-resolved URL so a staff field cannot point
+        # the fetch at loopback/link-local/metadata addresses, and do not
+        # follow redirects (they would bypass that validation).  DNS is
+        # resolved by curl itself at connect time, so only the fast
+        # literal-IP pre-flight is performed here.
+        await validate_outbound_url_async(url, check_dns=False)
         timeout_seconds = max(1, int(step.get("timeout_seconds") or 30))
         process = await asyncio.create_subprocess_exec(
             "curl",
             "--silent",
             "--show-error",
-            "--location",
             "--max-time",
             str(timeout_seconds),
             url,

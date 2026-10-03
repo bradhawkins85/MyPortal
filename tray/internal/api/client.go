@@ -447,6 +447,7 @@ type VersionResponse struct {
 	Version     string `json:"version"`
 	DownloadURL string `json:"download_url,omitempty"`
 	Required    bool   `json:"required"`
+	Sha256      string `json:"sha256,omitempty"`
 }
 
 // GetVersion checks if a newer installer version is available.
