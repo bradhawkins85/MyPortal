@@ -3178,7 +3178,7 @@ async def get_excluded_product_ids(
     placeholders = ", ".join(["%s"] * len(product_ids))
     rows = await db.fetch_all(
         "SELECT product_id FROM shop_product_exclusions "
-        f"WHERE company_id = %s AND product_id IN ({placeholders})",
+        f"WHERE company_id = %s AND product_id IN ({placeholders})",  # nosec B608 - parameterised placeholders only
         (company_id, *product_ids),
     )
     return [int(row["product_id"]) for row in rows]
