@@ -30,6 +30,59 @@
     data-super-admin="{{ 'true' if current_user and current_user.is_super_admin else 'false' }}"
   >
     {% set has_authenticated_user = current_user is defined and current_user and current_user.get('id') %}
+    {% if policies_update_pending and has_authenticated_user %}
+    <div class="policies-banner" role="region" aria-label="Policy update notice" data-policies-banner>
+      <div class="policies-banner__body">
+        <div class="policies-banner__copy">
+          <p class="policies-banner__title">Policies updated</p>
+          <p class="policies-banner__message">
+            We've updated our
+            <a href="/legal/privacy">Privacy Policy</a>,
+            <a href="/legal/acceptable-use">Acceptable Use Policy</a> and
+            <a href="/legal/terms">Terms and Conditions</a>
+            (updated {{ legal_policies_updated }}).
+            {% if legal_policies_change_summary %}
+            {{ legal_policies_change_summary }}
+            {% endif %}
+          </p>
+        </div>
+        <div class="policies-banner__actions">
+          <a href="/legal" class="button button--ghost">Review changes</a>
+          <form method="post" action="/api/users/me/policies/accept" data-policies-accept-form>
+            {% include "partials/csrf.html" %}
+            <button type="submit" class="button">Accept</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var form = document.querySelector('[data-policies-accept-form]');
+        var banner = document.querySelector('[data-policies-banner]');
+        if (!form || !banner) return;
+        form.addEventListener('submit', function (e) {
+          e.preventDefault();
+          var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+          var csrfToken = csrfMeta ? csrfMeta.content : '';
+          fetch('/api/users/me/policies/accept', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-Token': csrfToken
+            }
+          }).then(function (res) {
+            if (res.ok) {
+              banner.remove();
+            } else {
+              form.submit();
+            }
+          }).catch(function () {
+            form.submit();
+          });
+        });
+      })();
+    </script>
+    {% endif %}
     <div class="layout" data-layout>
       <div class="layout__scrim" data-mobile-nav-scrim aria-hidden="true"></div>
       <nav class="layout__sidebar" id="primary-navigation" data-sidebar tabindex="-1">
@@ -863,6 +916,14 @@
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M5 3a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4h-2V4H7v16h10v-3h2v4a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M16.59 11 14 13.59 15.41 15 21 9.41 15.41 4 14 5.41 16.59 8H9v2z"/></svg>
                   </span>
                   <span class="menu__label">Impersonation</span>
+                </a>
+              </li>
+              <li class="menu__item">
+                <a href="/admin/anonymisation" {% if current_path.startswith('/admin/anonymisation') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M9 3v1H4v2h16V4h-5V3H9zM6 7l1 13h10l1-13H6zm2 2h2v9H8V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9z"/></svg>
+                  </span>
+                  <span class="menu__label">Anonymisation</span>
                 </a>
               </li>
               {% if feature_pack_available('rag_index') %}<li class="menu__item">

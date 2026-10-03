@@ -2058,6 +2058,68 @@ button.header-title-menu__link,
   }
 }
 
+/* ---------------------------------------------------------------------------
+ * Policy update banner – full-width notice shown above the main layout for
+ * signed-in users whose policies_accepted_version is out of date.
+ * Mirrors the update-banner look but sits outside the .layout wrapper.
+ * --------------------------------------------------------------------------- */
+.policies-banner {
+  border: 1px solid var(--hf-line-strong, rgba(148, 163, 184, 0.34));
+  border-radius: var(--hf-radius-md, 0.75rem);
+  background: var(--hf-panel-raised, rgba(15, 23, 42, 0.85));
+  padding: var(--space-gap-tight);
+  margin: var(--space-gap-base) var(--space-gap-base) 0;
+  box-shadow: var(--hf-shadow-md, 0 0.75rem 1.75rem rgba(0, 0, 0, 0.28));
+}
+
+.policies-banner__body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-gap-tight);
+}
+
+.policies-banner__copy {
+  flex: 1 1 240px;
+  color: var(--hf-copy, #f1f5f9);
+}
+
+.policies-banner__title {
+  margin: 0 0 0.15rem;
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.policies-banner__message {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--hf-muted, rgba(226, 232, 240, 0.8));
+}
+
+.policies-banner__message a {
+  color: var(--hf-accent, #38bdf8);
+  text-decoration: underline;
+}
+
+.policies-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-gap-tight);
+  flex: 0 0 auto;
+}
+
+.policies-banner__actions form {
+  display: inline;
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .policies-banner__actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
 .dashboard {
   max-width: 1100px;
   margin: 0 auto;

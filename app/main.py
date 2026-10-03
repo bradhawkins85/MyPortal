@@ -112,7 +112,7 @@ from uuid import uuid4
 from app.core.config import get_settings, get_templates_config
 from app.core.database import db
 from app.core.features import init_registry
-from app.core.legal import LEGAL_POLICIES, LEGAL_POLICIES_UPDATED
+from app.core.legal import LEGAL_POLICIES, LEGAL_POLICIES_CHANGE_SUMMARY, LEGAL_POLICIES_UPDATED
 from app.core.plugin_loader import get_plugin_loader, init_plugin_loader
 from app.core.logging import configure_logging, log_error, log_info, log_warning
 from loguru import logger
@@ -2612,6 +2612,13 @@ async def _build_base_context(
         "can_access_all_tickets": _menu_can(menu_access, "menu.tickets", write=True),
     }
     context.update(permission_flags)
+
+    # Policy re-acceptance: show a banner when the user's accepted version
+    # does not match the current LEGAL_POLICIES_UPDATED constant.
+    context["policies_update_pending"] = user.get("policies_accepted_version") != LEGAL_POLICIES_UPDATED
+    context["legal_policies_updated"] = LEGAL_POLICIES_UPDATED
+    context["legal_policies_change_summary"] = LEGAL_POLICIES_CHANGE_SUMMARY
+
     if extra:
         context.update(extra)
 
@@ -7024,6 +7031,7 @@ async def admin_profile_page(request: Request):
             "profile_passkeys": profile_passkeys,
             "profile_m365_contacts": m365_contacts_status,
             "profile_sales_opt_out": await _profile_sales_opt_out_status(user),
+            "profile_anonymisation_request": await _profile_anonymisation_request(user),
         },
     )
     return templates.TemplateResponse(context["request"], "admin/profile.html", context)
@@ -7044,6 +7052,18 @@ async def _profile_sales_opt_out_status(user: Mapping[str, Any]) -> bool:
         return False
 
 
+async def _profile_anonymisation_request(user: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Return the user's anonymisation request for the profile "danger zone",
+    or ``None`` when they have not made one (so the request form is offered).
+    Read failures degrade to ``None``."""
+    try:
+        from app.repositories import anonymisation as anonymisation_repo
+
+        return await anonymisation_repo.get_request_for_user(int(user["id"]))
+    except Exception:  # pragma: no cover - defensive: profile still renders
+        return None
+
+
 @app.post("/admin/profile/marketing-opt-out")
 async def profile_marketing_opt_out(request: Request):
     user, redirect = await _require_authenticated_user(request)
@@ -7062,6 +7082,116 @@ async def profile_marketing_opt_out(request: Request):
         return flash_redirect("/admin/profile#security", "You will now receive sales and marketing emails.", "success")
     await campaign_repo.add_opt_out(email, campaign_service.CATEGORY_SALES, None)
     return flash_redirect("/admin/profile#security", "You will no longer receive sales and marketing emails. Service updates will still be sent.", "success")
+
+
+@app.post("/admin/profile/anonymisation")
+async def profile_anonymisation_request(request: Request):
+    """A user requests permanent deletion of their account (issue #4554)."""
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    from app.services import anonymisation as anonymisation_service
+
+    try:
+        result = await anonymisation_service.create_request(
+            user=user,
+            ip_address=get_client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+        )
+    except anonymisation_service.AnonymisationError as exc:
+        return flash_redirect("/admin/profile#security", f"Could not submit your request: {exc}", "error")
+    if result.get("created"):
+        return flash_redirect(
+            "/admin/profile#security",
+            "Your anonymisation request has been submitted. An administrator will verify your email and complete the deletion; this can take a few days.",
+            "success",
+        )
+    current = (result.get("status") or "pending").replace("_", " ")
+    return flash_redirect(
+        "/admin/profile#security",
+        f"You already have an anonymisation request ({current}).",
+        "info",
+    )
+
+
+@app.get("/admin/anonymisation", response_class=HTMLResponse)
+async def admin_anonymisation_list(request: Request):
+    """List account anonymisation requests for a super admin."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.services import anonymisation as anonymisation_service
+
+    anon_requests = await anonymisation_service.list_requests(status=None, limit=200)
+    context = await _build_base_context(
+        request,
+        current_user,
+        extra={
+            "title": "Account anonymisation",
+            "current_path": "/admin/anonymisation",
+            "anonymisation_request": None,
+            "anonymisation_requests": anon_requests,
+        },
+    )
+    return templates.TemplateResponse(context["request"], "admin/anonymisation.html", context)
+
+
+@app.get("/admin/anonymisation/{request_id}", response_class=HTMLResponse)
+async def admin_anonymisation_detail(request: Request, request_id: int):
+    """Show a single account anonymisation request for a super admin."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.services import anonymisation as anonymisation_service
+
+    anon_request = await anonymisation_service.get_request(request_id)
+    if anon_request is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anonymisation request not found")
+    context = await _build_base_context(
+        request,
+        current_user,
+        extra={
+            "title": f"Anonymisation request #{request_id}",
+            "current_path": f"/admin/anonymisation/{request_id}",
+            "anonymisation_request": anon_request,
+            "anonymisation_requests": [],
+        },
+    )
+    return templates.TemplateResponse(context["request"], "admin/anonymisation.html", context)
+
+
+@app.post("/admin/anonymisation/{request_id}/execute")
+async def admin_anonymisation_execute(request: Request, request_id: int):
+    """Execute a pending anonymisation request (irreversible) for a super admin."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.services import anonymisation as anonymisation_service
+
+    try:
+        await anonymisation_service.execute_request(request_id=request_id, actor_user=current_user)
+    except anonymisation_service.AnonymisationError as exc:
+        return flash_redirect(f"/admin/anonymisation/{request_id}", str(exc), "error")
+    return flash_redirect(
+        f"/admin/anonymisation/{request_id}",
+        f"Anonymisation request #{request_id} has been completed. The user's personal data has been deleted.",
+        "success",
+    )
+
+
+@app.post("/admin/anonymisation/{request_id}/cancel")
+async def admin_anonymisation_cancel(request: Request, request_id: int):
+    """Cancel (delete) a pending anonymisation request for a super admin."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.services import anonymisation as anonymisation_service
+
+    try:
+        await anonymisation_service.cancel_request(request_id=request_id, actor_user=current_user)
+    except anonymisation_service.AnonymisationError as exc:
+        return flash_redirect(f"/admin/anonymisation/{request_id}", str(exc), "error")
+    return flash_redirect("/admin/anonymisation", f"Anonymisation request #{request_id} has been cancelled.", "success")
 
 
 @app.get("/admin/profile/m365-contacts/connect")
@@ -11912,6 +12042,7 @@ def _legal_context_extra(policy_slug: str | None) -> dict[str, Any]:
         "legal_policy_slug": policy_slug if policy else None,
         "legal_policy": policy,
         "legal_updated": LEGAL_POLICIES_UPDATED,
+        "legal_policies_change_summary": LEGAL_POLICIES_CHANGE_SUMMARY,
         "legal_entity_name": (settings.legal_entity_name or "").strip() or settings.app_name,
         "legal_contact_email": (settings.legal_contact_email or "").strip()
         or (settings.smtp_from or "").strip(),

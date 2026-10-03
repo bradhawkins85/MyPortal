@@ -86,6 +86,11 @@
       </ul>
       {{ no_warranty_notice() }}
       <p class="legal__meta">Last updated <time datetime="{{ legal_updated }}">{{ legal_updated }}</time></p>
+      {% if legal_policies_change_summary %}
+      <p class="legal__meta">
+        <strong>Recent changes:</strong> {{ legal_policies_change_summary }}
+      </p>
+      {% endif %}
     </section>
   {% endif %}
 </div>

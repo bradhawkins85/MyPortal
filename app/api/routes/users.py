@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from contextlib import suppress
+from datetime import datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
+from app.core.legal import LEGAL_POLICIES_UPDATED
 from app.repositories import company_memberships as membership_repo
 from app.repositories import roles as role_repo
 from app.repositories import sidebar_preferences as sidebar_preferences_repo
@@ -115,6 +119,63 @@ async def delete_my_preference(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid preference key")
     await user_preferences_repo.delete_preference(int(current_user["id"]), key)
     return None
+
+
+@router.post("/me/policies/accept")
+async def accept_policies(
+    request: Request,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    """Record that the current user has accepted the latest legal policy version.
+
+    Works as both a plain form POST (redirects back to the referring page so
+    the banner disappears on the next render) and a JSON API call (returns a
+    JSON response) for JS-enhanced in-place dismissal.
+    """
+    user = await user_repo.get_user_by_id(int(current_user["id"]))
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    before_version = user.get("policies_accepted_version")
+    await user_repo.update_user(
+        int(current_user["id"]),
+        policies_accepted_version=LEGAL_POLICIES_UPDATED,
+        policies_accepted_at=datetime.utcnow(),
+    )
+    await audit_service.record(
+        action="user.policies.accept",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="user",
+        entity_id=int(current_user["id"]),
+        before={"policies_accepted_version": before_version},
+        after={"policies_accepted_version": LEGAL_POLICIES_UPDATED},
+        metadata={"policies_version": LEGAL_POLICIES_UPDATED},
+    )
+
+    # Plain form POST (no JS): redirect back to the referring page so the
+    # banner disappears when the page re-renders with the updated user row.
+    sec_fetch_mode = request.headers.get("sec-fetch-mode", "").lower()
+    accept_header = request.headers.get("accept", "").lower()
+    is_browser_nav = sec_fetch_mode == "navigate" or (
+        not sec_fetch_mode and "text/html" in accept_header
+    )
+    if is_browser_nav:
+        referer = request.headers.get("referer")
+        redirect_url = "/"
+        if referer:
+            try:
+                parts = urlsplit(referer)
+                if not parts.netloc or parts.netloc == request.url.netloc:
+                    redirect_url = parts.path or "/"
+                    if parts.query:
+                        redirect_url += "?" + parts.query
+            except ValueError:
+                pass
+        return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+
+    return JSONResponse(content={"ok": True, "policies_accepted_version": LEGAL_POLICIES_UPDATED})
 
 
 @router.get("", response_model=list[UserResponse])

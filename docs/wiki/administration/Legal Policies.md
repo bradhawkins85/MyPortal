@@ -38,5 +38,28 @@ The text lives in `app/templates/legal/_privacy.html`,
 MyPortal collects and the features it offers. It is written with the
 Australian Privacy Principles and the GDPR in mind but is a starting point,
 not legal advice: review it with your own adviser and adjust it for the
-features you enable. Update `LEGAL_POLICIES_UPDATED` in `app/main.py` when the
+features you enable. Update `LEGAL_POLICIES_UPDATED` in `app/core/legal.py` when the
 wording changes.
+
+## Re-acceptance banner
+
+When a signed-in user's `policies_accepted_version` differs from the current
+`LEGAL_POLICIES_UPDATED` value (including when it is `NULL`), a full-width
+**policy update banner** appears above the main layout on every page. The
+banner reads:
+
+> We've updated our Privacy Policy, Acceptable Use Policy and Terms and
+> Conditions (updated {date}). [Review changes] [Accept]
+
+- **Review changes** links to `/legal`.
+- **Accept** is a CSRF-protected `POST /api/users/me/policies/accept` that
+  sets `policies_accepted_version` to the current value, stamps
+  `policies_accepted_at`, writes an audit log entry
+  (`user.policies.accept`), and dismisses the banner.
+- Works without JavaScript (plain form POST → redirect back to the referring
+  page). With JavaScript, the form submission is intercepted and the banner
+  is removed in place after a successful `fetch` response.
+- The banner only shows on authenticated pages; public pages are unaffected.
+- Set `LEGAL_POLICIES_CHANGE_SUMMARY` in `app/core/legal.py` to a short
+  sentence describing the changes; it is appended to the banner message and
+  shown on the `/legal` overview page.
