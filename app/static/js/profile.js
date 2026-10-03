@@ -1867,6 +1867,20 @@
     });
   });
 
+  const marketingForm = root.querySelector('[data-profile-marketing]');
+  if (marketingForm) {
+    const marketingToggle = marketingForm.querySelector('[data-profile-marketing-toggle]');
+    const marketingSave = marketingForm.querySelector('[data-profile-marketing-save]');
+    if (marketingSave) {
+      marketingSave.hidden = true;
+    }
+    if (marketingToggle) {
+      marketingToggle.addEventListener('change', () => {
+        marketingForm.submit();
+      });
+    }
+  }
+
   renderTotpDevices();
   renderPasskeys();
 })();
