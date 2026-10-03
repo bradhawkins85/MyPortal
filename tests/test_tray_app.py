@@ -150,7 +150,8 @@ def tray_db(tray_event_loop):
                published_by_user_id INTEGER NULL,
                published_at TEXT DEFAULT (datetime('now')),
                rollout_percent INTEGER NOT NULL DEFAULT 100,
-               rollout_start_at TEXT NULL
+               rollout_start_at TEXT NULL,
+               sha256 TEXT NULL
            )""",
     ]
 

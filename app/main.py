@@ -135,6 +135,7 @@ from app.repositories import notifications as notifications_repo
 from app.repositories import chat as chat_repo
 from app.repositories import defender as defender_repo
 from app.repositories import roles as role_repo
+from app.repositories import shop as shop_repo
 from app.repositories import cart as cart_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import staff as staff_repo
@@ -152,7 +153,7 @@ from app.services.agent_sources import SOURCE_REGISTRY as AGENT_SOURCE_REGISTRY
 from app.security.menu_permissions import MENU_PERMISSIONS, catalogue_for_api, menu_has_access, normalize_access_level, normalize_menu_permissions
 from app.repositories import site_settings as site_settings_repo
 from app.security.cache_control import CacheControlMiddleware
-from app.security.client_ip import get_client_ip
+from app.security.client_ip import _peer_is_trusted, get_client_ip
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.security.flash import flash_redirect, set_flash
@@ -836,21 +837,6 @@ general_rate_limiter = SimpleRateLimiter(
     namespace="rate-limit:general",
 )
 app.add_middleware(
-    RateLimiterMiddleware,
-    rate_limiter=general_rate_limiter,
-    exempt_paths=(
-        SWAGGER_UI_PATH,
-        PROTECTED_OPENAPI_PATH,
-        "/static",
-        "/uploads",
-        "/health",
-        "/healthz",
-        "/readyz",
-    ),
-    key_func=_general_rate_limit_key,
-)
-
-app.add_middleware(
     CacheControlMiddleware,
     exempt_paths=("/static",),
 )
@@ -876,6 +862,22 @@ app.add_middleware(
         # browser session. Requiring CSRF here blocks legitimate automation.
         "/api/staff/workflow-webhooks",
     ),
+)
+
+# Registered after CSRF so rate limits are enforced before CSRF's session and database lookups run, throttling anonymous attackers first.
+app.add_middleware(
+    RateLimiterMiddleware,
+    rate_limiter=general_rate_limiter,
+    exempt_paths=(
+        SWAGGER_UI_PATH,
+        PROTECTED_OPENAPI_PATH,
+        "/static",
+        "/uploads",
+        "/health",
+        "/healthz",
+        "/readyz",
+    ),
+    key_func=_general_rate_limit_key,
 )
 
 # Registered last so it runs before authentication, CSRF, rate limiting and
@@ -1203,10 +1205,15 @@ async def refresh_updates(websocket: WebSocket) -> None:
     origin = (websocket.headers.get("origin") or "").strip()
     if origin:
         origin_host = urlsplit(origin).netloc.lower()
-        allowed_hosts = {
-            (websocket.headers.get("host") or "").strip().lower(),
-            (websocket.headers.get("x-forwarded-host") or "").split(",")[0].strip().lower(),
-        }
+        allowed_hosts = {(websocket.headers.get("host") or "").strip().lower()}
+        # X-Forwarded-Host is only honoured from configured trusted proxies,
+        # mirroring the X-Forwarded-For handling in get_client_ip; otherwise
+        # an attacker-controlled header would whitelist any Origin host.
+        peer_ip = websocket.client.host if websocket.client else None
+        if peer_ip and _peer_is_trusted(peer_ip, settings.trusted_proxy_networks()):
+            allowed_hosts.add(
+                (websocket.headers.get("x-forwarded-host") or "").split(",")[0].strip().lower()
+            )
         if settings.portal_url:
             allowed_hosts.add(urlsplit(settings.portal_url.unicode_string()).netloc.lower())
         allowed_hosts.discard("")
@@ -1734,6 +1741,44 @@ def _classify_private_upload(sanitized_path: PurePosixPath) -> tuple[bool, bool]
     return None
 
 
+async def _require_shop_image_access(
+    user: dict[str, Any] | None, request: Request, sanitized_path: PurePosixPath
+) -> None:
+    """Scope product images to users whose company can access the shop.
+
+    Product images live in a shared directory keyed by random names, so the
+    directory alone cannot enforce company boundaries.  A product image is
+    only served when the requesting user holds the ``can_access_shop``
+    membership permission and their company has not excluded every product
+    that references the image.
+    """
+    if not user or user.get("is_super_admin"):
+        return
+    try:
+        user_id = int(user["id"])
+        company_id = int(user.get("company_id"))
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+        ) from None
+    membership = await _get_effective_company_membership(request, user_id, company_id)
+    if not (membership and membership.get("can_access_shop")):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+        )
+    image_path = f"/uploads/shop/{sanitized_path.parts[1]}"
+    product_ids = await shop_repo.get_product_ids_by_image_url(image_path)
+    if not product_ids:
+        # Orphaned images (e.g. a stock-feed import still in flight) keep
+        # the permission-only behaviour above.
+        return
+    excluded = await shop_repo.get_excluded_product_ids(company_id, product_ids)
+    if excluded and set(excluded).issuperset(product_ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+        )
+
+
 @app.get("/uploads/{file_path:path}", response_class=FileResponse, include_in_schema=False)
 async def serve_private_upload(file_path: str, request: Request):
     """Serve product images stored in the legacy private uploads directory."""
@@ -1745,9 +1790,11 @@ async def serve_private_upload(file_path: str, request: Request):
     is_public_kb_image, is_inline_image = classification
 
     if not is_public_kb_image:
-        _, redirect = await _require_authenticated_user(request)
+        user, redirect = await _require_authenticated_user(request)
         if redirect:
             return redirect
+        if sanitized_path.parts[:1] == ("shop",):
+            await _require_shop_image_access(user, request, sanitized_path)
 
     resolved_path = _resolve_private_upload(sanitized_path)
     headers = {

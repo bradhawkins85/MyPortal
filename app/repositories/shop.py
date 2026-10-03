@@ -3158,3 +3158,27 @@ def _normalise_quote_item(row: dict[str, Any]) -> dict[str, Any]:
     normalised["stock_sa"] = _coerce_optional_int(row.get("stock_sa"))
     normalised["stock_wa"] = _coerce_optional_int(row.get("stock_wa"))
     return normalised
+
+
+async def get_product_ids_by_image_url(image_url: str) -> list[int]:
+    """Return the ids of products whose ``image_url`` equals ``image_url``."""
+    rows = await db.fetch_all(
+        "SELECT id FROM shop_products WHERE image_url = %s",
+        (image_url,),
+    )
+    return [int(row["id"]) for row in rows]
+
+
+async def get_excluded_product_ids(
+    company_id: int, product_ids: list[int]
+) -> list[int]:
+    """Return which of ``product_ids`` are excluded from ``company_id``'s shop."""
+    if not product_ids:
+        return []
+    placeholders = ", ".join(["%s"] * len(product_ids))
+    rows = await db.fetch_all(
+        "SELECT product_id FROM shop_product_exclusions "
+        f"WHERE company_id = %s AND product_id IN ({placeholders})",
+        (company_id, *product_ids),
+    )
+    return [int(row["product_id"]) for row in rows]

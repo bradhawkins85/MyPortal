@@ -27,14 +27,29 @@ def uploads(tmp_path: Path, monkeypatch):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"<script>alert(1)</script>")
     monkeypatch.setattr(app_main, "_private_uploads_path", root)
-    state = {"authenticated": True}
+    state = {"authenticated": True, "can_access_shop": True}
 
     async def fake_auth(request):
         if state["authenticated"]:
-            return {"id": 1}, None
+            user = {"id": 1, "company_id": 5}
+            if state.get("super_admin"):
+                user["is_super_admin"] = True
+            return user, None
         return None, RedirectResponse("/login")
 
+    async def fake_membership(request, user_id, company_id):
+        return {"can_access_shop": state["can_access_shop"]}
+
+    async def fake_product_ids(image_url):
+        return list(state.get("product_ids", []))
+
+    async def fake_excluded(company_id, product_ids):
+        return list(state.get("excluded_product_ids", []))
+
     monkeypatch.setattr(app_main, "_require_authenticated_user", fake_auth)
+    monkeypatch.setattr(app_main, "_get_effective_company_membership", fake_membership)
+    monkeypatch.setattr(app_main.shop_repo, "get_product_ids_by_image_url", fake_product_ids)
+    monkeypatch.setattr(app_main.shop_repo, "get_excluded_product_ids", fake_excluded)
     return state
 
 
@@ -61,6 +76,30 @@ async def test_images_served_inline_with_nosniff(uploads):
     assert response.media_type == "image/png"
     assert response.headers["x-content-type-options"] == "nosniff"
     assert "content-disposition" not in response.headers
+
+
+@pytest.mark.asyncio
+async def test_shop_image_hidden_without_shop_permission(uploads):
+    uploads["can_access_shop"] = False
+    with pytest.raises(HTTPException) as exc:
+        await app_main.serve_private_upload("shop/prod.png", request=None)
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_shop_image_hidden_when_product_excluded_for_company(uploads):
+    uploads["product_ids"] = [77]
+    uploads["excluded_product_ids"] = [77]
+    with pytest.raises(HTTPException) as exc:
+        await app_main.serve_private_upload("shop/prod.png", request=None)
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_super_admin_can_view_shop_image(uploads):
+    uploads["super_admin"] = True
+    response = await app_main.serve_private_upload("shop/prod.png", request=None)
+    assert response.media_type == "image/png"
 
 
 @pytest.mark.asyncio
