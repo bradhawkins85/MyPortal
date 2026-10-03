@@ -134,30 +134,24 @@
             <svg viewBox="0 0 24 24" focusable="false"><path d="M9 3v1H4v2h16V4h-5V3H9zM6 7l1 13h10l1-13H6zm2 2h2v9H8V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9z"/></svg>
           </span>
           <div class="profile-card__heading">
-            <h2 class="card__title" id="profile-anonymise-title">Danger zone</h2>
-            <p class="card__subtitle">Permanently delete your account and all of your personal data.</p>
+            <h2 class="card__title" id="profile-anonymise-title">Delete or anonymise my account</h2>
+            <p class="card__subtitle">Ask us to remove your personal details from {{ app_name | default('MyPortal') }}.</p>
           </div>
+          {% set ar = profile_anonymisation_request %}
+          {% if not ar or ar.status == "rejected" %}
+          <button type="button" class="button button--danger button--small" data-profile-open="profile-anonymise-modal" aria-haspopup="dialog" aria-controls="profile-anonymise-modal">Request</button>
+          {% endif %}
         </header>
         <div class="card__body">
-          {% if profile_anonymisation_request %}
-            {% set ar = profile_anonymisation_request %}
-            {% if ar.status in ("pending", "executing") %}
-              <p><span class="badge badge--warning">Anonymisation {{ ar.status | replace("_", " ") }}</span></p>
-              <p class="form-help">You have requested account deletion. An administrator will verify your email and complete the process, which can take a few days.</p>
-            {% elif ar.status == "completed" %}
-              <p><span class="badge badge--success">Anonymised</span></p>
-              <p class="form-help">Your personal data has been deleted. You can sign up again at any time to create a new account.</p>
-            {% else %}
-              <p><span class="badge badge--danger">Request failed</span></p>
-              {% if ar.error_message %}<p class="form-help">{{ ar.error_message }}</p>{% endif %}
-              <p class="form-help">Please contact support if you would like to request deletion again.</p>
-            {% endif %}
+          {% if ar and ar.status in ("pending", "approved") %}
+            <p><span class="status status--warning">Request in progress</span></p>
+            <p class="form-help">We received your request on <span data-utc="{{ ar.requested_at.isoformat() if ar.requested_at is not string else ar.requested_at }}">{{ ar.requested_at }}</span>. We'll email you once it has been reviewed.</p>
+          {% elif ar and ar.status == "rejected" %}
+            <p><span class="status status--neutral">Previous request not actioned</span></p>
+            {% if ar.notes %}<p class="form-help">Reason: {{ ar.notes }}</p>{% endif %}
+            <p class="form-help">You can submit a new request at any time.</p>
           {% else %}
-            <p class="form-help">Requesting anonymisation permanently removes your account, content, and personal data after an administrator verifies your email. This cannot be undone.</p>
-            <form method="post" action="/admin/profile/anonymisation" id="profile-anonymise-form" class="profile-form">
-              {% include "partials/csrf.html" %}
-              <button type="submit" class="button button--danger">Request account deletion</button>
-            </form>
+            <p class="form-help">Your name, email address, phone numbers and sign-in details are removed, and you won't be able to sign in again. This can't be undone.</p>
           {% endif %}
         </div>
       </section>
@@ -632,6 +626,38 @@
       </footer>
     </form>
   </div>
+  <div class="modal scf-modal" id="profile-anonymise-modal" role="dialog" aria-modal="true" aria-labelledby="profile-anonymise-modal-title" hidden>
+    <form class="modal__panel profile-modal" id="profile-anonymise-form" method="post" action="/admin/profile/anonymisation" autocomplete="off">
+      {% include "partials/csrf.html" %}
+      <header class="modal__header">
+        <div>
+          <h2 class="modal__title" id="profile-anonymise-modal-title">Delete or anonymise my account</h2>
+          <p class="scf-editor__subtitle">We'll review your request and email you when it has been actioned.</p>
+        </div>
+        <button type="button" class="modal__close" data-modal-close aria-label="Close anonymisation request"></button>
+      </header>
+      <div class="modal__body profile-modal__body">
+        <p>When your request is approved we replace your name, email address and phone numbers, delete your password, two-factor and passkey details, call recordings and voicemail, and close your account.</p>
+        <p class="form-help">Some records, such as invoices, tickets and orders, are kept where the law requires us to, but your personal details are removed from them.</p>
+        <div class="form-field">
+          <label class="form-label" for="anonymise-reason">Reason <span class="scf-optional">optional</span></label>
+          <textarea id="anonymise-reason" name="reason" class="form-input" rows="3" maxlength="2000"></textarea>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="anonymise-confirm-email">Confirm your email address</label>
+          <input id="anonymise-confirm-email" name="confirm_email" type="email" class="form-input" required autocomplete="off" placeholder="{{ current_user.email if current_user else '' }}" />
+        </div>
+        <label class="form-checkbox" for="anonymise-acknowledge">
+          <input type="checkbox" id="anonymise-acknowledge" name="acknowledge" value="1" required />
+          <span>I understand that my account will be anonymised, I won't be able to sign in again, and this can't be undone.</span>
+        </label>
+      </div>
+      <footer class="modal__footer scf-editor__footer">
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        <button type="submit" class="button button--danger">Submit request</button>
+      </footer>
+    </form>
+  </div>
 </div>
 {% endblock %}
 
@@ -644,25 +670,4 @@
   <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>
   {% endif %}
   <script src="{{ static_url('/static/js/profile.js') }}" defer></script>
-  <script>
-    // Danger Zone: inline confirm for the anonymisation request form.
-    // admin.js (which provides the global data-confirm handler) is not loaded
-    // on the profile page, so bind a lightweight confirm here.
-    (function () {
-      function bind() {
-        var form = document.getElementById('profile-anonymise-form');
-        if (!form) return;
-        form.addEventListener('submit', function (event) {
-          if (!window.confirm('Request permanent deletion of your account and all of your personal data? This cannot be undone.')) {
-            event.preventDefault();
-          }
-        });
-      }
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', bind);
-      } else {
-        bind();
-      }
-    })();
-  </script>
 {% endblock %}

@@ -15,7 +15,7 @@
     <header class="card__header">
       <div>
         <h2 class="card__title">Active MyPortal users</h2>
-        <p class="card__description">Review active portal accounts, record AI opt-out requests received by email or phone, and remove access that is no longer needed.</p>
+        <p class="card__description">Review active portal accounts, record AI opt-out and anonymisation requests received by email or phone, and remove access that is no longer needed.</p>
       </div>
     </header>
     <div class="table-wrapper">
@@ -71,6 +71,10 @@
                   {% include "partials/csrf.html" %}
                   <button type="submit" class="button button--ghost" {% if is_self %}disabled{% endif %}>Deactivate</button>
                 </form>
+                <button type="button" class="button button--ghost" {% if is_self %}disabled{% endif %}
+                        data-anonymise-open="anonymise-user-modal" aria-haspopup="dialog" aria-controls="anonymise-user-modal"
+                        data-anonymise-user-id="{{ entry.id }}" data-anonymise-label="{{ entry.email }}"
+                        title="Use when the person asks by email or phone to have their account anonymised">Anonymise</button>
                 <form action="/admin/users/{{ entry.id }}/delete" method="post" class="inline-form"
                       onsubmit="return confirm({{ ('Permanently delete ' ~ entry.email ~ '? This cannot be undone.') | tojson | forceescape }});">
                   {% include "partials/csrf.html" %}
@@ -92,9 +96,38 @@
       <p class="table-pagination__status" data-page-info aria-live="polite"></p>
     </div>
   </section>
+
+  <div class="modal" id="anonymise-user-modal" role="dialog" aria-modal="true" aria-labelledby="anonymise-user-modal-title" hidden>
+    <form class="modal__panel" method="post" action="/admin/users">
+      {% include "partials/csrf.html" %}
+      <header class="modal__header">
+        <div>
+          <h2 class="modal__title" id="anonymise-user-modal-title">Anonymise account</h2>
+          <p class="text-muted">Permanently anonymises <strong data-anonymise-target></strong>. It can't be undone.</p>
+        </div>
+        <button type="button" class="modal__close" data-modal-close aria-label="Close anonymise account"></button>
+      </header>
+      <div class="modal__body">
+        <p>Their name, email address and phone numbers are replaced across the portal, their sign-in details, recordings and voicemail are deleted, and the account is closed. Tickets, invoices and orders are kept without their personal details.</p>
+        <div class="form-field">
+          <label class="form-label" for="anonymise-user-notes">How the request was received <span class="text-muted">optional</span></label>
+          <textarea id="anonymise-user-notes" name="notes" class="form-input" rows="3" maxlength="2000" placeholder="For example: phone call on 3 October, identity checked"></textarea>
+        </div>
+        <label class="form-checkbox" for="anonymise-user-confirm">
+          <input type="checkbox" id="anonymise-user-confirm" name="confirm" value="1" required />
+          <span>The person asked for this, and I've checked who they are.</span>
+        </label>
+      </div>
+      <footer class="modal__footer">
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        <button type="submit" class="button button--danger">Anonymise account</button>
+      </footer>
+    </form>
+  </div>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/anonymisation_admin.js') }}" defer></script>
 {% endblock %}

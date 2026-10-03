@@ -7086,30 +7086,34 @@ async def profile_marketing_opt_out(request: Request):
 
 @app.post("/admin/profile/anonymisation")
 async def profile_anonymisation_request(request: Request):
-    """A user requests permanent deletion of their account (issue #4554)."""
+    """A user asks for their account to be anonymised (issue #4554)."""
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return redirect
     from app.services import anonymisation as anonymisation_service
 
+    form = await request.form()
     try:
         result = await anonymisation_service.create_request(
             user=user,
+            reason=str(form.get("reason") or ""),
+            confirm_email=str(form.get("confirm_email") or ""),
+            acknowledged=str(form.get("acknowledge") or "").strip().lower() in {"1", "true", "on", "yes"},
             ip_address=get_client_ip(request),
             user_agent=request.headers.get("user-agent"),
+            request=request,
         )
     except anonymisation_service.AnonymisationError as exc:
-        return flash_redirect("/admin/profile#security", f"Could not submit your request: {exc}", "error")
+        return flash_redirect("/admin/profile#security", "Your request wasn't submitted. " + str(exc), "error")
     if result.get("created"):
         return flash_redirect(
             "/admin/profile#security",
-            "Your anonymisation request has been submitted. An administrator will verify your email and complete the deletion; this can take a few days.",
+            "Your request has been submitted. We've emailed you a confirmation, and we'll email you again once it has been reviewed.",
             "success",
         )
-    current = (result.get("status") or "pending").replace("_", " ")
     return flash_redirect(
         "/admin/profile#security",
-        f"You already have an anonymisation request ({current}).",
+        "You already have a request in progress. We'll email you once it has been reviewed.",
         "info",
     )
 
@@ -7122,7 +7126,10 @@ async def admin_anonymisation_list(request: Request):
         return redirect
     from app.services import anonymisation as anonymisation_service
 
-    anon_requests = await anonymisation_service.list_requests(status=None, limit=200)
+    status_filter = str(request.query_params.get("status") or "").strip().lower()
+    if status_filter not in {"pending", "approved", "rejected", "completed"}:
+        status_filter = ""
+    anon_requests = await anonymisation_service.list_requests(status=status_filter or None, limit=200)
     context = await _build_base_context(
         request,
         current_user,
@@ -7131,6 +7138,7 @@ async def admin_anonymisation_list(request: Request):
             "current_path": "/admin/anonymisation",
             "anonymisation_request": None,
             "anonymisation_requests": anon_requests,
+            "anonymisation_status_filter": status_filter,
         },
     )
     return templates.TemplateResponse(context["request"], "admin/anonymisation.html", context)
@@ -7151,8 +7159,8 @@ async def admin_anonymisation_detail(request: Request, request_id: int):
         request,
         current_user,
         extra={
-            "title": f"Anonymisation request #{request_id}",
-            "current_path": f"/admin/anonymisation/{request_id}",
+            "title": "Anonymisation request #" + str(request_id),
+            "current_path": "/admin/anonymisation/" + str(request_id),
             "anonymisation_request": anon_request,
             "anonymisation_requests": [],
         },
@@ -7160,38 +7168,48 @@ async def admin_anonymisation_detail(request: Request, request_id: int):
     return templates.TemplateResponse(context["request"], "admin/anonymisation.html", context)
 
 
-@app.post("/admin/anonymisation/{request_id}/execute")
-async def admin_anonymisation_execute(request: Request, request_id: int):
-    """Execute a pending anonymisation request (irreversible) for a super admin."""
+@app.post("/admin/anonymisation/{request_id}/approve")
+async def admin_anonymisation_approve(request: Request, request_id: int):
+    """Approve a request and anonymise the account (irreversible)."""
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
     from app.services import anonymisation as anonymisation_service
 
+    form = await request.form()
+    detail_url = "/admin/anonymisation/" + str(request_id)
     try:
-        await anonymisation_service.execute_request(request_id=request_id, actor_user=current_user)
+        await anonymisation_service.approve_request(
+            request_id=request_id,
+            actor_user=current_user,
+            notes=str(form.get("notes") or ""),
+            request=request,
+        )
     except anonymisation_service.AnonymisationError as exc:
-        return flash_redirect(f"/admin/anonymisation/{request_id}", str(exc), "error")
-    return flash_redirect(
-        f"/admin/anonymisation/{request_id}",
-        f"Anonymisation request #{request_id} has been completed. The user's personal data has been deleted.",
-        "success",
-    )
+        return flash_redirect(detail_url, str(exc), "error")
+    return flash_redirect(detail_url, "The account has been anonymised.", "success")
 
 
-@app.post("/admin/anonymisation/{request_id}/cancel")
-async def admin_anonymisation_cancel(request: Request, request_id: int):
-    """Cancel (delete) a pending anonymisation request for a super admin."""
+@app.post("/admin/anonymisation/{request_id}/reject")
+async def admin_anonymisation_reject(request: Request, request_id: int):
+    """Reject a pending request. The reason is emailed to the user."""
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
     from app.services import anonymisation as anonymisation_service
 
+    form = await request.form()
+    detail_url = "/admin/anonymisation/" + str(request_id)
     try:
-        await anonymisation_service.cancel_request(request_id=request_id, actor_user=current_user)
+        await anonymisation_service.reject_request(
+            request_id=request_id,
+            actor_user=current_user,
+            reason=str(form.get("reason") or ""),
+            request=request,
+        )
     except anonymisation_service.AnonymisationError as exc:
-        return flash_redirect(f"/admin/anonymisation/{request_id}", str(exc), "error")
-    return flash_redirect("/admin/anonymisation", f"Anonymisation request #{request_id} has been cancelled.", "success")
+        return flash_redirect(detail_url, str(exc), "error")
+    return flash_redirect(detail_url, "The request has been rejected and the user has been emailed the reason.", "success")
 
 
 @app.get("/admin/profile/m365-contacts/connect")
@@ -7518,6 +7536,35 @@ async def _admin_set_user_ai_opt_out(
     return flash_redirect("/admin/users", f"AI processing is turned back on for {label}.", "success")
 
 
+async def _admin_anonymise_user(
+    request: Request, current_user: dict[str, Any], user_id: int
+) -> RedirectResponse:
+    """Anonymise an account for a request received by email or phone."""
+
+    from app.services import anonymisation as anonymisation_service
+
+    form = await request.form()
+    if str(form.get("confirm") or "").strip().lower() not in {"1", "true", "on", "yes"}:
+        return flash_redirect("/admin/users", "Tick the box to confirm the person asked for this.", "error")
+    target = await user_repo.get_user_by_id(user_id)
+    if target and target.get("is_super_admin") and await user_repo.count_active_super_admins() <= 1:
+        return flash_redirect("/admin/users", "The last active super admin cannot be anonymised.", "error")
+    try:
+        result = await anonymisation_service.start_for_user(
+            user_id=user_id,
+            actor_user=current_user,
+            notes=str(form.get("notes") or ""),
+            request=request,
+        )
+    except anonymisation_service.AnonymisationError as exc:
+        return flash_redirect("/admin/users", str(exc), "error")
+    return flash_redirect(
+        "/admin/anonymisation/" + str(result["request_id"]),
+        "The account has been anonymised.",
+        "success",
+    )
+
+
 @app.post("/admin/users/{user_id}/{action}", response_class=HTMLResponse)
 async def admin_users_action(request: Request, user_id: int, action: str):
     current_user, redirect = await _require_super_admin_page(request)
@@ -7527,6 +7574,8 @@ async def admin_users_action(request: Request, user_id: int, action: str):
         return await _admin_set_user_ai_opt_out(
             request, current_user, user_id, opt_out=action == "ai-opt-out"
         )
+    if action == "anonymise":
+        return await _admin_anonymise_user(request, current_user, user_id)
     if action not in {"deactivate", "delete"}:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Unknown user action"
