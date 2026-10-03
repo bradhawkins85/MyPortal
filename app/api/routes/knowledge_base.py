@@ -395,10 +395,13 @@ def _validate_attachment_path_component(value: str, *, field_name: str) -> str:
 
 
 def _validate_article_id_component(article_id: int) -> str:
-    article_component = _validate_attachment_path_component(str(article_id), field_name="article identifier")
-    if not article_component.isdigit() or int(article_component) <= 0:
+    # ``article_id`` is an integer path parameter enforced by the API layer.
+    # Derive the on-disk directory name from the integer itself so the path
+    # segment can only ever contain digits (path separators are impossible).
+    numeric = int(article_id)
+    if numeric <= 0:
         raise HTTPException(status_code=400, detail="Invalid article identifier")
-    return article_component
+    return str(numeric)
 
 
 def _ensure_relative_to(path: Path, root: Path) -> None:
@@ -465,8 +468,12 @@ async def upload_article_attachment(
         await file.close()
         raise HTTPException(status_code=400, detail="Unsupported attachment type")
     directory = _resolve_article_attachment_directory(article_id, create=True)
+    # The on-disk filename is a server-generated random token only. The
+    # untrusted upload filename is kept solely in the database (for download
+    # display) and is never written into the stored path, so it cannot
+    # influence where the file is placed on disk.
     destination_name = _validate_attachment_path_component(
-        f"{uuid4().hex}{suffix}",
+        uuid4().hex,
         field_name="attachment filename",
     )
     destination = (directory / destination_name).resolve()
