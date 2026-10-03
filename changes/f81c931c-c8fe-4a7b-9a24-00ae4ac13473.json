@@ -1,0 +1,7 @@
+{
+  "guid": "f81c931c-c8fe-4a7b-9a24-00ae4ac13473",
+  "occurred_at": "2026-10-02T14:00Z",
+  "change_type": "Feature",
+  "summary": "Redesign the new and edit campaign pages to the gold-standard header bar with the draft status and Save button in the header",
+  "content_hash": "7c66b0ea99ff160a1dacc8735b933b542d0bde8d1aae8ff73ae073f038177342"
+}
