@@ -8004,6 +8004,18 @@ body:has(.stf-modal.is-visible) {
   margin: 0;
 }
 
+.profile-marketing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-tight);
+}
+
+.profile-marketing [hidden] {
+  display: none;
+}
+
 .profile-form__status {
   margin-right: auto;
   font-size: 0.85rem;
