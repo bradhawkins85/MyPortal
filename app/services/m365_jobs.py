@@ -138,6 +138,7 @@ async def _loop() -> None:
             try:
                 await asyncio.wait_for(_stop.wait(), POLL_SECONDS)
             except asyncio.TimeoutError:
+                # Poll interval elapsed with no stop signal: loop again.
                 pass
 
 

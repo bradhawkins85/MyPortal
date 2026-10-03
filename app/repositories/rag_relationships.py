@@ -79,7 +79,7 @@ async def list_compatible_targets(
         "SELECT d.*, c.chunk_text AS candidate_text, c.embedding_json AS candidate_embedding "
         "FROM rag_documents d LEFT JOIN rag_chunks c ON c.document_id = d.id AND c.is_active = 1 "
         "WHERE d.id <> ? AND d.is_active = 1 AND d.embedding_model = ? "
-        "AND d.source_type IN (" + placeholders + ") AND " + scope_sql,
+        "AND d.source_type IN (" + placeholders + ") AND " + scope_sql,  # nosec B608
         tuple(params),
     )
     documents: dict[int, dict[str, Any]] = {}

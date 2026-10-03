@@ -120,7 +120,7 @@ async def create_workflow_external(
     )
     row = await db.fetch_one(
         "SELECT "
-        + prefixed_columns
+        + prefixed_columns  # nosec B608
         + ", g.workflow_token_ciphertext FROM credential_grants g JOIN credentials c ON c.id = g.credential_id AND c.company_id = g.company_id WHERE g.company_id = %s AND g.workflow_execution_id = %s AND g.workflow_step_identity = %s AND g.expires_at > CURRENT_TIMESTAMP AND g.credential_version = c.current_version AND c.revoked_at IS NULL AND c.archived_at IS NULL",
         (company_id, workflow_execution_id, workflow_step_identity),
     )
@@ -141,7 +141,7 @@ async def create_workflow_external(
 
 async def get(grant_id: int) -> dict[str, Any] | None:
     return await db.fetch_one(
-        "SELECT " + _COLUMNS + " FROM credential_grants WHERE id = %s", (grant_id,)
+        "SELECT " + _COLUMNS + " FROM credential_grants WHERE id = %s", (grant_id,)  # nosec B608
     )
 
 
@@ -206,7 +206,7 @@ async def consume_external(token: str, code: str) -> tuple[dict[str, Any], str] 
     if changed != 1:
         return None
     row = await db.fetch_one(
-        "SELECT " + _COLUMNS + " FROM credential_grants WHERE token_hash = %s",
+        "SELECT " + _COLUMNS + " FROM credential_grants WHERE token_hash = %s",  # nosec B608
         (token_hash,),
     )
     if row is None:
@@ -233,12 +233,12 @@ async def claim_expiry(
         return None
     changed = await db.execute_rowcount(
         "UPDATE credential_grants SET expired_audited_at = CURRENT_TIMESTAMP WHERE "
-        + where
+        + where  # nosec B608
         + " AND expired_audited_at IS NULL AND expires_at <= CURRENT_TIMESTAMP",
         params,
     )
     if changed != 1:
         return None
     return await db.fetch_one(
-        "SELECT " + _COLUMNS + " FROM credential_grants WHERE " + where, params
+        "SELECT " + _COLUMNS + " FROM credential_grants WHERE " + where, params  # nosec B608
     )

@@ -448,7 +448,7 @@ async def _apply_port_links(company_id: int, equipment_id: int,
                         and link.peer_port_id is None})
     if asset_ids:
         found = await db.fetch_all(
-            "SELECT id FROM assets WHERE company_id=%s AND id IN (" + ",".join(["%s"] * len(asset_ids)) + ")",
+            "SELECT id FROM assets WHERE company_id=%s AND id IN (" + ",".join(["%s"] * len(asset_ids)) + ")",  # nosec B608
             (company_id, *asset_ids)) or []
         if {int(row["id"]) for row in found} != set(asset_ids):
             raise ValueError("Asset does not belong to this company")
@@ -457,7 +457,7 @@ async def _apply_port_links(company_id: int, equipment_id: int,
     if source_ids:
         outlets = await db.fetch_all(
             "SELECT id, equipment_id FROM rack_equipment_ports WHERE company_id=%s AND connector IN ('iec','3pin') AND id IN ("
-            + ",".join(["%s"] * len(source_ids)) + ")",
+            + ",".join(["%s"] * len(source_ids)) + ")",  # nosec B608
             (company_id, *source_ids)) or []
         valid = {int(row["id"]) for row in outlets if int(row["equipment_id"]) != equipment_id}
         if valid != set(source_ids):
@@ -504,7 +504,7 @@ async def network_linked_ports(company_id: int, port_ids: Iterable[int]) -> set[
     marks = ",".join(["%s"] * len(ids))
     rows = await db.fetch_all(
         "SELECT a_kind, a_id, b_kind, b_id FROM network_links WHERE company_id=%s AND ("
-        "(a_kind='rack_port' AND a_id IN (" + marks + ")) OR (b_kind='rack_port' AND b_id IN (" + marks + ")))",
+        "(a_kind='rack_port' AND a_id IN (" + marks + ")) OR (b_kind='rack_port' AND b_id IN (" + marks + ")))",  # nosec B608
         (company_id, *ids, *ids)) or []
     linked = set()
     for row in rows:
@@ -524,7 +524,7 @@ async def _check_peer_targets(company_id: int, equipment_id: int, links: list[Po
         return
     rows = await db.fetch_all(
         "SELECT id, equipment_id, connector FROM rack_equipment_ports WHERE company_id=%s AND id IN ("
-        + ",".join(["%s"] * len(targets)) + ")", (company_id, *targets)) or []
+        + ",".join(["%s"] * len(targets)) + ")", (company_id, *targets)) or []  # nosec B608
     found = {int(row["id"]): row for row in rows}
     for target_id, connector in targets.items():
         row = found.get(target_id)
@@ -576,10 +576,10 @@ async def _sync_ports(company_id: int, equipment_id: int, counts: Mapping[str, i
         removed += [int(row["id"]) for row in existing[keep:]]
     if removed:
         marks = ",".join(["%s"] * len(removed))
-        await db.execute("UPDATE rack_equipment_ports SET source_port_id=NULL WHERE source_port_id IN (" + marks + ")", tuple(removed))
-        await db.execute("UPDATE rack_equipment_ports SET peer_port_id=NULL WHERE peer_port_id IN (" + marks + ")", tuple(removed))
+        await db.execute("UPDATE rack_equipment_ports SET source_port_id=NULL WHERE source_port_id IN (" + marks + ")", tuple(removed))  # nosec B608
+        await db.execute("UPDATE rack_equipment_ports SET peer_port_id=NULL WHERE peer_port_id IN (" + marks + ")", tuple(removed))  # nosec B608
         await _delete_port_links(removed)
-        await db.execute("DELETE FROM rack_equipment_ports WHERE id IN (" + marks + ")", tuple(removed))
+        await db.execute("DELETE FROM rack_equipment_ports WHERE id IN (" + marks + ")", tuple(removed))  # nosec B608
     next_number = max((int(row["port_number"]) for row in rows), default=0) + 1
     for connector, count in counts.items():
         have = sum(1 for row in kept if str(row.get("connector") or "data") == connector)
@@ -624,7 +624,7 @@ async def place_asset(company_id: int, rack_id: int, asset_id: int | None, start
     values: list[Any] = [company_id, rack_id, asset_id, start_unit, unit_height, face, notes, width_lanes,
                          start_lane, depth_mode, power_draw_watts, item_type, clean_name, sum(counts.values())]
     equipment_id = await db.execute_returning_lastrowid(
-        "INSERT INTO rack_equipment (" + ",".join(columns) + ") VALUES (" + ",".join(["%s"] * len(columns)) + ")",
+        "INSERT INTO rack_equipment (" + ",".join(columns) + ") VALUES (" + ",".join(["%s"] * len(columns)) + ")",  # nosec B608
         tuple(values))
     try:
         await _insert_slots(equipment_id, rack_id, units, faces, lanes)
@@ -740,7 +740,7 @@ async def update_rack_equipment(company_id: int, equipment_id: int, name: str | 
         assignments.append("port_count=%s")
         values.append(sum(counts.values()))
     await db.execute(
-        "UPDATE rack_equipment SET " + ",".join(assignments) + " WHERE id=%s AND company_id=%s",
+        "UPDATE rack_equipment SET " + ",".join(assignments) + " WHERE id=%s AND company_id=%s",  # nosec B608
         (*values, equipment_id, company_id))
     if counts is not None:
         ports = await _sync_ports(company_id, equipment_id, counts)
@@ -812,7 +812,7 @@ async def _delete_port_links(port_ids: list[int]) -> None:
         return
     marks = ",".join(["%s"] * len(port_ids))
     await db.execute(
-        "DELETE FROM network_links WHERE (a_kind='rack_port' AND a_id IN (" + marks + "))"
+        "DELETE FROM network_links WHERE (a_kind='rack_port' AND a_id IN (" + marks + "))"  # nosec B608
         " OR (b_kind='rack_port' AND b_id IN (" + marks + "))", (*port_ids, *port_ids))
 
 

@@ -5710,7 +5710,6 @@ async def _invoke_update_ticket(
 
     The ticket_id can be provided directly or via context.ticket.id or context.ticket_id.
     """
-    tickets_repo = import_module("app.repositories.tickets")
 
     raw_context = payload.get("context")
     context = raw_context if isinstance(raw_context, Mapping) else {}
@@ -6021,8 +6020,6 @@ async def _invoke_update_ticket_description(
     description = payload.get("description")
     if description is not None:
         description = str(description)
-
-    tickets_repo = import_module("app.repositories.tickets")
 
     try:
         existing = await _tickets_repo().get_ticket(ticket_id_int)
@@ -7033,7 +7030,6 @@ async def _invoke_add_ticket_reply(
     - labour_type_id: Optional - Labour type for billing
     - send_notification: Optional (default: false) - Whether to send email notification
     """
-    tickets_repo = import_module("app.repositories.tickets")
 
     raw_context = payload.get("context")
     context = raw_context if isinstance(raw_context, Mapping) else {}
@@ -7259,7 +7255,6 @@ async def _invoke_smart_attachment_removal(
 ) -> dict[str, Any]:
     """Remove duplicate ticket attachments by comparing content hashes."""
 
-    tickets_repo = import_module("app.repositories.tickets")
     from app.repositories import ticket_attachments as attachments_repo
     from app.services import ticket_attachments as attachments_service
 
@@ -7625,7 +7620,6 @@ async def _invoke_whisperx(
     WhisperX ``/asr`` endpoint, and (when *add_note* is true) posts the
     resulting transcription as an internal note on the ticket.
     """
-    tickets_repo = import_module("app.repositories.tickets")
     from app.repositories import ticket_attachments as attachments_repo
     from app.services import ticket_attachments as attachments_service
 
@@ -8227,8 +8221,6 @@ async def _resolve_company_from_ticket_id(
     if ticket_id <= 0:
         return None
     try:
-        tickets_repo = import_module("app.repositories.tickets")
-
         ticket = await _tickets_repo().get_ticket(ticket_id)
     except Exception as exc:  # pragma: no cover - defensive lookup fallback
         logger.debug("Trello company lookup by ticket {} failed: {}", ticket_id, exc)

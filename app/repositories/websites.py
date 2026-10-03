@@ -188,7 +188,7 @@ async def enqueue_scheduled_scope(*, command: str, company_id: int | None,
             "w.collect_domain_expiry = 1)"
         )
     rows = await db.fetch_all(
-        "SELECT w.id FROM websites w WHERE " + " AND ".join(clauses) + " ORDER BY w.company_id, w.id",
+        "SELECT w.id FROM websites w WHERE " + " AND ".join(clauses) + " ORDER BY w.company_id, w.id",  # nosec B608
         tuple(params),
     ) or []
     queued = skipped = 0

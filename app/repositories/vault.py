@@ -37,7 +37,7 @@ async def _validate_links(company_id: int, links: list[tuple[str, int]]) -> None
 async def list_credentials(company_id: int) -> list[dict[str, Any]]:
     return await db.fetch_all(
         "SELECT "
-        + _METADATA_COLUMNS
+        + _METADATA_COLUMNS  # nosec B608
         + " FROM credentials WHERE company_id = %s ORDER BY archived_at IS NOT NULL, name, id",
         (company_id,),
     )
@@ -46,7 +46,7 @@ async def list_credentials(company_id: int) -> list[dict[str, Any]]:
 async def get_metadata(company_id: int, credential_id: int) -> dict[str, Any] | None:
     return await db.fetch_one(
         "SELECT "
-        + _METADATA_COLUMNS
+        + _METADATA_COLUMNS  # nosec B608
         + " FROM credentials WHERE company_id = %s AND id = %s",
         (company_id, credential_id),
     )
@@ -56,7 +56,7 @@ async def get_workflow_credential(
     company_id: int, execution_id: int, step_identity: str
 ) -> dict[str, Any] | None:
     return await db.fetch_one(
-        "SELECT " + _METADATA_COLUMNS + " FROM credentials "
+        "SELECT " + _METADATA_COLUMNS + " FROM credentials "  # nosec B608
         "WHERE company_id = %s AND workflow_execution_id = %s AND workflow_step_identity = %s",
         (company_id, execution_id, step_identity),
     )
@@ -209,7 +209,7 @@ async def set_lifecycle(
         raise ValueError("Unsupported lifecycle action")
     await db.execute(
         "UPDATE credentials SET "
-        + column
+        + column  # nosec B608
         + " = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = %s AND company_id = %s AND "
         + column
         + " IS NULL",

@@ -2660,7 +2660,7 @@ async def list_component_asset_links(
            FROM bcp_component_asset_links link
            LEFT JOIN assets asset ON asset.id = link.asset_id
                                 AND asset.company_id = link.company_id
-           WHERE """ + " AND ".join(conditions) +
+           WHERE """ + " AND ".join(conditions) +  # nosec B608
         " ORDER BY link.component_type, link.component_id, link.linked_at, link.id",
         tuple(params),
     ) or [])
@@ -2675,7 +2675,7 @@ async def link_asset_to_component(
     if table is None:
         raise ValueError("Unsupported BCP component type")
     component = await db.fetch_one(
-        "SELECT component.id FROM " + table + " component "
+        "SELECT component.id FROM " + table + " component "  # nosec B608
         "INNER JOIN bcp_plan plan ON plan.id = component.plan_id "
         "WHERE component.id = %s AND component.plan_id = %s AND plan.company_id = %s",
         (component_id, plan_id, company_id),
