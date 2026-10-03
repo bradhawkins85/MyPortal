@@ -23,13 +23,13 @@ from app.api.dependencies.auth import (
     require_helpdesk_technician,
     require_super_admin,
 )
-from app.api.dependencies.api_keys import get_optional_api_key
+from app.api.dependencies.api_keys import get_optional_api_key, require_api_key_company_access
 from app.core.errors import (
     build_client_http_error,
     log_exception_with_error_id,
     new_error_id,
 )
-from app.core.logging import log_error
+from app.core.logging import log_error, log_warning
 from loguru import logger
 from app.repositories import company_memberships as membership_repo
 from app.repositories import companies as companies_repo
@@ -177,6 +177,44 @@ async def _resolve_integration_ticket_actor(
     return actor
 
 
+def _enforce_api_key_company_access(
+    api_key_record: dict | None, company_id: int | str | None
+) -> None:
+    """Restrict API-key requests to tickets of companies the key is scoped to.
+
+    Keys that carry an explicit ``allowed_company_ids`` scope are strictly
+    enforced. Keys with an empty scope list keep their legacy global
+    helpdesk behaviour for backwards compatibility (a warning is logged so
+    unscoped keys remain visible to operators).
+    """
+    if not api_key_record or company_id is None:
+        return
+    try:
+        company_id_int = int(company_id)
+    except (TypeError, ValueError):
+        return
+    if not _api_key_scoped_company_ids(api_key_record):
+        log_warning(
+            "API key with no company scope used against ticket API",
+            api_key_id=api_key_record.get("id"),
+            company_id=company_id_int,
+        )
+        return
+    require_api_key_company_access(api_key_record, company_id_int)
+
+
+def _api_key_scoped_company_ids(
+    api_key_record: dict | None,
+) -> list[int]:
+    """Return the explicit company scope of an API key (empty = unscoped)."""
+    if not api_key_record:
+        return []
+    try:
+        return [int(c) for c in (api_key_record.get("allowed_company_ids") or [])]
+    except (TypeError, ValueError):
+        return []
+
+
 def _encode_ticket_cursor(
     updated_at: datetime | None, ticket_id: int | None
 ) -> str | None:
@@ -304,6 +342,17 @@ async def list_tickets(
     api_key_record = actor.get("api_key")
 
     cursor_updated_at, cursor_id = _decode_ticket_cursor(cursor)
+
+    if api_key_record:
+        allowed_companies = _api_key_scoped_company_ids(api_key_record)
+        if company_id is None and len(allowed_companies) == 1:
+            company_id = allowed_companies[0]
+        if company_id is None and len(allowed_companies) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="company_id query parameter is required for this API key.",
+            )
+        _enforce_api_key_company_access(api_key_record, company_id)
 
     has_helpdesk_access = bool(api_key_record)
     if current_user:
@@ -728,6 +777,14 @@ async def create_ticket(
         if has_helpdesk_access
         else (current_user.get("company_id") if current_user else None)
     )
+    if api_key_record:
+        allowed_companies = _api_key_scoped_company_ids(api_key_record)
+        if allowed_companies and company_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="company_id is required for API keys scoped to specific companies.",
+            )
+        _enforce_api_key_company_access(api_key_record, company_id)
 
     # Validate requester is an enabled staff member for the company (when company is specified)
     if (
@@ -842,6 +899,10 @@ async def create_tacticalrmm_ticket(
         external_reference
     )
     if existing_ticket:
+        if api_key_record := actor.get("api_key"):
+            _enforce_api_key_company_access(
+                api_key_record, existing_ticket.get("company_id")
+            )
         current_user = actor.get("user")
         detail_user = current_user or {"id": None, "is_super_admin": False}
         return await _build_ticket_detail(existing_ticket["id"], detail_user)
@@ -856,6 +917,9 @@ async def create_tacticalrmm_ticket(
                 f"'{tactical_client_id}'."
             ),
         )
+
+    if api_key_record := actor.get("api_key"):
+        _enforce_api_key_company_access(api_key_record, company["id"])
 
     asset: dict | None = None
     tactical_agent_id: str | None = None
@@ -949,6 +1013,8 @@ async def resolve_tacticalrmm_ticket(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No ticket is associated with Tactical RMM alert '{alert_id}'.",
         )
+    if api_key_record := actor.get("api_key"):
+        _enforce_api_key_company_access(api_key_record, ticket.get("company_id"))
 
     if ticket.get("status") != "resolved":
         previous_ticket = dict(ticket)
@@ -997,6 +1063,9 @@ async def get_ticket(
     actor: dict = Depends(_resolve_ticket_actor),
 ) -> TicketDetail:
     current_user: dict | None = actor.get("user")
+    if api_key_record := actor.get("api_key"):
+        ticket = await tickets_repo.get_ticket(ticket_id)
+        _enforce_api_key_company_access(api_key_record, (ticket or {}).get("company_id"))
     # API key requests get full helpdesk access via a synthetic super-admin user dict
     effective_user = (
         current_user if current_user else {"id": None, "is_super_admin": True}
@@ -1041,6 +1110,14 @@ async def update_ticket(
             status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
         )
     fields = payload.model_dump(exclude_unset=True)
+    if api_key_record := actor.get("api_key"):
+        _enforce_api_key_company_access(api_key_record, existing.get("company_id"))
+        target_company_id = fields.get("company_id")
+        if (
+            target_company_id is not None
+            and target_company_id != existing.get("company_id")
+        ):
+            _enforce_api_key_company_access(api_key_record, target_company_id)
     description_marker = object()
     description_value = fields.pop("description", description_marker)
     if "status" in fields and fields["status"] is not None:
@@ -1127,6 +1204,8 @@ async def delete_ticket(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
         )
+    if api_key_record := actor.get("api_key"):
+        _enforce_api_key_company_access(api_key_record, existing.get("company_id"))
     await tickets_repo.delete_ticket(ticket_id)
     await tickets_service.broadcast_ticket_event(action="deleted", ticket_id=ticket_id)
     if effective_user.get("id") is not None:
@@ -1204,6 +1283,8 @@ async def add_reply(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
         )
+    if api_key_record:
+        _enforce_api_key_company_access(api_key_record, ticket.get("company_id"))
 
     # Prevent adding time to billed tickets
     if ticket.get("xero_invoice_number"):

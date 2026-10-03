@@ -6,8 +6,33 @@ from ipaddress import ip_address, ip_network
 from fastapi import Depends, HTTPException, Request, status
 
 from app.api.dependencies.database import require_database
+from app.core.config import get_settings
+from app.core.logging import log_warning
 from app.repositories import api_keys as api_key_repo
 from app.security.client_ip import get_client_ip
+
+# Keys already warned about in this process (empty permissions list).  Keeps
+# the warning log readable while still surfacing every unscoped key once.
+_warned_unscoped_keys: set[int] = set()
+
+
+def _warn_unscoped_api_key(record: dict) -> None:
+    try:
+        key_id = int(record["id"])
+    except (KeyError, TypeError, ValueError):
+        return
+    if key_id in _warned_unscoped_keys:
+        return
+    _warned_unscoped_keys.add(key_id)
+    log_warning(
+        "API key with no endpoint permissions is being used",
+        api_key_id=key_id,
+        hint=(
+            "empty permissions list grants access to every API-key endpoint; "
+            "assign explicit permissions or enable "
+            "API_KEYS_DEFAULT_DENY_WHEN_UNSCOPED"
+        ),
+    )
 
 
 def require_api_key_company_access(record: dict, company_id: int) -> None:
@@ -44,6 +69,16 @@ async def _resolve_api_key_record(request: Request, record: dict) -> dict:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="API key not permitted for this endpoint",
             )
+    else:
+        # No explicit permission list: historically this meant unrestricted
+        # access to every API-key endpoint.  Operators can flip this to
+        # default-deny once existing keys carry explicit permissions.
+        if get_settings().api_keys_default_deny_when_unscoped:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="API key has no endpoint permissions configured",
+            )
+        _warn_unscoped_api_key(record)
     restrictions: Sequence[dict[str, str]] = record.get("ip_restrictions") or []
     if restrictions:
         try:

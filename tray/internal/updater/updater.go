@@ -20,11 +20,16 @@ package updater
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
@@ -132,23 +137,35 @@ func (c *Checker) CheckNow(ctx context.Context, force bool) {
 }
 
 func (c *Checker) downloadAndInstall(ctx context.Context, resp *api.VersionResponse) error {
-	tmpDir := os.TempDir()
-	var fname string
+	var ext string
 	switch runtime.GOOS {
 	case "windows":
-		fname = "myportal-tray.msi"
+		ext = ".msi"
 	default:
-		fname = "myportal-tray.pkg"
+		ext = ".pkg"
 	}
-	dest := filepath.Join(tmpDir, fname)
+	// Use a randomly named temp file so a local attacker cannot pre-create
+	// or symlink the fixed installer path the service will execute.
+	dest, err := os.CreateTemp(os.TempDir(), "myportal-tray-*"+ext)
+	if err != nil {
+		return err
+	}
+	tmpPath := dest.Name()
+	dest.Close()
 
-	logger.Info("Downloading installer to %s", dest)
-	if err := downloadFile(ctx, resp.DownloadURL, dest); err != nil {
+	logger.Info("Downloading installer to %s", tmpPath)
+	if err := downloadFile(ctx, resp.DownloadURL, tmpPath); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	defer os.Remove(tmpPath)
+
+	if err := verifyInstallerSha256(tmpPath, resp.Sha256); err != nil {
 		return err
 	}
 
-	logger.Info("Launching installer %s", dest)
-	return launchInstaller(dest)
+	logger.Info("Launching installer %s", tmpPath)
+	return launchInstaller(tmpPath)
 }
 
 func launchInstaller(path string) error {
@@ -160,4 +177,32 @@ func launchInstaller(path string) error {
 		cmd = exec.Command("installer", "-pkg", path, "-target", "/")
 	}
 	return cmd.Start() // fire and forget — service will restart from installer
+}
+
+// verifyInstallerSha256 checks the downloaded installer against the digest
+// published by the server. A provided digest must match exactly; the
+// comparison is constant-time. When the server publishes no digest (legacy
+// publishes predating digest support) the check is skipped with a warning so
+// older servers keep working; operators should re-publish versions so every
+// rollout carries a digest.
+func verifyInstallerSha256(path, expected string) error {
+	expected = strings.ToLower(strings.TrimSpace(expected))
+	if expected == "" {
+		logger.Warn("Auto-update: server did not provide an installer SHA-256 digest; skipping integrity check")
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	digest := sha256.New()
+	if _, err := io.Copy(digest, f); err != nil {
+		return err
+	}
+	actual := hex.EncodeToString(digest.Sum(nil))
+	if subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
+		return fmt.Errorf("installer sha256 mismatch: got %s want %s", actual, expected)
+	}
+	return nil
 }

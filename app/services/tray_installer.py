@@ -19,6 +19,7 @@ The download is skipped per asset when:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,34 @@ _ASSET_NAMES = ("myportal-tray.msi", "myportal-tray.dmg", "myportal-tray.pkg")
 _TRAY_STATIC_DIR = Path(__file__).resolve().parent.parent / "static" / "tray"
 _DOWNLOAD_LOCK = asyncio.Lock()
 _DOWNLOAD_CHUNK_SIZE = 65536
+
+
+def _sha256_file(path: Path) -> str:
+    """Return the hex SHA-256 digest of ``path``."""
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def cached_installer_sha256(download_url: str) -> str | None:
+    """Return the recorded SHA-256 for a cached installer matching ``download_url``.
+
+    Used by the publish endpoint so published versions carry the digest of
+    the exact bytes the server downloaded from GitHub Releases.
+    """
+    url = str(download_url or "").strip()
+    if not url:
+        return None
+    for asset_name in _ASSET_NAMES:
+        try:
+            metadata = json.loads(_metadata_path(asset_name).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if metadata.get("download_url") == url and metadata.get("sha256"):
+            return str(metadata["sha256"]).lower()
+    return None
 
 
 def _build_headers(github_token: str | None) -> dict[str, str]:
@@ -288,6 +317,7 @@ async def _download_asset(
                         fh.write(chunk)
                 tmp_path.replace(dest_path)
                 metadata["etag"] = resp.headers.get("etag")
+                metadata["sha256"] = _sha256_file(dest_path)
                 _metadata_path(asset_name).write_text(
                     json.dumps(metadata, sort_keys=True), encoding="utf-8"
                 )

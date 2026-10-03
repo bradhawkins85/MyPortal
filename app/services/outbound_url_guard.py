@@ -107,6 +107,15 @@ def _check_addresses(hostname: str, addresses: Iterable[str], *, allow_private: 
             )
 
 
+def _check_literal_host(hostname: str, *, allow_private: bool) -> None:
+    """Reject literal-IP hosts in forbidden ranges without performing DNS."""
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        return
+    _check_addresses(hostname, [hostname], allow_private=allow_private)
+
+
 def validate_outbound_url(
     url: str,
     *,
@@ -124,11 +133,22 @@ async def validate_outbound_url_async(
     *,
     allow_private: bool = True,
     schemes: Iterable[str] = ("http", "https"),
+    check_dns: bool = True,
 ) -> str:
-    """Async variant which resolves DNS off the event loop."""
+    """Async variant which resolves DNS off the event loop.
+
+    Pass ``check_dns=False`` for a fast pre-flight check that only validates
+    the scheme and literal-IP hosts, skipping DNS resolution entirely.  Use
+    this when the caller performs connect-time protection itself (e.g. via
+    :func:`redirect_guard_hooks`) so placeholder or not-yet-resolvable hosts
+    are not rejected before the actual request.
+    """
     hostname, _ = _check_url(url, allow_private=allow_private, schemes=schemes)
-    addresses = await asyncio.to_thread(_resolve, hostname)
-    _check_addresses(hostname, addresses, allow_private=allow_private)
+    if check_dns:
+        addresses = await asyncio.to_thread(_resolve, hostname)
+        _check_addresses(hostname, addresses, allow_private=allow_private)
+    else:
+        _check_literal_host(hostname, allow_private=allow_private)
     return str(url).strip()
 
 
