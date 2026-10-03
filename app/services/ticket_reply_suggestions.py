@@ -19,6 +19,7 @@ from app.core.logging import log_error
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
 from app.repositories import tickets as tickets_repo
+from app.services import ai_consent
 from app.services import modules as modules_service
 from app.services import rag_index as rag_index_service
 from app.services.ai_prompt_security import UntrustedRecord, build_prompt, validate_references
@@ -223,6 +224,8 @@ async def suggest_reply(
 ) -> dict[str, Any]:
     """Return ``{"draft", "sources"}``; raise ReplySuggestionError otherwise."""
     ticket_id = int(ticket["id"])
+    if not await ai_consent.is_ai_allowed_for_ticket(ticket):
+        raise ReplySuggestionError(ai_consent.TICKET_OPTED_OUT_REASON)
     sources = await collect_reply_sources(ticket_id, user=user, memberships=memberships)
     if not sources:
         raise ReplySuggestionError(

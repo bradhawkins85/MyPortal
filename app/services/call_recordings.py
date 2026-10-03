@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from app.repositories import call_recordings as call_recordings_repo
+from app.services import ai_consent
 from app.services import module_runtime as modules_service
 from app.services import webhook_monitor
 from app.services.ai_prompt_security import (
@@ -1137,6 +1138,13 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
     if not recording:
         raise ValueError(f"Recording {recording_id} not found")
 
+    if not await ai_consent.is_ai_allowed_for_call(recording):
+        logger.info(f"Recording {recording_id} not transcribed: the caller opted out of AI processing")
+        return await call_recordings_repo.update_call_recording(
+            recording_id,
+            transcription_status="skipped",
+        ) or recording
+
     # Check if already transcribed
     if not force and recording.get("transcription") and recording.get("transcription_status") == "completed":
         logger.info(f"Recording {recording_id} already transcribed, skipping")
@@ -1633,8 +1641,12 @@ async def create_ticket_from_recording(
     if not transcription:
         raise ValueError("Recording has no transcription. Please transcribe it first.")
 
-    # Generate summary for ticket subject and description
-    summary = await summarize_transcription(transcription)
+    # Generate summary for ticket subject and description, unless the caller
+    # asked not to have their requests processed by AI.
+    if await ai_consent.is_ai_allowed_for_call(recording):
+        summary = await summarize_transcription(transcription)
+    else:
+        summary = _summary_fallback(transcription)
 
     # Create subject from summary (first line or first 100 chars)
     subject_lines = summary.split("\n")

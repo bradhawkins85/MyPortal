@@ -14,6 +14,7 @@ from app.services.monitored_http import monitored_client
 from app.core.config import get_settings
 from app.core.logging import log_info, log_warning
 from app.repositories import rag_index as rag_repo
+from app.services import ai_consent
 from app.services import rag_relationships
 from app.services import rag_embedding_identity
 from app.services.rag_urls import canonical_source_url
@@ -742,6 +743,15 @@ async def index_agent_sources(
             if not isinstance(item, Mapping):
                 counts["skipped"] += 1
                 continue
+            prepared = await ai_consent.prepare_rag_source(normalised_type, item)
+            if prepared is None:
+                # The person opted out of AI processing: keep them out of the index.
+                identity = source_identity(normalised_type, item)
+                if identity is not None:
+                    await rag_repo.delete_documents_for_sources(identity[0], [identity[1]])
+                counts["skipped"] += 1
+                continue
+            item = prepared
             document = document_from_source(normalised_type, item)
             if document is None:
                 counts["skipped"] += 1

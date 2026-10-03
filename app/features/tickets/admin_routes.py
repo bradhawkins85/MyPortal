@@ -58,6 +58,7 @@ from app.repositories import rag_relationships as rag_relationship_repo
 from app.repositories import users as user_repo
 from app.repositories import site_settings as site_settings_repo
 from app.services import agent as agent_service
+from app.services import ai_consent
 from app.services import labour_types as labour_types_service
 from app.services import ticket_attachments as attachments_service
 from app.services import rag_index as rag_index_service
@@ -852,6 +853,14 @@ async def admin_rescan_ticket_related(ticket_id: int, request: Request):
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    if not await ai_consent.is_ai_allowed_for_ticket(ticket):
+        return JSONResponse({
+            "items": [],
+            "scanned": False,
+            "skipped": True,
+            "reason": ai_consent.TICKET_OPTED_OUT_REASON,
+            "generated_at": None,
+        })
 
     replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
     attachments = await attachments_repo.list_attachments(ticket_id)

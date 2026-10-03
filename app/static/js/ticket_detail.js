@@ -693,6 +693,11 @@
           throw new Error(`Scan failed (${response.status})`);
         }
         const payload = await response.json();
+        if (payload.skipped && payload.reason) {
+          renderItems([]);
+          setStatus(payload.reason);
+          return;
+        }
         renderItems(payload.items || []);
       } catch (error) {
         console.error('Failed to scan ticket related content:', error);

@@ -1,0 +1,7 @@
+{
+  "guid": "f430718e-d632-4c94-87ec-69ad54e8f3c5",
+  "occurred_at": "2026-10-02T14:07Z",
+  "change_type": "Feature",
+  "summary": "Let individual users opt out of AI processing from their profile, with super admin control, enforcement across ticket AI, chat assistant, agent, RAG index and call transcription",
+  "content_hash": "50df05f6a22e4f4f311d16418db5532f1a066774320bba346614d301356fba71"
+}

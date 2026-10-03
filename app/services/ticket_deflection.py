@@ -15,7 +15,7 @@ from typing import Any, Collection, Mapping, Sequence
 from app.core.logging import log_error
 from app.repositories import knowledge_base as kb_repo
 from app.repositories import tickets as tickets_repo
-from app.services import rag_retrieval
+from app.services import ai_consent, rag_retrieval
 
 SOURCE_TYPES = ("knowledge_base", "tickets")
 MIN_QUERY_LENGTH = 12
@@ -123,6 +123,9 @@ async def suggest_for_new_ticket(
     except (TypeError, ValueError):
         return []
     if user_id <= 0:
+        return []
+    # The draft would be embedded for retrieval; honour the user's AI opt-out.
+    if ai_consent.is_opted_out_record(user) or not await ai_consent.is_ai_allowed_for_user(user_id):
         return []
     try:
         # The LLM reranker is skipped: this runs on every pause in typing.

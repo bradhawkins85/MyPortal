@@ -20,6 +20,7 @@ from app.core.logging import log_error
 from app.repositories import chat as chat_repo
 from app.repositories import knowledge_base as kb_repo
 from app.repositories import matrix_ai_tag_synonyms as tag_synonyms_repo
+from app.services import ai_consent
 from app.services import audit as audit_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import matrix as matrix_service
@@ -669,7 +670,10 @@ async def _eligible_room(room: Mapping[str, Any]) -> bool:
         return False
     if await chat_repo.has_technician_message(room_id):
         return False
-    return int(room.get("ai_bot_response_count") or 0) < get_settings().matrixbot_ai_max_responses
+    if int(room.get("ai_bot_response_count") or 0) >= get_settings().matrixbot_ai_max_responses:
+        return False
+    # The customer may have asked not to have their requests handled by AI.
+    return await ai_consent.is_ai_allowed_for_chat(room)
 
 
 async def scan_waiting_rooms_once() -> None:

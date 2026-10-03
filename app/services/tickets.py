@@ -21,6 +21,7 @@ from app.repositories import company_memberships as membership_repo
 from app.repositories import ticket_statuses as ticket_status_repo
 from app.repositories import staff as staff_repo
 from app.repositories.tickets import TicketRecord
+from app.services import ai_consent
 from app.services import automation_dispatch as automations_service
 from app.services import module_dispatch as modules_service
 from app.services.ai_prompt_security import UntrustedRecord, build_prompt
@@ -1194,8 +1195,21 @@ async def refresh_ticket_ai_summary(ticket_id: int) -> None:
         return
     if not ticket:
         return
+    if not await ai_consent.is_ai_allowed_for_ticket(ticket):
+        await _safely_call(
+            tickets_repo.update_ticket,
+            ticket_id,
+            ai_summary=None,
+            ai_summary_status="skipped",
+            ai_summary_model=None,
+            ai_resolution_state=None,
+            ai_summary_updated_at=datetime.now(timezone.utc),
+        )
+        return
 
-    replies = await _safely_call(tickets_repo.list_replies, ticket_id, include_internal=True) or []
+    replies = await ai_consent.filter_replies_for_ai(
+        await _safely_call(tickets_repo.list_replies, ticket_id, include_internal=True) or []
+    )
     user_lookup: dict[int, Mapping[str, Any]] = {}
     user_ids: set[int] = set()
 
@@ -1356,8 +1370,15 @@ async def refresh_ticket_resolution_steps(ticket_id: int, *, force: bool = False
         and ticket.get("resolution_steps")
     ):
         return
-    replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
     now = datetime.now(timezone.utc)
+    if not await ai_consent.is_ai_allowed_for_ticket(ticket):
+        await tickets_repo.update_ticket(
+            ticket_id, resolution_steps_status="skipped", resolution_steps_updated_at=now
+        )
+        return
+    replies = await ai_consent.filter_replies_for_ai(
+        await tickets_repo.list_replies(ticket_id, include_internal=True)
+    )
     await tickets_repo.update_ticket(
         ticket_id, resolution_steps_status="queued", resolution_steps_updated_at=now
     )
@@ -1403,8 +1424,20 @@ async def refresh_ticket_ai_tags(ticket_id: int) -> None:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         return
+    if not await ai_consent.is_ai_allowed_for_ticket(ticket):
+        await _safely_call(
+            tickets_repo.update_ticket,
+            ticket_id,
+            ai_tags=None,
+            ai_tags_status="skipped",
+            ai_tags_model=None,
+            ai_tags_updated_at=datetime.now(timezone.utc),
+        )
+        return
 
-    replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
+    replies = await ai_consent.filter_replies_for_ai(
+        await tickets_repo.list_replies(ticket_id, include_internal=True)
+    )
     user_lookup: dict[int, Mapping[str, Any]] = {}
     user_ids: set[int] = set()
 
@@ -1501,7 +1534,9 @@ async def _load_ticket_ai_context(
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         return None, [], {}
-    replies = await _safely_call(tickets_repo.list_replies, ticket_id, include_internal=True) or []
+    replies = await ai_consent.filter_replies_for_ai(
+        await _safely_call(tickets_repo.list_replies, ticket_id, include_internal=True) or []
+    )
     user_ids: set[int] = set()
     for key in ("requester_id", "assigned_user_id"):
         value = ticket.get(key)
@@ -1536,8 +1571,6 @@ async def refresh_ticket_ai_insights(ticket_id: int) -> None:
     if not ticket:
         return
 
-    preferred_tags = await get_preferred_tags()
-    prompt = _render_insights_prompt(ticket, replies, user_lookup, preferred_tags)
     now = datetime.now(timezone.utc)
 
     async def _set_terminal_status(status_value: str) -> None:
@@ -1555,6 +1588,13 @@ async def refresh_ticket_ai_insights(ticket_id: int) -> None:
             ai_tags_updated_at=now,
         )
         await emit_ticket_updated_event(ticket_id, actor_type="system")
+
+    if not await ai_consent.is_ai_allowed_for_ticket(ticket):
+        await _set_terminal_status("skipped")
+        return
+
+    preferred_tags = await get_preferred_tags()
+    prompt = _render_insights_prompt(ticket, replies, user_lookup, preferred_tags)
 
     await _safely_call(
         tickets_repo.update_ticket,

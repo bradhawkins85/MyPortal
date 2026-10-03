@@ -441,3 +441,24 @@ async def cleanup_missing_documents(
         if source_id not in active_sources[source_type]:
             stale_ids.append(int(row["id"]))
     return await delete_documents_by_ids(stale_ids)
+
+
+async def delete_documents_for_sources(source_type: str, source_ids: Sequence[str]) -> int:
+    """Permanently remove every indexed document for the given sources."""
+
+    ids = [str(value) for value in source_ids if str(value or "").strip()]
+    if not ids:
+        return 0
+    document_ids: list[int] = []
+    # Query in bounded batches; only "?" placeholders are interpolated.
+    for start in range(0, len(ids), 500):
+        batch = ids[start:start + 500]
+        placeholders = ",".join("?" for _ in batch)
+        rows = await db.fetch_all(
+            "SELECT id FROM rag_documents WHERE source_type = ? AND source_id IN ("  # nosec B608
+            + placeholders
+            + ")",
+            tuple([source_type, *batch]),
+        )
+        document_ids.extend(int(row["id"]) for row in rows or [])
+    return await delete_documents_by_ids(document_ids)

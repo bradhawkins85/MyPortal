@@ -319,6 +319,7 @@
       const statusText = String(result.status).toLowerCase();
       if (statusText === 'succeeded') parts.push('Answer generated successfully.');
       else if (statusText === 'skipped') parts.push('The Ollama module is disabled; showing recent context.');
+      else if (statusText === 'ai_opted_out') { /* the message explains the opt-out */ }
       else parts.push('The agent could not generate a response.');
     }
     if (result.model) parts.push(`Model: ${result.model}`);

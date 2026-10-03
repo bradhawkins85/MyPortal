@@ -22,6 +22,7 @@ from app.repositories import staff as staff_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import ticket_attachments as ticket_attachments_repo
+from app.services import ai_consent
 from app.services import company_access
 from app.services import backup_jobs as backup_jobs_service
 from app.services import issues as issues_service
@@ -1291,6 +1292,7 @@ async def _search_chat_sources(
     rows = await db.fetch_all(
         """
         SELECT r.id, r.subject, r.status, r.company_id, r.updated_at, r.linked_ticket_id,
+               r.created_by_user_id,
                MAX(m.sent_at) AS last_message_at,
                SUBSTR(MAX(m.body), 1, 320) AS matching_message
         FROM chat_rooms r
@@ -1305,7 +1307,8 @@ async def _search_chat_sources(
                    WHERE cp.room_id = r.id AND cp.user_id = ?
                ))
           AND (r.subject LIKE ? OR r.room_alias LIKE ? OR m.body LIKE ?)
-        GROUP BY r.id, r.subject, r.status, r.company_id, r.updated_at, r.linked_ticket_id
+        GROUP BY r.id, r.subject, r.status, r.company_id, r.updated_at, r.linked_ticket_id,
+                 r.created_by_user_id
         ORDER BY COALESCE(MAX(m.sent_at), r.updated_at) DESC
         LIMIT ?
         """,
@@ -1610,6 +1613,22 @@ async def execute_agent_query(
             "context": {"companies": []},
         }
 
+    # Maintenance indexing runs as a system task, not on the user's behalf.
+    if rag_index_job_id is None and not await ai_consent.is_ai_allowed_for_user(
+        user.get("id")
+    ):
+        return {
+            "query": query_text,
+            "status": "ai_opted_out",
+            "answer": None,
+            "model": None,
+            "event_id": None,
+            "message": ai_consent.AGENT_OPTED_OUT_MESSAGE,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "sources": {},
+            "context": {"companies": []},
+        }
+
     resolved_memberships = _normalise_memberships(memberships)
     if not resolved_memberships:
         try:
@@ -1741,8 +1760,12 @@ async def execute_agent_query(
                     )
                 if not can_access_ticket:
                     continue
-                replies = await tickets_repo.list_replies(
-                    explicit_ticket_id, include_internal=is_super_admin
+                if not await ai_consent.is_ai_allowed_for_ticket(ticket):
+                    continue
+                replies = await ai_consent.filter_replies_for_ai(
+                    await tickets_repo.list_replies(
+                        explicit_ticket_id, include_internal=is_super_admin
+                    )
                 )
             except Exception as exc:  # pragma: no cover - defensive guard
                 log_error(
@@ -1813,6 +1836,7 @@ async def execute_agent_query(
                                 "internal_only": True,
                                 "ticket_id": ticket.get("id"),
                                 "company_id": ticket.get("company_id"),
+                                "requester_id": ticket.get("requester_id"),
                             }
                         )
             except Exception as exc:  # pragma: no cover - defensive source loading
@@ -2143,7 +2167,7 @@ async def execute_agent_query(
         else {}
     )
 
-    assembled_sources = {
+    assembled_sources: dict[str, Any] = {
         "knowledge_base": knowledge_base_sources,
         "tickets": ticket_sources,
         "ticket_comments": internal_note_sources,
@@ -2162,6 +2186,10 @@ async def execute_agent_query(
         "best_practices": best_practice_sources,
         "feature_packs": feature_pack_sources,
     }
+    # People who opted out of AI processing must not reach the model or index.
+    assembled_sources = await ai_consent.filter_agent_sources(assembled_sources)
+    ticket_sources = assembled_sources["tickets"]
+    chat_sources = assembled_sources["chats"]
     stages.append(
         _stage(
             "retrieval",

@@ -519,6 +519,48 @@
     });
   }
 
+  // ── AI features ────────────────────────────────────────────────────────
+  const aiForm = document.getElementById('profile-ai-form');
+  if (aiForm && userId) {
+    const aiToggle = aiForm.querySelector('#profile-ai-opt-out');
+    const aiSaveStatus = aiForm.querySelector('[data-profile-ai-save-status]');
+    const aiStatus = root.querySelector('[data-profile-ai-status]');
+    const syncAiStatus = (optedOut) => {
+      if (!aiStatus) return;
+      aiStatus.textContent = optedOut ? 'AI turned off' : 'AI allowed';
+      aiStatus.classList.toggle('status--warning', optedOut);
+      aiStatus.classList.toggle('status--neutral', !optedOut);
+    };
+    aiForm.addEventListener('change', () => {
+      if (aiSaveStatus) aiSaveStatus.textContent = 'Unsaved changes';
+    });
+    aiForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const optOut = Boolean(aiToggle && aiToggle.checked);
+      const submitButton = aiForm.querySelector('button[type="submit"]');
+      setBusy(submitButton, true, 'Saving…');
+      try {
+        const updated = await requestJson(`/api/users/${userId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ ai_opt_out: optOut }),
+        });
+        const saved = Boolean(updated && updated.ai_opt_out);
+        if (aiToggle) aiToggle.checked = saved;
+        syncAiStatus(saved);
+        flashStatus(aiSaveStatus, 'Saved');
+        showMessage(
+          { variant: 'success' },
+          saved ? "We won't use AI to process your requests." : 'AI features can process your requests again.',
+        );
+      } catch (error) {
+        if (aiSaveStatus) aiSaveStatus.textContent = '';
+        showMessage({ variant: 'error' }, error.message || 'Unable to save your AI preference.');
+      } finally {
+        setBusy(submitButton, false);
+      }
+    });
+  }
+
   const sidebarSection = root.querySelector('[data-sidebar-customisation]');
   const sidebarList = root.querySelector('[data-sidebar-items]');
   const sidebarSaveButton = root.querySelector('[data-sidebar-save]');
