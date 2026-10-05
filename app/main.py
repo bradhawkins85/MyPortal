@@ -5132,6 +5132,14 @@ async def m365_diagnostics_page(request: Request):
         except m365_service.M365Error as exc:
             required_access = {"all_ok": False, "error": str(exc), "resources": [], "directory_roles": []}
 
+    permission_status_counts = {"total": 0, "pass": 0, "fail": 0, "unavailable": 0}
+    for resource in (required_access or {}).get("resources", []):
+        for permission in resource.get("permissions", []):
+            permission_status_counts["total"] += 1
+            status = permission.get("status")
+            if status in permission_status_counts:
+                permission_status_counts[status] += 1
+
     extra = {
         "title": "Office 365 Diagnostics",
         "company": company,
@@ -5140,6 +5148,7 @@ async def m365_diagnostics_page(request: Request):
         "results": last_results,
         "purview_preflight": purview_preflight,
         "required_access": required_access,
+        "permission_status_counts": permission_status_counts,
         "connection_health": connection_health,
         "is_super_admin": True,
     }

@@ -2702,6 +2702,13 @@ body:not(.navigation--top) .policies-banner--overlay .policies-banner__logout .s
   font-size: 0.95rem;
 }
 
+.card__subheading {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.9);
+}
+
 .dashboard__section {
   display: flex;
   flex-direction: column;
@@ -14849,6 +14856,20 @@ a.stat-strip__stat:focus-visible {
 .stat-strip__stat:hover {
   transform: translateY(-2px);
   box-shadow: var(--hf-highlight), var(--hf-shadow-lg);
+}
+
+.stat-strip__stat[role="button"] {
+  cursor: pointer;
+}
+
+.stat-strip__stat[role="button"]:focus-visible {
+  outline: 2px solid var(--color-accent, #38bdf8);
+  outline-offset: 2px;
+}
+
+.stat-strip__stat--active {
+  outline: 2px solid var(--color-accent, #38bdf8);
+  outline-offset: 2px;
 }
 
 .stat-strip__stat-label {
