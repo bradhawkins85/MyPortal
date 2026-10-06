@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 from collections.abc import Awaitable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone
@@ -193,6 +194,199 @@ async def _record_action_history(
         logger.warning(
             "Failed to record automation history",
             automation_id=automation_id,
+            error=str(exc),
+        )
+    if ticket_id is not None:
+        await _record_ticket_conversation_audit(
+            automation,
+            ticket_id=ticket_id,
+            action_name=action_name,
+            action_module=action_module,
+            status=status,
+            result=result,
+            error_message=error_message,
+            context=context,
+        )
+
+
+AUTOMATION_AUDIT_AUTHOR = "Automation"
+AUTOMATION_AUDIT_REFERENCE_PREFIX = tickets_repo.AUTOMATION_AUDIT_REFERENCE_PREFIX
+_AUDITED_ACTION_STATUSES = {"succeeded", "failed", "deferred"}
+_AUDIT_STATUS_LABELS = {
+    "succeeded": "completed",
+    "failed": "failed",
+    "deferred": "deferred",
+}
+_AUDIT_VALUE_MAX_LENGTH = 200
+
+
+def _audit_value(value: Any) -> str:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return "(empty)"
+    if isinstance(value, bool):
+        text = "Yes" if value else "No"
+    elif isinstance(value, datetime):
+        text = value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    elif isinstance(value, (Mapping, list, tuple)):
+        text = json.dumps(value, default=str)
+    else:
+        text = str(value)
+    text = " ".join(text.split())
+    if len(text) > _AUDIT_VALUE_MAX_LENGTH:
+        text = text[: _AUDIT_VALUE_MAX_LENGTH - 1] + "\u2026"
+    return text
+
+
+def _audit_result_mapping(result: Any) -> Mapping[str, Any]:
+    """Return the module result payload, unwrapping action result entries."""
+
+    if not isinstance(result, Mapping):
+        return {}
+    nested = result.get("result")
+    if isinstance(nested, Mapping):
+        return nested
+    return result
+
+
+async def _build_ticket_audit_body(
+    automation: Mapping[str, Any],
+    *,
+    ticket_id: int,
+    action_name: str,
+    action_module: str | None,
+    status: str,
+    result: Any,
+    error_message: str | None,
+    context: Mapping[str, Any] | None,
+) -> str:
+    automation_name = str(automation.get("name") or "").strip() or (
+        f"Automation #{automation.get('id')}"
+    )
+    kind = str(automation.get("kind") or "").strip().lower()
+    trigger_label = "Scheduled automation" if kind == "scheduled" else "Event automation"
+    if kind != "scheduled":
+        event_name = str(automation.get("trigger_event") or "").strip()
+        if event_name:
+            trigger_label = f"{trigger_label} ({event_name})"
+    ticket_update = context.get("ticket_update") if isinstance(context, Mapping) else None
+    if isinstance(ticket_update, Mapping) and ticket_update.get("actor_type") == "automation_test":
+        trigger_label = f"{trigger_label}, manual test run"
+
+    action_label = str(action_name or action_module or "action").strip()
+    if action_module and action_module != action_label:
+        action_label = f"{action_label} ({action_module})"
+
+    status_label = _AUDIT_STATUS_LABELS.get(status, status)
+    lines: list[str] = [
+        f"<p><strong>Automation:</strong> {html.escape(automation_name)}"
+        f" &mdash; {html.escape(trigger_label)}</p>",
+        f"<p><strong>Action:</strong> {html.escape(action_label)}"
+        f" &mdash; {html.escape(status_label)}</p>",
+    ]
+
+    details: list[str] = []
+    payload = _audit_result_mapping(result)
+    updated_fields = payload.get("updated_fields")
+    previous_values = payload.get("previous_values")
+    if isinstance(updated_fields, Sequence) and not isinstance(updated_fields, str):
+        current: Mapping[str, Any] = {}
+        if updated_fields:
+            try:
+                current = await tickets_repo.get_ticket(ticket_id) or {}
+            except Exception:  # pragma: no cover - audit must not break automations
+                current = {}
+        previous = previous_values if isinstance(previous_values, Mapping) else {}
+        for field in updated_fields:
+            field_name = str(field)
+            label = field_name.replace("_", " ").capitalize()
+            change = html.escape(f"{label}: {_audit_value(previous.get(field_name))}")
+            if field_name in current:
+                change += " &rarr; " + html.escape(_audit_value(current.get(field_name)))
+            details.append(change)
+    response = payload.get("response")
+    reply_id = payload.get("reply_id")
+    if reply_id is None and isinstance(response, Mapping):
+        reply_id = response.get("reply_id")
+    if reply_id is not None:
+        visibility = ""
+        if isinstance(response, Mapping) and "is_internal" in response:
+            visibility = " (internal note)" if response.get("is_internal") else " (public reply)"
+        details.append(html.escape(f"Added reply #{reply_id}{visibility}"))
+    run_after = payload.get("run_after")
+    if status == "deferred" and run_after:
+        details.append(html.escape(f"Will run after {run_after}"))
+    reason = payload.get("reason")
+    if reason is None and isinstance(result, Mapping):
+        reason = result.get("reason")
+    if reason:
+        details.append(html.escape(f"Reason: {_audit_value(reason)}"))
+    if error_message:
+        details.append(html.escape(f"Error: {_audit_value(error_message)}"))
+
+    if details:
+        lines.append(
+            "<ul>" + "".join(f"<li>{item}</li>" for item in details) + "</ul>"
+        )
+    return "".join(lines)
+
+
+async def _record_ticket_conversation_audit(
+    automation: Mapping[str, Any],
+    *,
+    ticket_id: int,
+    action_name: str,
+    action_module: str | None,
+    status: str,
+    result: Any,
+    error_message: str | None,
+    context: Mapping[str, Any] | None,
+) -> None:
+    """Add an internal "Automation" note to the ticket conversation history.
+
+    Gives admins an audit trail of every automation action taken on a ticket
+    directly in the ticket timeline.  Skipped actions are not recorded because
+    scheduled automations re-evaluate tickets on every tick, and an identical
+    note is not repeated back-to-back so a repeatedly failing action does not
+    flood the conversation.
+    """
+
+    if status not in _AUDITED_ACTION_STATUSES:
+        return
+    try:
+        automation_id = int(automation.get("id"))
+        body = await _build_ticket_audit_body(
+            automation,
+            ticket_id=ticket_id,
+            action_name=action_name,
+            action_module=action_module,
+            status=status,
+            result=result,
+            error_message=error_message,
+            context=context,
+        )
+        external_reference = f"{AUTOMATION_AUDIT_REFERENCE_PREFIX}{automation_id}"
+        latest = await tickets_repo.get_latest_reply(ticket_id)
+        if (
+            latest
+            and latest.get("external_reference") == external_reference
+            and latest.get("body") == body
+        ):
+            return
+        await tickets_repo.create_reply(
+            ticket_id=ticket_id,
+            author_id=None,
+            body=body,
+            is_internal=True,
+            minutes_spent=None,
+            is_billable=False,
+            external_reference=external_reference,
+            author_display_name=AUTOMATION_AUDIT_AUTHOR,
+        )
+    except Exception as exc:  # pragma: no cover - audit must not break automations
+        logger.warning(
+            "Failed to record automation audit note on ticket",
+            automation_id=automation.get("id"),
+            ticket_id=ticket_id,
             error=str(exc),
         )
 
