@@ -157,6 +157,7 @@ class TicketResponse(TicketBase):
     ai_tags_updated_at: Optional[datetime] = None
     merged_into_ticket_id: Optional[int] = None
     split_from_ticket_id: Optional[int] = None
+    parent_ticket_id: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -405,12 +406,23 @@ class TicketTask(BaseModel):
     sort_order: int
     created_at: datetime
     updated_at: datetime
+    linked_ticket_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class TicketTaskListResponse(BaseModel):
     items: list[TicketTask] = Field(default_factory=list)
+
+
+class TaskLinkedTicketResponse(BaseModel):
+    """Result of creating (or fetching the existing) linked ticket for a task."""
+
+    ticket_id: int
+    ticket_number: Optional[str] = None
+    subject: str
+    admin_url: str
+    created: bool
 
 
 class TicketViewFilters(BaseModel):

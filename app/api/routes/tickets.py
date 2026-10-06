@@ -15,6 +15,7 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     UploadFile,
     status,
 )
@@ -79,6 +80,7 @@ from app.schemas.tickets import (
     TicketTaskCreate,
     TicketTaskListResponse,
     TicketTaskUpdate,
+    TaskLinkedTicketResponse,
     TicketUpdate,
     TicketViewCreate,
     TicketViewListResponse,
@@ -1739,7 +1741,7 @@ async def troubleshoot_ticket_asset(
     ticket_id: int,
     asset_id: int,
     payload: TicketAssetTroubleshootRequest | None = None,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_helpdesk_technician),
 ) -> TrayTroubleshootResponse:
     """Trigger the AI troubleshooter on the device linked to a ticket asset.
 
@@ -1754,13 +1756,6 @@ async def troubleshoot_ticket_asset(
     Requires helpdesk / super-admin access. The asset must be linked to the
     ticket and have an active tray device in the same company as the ticket.
     """
-    if not (
-        current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Helpdesk access required."
-        )
-
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(
@@ -2427,6 +2422,92 @@ async def delete_ticket_task(
                 )
 
     await ticket_tasks_repo.delete_task(task_id)
+
+
+@router.post(
+    "/{ticket_id}/tasks/{task_id}/linked-ticket",
+    response_model=TaskLinkedTicketResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def create_task_linked_ticket(
+    ticket_id: int,
+    task_id: int,
+    request: Request,
+    response: Response,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> TaskLinkedTicketResponse:
+    """Create a standalone linked ticket for a task on the given ticket.
+
+    The new ticket references back to the main ticket (``parent_ticket_id``)
+    and the task (``ticket_tasks.linked_ticket_id``) so it can hold its own
+    assignment and notes/replies. Requires helpdesk technician permission.
+
+    The operation is idempotent: when the task already has a linked ticket it
+    is returned with HTTP 200 and ``created=false``; otherwise a new ticket is
+    created and returned with HTTP 201 and ``created=true``.
+    """
+    main_ticket = await tickets_repo.get_ticket(ticket_id)
+    if not main_ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+
+    task = await ticket_tasks_repo.get_task(task_id)
+    if not task or task.get("ticket_id") != ticket_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+
+    try:
+        linked_ticket, created = await tickets_service.create_linked_ticket_for_task(
+            main_ticket=main_ticket,
+            task=task,
+            actor=current_user,
+        )
+    except ValueError as exc:
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Task linked-ticket creation failed",
+            error_id=error_id,
+            route="tickets.create_task_linked_ticket",
+            ticket_id=ticket_id,
+            task_id=task_id,
+            detail=str(exc),
+        )
+        raise build_client_http_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "Unable to create a linked ticket for this task.",
+            error_id=error_id,
+        ) from exc
+
+    linked_id = int(linked_ticket.get("id"))
+    ticket_number = str(linked_ticket.get("ticket_number") or linked_id)
+    response.status_code = (
+        status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    )
+
+    if created:
+        await audit_service.record(
+            action="ticket.task_linked_ticket_created",
+            request=request,
+            user_id=int(current_user["id"]),
+            entity_type="ticket",
+            entity_id=ticket_id,
+            before=_audit_ticket_view(main_ticket),
+            after=_audit_ticket_view(main_ticket),
+            metadata={
+                "task_id": task_id,
+                "linked_ticket_id": linked_id,
+            },
+        )
+
+    return TaskLinkedTicketResponse(
+        ticket_id=linked_id,
+        ticket_number=ticket_number,
+        subject=str(linked_ticket.get("subject") or ""),
+        admin_url=f"/admin/tickets/{linked_id}",
+        created=created,
+    )
 
 
 # ==================== Ticket Attachments ====================

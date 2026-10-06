@@ -36,6 +36,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from app.api.dependencies.auth import (
     get_current_tray_device,
     get_current_user,
+    require_helpdesk_technician,
     require_super_admin,
 )
 from app.api.dependencies.api_keys import require_api_key
@@ -2603,7 +2604,7 @@ async def push_notification_to_device(
 async def run_troubleshoot(
     device_uid: str,
     payload: TrayTroubleshootRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_helpdesk_technician),
 ) -> TrayTroubleshootResponse:
     """Ask a tray device to run the AI troubleshooting agent.
 
@@ -2616,13 +2617,6 @@ async def run_troubleshoot(
     the same company as the device. The command is queued in
     ``tray_command_log`` and pushed live when the device is connected.
     """
-
-    if not (
-        current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Helpdesk access required."
-        )
 
     device = await tray_repo.get_device_by_uid(device_uid)
     if not device:

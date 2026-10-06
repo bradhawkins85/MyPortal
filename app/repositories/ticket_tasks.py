@@ -20,7 +20,7 @@ def _make_aware(value: Any) -> datetime | None:
 
 def _normalise_task(row: dict[str, Any]) -> TaskRecord:
     record = dict(row)
-    for key in ("id", "ticket_id", "completed_by", "sort_order"):
+    for key in ("id", "ticket_id", "completed_by", "sort_order", "linked_ticket_id"):
         if key in record and record[key] is not None:
             record[key] = int(record[key])
     for key in ("created_at", "updated_at", "completed_at"):
@@ -59,6 +59,14 @@ async def create_task(
         "updated_at": None,
     }
     return _normalise_task(fallback_row)
+
+
+async def set_task_linked_ticket(task_id: int, linked_ticket_id: int | None) -> None:
+    """Record which ticket was created for a task (or clear the link)."""
+    await db.execute(
+        "UPDATE ticket_tasks SET linked_ticket_id = %s WHERE id = %s",
+        (linked_ticket_id, task_id),
+    )
 
 
 async def list_tasks(ticket_id: int) -> list[TaskRecord]:
