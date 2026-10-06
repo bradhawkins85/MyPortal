@@ -25,15 +25,6 @@ func isPlatformLogSource(source string) bool { return isWindowsLogSource(source)
 // cannot blow past the prompt budget.
 const maxWinEvents = 500
 
-// logQueryScript emits one bounded line per event so the prompt stays
-// greppable. It is read-only (Get-WinEvent never mutates the logs).
-const logQueryScript = `$ErrorActionPreference = 'Stop'
-Get-WinEvent -LogName '%s' -Since ([datetime] '%s') -MaxEvents %d -ErrorAction SilentlyContinue |
-  ForEach-Object {
-    $msg = if ($null -ne $_.Message) { ($_.Message -replace "\r?\n", ' ') } else { '' }
-    '{0:yyyy-MM-dd HH:mm:ss} [{1}] id={2}: {3}' -f $_.TimeCreated, $_.LevelDisplayName, $_.Id, $msg.Substring(0, [Math]::Min(400, $msg.Length))
-  }`
-
 // collectPlatformLogs reads each requested Windows Event Log channel as plain
 // text via PowerShell's Get-WinEvent. It is read-only. Only allowlisted
 // channels are read: the name is embedded in the script, so an unlisted name
@@ -82,7 +73,7 @@ func runReadOnlyPowerShell(ctx context.Context, script string) ([]byte, error) {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, fmt.Errorf("timed out: %w", ctx.Err())
 		}
-		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("%w: %s", err, PowerShellErrorText(stderr.String()))
 	}
 	return out, nil
 }
