@@ -251,6 +251,7 @@ def _normalise_ticket(row: dict[str, Any]) -> TicketRecord:
         "assigned_user_id",
         "merged_into_ticket_id",
         "split_from_ticket_id",
+        "parent_ticket_id",
     ):
         if key in record and record[key] is not None:
             record[key] = int(record[key])
@@ -987,6 +988,14 @@ async def count_tickets_by_status() -> dict[str, int]:
 async def get_ticket(ticket_id: int) -> TicketRecord | None:
     row = await db.fetch_one("SELECT * FROM tickets WHERE id = %s", (ticket_id,))
     return _normalise_ticket(row) if row else None
+
+
+async def set_ticket_parent(ticket_id: int, parent_ticket_id: int | None) -> None:
+    """Record the main ticket a linked (child) ticket was spawned from."""
+    await db.execute(
+        "UPDATE tickets SET parent_ticket_id = %s WHERE id = %s",
+        (parent_ticket_id, ticket_id),
+    )
 
 
 async def is_ticket_watcher(ticket_id: int, user_id: int) -> bool:

@@ -2665,6 +2665,123 @@ async def split_ticket(
     return original_ticket, new_ticket, moved_count
 
 
+async def create_linked_ticket_for_task(
+    main_ticket: Mapping[str, Any],
+    task: Mapping[str, Any],
+    *,
+    actor: Mapping[str, Any] | None = None,
+) -> tuple[TicketRecord, bool]:
+    """Create a standalone linked ticket for a task on ``main_ticket``.
+
+    The linked ticket inherits the main ticket's company and requester so it
+    belongs to the same account, but starts unassigned so it can be assigned
+    independently and hold its own notes/replies. It references back to the
+    main ticket via ``tickets.parent_ticket_id`` and the task via
+    ``ticket_tasks.linked_ticket_id``.
+
+    The operation is idempotent: when the task already has a linked ticket,
+    that ticket is returned with ``created=False``.
+    """
+    main_ticket_id = int(main_ticket.get("id"))
+
+    # Idempotency: reopen the existing linked ticket when one is already set.
+    linked_id = task.get("linked_ticket_id")
+    if linked_id is not None:
+        try:
+            candidate = await tickets_repo.get_ticket(int(linked_id))
+        except (TypeError, ValueError):
+            candidate = None
+        if candidate:
+            return candidate, False
+
+    task_id = task.get("id")
+    task_name = str(task.get("task_name") or "").strip() or "Linked task"
+    main_subject = str(main_ticket.get("subject") or "").strip()
+
+    if main_subject and main_subject.casefold() != task_name.casefold():
+        subject = f"{main_subject} \u2014 {task_name}"
+    else:
+        subject = task_name
+    subject = subject[:255] or "Linked ticket"
+
+    description = (
+        f"Linked ticket created from task \"{task_name}\" on ticket #{main_ticket_id}.\n\n"
+        f"Main ticket: #{main_ticket_id} \u2014 {main_subject or '(no subject)'}"
+    )
+
+    actor_id: int | None = None
+    if actor is not None:
+        try:
+            actor_id = int(actor.get("id"))
+        except (TypeError, ValueError):
+            actor_id = None
+        if actor_id is not None and actor_id <= 0:
+            actor_id = None
+    actor_email = str(actor.get("email")).strip() if actor and actor.get("email") else None
+    actor_display_name: str | None = None
+    if actor:
+        display_name = " ".join(
+            str(part).strip()
+            for part in (actor.get("first_name"), actor.get("last_name"))
+            if part
+        ).strip()
+        actor_display_name = display_name or None
+
+    new_ticket = await create_ticket(
+        subject=subject,
+        description=description,
+        requester_id=main_ticket.get("requester_id"),
+        company_id=main_ticket.get("company_id"),
+        assigned_user_id=None,  # separate assignment
+        priority=str(main_ticket.get("priority") or "normal"),
+        status="open",
+        category=main_ticket.get("category"),
+        module_slug=main_ticket.get("module_slug"),
+        external_reference=None,
+        trigger_automations=False,
+        initial_reply_author_id=actor_id,
+        initial_reply_author_email=actor_email if actor_id is None else None,
+        initial_reply_author_display_name=actor_display_name if actor_id is None else None,
+    )
+    if not isinstance(new_ticket, Mapping) or not new_ticket.get("id"):
+        raise ValueError("Failed to create linked ticket")
+    new_ticket_id = int(new_ticket.get("id"))
+
+    # Reference back to the main ticket.
+    await tickets_repo.set_ticket_parent(new_ticket_id, main_ticket_id)
+
+    # Record the link on the task so the button can simply reopen it later.
+    if task_id is not None:
+        from app.repositories import ticket_tasks as ticket_tasks_repo
+
+        try:
+            await ticket_tasks_repo.set_task_linked_ticket(int(task_id), new_ticket_id)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            pass
+
+    # Drop an internal note on the main ticket so the link is visible in context.
+    ticket_number = new_ticket.get("ticket_number") or new_ticket_id
+    try:
+        await tickets_repo.create_reply(
+            ticket_id=main_ticket_id,
+            author_id=None,
+            body=f"Task \"{task_name}\" was linked to a new ticket #{ticket_number}.",
+            is_internal=True,
+            minutes_spent=None,
+            is_billable=False,
+            external_reference=f"task-linked-ticket:{new_ticket_id}",
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        log_error(
+            "Failed to record task-linked-ticket note on main ticket",
+            ticket_id=main_ticket_id,
+            error=str(exc),
+        )
+
+    refreshed = await tickets_repo.get_ticket(new_ticket_id) or new_ticket
+    return refreshed, True
+
+
 async def merge_tickets(
     ticket_ids: list[int],
     target_ticket_id: int,
