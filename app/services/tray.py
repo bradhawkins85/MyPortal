@@ -626,6 +626,48 @@ def is_device_connected(device_uid: str) -> bool:
     return device_uid in _active_connections
 
 
+# A device whose WebSocket touched ``ws_last_seen_utc`` within this window is
+# treated as live on *some* app worker (it re-drains queued commands on its
+# next keep-alive, so a queued command is picked up within ~20 seconds).
+WEBSOCKET_PRESENCE_WINDOW_SECONDS = 90
+
+
+async def mark_websocket_alive(device: dict[str, Any]) -> None:
+    """Best-effort record that ``device`` holds a live WebSocket."""
+
+    try:
+        await tray_repo.touch_device_websocket(int(device["id"]))
+    except Exception as exc:  # noqa: BLE001 - presence is diagnostic only
+        log_warning(
+            "Failed to record tray WebSocket presence",
+            device_uid=device.get("device_uid"),
+            error=str(exc),
+        )
+
+
+def _as_utc(value: Any) -> datetime | None:
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def websocket_recently_seen(device: dict[str, Any], *, now: datetime | None = None) -> bool:
+    """Return True when the device's WebSocket was active very recently."""
+
+    seen = _as_utc(device.get("ws_last_seen_utc"))
+    if seen is None:
+        return False
+    current = now or datetime.now(timezone.utc)
+    return (current - seen).total_seconds() <= WEBSOCKET_PRESENCE_WINDOW_SECONDS
+
+
 # How often an open device WebSocket re-checks the command log for commands
 # that were queued by another worker (see ``/ws/tray/{device_uid}``).
 QUEUED_COMMAND_DRAIN_INTERVAL_SECONDS = 15.0
@@ -890,10 +932,28 @@ async def add_troubleshoot_requested_note(
             "<p>Sent to the device. Progress updates will be posted here as "
             "the agent runs.</p>"
         )
-    else:
+    elif websocket_recently_seen(device):
         delivery_html = (
-            "<p>The device is not currently connected to this server, so the "
-            "request is queued and will start when the device next checks in.</p>"
+            "<p>The device is connected to another MyPortal worker process, so "
+            "the request is queued and will be picked up within about 30 "
+            "seconds. Progress updates will be posted here as the agent "
+            "runs.</p>"
+        )
+    else:
+        last_live = _as_utc(device.get("ws_last_seen_utc"))
+        last_live_text = (
+            f"last live connection {last_live.strftime('%Y-%m-%d %H:%M UTC')}"
+            if last_live
+            else "no live connection has been recorded"
+        )
+        delivery_html = (
+            "<p>The request is queued, but the device has no live connection to "
+            f"MyPortal ({html.escape(last_live_text)}). It will start as soon as "
+            "the device's live connection is established.</p>"
+            "<p><em>If the device still shows as online, its heartbeat is "
+            "reaching the server but its WebSocket is not - check that the "
+            "reverse proxy forwards WebSocket upgrades for <code>/ws/</code> "
+            "paths.</em></p>"
         )
     body_html = (
         "<p><strong>AI Troubleshooting Agent</strong> - troubleshooter requested by "

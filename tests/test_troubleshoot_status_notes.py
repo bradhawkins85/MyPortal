@@ -331,3 +331,68 @@ def test_queued_troubleshoot_rechecks_consent(recorder, monkeypatch, allowed):
         assert sent == []
         assert result["delivered"] == 0
         assert recorder.completed == [(11, tray_service.TROUBLESHOOT_AI_OPT_OUT_DETAIL)]
+
+
+# ---------------------------------------------------------------------------
+# Queued-note wording distinguishes "on another worker" from "no live socket"
+# ---------------------------------------------------------------------------
+
+
+def _requested_note_body(recorder, device):
+    asyncio.run(
+        tray_service.add_troubleshoot_requested_note(
+            ticket_id=77,
+            command_id=11,
+            delivered=False,
+            device=device,
+            model="llama3",
+            requested_by=None,
+        )
+    )
+    return recorder.replies[-1]["body"]
+
+
+def test_queued_note_when_websocket_on_another_worker(recorder):
+    from datetime import datetime, timezone
+
+    device = {**DEVICE, "ws_last_seen_utc": datetime.now(timezone.utc).replace(tzinfo=None)}
+    body = _requested_note_body(recorder, device)
+    assert "another MyPortal worker" in body
+    assert "reverse proxy" not in body
+
+
+def test_queued_note_when_websocket_never_connected(recorder):
+    body = _requested_note_body(recorder, {**DEVICE, "ws_last_seen_utc": None})
+    assert "no live connection has been recorded" in body
+    assert "reverse proxy" in body
+
+
+def test_queued_note_when_websocket_stale(recorder):
+    from datetime import datetime, timedelta, timezone
+
+    stale = datetime.now(timezone.utc) - timedelta(hours=2)
+    body = _requested_note_body(recorder, {**DEVICE, "ws_last_seen_utc": stale})
+    assert "last live connection" in body
+    assert "another MyPortal worker" not in body
+
+
+def test_websocket_recently_seen_window():
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
+    within = now - timedelta(seconds=tray_service.WEBSOCKET_PRESENCE_WINDOW_SECONDS - 1)
+    outside = now - timedelta(seconds=tray_service.WEBSOCKET_PRESENCE_WINDOW_SECONDS + 1)
+    assert tray_service.websocket_recently_seen({"ws_last_seen_utc": within.replace(tzinfo=None)}, now=now)
+    assert tray_service.websocket_recently_seen({"ws_last_seen_utc": within.isoformat()}, now=now)
+    assert not tray_service.websocket_recently_seen({"ws_last_seen_utc": outside}, now=now)
+    assert not tray_service.websocket_recently_seen({}, now=now)
+
+
+def test_mark_websocket_alive_is_best_effort(monkeypatch):
+    from app.repositories import tray as tray_repo
+
+    async def boom(device_id):
+        raise RuntimeError("unknown column ws_last_seen_utc")
+
+    monkeypatch.setattr(tray_repo, "touch_device_websocket", boom)
+    asyncio.run(tray_service.mark_websocket_alive(DEVICE))
