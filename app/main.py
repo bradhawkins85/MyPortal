@@ -76,6 +76,7 @@ from app.api.routes import (
     compliance_checks as compliance_checks_api,
     email_blocklist as email_blocklist_api,
     email_tracking as email_tracking_api,
+    feedback,
     forms as forms_api,
     invoices as invoices_api,
     issues as issues_api,
@@ -1375,6 +1376,7 @@ app.include_router(users.router)
 app.include_router(click_to_call_api.router)
 app.include_router(call_recordings_api.router)
 app.include_router(companies.router)
+app.include_router(feedback.router)
 app.include_router(documentation.router)
 app.include_router(essential8_api.router)
 app.include_router(smb1001_api.router)
