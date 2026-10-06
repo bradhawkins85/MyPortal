@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import html
+import json
+import re
 from datetime import datetime, timezone
 from importlib import import_module
 from typing import Any
@@ -8,17 +11,20 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     HTTPException,
     Query,
     Request,
+    Response,
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.api.dependencies.auth import (
     get_current_session,
     get_current_user,
+    get_current_tray_device,
     get_optional_user,
     require_helpdesk_technician,
     require_super_admin,
@@ -29,7 +35,7 @@ from app.core.errors import (
     log_exception_with_error_id,
     new_error_id,
 )
-from app.core.logging import log_error
+from app.core.logging import log_error, log_info
 from loguru import logger
 from app.repositories import company_memberships as membership_repo
 from app.repositories import companies as companies_repo
@@ -39,6 +45,9 @@ from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import ticket_tasks as ticket_tasks_repo
 from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import tray as tray_repo
+from app.schemas.tray import TrayTroubleshootResponse, TicketAssetTroubleshootRequest
+from app.services import tray as tray_service
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
 from app.schemas.tickets import (
@@ -71,6 +80,7 @@ from app.schemas.tickets import (
     TicketTaskCreate,
     TicketTaskListResponse,
     TicketTaskUpdate,
+    TaskLinkedTicketResponse,
     TicketUpdate,
     TicketViewCreate,
     TicketViewListResponse,
@@ -1393,6 +1403,363 @@ async def add_reply(
     )
 
 
+@router.post(
+    "/{ticket_id}/troubleshoot-complete",
+    status_code=status.HTTP_200_OK,
+    summary="Receive AI troubleshooting result from a tray device",
+)
+async def receive_troubleshoot_result(
+    ticket_id: int,
+    request: Request,
+    command_id: int = Form(..., gt=0),
+    guidance: str = Form("", max_length=65536),
+    endpoint: str = Form(""),
+    log_bundle: UploadFile | None = File(None),
+    device: dict = Depends(get_current_tray_device),
+) -> JSONResponse:
+    """Tray-device callback for the AI troubleshooting agent.
+
+    The Go agent authenticates with the device token (``get_current_tray_device``),
+    collects up to 24 h of endpoint logs, calls the configured LLM for guidance,
+    and posts the result back here. This route:
+
+    1. Verifies the command is a ``troubleshoot`` command that was issued to
+       *this* device and targets *this* ticket.
+    2. Stores the LLM guidance as an **internal** (staff-only) ticket note.
+    3. Attaches the read-only log bundle as a staff-only (``closed``) attachment.
+    4. Marks the command ``completed`` in the tray command log.
+
+    Device tokens scope the caller to its own company, so a compromised device
+    can only write to tickets owned by its own company (enforced below).
+    """
+    device_id = device.get("id")
+    device_uid = str(device.get("device_uid") or "")
+    hostname = str(device.get("hostname") or "")
+
+    # --- Verify the command is a troubleshoot command for this device/ticket --
+    command = await tray_repo.get_command(command_id)
+    if command is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Troubleshoot command not found",
+        )
+    if command.get("command") != "troubleshoot":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Command is not a troubleshoot command",
+        )
+    if command.get("device_id") != device_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Command was not issued to this device",
+        )
+
+    command_payload = command.get("payload_json") or {}
+    if isinstance(command_payload, str):
+        try:
+            command_payload = json.loads(command_payload)
+        except (TypeError, ValueError):
+            command_payload = {}
+    command_ticket_id = (
+        command_payload.get("ticket_id")
+        if isinstance(command_payload, dict)
+        else None
+    )
+    try:
+        command_ticket_id_int = (
+            int(command_ticket_id) if command_ticket_id is not None else None
+        )
+    except (TypeError, ValueError):
+        command_ticket_id_int = None
+    if command_ticket_id_int != ticket_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Command does not target this ticket",
+        )
+
+    # --- Verify the ticket exists and belongs to the device's company ---------
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+    device_company_id = device.get("company_id")
+    if device_company_id is not None and ticket.get("company_id") not in (
+        None,
+        device_company_id,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Ticket does not belong to this device's company",
+        )
+
+    guidance_text = (guidance or "").strip()
+    if not guidance_text and log_bundle is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide guidance or a log bundle",
+        )
+
+    # --- Compose the internal note -------------------------------------------
+    endpoint_label = (endpoint or "").strip() or hostname or device_uid or "device"
+    header_html = (
+        "<p><strong>AI Troubleshooting Agent</strong> - guidance for "
+        f"{endpoint_label}</p>"
+    )
+    if guidance_text:
+        guidance_html = sanitize_rich_text(guidance_text).html
+    else:
+        guidance_html = (
+            "<p><em>No guidance produced - see the attached log bundle.</em></p>"
+        )
+    footer_html = (
+        "<p><em>Log bundle attached read-only from the device (last 24 hours). "
+        "Generated by the MyPortal troubleshooting agent.</em></p>"
+    )
+    body_html = sanitize_rich_text(header_html + guidance_html + footer_html).html
+
+    reply = await tickets_repo.create_reply(
+        ticket_id=ticket_id,
+        author_id=None,
+        body=body_html,
+        is_internal=True,
+        author_email="troubleshooting-agent@myportal.local",
+        author_display_name="Troubleshooting Agent",
+    )
+
+    # --- Attach the log bundle (best effort) ---------------------------------
+    attachment_id = None
+    if log_bundle is not None:
+        log_bytes = await log_bundle.read()
+        if log_bytes:
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            original_name = f"troubleshoot-logs-{command_id}-{ts}.gz"
+            try:
+                attachment = await attachments_service.save_file_bytes(
+                    ticket_id,
+                    contents=log_bytes,
+                    original_filename=original_name,
+                    mime_type="application/gzip",
+                    access_level="closed",
+                    uploaded_by_user_id=None,
+                )
+                attachment_id = attachment.get("id")
+            except Exception as exc:  # noqa: BLE001 - attachment is best-effort
+                log_error(
+                    f"Failed to attach troubleshoot log bundle "
+                    f"(ticket {ticket_id}, command {command_id}): {exc}"
+                )
+
+    # --- Mark the command completed -----------------------------------------
+    await tray_repo.mark_command_completed(command_id)
+
+    ticket_url = str(request.base_url).rstrip("/") + f"/tickets/{ticket_id}"
+
+    return JSONResponse(
+        {
+            "status": "completed",
+            "command_id": command_id,
+            "ticket_id": ticket_id,
+            "reply_id": reply.get("id") if reply else None,
+            "attachment_id": attachment_id,
+            "ticket_url": ticket_url,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# AI troubleshooting agent — invoked from a ticket's asset list
+# ---------------------------------------------------------------------------
+
+_TAG_RE = re.compile(r"<[^<>]*>")
+_SPACE_RE = re.compile(r"\s+")
+
+
+def _strip_ticket_description(value: Any, limit: int = 2000) -> str:
+    """Reduce a ticket description to bounded plain text for the LLM prompt.
+
+    Mirrors the text-normalisation used elsewhere in the codebase (strip HTML
+    tags, unescape entities, collapse whitespace) so a long customer-written
+    description cannot blow the LLM prompt budget.
+    """
+    text = _SPACE_RE.sub(" ", html.unescape(_TAG_RE.sub(" ", str(value or "")))).strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def _build_asset_troubleshoot_prompt(
+    ticket: dict[str, Any],
+    asset: dict[str, Any],
+    extra_context: str | None,
+) -> str:
+    """Assemble the LLM "reported problem" from the ticket and asset data.
+
+    The troubleshooter LLM only sees this string plus the endpoint's own logs,
+    so the ticket's own data (subject, description, priority, category, status)
+    and the asset under investigation are folded in here. This is what makes
+    the agent's guidance specific to the reported problem rather than a
+    generic endpoint analysis.
+    """
+    header_bits: list[str] = []
+    ticket_number = str(ticket.get("ticket_number") or ticket.get("id") or "").strip()
+    if ticket_number:
+        header_bits.append(f"Ticket {ticket_number}")
+    subject = str(ticket.get("subject") or "").strip()
+    if subject:
+        header_bits.append(f"Subject: {subject}")
+    for field, label in (("priority", "Priority"), ("category", "Category"), ("status", "Status")):
+        value = str(ticket.get(field) or "").strip()
+        if value:
+            header_bits.append(f"{label}: {value}")
+
+    description = _strip_ticket_description(ticket.get("description"))
+
+    lines: list[str] = [
+        "AI troubleshooting request from a support ticket. Use this ticket context "
+        "together with the endpoint logs below to diagnose the problem."
+    ]
+    if header_bits:
+        lines.append(" | ".join(header_bits))
+    if description:
+        lines.append("")
+        lines.append("Ticket description (reported problem):")
+        lines.append(description)
+
+    asset_bits: list[str] = []
+    asset_name = str(asset.get("name") or "").strip()
+    if asset_name:
+        asset_bits.append(asset_name)
+    for field, label in (
+        ("serial_number", "Serial"),
+        ("os_name", "OS"),
+        ("type", "Type"),
+        ("status", "Status"),
+    ):
+        value = str(asset.get(field) or "").strip()
+        if value:
+            asset_bits.append(f"{label}: {value}")
+    if asset_bits:
+        lines.append("")
+        lines.append("Asset under investigation: " + ", ".join(asset_bits))
+
+    extra = str(extra_context or "").strip()
+    if extra:
+        lines.append("")
+        lines.append(f"Technician notes: {extra}")
+
+    return "\n".join(lines)
+
+
+@router.post(
+    "/{ticket_id}/assets/{asset_id}/troubleshoot",
+    response_model=TrayTroubleshootResponse,
+    summary="Run the AI troubleshooting agent on a ticket's linked asset",
+)
+async def troubleshoot_ticket_asset(
+    ticket_id: int,
+    asset_id: int,
+    payload: TicketAssetTroubleshootRequest | None = None,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> TrayTroubleshootResponse:
+    """Trigger the AI troubleshooter on the device linked to a ticket asset.
+
+    A technician opens a ticket, finds an asset in the ticket's asset list, and
+    asks the AI troubleshooter to run on that asset's tray device. The ticket's
+    own data (subject, description, priority, category, status) and the asset
+    details are fed to the remote agent so the LLM analyses the endpoint logs
+    in the context of the reported problem. The agent reports back via
+    ``POST /api/tickets/{ticket_id}/troubleshoot-complete`` which stores the
+    result as an internal ticket note plus a log-bundle attachment.
+
+    Requires helpdesk / super-admin access. The asset must be linked to the
+    ticket and have an active tray device in the same company as the ticket.
+    """
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found."
+        )
+
+    linked_assets = await tickets_repo.list_ticket_assets(ticket_id)
+    asset = next((a for a in linked_assets if a.get("asset_id") == asset_id), None)
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Asset is not linked to this ticket.",
+        )
+
+    device_uid = str(asset.get("tray_device_uid") or "").strip()
+    if not device_uid:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This asset has no active tray device.",
+        )
+
+    device = await tray_repo.get_device_by_uid(device_uid)
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Device not found."
+        )
+    if device.get("status") != "active":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Device is not active."
+        )
+
+    ticket_company_id = ticket.get("company_id")
+    if (
+        ticket_company_id is not None
+        and int(device.get("company_id") or 0) != int(ticket_company_id)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Ticket does not belong to the device's company.",
+        )
+
+    model_override = payload.model if payload else None
+    llm = tray_service.build_troubleshoot_llm_config(model_override)
+    if not llm["model"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No LLM model is configured for the AI assistant.",
+        )
+
+    prompt = _build_asset_troubleshoot_prompt(
+        ticket, asset, payload.context if payload else None
+    )
+    troubleshoot_payload = {
+        "ticket_id": ticket_id,
+        "prompt": prompt,
+        "llm_base_url": llm["base_url"],
+        "llm_model": llm["model"],
+        "llm_api_key": llm["api_key"],
+    }
+    command_id, delivered = await tray_service.dispatch_troubleshoot_command(
+        device_id=int(device["id"]),
+        device_uid=device_uid,
+        payload=troubleshoot_payload,
+        initiated_by_user_id=int(current_user["id"]),
+    )
+
+    log_info(
+        "AI troubleshooter started from ticket asset list",
+        ticket_id=ticket_id,
+        asset_id=asset_id,
+        device_uid=device_uid,
+        command_id=command_id,
+        delivered=delivered,
+    )
+
+    return TrayTroubleshootResponse(
+        command_id=command_id,
+        device_uid=device_uid,
+        ticket_id=ticket_id,
+        status="delivered" if delivered else "queued",
+        delivered=delivered,
+        model=llm["model"],
+    )
+
+
 @router.patch("/{ticket_id}/replies/{reply_id}", response_model=TicketReplyResponse)
 async def update_reply_time_entry(
     ticket_id: int,
@@ -1974,6 +2341,92 @@ async def delete_ticket_task(
                 )
 
     await ticket_tasks_repo.delete_task(task_id)
+
+
+@router.post(
+    "/{ticket_id}/tasks/{task_id}/linked-ticket",
+    response_model=TaskLinkedTicketResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def create_task_linked_ticket(
+    ticket_id: int,
+    task_id: int,
+    request: Request,
+    response: Response,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> TaskLinkedTicketResponse:
+    """Create a standalone linked ticket for a task on the given ticket.
+
+    The new ticket references back to the main ticket (``parent_ticket_id``)
+    and the task (``ticket_tasks.linked_ticket_id``) so it can hold its own
+    assignment and notes/replies. Requires helpdesk technician permission.
+
+    The operation is idempotent: when the task already has a linked ticket it
+    is returned with HTTP 200 and ``created=false``; otherwise a new ticket is
+    created and returned with HTTP 201 and ``created=true``.
+    """
+    main_ticket = await tickets_repo.get_ticket(ticket_id)
+    if not main_ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+
+    task = await ticket_tasks_repo.get_task(task_id)
+    if not task or task.get("ticket_id") != ticket_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+
+    try:
+        linked_ticket, created = await tickets_service.create_linked_ticket_for_task(
+            main_ticket=main_ticket,
+            task=task,
+            actor=current_user,
+        )
+    except ValueError as exc:
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Task linked-ticket creation failed",
+            error_id=error_id,
+            route="tickets.create_task_linked_ticket",
+            ticket_id=ticket_id,
+            task_id=task_id,
+            detail=str(exc),
+        )
+        raise build_client_http_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "Unable to create a linked ticket for this task.",
+            error_id=error_id,
+        ) from exc
+
+    linked_id = int(linked_ticket.get("id"))
+    ticket_number = str(linked_ticket.get("ticket_number") or linked_id)
+    response.status_code = (
+        status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    )
+
+    if created:
+        await audit_service.record(
+            action="ticket.task_linked_ticket_created",
+            request=request,
+            user_id=int(current_user["id"]),
+            entity_type="ticket",
+            entity_id=ticket_id,
+            before=_audit_ticket_view(main_ticket),
+            after=_audit_ticket_view(main_ticket),
+            metadata={
+                "task_id": task_id,
+                "linked_ticket_id": linked_id,
+            },
+        )
+
+    return TaskLinkedTicketResponse(
+        ticket_id=linked_id,
+        ticket_number=ticket_number,
+        subject=str(linked_ticket.get("subject") or ""),
+        admin_url=f"/admin/tickets/{linked_id}",
+        created=created,
+    )
 
 
 # ==================== Ticket Attachments ====================

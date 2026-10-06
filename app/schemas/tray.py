@@ -382,3 +382,61 @@ class TrayTicketQuestionUpdate(BaseModel):
     sort_order: Optional[int] = None
     is_active: Optional[bool] = None
     conditions: Optional[list[TrayTicketQuestionCondition]] = None
+
+
+# ---------------------------------------------------------------------------
+# AI troubleshooting agent
+# ---------------------------------------------------------------------------
+
+
+class TrayTroubleshootRequest(BaseModel):
+    """Technician payload to start an AI troubleshooting run on a device."""
+
+    ticket_id: int = Field(
+        ...,
+        ge=1,
+        description="The support ticket the agent's guidance + log bundle attach to.",
+    )
+    prompt: str = Field(
+        ...,
+        min_length=1,
+        max_length=8000,
+        description="Description of the issue to troubleshoot, written by the technician.",
+    )
+    model: Optional[str] = Field(
+        None,
+        max_length=120,
+        description="Optional LLM model override. Falls back to the site default model.",
+    )
+
+
+class TrayTroubleshootResponse(BaseModel):
+    """Acknowledgement returned after the troubleshoot command is queued/delivered."""
+
+    command_id: int
+    device_uid: str
+    ticket_id: int
+    status: str  # "delivered" (device online) or "queued" (will run on reconnect)
+    delivered: bool
+    model: str
+
+
+class TicketAssetTroubleshootRequest(BaseModel):
+    """Technician payload to run the AI troubleshooter on a ticket's linked asset.
+
+    All fields are optional. The ticket's own data (subject, description,
+    priority, category, status) plus the asset under investigation are always
+    fed to the LLM by the server; ``model`` overrides the LLM model and
+    ``context`` appends free-form technician notes to that context.
+    """
+
+    model: Optional[str] = Field(
+        None,
+        max_length=120,
+        description="Optional LLM model override. Falls back to the site default model.",
+    )
+    context: Optional[str] = Field(
+        None,
+        max_length=2000,
+        description="Optional technician notes appended to the ticket context fed to the LLM.",
+    )

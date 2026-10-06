@@ -1305,6 +1305,23 @@
         chatButton.innerHTML = '<span aria-hidden="true">💬</span>';
         actions.appendChild(chatButton);
 
+        const troubleshootButton = document.createElement('button');
+        troubleshootButton.type = 'button';
+        troubleshootButton.className = 'button button--ghost button--icon ticket-assets-linked__action';
+        troubleshootButton.setAttribute('data-linked-asset-troubleshoot', '');
+        troubleshootButton.setAttribute('data-asset-id', assetIdValue);
+        troubleshootButton.setAttribute('data-asset-name', displayName);
+        troubleshootButton.title = 'Run AI troubleshooter on this asset';
+        troubleshootButton.setAttribute('aria-label', `Run AI troubleshooter on ${displayName}`);
+        if (record.tray_device_uid) {
+          troubleshootButton.setAttribute('data-device-uid', record.tray_device_uid);
+        } else {
+          troubleshootButton.disabled = true;
+          troubleshootButton.setAttribute('aria-disabled', 'true');
+        }
+        troubleshootButton.innerHTML = '<span aria-hidden="true">🤖</span>';
+        actions.appendChild(troubleshootButton);
+
         const removeButton = document.createElement('button');
         removeButton.type = 'button';
         removeButton.className = 'button button--ghost button--icon ticket-assets-linked__remove';
@@ -1598,6 +1615,61 @@
             console.error('Failed to open tray chat', error);
             window.alert(`Failed to open chat: ${error.message || 'Unknown error'}`);
             chatButton.disabled = false;
+          });
+        return;
+      }
+
+      const troubleshootButton = target.closest('[data-linked-asset-troubleshoot]');
+      if (troubleshootButton) {
+        const uid = troubleshootButton.getAttribute('data-device-uid') || '';
+        if (!uid || troubleshootButton.disabled) {
+          return;
+        }
+        const assetId = troubleshootButton.getAttribute('data-asset-id') || '';
+        const assetName = (troubleshootButton.getAttribute('data-asset-name') || 'asset').trim();
+        const ticketId = getTicketIdFromPath();
+        if (!assetId || !ticketId) {
+          return;
+        }
+        const showToast = (message, variant) => {
+          if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+            window.__portalToast.show(message, { variant });
+            return true;
+          }
+          return false;
+        };
+        troubleshootButton.disabled = true;
+        fetch(`/api/tickets/${encodeURIComponent(ticketId)}/assets/${encodeURIComponent(assetId)}/troubleshoot`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': getCsrfToken(),
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({}),
+        })
+          .then(async (response) => {
+            if (!response.ok) {
+              throw new Error(await getApiErrorMessage(response, `Unable to start the AI troubleshooter for ${assetName}.`));
+            }
+            return response.json();
+          })
+          .then((data) => {
+            const message = data.delivered
+              ? `AI troubleshooter started on ${assetName}. The result will post to this ticket as a note and log bundle.`
+              : `AI troubleshooter queued for ${assetName}. It will run when the device reconnects.`;
+            if (!showToast(message, 'success')) {
+              window.alert(message);
+            }
+            troubleshootButton.disabled = false;
+          })
+          .catch((error) => {
+            console.error('Failed to start AI troubleshooter', error);
+            const message = `Failed to start the AI troubleshooter: ${error.message || 'Unknown error'}`;
+            if (!showToast(message, 'error')) {
+              window.alert(message);
+            }
+            troubleshootButton.disabled = false;
           });
         return;
       }
@@ -2122,6 +2194,24 @@
         const actions = document.createElement('div');
         actions.className = 'task-list__actions';
 
+        const linkedTicketId = task.linked_ticket_id ? Number(task.linked_ticket_id) : null;
+        const linkedButton = document.createElement('button');
+        linkedButton.type = 'button';
+        linkedButton.className = 'button button--ghost button--icon button--small';
+        if (linkedTicketId) {
+          linkedButton.innerHTML = '🎫';
+          linkedButton.title = `Open linked ticket #${linkedTicketId}`;
+          linkedButton.setAttribute('aria-label', `Open linked ticket #${linkedTicketId}`);
+          linkedButton.addEventListener('click', () => {
+            window.open(`/admin/tickets/${linkedTicketId}`, '_blank', 'noopener,noreferrer');
+          });
+        } else {
+          linkedButton.innerHTML = '🔗';
+          linkedButton.title = 'Create a linked ticket for this task';
+          linkedButton.setAttribute('aria-label', 'Create linked ticket');
+          linkedButton.addEventListener('click', () => handleCreateLinkedTicket(task, linkedButton));
+        }
+
         const editButton = document.createElement('button');
         editButton.type = 'button';
         editButton.className = 'button button--ghost button--icon button--small';
@@ -2136,6 +2226,7 @@
         deleteButton.innerHTML = '×';
         deleteButton.addEventListener('click', () => handleDeleteTask(task.id));
 
+        actions.appendChild(linkedButton);
         actions.appendChild(editButton);
         actions.appendChild(deleteButton);
 
@@ -2229,6 +2320,42 @@
         } catch (error) {
           console.error('Failed to delete task', error);
           alert('Failed to delete task. Please try again.');
+        }
+      }
+
+      async function handleCreateLinkedTicket(task, button) {
+        const csrfToken = getCsrfToken();
+        const headers = { Accept: 'application/json' };
+        if (csrfToken) {
+          headers['X-CSRF-Token'] = csrfToken;
+        }
+        if (button) {
+          button.disabled = true;
+        }
+
+        try {
+          const response = await fetch(
+            `/api/tickets/${ticketId}/tasks/${task.id}/linked-ticket`,
+            {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers,
+            },
+          );
+          if (!response.ok) {
+            throw new Error('Failed to create linked ticket');
+          }
+          const data = await response.json();
+          const url = data.admin_url || `/admin/tickets/${data.ticket_id}`;
+          window.open(url, '_blank', 'noopener,noreferrer');
+          await loadTasks();
+        } catch (error) {
+          console.error('Failed to create linked ticket', error);
+          alert('Failed to create linked ticket. Please try again.');
+        } finally {
+          if (button) {
+            button.disabled = false;
+          }
         }
       }
 

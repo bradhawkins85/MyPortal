@@ -34,6 +34,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from app.api.dependencies.auth import (
     get_current_tray_device,
     get_current_user,
+    require_helpdesk_technician,
     require_super_admin,
 )
 from app.api.dependencies.api_keys import require_api_key
@@ -74,6 +75,8 @@ from app.schemas.tray import (
     TrayTRMMScriptRunResponse,
     TrayTRMMSyncRequest,
     TrayTRMMSyncResponse,
+    TrayTroubleshootRequest,
+    TrayTroubleshootResponse,
 )
 from app.services import audit as audit_service
 from app.services import chat_ticket_sync
@@ -2574,6 +2577,83 @@ async def push_notification_to_device(
         {
             "delivered": delivered,
         }
+    )
+
+
+@router.post(
+    "/{device_uid}/troubleshoot",
+    response_model=TrayTroubleshootResponse,
+    summary="Run the AI troubleshooting agent on a device (Phase 9)",
+)
+async def run_troubleshoot(
+    device_uid: str,
+    payload: TrayTroubleshootRequest,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> TrayTroubleshootResponse:
+    """Ask a tray device to run the AI troubleshooting agent.
+
+    The device collects the endpoint's recent read-only logs, calls the
+    configured LLM for guidance, and reports back to
+    ``POST /api/tickets/{ticket_id}/troubleshoot-complete`` which stores the
+    result as an internal ticket note plus a log-bundle attachment.
+
+    Requires helpdesk / super-admin access. The target ticket must belong to
+    the same company as the device. The command is queued in
+    ``tray_command_log`` and pushed live when the device is connected.
+    """
+
+    device = await tray_repo.get_device_by_uid(device_uid)
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Device not found."
+        )
+    if device.get("status") != "active":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Device is not active."
+        )
+
+    ticket = await tickets_repo.get_ticket(int(payload.ticket_id))
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found."
+        )
+    ticket_company_id = ticket.get("company_id")
+    if (
+        ticket_company_id is not None
+        and int(device.get("company_id") or 0) != int(ticket_company_id)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Ticket does not belong to the device's company.",
+        )
+
+    llm = tray_service.build_troubleshoot_llm_config(payload.model)
+    if not llm["model"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No LLM model is configured for the AI assistant.",
+        )
+
+    troubleshoot_payload = {
+        "ticket_id": int(payload.ticket_id),
+        "prompt": payload.prompt,
+        "llm_base_url": llm["base_url"],
+        "llm_model": llm["model"],
+        "llm_api_key": llm["api_key"],
+    }
+    command_id, delivered = await tray_service.dispatch_troubleshoot_command(
+        device_id=int(device["id"]),
+        device_uid=device_uid,
+        payload=troubleshoot_payload,
+        initiated_by_user_id=int(current_user["id"]),
+    )
+    return TrayTroubleshootResponse(
+        command_id=command_id,
+        device_uid=device_uid,
+        ticket_id=int(payload.ticket_id),
+        status="delivered" if delivered else "queued",
+        delivered=delivered,
+        model=llm["model"],
     )
 
 
