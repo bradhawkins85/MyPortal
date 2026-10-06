@@ -1,5 +1,6 @@
 """Browser regression checks for multi-select conversation filters."""
 from pathlib import Path
+import re
 import shutil
 
 import pytest
@@ -18,6 +19,7 @@ CONTROLS = TEMPLATE[TEMPLATE.index('              <div class="stat-strip ticket-
     ({'is_internal': False, 'author_id': None, 'external_reference': 'imap:customer-message'}, 'customer'),
     ({'is_internal': True, 'author_id': 2, 'external_reference': None}, 'internal'),
     ({'is_internal': False, 'author_id': 2, 'external_reference': None}, 'technician'),
+    ({'is_internal': True, 'is_ai': True, 'author_id': None, 'external_reference': None}, 'ai'),
 ])
 def test_reply_category_preserves_origin_and_visibility(reply, expected):
     classification = TEMPLATE[TEMPLATE.index('                      {% set reply_is_automation'):TEMPLATE.index('                      <article', TEMPLATE.index('                      {% set reply_is_automation'))]
@@ -39,9 +41,14 @@ def history_page():
         browser.close()
 
 
-def mount(page, kinds=None, user_id=7, extra_filter=None):
+def mount(page, kinds=None, user_id=7, extra_filter=None, drop_filter=None):
     kinds = kinds or ['customer', 'technician', 'internal', 'automation'] * 3
     controls = Environment().from_string(CONTROLS).render(current_user={'id': user_id})
+    if drop_filter:
+        # Simulate an older page that does not have this tile yet.
+        controls = re.sub(
+            rf'<button[^>]*data-history-filter="{drop_filter}".*?</button>', '', controls, flags=re.S
+        )
     if extra_filter:
         controls = controls.replace('</div>', f'<button data-history-filter="{extra_filter}" type="button"><span data-history-count></span>{extra_filter}</button></div>')
     messages = ''.join(f'<article data-ticket-reply data-message-kind="{kind}">{index}</article>' for index, kind in enumerate(kinds))
@@ -101,17 +108,17 @@ def test_persistence_user_isolation_and_new_ai_type(history_page):
     mount(page)
     assert tile(page, 'automation').get_attribute('aria-pressed') == 'false'
     page.goto('http://history.test/admin/tickets/999')
-    mount(page, kinds=['customer', 'ai', 'automation'], extra_filter='ai')
+    mount(page, kinds=['customer', 'ai', 'automation'])
     assert visible_count(page, 'automation') == 0
     assert visible_count(page, 'ai') == 1
     tile(page, 'ai').click()
     page.reload()
-    mount(page, kinds=['customer', 'ai', 'automation'], extra_filter='ai')
+    mount(page, kinds=['customer', 'ai', 'automation'])
     assert visible_count(page, 'ai') == 0
     # A version without the AI tile must not discard that preference.
-    mount(page)
+    mount(page, drop_filter='ai')
     tile(page, 'customer').click()
-    mount(page, kinds=['customer', 'ai', 'automation'], extra_filter='ai')
+    mount(page, kinds=['customer', 'ai', 'automation'])
     assert visible_count(page, 'ai') == 0
     mount(page, user_id=8)
     assert tile(page, 'automation').get_attribute('aria-pressed') == 'true'

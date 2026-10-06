@@ -1,0 +1,7 @@
+{
+  "guid": "0618ff87-4cb8-4a2a-955f-983ebc9c9957",
+  "occurred_at": "2026-10-06T11:45Z",
+  "change_type": "Feature",
+  "summary": "AI troubleshooter can optionally search the public web for troubleshooting steps (TROUBLESHOOT_WEB_SEARCH_ENABLED) and posts the steps with their source URLs for building KB articles.",
+  "content_hash": "bf222f7ad08740588a70140865cc76927a56321b3b26d651957fd717be72c084"
+}

@@ -12,18 +12,47 @@ import (
 	"time"
 )
 
-// collectPlatformLogs reads the macOS unified log for the last window using
-// `log show`, which is read-only and needs no special entitlement.
-func collectPlatformLogs(ctx context.Context, window time.Duration) (string, []string, error) {
-	out, err := runDarwinLog(ctx, "show", "--style", "compact", "--last", logWindow(window))
-	if err != nil {
-		return "", nil, fmt.Errorf("log show: %w", err)
+// defaultPlatformSources reads the whole unified log when the server names
+// no sources.
+var defaultPlatformSources = []string{"macos:all"}
+
+// isPlatformLogSource reports whether source is an allowlisted macOS source.
+func isPlatformLogSource(source string) bool { return isMacOSLogSource(source) }
+
+// collectPlatformLogs reads the macOS unified log for each requested source
+// using `log show`, which is read-only and needs no special entitlement. Each
+// source maps to a fixed predicate; unlisted sources are refused.
+func collectPlatformLogs(ctx context.Context, specs []LogSpec) (string, []string, error) {
+	var b strings.Builder
+	var sources []string
+	var lastErr error
+	for _, spec := range specs {
+		predicate, ok := MacOSLogPredicates[spec.Source]
+		if !ok {
+			b.WriteString(fmt.Sprintf("### %s Log\n[refused: not an allowlisted source]\n\n", spec.Source))
+			continue
+		}
+		args := []string{"show", "--style", "compact", "--last", logWindow(spec.Window)}
+		if predicate != "" {
+			args = append(args, "--predicate", predicate)
+		}
+		out, err := runDarwinLog(ctx, args...)
+		if err != nil {
+			lastErr = err
+			b.WriteString(fmt.Sprintf("### %s Log\n[unavailable: %s]\n\n", spec.Source, err))
+			continue
+		}
+		text := strings.TrimSpace(string(out))
+		if text == "" {
+			text = "[no entries in this window]"
+		}
+		b.WriteString(fmt.Sprintf("### %s Log\n%s\n\n", spec.Source, text))
+		sources = append(sources, spec.Source)
 	}
-	text := strings.TrimSpace(string(out))
-	if text == "" {
-		text = "[no entries in this window]"
+	if len(sources) == 0 && lastErr != nil {
+		return "", nil, fmt.Errorf("log show: %w", lastErr)
 	}
-	return text, []string{"unified log"}, nil
+	return b.String(), sources, nil
 }
 
 func runDarwinLog(ctx context.Context, args ...string) ([]byte, error) {

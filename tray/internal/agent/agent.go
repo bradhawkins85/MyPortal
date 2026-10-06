@@ -9,6 +9,11 @@
 //     caller can report them back to the server as an internal ticket note and
 //     a staff-only attachment.
 //
+// In ModeCollectLogs (the server's multi-stage troubleshooter) the server has
+// already researched the problem and decided which logs it needs and why, so
+// the agent only collects those allowlisted sources and uploads them; the
+// server sends them to the LLM itself.
+//
 // The agent performs no privileged operation: it only reads local logs and
 // makes a single outbound request to the LLM endpoint the server supplies.
 package agent
@@ -57,6 +62,10 @@ type Request struct {
 	Endpoint  string // optional operator-supplied label for the endpoint
 	Prompt    string // operator-supplied description of the problem
 	LLM       LLMConfig
+	// Mode is empty for the original single-stage job or ModeCollectLogs.
+	Mode string
+	// LogRequests names the sources to collect in ModeCollectLogs.
+	LogRequests []LogRequest
 }
 
 // Result is the finished agent output, ready to be reported to the server. A
@@ -73,8 +82,11 @@ type Result struct {
 // tests can stub the expensive platform and network calls.
 type Agent struct {
 	// CollectLogs returns raw (uncompressed) log text plus a list of the
-	// human-readable sources it gathered, looking back window.
-	CollectLogs func(ctx context.Context, window time.Duration) (string, []string, error)
+	// human-readable sources it gathered, one per spec.
+	CollectLogs func(ctx context.Context, specs []LogSpec) (string, []string, error)
+	// AllowedSource reports whether a requested source may be collected on
+	// this platform. Defaults to the platform allowlist.
+	AllowedSource func(source string) bool
 	// CallLLM asks the model for guidance given a system and a user prompt.
 	CallLLM func(ctx context.Context, cfg LLMConfig, system, user string) (string, error)
 	// OnProgress, when set, is called as the job moves between stages so the
@@ -103,9 +115,10 @@ func (a *Agent) progress(stage, message string) {
 // OpenAI-compatible LLM client.
 func NewAgent() *Agent {
 	return &Agent{
-		CollectLogs: collectLogs,
-		CallLLM:     newLLMClient().Chat,
-		Window:      DefaultWindow,
+		CollectLogs:   collectLogs,
+		AllowedSource: isPlatformLogSource,
+		CallLLM:       newLLMClient().Chat,
+		Window:        DefaultWindow,
 	}
 }
 
@@ -124,8 +137,25 @@ func (a *Agent) Run(ctx context.Context, req Request) (Result, error) {
 
 	var errs []string
 
-	a.progress(StageCollectingLogs, fmt.Sprintf("Collecting endpoint logs from the last %s.", window))
-	rawLogs, sources, collectErr := a.CollectLogs(ctx, window)
+	collectOnly := req.Mode == ModeCollectLogs
+	specs := defaultLogSpecs(window)
+	if collectOnly {
+		allowed := a.AllowedSource
+		if allowed == nil {
+			allowed = isPlatformLogSource
+		}
+		requested, refused := ResolveLogRequests(req.LogRequests, allowed)
+		if len(refused) > 0 {
+			errs = append(errs, fmt.Sprintf("skipped log sources not available on this endpoint: %s", strings.Join(refused, ", ")))
+		}
+		if len(requested) > 0 {
+			specs = requested
+		}
+		a.progress(StageCollectingLogs, describeLogRequests(req.LogRequests, specs, refused))
+	} else {
+		a.progress(StageCollectingLogs, fmt.Sprintf("Collecting endpoint logs from the last %s.", window))
+	}
+	rawLogs, sources, collectErr := a.CollectLogs(ctx, specs)
 	var redacted string
 	if collectErr != nil {
 		errs = append(errs, fmt.Sprintf("log collection: %v", collectErr))
@@ -157,7 +187,8 @@ func (a *Agent) Run(ctx context.Context, req Request) (Result, error) {
 		result.LogBundle = bundle
 	}
 
-	if req.LLM.Model != "" {
+	// In collect-only mode the server analyses the logs itself.
+	if req.LLM.Model != "" && !collectOnly {
 		if a.CallLLM == nil {
 			errs = append(errs, "no LLM client configured")
 		} else {
@@ -176,6 +207,31 @@ func (a *Agent) Run(ctx context.Context, req Request) (Result, error) {
 		return result, errors.New(strings.Join(errs, "; "))
 	}
 	return result, nil
+}
+
+// describeLogRequests renders the collect-only progress note: each source the
+// agent will read with the reason the troubleshooter asked for it.
+func describeLogRequests(requests []LogRequest, specs []LogSpec, refused []string) string {
+	reasons := map[string]string{}
+	for _, r := range requests {
+		source := strings.TrimSpace(r.Source)
+		if _, seen := reasons[source]; !seen {
+			reasons[source] = strings.TrimSpace(r.Reason)
+		}
+	}
+	var b strings.Builder
+	b.WriteString("Collecting the logs the troubleshooter asked for:")
+	for _, spec := range specs {
+		fmt.Fprintf(&b, "\n- %s (last %s)", spec.Source, spec.Window)
+		if reason := reasons[spec.Source]; reason != "" {
+			fmt.Fprintf(&b, ": %s", reason)
+		}
+	}
+	if len(refused) > 0 {
+		fmt.Fprintf(&b, "\nNot available on this endpoint: %s.", strings.Join(refused, ", "))
+	}
+	out, _ := Truncate(b.String(), 3500)
+	return out
 }
 
 // resolveEndpoint picks the label used in the ticket note: the operator-supplied

@@ -1,0 +1,7 @@
+{
+  "guid": "7baaeffc-3316-4abd-aa3b-4f3c7d0d9bcf",
+  "occurred_at": "2026-10-06T11:30Z",
+  "change_type": "Feature",
+  "summary": "AI troubleshooter now works in stages: finds troubleshooting articles, posts recommended steps, collects only the endpoint logs those steps call for, and has the AI analyse them against the reason each was collected.",
+  "content_hash": "522e41e7cc9ac2d48c53b44ce4513c0edbc02e1ceae1e1c7f3480964fca77f7e"
+}

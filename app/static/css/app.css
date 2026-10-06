@@ -18824,6 +18824,7 @@ body.scf-modal-open {
 .timeline__event--technician { margin-left: clamp(1rem, 7%, 5rem); border-right: 3px solid #818cf8; background: rgba(49, 46, 129, 0.24); }
 .timeline__event--internal { margin-left: clamp(1rem, 7%, 5rem); border: 1px dashed #fbbf24; background: rgba(120, 53, 15, 0.2); }
 .timeline__event--automation { border-color: rgba(148, 163, 184, 0.32); background: rgba(30, 41, 59, 0.44); }
+.timeline__event--ai { margin-left: clamp(1rem, 7%, 5rem); border: 1px dashed #a78bfa; background: rgba(76, 29, 149, 0.22); }
 .timeline__message-content { max-width: 82ch; color: #e2e8f0; line-height: 1.55; }
 
 .ticket-split-select input {

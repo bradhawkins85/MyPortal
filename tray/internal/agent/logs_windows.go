@@ -13,43 +13,43 @@ import (
 	"unicode/utf16"
 )
 
-// windowsLogSources are the event channels the agent reads. Security is
-// included because most endpoint incidents (logon, RDP, service changes,
-// tamper alerts) surface there first.
-var windowsLogSources = []string{"System", "Application", "Security"}
+// defaultPlatformSources are the event channels read when the server names
+// none. Security is included because most endpoint incidents (logon, RDP,
+// service changes, tamper alerts) surface there first.
+var defaultPlatformSources = []string{"System", "Application", "Security"}
+
+// isPlatformLogSource reports whether source is an allowlisted channel.
+func isPlatformLogSource(source string) bool { return isWindowsLogSource(source) }
 
 // maxWinEvents caps the number of entries read per channel so a busy machine
 // cannot blow past the prompt budget.
 const maxWinEvents = 500
 
-// logQueryScript emits one bounded line per event so the prompt stays
-// greppable. It is read-only (Get-WinEvent never mutates the logs).
-const logQueryScript = `$ErrorActionPreference = 'Stop'
-Get-WinEvent -LogName '%s' -Since ([datetime] '%s') -MaxEvents %d -ErrorAction SilentlyContinue |
-  ForEach-Object {
-    $msg = if ($null -ne $_.Message) { ($_.Message -replace "\r?\n", ' ') } else { '' }
-    '{0:yyyy-MM-dd HH:mm:ss} [{1}] id={2}: {3}' -f $_.TimeCreated, $_.LevelDisplayName, $_.Id, $msg.Substring(0, [Math]::Min(400, $msg.Length))
-  }`
-
-// collectPlatformLogs reads the last window of Windows Event Log entries as
-// plain text via PowerShell's Get-WinEvent. It is read-only.
-func collectPlatformLogs(ctx context.Context, window time.Duration) (string, []string, error) {
-	since := time.Now().Add(-window).Format("2006-01-02T15:04:05")
+// collectPlatformLogs reads each requested Windows Event Log channel as plain
+// text via PowerShell's Get-WinEvent. It is read-only. Only allowlisted
+// channels are read: the name is embedded in the script, so an unlisted name
+// is refused rather than quoted.
+func collectPlatformLogs(ctx context.Context, specs []LogSpec) (string, []string, error) {
 	var b strings.Builder
 	var sources []string
-	for _, log := range windowsLogSources {
-		script := fmt.Sprintf(logQueryScript, log, since, maxWinEvents)
+	for _, spec := range specs {
+		if !isWindowsLogSource(spec.Source) {
+			b.WriteString(fmt.Sprintf("### %s Log\n[refused: not an allowlisted channel]\n\n", spec.Source))
+			continue
+		}
+		since := time.Now().Add(-spec.Window).Format("2006-01-02T15:04:05")
+		script := fmt.Sprintf(logQueryScript, spec.Source, since, maxWinEvents)
 		out, err := runReadOnlyPowerShell(ctx, script)
 		if err != nil {
-			b.WriteString(fmt.Sprintf("### %s Log\n[unavailable: %s]\n\n", log, err))
+			b.WriteString(fmt.Sprintf("### %s Log\n[unavailable: %s]\n\n", spec.Source, err))
 			continue
 		}
 		text := strings.TrimSpace(string(out))
 		if text == "" {
 			text = "[no entries in this window]"
 		}
-		b.WriteString(fmt.Sprintf("### %s Log\n%s\n\n", log, text))
-		sources = append(sources, log)
+		b.WriteString(fmt.Sprintf("### %s Log\n%s\n\n", spec.Source, text))
+		sources = append(sources, spec.Source)
 	}
 	return b.String(), sources, nil
 }
@@ -73,7 +73,7 @@ func runReadOnlyPowerShell(ctx context.Context, script string) ([]byte, error) {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, fmt.Errorf("timed out: %w", ctx.Err())
 		}
-		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("%w: %s", err, PowerShellErrorText(stderr.String()))
 	}
 	return out, nil
 }

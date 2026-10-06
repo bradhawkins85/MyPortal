@@ -49,6 +49,11 @@ FEATURES: tuple[LLMFeature, ...] = (
         callers=(("app.services.agent", "_invoke_agent_llm"),),
     ),
     LLMFeature(
+        "ai_troubleshooter", "AI troubleshooter",
+        "Researches articles, recommends steps and analyses endpoint logs for a ticket asset.",
+        callers=(("app.services.ai_troubleshooter", "_chat"),),
+    ),
+    LLMFeature(
         "ticket_ai_summary", "Ticket AI summary",
         "Summarises the ticket conversation on the ticket page.",
         callers=(("app.services.tickets", "refresh_ticket_ai_summary"),),

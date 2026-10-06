@@ -882,6 +882,25 @@ class Settings(BaseSettings):
     troubleshoot_llm_api_key: str | None = Field(
         default=None, validation_alias="TROUBLESHOOT_LLM_API_KEY"
     )
+    # Optional public web search for the multi-stage troubleshooter. Off by
+    # default: when enabled, generic (LLM-written, no customer details) search
+    # terms are sent to the configured search provider and the top public
+    # pages are read for troubleshooting steps.
+    troubleshoot_web_search_enabled: bool = Field(
+        default=False, validation_alias="TROUBLESHOOT_WEB_SEARCH_ENABLED"
+    )
+    troubleshoot_web_search_provider: str = Field(
+        default="searxng", validation_alias="TROUBLESHOOT_WEB_SEARCH_PROVIDER"
+    )
+    troubleshoot_web_search_url: str | None = Field(
+        default=None, validation_alias="TROUBLESHOOT_WEB_SEARCH_URL"
+    )
+    troubleshoot_web_search_api_key: str | None = Field(
+        default=None, validation_alias="TROUBLESHOOT_WEB_SEARCH_API_KEY"
+    )
+    troubleshoot_web_search_max_pages: int = Field(
+        default=3, validation_alias="TROUBLESHOOT_WEB_SEARCH_MAX_PAGES", ge=1, le=5
+    )
     matrixbot_ai_response_delay_minutes: int = Field(
         default=5, validation_alias="MATRIXBOT_AI_RESPONSE_DELAY_MINUTES", ge=1
     )

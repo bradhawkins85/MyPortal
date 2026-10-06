@@ -104,6 +104,7 @@ All endpoints appear in the Swagger UI at `/docs` per project convention.
 * `{"type": "show_notification", "title": "...", "body": "..."}`
 * `{"type": "run_menu_action", "node_id": "..."}` *(only for whitelisted server-defined actions)*
 * `{"type": "troubleshoot", "ticket_id": <int>, "command_id": <int>, "prompt": "...", "llm_base_url": "...", "llm_model": "...", "llm_api_key": "..."}` *(AI troubleshooting: the device collects sanitized local logs, asks a local LLM for guidance, then POSTs the result back to `troubleshoot-complete`. Fields are flat top-level JSON.)*
+* `{"type": "troubleshoot", "ticket_id": <int>, "command_id": <int>, "mode": "collect_logs", "log_requests": [{"source": "System", "reason": "...", "hours": 24}]}` *(Multi-stage troubleshooter: the device collects only the allowlisted log sources named, scrubs them and uploads them to `troubleshoot-complete`; the server analyses them. No LLM credentials are sent.)*
 
 **Device → server:**
 * `{"type": "pong"}`
@@ -425,6 +426,48 @@ for delivery on the next reconnect (full queued delivery in Phase 5.2).
 ---
 
 ## 11. AI Troubleshooting Agent
+
+### Multi-stage troubleshooter (ticket assets)
+
+The 🤖 button on an asset in a ticket's asset list runs the troubleshooter
+in stages, each posted to the ticket as an internal note:
+
+1. **Articles** - the server asks the troubleshooter LLM for published
+   troubleshooting articles matching the ticket and searches the internal
+   knowledge base (public articles plus the ticket's company only).
+2. **Recommended steps** - the LLM turns those articles into ordered steps
+   and says which endpoint logs, if any, would confirm or rule out a cause,
+   with a reason for each. Sources are limited to a fixed allowlist of
+   Windows Event Log channels and macOS unified-log subsystems
+   (`tray/internal/agent/logsources.go`, mirrored in
+   `app/services/ai_troubleshooter.py`).
+3. **Log collection** - when logs are needed, the server sends a
+   `collect_logs` troubleshoot command to the asset's tray device. The
+   device re-checks every source against its own allowlist, collects and
+   scrubs the logs, and uploads them to `troubleshoot-complete`. The bundle
+   is attached to the ticket as a staff-only file.
+4. **Log analysis** - the server sends the logs to the LLM along with the
+   reason each was collected and the recommended steps, and posts the
+   findings, likely causes and possible solutions.
+
+**Optional public web search.** Set `TROUBLESHOOT_WEB_SEARCH_ENABLED=true`
+to also search the public web in stage 1 (off by default). Choose
+`TROUBLESHOOT_WEB_SEARCH_PROVIDER=searxng` with your SearXNG instance in
+`TROUBLESHOOT_WEB_SEARCH_URL` (JSON output enabled), or `brave` with a Brave
+Search API key in `TROUBLESHOOT_WEB_SEARCH_API_KEY`.
+`TROUBLESHOOT_WEB_SEARCH_MAX_PAGES` (1-5, default 3) caps how many result
+pages are read. Only the generic search terms the AI writes are sent to the
+provider, never ticket text. Pages are fetched with the outbound URL guard
+(no private, loopback or cloud-metadata addresses). The steps found on each
+page are posted as an extra note with its URL, ready to turn into an internal
+knowledge base article.
+
+Steps 1, 2 and 4 run on the server, so the LLM credentials never leave it.
+Older tray agents ignore `mode` and upload their default log set (System,
+Application and Security), which the server still analyses. Each run is
+listed as "AI troubleshooter" on the LLM Usage page.
+
+### Single-stage agent (API)
 
 When an endpoint is being troubleshot, a technician can ask the device to
 collect its own logs and produce an **AI-assisted diagnosis**. This is a

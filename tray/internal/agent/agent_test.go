@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func testAgent(collect func(context.Context, time.Duration) (string, []string, error), llm func(context.Context, LLMConfig, string, string) (string, error)) *Agent {
+func testAgent(collect func(context.Context, []LogSpec) (string, []string, error), llm func(context.Context, LLMConfig, string, string) (string, error)) *Agent {
 	return &Agent{
 		CollectLogs: collect,
 		CallLLM:     llm,
@@ -21,7 +21,7 @@ func testAgent(collect func(context.Context, time.Duration) (string, []string, e
 
 func TestRunSuccess(t *testing.T) {
 	a := testAgent(
-		func(context.Context, time.Duration) (string, []string, error) {
+		func(context.Context, []LogSpec) (string, []string, error) {
 			return "2024-05-01 10:00:00 [Error] RDP session ended", []string{"System"}, nil
 		},
 		func(context.Context, LLMConfig, string, string) (string, error) {
@@ -54,7 +54,7 @@ func TestRunSuccess(t *testing.T) {
 
 func TestRunScrubBundle(t *testing.T) {
 	a := testAgent(
-		func(context.Context, time.Duration) (string, []string, error) {
+		func(context.Context, []LogSpec) (string, []string, error) {
 			return "login api_key=supersecret123 failed", []string{"App"}, nil
 		},
 		func(context.Context, LLMConfig, string, string) (string, error) { return "ok", nil },
@@ -75,7 +75,7 @@ func TestRunScrubBundle(t *testing.T) {
 
 func TestRunLLMFailureStillReturnsBundle(t *testing.T) {
 	a := testAgent(
-		func(context.Context, time.Duration) (string, []string, error) {
+		func(context.Context, []LogSpec) (string, []string, error) {
 			return "some log", []string{"System"}, nil
 		},
 		func(context.Context, LLMConfig, string, string) (string, error) {
@@ -101,7 +101,7 @@ func TestRunLLMFailureStillReturnsBundle(t *testing.T) {
 func TestRunNoModelSkipsLLM(t *testing.T) {
 	called := false
 	a := testAgent(
-		func(context.Context, time.Duration) (string, []string, error) {
+		func(context.Context, []LogSpec) (string, []string, error) {
 			return "some log", []string{"System"}, nil
 		},
 		func(context.Context, LLMConfig, string, string) (string, error) {
@@ -128,7 +128,7 @@ func TestRunNoModelSkipsLLM(t *testing.T) {
 func TestRunLogCollectionFailureStillCallsLLM(t *testing.T) {
 	llmCalls := 0
 	a := testAgent(
-		func(context.Context, time.Duration) (string, []string, error) {
+		func(context.Context, []LogSpec) (string, []string, error) {
 			return "", nil, errors.New("no such log")
 		},
 		func(context.Context, LLMConfig, string, string) (string, error) {
@@ -153,21 +153,104 @@ func TestRunLogCollectionFailureStillCallsLLM(t *testing.T) {
 }
 
 func TestRunDefaultWindowWhenZero(t *testing.T) {
-	window := time.Duration(0)
-	capturedWindow := time.Duration(0)
+	var captured []LogSpec
 	a := &Agent{
-		CollectLogs: func(_ context.Context, w time.Duration) (string, []string, error) {
-			capturedWindow = w
+		CollectLogs: func(_ context.Context, specs []LogSpec) (string, []string, error) {
+			captured = specs
 			return "", nil, nil
 		},
 		CallLLM: func(context.Context, LLMConfig, string, string) (string, error) { return "", nil },
-		Window:  window,
 	}
 	if _, err := a.Run(context.Background(), Request{Endpoint: "h"}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if capturedWindow != DefaultWindow {
-		t.Errorf("window = %v, want default %v", capturedWindow, DefaultWindow)
+	if len(captured) != len(defaultPlatformSources) {
+		t.Fatalf("specs = %v, want one per default source %v", captured, defaultPlatformSources)
+	}
+	for _, spec := range captured {
+		if spec.Window != DefaultWindow {
+			t.Errorf("window for %s = %v, want default %v", spec.Source, spec.Window, DefaultWindow)
+		}
+	}
+}
+
+func TestRunCollectOnlyReadsRequestedSourcesAndSkipsLLM(t *testing.T) {
+	var captured []LogSpec
+	var progress []string
+	llmCalled := false
+	a := &Agent{
+		CollectLogs: func(_ context.Context, specs []LogSpec) (string, []string, error) {
+			captured = specs
+			return "### System Log\n2024-05-01 [Error] disk", []string{"System"}, nil
+		},
+		AllowedSource: func(source string) bool { return source == "System" || source == "Setup" },
+		CallLLM: func(context.Context, LLMConfig, string, string) (string, error) {
+			llmCalled = true
+			return "should not be used", nil
+		},
+		OnProgress: func(stage, message string) { progress = append(progress, stage+": "+message) },
+	}
+	req := Request{
+		Endpoint: "h",
+		Mode:     ModeCollectLogs,
+		LLM:      LLMConfig{BaseURL: "http://x", Model: "m"},
+		LogRequests: []LogRequest{
+			{Source: "System", Reason: "Disk errors were reported", Hours: 6},
+			{Source: "Setup", Reason: "Check the last update", Hours: 500},
+			{Source: "C:/secrets.txt", Reason: "not allowed"},
+		},
+	}
+	res, err := a.Run(context.Background(), req)
+	if err == nil || !strings.Contains(err.Error(), "C:/secrets.txt") {
+		t.Fatalf("expected an error naming the refused source, got %v", err)
+	}
+	if llmCalled {
+		t.Error("collect-only mode must not call the LLM")
+	}
+	if res.Guidance != "" {
+		t.Errorf("Guidance = %q, want empty", res.Guidance)
+	}
+	if len(res.LogBundle) == 0 {
+		t.Error("expected a log bundle")
+	}
+	want := []LogSpec{{"System", 6 * time.Hour}, {"Setup", MaxRequestWindow}}
+	if len(captured) != len(want) {
+		t.Fatalf("specs = %v, want %v", captured, want)
+	}
+	for i := range want {
+		if captured[i] != want[i] {
+			t.Errorf("spec %d = %v, want %v", i, captured[i], want[i])
+		}
+	}
+	if len(progress) == 0 || !strings.Contains(progress[0], "Disk errors were reported") {
+		t.Errorf("progress should name the reason for each source: %v", progress)
+	}
+}
+
+func TestResolveLogRequestsDefaultsAndDedupes(t *testing.T) {
+	specs, refused := ResolveLogRequests([]LogRequest{
+		{Source: " System ", Hours: 0},
+		{Source: "System", Hours: 12},
+		{Source: "Bogus"},
+	}, isWindowsLogSource)
+	if len(refused) != 1 || refused[0] != "Bogus" {
+		t.Errorf("refused = %v", refused)
+	}
+	if len(specs) != 1 || specs[0].Source != "System" || specs[0].Window != DefaultWindow {
+		t.Errorf("specs = %v", specs)
+	}
+}
+
+func TestLogSourceAllowlistsAreQuoteFree(t *testing.T) {
+	for _, s := range WindowsLogSources {
+		if strings.ContainsAny(s, "'\"`$") {
+			t.Errorf("windows source %q must not contain quote or expansion characters", s)
+		}
+	}
+	for key := range MacOSLogPredicates {
+		if !strings.HasPrefix(key, "macos:") {
+			t.Errorf("macOS source %q must use the macos: prefix", key)
+		}
 	}
 }
 
@@ -186,7 +269,7 @@ func gunzip(b []byte) (string, error) {
 
 func TestRunReportsProgress(t *testing.T) {
 	a := testAgent(
-		func(context.Context, time.Duration) (string, []string, error) {
+		func(context.Context, []LogSpec) (string, []string, error) {
 			return "some log", []string{"System"}, nil
 		},
 		func(context.Context, LLMConfig, string, string) (string, error) {
@@ -212,7 +295,7 @@ func TestRunReportsProgress(t *testing.T) {
 
 func TestRunProgressSkipsAnalysingWithoutModel(t *testing.T) {
 	a := testAgent(
-		func(context.Context, time.Duration) (string, []string, error) {
+		func(context.Context, []LogSpec) (string, []string, error) {
 			return "", nil, errors.New("boom")
 		},
 		nil,
