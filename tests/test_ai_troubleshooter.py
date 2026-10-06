@@ -745,6 +745,32 @@ def test_tar_bundle_is_attached_as_tar_gz(rec, completion):
         ("file:C:\\Windows\\CCM\\Logs\\AppEnforce*.log", "unknown", "file:C:\\Windows\\CCM\\Logs\\AppEnforce*.log"),
         ("file:~/Library/Logs/DiagnosticReports/*.ips", "macos", "file:/Users/*/Library/Logs/DiagnosticReports/*.ips"),
         ("file:/var/log/install.log", "macos", "file:/var/log/install.log"),
+        # Common Microsoft application log folders.
+        (
+            "file:%LOCALAPPDATA%\\Microsoft\\Office\\Logs\\*.log",
+            "windows",
+            "file:C:\\Users\\*\\AppData\\Local\\Microsoft\\Office\\Logs\\*.log",
+        ),
+        (
+            "file:C:\\Users\\*\\AppData\\Local\\Microsoft\\OneDrive\\setup\\logs\\Install.log",
+            "windows",
+            "file:C:\\Users\\*\\AppData\\Local\\Microsoft\\OneDrive\\setup\\logs\\Install.log",
+        ),
+        (
+            "file:%APPDATA%\\Microsoft\\Teams\\logs.txt",
+            "windows",
+            "file:C:\\Users\\*\\AppData\\Roaming\\Microsoft\\Teams\\logs.txt",
+        ),
+        (
+            "file:~/Library/Containers/com.microsoft.Outlook/Data/Library/Logs/*.log",
+            "macos",
+            "file:/Users/*/Library/Containers/com.microsoft.Outlook/Data/Library/Logs/*.log",
+        ),
+        (
+            "file:/Users/*/Library/Application Support/Microsoft/Teams/logs.txt",
+            "macos",
+            "file:/Users/*/Library/Application Support/Microsoft/Teams/logs.txt",
+        ),
         # Refused: outside the log folders, traversal, wrong type, wrong platform.
         ("file:C:\\Windows\\System32\\config\\SAM", "windows", None),
         ("file:C:\\Windows\\Logs\\..\\System32\\config\\SAM.log", "windows", None),
@@ -760,6 +786,20 @@ def test_tar_bundle_is_attached_as_tar_gz(rec, completion):
 )
 def test_normalise_file_source(source, platform, expected):
     assert ts.normalise_file_source(source, platform) == expected
+
+
+def test_microsoft_app_log_folders_are_offered_to_the_planner():
+    windows = ts.allowed_log_file_roots("windows")
+    for folder in (
+        "C:\\Users\\*\\AppData\\Local\\Microsoft\\Office\\Logs",
+        "C:\\Users\\*\\AppData\\Local\\Microsoft\\OneDrive\\logs",
+        "C:\\Users\\*\\AppData\\Local\\Microsoft\\Olk",
+        "C:\\Users\\*\\AppData\\Local\\Microsoft\\TeamsMeetingAddin",
+    ):
+        assert windows[folder]
+    macos = ts.allowed_log_file_roots("macos")
+    assert macos["/Users/*/Library/Containers/*/Data/Library/Logs"]
+    assert macos["/Users/*/Library/Application Support/Microsoft/Teams"]
 
 
 def test_log_file_roots_match_tray_agent():

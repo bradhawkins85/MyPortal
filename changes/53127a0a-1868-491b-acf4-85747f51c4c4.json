@@ -1,0 +1,7 @@
+{
+  "guid": "53127a0a-1868-491b-acf4-85747f51c4c4",
+  "occurred_at": "2026-10-06T12:45Z",
+  "change_type": "Feature",
+  "summary": "Added the common Microsoft application log folders (Microsoft 365 Apps, Outlook, Teams, OneDrive and Edge) to the AI troubleshooter's built-in list of endpoint log folders.",
+  "content_hash": "4ec161a6767f987e4ba4b739a662eaf2a8aa9b1704931383dbf09f8563d688ed"
+}

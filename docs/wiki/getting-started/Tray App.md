@@ -446,13 +446,22 @@ in stages, each posted to the ticket as an internal note:
    crash report) are requested as `file:<path>`; a `*` may match file or
    folder names, and `%TEMP%`, `%ProgramData%`, `%SystemRoot%`, `%AppData%`
    and `%LocalAppData%` are expanded. A file must be inside one of the
-   allowlisted log folders (`tray/internal/agent/logfiles.go`, such as
-   `C:\Windows\Logs`, `C:\Windows\Panther`, `C:\Windows\INF`,
-   `C:\Windows\CCM\Logs`, the Intune and Defender log folders, user temp
-   folders, `/var/log` and `~/Library/Logs`) and end in `.log`, `.txt`,
+   allowlisted log folders (`tray/internal/agent/logfiles.go`) and end in `.log`, `.txt`,
    `.wer`, `.lo_`, `.ips`, `.crash`, `.panic` or `.diag`. The device reads
    at most 10 files per request (newest first; a wildcard only reads files
    changed in the requested window) and the last 1 MB of each.
+
+   The built-in folders cover Windows and the common Microsoft applications:
+
+   | Area | Folders |
+   | --- | --- |
+   | Windows | `C:\Windows\Logs`, `C:\Windows\Panther`, `C:\Windows\debug`, `C:\Windows\INF`, `C:\Windows\Temp`, `C:\Windows\Security\Logs`, `C:\Windows\System32\LogFiles`, `C:\Windows\SoftwareDistribution` |
+   | Management and security | `C:\Windows\CCM\Logs`, `C:\ProgramData\Microsoft\IntuneManagementExtension\Logs`, `C:\ProgramData\Microsoft\Windows Defender\Support`, the two WER report folders, `C:\inetpub\logs\LogFiles` |
+   | Office and Outlook | `%LocalAppData%\Microsoft\Office\Logs`, `%LocalAppData%\Microsoft\Olk` (new Outlook), `%LocalAppData%\Temp` (Click-to-Run setup and Outlook Logging), `C:\Windows\Temp` |
+   | Teams | `%AppData%\Microsoft\Teams` (classic), the `MSTeams_8wekyb3d8bbwe` package Logs folder (new Teams), `%LocalAppData%\Microsoft\Teams`, `%LocalAppData%\Microsoft\TeamsMeetingAddin` |
+   | OneDrive and Edge | `%LocalAppData%\Microsoft\OneDrive\logs`, `%LocalAppData%\Microsoft\OneDrive\setup\logs`, `C:\ProgramData\Microsoft OneDrive\setup\logs`, `C:\ProgramData\Microsoft\EdgeUpdate\Log` |
+   | macOS | `/var/log`, `/Library/Logs`, `~/Library/Logs` (AutoUpdate, OneDrive, Office), `~/Library/Containers/*/Data/Library/Logs` (sandboxed Office apps), the new Teams container Logs folder, `~/Library/Application Support/Microsoft/Teams` |
+
    Owners can allow more folders with `TROUBLESHOOT_LOG_FOLDERS_WINDOWS` and
    `TROUBLESHOOT_LOG_FOLDERS_MACOS` (separated by `;`, for example
    `C:\ProgramData\Vendor\Logs;C:\Users\*\AppData\Local\Vendor\Logs`).

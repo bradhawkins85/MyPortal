@@ -20,6 +20,11 @@ func TestWindowsFilePatternAllowlist(t *testing.T) {
 		`C:\Users\*\AppData\Local\Temp\Outlook Logging\*.etl.txt`,
 		`C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\IntuneManagementExtension.log`,
 		`C:\ProgramData\Microsoft\Windows\WER\ReportArchive\*\Report.wer`,
+		`C:\Users\*\AppData\Local\Microsoft\Office\Logs\Word.log`,
+		`C:\Users\*\AppData\Local\Microsoft\OneDrive\setup\logs\Install.log`,
+		`C:\Users\*\AppData\Local\Microsoft\TeamsMeetingAddin\*\*.log`,
+		`C:\ProgramData\Microsoft OneDrive\setup\logs\*.log`,
+		`C:\inetpub\logs\LogFiles\W3SVC1\*.log`,
 		`C:\Windows\SoftwareDistribution\ReportingEvents.log`,
 	}
 	for _, p := range ok {
@@ -51,12 +56,19 @@ func TestWindowsFilePatternAllowlist(t *testing.T) {
 }
 
 func TestMacOSFilePatternAllowlist(t *testing.T) {
-	for _, p := range []string{"/var/log/system.log", "/Library/Logs/DiagnosticReports/*.ips", "/Users/*/Library/Logs/*.log", "/var/log/wifi.log.0"} {
+	for _, p := range []string{
+		"/var/log/system.log",
+		"/Library/Logs/DiagnosticReports/*.ips",
+		"/Users/*/Library/Logs/*.log",
+		"/var/log/wifi.log.0",
+		"/Users/*/Library/Containers/com.microsoft.Outlook/Data/Library/Logs/*.log",
+		"/Users/*/Library/Application Support/Microsoft/Teams/logs.txt",
+	} {
 		if _, err := posixPaths.allowedFilePattern(p, MacOSLogFileRoots); err != nil {
 			t.Errorf("%s refused: %v", p, err)
 		}
 	}
-	for _, p := range []string{"/etc/passwd", "/var/log/../../etc/master.passwd.log", "/Users/bob/.ssh/id_rsa", "/var/LOG/system.log", "/var/log/system.log.gz", "var/log/x.log"} {
+	for _, p := range []string{"/Users/bob/Library/Containers/com.microsoft.Outlook/Data/Library/notes.txt", "/etc/passwd", "/var/log/../../etc/master.passwd.log", "/Users/bob/.ssh/id_rsa", "/var/LOG/system.log", "/var/log/system.log.gz", "var/log/x.log"} {
 		if _, err := posixPaths.allowedFilePattern(p, MacOSLogFileRoots); err == nil {
 			t.Errorf("%s was allowed", p)
 		}
