@@ -2850,9 +2850,10 @@ async def admin_update_shop_product(
 
 
 async def admin_bulk_refresh_shop_product_descriptions(request: Request):
-    from app.services import audit as audit_service
+    from uuid import uuid4
+
+    from app.services import background as background_tasks
     from app.services import product_descriptions
-    from app.repositories import shop as shop_repo
 
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
@@ -2860,53 +2861,28 @@ async def admin_bulk_refresh_shop_product_descriptions(request: Request):
 
     form = await request.form()
     include_archived = _form_bool(form, "include_archived")
-    product_ids = await shop_repo.list_product_description_refresh_ids(
-        include_archived=include_archived
-    )
-
-    refreshed_count = 0
-    failed_count = 0
-    for product_id in product_ids:
-        try:
-            result = await product_descriptions.improve_product_description(product_id)
-        except Exception as exc:  # pragma: no cover - defensive per-item isolation
-            failed_count += 1
-            _main().log_error(
-                "Bulk shop product description refresh failed for product",
-                product_id=product_id,
-                error=str(exc),
-            )
-            continue
-        if result is None:
-            failed_count += 1
-        else:
-            refreshed_count += 1
-
-    await audit_service.record(
-        action="shop.product.description_bulk_refresh",
-        request=request,
-        entity_type="shop.product",
-        metadata={
-            "include_archived": include_archived,
-            "requested_count": len(product_ids),
-            "refreshed_count": refreshed_count,
-            "failed_count": failed_count,
-        },
+    user_id = current_user["id"] if current_user else None
+    task_id = uuid4().hex
+    background_tasks.queue_background_task(
+        lambda: product_descriptions.bulk_refresh_product_descriptions(
+            include_archived=include_archived, user_id=user_id, task_id=task_id
+        ),
+        task_id=task_id,
+        description="shop-product-description-bulk-refresh",
     )
     _main().log_info(
-        "Bulk shop product descriptions refreshed",
-        requested_count=len(product_ids),
-        refreshed_count=refreshed_count,
-        failed_count=failed_count,
+        "Queued bulk shop product description refresh",
+        task_id=task_id,
         include_archived=include_archived,
-        refreshed_by=current_user["id"] if current_user else None,
+        refreshed_by=user_id,
     )
-
-    level = "warning" if failed_count else "success"
-    message = f"Refreshed {refreshed_count} product description{'s' if refreshed_count != 1 else ''}."
-    if failed_count:
-        message += f" {failed_count} product{'s' if failed_count != 1 else ''} could not be refreshed."
-    return flash_redirect("/admin/shop", message, level)
+    redirect_url = "/admin/shop?showArchived=1" if include_archived else "/admin/shop"
+    return flash_redirect(
+        redirect_url,
+        "Bulk description refresh queued and will run in the background. "
+        f"You can continue using Shop Admin. Task ID: {task_id[:8]}",
+        "success",
+    )
 
 
 async def admin_refresh_shop_product_description(request: Request, product_id: int):
