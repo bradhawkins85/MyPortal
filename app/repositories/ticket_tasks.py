@@ -128,3 +128,24 @@ async def update_task(
 
 async def delete_task(task_id: int) -> None:
     await db.execute("DELETE FROM ticket_tasks WHERE id = %s", (task_id,))
+
+
+async def complete_tasks_linked_to_tickets(linked_ticket_ids: list[int]) -> int:
+    """Mark tasks complete whose linked ticket is one of ``linked_ticket_ids``.
+
+    Called when linked tickets are closed so the originating task on the main
+    ticket is ticked off automatically. Already completed tasks are untouched.
+    """
+    ids = [int(value) for value in linked_ticket_ids if value]
+    if not ids:
+        return 0
+    placeholders = ", ".join(["%s"] * len(ids))
+    # The IN placeholders are derived only from integer ticket ids; values remain bound.
+    return await db.execute_rowcount(
+        f"""
+        UPDATE ticket_tasks
+        SET is_completed = 1, completed_at = UTC_TIMESTAMP(6)
+        WHERE linked_ticket_id IN ({placeholders}) AND is_completed = 0
+        """,  # nosec B608
+        tuple(ids),
+    )
