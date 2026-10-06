@@ -77,3 +77,22 @@ async def test_bulk_reopen_does_not_complete_tasks(recording_db):
     await tickets.set_tickets_status([5, 6], "open")
 
     assert recording_db.task_updates() == []
+
+
+@pytest.mark.anyio
+async def test_merging_linked_ticket_completes_task(recording_db, monkeypatch):
+    async def _get_ticket(ticket_id):
+        return {"id": ticket_id}
+
+    async def _list_empty(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(tickets, "get_ticket", _get_ticket)
+    monkeypatch.setattr(tickets, "list_watchers", _list_empty)
+    monkeypatch.setattr(tickets, "list_replies", _list_empty)
+
+    await tickets.merge_tickets([10, 11, 12], 10)
+
+    updates = recording_db.task_updates()
+    assert len(updates) == 1
+    assert updates[0][1] == (11, 12)

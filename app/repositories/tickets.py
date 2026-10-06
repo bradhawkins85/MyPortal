@@ -2443,6 +2443,7 @@ async def merge_tickets(
         _SQL_MERGE_TICKETS + "(" + placeholders + ")",
         (target_ticket_id, *source_ticket_ids),
     )
+    await _complete_linked_tasks(list(source_ticket_ids))
 
     # Refresh target ticket
     target_ticket = await get_ticket(target_ticket_id)
