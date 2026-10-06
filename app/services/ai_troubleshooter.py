@@ -40,6 +40,7 @@ from app.services import ai_prompt_security
 from app.services import knowledge_base as knowledge_base_service
 from app.services import llm_usage
 from app.services import tray as tray_service
+from app.services import troubleshoot_web_search
 from app.services.monitored_http import monitored_client
 
 MODE_COLLECT_LOGS = "collect_logs"
@@ -350,7 +351,10 @@ Rules:
 - Only cite articles you are confident exist. Leave "url" empty when you are not sure
   of the exact address; never invent one.
 - "steps" are the troubleshooting steps that article recommends, in order.
-- "search_terms" are 1-4 short phrases for searching an internal knowledge base."""
+- "search_terms" are 1-4 short, generic phrases for searching a knowledge base or the
+  public web (for example "Windows 11 Wi-Fi disconnects intermittently"). Never include
+  names, email addresses, company names, hostnames, IP addresses or other identifying
+  details from the ticket."""
 
 
 def _parse_articles(data: Mapping[str, Any] | None) -> tuple[list[dict[str, Any]], list[str]]:
@@ -425,7 +429,19 @@ async def _search_kb(ticket: Mapping[str, Any], terms: Sequence[str]) -> list[di
     return list(found.values())[:MAX_KB_ARTICLES]
 
 
-def _research_note(kb_articles: Sequence[Mapping[str, Any]], articles: Sequence[Mapping[str, Any]]) -> str:
+def _link(url: str, title: str) -> str:
+    return (
+        f'<a href="{html.escape(url, quote=True)}" rel="noopener noreferrer" '
+        f'target="_blank">{html.escape(title)}</a>'
+    )
+
+
+def _research_note(
+    kb_articles: Sequence[Mapping[str, Any]],
+    articles: Sequence[Mapping[str, Any]],
+    web_pages: Sequence[Mapping[str, Any]] = (),
+    web_error: str | None = None,
+) -> str:
     parts = [NOTE_HEADER + "Stage 1 of 4: troubleshooting articles found.</p>"]
     if kb_articles:
         items = [
@@ -440,10 +456,7 @@ def _research_note(kb_articles: Sequence[Mapping[str, Any]], articles: Sequence[
         for article in articles:
             title = html.escape(str(article["title"]))
             if article.get("url"):
-                title = (
-                    f'<a href="{html.escape(str(article["url"]), quote=True)}" '
-                    f'rel="noopener noreferrer" target="_blank">{title}</a>'
-                )
+                title = _link(str(article["url"]), str(article["title"]))
             publisher = (
                 f" ({html.escape(str(article['publisher']))})" if article.get("publisher") else ""
             )
@@ -455,7 +468,18 @@ def _research_note(kb_articles: Sequence[Mapping[str, Any]], articles: Sequence[
             "<p><strong>Published articles suggested by the AI model</strong> "
             "<em>(verify the source before relying on it)</em></p>" + _html_list(items)
         )
-    if not kb_articles and not articles:
+    if web_pages:
+        items = [
+            _link(str(page["url"]), str(page["title"]))
+            + (f" - {html.escape(str(page['snippet']))}" if page.get("snippet") else "")
+            for page in web_pages
+        ]
+        parts.append("<p><strong>Public web pages read</strong></p>" + _html_list(items))
+    if web_error:
+        parts.append(
+            "<p><em>Public web search failed: " + html.escape(web_error[:300]) + "</em></p>"
+        )
+    if not kb_articles and not articles and not web_pages:
         parts.append(
             "<p>No matching articles were found. The recommended steps below are "
             "based on the ticket details alone.</p>"
@@ -486,6 +510,13 @@ Rules:
   "source" MUST be one of the ALLOWED_LOG_SOURCES keys exactly. "reason" says what you
   expect the log to show and which step it supports. "hours" is how far back to read
   (1-72). At most 5 requests."""
+
+_PLAN_WEB_INSTRUCTIONS = """
+Some records are public web pages (record_id "web-N"). Also return
+"web_sources": [{"id": "web-N", "steps": [str, ...]}] listing, for each page that
+contains troubleshooting steps for this problem, those steps in order and in your own
+words. Leave a page out if it has no relevant steps. These will be used to write
+internal knowledge base articles."""
 
 
 def _parse_plan(data: Mapping[str, Any] | None, raw_text: str, allowed: Mapping[str, str]) -> dict[str, Any]:
@@ -531,6 +562,47 @@ def _parse_plan(data: Mapping[str, Any] | None, raw_text: str, allowed: Mapping[
         if len(requests) >= MAX_LOG_REQUESTS:
             break
     return {"summary": _clean(data.get("summary"), 1000), "steps": steps, "log_requests": requests}
+
+
+def _parse_web_sources(
+    data: Mapping[str, Any] | None, web_pages: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """Attach the steps the model extracted to each web page it read."""
+
+    if not data or not web_pages:
+        return []
+    by_id = {f"web-{index}": page for index, page in enumerate(web_pages, start=1)}
+    sources: list[dict[str, Any]] = []
+    raw = data.get("web_sources")
+    for entry in raw if isinstance(raw, list) else []:
+        if not isinstance(entry, Mapping):
+            continue
+        page = by_id.pop(str(entry.get("id") or "").strip(), None)
+        steps = _string_list(entry.get("steps"), limit=15, item_chars=400)
+        if page is None or not steps:
+            continue
+        sources.append({"title": page["title"], "url": page["url"], "steps": steps})
+    return sources
+
+
+def _web_steps_note(sources: Sequence[Mapping[str, Any]]) -> str:
+    """A note gathering each public page's steps with its URL, ready for a KB article."""
+
+    parts = [
+        NOTE_HEADER
+        + "troubleshooting steps found on the public web. Useful as a starting "
+        "point for an internal knowledge base article; check each source first.</p>"
+    ]
+    for source in sources:
+        parts.append(
+            "<p><strong>"
+            + _link(str(source["url"]), str(source["title"]))
+            + "</strong><br><code>"
+            + html.escape(str(source["url"]))
+            + "</code></p>"
+            + _html_list([html.escape(step) for step in source["steps"]], ordered=True)
+        )
+    return "".join(parts)
 
 
 def _plan_note(plan: Mapping[str, Any], *, can_collect: bool) -> str:
@@ -643,7 +715,14 @@ async def run_research_and_plan(
         return None
     articles, terms = _parse_articles(_extract_json_object(research_text))
     kb_articles = await _search_kb(ticket, terms)
-    await _note(ticket_id, _research_note(kb_articles, articles))
+    web_pages: list[dict[str, str]] = []
+    web_error: str | None = None
+    if troubleshoot_web_search.is_enabled() and terms:
+        try:
+            web_pages = await troubleshoot_web_search.research(terms)
+        except Exception as exc:  # noqa: BLE001 - reported in the note
+            web_error = str(exc) or exc.__class__.__name__
+    await _note(ticket_id, _research_note(kb_articles, articles, web_pages, web_error))
 
     if await _consent_withdrawn(ticket_id):
         return None
@@ -667,9 +746,18 @@ async def run_research_and_plan(
             allowed_use="Troubleshooting reference",
         )
         for index, article in enumerate(articles, start=1)
+    ] + [
+        ai_prompt_security.UntrustedRecord(
+            record_id=f"web-{index}",
+            provenance=f"Public web page: {page['url']}",
+            content={"title": page["title"], "url": page["url"], "text": page["content"]},
+            allowed_use="Troubleshooting reference",
+        )
+        for index, page in enumerate(web_pages, start=1)
     ]
     plan_instructions = (
         _PLAN_INSTRUCTIONS
+        + (_PLAN_WEB_INSTRUCTIONS if web_pages else "")
         + f"\n\nENDPOINT_PLATFORM: {platform}\nALLOWED_LOG_SOURCES:\n"
         + "\n".join(f"- {key}: {description}" for key, description in allowed.items())
     )
@@ -692,10 +780,15 @@ async def run_research_and_plan(
             + ").</p>",
         )
         return None
-    plan = _parse_plan(_extract_json_object(plan_text), plan_text, allowed)
+    plan_data = _extract_json_object(plan_text)
+    plan = _parse_plan(plan_data, plan_text, allowed)
+    web_sources = _parse_web_sources(plan_data, web_pages)
     device_uid = str(device.get("device_uid") or "").strip()
     can_collect = bool(device_uid) and device.get("status") == "active"
     await _note(ticket_id, _plan_note(plan, can_collect=can_collect))
+    if web_sources:
+        await _note(ticket_id, _web_steps_note(web_sources))
+    plan["web_sources"] = web_sources
 
     if not plan["log_requests"] or not can_collect:
         return plan

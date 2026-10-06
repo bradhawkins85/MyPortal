@@ -547,3 +547,142 @@ def test_ticket_template_renders_ai_commenter_type():
     assert "{% set reply_kind = 'ai' if reply.is_ai else" in template
     assert 'data-message-kind="{{ reply_kind }}"' in template
     assert 'data-history-filter="ai"' in template
+
+
+# ---------------------------------------------------------------------------
+# Optional public web search
+# ---------------------------------------------------------------------------
+
+
+def test_web_search_disabled_by_default(rec, monkeypatch):
+    called = []
+
+    async def fake_research(terms):
+        called.append(terms)
+        return []
+
+    monkeypatch.setattr(ts.troubleshoot_web_search, "research", fake_research)
+    monkeypatch.setattr(ts.troubleshoot_web_search, "is_enabled", lambda: False)
+    rec.chat_responses = [_research_response(), _plan_response([])]
+    _run()
+    assert called == []
+    assert "Public web" not in rec.notes[0]
+
+
+def test_web_search_pages_feed_plan_and_kb_note(rec, monkeypatch):
+    searched = []
+
+    async def fake_research(terms):
+        searched.append(list(terms))
+        return [
+            {
+                "title": "Fix Wi-Fi drops",
+                "url": "https://example.com/wifi",
+                "snippet": "Reset the adapter",
+                "content": "1. Reset the network adapter 2. Update the driver",
+            },
+            {"title": "Unrelated", "url": "https://example.com/other", "snippet": "", "content": "x"},
+        ]
+
+    monkeypatch.setattr(ts.troubleshoot_web_search, "is_enabled", lambda: True)
+    monkeypatch.setattr(ts.troubleshoot_web_search, "research", fake_research)
+    plan = json.loads(_plan_response([]).strip("`").removeprefix("json\n"))
+    plan["web_sources"] = [
+        {"id": "web-1", "steps": ["Reset the network adapter", "Update the driver"]},
+        {"id": "web-9", "steps": ["unknown page"]},
+    ]
+    rec.chat_responses = [_research_response(), json.dumps(plan)]
+    result = _run()
+
+    # Only the generic search terms leave the server, never the ticket text.
+    assert searched == [["wifi drops"]]
+    assert 'href="https://example.com/wifi"' in rec.notes[0]
+    plan_messages = rec.chats[1]
+    assert "web_sources" in plan_messages[0]["content"]
+    assert "Reset the network adapter 2." in plan_messages[1]["content"]
+    assert result["web_sources"] == [
+        {
+            "title": "Fix Wi-Fi drops",
+            "url": "https://example.com/wifi",
+            "steps": ["Reset the network adapter", "Update the driver"],
+        }
+    ]
+    kb_note = rec.notes[2]
+    assert "knowledge base article" in kb_note
+    assert "<code>https://example.com/wifi</code>" in kb_note
+    assert "<ol><li>Reset the network adapter</li><li>Update the driver</li></ol>" in kb_note
+
+
+def test_web_search_failure_is_noted_and_run_continues(rec, monkeypatch):
+    async def boom(terms):
+        raise ValueError("TROUBLESHOOT_WEB_SEARCH_URL is not set")
+
+    monkeypatch.setattr(ts.troubleshoot_web_search, "is_enabled", lambda: True)
+    monkeypatch.setattr(ts.troubleshoot_web_search, "research", boom)
+    rec.chat_responses = [_research_response(), _plan_response([])]
+    assert _run() is not None
+    assert "Public web search failed" in rec.notes[0]
+    assert "TROUBLESHOOT_WEB_SEARCH_URL" in rec.notes[0]
+
+
+def test_html_to_text_keeps_steps_and_drops_scripts():
+    from app.services import troubleshoot_web_search as web
+
+    title, text = web.html_to_text(
+        "<html><head><title>Fix &amp; repair</title><script>alert(1)</script></head>"
+        "<body><nav>Menu</nav><h1>Steps</h1><ol><li>Restart</li><li>Update</li></ol></body></html>"
+    )
+    assert title == "Fix & repair"
+    assert "alert" not in text and "Menu" not in text
+    assert text.splitlines() == ["Steps", "Restart", "Update"]
+
+
+def test_fetch_page_text_refuses_private_addresses():
+    from app.services import troubleshoot_web_search as web
+
+    assert asyncio.run(web.fetch_page_text("http://127.0.0.1/admin")) == ""
+    assert asyncio.run(web.fetch_page_text("http://169.254.169.254/latest/meta-data")) == ""
+
+
+def test_searxng_and_brave_results_are_parsed(monkeypatch):
+    import httpx
+    from types import SimpleNamespace
+
+    from app.services import troubleshoot_web_search as web
+
+    settings = SimpleNamespace(
+        troubleshoot_web_search_url="https://search.example",
+        troubleshoot_web_search_api_key="key",
+    )
+    monkeypatch.setattr(web, "get_settings", lambda: settings)
+
+    async def ok(url, **kwargs):
+        return url
+
+    monkeypatch.setattr(web, "validate_outbound_url_async", ok)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "search.example":
+            assert request.url.params["format"] == "json"
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"title": "Fix it", "url": "https://a.example/x", "content": "steps"},
+                        {"title": "Bad", "url": "file:///etc/passwd"},
+                    ]
+                },
+            )
+        assert request.headers["X-Subscription-Token"] == "key"
+        return httpx.Response(
+            200,
+            json={"web": {"results": [{"title": "Brave", "url": "https://b.example", "description": "d"}]}},
+        )
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await web._search_searxng(client, "wifi"), await web._search_brave(client, "wifi")
+
+    searx, brave = asyncio.run(run())
+    assert searx == [{"title": "Fix it", "url": "https://a.example/x", "snippet": "steps"}]
+    assert brave == [{"title": "Brave", "url": "https://b.example", "snippet": "d"}]

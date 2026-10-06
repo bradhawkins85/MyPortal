@@ -450,6 +450,18 @@ in stages, each posted to the ticket as an internal note:
    reason each was collected and the recommended steps, and posts the
    findings, likely causes and possible solutions.
 
+**Optional public web search.** Set `TROUBLESHOOT_WEB_SEARCH_ENABLED=true`
+to also search the public web in stage 1 (off by default). Choose
+`TROUBLESHOOT_WEB_SEARCH_PROVIDER=searxng` with your SearXNG instance in
+`TROUBLESHOOT_WEB_SEARCH_URL` (JSON output enabled), or `brave` with a Brave
+Search API key in `TROUBLESHOOT_WEB_SEARCH_API_KEY`.
+`TROUBLESHOOT_WEB_SEARCH_MAX_PAGES` (1-5, default 3) caps how many result
+pages are read. Only the generic search terms the AI writes are sent to the
+provider, never ticket text. Pages are fetched with the outbound URL guard
+(no private, loopback or cloud-metadata addresses). The steps found on each
+page are posted as an extra note with its URL, ready to turn into an internal
+knowledge base article.
+
 Steps 1, 2 and 4 run on the server, so the LLM credentials never leave it.
 Older tray agents ignore `mode` and upload their default log set (System,
 Application and Security), which the server still analyses. Each run is
