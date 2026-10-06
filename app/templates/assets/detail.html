@@ -1,15 +1,29 @@
 {% extends "base.html" %}
-{% from "macros/header.html" import page_header_actions %}
+{% from "macros/header.html" import page_header_overflow %}
 {% from "assets/_type_picker.html" import asset_type_picker %}
 
-{% block header_title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar page-header-bar--record">
+    <span class="header__title-text" title="{{ asset.name or ('Asset ' ~ asset.id) }}">{{ asset.name or ('Asset ' ~ asset.id) }}</span>
+    <span class="page-header-bar__meta">
+      {% if asset.archived_at %}<span class="status status--neutral">Archived</span>{% endif %}
+      {% if not customer_safe and asset.customer_visible %}<span class="status status--success">Customer portal</span>{% endif %}
+      {% if asset_type_label %}<span>{{ asset_type_label }}</span>{% endif %}
+      {% if not customer_safe and asset.serial_number %}<span>SN {{ asset.serial_number }}</span>{% endif %}
+      <span>Asset #{{ asset.id }}</span>
+    </span>
+  </div>
+{% endblock %}
 {% block title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
 {% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% endblock %}
 {% block header_actions %}
-  {% set detail_actions = [{"label": "Start process", "type": "link", "href": "/processes/start?asset_id=" ~ asset.id}, {"label": "Back to Assets", "type": "link", "href": "/assets"}] %}
-  {% if not customer_safe %}{% set _ = detail_actions.append({"label": "Company credentials", "type": "link", "href": "/admin/companies/" ~ asset.company_id ~ "/edit#credentials"}) %}{% endif %}
-  {% if is_super_admin and not customer_safe %}{% set _ = detail_actions.append({"label": "Customer preview", "type": "link", "href": "/assets/" ~ asset.id ~ "?customer_preview=true"}) %}{% endif %}
-  {{ page_header_actions(detail_actions) }}
+  <div class="header-actions">
+    <a class="button button--ghost" href="/assets">Back to Assets</a>
+    {% set detail_actions = [{"label": "Start process", "type": "link", "href": "/processes/start?asset_id=" ~ asset.id}] %}
+    {% if not customer_safe %}{% set _ = detail_actions.append({"label": "Company credentials", "type": "link", "href": "/admin/companies/" ~ asset.company_id ~ "/edit#credentials"}) %}{% endif %}
+    {% if is_super_admin and not customer_safe %}{% set _ = detail_actions.append({"label": "Customer preview", "type": "link", "href": "/assets/" ~ asset.id ~ "?customer_preview=true"}) %}{% endif %}
+    {{ page_header_overflow("asset-detail-actions", "Actions", detail_actions) }}
+  </div>
 {% endblock %}
 
 {% block content %}

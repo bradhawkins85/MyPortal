@@ -1,0 +1,7 @@
+{
+  "guid": "c3870a19-d39c-43b9-941b-76d3da25dc36",
+  "occurred_at": "2026-10-06T06:52Z",
+  "change_type": "Feature",
+  "summary": "Redesign the asset detail page to the gold-standard record header bar with the status pill, type and serial meta, and a Back-to-Assets button beside the Actions menu",
+  "content_hash": "ac518c428e910cf159042214fdb0ef59b5faf059958941cb8f3c58411d0ba66e"
+}
