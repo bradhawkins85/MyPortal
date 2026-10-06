@@ -359,6 +359,17 @@
     });
   }
 
+  // ── Account anonymisation ──────────────────────────────────────────────
+  const anonymiseModal = document.getElementById('profile-anonymise-modal');
+  const anonymiseForm = document.getElementById('profile-anonymise-form');
+
+  document.querySelectorAll('[data-profile-open="profile-anonymise-modal"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (anonymiseForm) anonymiseForm.reset();
+      openModal(anonymiseModal, { trigger: button, focus: '#anonymise-reason' });
+    });
+  });
+
   // ── Password ───────────────────────────────────────────────────────────
   const passwordModal = document.getElementById('profile-password-modal');
   const passwordForm = document.getElementById('password-form');
@@ -1866,6 +1877,20 @@
       }
     });
   });
+
+  const marketingForm = root.querySelector('[data-profile-marketing]');
+  if (marketingForm) {
+    const marketingToggle = marketingForm.querySelector('[data-profile-marketing-toggle]');
+    const marketingSave = marketingForm.querySelector('[data-profile-marketing-save]');
+    if (marketingSave) {
+      marketingSave.hidden = true;
+    }
+    if (marketingToggle) {
+      marketingToggle.addEventListener('change', () => {
+        marketingForm.submit();
+      });
+    }
+  }
 
   renderTotpDevices();
   renderPasskeys();

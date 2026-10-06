@@ -497,6 +497,38 @@ async def mark_command_delivered(command_id: int, *, error: str | None = None) -
     )
 
 
+async def mark_command_completed(command_id: int, *, error: str | None = None) -> None:
+    """Mark a command as executed by the device (delivered + outcome known).
+
+    Used by device-initiated callbacks (e.g. the AI troubleshooting agent)
+    to record that the command ran. A non-empty ``error`` records the failure
+    reason while keeping the row in a terminal ``error`` state.
+    """
+    placeholder = "?" if db.is_sqlite() else "%s"
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    new_status = "error" if error else "completed"
+    await db.execute(
+        f"UPDATE tray_command_log SET status = {placeholder}, error = {placeholder}, "  # nosec B608
+        f"delivered_at = {placeholder} WHERE id = {placeholder}",
+        (new_status, error, now, command_id),
+    )
+
+
+async def get_command(command_id: int) -> dict[str, Any] | None:
+    """Return a single command-log row by id (or ``None``).
+
+    The row carries ``device_id``, ``command`` and ``payload_json`` so
+    device-initiated callbacks can be correlated to the exact command the
+    server issued to that device.
+    """
+    placeholder = "?" if db.is_sqlite() else "%s"
+    row = await db.fetch_one(
+        f"SELECT * FROM tray_command_log WHERE id = {placeholder}",  # nosec B608
+        (command_id,),
+    )
+    return dict(row) if row else None
+
+
 # ---------------------------------------------------------------------------
 # Diagnostics (Phase 5)
 # ---------------------------------------------------------------------------
@@ -635,6 +667,7 @@ async def publish_tray_version(
     published_by_user_id: int | None,
     rollout_percent: int = 100,
     rollout_start_at: datetime | None = None,
+    sha256: str | None = None,
 ) -> int:
     p = "?" if db.is_sqlite() else "%s"
     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -642,10 +675,10 @@ async def publish_tray_version(
     last_id = await db.execute_returning_lastrowid(
         f"INSERT INTO tray_versions "  # nosec B608
         f"(version, platform, download_url, required, release_notes, published_by_user_id, "
-        f"published_at, rollout_percent, rollout_start_at) "
-        f"VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})",
+        f"published_at, rollout_percent, rollout_start_at, sha256) "
+        f"VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})",
         (version, platform, download_url, int(required), release_notes, published_by_user_id,
-         now, rollout_percent, rollout_start),
+         now, rollout_percent, rollout_start, sha256),
     )
     return int(last_id) if last_id else 0
 

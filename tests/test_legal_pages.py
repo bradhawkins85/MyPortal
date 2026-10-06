@@ -80,22 +80,26 @@ def test_privacy_policy_matches_profile_self_service_options(client):
 
 
 def test_privacy_policy_discloses_account_anonymisation(client):
-    """The privacy page must document the anonymisation / right-to-be-forgotten flow."""
+    """Privacy section 9 describes the request form and what is anonymised."""
     response = client.get("/legal/privacy")
 
     assert response.status_code == 200
-    assert "anonymise your account" in response.text
-    assert "right to be forgotten" in response.text
-    assert "danger zone" in response.text.lower()
-    assert "irreversible" in response.text
+    text = response.text
+    rights = text[text.index('id="privacy-rights"'):text.index('id="privacy-overseas"')]
+    assert "ask us to delete or anonymise your account" in rights
+    assert "Delete or anonymise my account" in rights
+    assert "we anonymise them by removing your personal details" in rights
+    assert "can't be undone" in rights
 
 
-def test_terms_disclose_account_anonymisation(client):
+def test_terms_disclose_account_anonymisation_in_section_12(client):
     response = client.get("/legal/terms")
 
     assert response.status_code == 200
-    assert "anonymise your account" in response.text
-    assert "right to be forgotten" in response.text
+    text = response.text
+    termination = text[text.index('id="terms-suspension"'):text.index('id="terms-general"')]
+    assert "Delete or anonymise my account" in termination
+    assert "we anonymise them by removing your personal details" in termination
 
 
 @pytest.mark.parametrize("path", ["/login", "/register", "/forgot-password"])

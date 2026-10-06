@@ -157,7 +157,7 @@ async def create_interface(company_id: int, asset_id: int, values: dict[str, Any
     await _check_ip(company_id, asset_id, ip_address_id)
     columns = ("company_id", "asset_id", "ip_address_id", *INTERFACE_COLUMNS)
     return await db.execute_returning_lastrowid(
-        "INSERT INTO asset_interfaces (" + ",".join(columns) + ") VALUES ("
+        "INSERT INTO asset_interfaces (" + ",".join(columns) + ") VALUES ("  # nosec B608
         + ",".join(["%s"] * len(columns)) + ")",
         (company_id, asset_id, ip_address_id, *(cleaned[key] for key in INTERFACE_COLUMNS)))
 
@@ -180,7 +180,7 @@ async def update_interface(company_id: int, interface_id: int, values: dict[str,
         raise ValueError("Remove this interface's links before switching between wired and radio")
     await _check_ip(company_id, int(existing["asset_id"]), ip_address_id)
     await db.execute(
-        "UPDATE asset_interfaces SET ip_address_id=%s," + ",".join(f"{key}=%s" for key in INTERFACE_COLUMNS)
+        "UPDATE asset_interfaces SET ip_address_id=%s," + ",".join(f"{key}=%s" for key in INTERFACE_COLUMNS)  # nosec B608
         + " WHERE id=%s AND company_id=%s",
         (ip_address_id, *(cleaned[key] for key in INTERFACE_COLUMNS), interface_id, company_id))
 

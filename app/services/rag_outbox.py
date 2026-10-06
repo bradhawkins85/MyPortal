@@ -119,7 +119,7 @@ async def process_pending(*, limit: int = 100) -> dict[str, int]:
     )
     await db.execute(
         "UPDATE rag_index_outbox SET status = 'pending', claimed_at = NULL "
-        "WHERE status = 'processing' AND claimed_at < " + stale_lease
+        "WHERE status = 'processing' AND claimed_at < " + stale_lease  # nosec B608
     )
     rows = await db.fetch_all(
         """SELECT * FROM rag_index_outbox
@@ -174,7 +174,7 @@ async def process_pending(*, limit: int = 100) -> dict[str, int]:
             await db.execute(
                 "UPDATE rag_index_outbox SET status = ?, attempt_count = ?, "
                 "available_at = "
-                + availability
+                + availability  # nosec B608
                 + ", last_error = ?, claimed_at = NULL, "
                 "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (

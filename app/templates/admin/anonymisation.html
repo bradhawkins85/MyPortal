@@ -1,80 +1,75 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
+{% from "macros/tables.html" import data_table, table_toolbar %}
 
-{# Map a request status to a badge class + human label. #}
-{% macro anon_status_badge(status) -%}
-  {%- set cls = {"pending": "badge--warning", "executing": "badge--info", "completed": "badge--success", "failed": "badge--danger", "cancelled": "badge--muted"} -%}
-  {%- set label = {"pending": "Pending", "executing": "Executing", "completed": "Completed", "failed": "Failed", "cancelled": "Cancelled"} -%}
-  <span class="badge {{ cls.get(status, 'badge--muted') }}">{{ label.get(status, (status or 'Unknown') | capitalize) }}</span>
+{% macro anon_status(status) -%}
+  {%- set variant = {"pending": "warning", "approved": "info", "rejected": "neutral", "completed": "success"} -%}
+  {%- set label = {"pending": "Pending", "approved": "Approved", "rejected": "Rejected", "completed": "Completed"} -%}
+  <span class="status status--{{ variant.get(status, 'neutral') }}">{{ label.get(status, (status or 'Unknown') | capitalize) }}</span>
 {%- endmacro %}
 
-{% block header_title %}{% if anonymisation_request %}Anonymisation request #{{ anonymisation_request.id }}{% else %}Account anonymisation{% endif %}{% endblock %}
+{% macro utc(value) -%}
+  {%- if value -%}<span data-utc="{{ value.isoformat() if value is not string else value }}">{{ value }}</span>{%- else -%}&mdash;{%- endif -%}
+{%- endmacro %}
+
+{% block title %}{% if anonymisation_request %}Anonymisation request #{{ anonymisation_request.id }}{% else %}Account anonymisation{% endif %}{% endblock %}
+
+{% block header_title %}
+  {% if anonymisation_request %}
+    Anonymisation request #{{ anonymisation_request.id }} {{ anon_status(anonymisation_request.status) }}
+  {% else %}
+    Account anonymisation
+  {% endif %}
+{% endblock %}
 
 {% block header_actions %}
   {% if anonymisation_request %}
-    {{ page_header_actions([
-      {"label": "All anonymisation requests", "type": "link", "href": "/admin/anonymisation"}
-    ]) }}
+    {% set req = anonymisation_request %}
+    {% set actions = [{"label": "All requests", "type": "link", "href": "/admin/anonymisation"}] %}
+    {% if req.status == "pending" %}
+      {% set actions = actions + [
+        {"label": "Reject", "attrs": {"data-anonymise-open": "anonymise-reject-modal", "aria-haspopup": "dialog", "aria-controls": "anonymise-reject-modal"}},
+        {"label": "Approve and anonymise", "variant": "danger", "attrs": {"data-anonymise-open": "anonymise-approve-modal", "aria-haspopup": "dialog", "aria-controls": "anonymise-approve-modal"}}
+      ] %}
+    {% elif req.status == "approved" %}
+      {% set actions = actions + [
+        {"label": "Retry anonymisation", "variant": "danger", "attrs": {"data-anonymise-open": "anonymise-approve-modal", "aria-haspopup": "dialog", "aria-controls": "anonymise-approve-modal"}}
+      ] %}
+    {% endif %}
+    {{ page_header_actions(actions) }}
   {% endif %}
 {% endblock %}
 
 {% block content %}
-<div class="admin-grid">
 {% if anonymisation_request %}
   {% set req = anonymisation_request %}
+  {% set label = req.request_user_email or ("user #" ~ req.user_id) %}
   <section class="card card--panel">
-    <header class="card__header card__header--stacked">
+    <header class="card__header">
       <div>
         <h2 class="card__title">Request details</h2>
-        <p class="card__subtitle">A permanent deletion request for a user account.</p>
+        <p class="card__subtitle">Approving replaces the person's name, email address and phone numbers across the portal, deletes their sign-in details, recordings and voicemail, and closes the account. It can't be undone.</p>
       </div>
     </header>
     <div class="card__body">
-      <p class="card__status-line">{{ anon_status_badge(req.status) }}</p>
+      {% if req.status == "approved" and req.error_message %}
+        <p class="alert alert--error" role="alert">The last run didn't finish ({{ req.error_message }}). Retrying is safe: steps that already ran are repeated with the same result.</p>
+      {% endif %}
       <div class="table-wrapper">
         <table class="table">
           <tbody>
-            <tr>
-              <th scope="row">Requested by</th>
-              <td>{{ req.request_user_email or "Unknown" }}</td>
-            </tr>
-            <tr>
-              <th scope="row">User ID</th>
-              <td>#{{ req.user_id }}</td>
-            </tr>
-            <tr>
-              <th scope="row">Requested at</th>
-              <td>{% if req.requested_at %}<span data-utc="{{ req.requested_at.isoformat() }}">{{ req.requested_at }}</span>{% else %}-{% endif %}</td>
-            </tr>
-            <tr>
-              <th scope="row">Reason</th>
-              <td>{{ req.reason or "-" }}</td>
-            </tr>
-            <tr>
-              <th scope="row">Support ticket</th>
-              <td>{% if req.support_ticket_id %}<a href="/admin/tickets/{{ req.support_ticket_id }}">#{{ req.support_ticket_id }}</a>{% else %}-{% endif %}</td>
-            </tr>
-            {% if req.executed_by_user_id %}
-            <tr>
-              <th scope="row">Executed by</th>
-              <td>{{ req.executed_by_email or ("User #" ~ req.executed_by_user_id) }}</td>
-            </tr>
-            <tr>
-              <th scope="row">Executed at</th>
-              <td>{% if req.executed_at %}<span data-utc="{{ req.executed_at.isoformat() }}">{{ req.executed_at }}</span>{% else %}-{% endif %}</td>
-            </tr>
+            <tr><th scope="row">Account</th><td>{{ label }} (user #{{ req.user_id }})</td></tr>
+            <tr><th scope="row">Requested</th><td>{{ utc(req.requested_at) }}{% if req.requested_by_user_id and req.requested_by_user_id != req.user_id %} by {{ req.requested_by_email or ("user #" ~ req.requested_by_user_id) }}{% endif %}</td></tr>
+            <tr><th scope="row">Reason</th><td>{{ req.reason or "—" }}</td></tr>
+            <tr><th scope="row">Support ticket</th><td>{% if req.support_ticket_id %}<a href="/admin/tickets/{{ req.support_ticket_id }}">#{{ req.support_ticket_id }}</a>{% else %}&mdash;{% endif %}</td></tr>
+            {% if req.decided_by %}
+            <tr><th scope="row">Decided</th><td>{{ utc(req.decided_at) }} by {{ req.decided_by_email or ("user #" ~ req.decided_by) }}</td></tr>
             {% endif %}
-            {% if req.ip_address %}
-            <tr>
-              <th scope="row">Request IP</th>
-              <td>{{ req.ip_address }}</td>
-            </tr>
+            {% if req.notes %}
+            <tr><th scope="row">{{ "Rejection reason" if req.status == "rejected" else "Notes" }}</th><td>{{ req.notes }}</td></tr>
             {% endif %}
-            {% if req.error_message %}
-            <tr>
-              <th scope="row">Error</th>
-              <td class="table__error">{{ req.error_message }}</td>
-            </tr>
+            {% if req.completed_at %}
+            <tr><th scope="row">Completed</th><td>{{ utc(req.completed_at) }}</td></tr>
             {% endif %}
           </tbody>
         </table>
@@ -82,73 +77,98 @@
     </div>
   </section>
 
+  {% if req.status in ("pending", "approved") %}
+  <div class="modal" id="anonymise-approve-modal" role="dialog" aria-modal="true" aria-labelledby="anonymise-approve-modal-title" hidden>
+    <form class="modal__panel" method="post" action="/admin/anonymisation/{{ req.id }}/approve">
+      {% include "partials/csrf.html" %}
+      <header class="modal__header">
+        <div>
+          <h2 class="modal__title" id="anonymise-approve-modal-title">Approve and anonymise</h2>
+          <p class="text-muted">This permanently anonymises {{ label }}. It can't be undone.</p>
+        </div>
+        <button type="button" class="modal__close" data-modal-close aria-label="Close approve request"></button>
+      </header>
+      <div class="modal__body">
+        <div class="form-field">
+          <label class="form-label" for="anonymise-approve-notes">Notes <span class="text-muted">optional, not sent to the user</span></label>
+          <textarea id="anonymise-approve-notes" name="notes" class="form-input" rows="3" maxlength="2000"></textarea>
+        </div>
+      </div>
+      <footer class="modal__footer">
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        <button type="submit" class="button button--danger">Anonymise account</button>
+      </footer>
+    </form>
+  </div>
+  {% endif %}
+
   {% if req.status == "pending" %}
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Actions</h2>
-        <p class="card__subtitle">Executing a request permanently removes the user's personal data. This action cannot be undone.</p>
+  <div class="modal" id="anonymise-reject-modal" role="dialog" aria-modal="true" aria-labelledby="anonymise-reject-modal-title" hidden>
+    <form class="modal__panel" method="post" action="/admin/anonymisation/{{ req.id }}/reject">
+      {% include "partials/csrf.html" %}
+      <header class="modal__header">
+        <div>
+          <h2 class="modal__title" id="anonymise-reject-modal-title">Reject request</h2>
+          <p class="text-muted">The reason is emailed to {{ label }}. They can submit a new request later.</p>
+        </div>
+        <button type="button" class="modal__close" data-modal-close aria-label="Close reject request"></button>
+      </header>
+      <div class="modal__body">
+        <div class="form-field">
+          <label class="form-label" for="anonymise-reject-reason">Reason</label>
+          <textarea id="anonymise-reject-reason" name="reason" class="form-input" rows="4" maxlength="2000" required></textarea>
+        </div>
       </div>
-    </header>
-    <div class="card__body">
-      <div class="detail-actions">
-        <form method="post" action="/admin/anonymisation/{{ req.id }}/execute" class="inline-form">
-          {% include "partials/csrf.html" %}
-          <button type="submit" class="button button--danger" data-confirm="Execute anonymisation for {{ req.request_user_email or ('user #' ~ req.user_id) }}? This permanently deletes their personal data and cannot be undone.">Execute anonymisation</button>
-        </form>
-        <form method="post" action="/admin/anonymisation/{{ req.id }}/cancel" class="inline-form">
-          {% include "partials/csrf.html" %}
-          <button type="submit" class="button button--ghost" data-confirm="Cancel this anonymisation request? The user will be able to request it again later.">Cancel request</button>
-        </form>
-      </div>
-    </div>
-  </section>
+      <footer class="modal__footer">
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        <button type="submit" class="button button--primary">Reject request</button>
+      </footer>
+    </form>
+  </div>
   {% endif %}
 {% else %}
   <section class="card card--panel">
-    <header class="card__header card__header--stacked">
+    <header class="card__header">
       <div>
-        <h2 class="card__title">Anonymisation requests</h2>
-        <p class="card__subtitle">Users can request permanent deletion of their account and personal data from their profile. Requests are verified and executed here.</p>
+        <h2 class="card__title">Requests</h2>
+        <p class="card__subtitle">People ask from their profile, or a super admin records a request received by email or phone from the Users page.</p>
       </div>
     </header>
-    <div class="table-wrapper">
-      <table class="table" data-table>
-        <thead>
-          <tr>
-            <th data-sort="number">ID</th>
-            <th data-sort="string">Requested by</th>
-            <th data-sort="string">Status</th>
-            <th data-sort="string">Requested</th>
-            <th data-sort="string">Executed</th>
-            <th class="table__actions">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for req in anonymisation_requests %}
-            <tr>
-              <td data-label="ID">#{{ req.id }}</td>
-              <td data-label="Requested by">{{ req.request_user_email or "Unknown" }}</td>
-              <td data-label="Status">{{ anon_status_badge(req.status) }}</td>
-              <td data-label="Requested">{% if req.requested_at %}<span data-utc="{{ req.requested_at.isoformat() }}">{{ req.requested_at }}</span>{% else %}-{% endif %}</td>
-              <td data-label="Executed">{% if req.executed_at %}<span data-utc="{{ req.executed_at.isoformat() }}">{{ req.executed_at }}</span>{% else %}-{% endif %}</td>
-              <td class="table__actions">
-                <a href="/admin/anonymisation/{{ req.id }}" class="button button--ghost button--small">View</a>
-              </td>
-            </tr>
-          {% else %}
-            <tr><td colspan="6" class="table__empty">No anonymisation requests yet.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div class="card__body">
+      {% set columns = [
+        {"key": "id", "label": "Request", "sort_type": "number", "width": "8%"},
+        {"key": "account", "label": "Account", "mobile_priority": "essential"},
+        {"key": "status", "label": "Status", "mobile_priority": "essential", "width": "12%"},
+        {"key": "requested", "label": "Requested", "sort_type": "date", "width": "16%"},
+        {"key": "decided", "label": "Decided", "sort_type": "date", "width": "16%"},
+        {"key": "actions", "label": "Actions", "sortable": false, "mobile_priority": "essential", "width": "10%"}
+      ] %}
+      {{ table_toolbar("anonymisation-requests", search=true, search_placeholder="Filter requests",
+                       filters=[{"name": "status", "label": "Status", "value": anonymisation_status_filter,
+                                 "options": [("", "All statuses"), ("pending", "Pending"), ("approved", "Approved"), ("rejected", "Rejected"), ("completed", "Completed")]}],
+                       columns=columns) }}
+      {% call data_table(columns, table_id="anonymisation-requests", columns=columns, aria_label="Account anonymisation requests") %}
+        {% for req in anonymisation_requests %}
+        <tr>
+          <td data-column-key="id" data-sort-value="{{ req.id }}">#{{ req.id }}</td>
+          <td data-column-key="account">{{ req.request_user_email or ("User #" ~ req.user_id) }}</td>
+          <td data-column-key="status">{{ anon_status(req.status) }}</td>
+          <td data-column-key="requested" data-sort-value="{{ req.requested_at or '' }}">{{ utc(req.requested_at) }}</td>
+          <td data-column-key="decided" data-sort-value="{{ req.decided_at or '' }}">{{ utc(req.decided_at) }}</td>
+          <td data-column-key="actions"><a href="/admin/anonymisation/{{ req.id }}" class="button button--ghost button--small">{{ "Review" if req.status == "pending" else "View" }}</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="table__empty">No anonymisation requests{% if anonymisation_status_filter %} with this status{% endif %}.</td></tr>
+        {% endfor %}
+      {% endcall %}
     </div>
   </section>
 {% endif %}
-</div>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
-  <script src="{{ static_url('/static/js/admin.js') }}?v=20260426c" defer></script>
-  <script src="{{ static_url('/static/js/tables.js') }}?v=20260416c" defer></script>
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/table_columns.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/anonymisation_admin.js') }}" defer></script>
 {% endblock %}

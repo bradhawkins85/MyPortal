@@ -50,7 +50,7 @@ async def upsert_integration(
                    oauth_scopes = COALESCE(%s, oauth_scopes),
                    oauth_connection_version = COALESCE(%s, oauth_connection_version),
                    token_revision = token_revision + 1, updated_at = UTC_TIMESTAMP(6)
-               WHERE user_id = %s""" + revision_clause,
+               WHERE user_id = %s""" + revision_clause,  # nosec B608
             tuple(params),
         )
         return

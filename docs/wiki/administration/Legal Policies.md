@@ -63,3 +63,35 @@ banner reads:
 - Set `LEGAL_POLICIES_CHANGE_SUMMARY` in `app/core/legal.py` to a short
   sentence describing the changes; it is appended to the banner message and
   shown on the `/legal` overview page.
+
+## Account anonymisation requests
+
+Privacy Policy section 9 and Terms section 12 describe how people ask for
+their account to be deleted or anonymised. Records that must be kept
+(tickets, invoices, orders) are anonymised rather than deleted.
+
+- **Requesting.** A signed-in user opens **Delete or anonymise my account** on
+  the Security tab of their profile, confirms their email address and ticks
+  the acknowledgement. This creates a `pending` row in
+  `account_anonymisation_requests` (one per user, so re-submitting never
+  duplicates it), raises a support ticket, writes an
+  `account_anonymisation.request` audit entry and emails the user.
+- **Deciding.** Super admins review requests at **Admin → Anonymisation**
+  (`/admin/anonymisation`). **Approve and anonymise** runs the anonymisation;
+  **Reject** needs a reason, which is emailed to the user. A rejected user can
+  submit a new request. Super admins can't decide their own request.
+- **Requests by email or phone.** On **Admin → Users**, the **Anonymise**
+  action records the request and anonymises the account straight away.
+- **What the run does.** It emails the original address a final notice, adds
+  the original and placeholder addresses to the sales opt-out list, removes
+  the person's content from the RAG index, then, in one transaction, replaces
+  their name and email (`anonymised+<id>@invalid`) on the user and linked
+  staff rows, redacts their email and phone in ticket and chat text, deletes
+  sessions, two-factor, passkeys, sign-in tokens, SMS links, call recordings,
+  voicemail attachments and email tracking events, and closes the account.
+  Recording and voicemail files are deleted after the transaction commits.
+- **Failures.** A failed run leaves the request `approved` with the error
+  type noted. Approving it again is safe because every step is idempotent.
+- **Audit trail.** Audit entries hold ids and row counts only. The request
+  keeps a SHA-256 hash of the original email so future marketing campaigns
+  still exclude it.

@@ -135,10 +135,12 @@ async def network_map_page(request: Request):
     endpoint_options = await links_repo.endpoint_options(company_id) if can_edit else []
     labels = {item["value"]: item["label"] for item in endpoint_options}
     query = urlencode(options.query())
+    safe_map_svg = Markup(_sanitize_svg(svg))  # nosec B704  # internally-generated SVG, sanitized above
     return await _routes()._main()._render_template(
         "network_map/index.html", request, user, extra={
             "title": title, "company": company, "can_edit": can_edit,
-            "map_svg": Markup(_sanitize_svg(svg)), "map_payload": network_map.graph_payload(graph),
+            "map_svg": safe_map_svg,
+            "map_payload": network_map.graph_payload(graph),
             "options": options, "options_query": query,
             "detail_levels": network_map.DETAIL_LEVELS,
             "layouts": network_map.LAYOUTS,
@@ -190,8 +192,10 @@ async def export_pdf(request: Request):
     # Scale the drawing to fit the page's printable area in both directions.
     avail_w, avail_h = page_w - 2 * PDF_MARGIN_MM, page_h - 2 * PDF_MARGIN_MM - 6
     map_width_mm = min(avail_w, avail_h * width / height)
+    safe_pdf_svg = Markup(_sanitize_svg(_fit_svg(svg)))  # nosec B704  # internally-generated SVG, sanitized above
     html = _routes()._main().templates.env.get_template("network_map/pdf.html").render(
-        svg=Markup(_sanitize_svg(_fit_svg(svg))), company=company, subtitle=subtitle, options=options,
+        svg=safe_pdf_svg,
+        company=company, subtitle=subtitle, options=options,
         page_size=f"{page_w}mm {page_h}mm", map_width_mm=round(map_width_mm, 1),
         inventory=network_map.inventory(graph) if options.detail != "overview" else [],
         detail=options.detail,

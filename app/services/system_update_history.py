@@ -160,6 +160,7 @@ def _match_history_dir_owner(fd: int, dir_fd: int | None) -> None:
         owner = os.fstat(dir_fd)
         os.fchown(fd, owner.st_uid, owner.st_gid)
     except OSError:
+        # Best-effort ownership repair; ignore if fchown is unavailable.
         pass
 
 

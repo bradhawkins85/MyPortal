@@ -26,7 +26,7 @@ async def list_entries(*, include_ignored: bool) -> list[dict[str, Any]]:
         LEFT JOIN companies c ON c.id = t.company_id
         LEFT JOIN knowledge_base_resolution_reviews r ON r.ticket_id = t.id
         WHERE t.resolution_steps IS NOT NULL AND TRIM(t.resolution_steps) <> ''
-        """ + ignored_clause + " ORDER BY t.resolution_steps_updated_at DESC, t.id DESC",
+        """ + ignored_clause + " ORDER BY t.resolution_steps_updated_at DESC, t.id DESC",  # nosec B608
     )
     entries = []
     for row in rows:

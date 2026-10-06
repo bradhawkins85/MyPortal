@@ -1,41 +1,37 @@
-"""Orchestration for the account-anonymisation lifecycle (issue #4554).
+"""Account anonymisation workflow (issue #4554).
 
-The destructive PII-removal run itself lives in
-:mod:`app.repositories.anonymisation` (``anonymise_user``) so that it can be
-unit-tested in isolation. This service coordinates the higher-level flow and
-the cross-cutting side effects:
+* A signed-in user submits a request from their profile. This records a
+  ``pending`` request, raises a support ticket, writes an audit entry and
+  emails the user a confirmation. Re-submitting never creates a duplicate.
+* A super admin approves the request, which runs the anonymisation, or
+  rejects it with a reason that is emailed to the user.
+* A super admin can also start anonymisation directly from the Users page for
+  requests received by email or phone.
 
-* opening a ``pending`` request from a user's profile and raising a support
-  ticket so an administrator has a work item to action;
-* executing a request (admin action): the anonymisation run, best-effort
-  cleanup of derived RAG documents, a marketing opt-out, an audit entry and a
-  confirmation email;
-* cancelling a ``pending`` request.
-
-Every best-effort side effect (support ticket, RAG index, marketing, email,
-audit) is guarded so that a failure in an optional integration never aborts an
-anonymisation run that has already succeeded.
+The database work lives in :func:`app.repositories.anonymisation.anonymise_user`.
+This module gathers what the run needs, then handles the side effects: the
+final email (sent *before* the address is replaced), the marketing opt-out,
+RAG cleanup, deleting recording and voicemail files, and the audit trail.
+Audit entries never hold the person's original personal data in plain text.
 """
 
 from __future__ import annotations
 
-import hashlib
-import logging
+import html
+from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+from loguru import logger
 
 from app.repositories import anonymisation as anonymisation_repo
 from app.repositories import users as users_repo
 from app.services import audit as audit_service
 from app.services import email as email_service
 
-logger = logging.getLogger(__name__)
-
-# Canonical request-status values (kept here so callers have one import point).
-STATUS_PENDING = "pending"
-STATUS_EXECUTING = "executing"
-STATUS_COMPLETED = "completed"
-STATUS_FAILED = "failed"
-STATUS_CANCELLED = "cancelled"
+STATUS_PENDING = anonymisation_repo.STATUS_PENDING
+STATUS_APPROVED = anonymisation_repo.STATUS_APPROVED
+STATUS_REJECTED = anonymisation_repo.STATUS_REJECTED
+STATUS_COMPLETED = anonymisation_repo.STATUS_COMPLETED
 
 
 class AnonymisationError(Exception):
@@ -43,205 +39,370 @@ class AnonymisationError(Exception):
 
 
 def _user_id(user: Mapping[str, Any] | None) -> int:
-    """Return the integer id of *user*, raising if it is missing or invalid."""
     try:
         return int((user or {}).get("id"))
     except (TypeError, ValueError):
         raise AnonymisationError("A valid user id is required") from None
 
 
-def _sha256(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+def _phones(*values: Any) -> list[str]:
+    return sorted({str(v).strip() for v in values if v is not None and str(v).strip()})
 
 
-async def list_requests(*, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
-    """Return anonymisation requests (newest first), optionally by status."""
+async def list_requests(*, status: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
     return await anonymisation_repo.list_requests(status=status, limit=limit)
 
 
 async def get_request(request_id: int) -> dict[str, Any] | None:
-    """Return a single anonymisation request by id, or ``None``."""
     return await anonymisation_repo.get_request(request_id)
 
 
 async def get_request_for_user(user_id: int) -> dict[str, Any] | None:
-    """Return the user's anonymisation request, or ``None`` when there is none."""
     return await anonymisation_repo.get_request_for_user(user_id)
+
+
+# ---------------------------------------------------------------------------
+# Submitting a request
+# ---------------------------------------------------------------------------
 
 
 async def create_request(
     *,
     user: Mapping[str, Any],
+    reason: str | None = None,
+    confirm_email: str | None = None,
+    acknowledged: bool = False,
     ip_address: str | None = None,
     user_agent: str | None = None,
+    request: Any = None,
 ) -> dict[str, Any]:
-    """Idempotently open a ``pending`` anonymisation request for *user*.
-
-    If the user already has a request in any state it is returned unchanged
-    (``created`` is ``False``) rather than duplicated. On a genuine first
-    request a support ticket is raised best-effort and linked back to the
-    request row.
-    """
+    """Submit the signed-in user's own request from the profile form."""
     user_id = _user_id(user)
-
-    existing = await anonymisation_repo.get_request_for_user(user_id)
-    if existing is not None:
-        return {
-            "request": dict(existing),
-            "created": False,
-            "ticket_id": None,
-            "status": existing.get("status"),
-        }
-
-    request_id = await anonymisation_repo.create_request(
-        user_id=user_id,
+    email = str(user.get("email") or "").strip()
+    if not acknowledged:
+        raise AnonymisationError("Please confirm that you understand anonymisation can't be undone.")
+    if not email or (confirm_email or "").strip().lower() != email.lower():
+        raise AnonymisationError("The email address you entered doesn't match your account.")
+    return await _open_request(
+        user=user,
+        reason=reason,
         requested_by_user_id=user_id,
-        reason="User requested account anonymisation from their profile.",
+        source="profile",
+        ip_address=ip_address,
+        user_agent=user_agent,
+        request=request,
+        notify=True,
+    )
+
+
+async def _open_request(
+    *,
+    user: Mapping[str, Any],
+    reason: str | None,
+    requested_by_user_id: int,
+    source: str,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    request: Any = None,
+    notify: bool,
+) -> dict[str, Any]:
+    user_id = _user_id(user)
+    existing = await anonymisation_repo.get_request_for_user(user_id)
+    if existing is not None and existing.get("status") == STATUS_COMPLETED:
+        raise AnonymisationError("This account has already been anonymised.")
+
+    request_id, created = await anonymisation_repo.create_request(
+        user_id=user_id,
+        reason=reason,
+        requested_by_user_id=requested_by_user_id,
         ip_address=ip_address,
         user_agent=user_agent,
     )
-    request = await anonymisation_repo.get_request(request_id) or {}
-    ticket_id = await _create_support_ticket(user, request_id)
+    if not created:
+        current = await anonymisation_repo.get_request(request_id) or {}
+        return {"request_id": request_id, "created": False, "status": current.get("status"), "ticket_id": None}
+
+    ticket_id = await _create_support_ticket(user, request_id, source=source)
     if ticket_id is not None:
         await anonymisation_repo.set_support_ticket(request_id, ticket_id)
+    await _audit(
+        "account_anonymisation.request",
+        actor_id=requested_by_user_id,
+        request_id=request_id,
+        user_id=user_id,
+        details={"source": source, "support_ticket_id": ticket_id},
+        request=request,
+    )
+    if notify:
+        await _send(
+            user.get("email"),
+            "We've received your account anonymisation request",
+            [
+                "We've received your request to delete or anonymise your account.",
+                "A member of our team will review it and email you when it has been actioned.",
+                "If you didn't make this request, please contact us straight away.",
+            ],
+        )
+    return {"request_id": request_id, "created": True, "status": STATUS_PENDING, "ticket_id": ticket_id}
 
-    return {
-        "request": dict(request),
-        "created": True,
-        "ticket_id": ticket_id,
-        "status": STATUS_PENDING,
-    }
+
+# ---------------------------------------------------------------------------
+# Admin decisions
+# ---------------------------------------------------------------------------
 
 
-async def execute_request(*, request_id: int, actor_user: Mapping[str, Any]) -> dict[str, Any]:
-    """Execute a ``pending`` request (admin action). This is irreversible.
+async def approve_request(
+    *, request_id: int, actor_user: Mapping[str, Any], notes: str | None = None, request: Any = None
+) -> dict[str, Any]:
+    """Approve a pending request and run the anonymisation. Irreversible.
 
-    Order: claim the request (``executing``) -> capture ticket ids -> run
-    ``anonymise_user`` -> best-effort RAG + marketing cleanup -> ``completed``
-    -> audit -> notify. The ticket ids are read *before* the run because
-    ``anonymise_user`` NULLs ``tickets.requester_id``. If the anonymisation run
-    raises, the request is marked ``failed`` and the error is re-raised as
-    :class:`AnonymisationError`.
+    An ``approved`` request whose earlier run failed can be approved again to
+    retry it; every step is idempotent.
     """
     actor_id = _user_id(actor_user)
-    request = await anonymisation_repo.get_request(request_id)
-    if request is None:
+    record = await anonymisation_repo.get_request(request_id)
+    if record is None:
         raise AnonymisationError("Anonymisation request not found")
-    if request.get("status") != STATUS_PENDING:
-        raise AnonymisationError(
-            f"Request cannot be executed in status '{request.get('status')}'"
-        )
+    status = record.get("status")
+    if status not in (STATUS_PENDING, STATUS_APPROVED):
+        raise AnonymisationError("Only pending requests can be approved (this one is " + str(status) + ").")
+    user_id = int(record["user_id"])
+    if user_id == actor_id:
+        raise AnonymisationError("You can't approve the anonymisation of your own account.")
 
-    user_id = int(request["user_id"])
     target = await users_repo.get_user_by_id(user_id) or {}
-    original_email = str(target.get("email") or "").strip() or None
-    original_phone = (
-        str(target.get("mobile_phone") or target.get("phone") or "").strip() or None
-    )
+    current_email = str(target.get("email") or "").strip() or None
+    # On a retry the users row may already hold the placeholder.
+    original_email = None if anonymisation_repo.is_anonymised_email(current_email) else current_email
 
-    # Read the ticket ids before the run clears the requester link.
-    ticket_ids = await anonymisation_repo.list_request_ticket_ids(user_id)
-
-    # Atomically claim the request so two admins cannot run it concurrently.
-    claimed = await anonymisation_repo.mark_executing(
-        request_id, executed_by_user_id=actor_id
-    )
-    if not claimed:
-        raise AnonymisationError(
-            "Request is no longer pending; another execution may be in progress"
+    if status == STATUS_PENDING:
+        claimed = await anonymisation_repo.mark_approved(
+            request_id,
+            decided_by=actor_id,
+            original_email_hash=anonymisation_repo.email_hash(original_email),
+            notes=notes,
         )
+        if not claimed:
+            raise AnonymisationError("This request has already been decided by someone else.")
 
     try:
-        details = await anonymisation_repo.anonymise_user(
-            user_id, original_email=original_email, original_phone=original_phone
-        )
+        details = await _run(user_id, target, original_email)
     except Exception as exc:
-        await anonymisation_repo.mark_failed(request_id, error_message=str(exc))
-        await _audit_execution(
-            request_id=request_id,
+        # Only the exception type: messages can echo the values being written.
+        logger.error("Account anonymisation failed for request {}: {}", request_id, type(exc).__name__)
+        await anonymisation_repo.record_error(request_id, type(exc).__name__ + ": run failed, retry to resume")
+        await _audit(
+            "account_anonymisation.fail",
             actor_id=actor_id,
+            request_id=request_id,
             user_id=user_id,
-            success=False,
-            details={"error": str(exc)},
+            details={"error": type(exc).__name__},
+            request=request,
         )
-        raise AnonymisationError(f"Anonymisation failed: {exc}") from exc
+        raise AnonymisationError("Anonymisation failed part-way. It is safe to approve the request again to retry.") from exc
 
-    rag_deleted = await _delete_rag_documents_for_user(ticket_ids)
-    await _opt_out_marketing(original_email)
-
-    await anonymisation_repo.mark_completed(
-        request_id,
-        original_email_hash=_sha256(original_email) if original_email else None,
-    )
-    await _audit_execution(
-        request_id=request_id,
+    await anonymisation_repo.mark_completed(request_id)
+    await _audit(
+        "account_anonymisation.complete",
         actor_id=actor_id,
+        request_id=request_id,
         user_id=user_id,
-        success=True,
-        details={**details, "rag_documents_deleted": rag_deleted},
+        details=details,
+        request=request,
     )
-    notified = await _notify_user_anonymised(original_email)
-
-    return {
-        "request_id": request_id,
-        "user_id": user_id,
-        "status": STATUS_COMPLETED,
-        "details": details,
-        "rag_documents_deleted": rag_deleted,
-        "notified": notified,
-    }
+    return {"request_id": request_id, "user_id": user_id, "status": STATUS_COMPLETED, "details": details}
 
 
-async def cancel_request(*, request_id: int, actor_user: Mapping[str, Any]) -> dict[str, Any]:
-    """Cancel a ``pending`` request (admin action). Deletes the request row."""
+async def reject_request(
+    *, request_id: int, actor_user: Mapping[str, Any], reason: str, request: Any = None
+) -> dict[str, Any]:
+    """Reject a pending request. The reason is required and emailed to the user."""
     actor_id = _user_id(actor_user)
-    request = await anonymisation_repo.get_request(request_id)
-    if request is None:
+    reason_text = (reason or "").strip()
+    if not reason_text:
+        raise AnonymisationError("Enter a reason for rejecting the request. It will be emailed to the user.")
+    record = await anonymisation_repo.get_request(request_id)
+    if record is None:
         raise AnonymisationError("Anonymisation request not found")
-    if request.get("status") != STATUS_PENDING:
-        raise AnonymisationError(
-            f"Only pending requests can be cancelled "
-            f"(current status: {request.get('status')})"
-        )
-    cancelled = await anonymisation_repo.cancel_request(request_id)
-    if not cancelled:
-        raise AnonymisationError("Could not cancel request (it is no longer pending)")
-    user_id = int(request["user_id"])
-    await _audit_execution(
-        request_id=request_id,
+    if record.get("status") != STATUS_PENDING:
+        raise AnonymisationError("Only pending requests can be rejected.")
+    if not await anonymisation_repo.mark_rejected(request_id, decided_by=actor_id, notes=reason_text):
+        raise AnonymisationError("This request has already been decided by someone else.")
+    user_id = int(record["user_id"])
+    await _audit(
+        "account_anonymisation.reject",
         actor_id=actor_id,
+        request_id=request_id,
         user_id=user_id,
-        success=True,
-        details={"action": "cancelled"},
+        details={"reason_length": len(reason_text)},
+        request=request,
     )
-    return {"request_id": request_id, "user_id": user_id, "status": STATUS_CANCELLED}
+    await _send(
+        record.get("request_user_email"),
+        "Your account anonymisation request",
+        [
+            "We've reviewed your request to delete or anonymise your account and can't action it at this time.",
+            "Reason: " + reason_text,
+            "You can contact us if you have any questions, or submit a new request from your profile.",
+        ],
+    )
+    return {"request_id": request_id, "user_id": user_id, "status": STATUS_REJECTED}
+
+
+async def start_for_user(
+    *, user_id: int, actor_user: Mapping[str, Any], notes: str | None = None, request: Any = None
+) -> dict[str, Any]:
+    """Super admin: anonymise an account now, for a request received by email or phone."""
+    actor_id = _user_id(actor_user)
+    if int(user_id) == actor_id:
+        raise AnonymisationError("You can't anonymise your own account.")
+    target = await users_repo.get_user_by_id(int(user_id))
+    if not target:
+        raise AnonymisationError("User not found.")
+    opened = await _open_request(
+        user=target,
+        reason=notes or "Request received by email or phone.",
+        requested_by_user_id=actor_id,
+        source="admin",
+        request=request,
+        notify=False,
+    )
+    return await approve_request(
+        request_id=int(opened["request_id"]), actor_user=actor_user, notes=notes, request=request
+    )
 
 
 # ---------------------------------------------------------------------------
-# Side-effect helpers (all best-effort / defensive)
+# The run
 # ---------------------------------------------------------------------------
 
 
-async def _create_support_ticket(user: Mapping[str, Any], request_id: int) -> int | None:
-    """Best-effort: raise a support ticket for an administrator to action."""
+async def _run(user_id: int, target: Mapping[str, Any], original_email: str | None) -> dict[str, int]:
+    staff = await anonymisation_repo.list_staff_for_user(user_id, original_email)
+    staff_ids = [int(row["id"]) for row in staff]
+    phones = _phones(target.get("mobile_phone"), *(row.get("mobile_phone") for row in staff))
+    ticket_ids = await anonymisation_repo.list_requested_ticket_ids(user_id, staff_ids)
+    recordings = await anonymisation_repo.list_call_recordings(phones, staff_ids)
+    voicemail = await anonymisation_repo.list_audio_attachments(ticket_ids)
+
+    # Emailed before the address is replaced, so the person can still receive it.
+    await _send(
+        original_email,
+        "Your account is being anonymised",
+        [
+            "Your request to delete or anonymise your account has been approved and is being actioned now.",
+            "Once it is complete you won't be able to sign in, and this email address will no longer be linked to the account.",
+            "We keep some records, such as invoices, where the law requires us to, but your personal details are removed from them.",
+            "This is the last email we'll send to this address about your account.",
+        ],
+    )
+    # Before the run, so the opt-out holds even if a later step fails.
+    await _opt_out_marketing(original_email, anonymisation_repo.placeholder_email_for(user_id))
+    rag_counts = await _purge_rag(user_id)
+
+    details = await anonymisation_repo.anonymise_user(
+        user_id,
+        original_email=original_email,
+        phones=phones,
+        staff_ids=staff_ids,
+        ticket_ids=ticket_ids,
+        call_recording_ids=[int(row["id"]) for row in recordings],
+        attachment_ids=[int(row["id"]) for row in voicemail],
+    )
+
+    # Files are removed only once the rows are gone, so a rolled-back run
+    # never leaves rows pointing at deleted files.
+    details["call_recording_files"] = _delete_recording_files(recordings)
+    details["voicemail_files"] = _delete_attachment_files(voicemail)
+    details.update({"rag_" + key: int(value) for key, value in rag_counts.items()})
+    return details
+
+
+async def _purge_rag(user_id: int) -> dict[str, int]:
+    try:
+        from app.services import ai_opt_out
+
+        return await ai_opt_out.purge_user_from_rag_index(user_id)
+    except Exception as exc:
+        logger.warning("RAG cleanup for anonymised user failed: {}", type(exc).__name__)
+        return {}
+
+
+def _delete_recording_files(recordings: Sequence[Mapping[str, Any]]) -> int:
+    deleted = 0
+    for row in recordings:
+        raw = str(row.get("file_path") or "").strip()
+        if not raw:
+            continue
+        try:
+            path = Path(raw)
+            if path.is_file():
+                path.unlink()
+                deleted += 1
+        except OSError as exc:
+            logger.warning("Could not delete call recording file {}: {}", row.get("id"), type(exc).__name__)
+    return deleted
+
+
+def _delete_attachment_files(attachments: Sequence[Mapping[str, Any]]) -> int:
+    deleted = 0
+    try:
+        from app.services import ticket_attachments as attachments_service
+    except Exception:  # pragma: no cover - defensive
+        return 0
+    for row in attachments:
+        filename = str(row.get("filename") or "")
+        if not filename:
+            continue
+        try:
+            path = attachments_service.get_attachment_file_path(filename)
+            if path.is_file():
+                path.unlink()
+                deleted += 1
+        except (OSError, ValueError) as exc:
+            logger.warning("Could not delete voicemail file {}: {}", row.get("id"), type(exc).__name__)
+    return deleted
+
+
+async def _opt_out_marketing(original_email: str | None, placeholder: str) -> None:
+    """Add both addresses to the sales opt-out list.
+
+    The one-way hash stored on the request also excludes the original
+    address from future campaigns (see ``marketing_campaigns.list_opted_out``).
+    """
+    try:
+        from app.repositories import marketing_campaigns as campaign_repo
+        from app.services import marketing_campaigns as campaign_service
+
+        # The placeholder uses the reserved .invalid TLD, which the address
+        # validator in normalise_email rejects, so it is added as written.
+        for email in (campaign_service.normalise_email(original_email), placeholder.lower()):
+            if email:
+                await campaign_repo.add_opt_out(email, campaign_service.CATEGORY_SALES, None)
+    except Exception as exc:
+        logger.warning("Marketing opt-out for anonymised user failed: {}", type(exc).__name__)
+
+
+# ---------------------------------------------------------------------------
+# Side-effect helpers
+# ---------------------------------------------------------------------------
+
+
+async def _create_support_ticket(user: Mapping[str, Any], request_id: int, *, source: str) -> int | None:
+    """Raise a ticket so staff are notified. It holds no personal details."""
     try:
         from app.services import tickets as tickets_service
 
         user_id = _user_id(user)
         company_id = user.get("company_id")
-        first = str(user.get("first_name") or "").strip()
-        last = str(user.get("last_name") or "").strip()
-        display = f"{first} {last}".strip() or "an account holder"
+        via = "from their profile" if source == "profile" else "by email or phone (recorded by a super admin)"
         description = (
-            f"{display} (user #{user_id}) requested anonymisation of their personal "
-            f"data from their profile.\n\n"
-            f"Anonymisation request ID: {request_id}\n"
-            "An administrator should review and execute this request from the "
-            "Anonymisation admin page. Execution is irreversible and removes "
-            "personal data across all MyPortal tables."
+            "User #" + str(user_id) + " asked " + via + " to have their account anonymised.\n\n"
+            "Anonymisation request #" + str(request_id) + ". Review it at /admin/anonymisation/"
+            + str(request_id) + " and approve or reject it. Approving is irreversible."
         )
         ticket = await tickets_service.create_ticket(
-            subject=f"Account anonymisation request — user #{user_id}",
+            subject="Account anonymisation request #" + str(request_id),
             description=description,
             requester_id=user_id,
             company_id=int(company_id) if company_id is not None else None,
@@ -250,103 +411,52 @@ async def _create_support_ticket(user: Mapping[str, Any], request_id: int) -> in
             status="open",
             category="Account Anonymisation",
             module_slug=None,
-            external_reference=f"anonymisation:{user_id}",
+            external_reference="anonymisation:" + str(request_id),
         )
         if isinstance(ticket, Mapping) and ticket.get("id") is not None:
             return int(ticket["id"])
         return None
-    except Exception as exc:  # pragma: no cover - best effort
-        logger.warning("Failed to create anonymisation support ticket: %s", exc)
+    except Exception as exc:
+        logger.warning("Failed to create anonymisation support ticket: {}", type(exc).__name__)
         return None
 
 
-async def _delete_rag_documents_for_user(ticket_ids: Sequence[int]) -> int:
-    """Best-effort: remove RAG documents derived from the user's tickets."""
-    if not ticket_ids:
-        return 0
-    try:
-        from app.repositories import rag_index as rag_index_repo
-
-        doc_ids = await rag_index_repo.list_document_ids_for_source("tickets", ticket_ids)
-        if not doc_ids:
-            return 0
-        return int(await rag_index_repo.delete_documents_by_ids(doc_ids) or 0)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("RAG cleanup for anonymised user failed: %s", exc)
-        return 0
-
-
-async def _opt_out_marketing(email_value: str | None) -> None:
-    """Best-effort: opt the user out of sales/marketing by their original email.
-
-    The marketing opt-out is keyed by email address — the single identity that
-    deliberately survives anonymisation so a suppression preference is
-    honoured. All other personal data is removed by the anonymisation run.
-    """
-    if not email_value:
-        return
-    try:
-        from app.repositories import marketing_campaigns as campaign_repo
-        from app.services import marketing_campaigns as campaign_service
-
-        email = campaign_service.normalise_email(email_value)
-        if not email:
-            return
-        await campaign_repo.add_opt_out(email, campaign_service.CATEGORY_SALES, None)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Marketing opt-out for anonymised user failed: %s", exc)
-
-
-async def _notify_user_anonymised(email_value: str | None) -> bool:
-    """Best-effort: confirm completion to the pre-anonymisation address."""
-    if not email_value:
+async def _send(recipient: Any, subject: str, paragraphs: Sequence[str]) -> bool:
+    address = str(recipient or "").strip()
+    if not address or anonymisation_repo.is_anonymised_email(address):
         return False
-    html_body = (
-        "<p>Hello,</p>"
-        "<p>Your request to anonymise your MyPortal account has been completed. "
-        "The personal information you asked us to remove has been deleted from "
-        "our systems.</p>"
-        "<p>If you believe any of your personal data has been retained, please "
-        "contact our support team and we will investigate.</p>"
-        "<p>Regards,<br/>The MyPortal team</p>"
-    )
-    text_body = (
-        "Your request to anonymise your MyPortal account has been completed. "
-        "The personal information you asked us to remove has been deleted from "
-        "our systems."
-    )
+    html_body = "".join("<p>" + html.escape(text) + "</p>" for text in paragraphs)
     try:
         sent, _ = await email_service.send_email(
-            subject="Your MyPortal account has been anonymised",
-            recipients=[email_value],
+            subject=subject,
+            recipients=[address],
             html_body=html_body,
-            text_body=text_body,
+            text_body="\n\n".join(paragraphs),
         )
         return bool(sent)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Anonymisation notification email failed: %s", exc)
+    except Exception as exc:
+        logger.warning("Anonymisation email failed: {}", type(exc).__name__)
         return False
 
 
-async def _audit_execution(
+async def _audit(
+    action: str,
     *,
-    request_id: int,
     actor_id: int,
+    request_id: int,
     user_id: int,
-    success: bool,
     details: Mapping[str, Any] | None,
+    request: Any = None,
 ) -> None:
-    """Record an audit entry, swallowing errors so the flow is unaffected."""
+    """Write an audit entry. It references ids and counts only, never names or addresses."""
     try:
         await audit_service.log_action(
-            action="account_anonymisation.execute"
-            if success
-            else "account_anonymisation.fail",
+            action=action,
             user_id=actor_id,
             entity_type="account_anonymisation_request",
             entity_id=request_id,
             new_value={"user_id": user_id, "details": dict(details or {})},
-            metadata={"success": success},
+            request=request,
         )
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Anonymisation audit write failed: %s", exc)
+    except Exception as exc:
+        logger.warning("Anonymisation audit write failed: {}", type(exc).__name__)

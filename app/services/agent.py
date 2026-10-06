@@ -2405,7 +2405,6 @@ async def execute_agent_query(
             conversation_context=conversation_context,
         )
 
-    module_status = "skipped"
     model_name: str | None = None
     answer_text: str | None = None
     event_id: int | None = None

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/url"
@@ -447,6 +448,7 @@ type VersionResponse struct {
 	Version     string `json:"version"`
 	DownloadURL string `json:"download_url,omitempty"`
 	Required    bool   `json:"required"`
+	Sha256      string `json:"sha256,omitempty"`
 }
 
 // GetVersion checks if a newer installer version is available.
@@ -620,6 +622,55 @@ func (c *Client) UploadDiagnostics(ctx context.Context, logDir string) error {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		return fmt.Errorf("diagnostics: HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// PostTroubleshootComplete reports the result of an AI troubleshooting run back
+// to the server. The server stores the guidance as an internal ticket note and
+// the gzip log bundle as a staff-only attachment on the target ticket. The
+// device authenticates with its per-device Bearer token.
+func (c *Client) PostTroubleshootComplete(ctx context.Context, ticketID, commandID int, guidance, endpoint string, logBundle []byte) error {
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+
+	if err := w.WriteField("command_id", fmt.Sprintf("%d", commandID)); err != nil {
+		return err
+	}
+	if err := w.WriteField("guidance", guidance); err != nil {
+		return err
+	}
+	if err := w.WriteField("endpoint", endpoint); err != nil {
+		return err
+	}
+	if len(logBundle) > 0 {
+		fw, err := w.CreateFormFile("log_bundle", fmt.Sprintf("troubleshoot-logs-%d.gz", commandID))
+		if err != nil {
+			return err
+		}
+		if _, err := fw.Write(logBundle); err != nil {
+			return err
+		}
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s/api/tickets/%d/troubleshoot-complete", c.baseURL, ticketID), &body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	c.setAuthHeader(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		return fmt.Errorf("troubleshoot-complete: HTTP %d", resp.StatusCode)
 	}
 	return nil
 }

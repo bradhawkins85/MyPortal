@@ -2059,24 +2059,84 @@ button.header-title-menu__link,
 }
 
 /* ---------------------------------------------------------------------------
- * Policy update banner – full-width notice shown above the main layout for
- * signed-in users whose policies_accepted_version is out of date.
- * Mirrors the update-banner look but sits outside the .layout wrapper.
+ * Policy update banner – shown to signed-in users whose
+ * policies_accepted_version is out of date. It is pinned over the primary
+ * navigation (sized by base.html to the navigation's box) so the menu stays
+ * blocked until the policies are accepted, and carries its own log out
+ * button. When the navigation is off screen (collapsed mobile menu) it falls
+ * back to a fixed bar across the top of the viewport.
  * --------------------------------------------------------------------------- */
 .policies-banner {
-  border: 1px solid var(--hf-line-strong, rgba(148, 163, 184, 0.34));
-  border-radius: var(--hf-radius-md, 0.75rem);
-  background: var(--hf-panel-raised, rgba(15, 23, 42, 0.85));
-  padding: var(--space-gap-tight);
-  margin: var(--space-gap-base) var(--space-gap-base) 0;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1300;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--hf-line-strong, rgba(148, 163, 184, 0.34));
+  /* Opaque so the navigation underneath is fully hidden. */
+  background: #0f172a;
+  padding: var(--space-gap-tight) var(--space-compact-inline, 1rem);
   box-shadow: var(--hf-shadow-md, 0 0.75rem 1.75rem rgba(0, 0, 0, 0.28));
+  overflow-y: auto;
+}
+
+.policies-banner--overlay {
+  right: auto;
+  max-height: 100vh;
+  border-bottom: 0;
+  box-shadow: inset -1px 0 0 var(--hf-line-strong, rgba(148, 163, 184, 0.34));
+}
+
+body.navigation--top .policies-banner--overlay {
+  box-shadow: inset 0 -1px 0 var(--hf-line-strong, rgba(148, 163, 184, 0.34));
+}
+
+.policies-banner__logout {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.policies-banner__logout .sidebar__logout-button {
+  width: auto;
 }
 
 .policies-banner__body {
+  flex: 1 1 auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-gap-tight);
+}
+
+.policies-banner__body > .policies-banner__logout {
+  margin-left: auto;
+}
+
+/* Side navigation: stack the notice and keep log out at the bottom, where the
+ * navigation's own log out button normally sits. */
+body:not(.navigation--top) .policies-banner--overlay .policies-banner__body {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+}
+
+body:not(.navigation--top) .policies-banner--overlay .policies-banner__copy {
+  flex: 0 0 auto;
+}
+
+body:not(.navigation--top) .policies-banner--overlay .policies-banner__actions {
+  flex-wrap: wrap;
+}
+
+body:not(.navigation--top) .policies-banner--overlay .policies-banner__logout {
+  margin: auto 0 0;
+}
+
+body:not(.navigation--top) .policies-banner--overlay .policies-banner__logout .sidebar__logout-button {
+  width: 100%;
 }
 
 .policies-banner__copy {
@@ -2640,6 +2700,13 @@ button.header-title-menu__link,
   margin: 0.35rem 0 0;
   color: rgba(226, 232, 240, 0.75);
   font-size: 0.95rem;
+}
+
+.card__subheading {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.9);
 }
 
 .dashboard__section {
@@ -7942,6 +8009,18 @@ body:has(.stf-modal.is-visible) {
   align-items: center;
   justify-content: flex-end;
   margin: 0;
+}
+
+.profile-marketing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-tight);
+}
+
+.profile-marketing [hidden] {
+  display: none;
 }
 
 .profile-form__status {
@@ -14777,6 +14856,20 @@ a.stat-strip__stat:focus-visible {
 .stat-strip__stat:hover {
   transform: translateY(-2px);
   box-shadow: var(--hf-highlight), var(--hf-shadow-lg);
+}
+
+.stat-strip__stat[role="button"] {
+  cursor: pointer;
+}
+
+.stat-strip__stat[role="button"]:focus-visible {
+  outline: 2px solid var(--color-accent, #38bdf8);
+  outline-offset: 2px;
+}
+
+.stat-strip__stat--active {
+  outline: 2px solid var(--color-accent, #38bdf8);
+  outline-offset: 2px;
 }
 
 .stat-strip__stat-label {

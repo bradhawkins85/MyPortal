@@ -1,7 +1,18 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
-{% block header_title %}Microsoft 365 connection diagnostics{% endblock %}
+{% from "macros/counters.html" import counter_strip %}
 {% block title %}Microsoft 365 connection diagnostics{% endblock %}
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Microsoft 365 connection diagnostics</span>
+    {% if required_access and required_access.resources %}
+    <div class="page-header-toolbar">
+      <label class="visually-hidden" for="permission-filter">Filter permissions</label>
+      <input class="form-input page-header-toolbar__search" id="permission-filter" type="search" placeholder="Resource, permission or type" data-permission-filter />
+    </div>
+    {% endif %}
+  </div>
+{% endblock %}
 {% block header_actions %}
   {{ page_header_actions([
     {"label": "Connection", "type": "link", "href": "/m365", "variant": "secondary"},
@@ -13,7 +24,7 @@
 <div class="page-stack">
   <section class="card card--panel" aria-labelledby="connection-health-title">
     <header class="card__header">
-      <div><h2 class="card__title" id="connection-health-title">Connection health</h2><p class="card__subtitle">Credentials are not treated as connected until tenant, workloads, access and renewal have been verified.</p></div>
+      <div><h2 class="card__title" id="connection-health-title">Connection health</h2><p class="card__subtitle">Credentials are not treated as connected until tenant, workloads, access and renewal have been verified. The same checks determine the status shown throughout company and module settings.</p></div>
       <span class="status status--{{ connection_health.variant }}" role="status">{{ connection_health.label }}</span>
     </header>
     <div class="card__body">
@@ -22,29 +33,36 @@
         <div class="definition-list__item"><dt>Last verified</dt><dd>{% if connection_health.last_verified_at %}<time data-utc="{{ connection_health.last_verified_at }}">{{ connection_health.last_verified_at }}</time>{% else %}Never{% endif %}</dd></div>
         <div class="definition-list__item"><dt>Next credential renewal / expiry</dt><dd>{% if connection_health.renewal_at %}<time data-utc="{{ connection_health.renewal_at }}">{{ connection_health.renewal_at }}</time>{% else %}Not scheduled{% endif %}</dd></div>
       </dl>
+      <h3 class="card__subheading" id="capability-readiness-title">Capability readiness</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--space-3);">
+        {% for workload in connection_health.workloads %}<div><strong>{{ workload.name }}</strong><br><span class="status status--{{ 'success' if workload.ready else 'warning' }}">{{ 'Ready' if workload.ready else 'Action required' }}</span></div>{% endfor %}
+      </div>
       <a class="button" href="{{ connection_health.next_action_url }}">{{ connection_health.next_action_label }}</a>
-    </div>
-  </section>
-
-  <section class="card card--panel" aria-labelledby="capability-title">
-    <header class="card__header"><div><h2 class="card__title" id="capability-title">Capability readiness</h2><p class="card__subtitle">The same checks determine the status shown throughout company and module settings.</p></div></header>
-    <div class="card__body" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--space-3);">
-      {% for workload in connection_health.workloads %}<div><strong>{{ workload.name }}</strong><br><span class="status status--{{ 'success' if workload.ready else 'warning' }}">{{ 'Ready' if workload.ready else 'Action required' }}</span></div>{% endfor %}
-      {% if purview_preflight %}<div><strong>Purview administrator workflow</strong><br><span class="status status--{{ 'success' if purview_preflight.ready else 'warning' }}">{{ 'Ready' if purview_preflight.ready else 'Action required' }}</span></div>{% endif %}
     </div>
   </section>
 
   <section class="card card--panel" aria-labelledby="permission-title">
     <header class="card__header"><div><h2 class="card__title" id="permission-title">Permission diagnostics</h2><p class="card__subtitle">Each resource, permission and grant type appears once with its requested, consented and operational state.</p></div></header>
     <div class="card__body">
-      <div class="table-toolbar"><label class="form-field" for="permission-filter"><span class="form-label">Filter permissions</span><input class="form-input" id="permission-filter" type="search" placeholder="Resource, permission or type" data-permission-filter></label></div>
       {% if required_access and required_access.error %}<p class="alert alert--danger" role="alert">{{ required_access.error }}</p>{% endif %}
+      {% if required_access and required_access.resources %}
+      {{ counter_strip(
+        [
+          {"label": "Passed", "value": permission_status_counts['pass'], "variant": "success", "attrs": {"data-permission-status-filter": "pass", "role": "button", "tabindex": "0"}},
+          {"label": "Failed", "value": permission_status_counts['fail'], "variant": "danger", "attrs": {"data-permission-status-filter": "fail", "role": "button", "tabindex": "0"}},
+          {"label": "Unavailable", "value": permission_status_counts['unavailable'], "variant": "neutral", "attrs": {"data-permission-status-filter": "unavailable", "role": "button", "tabindex": "0"}}
+        ],
+        total=permission_status_counts['total'],
+        total_label="Permissions",
+        total_attrs={"data-permission-status-filter": "", "role": "button", "tabindex": "0"}
+      ) }}
+      {% endif %}
       <div class="table-scroll" style="overflow-x:auto;">
         <table class="table" id="m365-permission-table">
           <thead><tr><th scope="col"><button type="button" class="button button--ghost" data-sort="resource">Resource</button></th><th scope="col"><button type="button" class="button button--ghost" data-sort="permission">Permission</button></th><th scope="col">Type</th><th scope="col">Requested</th><th scope="col">Consented</th><th scope="col">Operational</th></tr></thead>
           <tbody>
           {% if required_access %}{% for resource in required_access.resources %}{% for permission in resource.permissions %}
-            <tr data-permission-row data-resource="{{ resource.name|lower }}" data-permission="{{ permission.name|lower }}">
+            <tr data-permission-row data-resource="{{ resource.name|lower }}" data-permission="{{ permission.name|lower }}" data-status="{{ permission.status }}">
               <td>{{ resource.name }}</td><td><strong>{{ permission.name }}</strong>{% if permission.remediation %}<br><small class="text-muted">{{ permission.remediation }}</small>{% endif %}</td><td>{{ permission.type }}</td>
               <td><span class="status status--{{ 'success' if permission.configured else 'danger' }}">{{ 'Yes' if permission.configured else 'Missing' }}</span></td>
               <td><span class="status status--{{ 'success' if permission.consented else 'danger' }}">{{ 'Granted' if permission.consented else 'Missing' }}</span></td>
@@ -65,10 +83,41 @@
 <script>
 (() => {
   const input = document.querySelector('[data-permission-filter]');
+  const table = document.querySelector('#m365-permission-table');
   const rows = [...document.querySelectorAll('[data-permission-row]')];
-  input?.addEventListener('input', () => { const value = input.value.trim().toLowerCase(); rows.forEach(row => { row.hidden = !row.textContent.toLowerCase().includes(value); }); });
+  const tiles = [...document.querySelectorAll('[data-permission-status-filter]')];
+  let activeStatus = '';
+  const apply = () => {
+    const value = input ? input.value.trim().toLowerCase() : '';
+    rows.forEach(row => {
+      const matchesText = !value || row.textContent.toLowerCase().includes(value);
+      const matchesStatus = !activeStatus || row.dataset.status === activeStatus;
+      row.hidden = !(matchesText && matchesStatus);
+    });
+  };
+  input?.addEventListener('input', apply);
+  const setStatus = (status) => {
+    activeStatus = status;
+    tiles.forEach(tile => {
+      const value = tile.dataset.permissionStatusFilter || '';
+      tile.classList.toggle('stat-strip__stat--active', value !== '' && value === activeStatus);
+    });
+    apply();
+  };
+  const toggleStatus = (status) => {
+    if (status === '') { setStatus(''); return; }
+    setStatus(activeStatus === status ? '' : status);
+  };
+  tiles.forEach(tile => {
+    const status = tile.dataset.permissionStatusFilter || '';
+    tile.addEventListener('click', () => toggleStatus(status));
+    tile.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleStatus(status); }
+    });
+  });
   document.querySelectorAll('[data-sort]').forEach(button => button.addEventListener('click', () => {
-    const key = button.dataset.sort; const body = document.querySelector('#m365-permission-table tbody');
+    const key = button.dataset.sort; const body = table ? table.querySelector('tbody') : null;
+    if (!body) return;
     rows.sort((a, b) => a.dataset[key].localeCompare(b.dataset[key])); rows.forEach(row => body.appendChild(row));
   }));
 })();

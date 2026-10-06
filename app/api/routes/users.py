@@ -172,6 +172,7 @@ async def accept_policies(
                     if parts.query:
                         redirect_url += "?" + parts.query
             except ValueError:
+                # Malformed Referer: keep the default redirect target.
                 pass
         return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
