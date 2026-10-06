@@ -413,10 +413,14 @@ class TrayTroubleshootRequest(BaseModel):
 class TrayTroubleshootResponse(BaseModel):
     """Acknowledgement returned after the troubleshoot command is queued/delivered."""
 
-    command_id: int
+    # None for the multi-stage ticket troubleshooter, which only sends a device
+    # command later, if its recommended steps call for endpoint logs.
+    command_id: Optional[int] = None
     device_uid: str
     ticket_id: int
-    status: str  # "delivered" (device online) or "queued" (will run on reconnect)
+    # "delivered" (device online), "queued" (will run on reconnect) or
+    # "started" (multi-stage troubleshooter running on the server).
+    status: str
     delivered: bool
     model: str
 

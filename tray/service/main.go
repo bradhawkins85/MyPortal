@@ -641,6 +641,12 @@ func (d *daemon) handleTroubleshoot(msg map[string]json.RawMessage) {
 		}
 	}
 	req.LLM = llm
+	if t, ok := msg["mode"]; ok {
+		_ = json.Unmarshal(t, &req.Mode)
+	}
+	if t, ok := msg["log_requests"]; ok {
+		_ = json.Unmarshal(t, &req.LogRequests)
+	}
 
 	logger.Info("troubleshoot: running agent (ticket %d, command %d, model %q)",
 		req.TicketID, req.CommandID, llm.Model)
@@ -665,7 +671,11 @@ func (d *daemon) handleTroubleshoot(msg map[string]json.RawMessage) {
 	}
 	ag.OnProgress = report
 
-	report("received", fmt.Sprintf("Troubleshooter agent %s started (model %q).", updater.AgentVersion, llm.Model))
+	if req.Mode == agent.ModeCollectLogs {
+		report("received", fmt.Sprintf("Troubleshooter agent %s started collecting the requested logs.", updater.AgentVersion))
+	} else {
+		report("received", fmt.Sprintf("Troubleshooter agent %s started (model %q).", updater.AgentVersion, llm.Model))
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()

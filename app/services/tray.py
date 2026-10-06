@@ -696,6 +696,10 @@ async def send_to_device(
         return False
 
 
+# Key in a troubleshoot command payload holding state only the server reads.
+SERVER_CONTEXT_KEY = "server_context"
+
+
 TROUBLESHOOT_AI_OPT_OUT_DETAIL = (
     "The ticket's requester has opted out of AI processing, so the AI "
     "troubleshooter cannot run on this ticket."
@@ -741,6 +745,8 @@ async def deliver_queued_commands(device: dict[str, Any]) -> dict[str, int]:
             payload = {}
         payload.setdefault("type", command.get("command"))
         payload.setdefault("command_id", command.get("id"))
+        # Server-side troubleshooter state stays on the server.
+        payload.pop(SERVER_CONTEXT_KEY, None)
 
         if command.get("command") == "troubleshoot" and not await _troubleshoot_still_allowed(payload):
             # The requester opted out of AI after the command was queued:
@@ -834,6 +840,10 @@ async def dispatch_troubleshoot_command(
     paths inject them (the reconnect drain via ``setdefault``; the live path
     below), keeping the two paths byte-for-byte consistent for the device.
 
+    A ``server_context`` entry is stored with the command for the server's own
+    later use (the multi-stage troubleshooter's plan) and is never sent to the
+    device by either delivery path.
+
     Returns ``(command_id, delivered)`` where ``delivered`` is True only when
     the message reached the device's local WebSocket right now.
     """
@@ -846,7 +856,11 @@ async def dispatch_troubleshoot_command(
         initiated_by_user_id=initiated_by_user_id,
         status="queued",
     )
-    live_payload = {"type": "troubleshoot", "command_id": command_id, **payload}
+    live_payload = {
+        "type": "troubleshoot",
+        "command_id": command_id,
+        **{key: value for key, value in payload.items() if key != SERVER_CONTEXT_KEY},
+    }
     delivered = await send_to_device(device_uid, live_payload)
     if delivered:
         await tray_repo.mark_command_delivered(command_id)
@@ -894,21 +908,8 @@ async def add_troubleshoot_note(ticket_id: int, body_html: str) -> dict[str, Any
     return reply
 
 
-async def add_troubleshoot_requested_note(
-    *,
-    ticket_id: int,
-    command_id: int,
-    delivered: bool,
-    device: dict[str, Any],
-    model: str,
-    requested_by: dict[str, Any] | None,
-    target_label: str | None = None,
-) -> None:
-    """Record on the ticket that a technician started the troubleshooter.
-
-    Best effort: the command has already been dispatched, so a failure to
-    write the note is logged rather than surfaced to the caller.
-    """
+def troubleshoot_requester_label(requested_by: dict[str, Any] | None) -> str:
+    """Name the technician who started a troubleshooter run."""
 
     requester = requested_by or {}
     requester_label = str(
@@ -924,9 +925,12 @@ async def add_troubleshoot_requested_note(
         or requester.get("email")
         or "a technician"
     ).strip()
-    device_label = str(device.get("hostname") or device.get("device_uid") or "device").strip()
-    target = (target_label or "").strip()
-    target_html = f"{html.escape(target)} ({html.escape(device_label)})" if target else html.escape(device_label)
+    return requester_label
+
+
+def troubleshoot_delivery_html(*, delivered: bool, device: dict[str, Any]) -> str:
+    """Explain on the ticket whether a troubleshoot command reached the device."""
+
     if delivered:
         delivery_html = (
             "<p>Sent to the device. Progress updates will be posted here as "
@@ -955,6 +959,30 @@ async def add_troubleshoot_requested_note(
             "reverse proxy forwards WebSocket upgrades for <code>/ws/</code> "
             "paths.</em></p>"
         )
+    return delivery_html
+
+
+async def add_troubleshoot_requested_note(
+    *,
+    ticket_id: int,
+    command_id: int,
+    delivered: bool,
+    device: dict[str, Any],
+    model: str,
+    requested_by: dict[str, Any] | None,
+    target_label: str | None = None,
+) -> None:
+    """Record on the ticket that a technician started the troubleshooter.
+
+    Best effort: the command has already been dispatched, so a failure to
+    write the note is logged rather than surfaced to the caller.
+    """
+
+    requester_label = troubleshoot_requester_label(requested_by)
+    device_label = str(device.get("hostname") or device.get("device_uid") or "device").strip()
+    target = (target_label or "").strip()
+    target_html = f"{html.escape(target)} ({html.escape(device_label)})" if target else html.escape(device_label)
+    delivery_html = troubleshoot_delivery_html(delivered=delivered, device=device)
     body_html = (
         "<p><strong>AI Troubleshooting Agent</strong> - troubleshooter requested by "
         f"{html.escape(requester_label)} for {target_html} "

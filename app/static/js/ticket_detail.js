@@ -1666,9 +1666,11 @@
             return response.json();
           })
           .then((data) => {
-            const message = data.delivered
-              ? `AI troubleshooter started on ${assetName}. Progress and the result will be posted to this ticket as internal notes.`
-              : `AI troubleshooter queued for ${assetName}. It will start when the device next checks in; progress will be posted as internal notes.`;
+            const message = data.status === 'started'
+              ? `AI troubleshooter started for ${assetName}. Articles, recommended steps and any log analysis will be posted to this ticket as internal notes.`
+              : data.delivered
+                ? `AI troubleshooter started on ${assetName}. Progress and the result will be posted to this ticket as internal notes.`
+                : `AI troubleshooter queued for ${assetName}. It will start when the device next checks in; progress will be posted as internal notes.`;
             if (!showToast(message, 'success')) {
               window.alert(message);
             }
