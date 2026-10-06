@@ -868,6 +868,20 @@ class Settings(BaseSettings):
     matrixbot_ai_ollama_api_key: str | None = Field(
         default=None, validation_alias="MATRIXBOT_AI_OLLAMA_API_KEY"
     )
+    # AI troubleshooting agent (tray endpoint log collection + local LLM).
+    # Dedicated LLM settings so the troubleshooter can use a different model /
+    # endpoint / key than the Matrix-bot AI waiting assistant above. When none
+    # of these are set, build_troubleshoot_llm_config() falls back to the
+    # MATRIXBOT_AI_OLLAMA_* values.
+    troubleshoot_llm_base_url: str | None = Field(
+        default=None, validation_alias="TROUBLESHOOT_LLM_BASE_URL"
+    )
+    troubleshoot_llm_model: str | None = Field(
+        default=None, validation_alias="TROUBLESHOOT_LLM_MODEL"
+    )
+    troubleshoot_llm_api_key: str | None = Field(
+        default=None, validation_alias="TROUBLESHOOT_LLM_API_KEY"
+    )
     matrixbot_ai_response_delay_minutes: int = Field(
         default=5, validation_alias="MATRIXBOT_AI_RESPONSE_DELAY_MINUTES", ge=1
     )

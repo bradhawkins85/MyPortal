@@ -419,3 +419,24 @@ class TrayTroubleshootResponse(BaseModel):
     status: str  # "delivered" (device online) or "queued" (will run on reconnect)
     delivered: bool
     model: str
+
+
+class TicketAssetTroubleshootRequest(BaseModel):
+    """Technician payload to run the AI troubleshooter on a ticket's linked asset.
+
+    All fields are optional. The ticket's own data (subject, description,
+    priority, category, status) plus the asset under investigation are always
+    fed to the LLM by the server; ``model`` overrides the LLM model and
+    ``context`` appends free-form technician notes to that context.
+    """
+
+    model: Optional[str] = Field(
+        None,
+        max_length=120,
+        description="Optional LLM model override. Falls back to the site default model.",
+    )
+    context: Optional[str] = Field(
+        None,
+        max_length=2000,
+        description="Optional technician notes appended to the ticket context fed to the LLM.",
+    )
