@@ -440,7 +440,19 @@ in stages, each posted to the ticket as an internal note:
    with a reason for each. Sources are limited to a fixed allowlist of
    Windows Event Log channels and macOS unified-log subsystems
    (`tray/internal/agent/logsources.go`, mirrored in
-   `app/services/ai_troubleshooter.py`).
+   `app/services/ai_troubleshooter.py`). Log files the articles tell the
+   technician to check (for example `CBS.log`, `setupapi.dev.log`,
+   `NetSetup.LOG`, `IntuneManagementExtension.log`, `Report.wer`, or a macOS
+   crash report) are requested as `file:<path>`; a `*` may match file or
+   folder names, and `%TEMP%`, `%ProgramData%`, `%SystemRoot%`, `%AppData%`
+   and `%LocalAppData%` are expanded. A file must be inside one of the
+   allowlisted log folders (`tray/internal/agent/logfiles.go`, such as
+   `C:\Windows\Logs`, `C:\Windows\Panther`, `C:\Windows\INF`,
+   `C:\Windows\CCM\Logs`, the Intune and Defender log folders, user temp
+   folders, `/var/log` and `~/Library/Logs`) and end in `.log`, `.txt`,
+   `.wer`, `.lo_`, `.ips`, `.crash`, `.panic` or `.diag`. The device reads
+   at most 10 files per request (newest first; a wildcard only reads files
+   changed in the requested window) and the last 1 MB of each.
 3. **Log collection** - when logs are needed, the server sends a
    `collect_logs` troubleshoot command to the asset's tray device. The
    device re-checks every source against its own allowlist, collects and
@@ -450,7 +462,8 @@ in stages, each posted to the ticket as an internal note:
    ticket as a staff-only file. On Windows the channels are read with the
    built-in `wevtutil qe` (one line per event: time, level, event ID,
    provider and message); a source that cannot be read keeps its own file
-   with the reason.
+   with the reason. Each collected log file is its own file in the bundle,
+   named after its path.
 4. **Log analysis** - the server sends the logs to the LLM along with the
    reason each was collected and the recommended steps, and posts the
    findings, likely causes and possible solutions.

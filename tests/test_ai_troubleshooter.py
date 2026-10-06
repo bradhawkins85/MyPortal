@@ -724,3 +724,95 @@ def test_tar_bundle_with_one_file_per_log_is_read():
 def test_tar_bundle_is_attached_as_tar_gz(rec, completion):
     _complete(log_bundle=_Upload(_tar_gz([("System.log", "### System Log\nline\n")])))
     assert completion["attached"][0]["original_filename"].endswith(".tar.gz")
+
+
+# ---------------------------------------------------------------------------
+# Log files named by articles
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("source", "platform", "expected"),
+    [
+        ("file:C:\\Windows\\Logs\\CBS\\CBS.log", "windows", "file:C:\\Windows\\Logs\\CBS\\CBS.log"),
+        ("file:c:/windows/inf/setupapi.dev.log", "windows", "file:c:\\windows\\inf\\setupapi.dev.log"),
+        ("file:%windir%\\debug\\NetSetup.LOG", "windows", "file:C:\\Windows\\debug\\NetSetup.LOG"),
+        (
+            "file:%TEMP%\\Outlook Logging\\*.txt",
+            "windows",
+            "file:C:\\Users\\*\\AppData\\Local\\Temp\\Outlook Logging\\*.txt",
+        ),
+        ("file:C:\\Windows\\CCM\\Logs\\AppEnforce*.log", "unknown", "file:C:\\Windows\\CCM\\Logs\\AppEnforce*.log"),
+        ("file:~/Library/Logs/DiagnosticReports/*.ips", "macos", "file:/Users/*/Library/Logs/DiagnosticReports/*.ips"),
+        ("file:/var/log/install.log", "macos", "file:/var/log/install.log"),
+        # Refused: outside the log folders, traversal, wrong type, wrong platform.
+        ("file:C:\\Windows\\System32\\config\\SAM", "windows", None),
+        ("file:C:\\Windows\\Logs\\..\\System32\\config\\SAM.log", "windows", None),
+        ("file:C:\\Windows\\Logs\\CBS\\CBS.log:stream", "windows", None),
+        ("file:C:\\*\\Logs\\CBS.log", "windows", None),
+        ("file:C:\\Users\\bob\\Documents\\passwords.txt", "windows", None),
+        ("file:C:\\Windows\\Temp\\script.ps1", "windows", None),
+        ("file:\\\\server\\share\\a.log", "windows", None),
+        ("file:/etc/passwd", "macos", None),
+        ("file:/var/log/system.log", "windows", None),
+        ("System", "windows", None),
+    ],
+)
+def test_normalise_file_source(source, platform, expected):
+    assert ts.normalise_file_source(source, platform) == expected
+
+
+def test_log_file_roots_match_tray_agent():
+    go_source = (
+        Path(__file__).resolve().parents[1] / "tray" / "internal" / "agent" / "logfiles.go"
+    ).read_text(encoding="utf-8")
+    windows_block = go_source.split("var WindowsLogFileRoots = []string{", 1)[1].split("\n}", 1)[0]
+    mac_block = go_source.split("var MacOSLogFileRoots = []string{", 1)[1].split("\n}", 1)[0]
+    assert re.findall(r"`([^`]+)`,", windows_block) == list(ts.WINDOWS_LOG_FILE_ROOTS)
+    assert re.findall(r'"([^"]+)",', mac_block) == list(ts.MACOS_LOG_FILE_ROOTS)
+    go_extensions = re.search(r"\(\?i\)\\\.\(([^)]+)\)", go_source).group(1).split("|")
+    assert ", ".join("." + ext for ext in go_extensions) == ts.LOG_FILE_EXTENSIONS
+
+
+def test_plan_requests_log_files_named_by_articles(rec):
+    rec.chat_responses = [
+        _research_response(),
+        _plan_response(
+            [
+                {"source": "System", "reason": "Driver errors", "hours": 24},
+                {"source": "file:%SystemRoot%\\INF\\setupapi.dev.log", "reason": "Driver install failures"},
+                {"source": "file:C:\\Windows\\System32\\drivers\\etc\\hosts", "reason": "not a log"},
+            ]
+        ),
+    ]
+    plan = _run()
+    assert [r["source"] for r in plan["log_requests"]] == ["System", "file:C:\\Windows\\INF\\setupapi.dev.log"]
+    (dispatch,) = rec.dispatched
+    assert dispatch["payload"]["log_requests"] == plan["log_requests"]
+    plan_system = rec.chats[1][0]["content"]
+    assert "ALLOWED_LOG_FILE_FOLDERS" in plan_system
+    assert "C:\\Windows\\CCM\\Logs" in plan_system
+    assert "/Library/Logs" not in plan_system
+
+
+def test_analysis_maps_each_collected_file_to_its_request(rec):
+    command = _collect_command()
+    payload = json.loads(command["payload_json"])
+    payload["log_requests"] = [
+        {"source": "file:C:\\Windows\\CCM\\Logs\\AppEnforce*.log", "reason": "App install failures", "hours": 24}
+    ]
+    command["payload_json"] = json.dumps(payload)
+    log_text = (
+        "### file:C:\\WINDOWS\\CCM\\Logs\\AppEnforce.log Log\n[file modified]\nUnmatched exit code (1603)\n\n"
+        "### file:C:\\WINDOWS\\CCM\\Logs\\AppEnforce-20240501.log Log\n[file modified]\nOlder run\n\n"
+    )
+    rec.chat_responses = [json.dumps({"summary": "MSI 1603", "solutions": ["Repair the app"]})]
+    asyncio.run(
+        ts.analyse_collected_logs(
+            ticket_id=77, command=command, log_text=log_text, endpoint_label="laptop-01", llm=LLM
+        )
+    )
+    user_prompt = rec.chats[0][1]["content"]
+    assert user_prompt.count("App install failures") == 2
+    assert "default log set" not in user_prompt
+    assert "Unmatched exit code (1603)" in user_prompt

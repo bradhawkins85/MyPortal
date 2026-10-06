@@ -7,6 +7,12 @@ import "context"
 // defaultPlatformSources is empty: this platform has no log source wired up.
 var defaultPlatformSources []string
 
+// No log folders are allowlisted on this platform.
+var (
+	platformFileRoots []string
+	platformPathStyle = posixPaths
+)
+
 // isPlatformLogSource reports whether source may be collected here.
 func isPlatformLogSource(string) bool { return false }
 
