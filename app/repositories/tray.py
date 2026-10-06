@@ -279,6 +279,17 @@ async def update_device_heartbeat(
     )
 
 
+async def touch_device_websocket(device_id: int) -> None:
+    """Record that the device's live WebSocket is connected and active."""
+    placeholder = "?" if db.is_sqlite() else "%s"
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.execute(
+        f"UPDATE tray_devices SET ws_last_seen_utc = {placeholder} "  # nosec B608
+        f"WHERE id = {placeholder}",
+        (now, device_id),
+    )
+
+
 async def link_device_to_asset(device_id: int, asset_id: int | None) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
     # Backend placeholder token is selected from the active DB adapter; values remain bound.

@@ -1,0 +1,11 @@
+-- phase: expand
+-- compatible-from: *
+-- compatible-to: *
+-- maintenance: false
+-- Migration 460: Record when a tray device's live WebSocket was last active.
+-- last_seen_utc is also refreshed by the HTTP heartbeat, so it cannot tell a
+-- device whose WebSocket is down (for example behind a proxy that does not
+-- forward WebSocket upgrades) from one connected to another app worker.
+-- NULL means the device has never held a live WebSocket since this column
+-- was added.
+ALTER TABLE tray_devices ADD COLUMN IF NOT EXISTS ws_last_seen_utc DATETIME NULL;
