@@ -695,6 +695,72 @@ async def deliver_queued_commands(device: dict[str, Any]) -> dict[str, int]:
     return {"delivered": delivered, "failed": failed}
 
 
+def build_troubleshoot_llm_config(model_override: str | None = None) -> dict[str, str]:
+    """Resolve the LLM endpoint / model / key for the AI troubleshooting agent.
+
+    Returns a dict with ``base_url``, ``model`` and ``api_key`` derived from the
+    Matrix-bot AI settings. The agent calls the OpenAI-compatible
+    ``{base_url}/v1/chat/completions`` endpoint (which Ollama also serves), so the
+    same config works for both Ollama and OpenAI-compatible providers. A per-run
+    ``model_override`` takes precedence over the configured model.
+    """
+
+    configured_base_url = str(_settings.matrixbot_ai_ollama_url or "").strip().rstrip("/")
+    if not configured_base_url:
+        # Match the local default used by the Matrix-bot AI assistant.
+        configured_base_url = "http://127.0.0.1:11434"
+    model = (model_override or "").strip() or str(
+        _settings.matrixbot_ai_ollama_model or "llama3"
+    ).strip()
+    api_key = str(_settings.matrixbot_ai_ollama_api_key or "").strip()
+    return {"base_url": configured_base_url, "model": model, "api_key": api_key}
+
+
+async def dispatch_troubleshoot_command(
+    *,
+    device_id: int,
+    device_uid: str,
+    payload: dict[str, Any],
+    initiated_by_user_id: int | None,
+) -> tuple[int, bool]:
+    """Log a ``troubleshoot`` tray command and deliver it to the device.
+
+    The command is recorded in the command log (``status="queued"``) so it
+    survives the device being offline, then we attempt live delivery over the
+    device's WebSocket. When live delivery succeeds the row is marked
+    ``delivered``; otherwise it stays ``queued`` and the reconnect drain
+    (see :func:`deliver_queued_commands`) delivers it on the device's next
+    (re)connection.
+
+    ``payload`` must NOT contain ``type`` or ``command_id`` — both delivery
+    paths inject them (the reconnect drain via ``setdefault``; the live path
+    below), keeping the two paths byte-for-byte consistent for the device.
+
+    Returns ``(command_id, delivered)`` where ``delivered`` is True only when
+    the message reached the device's local WebSocket right now.
+    """
+
+    payload_json = json.dumps(payload)
+    command_id = await tray_repo.log_command(
+        device_id=device_id,
+        command="troubleshoot",
+        payload_json=payload_json,
+        initiated_by_user_id=initiated_by_user_id,
+        status="queued",
+    )
+    live_payload = {"type": "troubleshoot", "command_id": command_id, **payload}
+    delivered = await send_to_device(device_uid, live_payload)
+    if delivered:
+        await tray_repo.mark_command_delivered(command_id)
+    log_info(
+        "Dispatched tray troubleshoot command",
+        command_id=command_id,
+        device_uid=device_uid,
+        delivered=delivered,
+    )
+    return command_id, delivered
+
+
 async def push_notification_to_company_devices(
     *,
     company_id: int | None,

@@ -18,6 +18,9 @@
 ##   make build-chat-shell-win Build Electron chat shell for Windows (Windows host only)
 ##   make build-chat-shell-mac Build Electron chat shell for macOS (macOS host only)
 ##   make test                 Run Go tests
+##   make build-agent          Build the AI troubleshooting agent CLI
+##   make test-agent           Run the agent package tests
+##   make run-agent            Build + run the agent CLI (pass ARGS="...")
 ##   make clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.0.0-dev")
@@ -31,6 +34,7 @@ DIST     := dist
 .PHONY: all build-all build-windows build-darwin-amd64 build-darwin-arm64 \
         build-darwin-universal build-msi build-pkg build-dmg package-all \
         build-macos-icons build-chat-shell-win build-chat-shell-mac \
+        build-agent test-agent run-agent \
         test lint clean
 
 all: build-all
@@ -208,6 +212,25 @@ package-all: build-msi
 	else \
 	    echo "pkgbuild/hdiutil not available; skipping macOS .pkg/.dmg (macOS-only step)."; \
 	fi
+
+# -----------------------------------------------------------------------
+# AI troubleshooting agent CLI (cmd/tray-troubleshoot)
+# -----------------------------------------------------------------------
+# Native, CGO-free build — cross-compiles like the rest of the service.
+build-agent:
+	@mkdir -p $(DIST)/agent
+	@echo "Building troubleshoot agent CLI..."
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(DIST)/agent/tray-troubleshoot ./cmd/tray-troubleshoot
+
+# Run only the agent package tests (faster than the full ./... run).
+test-agent:
+	@echo "Running agent package tests..."
+	go test -count=1 ./internal/agent/...
+
+# Build and run the agent CLI locally. Pass flags via ARGS, e.g.:
+#   make run-agent ARGS="-prompt 'WiFi keeps dropping' -llm-base-url http://127.0.0.1:11434 -llm-model llama3"
+run-agent: build-agent
+	$(DIST)/agent/tray-troubleshoot $(ARGS)
 
 # -----------------------------------------------------------------------
 # Tests

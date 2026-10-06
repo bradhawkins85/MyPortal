@@ -90,6 +90,8 @@ Migrations are applied automatically at startup and are idempotent.
 | `/api/tray/admin/configs/{id}` | PUT / DELETE | Super admin | Update / delete |
 | `/api/tray/admin/devices` | GET | Helpdesk technician | List enrolled devices |
 | `/api/tray/admin/devices/{id}/revoke` | POST | Super admin | Revoke a device |
+| `/api/tray/{device_uid}/troubleshoot` | POST | Helpdesk / super admin | Ask an active device to run the AI troubleshooting agent for a ticket (queues + pushes a `troubleshoot` WS command) |
+| `/api/tickets/{ticket_id}/troubleshoot-complete` | POST | Device bearer | AI agent reports generated guidance + sanitized log bundle for a ticket (multipart) |
 
 All endpoints appear in the Swagger UI at `/docs` per project convention.
 
@@ -101,6 +103,7 @@ All endpoints appear in the Swagger UI at `/docs` per project convention.
 * `{"type": "chat_open", "room_id": <int>, "matrix_room_id": "...", "subject": "..."}`
 * `{"type": "show_notification", "title": "...", "body": "..."}`
 * `{"type": "run_menu_action", "node_id": "..."}` *(only for whitelisted server-defined actions)*
+* `{"type": "troubleshoot", "ticket_id": <int>, "command_id": <int>, "prompt": "...", "llm_base_url": "...", "llm_model": "...", "llm_api_key": "..."}` *(AI troubleshooting: the device collects sanitized local logs, asks a local LLM for guidance, then POSTs the result back to `troubleshoot-complete`. Fields are flat top-level JSON.)*
 
 **Device → server:**
 * `{"type": "pong"}`
@@ -418,3 +421,62 @@ for delivery on the next reconnect (full queued delivery in Phase 5.2).
   `installer/macos/install.sh`.
 - GitHub Actions workflow: `.github/workflows/tray-build.yml` — build +
   test on every PR; release artifacts on `tray/v*` tags.
+
+---
+
+## 11. AI Troubleshooting Agent
+
+When an endpoint is being troubleshot, a technician can ask the device to
+collect its own logs and produce an **AI-assisted diagnosis**. This is a
+fully client-side pipeline: the device gathers recent logs, sanitises them,
+asks a **local LLM** for guidance, and posts the result back to the server —
+raw log data is never uploaded unsanitised.
+
+### How it works
+
+1. A technician (or super-admin) calls `POST /api/tray/{device_uid}/troubleshoot`
+   with the `ticket_id` and a natural-language `prompt`. The server resolves
+   the configured LLM, queues the job in `tray_command_log`, and pushes a
+   `troubleshoot` command over the device WebSocket (see §3). The command
+   carries the `ticket_id` / `command_id` identifiers, the `prompt`, and the
+   local LLM endpoint (`llm_base_url` / `llm_model` / `llm_api_key`).
+2. The service runs the Go agent (`tray/internal/agent/`) in a background
+   goroutine: it collects up to 24 h of platform logs (Windows Event Log
+   + common app logs on Windows; `log` / `Console` subsystem logs and
+   common app logs on macOS), scrubs secrets, and truncates to a safe
+   sample.
+3. It prompts the LLM for **actionable guidance** (the LLM never executes
+   anything; the response is advisory text).
+4. The result — `guidance`, the `endpoint` hostname, and the sanitized
+   `log_bundle` (a gzip-compressed, redacted archive sent as a multipart
+   form file) — is posted to
+   `POST /api/tickets/{ticket_id}/troubleshoot-complete`.
+5. The server verifies the command, attaches the bundle as a read-only
+   (staff-only) ticket attachment, and stores the guidance as an internal
+   ticket note.
+
+If the LLM is unavailable the bundle is still uploaded (degraded result).
+If no logs can be collected, a bundle is not sent.
+
+### CLI
+
+A standalone CLI wraps the same agent for one-off / development use:
+
+```sh
+# from tray/
+make run-agent ARGS="-prompt 'WiFi keeps dropping' -llm-base-url http://127.0.0.1:11434 -llm-model llama3"
+```
+
+Flags: `-prompt`, `-endpoint`, `-llm-base-url`, `-llm-model`, `-llm-api-key`,
+`-window` (default `24h`), `-out` (write the gzip bundle to a file), and
+`-no-llm` (skip the LLM, bundle-only). Guidance is printed to stdout; the
+log bundle is written to `-out` when provided (otherwise the CLI only
+reports its size). Ctrl-C cancels an in-flight LLM call.
+
+### Makefile targets
+
+| Target | Purpose |
+| --- | --- |
+| `make build-agent` | Build `dist/agent/tray-troubleshoot` (CGO=0, cross-compiles) |
+| `make test-agent` | Run the `internal/agent/` unit tests |
+| `make run-agent ARGS="…"` | Build + run the CLI with the given flags |
