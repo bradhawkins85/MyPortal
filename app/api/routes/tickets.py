@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import html
 import json
+import re
 from datetime import datetime, timezone
 from importlib import import_module
 from typing import Any
@@ -32,7 +34,7 @@ from app.core.errors import (
     log_exception_with_error_id,
     new_error_id,
 )
-from app.core.logging import log_error
+from app.core.logging import log_error, log_info
 from loguru import logger
 from app.repositories import company_memberships as membership_repo
 from app.repositories import companies as companies_repo
@@ -43,6 +45,8 @@ from app.repositories import ticket_tasks as ticket_tasks_repo
 from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import tray as tray_repo
+from app.schemas.tray import TrayTroubleshootResponse, TicketAssetTroubleshootRequest
+from app.services import tray as tray_service
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
 from app.schemas.tickets import (
@@ -1558,6 +1562,206 @@ async def receive_troubleshoot_result(
             "attachment_id": attachment_id,
             "ticket_url": ticket_url,
         }
+    )
+
+
+# ---------------------------------------------------------------------------
+# AI troubleshooting agent — invoked from a ticket's asset list
+# ---------------------------------------------------------------------------
+
+_TAG_RE = re.compile(r"<[^<>]*>")
+_SPACE_RE = re.compile(r"\s+")
+
+
+def _strip_ticket_description(value: Any, limit: int = 2000) -> str:
+    """Reduce a ticket description to bounded plain text for the LLM prompt.
+
+    Mirrors the text-normalisation used elsewhere in the codebase (strip HTML
+    tags, unescape entities, collapse whitespace) so a long customer-written
+    description cannot blow the LLM prompt budget.
+    """
+    text = _SPACE_RE.sub(" ", html.unescape(_TAG_RE.sub(" ", str(value or "")))).strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def _build_asset_troubleshoot_prompt(
+    ticket: dict[str, Any],
+    asset: dict[str, Any],
+    extra_context: str | None,
+) -> str:
+    """Assemble the LLM "reported problem" from the ticket and asset data.
+
+    The troubleshooter LLM only sees this string plus the endpoint's own logs,
+    so the ticket's own data (subject, description, priority, category, status)
+    and the asset under investigation are folded in here. This is what makes
+    the agent's guidance specific to the reported problem rather than a
+    generic endpoint analysis.
+    """
+    header_bits: list[str] = []
+    ticket_number = str(ticket.get("ticket_number") or ticket.get("id") or "").strip()
+    if ticket_number:
+        header_bits.append(f"Ticket {ticket_number}")
+    subject = str(ticket.get("subject") or "").strip()
+    if subject:
+        header_bits.append(f"Subject: {subject}")
+    for field, label in (("priority", "Priority"), ("category", "Category"), ("status", "Status")):
+        value = str(ticket.get(field) or "").strip()
+        if value:
+            header_bits.append(f"{label}: {value}")
+
+    description = _strip_ticket_description(ticket.get("description"))
+
+    lines: list[str] = [
+        "AI troubleshooting request from a support ticket. Use this ticket context "
+        "together with the endpoint logs below to diagnose the problem."
+    ]
+    if header_bits:
+        lines.append(" | ".join(header_bits))
+    if description:
+        lines.append("")
+        lines.append("Ticket description (reported problem):")
+        lines.append(description)
+
+    asset_bits: list[str] = []
+    asset_name = str(asset.get("name") or "").strip()
+    if asset_name:
+        asset_bits.append(asset_name)
+    for field, label in (
+        ("serial_number", "Serial"),
+        ("os_name", "OS"),
+        ("type", "Type"),
+        ("status", "Status"),
+    ):
+        value = str(asset.get(field) or "").strip()
+        if value:
+            asset_bits.append(f"{label}: {value}")
+    if asset_bits:
+        lines.append("")
+        lines.append("Asset under investigation: " + ", ".join(asset_bits))
+
+    extra = str(extra_context or "").strip()
+    if extra:
+        lines.append("")
+        lines.append(f"Technician notes: {extra}")
+
+    return "\n".join(lines)
+
+
+@router.post(
+    "/{ticket_id}/assets/{asset_id}/troubleshoot",
+    response_model=TrayTroubleshootResponse,
+    summary="Run the AI troubleshooting agent on a ticket's linked asset",
+)
+async def troubleshoot_ticket_asset(
+    ticket_id: int,
+    asset_id: int,
+    payload: TicketAssetTroubleshootRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+) -> TrayTroubleshootResponse:
+    """Trigger the AI troubleshooter on the device linked to a ticket asset.
+
+    A technician opens a ticket, finds an asset in the ticket's asset list, and
+    asks the AI troubleshooter to run on that asset's tray device. The ticket's
+    own data (subject, description, priority, category, status) and the asset
+    details are fed to the remote agent so the LLM analyses the endpoint logs
+    in the context of the reported problem. The agent reports back via
+    ``POST /api/tickets/{ticket_id}/troubleshoot-complete`` which stores the
+    result as an internal ticket note plus a log-bundle attachment.
+
+    Requires helpdesk / super-admin access. The asset must be linked to the
+    ticket and have an active tray device in the same company as the ticket.
+    """
+    if not (
+        current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Helpdesk access required."
+        )
+
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found."
+        )
+
+    linked_assets = await tickets_repo.list_ticket_assets(ticket_id)
+    asset = next((a for a in linked_assets if a.get("asset_id") == asset_id), None)
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Asset is not linked to this ticket.",
+        )
+
+    device_uid = str(asset.get("tray_device_uid") or "").strip()
+    if not device_uid:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This asset has no active tray device.",
+        )
+
+    device = await tray_repo.get_device_by_uid(device_uid)
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Device not found."
+        )
+    if device.get("status") != "active":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Device is not active."
+        )
+
+    ticket_company_id = ticket.get("company_id")
+    if (
+        ticket_company_id is not None
+        and int(device.get("company_id") or 0) != int(ticket_company_id)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Ticket does not belong to the device's company.",
+        )
+
+    model_override = payload.model if payload else None
+    llm = tray_service.build_troubleshoot_llm_config(model_override)
+    if not llm["model"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No LLM model is configured for the AI assistant.",
+        )
+
+    prompt = _build_asset_troubleshoot_prompt(
+        ticket, asset, payload.context if payload else None
+    )
+    troubleshoot_payload = {
+        "ticket_id": ticket_id,
+        "prompt": prompt,
+        "llm_base_url": llm["base_url"],
+        "llm_model": llm["model"],
+        "llm_api_key": llm["api_key"],
+    }
+    command_id, delivered = await tray_service.dispatch_troubleshoot_command(
+        device_id=int(device["id"]),
+        device_uid=device_uid,
+        payload=troubleshoot_payload,
+        initiated_by_user_id=int(current_user["id"]),
+    )
+
+    log_info(
+        "AI troubleshooter started from ticket asset list",
+        ticket_id=ticket_id,
+        asset_id=asset_id,
+        device_uid=device_uid,
+        command_id=command_id,
+        delivered=delivered,
+    )
+
+    return TrayTroubleshootResponse(
+        command_id=command_id,
+        device_uid=device_uid,
+        ticket_id=ticket_id,
+        status="delivered" if delivered else "queued",
+        delivered=delivered,
+        model=llm["model"],
     )
 
 

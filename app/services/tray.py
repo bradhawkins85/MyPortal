@@ -698,22 +698,43 @@ async def deliver_queued_commands(device: dict[str, Any]) -> dict[str, int]:
 def build_troubleshoot_llm_config(model_override: str | None = None) -> dict[str, str]:
     """Resolve the LLM endpoint / model / key for the AI troubleshooting agent.
 
-    Returns a dict with ``base_url``, ``model`` and ``api_key`` derived from the
-    Matrix-bot AI settings. The agent calls the OpenAI-compatible
-    ``{base_url}/v1/chat/completions`` endpoint (which Ollama also serves), so the
-    same config works for both Ollama and OpenAI-compatible providers. A per-run
-    ``model_override`` takes precedence over the configured model.
+    Returns a dict with ``base_url``, ``model`` and ``api_key``. The agent calls
+    the OpenAI-compatible ``{base_url}/v1/chat/completions`` endpoint (which
+    Ollama also serves), so the same config works for both Ollama and
+    OpenAI-compatible providers.
+
+    Dedicated troubleshooter settings (``TROUBLESHOOT_LLM_*``) are preferred so
+    the troubleshooter can run against a different model / endpoint / key than
+    the Matrix-bot AI waiting assistant. When none of the troubleshooter
+    settings are configured, the Matrix-bot AI Ollama settings
+    (``MATRIXBOT_AI_OLLAMA_*``) are used as a fallback so a single LLM can serve
+    both. A per-run ``model_override`` always wins for the model.
     """
 
-    configured_base_url = str(_settings.matrixbot_ai_ollama_url or "").strip().rstrip("/")
-    if not configured_base_url:
+    troubleshoot_base_url = str(_settings.troubleshoot_llm_base_url or "").strip()
+    troubleshoot_model = str(_settings.troubleshoot_llm_model or "").strip()
+    troubleshoot_api_key = str(_settings.troubleshoot_llm_api_key or "").strip()
+
+    if troubleshoot_base_url or troubleshoot_model or troubleshoot_api_key:
+        # A dedicated troubleshooter LLM is configured; use it exclusively so
+        # settings from the two assistants are never mixed together.
+        base_url, model, api_key = (
+            troubleshoot_base_url,
+            troubleshoot_model,
+            troubleshoot_api_key,
+        )
+    else:
+        # No troubleshooter settings; fall back to the Matrix-bot AI settings.
+        base_url = str(_settings.matrixbot_ai_ollama_url or "").strip()
+        model = str(_settings.matrixbot_ai_ollama_model or "").strip()
+        api_key = str(_settings.matrixbot_ai_ollama_api_key or "").strip()
+
+    base_url = base_url.rstrip("/")
+    if not base_url:
         # Match the local default used by the Matrix-bot AI assistant.
-        configured_base_url = "http://127.0.0.1:11434"
-    model = (model_override or "").strip() or str(
-        _settings.matrixbot_ai_ollama_model or "llama3"
-    ).strip()
-    api_key = str(_settings.matrixbot_ai_ollama_api_key or "").strip()
-    return {"base_url": configured_base_url, "model": model, "api_key": api_key}
+        base_url = "http://127.0.0.1:11434"
+    model = (model_override or "").strip() or model or "llama3"
+    return {"base_url": base_url, "model": model, "api_key": api_key}
 
 
 async def dispatch_troubleshoot_command(

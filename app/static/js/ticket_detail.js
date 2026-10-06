@@ -1602,6 +1602,61 @@
         return;
       }
 
+      const troubleshootButton = target.closest('[data-linked-asset-troubleshoot]');
+      if (troubleshootButton) {
+        const uid = troubleshootButton.getAttribute('data-device-uid') || '';
+        if (!uid || troubleshootButton.disabled) {
+          return;
+        }
+        const assetId = troubleshootButton.getAttribute('data-asset-id') || '';
+        const assetName = (troubleshootButton.getAttribute('data-asset-name') || 'asset').trim();
+        const ticketId = getTicketIdFromPath();
+        if (!assetId || !ticketId) {
+          return;
+        }
+        const showToast = (message, variant) => {
+          if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+            window.__portalToast.show(message, { variant });
+            return true;
+          }
+          return false;
+        };
+        troubleshootButton.disabled = true;
+        fetch(`/api/tickets/${encodeURIComponent(ticketId)}/assets/${encodeURIComponent(assetId)}/troubleshoot`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': getCsrfToken(),
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({}),
+        })
+          .then(async (response) => {
+            if (!response.ok) {
+              throw new Error(await getApiErrorMessage(response, `Unable to start the AI troubleshooter for ${assetName}.`));
+            }
+            return response.json();
+          })
+          .then((data) => {
+            const message = data.delivered
+              ? `AI troubleshooter started on ${assetName}. The result will post to this ticket as a note and log bundle.`
+              : `AI troubleshooter queued for ${assetName}. It will run when the device reconnects.`;
+            if (!showToast(message, 'success')) {
+              window.alert(message);
+            }
+            troubleshootButton.disabled = false;
+          })
+          .catch((error) => {
+            console.error('Failed to start AI troubleshooter', error);
+            const message = `Failed to start the AI troubleshooter: ${error.message || 'Unknown error'}`;
+            if (!showToast(message, 'error')) {
+              window.alert(message);
+            }
+            troubleshootButton.disabled = false;
+          });
+        return;
+      }
+
       const removeButton = target.closest('[data-linked-asset-remove]');
       if (removeButton) {
         const parent = removeButton.closest('[data-linked-asset]');
