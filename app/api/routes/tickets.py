@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from importlib import import_module
 from typing import Any
@@ -8,17 +9,19 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     HTTPException,
     Query,
     Request,
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.api.dependencies.auth import (
     get_current_session,
     get_current_user,
+    get_current_tray_device,
     get_optional_user,
     require_helpdesk_technician,
     require_super_admin,
@@ -39,6 +42,7 @@ from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import ticket_tasks as ticket_tasks_repo
 from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import tray as tray_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
 from app.schemas.tickets import (
@@ -1390,6 +1394,170 @@ async def add_reply(
     )
     return TicketReplyResponse(
         ticket=ticket_response, reply=TicketReply(**reply_payload)
+    )
+
+
+@router.post(
+    "/{ticket_id}/troubleshoot-complete",
+    status_code=status.HTTP_200_OK,
+    summary="Receive AI troubleshooting result from a tray device",
+)
+async def receive_troubleshoot_result(
+    ticket_id: int,
+    request: Request,
+    command_id: int = Form(..., gt=0),
+    guidance: str = Form("", max_length=65536),
+    endpoint: str = Form(""),
+    log_bundle: UploadFile | None = File(None),
+    device: dict = Depends(get_current_tray_device),
+) -> JSONResponse:
+    """Tray-device callback for the AI troubleshooting agent.
+
+    The Go agent authenticates with the device token (``get_current_tray_device``),
+    collects up to 24 h of endpoint logs, calls the configured LLM for guidance,
+    and posts the result back here. This route:
+
+    1. Verifies the command is a ``troubleshoot`` command that was issued to
+       *this* device and targets *this* ticket.
+    2. Stores the LLM guidance as an **internal** (staff-only) ticket note.
+    3. Attaches the read-only log bundle as a staff-only (``closed``) attachment.
+    4. Marks the command ``completed`` in the tray command log.
+
+    Device tokens scope the caller to its own company, so a compromised device
+    can only write to tickets owned by its own company (enforced below).
+    """
+    device_id = device.get("id")
+    device_uid = str(device.get("device_uid") or "")
+    hostname = str(device.get("hostname") or "")
+
+    # --- Verify the command is a troubleshoot command for this device/ticket --
+    command = await tray_repo.get_command(command_id)
+    if command is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Troubleshoot command not found",
+        )
+    if command.get("command") != "troubleshoot":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Command is not a troubleshoot command",
+        )
+    if command.get("device_id") != device_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Command was not issued to this device",
+        )
+
+    command_payload = command.get("payload_json") or {}
+    if isinstance(command_payload, str):
+        try:
+            command_payload = json.loads(command_payload)
+        except (TypeError, ValueError):
+            command_payload = {}
+    command_ticket_id = (
+        command_payload.get("ticket_id")
+        if isinstance(command_payload, dict)
+        else None
+    )
+    try:
+        command_ticket_id_int = (
+            int(command_ticket_id) if command_ticket_id is not None else None
+        )
+    except (TypeError, ValueError):
+        command_ticket_id_int = None
+    if command_ticket_id_int != ticket_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Command does not target this ticket",
+        )
+
+    # --- Verify the ticket exists and belongs to the device's company ---------
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+    device_company_id = device.get("company_id")
+    if device_company_id is not None and ticket.get("company_id") not in (
+        None,
+        device_company_id,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Ticket does not belong to this device's company",
+        )
+
+    guidance_text = (guidance or "").strip()
+    if not guidance_text and log_bundle is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide guidance or a log bundle",
+        )
+
+    # --- Compose the internal note -------------------------------------------
+    endpoint_label = (endpoint or "").strip() or hostname or device_uid or "device"
+    header_html = (
+        "<p><strong>AI Troubleshooting Agent</strong> - guidance for "
+        f"{endpoint_label}</p>"
+    )
+    if guidance_text:
+        guidance_html = sanitize_rich_text(guidance_text).html
+    else:
+        guidance_html = (
+            "<p><em>No guidance produced - see the attached log bundle.</em></p>"
+        )
+    footer_html = (
+        "<p><em>Log bundle attached read-only from the device (last 24 hours). "
+        "Generated by the MyPortal troubleshooting agent.</em></p>"
+    )
+    body_html = sanitize_rich_text(header_html + guidance_html + footer_html).html
+
+    reply = await tickets_repo.create_reply(
+        ticket_id=ticket_id,
+        author_id=None,
+        body=body_html,
+        is_internal=True,
+        author_email="troubleshooting-agent@myportal.local",
+        author_display_name="Troubleshooting Agent",
+    )
+
+    # --- Attach the log bundle (best effort) ---------------------------------
+    attachment_id = None
+    if log_bundle is not None:
+        log_bytes = await log_bundle.read()
+        if log_bytes:
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            original_name = f"troubleshoot-logs-{command_id}-{ts}.gz"
+            try:
+                attachment = await attachments_service.save_file_bytes(
+                    ticket_id,
+                    contents=log_bytes,
+                    original_filename=original_name,
+                    mime_type="application/gzip",
+                    access_level="closed",
+                    uploaded_by_user_id=None,
+                )
+                attachment_id = attachment.get("id")
+            except Exception as exc:  # noqa: BLE001 - attachment is best-effort
+                log_error(
+                    f"Failed to attach troubleshoot log bundle "
+                    f"(ticket {ticket_id}, command {command_id}): {exc}"
+                )
+
+    # --- Mark the command completed -----------------------------------------
+    await tray_repo.mark_command_completed(command_id)
+
+    ticket_url = str(request.base_url).rstrip("/") + f"/tickets/{ticket_id}"
+
+    return JSONResponse(
+        {
+            "status": "completed",
+            "command_id": command_id,
+            "ticket_id": ticket_id,
+            "reply_id": reply.get("id") if reply else None,
+            "attachment_id": attachment_id,
+            "ticket_url": ticket_url,
+        }
     )
 
 

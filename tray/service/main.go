@@ -39,6 +39,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kardianos/service"
 
+	"github.com/bradhawkins85/myportal-tray/internal/agent"
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 	"github.com/bradhawkins85/myportal-tray/internal/config"
 	"github.com/bradhawkins85/myportal-tray/internal/defender"
@@ -604,7 +605,66 @@ func (d *daemon) dispatchWSMessage(msgType string, msg map[string]json.RawMessag
 				notify.Send(d.ipcSrv, n)
 			}
 		}
+	case "troubleshoot":
+		logger.Info("troubleshoot command received")
+		go d.handleTroubleshoot(msg)
 	}
+}
+
+// handleTroubleshoot runs the AI troubleshooting agent for a "troubleshoot"
+// WebSocket command and reports the result back to the server. It runs in a
+// goroutine (see the dispatch switch) because collecting up to 24 h of logs
+// plus a local LLM call can take several minutes and must never block the
+// WebSocket read loop.
+func (d *daemon) handleTroubleshoot(msg map[string]json.RawMessage) {
+	var req agent.Request
+	if t, ok := msg["ticket_id"]; ok {
+		_ = json.Unmarshal(t, &req.TicketID)
+	}
+	if t, ok := msg["command_id"]; ok {
+		_ = json.Unmarshal(t, &req.CommandID)
+	}
+	if t, ok := msg["prompt"]; ok {
+		_ = json.Unmarshal(t, &req.Prompt)
+	}
+	var llm agent.LLMConfig
+	for _, field := range []struct {
+		key string
+		dst *string
+	}{
+		{"llm_base_url", &llm.BaseURL},
+		{"llm_model", &llm.Model},
+		{"llm_api_key", &llm.APIKey},
+	} {
+		if t, ok := msg[field.key]; ok {
+			_ = json.Unmarshal(t, field.dst)
+		}
+	}
+	req.LLM = llm
+
+	logger.Info("troubleshoot: running agent (ticket %d, command %d, model %q)",
+		req.TicketID, req.CommandID, llm.Model)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	result, runErr := agent.NewAgent().Run(ctx, req)
+	if runErr != nil {
+		// The agent still returns whatever it managed to produce; log the
+		// partial failure and report below so the ticket gets the degraded
+		// result (guidance without bundle, or bundle without guidance).
+		logger.Warn("troubleshoot: agent partial failure: %v", runErr)
+	}
+
+	postCtx, postCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer postCancel()
+	if err := d.client.PostTroubleshootComplete(postCtx, req.TicketID, req.CommandID,
+		result.Guidance, result.Endpoint, result.LogBundle); err != nil {
+		logger.Warn("troubleshoot: report back failed: %v", err)
+		return
+	}
+	logger.Info("troubleshoot: reported ticket %d (guidance=%d bytes, bundle=%d bytes, truncated=%t)",
+		req.TicketID, len(result.Guidance), len(result.LogBundle), result.Truncated)
 }
 
 func (d *daemon) deliverUserSessionMessage(msg ipc.Message) {

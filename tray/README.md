@@ -8,8 +8,11 @@ Cross-platform (Windows + macOS) tray application for the MyPortal helpdesk port
 tray/
 ├── service/          Privileged background daemon (Windows Service / macOS LaunchDaemon)
 ├── ui/               Per-session tray UI agent (runs as the logged-in user)
+├── cmd/
+│   └── tray-troubleshoot/   AI troubleshooting CLI (log collection + local LLM)
 ├── internal/
 │   ├── api/          HTTP + WebSocket client for the MyPortal server
+│   ├── agent/        AI troubleshooting agent (log collection, LLM prompt, safety)
 │   ├── config/       Platform-aware config loader (registry / plist / env)
 │   ├── ipc/          Local IPC between service and UI agent
 │   ├── logger/       Structured logger with file rotation
@@ -345,6 +348,49 @@ sudo /Library/MyPortal/Tray/uninstall.sh --purge
 ```
 
 The default uninstall stops launchd jobs and removes installed binaries/plists while preserving configuration, state, and logs for troubleshooting or reinstall.
+
+## AI Troubleshooting Agent
+
+`internal/agent` is a small, self-contained Go package that produces an
+AI-assisted diagnosis on the device: it collects recent platform logs
+(Windows Event Log + common app logs on Windows; `log`/`Console` subsystems
++ common app logs on macOS), scrubs secrets and truncates to a safe sample,
+asks a **local LLM** for actionable guidance, and returns the guidance plus a
+sanitized gzip log bundle. Raw logs are never uploaded unsanitised and the
+LLM only ever produces advisory text — it cannot execute anything.
+
+- **Server-driven:** a technician triggers it via
+  `POST /api/tray/{device_uid}/troubleshoot`; the service runs it in a
+  goroutine when it receives the resulting `troubleshoot` WebSocket command,
+  then POSTs the result to `/api/tickets/{ticket_id}/troubleshoot-complete`.
+- **CLI:** `cmd/tray-troubleshoot` wraps the same `agent.NewAgent()` for
+  one-off / development use.
+
+### Build / run the agent
+
+```sh
+cd tray
+make build-agent                    # -> dist/agent/tray-troubleshoot (CGO=0)
+make test-agent                     # unit tests for internal/agent
+make run-agent ARGS="-prompt 'WiFi keeps dropping' -llm-base-url http://127.0.0.1:11434 -llm-model llama3"
+```
+
+### CLI flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-prompt` | `Investigate recent errors on this endpoint.` | Problem description for the LLM |
+| `-endpoint` | OS hostname | Endpoint identifier reported to the server |
+| `-llm-base-url` | — | Local LLM base URL (OpenAI-compatible); leave empty (or use `-no-llm`) to skip the LLM and produce the bundle only |
+| `-llm-model` | — | Model name to use |
+| `-llm-api-key` | — | API key (sent as `Authorization: Bearer …`) |
+| `-window` | `24h` | Log time window (`time.Duration`) |
+| `-out` | (none) | Path to write the gzip log bundle (only written when provided) |
+| `-no-llm` | `false` | Skip the LLM call, produce the bundle only |
+
+Guidance is printed to stdout (or `(no guidance)` in `-no-llm` mode). The
+log bundle is written to `-out` when provided (otherwise only its size is
+reported). Ctrl-C cancels an in-flight LLM call.
 
 ## Security model
 
