@@ -160,6 +160,20 @@ html {
   overflow: hidden;
 }
 
+/* Desktop left-sidebar mode: pin the app shell to the viewport height so the
+   sidebar stays a full-height column and the main content scrolls
+   independently (inside .layout__content) instead of scrolling the whole
+   document, which dragged the sidebar off-screen on long pages. The sidebar
+   keeps overflow-y:auto, so a long menu scrolls within the pinned column.
+   Mobile (≤1024px) uses an off-canvas drawer with normal page scroll, and the
+   top-navigation variant keeps page scroll too, so both are excluded. */
+@media (min-width: 1025px) {
+  body:not(.navigation--top) .layout {
+    height: 100vh;
+    height: 100dvh;
+  }
+}
+
 .layout__sidebar {
   width: clamp(240px, 22vw + 120px, 280px);
   background: linear-gradient(180deg, rgba(10, 16, 24, 0.9), rgba(8, 13, 20, 0.86));
