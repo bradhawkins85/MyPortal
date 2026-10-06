@@ -1137,6 +1137,30 @@
               </svg>
               <span class="sr-only">Refresh app</span>
             </button>
+            <button
+              type="button"
+              class="sidebar__footer-button"
+              data-open-feedback
+              title="Send feedback about MyPortal"
+              aria-haspopup="dialog"
+              aria-controls="feedback-modal"
+            >
+              <svg
+                class="sidebar__footer-icon"
+                viewBox="0 0 24 24"
+                width="20"
+                height="20"
+                preserveAspectRatio="xMidYMid meet"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path
+                  d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"
+                  fill="currentColor"
+                />
+              </svg>
+              <span class="sr-only">Send feedback</span>
+            </button>
           {% endif %}
           <a
             class="sidebar__footer-link"
@@ -1263,6 +1287,59 @@
       </main>
     </div>
     {% include "partials/notifications/toast.html" %}
+    {% if has_authenticated_user %}
+      <div
+        class="modal"
+        id="feedback-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="feedback-modal-title"
+        aria-hidden="true"
+        hidden
+      >
+        <div class="modal__content" role="document">
+          <button type="button" class="modal__close" data-modal-close aria-label="Close feedback form">&times;</button>
+          <h2 class="modal__title" id="feedback-modal-title">Send feedback</h2>
+          <p class="modal__subtitle">
+            Tell us how MyPortal is working for you. Your feedback creates a ticket so a
+            member of the team can follow up.
+          </p>
+          <form id="feedback-form" class="form" novalidate data-feedback-form>
+            {% include "partials/csrf.html" %}
+            <div class="form-field">
+              <span class="form-label" id="feedback-rating-label">How did it go?</span>
+              <div class="feedback-rating" role="radiogroup" aria-labelledby="feedback-rating-label" data-feedback-rating-group>
+                <button type="button" class="feedback-rating__option" role="radio" aria-checked="false" data-feedback-value="up">
+                  <svg class="feedback-rating__icon" viewBox="0 0 24 24" width="20" height="20" preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false">
+                    <path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z" fill="currentColor"/>
+                  </svg>
+                  <span>Looks good</span>
+                </button>
+                <button type="button" class="feedback-rating__option" role="radio" aria-checked="false" data-feedback-value="down">
+                  <svg class="feedback-rating__icon" viewBox="0 0 24 24" width="20" height="20" preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false">
+                    <path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z" fill="currentColor"/>
+                  </svg>
+                  <span>Needs work</span>
+                </button>
+              </div>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="feedback-reason">Reason</label>
+              <textarea id="feedback-reason" name="reason" class="form-input form-input--textarea" maxlength="2000" rows="3" data-feedback-reason></textarea>
+              <p class="form-help" data-feedback-reason-help>Optional — tell us what works well or could be better.</p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="feedback-improvements">Suggested improvements</label>
+              <textarea id="feedback-improvements" name="suggested_improvements" class="form-input form-input--textarea" maxlength="4000" rows="3" data-feedback-improvements></textarea>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="button button--primary" data-feedback-submit>Submit feedback</button>
+              <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    {% endif %}
     {% if page_flash %}
       <script id="page-flash-data" type="application/json">{{ page_flash | tojson }}</script>
     {% endif %}
@@ -1276,6 +1353,10 @@
     {% if has_authenticated_user and feature_pack_available('click_to_call') %}
     <script src="{{ static_url('/static/js/click_to_call.js') }}" defer></script>
     {% endif %}
+    {% if has_authenticated_user %}
+    <script src="{{ static_url('/static/js/user_feedback.js') }}" defer></script>
+    {% endif %}
+
     <script>
       (function () {
         const tokenMeta = document.querySelector('meta[name="csrf-token"]');
