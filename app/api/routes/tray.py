@@ -80,6 +80,7 @@ from app.schemas.tray import (
     TrayTroubleshootRequest,
     TrayTroubleshootResponse,
 )
+from app.services import ai_consent
 from app.services import audit as audit_service
 from app.services import chat_ticket_sync
 from app.services import chat_ntfy_notifications
@@ -2632,6 +2633,11 @@ async def run_troubleshoot(
     if not ticket:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found."
+        )
+    if not await ai_consent.is_ai_allowed_for_ticket(ticket):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=tray_service.TROUBLESHOOT_AI_OPT_OUT_DETAIL,
         )
     ticket_company_id = ticket.get("company_id")
     if (

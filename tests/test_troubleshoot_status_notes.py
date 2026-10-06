@@ -237,3 +237,97 @@ def test_requested_note_swallows_errors(monkeypatch):
             requested_by=None,
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# AI opt-out: the troubleshooter must fail closed for opted-out requesters
+# ---------------------------------------------------------------------------
+
+
+def _patch_consent(monkeypatch, allowed: bool):
+    from app.services import ai_consent
+
+    async def fake_ticket(ticket):
+        return allowed
+
+    async def fake_ticket_id(ticket_id):
+        return allowed
+
+    monkeypatch.setattr(ai_consent, "is_ai_allowed_for_ticket", fake_ticket)
+    monkeypatch.setattr(ai_consent, "is_ai_allowed_for_ticket_id", fake_ticket_id)
+
+
+def _fail_dispatch(monkeypatch):
+    async def boom(**kwargs):
+        raise AssertionError("troubleshoot command must not be dispatched")
+
+    monkeypatch.setattr(tray_service, "dispatch_troubleshoot_command", boom)
+
+
+def test_ticket_asset_troubleshoot_refused_when_requester_opted_out(recorder, monkeypatch):
+    _patch_consent(monkeypatch, allowed=False)
+    _fail_dispatch(monkeypatch)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            tickets_routes.troubleshoot_ticket_asset(
+                ticket_id=77, asset_id=1, payload=None, current_user={"id": 1}
+            )
+        )
+    assert exc.value.status_code == 403
+    assert "opted out" in exc.value.detail
+    assert recorder.replies == []
+
+
+def test_device_troubleshoot_refused_when_requester_opted_out(recorder, monkeypatch):
+    from app.api.routes import tray as tray_routes
+    from app.repositories import tray as tray_repo
+    from app.schemas.tray import TrayTroubleshootRequest
+
+    async def fake_device(uid):
+        return {**DEVICE, "status": "active"}
+
+    monkeypatch.setattr(tray_repo, "get_device_by_uid", fake_device)
+    _patch_consent(monkeypatch, allowed=False)
+    _fail_dispatch(monkeypatch)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            tray_routes.run_troubleshoot(
+                device_uid="dev-uid",
+                payload=TrayTroubleshootRequest(ticket_id=77, prompt="Printer offline"),
+                current_user={"id": 1},
+            )
+        )
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize("allowed", [True, False])
+def test_queued_troubleshoot_rechecks_consent(recorder, monkeypatch, allowed):
+    from app.repositories import tray as tray_repo
+
+    _patch_consent(monkeypatch, allowed=allowed)
+    sent: list[dict] = []
+
+    async def fake_queued(device_id):
+        return [
+            {
+                "id": 11,
+                "command": "troubleshoot",
+                "payload_json": json.dumps({"ticket_id": 77, "prompt": "secret"}),
+            }
+        ]
+
+    async def fake_send(uid, payload):
+        sent.append(payload)
+        return True
+
+    monkeypatch.setattr(tray_repo, "get_queued_commands_for_device", fake_queued)
+    monkeypatch.setattr(tray_service, "send_to_device", fake_send)
+
+    result = asyncio.run(tray_service.deliver_queued_commands(DEVICE))
+    if allowed:
+        assert result["delivered"] == 1
+        assert recorder.delivered == [11]
+    else:
+        assert sent == []
+        assert result["delivered"] == 0
+        assert recorder.completed == [(11, tray_service.TROUBLESHOOT_AI_OPT_OUT_DETAIL)]
