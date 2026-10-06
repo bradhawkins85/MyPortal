@@ -17,7 +17,8 @@ async def list_configurations(
         """
         SELECT ac.*
         FROM approval_configurations ac
-        WHERE ac.company_id = %s AND ac.workflow_type = %s""" + active_clause + """
+        WHERE ac.company_id = %s AND ac.workflow_type = %s""" + active_clause  # nosec B608
+        + """
         ORDER BY ac.name ASC, ac.id ASC
         """,
         (company_id, workflow_type),

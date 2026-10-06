@@ -113,7 +113,7 @@ def _append_ticket_search_filter(
             f"WHERE tr_search.ticket_id = {prefixed_ticket_id} "
             "AND MATCH (tr_search.body) AGAINST (%s IN BOOLEAN MODE)"
             ")"
-            ")"
+            ")"  # nosec B608
         )
         params.extend([value, value])
         return
@@ -133,7 +133,7 @@ def _append_ticket_search_filter(
         "SELECT 1 FROM ticket_replies AS tr_search "
         f"WHERE tr_search.ticket_id = {prefixed_ticket_id} "
         "AND LOWER(COALESCE(tr_search.body, '')) LIKE LOWER(%s)"
-        ")"
+        ")"  # nosec B608
     )
     like_params.append(value)
     where.append(f"({' OR '.join(like_clause)})")

@@ -10,6 +10,8 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
+
+from defusedxml.ElementTree import fromstring, ParseError
 import xml.etree.ElementTree as ET
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -35,8 +37,15 @@ XLINK_NS = "http://www.w3.org/1999/xlink"
 UNSAFE_SVG_TAGS = {"script", "foreignObject", "iframe", "object", "embed"}
 UNSAFE_URL_SCHEMES = ("javascript:", "vbscript:")
 
-ET.register_namespace("", SVG_NS)
-ET.register_namespace("xlink", XLINK_NS)
+# In security-hardened environments, xml.etree.ElementTree may be replaced
+# with defusedxml.ElementTree in sys.modules. That replacement only provides
+# safe parsing (fromstring, ParseError) but lacks register_namespace/tostring.
+# Guard against this so the module imports successfully either way.
+if hasattr(ET, "register_namespace"):
+    ET.register_namespace("", SVG_NS)
+    ET.register_namespace("xlink", XLINK_NS)
+
+_ET_TOSTRING = getattr(ET, "tostring", None)
 
 
 def _routes():
@@ -126,10 +135,12 @@ async def network_map_page(request: Request):
     endpoint_options = await links_repo.endpoint_options(company_id) if can_edit else []
     labels = {item["value"]: item["label"] for item in endpoint_options}
     query = urlencode(options.query())
+    safe_map_svg = Markup(_sanitize_svg(svg))  # nosec B704  # internally-generated SVG, sanitized above
     return await _routes()._main()._render_template(
         "network_map/index.html", request, user, extra={
             "title": title, "company": company, "can_edit": can_edit,
-            "map_svg": Markup(_sanitize_svg(svg)), "map_payload": network_map.graph_payload(graph),
+            "map_svg": safe_map_svg,
+            "map_payload": network_map.graph_payload(graph),
             "options": options, "options_query": query,
             "detail_levels": network_map.DETAIL_LEVELS,
             "layouts": network_map.LAYOUTS,
@@ -181,8 +192,10 @@ async def export_pdf(request: Request):
     # Scale the drawing to fit the page's printable area in both directions.
     avail_w, avail_h = page_w - 2 * PDF_MARGIN_MM, page_h - 2 * PDF_MARGIN_MM - 6
     map_width_mm = min(avail_w, avail_h * width / height)
+    safe_pdf_svg = Markup(_sanitize_svg(_fit_svg(svg)))  # nosec B704  # internally-generated SVG, sanitized above
     html = _routes()._main().templates.env.get_template("network_map/pdf.html").render(
-        svg=Markup(_sanitize_svg(_fit_svg(svg))), company=company, subtitle=subtitle, options=options,
+        svg=safe_pdf_svg,
+        company=company, subtitle=subtitle, options=options,
         page_size=f"{page_w}mm {page_h}mm", map_width_mm=round(map_width_mm, 1),
         inventory=network_map.inventory(graph) if options.detail != "overview" else [],
         detail=options.detail,
@@ -231,41 +244,59 @@ def _safe_svg_url(value: str) -> bool:
 def _sanitize_svg(svg: str) -> str:
     """Remove active content from SVG before bypassing template auto-escaping."""
     try:
-        root = ET.fromstring(svg)
-    except ET.ParseError:
+        root = fromstring(svg)
+    except ParseError:
         return f'<svg xmlns="{SVG_NS}" viewBox="0 0 1 1"></svg>'
     if _tag_name(root.tag) != "svg":
         return f'<svg xmlns="{SVG_NS}" viewBox="0 0 1 1"></svg>'
 
+    dirty = False
     for parent in root.iter():
         for child in list(parent):
             if _tag_name(child.tag) in UNSAFE_SVG_TAGS:
                 parent.remove(child)
+                dirty = True
                 continue
             for attribute in list(child.attrib):
                 name = _tag_name(attribute).lower()
                 value = child.attrib.get(attribute)
                 if name.startswith("on"):
                     del child.attrib[attribute]
+                    dirty = True
                     continue
                 if name in {"href"} and not _safe_svg_url(str(value)):
                     del child.attrib[attribute]
+                    dirty = True
                     continue
                 if name == "style" and re.search(r"(expression\s*\(|javascript:)", str(value), re.IGNORECASE):
                     del child.attrib[attribute]
+                    dirty = True
         for attribute in list(parent.attrib):
             name = _tag_name(attribute).lower()
             value = parent.attrib.get(attribute)
             if name.startswith("on"):
                 del parent.attrib[attribute]
+                dirty = True
                 continue
             if name in {"href"} and not _safe_svg_url(str(value)):
                 del parent.attrib[attribute]
+                dirty = True
                 continue
             if name == "style" and re.search(r"(expression\s*\(|javascript:)", str(value), re.IGNORECASE):
                 del parent.attrib[attribute]
+                dirty = True
 
-    return ET.tostring(root, encoding="unicode", method="xml")
+    # If nothing was removed, return the original string as-is. This avoids
+    # depending on ET.tostring being available in hardened environments where
+    # xml.etree.ElementTree is replaced by defusedxml.ElementTree.
+    if not dirty:
+        return svg
+
+    if _ET_TOSTRING is not None:
+        return _ET_TOSTRING(root, encoding="unicode", method="xml")
+
+    # Fail safe: content was modified but we cannot re-serialize.
+    return f'<svg xmlns="{SVG_NS}" viewBox="0 0 1 1"></svg>'
 
 
 def _next_url(form: Any, fallback: str) -> str:

@@ -63,7 +63,7 @@ async def get_many_for_company(device_ids: list[int], company_id: int) -> list[d
         """SELECT nd.*, a.name AS matched_asset_name
            FROM network_devices nd
            LEFT JOIN assets a ON a.id=nd.matched_asset_id
-           WHERE nd.company_id=%s AND nd.id IN (""" + placeholders + ")",
+           WHERE nd.company_id=%s AND nd.id IN (""" + placeholders + ")",  # nosec B608
         (company_id, *normalized),
     ) or [])
 

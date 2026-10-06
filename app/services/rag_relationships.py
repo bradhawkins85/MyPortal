@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 from datetime import datetime, timezone
 from enum import Enum
@@ -415,7 +416,7 @@ def _unit_interval(value: Any) -> float:
         number = float(value or 0.0)
     except (TypeError, ValueError):
         return 0.0
-    if number != number:  # NaN
+    if math.isnan(number):
         return 0.0
     return max(0.0, min(1.0, number))
 

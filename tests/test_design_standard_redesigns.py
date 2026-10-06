@@ -863,7 +863,7 @@ def test_profile_modals_follow_the_gold_standard():
     modal_ids = re.findall(r'<div class="modal scf-modal" id="([\w-]+)" role="dialog" aria-modal="true" aria-labelledby="[\w-]+"[^>]* hidden>', html)
     assert modal_ids == [
         "profile-password-modal", "profile-totp-modal", "profile-passkey-modal",
-        "profile-rename-modal", "profile-confirm-modal",
+        "profile-rename-modal", "profile-confirm-modal", "profile-anonymise-modal",
     ]
     assert "<dialog" not in html
     for hook in (
@@ -871,6 +871,7 @@ def test_profile_modals_follow_the_gold_standard():
         "data-totp-qr", "data-totp-manual-toggle", 'id="totp-verify-form"', 'id="totp-code"',
         'id="passkey-add-form"', 'id="passkey-rename-form"', 'id="profile-confirm-form"',
         "auth_ui.js", "passkey_utils.js", "profile.js",
+        'id="profile-anonymise-form"', 'name="confirm_email"', 'name="acknowledge"',
     ):
         assert hook in html, hook
 
@@ -999,3 +1000,77 @@ def test_campaign_form_puts_title_status_and_save_in_header_bar():
     assert ">Spring update</span>" in edit_header
     assert 'href="/admin/marketing/campaigns/7">Back to campaign' in edit_header
     assert 'action="/admin/marketing/campaigns/7"' in edit
+
+
+def _asset_detail_header_block(name: str) -> str:
+    source = (TEMPLATES / "assets" / "detail.html").read_text()
+    start_tag = "{%% block %s %%}" % name
+    start = source.index(start_tag) + len(start_tag)
+    return source[start : source.index("{% endblock %}", start)]
+
+
+def _render_asset_detail_header(
+    asset, *, customer_safe=False, is_super_admin=True, asset_type_label=None
+):
+    tpl = (
+        '{% from "macros/header.html" import page_header_overflow %}\n'
+        + _asset_detail_header_block("header_title")
+        + "\n"
+        + _asset_detail_header_block("header_actions")
+        + "\n"
+    )
+    return _env().from_string(tpl).render(
+        asset=asset,
+        customer_safe=customer_safe,
+        is_super_admin=is_super_admin,
+        asset_type_label=asset_type_label,
+    )
+
+
+def test_asset_detail_uses_gold_standard_record_header_bar():
+    html = _render_asset_detail_header(
+        {"id": 42, "name": "Edge Router", "company_id": 3, "archived_at": None,
+         "customer_visible": False, "serial_number": "SN-123"},
+        asset_type_label="Router",
+    )
+    assert 'page-header-bar page-header-bar--record' in html
+    assert 'class="header__title-text" title="Edge Router">Edge Router</span>' in html
+    # Type, serial and record id render as muted meta under the record name.
+    assert "<span>Router</span>" in html
+    assert "SN SN-123" in html
+    assert "Asset #42" in html
+    # "Back to Assets" is a direct ghost button left of the Actions overflow,
+    # not buried inside the menu.
+    assert 'class="button button--ghost" href="/assets">Back to Assets' in html
+    assert html.index("Back to Assets") < html.index('id="asset-detail-actions"')
+    # The secondary actions live inside the Actions overflow menu.
+    for label in ("Start process", "Company credentials", "Customer preview"):
+        assert f"<span>{label}</span>" in html
+
+    # Non-admins lose the Customer preview action; a published asset shows a pill.
+    limited = _render_asset_detail_header(
+        {"id": 42, "name": "Edge Router", "company_id": 3, "archived_at": None,
+         "customer_visible": True, "serial_number": None},
+        is_super_admin=False, asset_type_label="Router",
+    )
+    assert 'status status--success">Customer portal' in limited
+    assert "Customer preview" not in limited
+
+    # Archived assets get a neutral status pill.
+    archived = _render_asset_detail_header(
+        {"id": 42, "name": "Edge Router", "company_id": 3,
+         "archived_at": "2026-01-01T00:00:00Z", "customer_visible": False, "serial_number": None},
+        asset_type_label="Router",
+    )
+    assert 'status status--neutral">Archived' in archived
+
+    # Customer views drop the internal meta and the admin-only links.
+    customer = _render_asset_detail_header(
+        {"id": 42, "name": "Edge Router", "serial_number": "SN-123"},
+        customer_safe=True, is_super_admin=False, asset_type_label="Router",
+    )
+    assert "Asset #42" in customer
+    assert "Customer portal" not in customer
+    assert "SN SN-123" not in customer
+    assert "Company credentials" not in customer
+    assert "Customer preview" not in customer

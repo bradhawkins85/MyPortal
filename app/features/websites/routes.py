@@ -232,7 +232,9 @@ async def website_manual_check(request: Request, website_id: int):
     result = await check_website(website)
     await audit_service.record(action="website.check", request=request, user_id=int(user["id"]), entity_type="website", entity_id=website_id, after={"ok": result["ok"]})
     outcome = "completed" if result["ok"] else "failed"
-    return RedirectResponse(f"/websites/{website_id}?check={outcome}", status_code=303)
+    # Build the redirect target from the validated integer ID and a fixed
+    # outcome string so the URL can never be influenced by request input.
+    return RedirectResponse(f"/websites/{int(website_id)}?check={outcome}", status_code=303)
 
 
 @web_router.post("/websites/{website_id}/delete")

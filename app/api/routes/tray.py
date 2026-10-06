@@ -14,6 +14,8 @@ The websocket handler ``/ws/tray/{device_uid}`` is registered in
 
 from __future__ import annotations
 
+import re
+
 import asyncio
 import hashlib
 import html as _html
@@ -84,6 +86,7 @@ from app.services import m365_signature_deployment as signature_deploy_service
 from app.services import matrix as matrix_service
 from app.services import matrix_ai_waiting_assistant
 from app.services import tacticalrmm as tacticalrmm_service
+from app.services import tray_installer
 from app.services import tickets as tickets_service
 from app.services import syncro as syncro_service
 from app.services import tray as tray_service
@@ -2306,6 +2309,7 @@ async def get_tray_version(request: Request) -> JSONResponse:
             "version": row["version"],
             "download_url": row.get("download_url"),
             "required": bool(row.get("required")),
+            "sha256": row.get("sha256"),
         }
     )
 
@@ -2428,12 +2432,23 @@ async def admin_publish_version(
     release_notes = body.get("release_notes")
     rollout_percent = int(body.get("rollout_percent", 100))
     rollout_percent = max(1, min(100, rollout_percent))
+    sha256 = str(body.get("sha256") or "").strip().lower() or None
 
     if not version or not download_url:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="version and download_url are required.",
         )
+    if sha256 is not None and not re.fullmatch(r"[0-9a-f]{64}", sha256):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="sha256 must be a 64-character hex digest.",
+        )
+    # When the published installer is one the server downloaded and cached
+    # from GitHub Releases, attach the digest of the exact cached bytes so
+    # devices can verify the download before executing it.
+    if sha256 is None:
+        sha256 = tray_installer.cached_installer_sha256(download_url)
 
     await tray_repo.publish_tray_version(
         version=version,
@@ -2443,6 +2458,7 @@ async def admin_publish_version(
         release_notes=release_notes,
         published_by_user_id=int(current_user["id"]),
         rollout_percent=rollout_percent,
+        sha256=sha256,
     )
     return JSONResponse(
         {"published": True, "version": version, "rollout_percent": rollout_percent}

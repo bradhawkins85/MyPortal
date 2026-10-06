@@ -818,7 +818,12 @@ def _validate_graph_request_url(url: str, *, method: str) -> str:
         if any(not key.startswith("$") for key, _ in query_items):
             raise ValueError(f"Rejected Microsoft Graph {method} URL: {candidate}")
 
-    return candidate
+    # Rebuild the outbound URL from the fixed Microsoft Graph base URL and the
+    # individually validated path/query. The scheme and host are taken only from
+    # the constant base, so the request can never be redirected to a different
+    # origin even if a crafted value slips through the checks above.
+    query = f"?{parsed_url.query}" if parsed_url.query else ""
+    return _GRAPH_BASE + relative_path + query
 
 
 async def _graph_get(access_token: str, url: str) -> dict[str, Any]:

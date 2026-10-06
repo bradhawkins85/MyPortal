@@ -76,6 +76,7 @@ from app.api.routes import (
     compliance_checks as compliance_checks_api,
     email_blocklist as email_blocklist_api,
     email_tracking as email_tracking_api,
+    feedback,
     forms as forms_api,
     invoices as invoices_api,
     issues as issues_api,
@@ -135,6 +136,7 @@ from app.repositories import notifications as notifications_repo
 from app.repositories import chat as chat_repo
 from app.repositories import defender as defender_repo
 from app.repositories import roles as role_repo
+from app.repositories import shop as shop_repo
 from app.repositories import cart as cart_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import staff as staff_repo
@@ -152,7 +154,7 @@ from app.services.agent_sources import SOURCE_REGISTRY as AGENT_SOURCE_REGISTRY
 from app.security.menu_permissions import MENU_PERMISSIONS, catalogue_for_api, menu_has_access, normalize_access_level, normalize_menu_permissions
 from app.repositories import site_settings as site_settings_repo
 from app.security.cache_control import CacheControlMiddleware
-from app.security.client_ip import get_client_ip
+from app.security.client_ip import _peer_is_trusted, get_client_ip
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.security.flash import flash_redirect, set_flash
@@ -836,21 +838,6 @@ general_rate_limiter = SimpleRateLimiter(
     namespace="rate-limit:general",
 )
 app.add_middleware(
-    RateLimiterMiddleware,
-    rate_limiter=general_rate_limiter,
-    exempt_paths=(
-        SWAGGER_UI_PATH,
-        PROTECTED_OPENAPI_PATH,
-        "/static",
-        "/uploads",
-        "/health",
-        "/healthz",
-        "/readyz",
-    ),
-    key_func=_general_rate_limit_key,
-)
-
-app.add_middleware(
     CacheControlMiddleware,
     exempt_paths=("/static",),
 )
@@ -876,6 +863,22 @@ app.add_middleware(
         # browser session. Requiring CSRF here blocks legitimate automation.
         "/api/staff/workflow-webhooks",
     ),
+)
+
+# Registered after CSRF so rate limits are enforced before CSRF's session and database lookups run, throttling anonymous attackers first.
+app.add_middleware(
+    RateLimiterMiddleware,
+    rate_limiter=general_rate_limiter,
+    exempt_paths=(
+        SWAGGER_UI_PATH,
+        PROTECTED_OPENAPI_PATH,
+        "/static",
+        "/uploads",
+        "/health",
+        "/healthz",
+        "/readyz",
+    ),
+    key_func=_general_rate_limit_key,
 )
 
 # Registered last so it runs before authentication, CSRF, rate limiting and
@@ -947,6 +950,7 @@ def _release_manifest() -> dict[str, Any]:
         if isinstance(loaded, dict):
             policy = loaded
     except (OSError, ValueError):
+        # Missing/corrupt release policy: keep the default empty policy.
         pass
     compatibility = str(policy.get("compatibility", "soft")).lower()
     if compatibility not in {"none", "soft", "optional", "mandatory"}:
@@ -1202,10 +1206,15 @@ async def refresh_updates(websocket: WebSocket) -> None:
     origin = (websocket.headers.get("origin") or "").strip()
     if origin:
         origin_host = urlsplit(origin).netloc.lower()
-        allowed_hosts = {
-            (websocket.headers.get("host") or "").strip().lower(),
-            (websocket.headers.get("x-forwarded-host") or "").split(",")[0].strip().lower(),
-        }
+        allowed_hosts = {(websocket.headers.get("host") or "").strip().lower()}
+        # X-Forwarded-Host is only honoured from configured trusted proxies,
+        # mirroring the X-Forwarded-For handling in get_client_ip; otherwise
+        # an attacker-controlled header would whitelist any Origin host.
+        peer_ip = websocket.client.host if websocket.client else None
+        if peer_ip and _peer_is_trusted(peer_ip, settings.trusted_proxy_networks()):
+            allowed_hosts.add(
+                (websocket.headers.get("x-forwarded-host") or "").split(",")[0].strip().lower()
+            )
         if settings.portal_url:
             allowed_hosts.add(urlsplit(settings.portal_url.unicode_string()).netloc.lower())
         allowed_hosts.discard("")
@@ -1367,6 +1376,7 @@ app.include_router(users.router)
 app.include_router(click_to_call_api.router)
 app.include_router(call_recordings_api.router)
 app.include_router(companies.router)
+app.include_router(feedback.router)
 app.include_router(documentation.router)
 app.include_router(essential8_api.router)
 app.include_router(smb1001_api.router)
@@ -1733,6 +1743,44 @@ def _classify_private_upload(sanitized_path: PurePosixPath) -> tuple[bool, bool]
     return None
 
 
+async def _require_shop_image_access(
+    user: dict[str, Any] | None, request: Request, sanitized_path: PurePosixPath
+) -> None:
+    """Scope product images to users whose company can access the shop.
+
+    Product images live in a shared directory keyed by random names, so the
+    directory alone cannot enforce company boundaries.  A product image is
+    only served when the requesting user holds the ``can_access_shop``
+    membership permission and their company has not excluded every product
+    that references the image.
+    """
+    if not user or user.get("is_super_admin"):
+        return
+    try:
+        user_id = int(user["id"])
+        company_id = int(user.get("company_id"))
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+        ) from None
+    membership = await _get_effective_company_membership(request, user_id, company_id)
+    if not (membership and membership.get("can_access_shop")):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+        )
+    image_path = f"/uploads/shop/{sanitized_path.parts[1]}"
+    product_ids = await shop_repo.get_product_ids_by_image_url(image_path)
+    if not product_ids:
+        # Orphaned images (e.g. a stock-feed import still in flight) keep
+        # the permission-only behaviour above.
+        return
+    excluded = await shop_repo.get_excluded_product_ids(company_id, product_ids)
+    if excluded and set(excluded).issuperset(product_ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+        )
+
+
 @app.get("/uploads/{file_path:path}", response_class=FileResponse, include_in_schema=False)
 async def serve_private_upload(file_path: str, request: Request):
     """Serve product images stored in the legacy private uploads directory."""
@@ -1744,9 +1792,11 @@ async def serve_private_upload(file_path: str, request: Request):
     is_public_kb_image, is_inline_image = classification
 
     if not is_public_kb_image:
-        _, redirect = await _require_authenticated_user(request)
+        user, redirect = await _require_authenticated_user(request)
         if redirect:
             return redirect
+        if sanitized_path.parts[:1] == ("shop",):
+            await _require_shop_image_access(user, request, sanitized_path)
 
     resolved_path = _resolve_private_upload(sanitized_path)
     headers = {
@@ -5084,6 +5134,14 @@ async def m365_diagnostics_page(request: Request):
         except m365_service.M365Error as exc:
             required_access = {"all_ok": False, "error": str(exc), "resources": [], "directory_roles": []}
 
+    permission_status_counts = {"total": 0, "pass": 0, "fail": 0, "unavailable": 0}
+    for resource in (required_access or {}).get("resources", []):
+        for permission in resource.get("permissions", []):
+            permission_status_counts["total"] += 1
+            status = permission.get("status")
+            if status in permission_status_counts:
+                permission_status_counts[status] += 1
+
     extra = {
         "title": "Office 365 Diagnostics",
         "company": company,
@@ -5092,6 +5150,7 @@ async def m365_diagnostics_page(request: Request):
         "results": last_results,
         "purview_preflight": purview_preflight,
         "required_access": required_access,
+        "permission_status_counts": permission_status_counts,
         "connection_health": connection_health,
         "is_super_admin": True,
     }
@@ -6050,7 +6109,6 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # ── Tenant-discovery flow ──────────────────────────────────────────
         # Exchange the auth code to get a token, then extract the tid claim.
         return_to_company_edit = state_data.get("return_to") == "company_edit"
-        redirect_uri = str(state_data.get("redirect_uri") or "")
 
         def _discover_error(msg: str) -> RedirectResponse:
             if return_to_company_edit:
@@ -7086,30 +7144,34 @@ async def profile_marketing_opt_out(request: Request):
 
 @app.post("/admin/profile/anonymisation")
 async def profile_anonymisation_request(request: Request):
-    """A user requests permanent deletion of their account (issue #4554)."""
+    """A user asks for their account to be anonymised (issue #4554)."""
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return redirect
     from app.services import anonymisation as anonymisation_service
 
+    form = await request.form()
     try:
         result = await anonymisation_service.create_request(
             user=user,
+            reason=str(form.get("reason") or ""),
+            confirm_email=str(form.get("confirm_email") or ""),
+            acknowledged=str(form.get("acknowledge") or "").strip().lower() in {"1", "true", "on", "yes"},
             ip_address=get_client_ip(request),
             user_agent=request.headers.get("user-agent"),
+            request=request,
         )
     except anonymisation_service.AnonymisationError as exc:
-        return flash_redirect("/admin/profile#security", f"Could not submit your request: {exc}", "error")
+        return flash_redirect("/admin/profile#security", "Your request wasn't submitted. " + str(exc), "error")
     if result.get("created"):
         return flash_redirect(
             "/admin/profile#security",
-            "Your anonymisation request has been submitted. An administrator will verify your email and complete the deletion; this can take a few days.",
+            "Your request has been submitted. We've emailed you a confirmation, and we'll email you again once it has been reviewed.",
             "success",
         )
-    current = (result.get("status") or "pending").replace("_", " ")
     return flash_redirect(
         "/admin/profile#security",
-        f"You already have an anonymisation request ({current}).",
+        "You already have a request in progress. We'll email you once it has been reviewed.",
         "info",
     )
 
@@ -7122,7 +7184,10 @@ async def admin_anonymisation_list(request: Request):
         return redirect
     from app.services import anonymisation as anonymisation_service
 
-    anon_requests = await anonymisation_service.list_requests(status=None, limit=200)
+    status_filter = str(request.query_params.get("status") or "").strip().lower()
+    if status_filter not in {"pending", "approved", "rejected", "completed"}:
+        status_filter = ""
+    anon_requests = await anonymisation_service.list_requests(status=status_filter or None, limit=200)
     context = await _build_base_context(
         request,
         current_user,
@@ -7131,6 +7196,7 @@ async def admin_anonymisation_list(request: Request):
             "current_path": "/admin/anonymisation",
             "anonymisation_request": None,
             "anonymisation_requests": anon_requests,
+            "anonymisation_status_filter": status_filter,
         },
     )
     return templates.TemplateResponse(context["request"], "admin/anonymisation.html", context)
@@ -7151,8 +7217,8 @@ async def admin_anonymisation_detail(request: Request, request_id: int):
         request,
         current_user,
         extra={
-            "title": f"Anonymisation request #{request_id}",
-            "current_path": f"/admin/anonymisation/{request_id}",
+            "title": "Anonymisation request #" + str(request_id),
+            "current_path": "/admin/anonymisation/" + str(request_id),
             "anonymisation_request": anon_request,
             "anonymisation_requests": [],
         },
@@ -7160,38 +7226,48 @@ async def admin_anonymisation_detail(request: Request, request_id: int):
     return templates.TemplateResponse(context["request"], "admin/anonymisation.html", context)
 
 
-@app.post("/admin/anonymisation/{request_id}/execute")
-async def admin_anonymisation_execute(request: Request, request_id: int):
-    """Execute a pending anonymisation request (irreversible) for a super admin."""
+@app.post("/admin/anonymisation/{request_id}/approve")
+async def admin_anonymisation_approve(request: Request, request_id: int):
+    """Approve a request and anonymise the account (irreversible)."""
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
     from app.services import anonymisation as anonymisation_service
 
+    form = await request.form()
+    detail_url = "/admin/anonymisation/" + str(request_id)
     try:
-        await anonymisation_service.execute_request(request_id=request_id, actor_user=current_user)
+        await anonymisation_service.approve_request(
+            request_id=request_id,
+            actor_user=current_user,
+            notes=str(form.get("notes") or ""),
+            request=request,
+        )
     except anonymisation_service.AnonymisationError as exc:
-        return flash_redirect(f"/admin/anonymisation/{request_id}", str(exc), "error")
-    return flash_redirect(
-        f"/admin/anonymisation/{request_id}",
-        f"Anonymisation request #{request_id} has been completed. The user's personal data has been deleted.",
-        "success",
-    )
+        return flash_redirect(detail_url, str(exc), "error")
+    return flash_redirect(detail_url, "The account has been anonymised.", "success")
 
 
-@app.post("/admin/anonymisation/{request_id}/cancel")
-async def admin_anonymisation_cancel(request: Request, request_id: int):
-    """Cancel (delete) a pending anonymisation request for a super admin."""
+@app.post("/admin/anonymisation/{request_id}/reject")
+async def admin_anonymisation_reject(request: Request, request_id: int):
+    """Reject a pending request. The reason is emailed to the user."""
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
     from app.services import anonymisation as anonymisation_service
 
+    form = await request.form()
+    detail_url = "/admin/anonymisation/" + str(request_id)
     try:
-        await anonymisation_service.cancel_request(request_id=request_id, actor_user=current_user)
+        await anonymisation_service.reject_request(
+            request_id=request_id,
+            actor_user=current_user,
+            reason=str(form.get("reason") or ""),
+            request=request,
+        )
     except anonymisation_service.AnonymisationError as exc:
-        return flash_redirect(f"/admin/anonymisation/{request_id}", str(exc), "error")
-    return flash_redirect("/admin/anonymisation", f"Anonymisation request #{request_id} has been cancelled.", "success")
+        return flash_redirect(detail_url, str(exc), "error")
+    return flash_redirect(detail_url, "The request has been rejected and the user has been emailed the reason.", "success")
 
 
 @app.get("/admin/profile/m365-contacts/connect")
@@ -7518,6 +7594,35 @@ async def _admin_set_user_ai_opt_out(
     return flash_redirect("/admin/users", f"AI processing is turned back on for {label}.", "success")
 
 
+async def _admin_anonymise_user(
+    request: Request, current_user: dict[str, Any], user_id: int
+) -> RedirectResponse:
+    """Anonymise an account for a request received by email or phone."""
+
+    from app.services import anonymisation as anonymisation_service
+
+    form = await request.form()
+    if str(form.get("confirm") or "").strip().lower() not in {"1", "true", "on", "yes"}:
+        return flash_redirect("/admin/users", "Tick the box to confirm the person asked for this.", "error")
+    target = await user_repo.get_user_by_id(user_id)
+    if target and target.get("is_super_admin") and await user_repo.count_active_super_admins() <= 1:
+        return flash_redirect("/admin/users", "The last active super admin cannot be anonymised.", "error")
+    try:
+        result = await anonymisation_service.start_for_user(
+            user_id=user_id,
+            actor_user=current_user,
+            notes=str(form.get("notes") or ""),
+            request=request,
+        )
+    except anonymisation_service.AnonymisationError as exc:
+        return flash_redirect("/admin/users", str(exc), "error")
+    return flash_redirect(
+        "/admin/anonymisation/" + str(result["request_id"]),
+        "The account has been anonymised.",
+        "success",
+    )
+
+
 @app.post("/admin/users/{user_id}/{action}", response_class=HTMLResponse)
 async def admin_users_action(request: Request, user_id: int, action: str):
     current_user, redirect = await _require_super_admin_page(request)
@@ -7527,6 +7632,8 @@ async def admin_users_action(request: Request, user_id: int, action: str):
         return await _admin_set_user_ai_opt_out(
             request, current_user, user_id, opt_out=action == "ai-opt-out"
         )
+    if action == "anonymise":
+        return await _admin_anonymise_user(request, current_user, user_id)
     if action not in {"deactivate", "delete"}:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Unknown user action"

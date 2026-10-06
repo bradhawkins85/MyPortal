@@ -785,6 +785,15 @@ class Settings(BaseSettings):
         ge=1,
         description="Window in seconds for the general HTTP request rate limit.",
     )
+    api_keys_default_deny_when_unscoped: bool = Field(
+        default=False,
+        validation_alias="API_KEYS_DEFAULT_DENY_WHEN_UNSCOPED",
+        description=(
+            "When true, API keys whose permissions list is empty are denied on "
+            "every endpoint (default-deny). When false (current behaviour) such "
+            "keys may call any API-key endpoint, and a warning is logged."
+        ),
+    )
 
     mcp_rate_limit: int = Field(
         default=60,

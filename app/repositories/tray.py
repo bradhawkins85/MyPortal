@@ -667,6 +667,7 @@ async def publish_tray_version(
     published_by_user_id: int | None,
     rollout_percent: int = 100,
     rollout_start_at: datetime | None = None,
+    sha256: str | None = None,
 ) -> int:
     p = "?" if db.is_sqlite() else "%s"
     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -674,10 +675,10 @@ async def publish_tray_version(
     last_id = await db.execute_returning_lastrowid(
         f"INSERT INTO tray_versions "  # nosec B608
         f"(version, platform, download_url, required, release_notes, published_by_user_id, "
-        f"published_at, rollout_percent, rollout_start_at) "
-        f"VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})",
+        f"published_at, rollout_percent, rollout_start_at, sha256) "
+        f"VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})",
         (version, platform, download_url, int(required), release_notes, published_by_user_id,
-         now, rollout_percent, rollout_start),
+         now, rollout_percent, rollout_start, sha256),
     )
     return int(last_id) if last_id else 0
 
