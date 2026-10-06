@@ -160,3 +160,49 @@ async def improve_product_description(product_id: int) -> dict[str, Any] | None:
     await shop_repo.replace_product_features(product_id, features)
     log_info("Product description refreshed", product_id=product_id, feature_count=len(features), ai_used=bool(description_html))
     return {"description": updated.get("description") if updated else description_html, "features": features}
+
+
+async def bulk_refresh_product_descriptions(
+    *, include_archived: bool, user_id: int | None, task_id: str
+) -> dict[str, Any]:
+    """Refresh the catalogue outside the request, isolating per-product failures."""
+    from app.services import audit as audit_service
+
+    product_ids = await shop_repo.list_product_description_refresh_ids(
+        include_archived=include_archived
+    )
+    refreshed_count = 0
+    failed_count = 0
+    for product_id in product_ids:
+        try:
+            result = await improve_product_description(product_id)
+        except Exception as exc:
+            failed_count += 1
+            log_error(
+                "Bulk shop product description refresh failed for product",
+                task_id=task_id,
+                product_id=product_id,
+                error=str(exc),
+            )
+            continue
+        if result is None:
+            failed_count += 1
+        else:
+            refreshed_count += 1
+
+    summary = {
+        "task_id": task_id,
+        "include_archived": include_archived,
+        "requested_count": len(product_ids),
+        "refreshed_count": refreshed_count,
+        "failed_count": failed_count,
+    }
+    await audit_service.record(
+        action="shop.product.description_bulk_refresh",
+        user_id=user_id,
+        source="background",
+        entity_type="shop.product",
+        metadata=summary,
+    )
+    log_info("Bulk shop product descriptions refreshed", refreshed_by=user_id, **summary)
+    return summary
