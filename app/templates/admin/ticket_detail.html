@@ -1628,14 +1628,15 @@
               </div>
             </header>
             <div class="card__body">
-              <div class="ticket-history-filters" aria-label="Filter conversation">
-                <button type="button" class="is-active" data-history-filter="all" aria-pressed="true">All</button>
-                <button type="button" data-history-filter="customer" aria-pressed="false">Customer</button>
-                <button type="button" data-history-filter="technician" aria-pressed="false">Technician</button>
-                <button type="button" data-history-filter="internal" aria-pressed="false">Internal</button>
-                <button type="button" data-history-filter="automation" aria-pressed="false">Automation</button>
-                <button type="button" data-history-filter="ai" aria-pressed="false">AI</button>
+              <div class="stat-strip ticket-history-filters" role="group" aria-label="Show reply types" data-history-user-id="{{ current_user.id if current_user else '' }}">
+                {% for kind, label, variant in [('all', 'All', 'total'), ('customer', 'Customers', 'success'), ('technician', 'Technician', 'info'), ('internal', 'Internal', 'warning'), ('automation', 'Automation', 'neutral'), ('ai', 'AI', 'info')] %}
+                  <button type="button" class="stat-strip__stat stat-strip__stat--{{ variant }} stat-strip__stat--active" data-history-filter="{{ kind }}" aria-pressed="true">
+                    <span class="stat-strip__stat-label">{{ label }}</span>
+                    <span class="stat-strip__stat-value" data-history-count>0</span>
+                  </button>
+                {% endfor %}
               </div>
+              <p class="form-help">Toggle reply types to show or hide them. Your selection is saved across tickets in this browser.</p>
               {% if ticket_timeline_entries %}
                 <div class="timeline timeline--conversation" data-ticket-timeline data-ticket-id="{{ ticket.id }}">
                   {% for timeline_entry in ticket_timeline_entries %}
@@ -1725,7 +1726,7 @@
                     {% else %}
                       {% set reply = timeline_entry %}
                       {% set reply_is_automation = reply.external_reference and reply.external_reference.startswith('shipment-watch:') %}
-                      {% set reply_kind = 'ai' if reply.is_ai else ('internal' if reply.is_internal else ('automation' if reply_is_automation else ('technician' if reply.author_id and reply.author_id != ticket.requester_id else 'customer'))) %}
+                      {% set reply_kind = 'ai' if reply.is_ai else ('automation' if reply_is_automation else ('internal' if reply.is_internal else ('technician' if reply.author_id and reply.author_id != ticket.requester_id else 'customer'))) %}
                       <article
                         class="timeline__event timeline__event--{{ reply_kind }}{% if reply.is_split_hidden %} timeline__event--split-hidden{% endif %}"
                         data-ticket-reply
@@ -1748,7 +1749,7 @@
                             </span>
                             <span class="timeline__action">
                               {{ reply.author.email if reply.author else (reply.author_display_name or reply.author_email or 'System') }}
-                              <span class="timeline__direction">{{ 'AI note' if reply.is_ai else ('Internal note' if reply.is_internal else ('Automation' if reply_is_automation else ('Technician reply' if reply.author_id and reply.author_id != ticket.requester_id else 'Customer message'))) }}</span>
+                              <span class="timeline__direction">{{ 'AI note' if reply.is_ai else ('Automation' if reply_is_automation else ('Internal note' if reply.is_internal else ('Technician reply' if reply.author_id and reply.author_id != ticket.requester_id else 'Customer message'))) }}</span>
                               {% if reply.is_ai %}
                                 <span class="badge badge--info" title="Written by the AI troubleshooter. Visible to staff only.">AI</span>
                               {% elif reply.is_internal %}
@@ -1873,6 +1874,7 @@
                       </article>
                     {% endif %}
                   {% endfor %}
+                  <p class="card__empty" data-history-empty role="status" hidden>No replies match the selected types.</p>
                   <button type="button" class="button button--secondary ticket-history-load" data-history-load-earlier hidden>Load earlier messages</button>
                 </div>
               {% else %}

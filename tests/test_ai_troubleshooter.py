@@ -546,7 +546,7 @@ def test_ticket_template_renders_ai_commenter_type():
     ).read_text(encoding="utf-8")
     assert "{% set reply_kind = 'ai' if reply.is_ai else" in template
     assert 'data-message-kind="{{ reply_kind }}"' in template
-    assert 'data-history-filter="ai"' in template
+    assert "('ai', 'AI', " in template
 
 
 # ---------------------------------------------------------------------------

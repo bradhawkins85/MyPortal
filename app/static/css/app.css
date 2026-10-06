@@ -18813,10 +18813,11 @@ body.scf-modal-open {
 .ticket-split-select { display: none; }
 .timeline.is-selecting .ticket-split-select { display: inline-flex; }
 
-.ticket-history-filters { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1rem; }
-.ticket-history-filters button { padding: 0.4rem 0.72rem; border: 1px solid rgba(148, 163, 184, 0.32); border-radius: 999px; background: transparent; color: #cbd5e1; cursor: pointer; font: inherit; font-size: 0.82rem; }
-.ticket-history-filters button:hover,
-.ticket-history-filters button.is-active { border-color: #60a5fa; background: rgba(59, 130, 246, 0.2); color: #fff; }
+.ticket-history-filters { grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr)); }
+.ticket-history-filters button { cursor: pointer; font: inherit; text-align: left; min-width: 0; }
+.ticket-history-filters button[aria-pressed="false"] { box-shadow: none; }
+.ticket-history-filters button[aria-pressed="false"]::before { opacity: 0; }
+.ticket-history-filters button:focus-visible { outline: 2px solid var(--color-accent, #38bdf8); outline-offset: 2px; }
 .ticket-history-load { align-self: center; }
 .timeline__direction { margin-left: 0.35rem; color: #e2e8f0; font-size: 0.78rem; font-weight: 650; }
 .timeline__event--customer { margin-right: clamp(1rem, 7%, 5rem); border-left: 3px solid #38bdf8; background: rgba(8, 47, 73, 0.38); }
