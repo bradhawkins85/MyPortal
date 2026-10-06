@@ -9,6 +9,7 @@ from typing import Any, Iterable, Sequence
 from app.core.database import db
 from app.core.logging import log_debug, log_error, log_info
 from app.repositories import site_settings as site_settings_repo
+from app.repositories import ticket_tasks as ticket_tasks_repo
 
 TicketRecord = dict[str, Any]
 
@@ -1332,6 +1333,17 @@ async def _disable_shipment_watch(ticket_id: int) -> None:
     )
 
 
+# Closing (or resolving) a ticket created from a task ticks that task off.
+_TASK_COMPLETING_STATUSES = {"resolved", "closed"}
+
+
+async def _complete_linked_tasks(ticket_ids: list[int]) -> None:
+    try:
+        await ticket_tasks_repo.complete_tasks_linked_to_tickets(ticket_ids)
+    except Exception as exc:  # pragma: no cover - never block the status change
+        log_error("Failed to complete tasks linked to closed tickets", ticket_ids=ticket_ids, error=str(exc))
+
+
 async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
     if not fields:
         return await get_ticket(ticket_id)
@@ -1385,6 +1397,8 @@ async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
         or fields.get("closed_at") is not None
     ):
         await _disable_shipment_watch(ticket_id)
+    if str(fields.get("status") or "").casefold() in _TASK_COMPLETING_STATUSES:
+        await _complete_linked_tasks([ticket_id])
     log_info("Ticket updated successfully", ticket_id=ticket_id)
     updated = await get_ticket(ticket_id)
     await _rag_outbox_service().enqueue("tickets", ticket_id, source_updated_at=(updated or {}).get("updated_at"))
@@ -1489,6 +1503,8 @@ async def set_tickets_status(
             f"UPDATE ticket_shipment_watches SET active = 0 WHERE ticket_id IN ({placeholders})",  # nosec B608
             tuple(normalised_ids),
         )
+    if status.casefold() in _TASK_COMPLETING_STATUSES:
+        await _complete_linked_tasks(normalised_ids)
     return affected
 
 
