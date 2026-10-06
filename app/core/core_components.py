@@ -112,6 +112,12 @@ CORE_COMPONENTS: tuple[CoreComponent, ...] = (
         ("/admin/ai-quality",),
     ),
     CoreComponent(
+        "llm_usage",
+        "LLM Usage",
+        "LLM request and token usage by MyPortal function.",
+        ("/admin/llm-usage", "/api/admin/llm-usage"),
+    ),
+    CoreComponent(
         "ai_tag_synonyms",
         "AI Tag Synonyms",
         "AI tag synonym groups used by chat assignment.",

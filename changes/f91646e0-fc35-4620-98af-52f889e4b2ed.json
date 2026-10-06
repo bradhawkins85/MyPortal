@@ -1,0 +1,7 @@
+{
+  "guid": "f91646e0-fc35-4620-98af-52f889e4b2ed",
+  "occurred_at": "2026-10-06T10:40Z",
+  "change_type": "Feature",
+  "summary": "Add an Administration > LLM Usage page showing LLM requests and input/output tokens for a date range, with each MyPortal function's share of token usage.",
+  "content_hash": "e276bef03369787aad29037ff76f607221dbedefb9087e4d502bd092fb5907c0"
+}

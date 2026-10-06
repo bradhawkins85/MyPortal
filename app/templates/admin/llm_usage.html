@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% from "macros/counters.html" import counter_strip %}
+{% set totals = report.totals %}
+{% block header_title %}
+<div class="page-header-bar">
+  <span class="header__title-text">LLM Usage</span>
+  <form method="get" class="page-header-toolbar llmu-range" action="/admin/llm-usage" aria-label="Date range">
+    <label class="form-label llmu-range__label" for="llmu-start">From</label>
+    <input class="form-input llmu-range__date" type="date" id="llmu-start" name="start" value="{{ report.start_date }}" max="{{ report.end_date }}" required>
+    <label class="form-label llmu-range__label" for="llmu-end">To</label>
+    <input class="form-input llmu-range__date" type="date" id="llmu-end" name="end" value="{{ report.end_date }}" required>
+    <button type="submit" class="button button--primary">Apply</button>
+    <nav class="llmu-range__presets" aria-label="Quick ranges">
+      {% for preset in presets %}
+      <a class="button button--ghost button--small" href="/admin/llm-usage?start={{ preset.start }}&amp;end={{ preset.end }}"{% if preset.start == report.start_date and preset.end == report.end_date %} aria-current="true"{% endif %}>{{ preset.label }}</a>
+      {% endfor %}
+    </nav>
+  </form>
+</div>
+{% endblock %}
+{% block content %}
+<p class="llmu-intro">Requests MyPortal sent to its LLM providers between <strong>{{ report.start_date }}</strong> and <strong>{{ report.end_date }}</strong> (UTC days). Prompts and responses are not stored, only the function that made the request and the tokens the provider reported.</p>
+
+{{ counter_strip([
+  {"label": "Requests", "value": "{:,}".format(totals.requests), "variant": "info"},
+  {"label": "Input tokens", "value": "{:,}".format(totals.input_tokens), "variant": "neutral"},
+  {"label": "Output tokens", "value": "{:,}".format(totals.output_tokens), "variant": "neutral"},
+  {"label": "Total tokens", "value": "{:,}".format(totals.total_tokens), "variant": "success"},
+  {"label": "Failed requests", "value": "{:,}".format(totals.failed_requests), "variant": "danger" if totals.failed_requests else "neutral"},
+]) }}
+{% if totals.estimated_requests %}
+<p class="llmu-note" role="note">{{ "{:,}".format(totals.estimated_requests) }} request{{ "s" if totals.estimated_requests != 1 }} came from a provider that did not report token counts; their tokens are estimated at about four characters per token.</p>
+{% endif %}
+
+{% set peak = namespace(value=0) %}
+{% for day in report.days %}{% set peak.value = [peak.value, day.input_tokens + day.output_tokens]|max %}{% endfor %}
+<section class="card card--panel llmu-card" aria-labelledby="llmu-daily-heading">
+  <header class="llmu-card__header">
+    <h2 id="llmu-daily-heading" class="card__title">Tokens per day</h2>
+    <ul class="llmu-legend" aria-label="Legend">
+      <li><span class="llmu-swatch llmu-swatch--input" aria-hidden="true"></span>Input tokens</li>
+      <li><span class="llmu-swatch llmu-swatch--output" aria-hidden="true"></span>Output tokens</li>
+    </ul>
+  </header>
+  {% if totals.requests %}
+  <div class="llmu-chart" role="img" aria-label="Daily input and output tokens; the table below lists each day's figures.">
+    {% for day in report.days %}
+    {% set day_total = day.input_tokens + day.output_tokens %}
+    <div class="llmu-chart__col" title="{{ day.day }}: {{ '{:,}'.format(day.requests) }} requests, {{ '{:,}'.format(day.input_tokens) }} in / {{ '{:,}'.format(day.output_tokens) }} out">
+      <div class="llmu-chart__bar" style="--llmu-height: {{ ((day_total * 100 / peak.value) if peak.value else 0)|round(1) }}%">
+        {% if day_total %}
+        <span class="llmu-chart__seg llmu-chart__seg--output" style="--llmu-part: {{ (day.output_tokens * 100 / day_total)|round(1) }}%"></span>
+        <span class="llmu-chart__seg llmu-chart__seg--input" style="--llmu-part: {{ (day.input_tokens * 100 / day_total)|round(1) }}%"></span>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="llmu-chart__axis" aria-hidden="true"><span>{{ report.start_date }}</span><span>{{ report.end_date }}</span></div>
+  <details class="llmu-details">
+    <summary>Show daily figures</summary>
+    <div class="table-responsive">
+      <table class="data-table" data-table-sortable>
+        <caption class="visually-hidden">Daily LLM usage</caption>
+        <thead><tr><th data-sort="string">Day (UTC)</th><th data-sort="int">Requests</th><th data-sort="int">Input tokens</th><th data-sort="int">Output tokens</th></tr></thead>
+        <tbody>{% for day in report.days %}<tr><td>{{ day.day }}</td><td data-value="{{ day.requests }}">{{ "{:,}".format(day.requests) }}</td><td data-value="{{ day.input_tokens }}">{{ "{:,}".format(day.input_tokens) }}</td><td data-value="{{ day.output_tokens }}">{{ "{:,}".format(day.output_tokens) }}</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+  </details>
+  {% else %}
+  <p class="llmu-empty">No LLM requests in this date range. Usage is recorded from the moment this page was installed; pick a later range or wait for an AI feature to run.</p>
+  {% endif %}
+</section>
+
+<section class="card card--panel llmu-card" aria-labelledby="llmu-features-heading">
+  <header class="llmu-card__header">
+    <h2 id="llmu-features-heading" class="card__title">Token share by MyPortal function</h2>
+    <label class="visually-hidden" for="llmu-feature-filter">Filter functions</label>
+    <input id="llmu-feature-filter" class="form-input llmu-card__search" type="search" placeholder="Filter functions" data-table-filter="llmu-features-table">
+  </header>
+  <div class="table-responsive">
+    <table id="llmu-features-table" class="data-table" data-table-sortable>
+      <caption class="visually-hidden">Every MyPortal function that uses the LLM, with its share of total tokens</caption>
+      <thead><tr>
+        <th data-sort="string">Function</th>
+        <th data-sort="int">Requests</th>
+        <th data-sort="int">Input tokens</th>
+        <th data-sort="int">Output tokens</th>
+        <th data-sort="int">Total tokens</th>
+        <th data-sort="number">Share of tokens</th>
+        <th data-sort="string">Last used</th>
+      </tr></thead>
+      <tbody>{% for row in report.features %}<tr{% if not row.requests %} class="llmu-row--idle"{% endif %}>
+        <td data-value="{{ row.label }}">
+          <span class="llmu-feature__name">{{ row.label }}</span>
+          <span class="llmu-feature__desc">{{ row.description }}</span>
+          {% if row.failed_requests %}<span class="status status--error">{{ row.failed_requests }} failed</span>{% endif %}
+        </td>
+        <td data-value="{{ row.requests }}">{{ "{:,}".format(row.requests) }}</td>
+        <td data-value="{{ row.input_tokens }}">{{ "{:,}".format(row.input_tokens) }}</td>
+        <td data-value="{{ row.output_tokens }}">{{ "{:,}".format(row.output_tokens) }}</td>
+        <td data-value="{{ row.total_tokens }}">{{ "{:,}".format(row.total_tokens) }}</td>
+        <td data-value="{{ row.share }}">
+          <div class="llmu-share">
+            <span class="llmu-share__track" aria-hidden="true"><span class="llmu-share__fill" style="--llmu-share: {{ row.share }}%"></span></span>
+            <span class="llmu-share__value">{{ row.share }}%</span>
+          </div>
+        </td>
+        <td data-value="{{ row.last_used_at or '' }}">{% if row.last_used_at %}<span data-utc="{{ row.last_used_at }}">{{ row.last_used_at }}</span>{% else %}<span class="llmu-muted">Not in range</span>{% endif %}</td>
+      </tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card card--panel llmu-card" aria-labelledby="llmu-models-heading">
+  <header class="llmu-card__header">
+    <h2 id="llmu-models-heading" class="card__title">Usage by model</h2>
+  </header>
+  {% if report.models %}
+  <div class="table-responsive">
+    <table class="data-table" data-table-sortable>
+      <caption class="visually-hidden">LLM usage by provider and model</caption>
+      <thead><tr><th data-sort="string">Provider</th><th data-sort="string">Model</th><th data-sort="int">Requests</th><th data-sort="int">Input tokens</th><th data-sort="int">Output tokens</th><th data-sort="number">Share of tokens</th></tr></thead>
+      <tbody>{% for row in report.models %}<tr>
+        <td>{{ row.provider or 'Not reported' }}</td><td>{{ row.model or 'Not reported' }}</td>
+        <td data-value="{{ row.requests }}">{{ "{:,}".format(row.requests) }}</td>
+        <td data-value="{{ row.input_tokens }}">{{ "{:,}".format(row.input_tokens) }}</td>
+        <td data-value="{{ row.output_tokens }}">{{ "{:,}".format(row.output_tokens) }}</td>
+        <td data-value="{{ row.share }}">{{ row.share }}%</td>
+      </tr>{% endfor %}</tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="llmu-empty">No models used in this date range.</p>
+  {% endif %}
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/tables.js') }}" defer></script>{% endblock %}

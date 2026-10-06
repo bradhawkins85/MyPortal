@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -15,6 +16,7 @@ from app.core.config import get_settings
 from app.core.logging import log_info, log_warning
 from app.repositories import rag_index as rag_repo
 from app.services import ai_consent
+from app.services import llm_usage
 from app.services import rag_relationships
 from app.services import rag_embedding_identity
 from app.services.rag_urls import canonical_source_url
@@ -259,10 +261,33 @@ async def embed_text(text: str) -> list[float]:
             "input": text,
             "encoding_format": "float",
         }
-    async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
-        response = await client.post(url, json=payload, headers=headers)
-        response.raise_for_status()
-        body = response.json()
+    started = time.monotonic()
+    try:
+        async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            body = response.json()
+    except Exception:
+        await llm_usage.record_usage(
+            feature="rag_embeddings",
+            provider=provider,
+            model=settings.rag_embedding_model,
+            status="failed",
+            usage=(0, 0),
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        raise
+    reported = llm_usage.extract_token_usage(body)
+    await llm_usage.record_usage(
+        feature="rag_embeddings",
+        provider=provider,
+        model=settings.rag_embedding_model,
+        status="succeeded",
+        # Embeddings consume input tokens only.
+        usage=(reported[0], 0) if reported else None,
+        prompt=text,
+        duration_ms=int((time.monotonic() - started) * 1000),
+    )
     try:
         vector = (
             body["embeddings"][0]

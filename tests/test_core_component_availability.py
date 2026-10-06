@@ -28,6 +28,7 @@ EXPECTED_SLUGS = {
     "backup_register",
     "rag_index",
     "ai_quality",
+    "llm_usage",
     "ai_tag_synonyms",
     "tray",
     "outlook_contacts",
