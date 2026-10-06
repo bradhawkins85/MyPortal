@@ -754,4 +754,5 @@ def test_external_customer_messages_are_not_labelled_as_automation() -> None:
     assert "reply.external_reference and not reply.author_id" not in template
     assert "reply.external_reference.startswith('shipment-watch:')" in template
     assert "reply.author_id != ticket.requester_id" in template
-    assert 'data-message-kind="{{ \'internal\' if reply.is_internal else (\'automation\' if reply_is_automation' in template
+    assert "('internal' if reply.is_internal else ('automation' if reply_is_automation" in template
+    assert 'data-message-kind="{{ reply_kind }}"' in template

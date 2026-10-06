@@ -11593,9 +11593,18 @@ async def _render_ticket_detail(
         ticket_url=str(request.url),
     )
 
+    from app.services import tray as tray_service
+
     timeline_entries = sorted(
         [
-            *({**reply, "type": "reply"} for reply in enriched_replies),
+            *(
+                {
+                    **reply,
+                    "type": "reply",
+                    "is_ai": tray_service.is_troubleshoot_agent_reply(reply),
+                }
+                for reply in enriched_replies
+            ),
             *({**recording, "type": "call_recording"} for recording in enriched_recordings),
         ],
         key=lambda item: (

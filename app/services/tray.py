@@ -877,6 +877,15 @@ TROUBLESHOOT_AGENT_EMAIL = "troubleshooting-agent@myportal.local"
 TROUBLESHOOT_AGENT_NAME = "Troubleshooting Agent"
 
 
+def is_troubleshoot_agent_reply(reply: dict[str, Any]) -> bool:
+    """True for notes the AI troubleshooter wrote (shown as the "AI" type)."""
+
+    return (
+        reply.get("author_id") is None
+        and str(reply.get("author_email") or "").strip().lower() == TROUBLESHOOT_AGENT_EMAIL
+    )
+
+
 async def add_troubleshoot_note(ticket_id: int, body_html: str) -> dict[str, Any] | None:
     """Store an internal (staff-only) troubleshooter status note on a ticket.
 

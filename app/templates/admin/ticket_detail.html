@@ -1634,6 +1634,7 @@
                 <button type="button" data-history-filter="technician" aria-pressed="false">Technician</button>
                 <button type="button" data-history-filter="internal" aria-pressed="false">Internal</button>
                 <button type="button" data-history-filter="automation" aria-pressed="false">Automation</button>
+                <button type="button" data-history-filter="ai" aria-pressed="false">AI</button>
               </div>
               {% if ticket_timeline_entries %}
                 <div class="timeline timeline--conversation" data-ticket-timeline data-ticket-id="{{ ticket.id }}">
@@ -1724,10 +1725,11 @@
                     {% else %}
                       {% set reply = timeline_entry %}
                       {% set reply_is_automation = reply.external_reference and reply.external_reference.startswith('shipment-watch:') %}
+                      {% set reply_kind = 'ai' if reply.is_ai else ('internal' if reply.is_internal else ('automation' if reply_is_automation else ('technician' if reply.author_id and reply.author_id != ticket.requester_id else 'customer'))) %}
                       <article
-                        class="timeline__event timeline__event--{{ 'internal' if reply.is_internal else ('automation' if reply_is_automation else ('technician' if reply.author_id and reply.author_id != ticket.requester_id else 'customer')) }}{% if reply.is_split_hidden %} timeline__event--split-hidden{% endif %}"
+                        class="timeline__event timeline__event--{{ reply_kind }}{% if reply.is_split_hidden %} timeline__event--split-hidden{% endif %}"
                         data-ticket-reply
-                        data-message-kind="{{ 'internal' if reply.is_internal else ('automation' if reply_is_automation else ('technician' if reply.author_id and reply.author_id != ticket.requester_id else 'customer')) }}"
+                        data-message-kind="{{ reply_kind }}"
                         {% if reply.is_split_hidden %}data-split-hidden="true" hidden{% endif %}
                         data-reply-id="{{ reply.id }}"
                         data-reply-minutes="{{ reply.minutes_spent if reply.minutes_spent is not none else '' }}"
@@ -1746,8 +1748,10 @@
                             </span>
                             <span class="timeline__action">
                               {{ reply.author.email if reply.author else (reply.author_display_name or reply.author_email or 'System') }}
-                              <span class="timeline__direction">{{ 'Internal note' if reply.is_internal else ('Automation' if reply_is_automation else ('Technician reply' if reply.author_id and reply.author_id != ticket.requester_id else 'Customer message')) }}</span>
-                              {% if reply.is_internal %}
+                              <span class="timeline__direction">{{ 'AI note' if reply.is_ai else ('Internal note' if reply.is_internal else ('Automation' if reply_is_automation else ('Technician reply' if reply.author_id and reply.author_id != ticket.requester_id else 'Customer message'))) }}</span>
+                              {% if reply.is_ai %}
+                                <span class="badge badge--info" title="Written by the AI troubleshooter. Visible to staff only.">AI</span>
+                              {% elif reply.is_internal %}
                                 <span class="badge badge--muted">Internal</span>
                               {% endif %}
                               {% if reply.is_resolution_step %}

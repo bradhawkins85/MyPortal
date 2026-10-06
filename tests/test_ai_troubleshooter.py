@@ -525,3 +525,25 @@ def test_asset_route_starts_multi_stage_run(monkeypatch):
     (call,) = started
     assert "Drops every hour" in call["problem"]
     assert call["device"]["device_uid"] == "dev-uid"
+
+
+def test_troubleshooter_notes_are_the_ai_commenter_type():
+    assert tray_service.is_troubleshoot_agent_reply(
+        {"author_id": None, "author_email": tray_service.TROUBLESHOOT_AGENT_EMAIL}
+    )
+    # A real user with the same address is not the AI agent.
+    assert not tray_service.is_troubleshoot_agent_reply(
+        {"author_id": 3, "author_email": tray_service.TROUBLESHOOT_AGENT_EMAIL}
+    )
+    assert not tray_service.is_troubleshoot_agent_reply(
+        {"author_id": None, "author_email": "someone@example.com"}
+    )
+
+
+def test_ticket_template_renders_ai_commenter_type():
+    template = (
+        Path(__file__).resolve().parents[1] / "app" / "templates" / "admin" / "ticket_detail.html"
+    ).read_text(encoding="utf-8")
+    assert "{% set reply_kind = 'ai' if reply.is_ai else" in template
+    assert 'data-message-kind="{{ reply_kind }}"' in template
+    assert 'data-history-filter="ai"' in template
