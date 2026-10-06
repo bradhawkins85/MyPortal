@@ -173,3 +173,55 @@ func TestResolveLogRequestsAcceptsFiles(t *testing.T) {
 		t.Fatalf("specs=%v refused=%v", specs, refused)
 	}
 }
+
+func TestFileRootsAcceptsValidExtraFolders(t *testing.T) {
+	roots, ignored := FileRoots(WindowsLogFileRoots, windowsPaths, []string{
+		`C:\ProgramData\Vendor\Logs`,
+		`C:/Program Files/Vendor/logs`,
+		`C:\Users\*\AppData\Local\Vendor`,
+		"",
+		`C:\`,
+		`C:\Users`,
+		`C:\Users\*`,
+		`C:\*\Vendor\Logs`,
+		`C:\ProgramData\Ven*\Logs`,
+		`C:\ProgramData\..\Windows\System32`,
+		`\\server\share\logs`,
+		`/var/vendor/logs`,
+	})
+	if got := roots[len(WindowsLogFileRoots):]; strings.Join(got, "|") != `C:\ProgramData\Vendor\Logs|C:/Program Files/Vendor/logs|C:\Users\*\AppData\Local\Vendor` {
+		t.Fatalf("extra roots = %v", got)
+	}
+	if len(ignored) != 8 {
+		t.Fatalf("ignored = %v", ignored)
+	}
+	if _, err := windowsPaths.allowedFilePattern(`C:\Program Files\Vendor\logs\agent.log`, roots); err != nil {
+		t.Fatalf("extra folder not usable: %v", err)
+	}
+	if _, err := windowsPaths.allowedFilePattern(`C:\Program Files\Vendor\agent.log`, roots); err == nil {
+		t.Fatal("parent of an extra folder was allowed")
+	}
+	if roots, _ := FileRoots(nil, posixPaths, []string{"/opt/vendor/logs"}); roots != nil {
+		t.Fatalf("platform without file logs gained roots: %v", roots)
+	}
+}
+
+func TestAgentUsesExtraLogFoldersFromRequest(t *testing.T) {
+	a := NewAgent()
+	a.CallLLM = nil
+	var gotRoots []string
+	a.CollectLogs = func(_ context.Context, specs []LogSpec) (string, []string, error) {
+		gotRoots = a.roots()
+		return "", nil, nil
+	}
+	_, _ = a.Run(context.Background(), Request{Mode: ModeCollectLogs, ExtraLogFolders: []string{"/opt/vendor/logs"}})
+	if len(platformFileRoots) == 0 {
+		if gotRoots != nil {
+			t.Fatalf("roots = %v", gotRoots)
+		}
+		return
+	}
+	if gotRoots[len(gotRoots)-1] != "/opt/vendor/logs" && platformPathStyle == posixPaths {
+		t.Fatalf("roots = %v", gotRoots)
+	}
+}

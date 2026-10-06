@@ -901,6 +901,14 @@ class Settings(BaseSettings):
     troubleshoot_web_search_max_pages: int = Field(
         default=3, validation_alias="TROUBLESHOOT_WEB_SEARCH_MAX_PAGES", ge=1, le=5
     )
+    # Extra folders the troubleshooter may read log files from, on top of the
+    # built-in list, separated by ";". The tray agent re-checks each one.
+    troubleshoot_log_folders_windows: str | None = Field(
+        default=None, validation_alias="TROUBLESHOOT_LOG_FOLDERS_WINDOWS"
+    )
+    troubleshoot_log_folders_macos: str | None = Field(
+        default=None, validation_alias="TROUBLESHOOT_LOG_FOLDERS_MACOS"
+    )
     matrixbot_ai_response_delay_minutes: int = Field(
         default=5, validation_alias="MATRIXBOT_AI_RESPONSE_DELAY_MINUTES", ge=1
     )

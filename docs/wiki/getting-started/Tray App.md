@@ -453,6 +453,12 @@ in stages, each posted to the ticket as an internal note:
    `.wer`, `.lo_`, `.ips`, `.crash`, `.panic` or `.diag`. The device reads
    at most 10 files per request (newest first; a wildcard only reads files
    changed in the requested window) and the last 1 MB of each.
+   Owners can allow more folders with `TROUBLESHOOT_LOG_FOLDERS_WINDOWS` and
+   `TROUBLESHOOT_LOG_FOLDERS_MACOS` (separated by `;`, for example
+   `C:\ProgramData\Vendor\Logs;C:\Users\*\AppData\Local\Vendor\Logs`).
+   They are added to the built-in list, sent to the device with the request
+   and re-checked there; a folder must name at least two real folders, so a
+   drive or `C:\Users\*` on its own is ignored.
 3. **Log collection** - when logs are needed, the server sends a
    `collect_logs` troubleshoot command to the asset's tray device. The
    device re-checks every source against its own allowlist, collects and

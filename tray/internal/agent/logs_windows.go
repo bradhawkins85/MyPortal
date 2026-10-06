@@ -22,11 +22,8 @@ var (
 	platformPathStyle = windowsPaths
 )
 
-// isPlatformLogSource reports whether source is an allowlisted channel or
-// log file.
-func isPlatformLogSource(source string) bool {
-	return isWindowsLogSource(source) || isFileLogSource(source)
-}
+// isPlatformLogSource reports whether source is an allowlisted channel.
+func isPlatformLogSource(source string) bool { return isWindowsLogSource(source) }
 
 // collectPlatformLogs reads each requested Windows Event Log channel with
 // wevtutil, which is built into Windows and read-only. It is used instead of

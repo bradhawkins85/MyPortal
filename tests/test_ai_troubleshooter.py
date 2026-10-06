@@ -816,3 +816,34 @@ def test_analysis_maps_each_collected_file_to_its_request(rec):
     assert user_prompt.count("App install failures") == 2
     assert "default log set" not in user_prompt
     assert "Unmatched exit code (1603)" in user_prompt
+
+
+def test_owner_can_allow_extra_log_folders(rec, monkeypatch):
+    settings = ts.get_settings()
+    monkeypatch.setattr(
+        settings,
+        "troubleshoot_log_folders_windows",
+        "C:\\ProgramData\\Vendor\\Logs; C:/Program Files/Vendor/logs\nC:\;C:\\Users\\*;C:\\ProgramData\\Ven*\\Logs",
+    )
+    monkeypatch.setattr(settings, "troubleshoot_log_folders_macos", "/opt/vendor/logs;/opt")
+    assert ts.extra_log_folders("windows") == ["C:\\ProgramData\\Vendor\\Logs", "C:\\Program Files\\Vendor\\logs"]
+    assert ts.extra_log_folders("macos") == ["/opt/vendor/logs"]
+    assert ts.normalise_file_source("file:C:\\ProgramData\\Vendor\\Logs\\agent.log", "windows") == (
+        "file:C:\\ProgramData\\Vendor\\Logs\\agent.log"
+    )
+    assert ts.normalise_file_source("file:C:\\ProgramData\\Vendor\\agent.log", "windows") is None
+
+    rec.chat_responses = [
+        _research_response(),
+        _plan_response([{"source": "file:C:\\Program Files\\Vendor\\logs\\*.log", "reason": "Vendor agent errors"}]),
+    ]
+    plan = _run()
+    assert plan["log_requests"][0]["source"] == "file:C:\\Program Files\\Vendor\\logs\\*.log"
+    (dispatch,) = rec.dispatched
+    assert dispatch["payload"]["extra_log_folders"] == ts.extra_log_folders("windows")
+    assert "C:\\ProgramData\\Vendor\\Logs: Added by this portal's owner" in rec.chats[1][0]["content"]
+
+
+def test_extra_log_folders_off_by_default():
+    assert ts.extra_log_folders("windows") == []
+    assert ts.extra_log_folders("macos") == []

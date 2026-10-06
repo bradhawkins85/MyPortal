@@ -39,6 +39,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
 from app.services import ai_consent
 from app.services import ai_prompt_security
@@ -269,9 +270,9 @@ def normalise_file_source(source: str, platform: str) -> str | None:
     path = raw[len(FILE_SOURCE_PREFIX) :].strip()
     candidates: list[tuple[bool, dict[str, str]]] = []
     if platform in {"windows", "unknown"}:
-        candidates.append((True, WINDOWS_LOG_FILE_ROOTS))
+        candidates.append((True, allowed_log_file_roots("windows")))
     if platform in {"macos", "unknown"}:
-        candidates.append((False, MACOS_LOG_FILE_ROOTS))
+        candidates.append((False, allowed_log_file_roots("macos")))
     for windows, roots in candidates:
         candidate = _expand_windows_variables(path) if windows else path
         if not windows and candidate.startswith("~/"):
@@ -289,12 +290,68 @@ def normalise_file_source(source: str, platform: str) -> str | None:
     return None
 
 
+_MAX_EXTRA_LOG_FOLDERS = 50
+_EXTRA_FOLDER_DESCRIPTION = "Added by this portal's owner"
+
+
+def _valid_extra_root(folder: str, windows: bool) -> bool:
+    """Mirror of validExtraRoot in the tray agent."""
+
+    segments = _split_path(folder, windows)
+    if not segments or len(segments) < 3 or segments[1] == "*":
+        return False
+    literal = 0
+    for segment in segments[1:]:
+        if segment == "*":
+            continue
+        if any(ch in segment for ch in "*?"):
+            return False
+        literal += 1
+    return literal >= 2
+
+
+def extra_log_folders(platform: str) -> list[str]:
+    """Owner-configured log folders (TROUBLESHOOT_LOG_FOLDERS_WINDOWS/_MACOS).
+
+    Entries are separated by ``;`` or new lines. Invalid entries (a drive,
+    a top-level folder, wildcards inside a name, ``..``) are skipped here and
+    again on the device.
+    """
+
+    settings = get_settings()
+    sources: list[tuple[bool, Any]] = []
+    if platform in {"windows", "unknown"}:
+        sources.append((True, getattr(settings, "troubleshoot_log_folders_windows", None)))
+    if platform in {"macos", "unknown"}:
+        sources.append((False, getattr(settings, "troubleshoot_log_folders_macos", None)))
+    folders: list[str] = []
+    for windows, raw in sources:
+        count = 0
+        for entry in re.split(r"[;\n]", str(raw or "")):
+            folder = entry.strip().strip('"').strip()
+            if not folder:
+                continue
+            count += 1
+            if count > _MAX_EXTRA_LOG_FOLDERS or not _valid_extra_root(folder, windows):
+                log_warning("Ignoring invalid troubleshooter log folder", folder=folder)
+                continue
+            if windows:
+                folder = folder.replace("/", "\\")
+            if folder not in folders:
+                folders.append(folder)
+    return folders
+
+
 def allowed_log_file_roots(platform: str) -> dict[str, str]:
     if platform == "windows":
-        return dict(WINDOWS_LOG_FILE_ROOTS)
-    if platform == "macos":
-        return dict(MACOS_LOG_FILE_ROOTS)
-    return {**WINDOWS_LOG_FILE_ROOTS, **MACOS_LOG_FILE_ROOTS}
+        roots = dict(WINDOWS_LOG_FILE_ROOTS)
+    elif platform == "macos":
+        roots = dict(MACOS_LOG_FILE_ROOTS)
+    else:
+        roots = {**WINDOWS_LOG_FILE_ROOTS, **MACOS_LOG_FILE_ROOTS}
+    for folder in extra_log_folders(platform):
+        roots.setdefault(folder, _EXTRA_FOLDER_DESCRIPTION)
+    return roots
 
 
 def file_source_matches(request_source: str, section_source: str) -> bool:
@@ -975,6 +1032,7 @@ async def run_research_and_plan(
         "ticket_id": ticket_id,
         "mode": MODE_COLLECT_LOGS,
         "log_requests": plan["log_requests"],
+        "extra_log_folders": extra_log_folders(platform),
         tray_service.SERVER_CONTEXT_KEY: {
             "problem": problem,
             "model": str(llm.get("model") or ""),
@@ -1311,6 +1369,7 @@ __all__ = [
     "MACOS_LOG_SOURCES",
     "allowed_log_sources",
     "allowed_log_file_roots",
+    "extra_log_folders",
     "normalise_file_source",
     "file_source_matches",
     "analyse_collected_logs",

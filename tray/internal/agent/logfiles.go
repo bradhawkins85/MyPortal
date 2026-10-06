@@ -183,14 +183,61 @@ func (s pathStyle) allowedFile(path string, roots []string) bool {
 	return false
 }
 
-// isFileLogSource reports whether source is a file request this platform
-// may serve.
-func isFileLogSource(source string) bool {
-	pattern, ok := strings.CutPrefix(source, FileSourcePrefix)
-	if !ok || len(platformFileRoots) == 0 {
+// maxExtraLogFolders caps how many extra folders the server may add.
+const maxExtraLogFolders = 50
+
+// FileRoots returns the built-in roots plus each valid extra folder the
+// server's owner configured, and the extras it ignored. An extra folder must
+// be absolute and name at least two real folders, starting with a real one
+// (so never a drive, "/Users" or "C:\Users\*"), with no "." or ".." and
+// wildcards only as a whole "*" folder name.
+func FileRoots(builtin []string, style pathStyle, extra []string) ([]string, []string) {
+	if len(builtin) == 0 {
+		// This platform reads no log files.
+		return nil, nil
+	}
+	roots := append([]string(nil), builtin...)
+	var ignored []string
+	for i, folder := range extra {
+		folder = strings.TrimSpace(folder)
+		if folder == "" {
+			continue
+		}
+		if i >= maxExtraLogFolders || !validExtraRoot(style, folder) {
+			ignored = append(ignored, folder)
+			continue
+		}
+		roots = append(roots, folder)
+	}
+	return roots, ignored
+}
+
+func validExtraRoot(style pathStyle, folder string) bool {
+	segs, err := style.splitPath(folder)
+	if err != nil || len(segs) < 3 {
 		return false
 	}
-	_, err := platformPathStyle.allowedFilePattern(strings.TrimSpace(pattern), platformFileRoots)
+	literal := 0
+	for _, seg := range segs[1:] {
+		switch {
+		case seg == "*":
+		case hasWildcard(seg):
+			return false
+		default:
+			literal++
+		}
+	}
+	return segs[1] != "*" && literal >= 2
+}
+
+// isFileLogSource reports whether source is a file request that may be
+// served from roots.
+func isFileLogSource(source string, roots []string) bool {
+	pattern, ok := strings.CutPrefix(source, FileSourcePrefix)
+	if !ok || len(roots) == 0 {
+		return false
+	}
+	_, err := platformPathStyle.allowedFilePattern(strings.TrimSpace(pattern), roots)
 	return err == nil
 }
 

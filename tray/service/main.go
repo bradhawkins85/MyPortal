@@ -647,6 +647,9 @@ func (d *daemon) handleTroubleshoot(msg map[string]json.RawMessage) {
 	if t, ok := msg["log_requests"]; ok {
 		_ = json.Unmarshal(t, &req.LogRequests)
 	}
+	if t, ok := msg["extra_log_folders"]; ok {
+		_ = json.Unmarshal(t, &req.ExtraLogFolders)
+	}
 
 	logger.Info("troubleshoot: running agent (ticket %d, command %d, model %q)",
 		req.TicketID, req.CommandID, llm.Model)

@@ -15,7 +15,7 @@ var ErrLogsUnsupported = errors.New("endpoint log collection is not supported on
 // event logs from the platform's log tool and "file:" specs from allowlisted
 // log folders. It returns the combined text and a list of the human-readable
 // sources it read. It is strictly read-only.
-func collectLogs(ctx context.Context, specs []LogSpec) (string, []string, error) {
+func collectLogs(ctx context.Context, specs []LogSpec, fileRoots []string) (string, []string, error) {
 	var eventSpecs, fileSpecs []LogSpec
 	for _, spec := range specs {
 		if strings.HasPrefix(spec.Source, FileSourcePrefix) {
@@ -41,7 +41,7 @@ func collectLogs(ctx context.Context, specs []LogSpec) (string, []string, error)
 			sources = append(sources, read...)
 		}
 	}
-	text, read := collectFileLogs(ctx, fileSpecs, platformFileRoots, platformPathStyle, time.Now())
+	text, read := collectFileLogs(ctx, fileSpecs, fileRoots, platformPathStyle, time.Now())
 	b.WriteString(text)
 	sources = append(sources, read...)
 	return b.String(), sources, nil

@@ -64,6 +64,9 @@ type Request struct {
 	Mode string
 	// LogRequests names the sources to collect in ModeCollectLogs.
 	LogRequests []LogRequest
+	// ExtraLogFolders are log folders the server's owner allowed on top of
+	// the built-in list (TROUBLESHOOT_LOG_FOLDERS_*). Each is re-validated.
+	ExtraLogFolders []string
 }
 
 // Result is the finished agent output, ready to be reported to the server. A
@@ -93,6 +96,10 @@ type Agent struct {
 	OnProgress func(stage, message string)
 
 	Window time.Duration
+
+	// fileRoots are the folders "file:" sources may be read from for the
+	// current job: the platform list plus the job's valid extra folders.
+	fileRoots []string
 }
 
 // Progress stages reported through Agent.OnProgress. They match the stages
@@ -112,12 +119,27 @@ func (a *Agent) progress(stage, message string) {
 // NewAgent returns an Agent wired with the real platform log collector and the
 // OpenAI-compatible LLM client.
 func NewAgent() *Agent {
-	return &Agent{
-		CollectLogs:   collectLogs,
-		AllowedSource: isPlatformLogSource,
-		CallLLM:       newLLMClient().Chat,
-		Window:        DefaultWindow,
+	a := &Agent{
+		CallLLM: newLLMClient().Chat,
+		Window:  DefaultWindow,
 	}
+	a.CollectLogs = func(ctx context.Context, specs []LogSpec) (string, []string, error) {
+		return collectLogs(ctx, specs, a.roots())
+	}
+	a.AllowedSource = func(source string) bool {
+		if strings.HasPrefix(source, FileSourcePrefix) {
+			return isFileLogSource(source, a.roots())
+		}
+		return isPlatformLogSource(source)
+	}
+	return a
+}
+
+func (a *Agent) roots() []string {
+	if a.fileRoots == nil {
+		return platformFileRoots
+	}
+	return a.fileRoots
 }
 
 // Run executes a full troubleshooting job. The returned Result is always safe
@@ -135,12 +157,20 @@ func (a *Agent) Run(ctx context.Context, req Request) (Result, error) {
 
 	var errs []string
 
+	roots, ignored := FileRoots(platformFileRoots, platformPathStyle, req.ExtraLogFolders)
+	a.fileRoots = roots
+	if len(ignored) > 0 {
+		errs = append(errs, fmt.Sprintf("ignored extra log folders that are not valid on this endpoint: %s", strings.Join(ignored, ", ")))
+	}
+
 	collectOnly := req.Mode == ModeCollectLogs
 	specs := defaultLogSpecs(window)
 	if collectOnly {
 		allowed := a.AllowedSource
 		if allowed == nil {
-			allowed = isPlatformLogSource
+			allowed = func(source string) bool {
+				return isPlatformLogSource(source) || isFileLogSource(source, a.roots())
+			}
 		}
 		requested, refused := ResolveLogRequests(req.LogRequests, allowed)
 		if len(refused) > 0 {
