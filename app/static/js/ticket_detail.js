@@ -1055,6 +1055,8 @@
     const initialCompanyId = select.dataset.initialCompanyId || '';
     const ticketNumber = (linkedContainer.dataset.ticketNumber || '').trim();
     const ticketSubject = (linkedContainer.dataset.ticketSubject || '').trim();
+    // Requester opted out of AI processing: the troubleshooter must stay off.
+    const aiOptedOut = linkedContainer.dataset.aiOptedOut === 'true';
     const lookupButton = document.querySelector('[data-requester-assets-lookup]');
     const lookupResults = document.querySelector('[data-requester-assets-results]');
     const lookupStatus = document.querySelector('[data-requester-assets-status]');
@@ -1311,11 +1313,20 @@
         troubleshootButton.setAttribute('data-linked-asset-troubleshoot', '');
         troubleshootButton.setAttribute('data-asset-id', assetIdValue);
         troubleshootButton.setAttribute('data-asset-name', displayName);
-        troubleshootButton.title = 'Run AI troubleshooter on this asset';
-        troubleshootButton.setAttribute('aria-label', `Run AI troubleshooter on ${displayName}`);
+        if (aiOptedOut) {
+          troubleshootButton.title = 'AI is turned off for this ticket because the requester opted out';
+          troubleshootButton.setAttribute(
+            'aria-label',
+            `AI troubleshooter unavailable for ${displayName}: the requester opted out of AI`,
+          );
+        } else {
+          troubleshootButton.title = 'Run AI troubleshooter on this asset';
+          troubleshootButton.setAttribute('aria-label', `Run AI troubleshooter on ${displayName}`);
+        }
         if (record.tray_device_uid) {
           troubleshootButton.setAttribute('data-device-uid', record.tray_device_uid);
-        } else {
+        }
+        if (!record.tray_device_uid || aiOptedOut) {
           troubleshootButton.disabled = true;
           troubleshootButton.setAttribute('aria-disabled', 'true');
         }

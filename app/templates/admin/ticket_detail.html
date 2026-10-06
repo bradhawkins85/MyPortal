@@ -1031,6 +1031,7 @@
                   data-details-form-id="ticket-details-form"
                   data-ticket-number="{{ ticket.ticket_number or ticket.id }}"
                   data-ticket-subject="{{ ticket.subject | e }}"
+                  data-ai-opted-out="{{ 'true' if ticket_ai_opted_out else 'false' }}"
                 >
                   <ul class="ticket-assets-linked__list" data-linked-assets-list>
                     {% for asset in ticket_suggested_assets %}
@@ -1136,9 +1137,14 @@
                             data-asset-id="{{ asset.asset_id }}"
                             data-device-uid="{{ asset.tray_device_uid or '' }}"
                             data-asset-name="{{ display_name | e }}"
-                            {% if not asset.tray_device_uid %}disabled aria-disabled="true"{% endif %}
+                            {% if not asset.tray_device_uid or ticket_ai_opted_out %}disabled aria-disabled="true"{% endif %}
+                            {% if ticket_ai_opted_out %}
+                            title="AI is turned off for this ticket because the requester opted out"
+                            aria-label="AI troubleshooter unavailable for {{ display_name }}: the requester opted out of AI"
+                            {% else %}
                             title="Run AI troubleshooter on this asset"
                             aria-label="Run AI troubleshooter on {{ display_name }}"
+                            {% endif %}
                           >
                             <span aria-hidden="true">🤖</span>
                           </button>

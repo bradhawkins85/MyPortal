@@ -47,6 +47,7 @@ from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import tray as tray_repo
 from app.schemas.tray import TrayTroubleshootResponse, TicketAssetTroubleshootRequest
+from app.services import ai_consent
 from app.services import tray as tray_service
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
@@ -1870,11 +1871,17 @@ async def troubleshoot_ticket_asset(
 
     Requires helpdesk / super-admin access. The asset must be linked to the
     ticket and have an active tray device in the same company as the ticket.
+    Refused when the ticket's requester has opted out of AI processing.
     """
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found."
+        )
+    if not await ai_consent.is_ai_allowed_for_ticket(ticket):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=tray_service.TROUBLESHOOT_AI_OPT_OUT_DETAIL,
         )
 
     linked_assets = await tickets_repo.list_ticket_assets(ticket_id)

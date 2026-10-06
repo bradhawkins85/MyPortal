@@ -29,6 +29,7 @@ from app.repositories import assets as assets_repo
 from app.repositories import companies as companies_repo
 from app.repositories import site_settings as site_settings_repo
 from app.repositories import tray as tray_repo
+from app.services import ai_consent
 from app.services import service_status as service_status_service
 
 _settings = get_settings()
@@ -653,6 +654,21 @@ async def send_to_device(
         return False
 
 
+TROUBLESHOOT_AI_OPT_OUT_DETAIL = (
+    "The ticket's requester has opted out of AI processing, so the AI "
+    "troubleshooter cannot run on this ticket."
+)
+
+
+async def _troubleshoot_still_allowed(payload: dict[str, Any]) -> bool:
+    """Re-check AI consent for a queued troubleshoot command (fails closed)."""
+
+    ticket_id = payload.get("ticket_id")
+    if ticket_id in (None, ""):
+        return False
+    return await ai_consent.is_ai_allowed_for_ticket_id(ticket_id)
+
+
 async def deliver_queued_commands(device: dict[str, Any]) -> dict[str, int]:
     """Send queued commands to a freshly connected device.
 
@@ -683,6 +699,19 @@ async def deliver_queued_commands(device: dict[str, Any]) -> dict[str, int]:
             payload = {}
         payload.setdefault("type", command.get("command"))
         payload.setdefault("command_id", command.get("id"))
+
+        if command.get("command") == "troubleshoot" and not await _troubleshoot_still_allowed(payload):
+            # The requester opted out of AI after the command was queued:
+            # never hand the ticket-derived prompt to the device.
+            await tray_repo.mark_command_completed(
+                int(command["id"]), error=TROUBLESHOOT_AI_OPT_OUT_DETAIL
+            )
+            log_info(
+                "Dropped queued troubleshoot command: requester opted out of AI",
+                command_id=command.get("id"),
+                device_uid=device_uid,
+            )
+            continue
 
         if await send_to_device(device_uid, payload):
             await tray_repo.mark_command_delivered(int(command["id"]))
