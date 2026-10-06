@@ -91,6 +91,7 @@ def test_build_report_calculates_token_share_and_lists_unused_functions(monkeypa
     async def fake_by_feature(start, end):
         return [
             {"feature": "agent", "requests": 3, "input_tokens": 500, "output_tokens": 250,
+             "models": ["llama3", "qwen"],
              "failed_requests": 0, "last_used_at": "2026-10-02 09:30:00"},
             {"feature": "legacy_caller", "requests": 1, "input_tokens": 100, "output_tokens": 150,
              "failed_requests": 1, "last_used_at": datetime(2026, 10, 1, 8, 0)},
@@ -113,6 +114,7 @@ def test_build_report_calculates_token_share_and_lists_unused_functions(monkeypa
     assert report["totals"]["total_tokens"] == 1000
     features = {row["feature"]: row for row in report["features"]}
     assert features["agent"]["share"] == 75.0
+    assert features["agent"]["models"] == ["llama3", "qwen"]
     assert features["agent"]["label"] == "MyPortal Agent"
     assert features["agent"]["last_used_at"] == "2026-10-02T09:30:00Z"
     assert features["legacy_caller"]["share"] == 25.0
@@ -120,6 +122,7 @@ def test_build_report_calculates_token_share_and_lists_unused_functions(monkeypa
     # Every known LLM function is listed even with no usage in the range.
     assert set(llm_usage.FEATURES_BY_KEY) <= set(features)
     assert features["ticket_ai_summary"]["requests"] == 0
+    assert features["ticket_ai_summary"]["models"] == []
     assert features["ticket_ai_summary"]["share"] == 0.0
     assert report["features"][0]["feature"] == "agent"
     assert report["models"][0]["share"] == 100.0
@@ -278,15 +281,15 @@ async def test_repository_aggregates_on_sqlite(monkeypatch):
                 await test_db.execute(statement)
             monkeypatch.setattr(usage_repo, "db", test_db)
 
-            for occurred_at, feature, status, tokens in (
-                (datetime(2026, 10, 1, 9), "agent", "succeeded", (100, 50)),
-                (datetime(2026, 10, 1, 23, 59), "agent", "failed", (0, 0)),
-                (datetime(2026, 10, 2, 10), "ticket_ai_tags", "succeeded", (30, 20)),
-                (datetime(2026, 10, 4, 0, 0), "agent", "succeeded", (999, 999)),
+            for occurred_at, feature, model, status, tokens in (
+                (datetime(2026, 10, 1, 9), "agent", "llama3", "succeeded", (100, 50)),
+                (datetime(2026, 10, 1, 23, 59), "agent", "qwen", "failed", (0, 0)),
+                (datetime(2026, 10, 2, 10), "ticket_ai_tags", None, "succeeded", (30, 20)),
+                (datetime(2026, 10, 4, 0, 0), "agent", "outside-range", "succeeded", (999, 999)),
             ):
                 await usage_repo.record_event(
                     occurred_at=occurred_at, feature=feature, provider="ollama",
-                    model="llama3", status=status, input_tokens=tokens[0],
+                    model=model, status=status, input_tokens=tokens[0],
                     output_tokens=tokens[1], tokens_estimated=False,
                     duration_ms=10, webhook_event_id=None,
                 )
@@ -299,13 +302,15 @@ async def test_repository_aggregates_on_sqlite(monkeypatch):
             }
             by_feature = {row["feature"]: row for row in await usage_repo.usage_by_feature(start, end)}
             assert by_feature["agent"]["requests"] == 2
+            assert by_feature["agent"]["models"] == ["llama3", "qwen"]
+            assert by_feature["ticket_ai_tags"]["models"] == ["Not reported"]
             assert by_feature["ticket_ai_tags"]["input_tokens"] == 30
             days = await usage_repo.usage_by_day(start, end)
             assert [(row["day"], row["requests"]) for row in days] == [
                 ("2026-10-01", 2), ("2026-10-02", 1),
             ]
             models = await usage_repo.usage_by_model(start, end)
-            assert models[0]["requests"] == 3
+            assert sum(row["requests"] for row in models) == 3
         finally:
             await test_db.disconnect()
 
@@ -333,9 +338,11 @@ def page_client(monkeypatch):
                        "total_tokens": 2000, "failed_requests": 0, "estimated_requests": 1},
             "features": [
                 {"feature": "agent", "label": "MyPortal Agent", "description": "Agent chat.",
+                 "models": ["llama3", "qwen"],
                  "requests": 2, "input_tokens": 1500, "output_tokens": 500, "total_tokens": 2000,
                  "failed_requests": 0, "share": 100.0, "last_used_at": "2026-10-02T09:30:00Z"},
                 {"feature": "ticket_ai_tags", "label": "Ticket AI tags", "description": "Tags.",
+                 "models": [],
                  "requests": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
                  "failed_requests": 0, "share": 0.0, "last_used_at": None},
             ],
@@ -361,6 +368,9 @@ def test_llm_usage_page_renders_date_range_and_function_share(page_client):
     assert 'name="start" value="2026-10-01"' in body
     assert 'name="end" value="2026-10-02"' in body
     assert "MyPortal Agent" in body
+    assert '>Model(s)</th>' in body
+    assert 'data-value="llama3, qwen">llama3, qwen</td>' in body
+    assert 'class="llmu-muted">Not in range</span>' in body
     assert "Ticket AI tags" in body
     assert "100.0%" in body
     assert "1,500" in body

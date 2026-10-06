@@ -83,6 +83,7 @@
       <caption class="visually-hidden">Every MyPortal function that uses the LLM, with its share of total tokens</caption>
       <thead><tr>
         <th data-sort="string">Function</th>
+        <th data-sort="string">Model(s)</th>
         <th data-sort="int">Requests</th>
         <th data-sort="int">Input tokens</th>
         <th data-sort="int">Output tokens</th>
@@ -96,6 +97,7 @@
           <span class="llmu-feature__desc">{{ row.description }}</span>
           {% if row.failed_requests %}<span class="status status--error">{{ row.failed_requests }} failed</span>{% endif %}
         </td>
+        <td data-value="{{ row.models|join(', ') }}">{% if row.models %}{{ row.models|join(', ') }}{% else %}<span class="llmu-muted">{{ 'Not reported' if row.requests else 'Not in range' }}</span>{% endif %}</td>
         <td data-value="{{ row.requests }}">{{ "{:,}".format(row.requests) }}</td>
         <td data-value="{{ row.input_tokens }}">{{ "{:,}".format(row.input_tokens) }}</td>
         <td data-value="{{ row.output_tokens }}">{{ "{:,}".format(row.output_tokens) }}</td>

@@ -14,7 +14,8 @@ admins only) shows how much MyPortal uses its LLM providers.
 - **Token share by MyPortal function** – every MyPortal function that calls the
   LLM (ticket AI summaries, tags, insights, reply suggestions, the Agent, AI
   automation actions, knowledge base search, call summaries, RAG embeddings and
-  so on), with its requests, tokens and percentage of total tokens. Functions
+  so on), with the distinct model(s) it used in the selected range, its requests,
+  tokens and percentage of total tokens. Missing model names show as *Not reported*. Functions
   that did not run in the range are listed with 0%.
 - **Usage by model** – the same totals per provider and model.
 

@@ -388,6 +388,7 @@ async def build_report(start_date: date, end_date: date) -> dict[str, Any]:
         features.append({
             **row,
             "feature": key,
+            "models": row.get("models", []),
             "label": feature_label(key),
             "description": feature.description if feature else "Requests from an unlisted caller.",
             "last_used_at": _iso_utc(row["last_used_at"]),

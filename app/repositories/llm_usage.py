@@ -95,9 +95,21 @@ async def usage_by_feature(start: datetime, end: datetime) -> list[dict[str, Any
         GROUP BY feature""",
         (_format_timestamp(start), _format_timestamp(end)),
     )
+    model_rows = await db.fetch_all(
+        """SELECT DISTINCT feature, model
+        FROM llm_usage_events
+        WHERE occurred_at >= ? AND occurred_at < ?""",
+        (_format_timestamp(start), _format_timestamp(end)),
+    )
+    models_by_feature: dict[str, set[str]] = {}
+    for row in model_rows or []:
+        key = str(row.get("feature") or "")
+        model = str(row.get("model") or "").strip() or "Not reported"
+        models_by_feature.setdefault(key, set()).add(model)
     return [
         {
             "feature": str(row.get("feature") or ""),
+            "models": sorted(models_by_feature.get(str(row.get("feature") or ""), set())),
             "requests": _int(row.get("requests")),
             "input_tokens": _int(row.get("input_tokens")),
             "output_tokens": _int(row.get("output_tokens")),
