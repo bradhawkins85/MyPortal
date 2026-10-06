@@ -651,7 +651,7 @@ func (c *Client) PostTroubleshootComplete(ctx context.Context, ticketID, command
 		}
 	}
 	if len(logBundle) > 0 {
-		fw, err := w.CreateFormFile("log_bundle", fmt.Sprintf("troubleshoot-logs-%d.gz", commandID))
+		fw, err := w.CreateFormFile("log_bundle", fmt.Sprintf("troubleshoot-logs-%d.tar.gz", commandID))
 		if err != nil {
 			return err
 		}

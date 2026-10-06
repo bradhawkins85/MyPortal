@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"archive/tar"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -254,17 +255,41 @@ func TestLogSourceAllowlistsAreQuoteFree(t *testing.T) {
 	}
 }
 
+// gunzip reads a .tar.gz log bundle and returns its files' contents joined.
 func gunzip(b []byte) (string, error) {
+	files, err := untar(b)
+	if err != nil {
+		return "", err
+	}
+	var out strings.Builder
+	for _, f := range files {
+		out.WriteString(f.Content)
+	}
+	return out.String(), nil
+}
+
+func untar(b []byte) ([]LogFile, error) {
 	zr, err := gzip.NewReader(bytes.NewReader(b))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer zr.Close()
-	data, err := io.ReadAll(zr)
-	if err != nil {
-		return "", err
+	tr := tar.NewReader(zr)
+	var files []LogFile
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return files, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		data, err := io.ReadAll(tr)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, LogFile{Name: hdr.Name, Content: string(data)})
 	}
-	return string(data), nil
 }
 
 func TestRunReportsProgress(t *testing.T) {

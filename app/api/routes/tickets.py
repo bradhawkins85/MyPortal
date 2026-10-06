@@ -1756,7 +1756,8 @@ async def receive_troubleshoot_result(
     attachment_id = None
     if log_bytes:
         ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        original_name = f"troubleshoot-logs-{command_id}-{ts}.gz"
+        extension = "tar.gz" if ai_troubleshooter.is_tar_bundle(log_bytes) else "gz"
+        original_name = f"troubleshoot-logs-{command_id}-{ts}.{extension}"
         try:
             attachment = await attachments_service.save_file_bytes(
                 ticket_id,

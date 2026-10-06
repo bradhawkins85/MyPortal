@@ -440,12 +440,36 @@ in stages, each posted to the ticket as an internal note:
    with a reason for each. Sources are limited to a fixed allowlist of
    Windows Event Log channels and macOS unified-log subsystems
    (`tray/internal/agent/logsources.go`, mirrored in
-   `app/services/ai_troubleshooter.py`).
+   `app/services/ai_troubleshooter.py`). Log files the articles tell the
+   technician to check (for example `CBS.log`, `setupapi.dev.log`,
+   `NetSetup.LOG`, `IntuneManagementExtension.log`, `Report.wer`, or a macOS
+   crash report) are requested as `file:<path>`; a `*` may match file or
+   folder names, and `%TEMP%`, `%ProgramData%`, `%SystemRoot%`, `%AppData%`
+   and `%LocalAppData%` are expanded. A file must be inside one of the
+   allowlisted log folders (`tray/internal/agent/logfiles.go`, such as
+   `C:\Windows\Logs`, `C:\Windows\Panther`, `C:\Windows\INF`,
+   `C:\Windows\CCM\Logs`, the Intune and Defender log folders, user temp
+   folders, `/var/log` and `~/Library/Logs`) and end in `.log`, `.txt`,
+   `.wer`, `.lo_`, `.ips`, `.crash`, `.panic` or `.diag`. The device reads
+   at most 10 files per request (newest first; a wildcard only reads files
+   changed in the requested window) and the last 1 MB of each.
+   Owners can allow more folders with `TROUBLESHOOT_LOG_FOLDERS_WINDOWS` and
+   `TROUBLESHOOT_LOG_FOLDERS_MACOS` (separated by `;`, for example
+   `C:\ProgramData\Vendor\Logs;C:\Users\*\AppData\Local\Vendor\Logs`).
+   They are added to the built-in list, sent to the device with the request
+   and re-checked there; a folder must name at least two real folders, so a
+   drive or `C:\Users\*` on its own is ignored.
 3. **Log collection** - when logs are needed, the server sends a
    `collect_logs` troubleshoot command to the asset's tray device. The
    device re-checks every source against its own allowlist, collects and
    scrubs the logs, and uploads them to `troubleshoot-complete`. The bundle
-   is attached to the ticket as a staff-only file.
+   is a `.tar.gz` with one file per log source (for example `System.log`,
+   `Microsoft-Windows-WLAN-AutoConfig_Operational.log`), attached to the
+   ticket as a staff-only file. On Windows the channels are read with the
+   built-in `wevtutil qe` (one line per event: time, level, event ID,
+   provider and message); a source that cannot be read keeps its own file
+   with the reason. Each collected log file is its own file in the bundle,
+   named after its path.
 4. **Log analysis** - the server sends the logs to the LLM along with the
    reason each was collected and the recommended steps, and posts the
    findings, likely causes and possible solutions.
@@ -491,8 +515,8 @@ raw log data is never uploaded unsanitised.
 3. It prompts the LLM for **actionable guidance** (the LLM never executes
    anything; the response is advisory text).
 4. The result — `guidance`, the `endpoint` hostname, and the sanitized
-   `log_bundle` (a gzip-compressed, redacted archive sent as a multipart
-   form file) — is posted to
+   `log_bundle` (a redacted `.tar.gz` with one file per log source, sent
+   as a multipart form file) — is posted to
    `POST /api/tickets/{ticket_id}/troubleshoot-complete`.
 5. The server verifies the command, attaches the bundle as a read-only
    (staff-only) ticket attachment, and stores the guidance as an internal
@@ -511,7 +535,7 @@ make run-agent ARGS="-prompt 'WiFi keeps dropping' -llm-base-url http://127.0.0.
 ```
 
 Flags: `-prompt`, `-endpoint`, `-llm-base-url`, `-llm-model`, `-llm-api-key`,
-`-window` (default `24h`), `-out` (write the gzip bundle to a file), and
+`-window` (default `24h`), `-out` (write the `.tar.gz` bundle to a file), and
 `-no-llm` (skip the LLM, bundle-only). Guidance is printed to stdout; the
 log bundle is written to `-out` when provided (otherwise the CLI only
 reports its size). Ctrl-C cancels an in-flight LLM call.

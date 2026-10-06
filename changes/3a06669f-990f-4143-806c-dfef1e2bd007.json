@@ -1,0 +1,7 @@
+{
+  "guid": "3a06669f-990f-4143-806c-dfef1e2bd007",
+  "occurred_at": "2026-10-06T12:30Z",
+  "change_type": "Feature",
+  "summary": "Added TROUBLESHOOT_LOG_FOLDERS_WINDOWS and TROUBLESHOOT_LOG_FOLDERS_MACOS so owners can allow extra folders the AI troubleshooter may read endpoint log files from.",
+  "content_hash": "e71dfcb3a7791372460429c6393b4dc0172c91436dd1b97fda7a3339b7d76080"
+}

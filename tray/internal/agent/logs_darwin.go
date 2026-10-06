@@ -16,6 +16,12 @@ import (
 // no sources.
 var defaultPlatformSources = []string{"macos:all"}
 
+// Log files may be read from these folders.
+var (
+	platformFileRoots = MacOSLogFileRoots
+	platformPathStyle = posixPaths
+)
+
 // isPlatformLogSource reports whether source is an allowlisted macOS source.
 func isPlatformLogSource(source string) bool { return isMacOSLogSource(source) }
 

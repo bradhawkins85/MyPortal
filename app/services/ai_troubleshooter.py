@@ -17,15 +17,20 @@ an internal (staff-only) note:
    solutions.
 
 The LLM never chooses what runs on the endpoint: log sources it suggests are
-validated against a fixed allowlist here and again on the device.
+validated against a fixed allowlist here and again on the device. Log files an
+article names (``file:<path>``) must sit in an allowlisted log folder and have
+a log file extension.
 """
 
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import html
+import io
 import json
 import re
+import tarfile
 import time
 import zlib
 from collections.abc import Awaitable, Mapping, Sequence
@@ -34,6 +39,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
 from app.services import ai_consent
 from app.services import ai_prompt_security
@@ -83,9 +89,55 @@ MACOS_LOG_SOURCES: dict[str, str] = {
     "macos:loginwindow": "Login window and authorisation",
 }
 
+# Folders the tray agent may read log files from, requested as
+# "file:<absolute path>" (a * wildcard may match names). A "*" folder matches
+# any user profile. Keep in sync with tray/internal/agent/logfiles.go.
+FILE_SOURCE_PREFIX = "file:"
+WINDOWS_LOG_FILE_ROOTS: dict[str, str] = {
+    "C:\\Windows\\Logs": "CBS, DISM, MoSetup, WindowsUpdate text logs",
+    "C:\\Windows\\Panther": "Windows setup and upgrade (setupact.log, setuperr.log)",
+    "C:\\Windows\\debug": "Domain join and Netlogon (NetSetup.LOG, netlogon.log)",
+    "C:\\Windows\\INF": "Driver installation (setupapi.dev.log)",
+    "C:\\Windows\\Temp": "Installer and service logs written as SYSTEM",
+    "C:\\Windows\\CCM\\Logs": "Configuration Manager client logs",
+    "C:\\Windows\\System32\\LogFiles": "Firewall (pfirewall.log), HTTPERR and other service logs",
+    "C:\\Windows\\SoftwareDistribution": "Windows Update (ReportingEvents.log)",
+    "C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs": "Intune Management Extension and Win32 app installs",
+    "C:\\ProgramData\\Microsoft\\Windows Defender\\Support": "Defender support logs (MPLog-*.log)",
+    "C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportArchive": "Windows Error Reporting crash reports (*\\Report.wer)",
+    "C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportQueue": "Pending Windows Error Reporting reports (*\\Report.wer)",
+    "C:\\Users\\*\\AppData\\Local\\Temp": "Per-user temp logs (installers, Outlook Logging)",
+    "C:\\Users\\*\\AppData\\Roaming\\Microsoft\\Teams": "Classic Teams (logs.txt)",
+    "C:\\Users\\*\\AppData\\Local\\Packages\\MSTeams_8wekyb3d8bbwe\\LocalCache\\Microsoft\\MSTeams\\Logs": "New Teams client logs",
+}
+MACOS_LOG_FILE_ROOTS: dict[str, str] = {
+    "/var/log": "System logs (system.log, install.log, wifi.log)",
+    "/private/var/log": "Same as /var/log",
+    "/Library/Logs": "System-wide app logs and DiagnosticReports (*.ips, *.crash, *.panic)",
+    "/Users/*/Library/Logs": "Per-user app logs and DiagnosticReports",
+}
+LOG_FILE_EXTENSIONS = ".log, .txt, .wer, .lo_, .ips, .crash, .panic, .diag"
+_LOG_FILE_NAME_RE = re.compile(r"\.(log|txt|wer|lo_|ips|crash|panic|diag)(\.[0-9]{1,3})?$", re.IGNORECASE)
+_MAX_FILE_PATTERN_LEN = 400
+# Environment variables articles use in log paths, mapped to the folders the
+# agent (running as SYSTEM) should read instead.
+_WINDOWS_PATH_VARIABLES: dict[str, str] = {
+    "%systemroot%": "C:\\Windows",
+    "%windir%": "C:\\Windows",
+    "%systemdrive%": "C:",
+    "%programdata%": "C:\\ProgramData",
+    "%allusersprofile%": "C:\\ProgramData",
+    "%userprofile%": "C:\\Users\\*",
+    "%appdata%": "C:\\Users\\*\\AppData\\Roaming",
+    "%localappdata%": "C:\\Users\\*\\AppData\\Local",
+    "%temp%": "C:\\Users\\*\\AppData\\Local\\Temp",
+    "%tmp%": "C:\\Users\\*\\AppData\\Local\\Temp",
+}
+_WINDOWS_PATH_VARIABLE_RE = re.compile(r"%[A-Za-z]+%")
+
 DEFAULT_LOG_HOURS = 24
 MAX_LOG_HOURS = 72
-MAX_LOG_REQUESTS = 5
+MAX_LOG_REQUESTS = 8
 MAX_ARTICLES = 5
 MAX_KB_ARTICLES = 3
 MAX_STEPS = 12
@@ -94,7 +146,7 @@ MAX_STEPS = 12
 _KB_CONTENT_CHARS = 3000
 _LOG_PROMPT_CHARS = 48 * 1024
 # Decompressed log bundle cap; bounds memory against a hostile bundle.
-_MAX_DECOMPRESSED_LOG_BYTES = 2 * 1024 * 1024
+_MAX_DECOMPRESSED_LOG_BYTES = 16 * 1024 * 1024
 _LLM_TIMEOUT_SECONDS = 300
 _LLM_RESPONSE_LIMIT_CHARS = 64 * 1024
 
@@ -152,6 +204,166 @@ def allowed_log_sources(platform: str) -> dict[str, str]:
     if platform == "macos":
         return dict(MACOS_LOG_SOURCES)
     return {**WINDOWS_LOG_SOURCES, **MACOS_LOG_SOURCES}
+
+
+def _split_path(path: str, windows: bool) -> list[str] | None:
+    """Mirror of pathStyle.splitPath in the tray agent."""
+
+    if not path or len(path) > _MAX_FILE_PATTERN_LEN:
+        return None
+    if any(ch in path for ch in '[]"<>|\x00') or any(ord(ch) < 0x20 for ch in path):
+        return None
+    if windows:
+        path = path.replace("/", "\\")
+        if len(path) < 3 or not path[0].isascii() or not path[0].isalpha() or path[1:3] != ":\\":
+            return None
+        if ":" in path[2:]:
+            return None
+        parts = path.split("\\")
+    else:
+        if not path.startswith("/"):
+            return None
+        parts = path.split("/")
+    segments: list[str] = []
+    for index, part in enumerate(parts):
+        if part == "" and index > 0:
+            continue
+        if part in {".", ".."}:
+            return None
+        if windows and index > 0 and part.rstrip(". ") != part:
+            return None
+        segments.append(part)
+    return segments
+
+
+def _under_root(segments: Sequence[str], root: str, windows: bool) -> bool:
+    root_segments = _split_path(root, windows) or []
+    if not root_segments or len(segments) <= len(root_segments):
+        return False
+    for segment, root_segment in zip(segments, root_segments):
+        if root_segment == "*":
+            continue
+        if any(ch in segment for ch in "*?"):
+            return False
+        if (segment.lower() != root_segment.lower()) if windows else (segment != root_segment):
+            return False
+    return True
+
+
+def _expand_windows_variables(path: str) -> str:
+    return _WINDOWS_PATH_VARIABLE_RE.sub(
+        lambda match: _WINDOWS_PATH_VARIABLES.get(match.group(0).lower(), match.group(0)), path
+    )
+
+
+def normalise_file_source(source: str, platform: str) -> str | None:
+    """Return ``file:<path>`` when ``source`` names an allowlisted log file.
+
+    Expands the common Windows path variables (``%TEMP%``, ``%ProgramData%``)
+    and ``~`` on macOS; returns ``None`` for anything outside the log folders.
+    The tray agent repeats the same check before reading a file.
+    """
+
+    raw = str(source or "").strip()
+    if not raw.lower().startswith(FILE_SOURCE_PREFIX):
+        return None
+    path = raw[len(FILE_SOURCE_PREFIX) :].strip()
+    candidates: list[tuple[bool, dict[str, str]]] = []
+    if platform in {"windows", "unknown"}:
+        candidates.append((True, allowed_log_file_roots("windows")))
+    if platform in {"macos", "unknown"}:
+        candidates.append((False, allowed_log_file_roots("macos")))
+    for windows, roots in candidates:
+        candidate = _expand_windows_variables(path) if windows else path
+        if not windows and candidate.startswith("~/"):
+            candidate = "/Users/*" + candidate[1:]
+        segments = _split_path(candidate, windows)
+        if not segments:
+            continue
+        name = segments[-1]
+        if not _LOG_FILE_NAME_RE.search(name) and not any(ch in name for ch in "*?"):
+            continue
+        if any(_under_root(segments, root, windows) for root in roots):
+            separator = "\\" if windows else "/"
+            joined = separator.join(segments)
+            return FILE_SOURCE_PREFIX + (joined if len(segments) > 1 or not windows else joined + separator)
+    return None
+
+
+_MAX_EXTRA_LOG_FOLDERS = 50
+_EXTRA_FOLDER_DESCRIPTION = "Added by this portal's owner"
+
+
+def _valid_extra_root(folder: str, windows: bool) -> bool:
+    """Mirror of validExtraRoot in the tray agent."""
+
+    segments = _split_path(folder, windows)
+    if not segments or len(segments) < 3 or segments[1] == "*":
+        return False
+    literal = 0
+    for segment in segments[1:]:
+        if segment == "*":
+            continue
+        if any(ch in segment for ch in "*?"):
+            return False
+        literal += 1
+    return literal >= 2
+
+
+def extra_log_folders(platform: str) -> list[str]:
+    """Owner-configured log folders (TROUBLESHOOT_LOG_FOLDERS_WINDOWS/_MACOS).
+
+    Entries are separated by ``;`` or new lines. Invalid entries (a drive,
+    a top-level folder, wildcards inside a name, ``..``) are skipped here and
+    again on the device.
+    """
+
+    settings = get_settings()
+    sources: list[tuple[bool, Any]] = []
+    if platform in {"windows", "unknown"}:
+        sources.append((True, getattr(settings, "troubleshoot_log_folders_windows", None)))
+    if platform in {"macos", "unknown"}:
+        sources.append((False, getattr(settings, "troubleshoot_log_folders_macos", None)))
+    folders: list[str] = []
+    for windows, raw in sources:
+        count = 0
+        for entry in re.split(r"[;\n]", str(raw or "")):
+            folder = entry.strip().strip('"').strip()
+            if not folder:
+                continue
+            count += 1
+            if count > _MAX_EXTRA_LOG_FOLDERS or not _valid_extra_root(folder, windows):
+                log_warning("Ignoring invalid troubleshooter log folder", folder=folder)
+                continue
+            if windows:
+                folder = folder.replace("/", "\\")
+            if folder not in folders:
+                folders.append(folder)
+    return folders
+
+
+def allowed_log_file_roots(platform: str) -> dict[str, str]:
+    if platform == "windows":
+        roots = dict(WINDOWS_LOG_FILE_ROOTS)
+    elif platform == "macos":
+        roots = dict(MACOS_LOG_FILE_ROOTS)
+    else:
+        roots = {**WINDOWS_LOG_FILE_ROOTS, **MACOS_LOG_FILE_ROOTS}
+    for folder in extra_log_folders(platform):
+        roots.setdefault(folder, _EXTRA_FOLDER_DESCRIPTION)
+    return roots
+
+
+def file_source_matches(request_source: str, section_source: str) -> bool:
+    """True when a collected ``file:`` section came from ``request_source``."""
+
+    if not request_source.startswith(FILE_SOURCE_PREFIX) or not section_source.startswith(FILE_SOURCE_PREFIX):
+        return False
+    pattern = request_source[len(FILE_SOURCE_PREFIX) :]
+    path = section_source[len(FILE_SOURCE_PREFIX) :]
+    if "\\" in pattern:
+        return fnmatch.fnmatchcase(path.lower(), pattern.lower())
+    return fnmatch.fnmatchcase(path, pattern)
 
 
 def _extract_json_object(text: str) -> dict[str, Any] | None:
@@ -507,9 +719,19 @@ Rules:
   the step comes from, or "" if it is your own recommendation.
 - "log_requests": only when a step advises reviewing or collecting logs, or the logs
   would clearly confirm or rule out a likely cause. Otherwise return [].
-  "source" MUST be one of the ALLOWED_LOG_SOURCES keys exactly. "reason" says what you
-  expect the log to show and which step it supports. "hours" is how far back to read
-  (1-72). At most 5 requests."""
+  "source" is either one of the ALLOWED_LOG_SOURCES keys exactly, or a log file as
+  "file:<absolute path>" (see below). "reason" says what you expect the log to show and
+  which step it supports. "hours" is how far back to read (1-72). At most 8 requests.
+- Request every log file the articles tell the technician to check (for example
+  CBS.log, DISM.log, setupapi.dev.log, NetSetup.LOG, IntuneManagementExtension.log,
+  pfirewall.log, Report.wer, system.log or an app's crash report), as well as any event
+  log the steps need. A log file must be inside one of the ALLOWED_LOG_FILE_FOLDERS and
+  end in one of ALLOWED_LOG_FILE_EXTENSIONS. Use the full path, e.g.
+  "file:C:\\Windows\\Logs\\CBS\\CBS.log". A * wildcard may stand for a file or folder
+  name, e.g. "file:C:\\Windows\\CCM\\Logs\\AppEnforce*.log"; wildcard requests only read
+  files changed in the last "hours". %TEMP%, %ProgramData%, %SystemRoot%, %AppData%
+  and %LocalAppData% are expanded for you (user folders are read for every profile).
+  Do not request files outside these folders; they will be refused."""
 
 _PLAN_WEB_INSTRUCTIONS = """
 Some records are public web pages (record_id "web-N"). Also return
@@ -519,7 +741,12 @@ words. Leave a page out if it has no relevant steps. These will be used to write
 internal knowledge base articles."""
 
 
-def _parse_plan(data: Mapping[str, Any] | None, raw_text: str, allowed: Mapping[str, str]) -> dict[str, Any]:
+def _parse_plan(
+    data: Mapping[str, Any] | None,
+    raw_text: str,
+    allowed: Mapping[str, str],
+    platform: str = "unknown",
+) -> dict[str, Any]:
     if not data:
         # The model ignored the JSON format; keep its text as a single step so
         # the technician still gets the guidance.
@@ -549,7 +776,9 @@ def _parse_plan(data: Mapping[str, Any] | None, raw_text: str, allowed: Mapping[
         if not isinstance(entry, Mapping):
             continue
         source = str(entry.get("source") or "").strip()
-        if source not in allowed or source in seen:
+        if source not in allowed:
+            source = normalise_file_source(source, platform) or ""
+        if not source or source in seen:
             continue
         try:
             hours = int(entry.get("hours") or DEFAULT_LOG_HOURS)
@@ -760,6 +989,9 @@ async def run_research_and_plan(
         + (_PLAN_WEB_INSTRUCTIONS if web_pages else "")
         + f"\n\nENDPOINT_PLATFORM: {platform}\nALLOWED_LOG_SOURCES:\n"
         + "\n".join(f"- {key}: {description}" for key, description in allowed.items())
+        + "\nALLOWED_LOG_FILE_FOLDERS:\n"
+        + "\n".join(f"- {key}: {description}" for key, description in allowed_log_file_roots(platform).items())
+        + f"\nALLOWED_LOG_FILE_EXTENSIONS: {LOG_FILE_EXTENSIONS}"
     )
     try:
         plan_text = await _chat(
@@ -781,7 +1013,7 @@ async def run_research_and_plan(
         )
         return None
     plan_data = _extract_json_object(plan_text)
-    plan = _parse_plan(plan_data, plan_text, allowed)
+    plan = _parse_plan(plan_data, plan_text, allowed, platform)
     web_sources = _parse_web_sources(plan_data, web_pages)
     device_uid = str(device.get("device_uid") or "").strip()
     can_collect = bool(device_uid) and device.get("status") == "active"
@@ -800,6 +1032,7 @@ async def run_research_and_plan(
         "ticket_id": ticket_id,
         "mode": MODE_COLLECT_LOGS,
         "log_requests": plan["log_requests"],
+        "extra_log_folders": extra_log_folders(platform),
         tray_service.SERVER_CONTEXT_KEY: {
             "problem": problem,
             "model": str(llm.get("model") or ""),
@@ -854,21 +1087,58 @@ def is_collect_logs_command(command: Mapping[str, Any]) -> bool:
     return command_payload(command).get("mode") == MODE_COLLECT_LOGS
 
 
-def decompress_log_bundle(data: bytes) -> str:
-    """Inflate a gzip log bundle, bounded and tolerant of truncation.
+def _inflate(data: bytes, limit: int) -> bytes:
+    inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    try:
+        return inflater.decompress(data, limit)
+    except zlib.error:
+        return b""
 
-    The device caps the bundle by cutting the compressed bytes, so the stream
-    may end early; whatever inflated cleanly is kept.
+
+def _is_tar(raw: bytes) -> bool:
+    return len(raw) >= 512 and raw[257:262] == b"ustar"
+
+
+def is_tar_bundle(data: bytes) -> bool:
+    """True when the bundle is a .tar.gz with one file per log source."""
+
+    return _is_tar(_inflate(data, 1024)) if data else False
+
+
+def _tar_text(raw: bytes) -> str:
+    """Join the files of an in-memory tar (each starts with its log header)."""
+
+    parts: list[str] = []
+    try:
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:
+            for member in archive:
+                if not member.isfile():
+                    continue
+                handle = archive.extractfile(member)
+                if handle is None:
+                    continue
+                text = handle.read(_MAX_DECOMPRESSED_LOG_BYTES).decode("utf-8", errors="replace")
+                parts.append(text.rstrip("\n") + "\n\n")
+    except (tarfile.TarError, EOFError, OSError):
+        # The bounded inflate can cut the last file; keep the complete ones.
+        pass
+    return "".join(parts)
+
+
+def decompress_log_bundle(data: bytes) -> str:
+    """Inflate a log bundle, bounded and tolerant of truncation.
+
+    Current agents send a .tar.gz with one file per log source; older agents
+    send a single gzip text stream. Both come back as one text with a
+    ``### <source> Log`` header per section.
     """
 
     if not data:
         return ""
-    inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
-    try:
-        out = inflater.decompress(data, _MAX_DECOMPRESSED_LOG_BYTES)
-    except zlib.error:
-        return ""
-    return out.decode("utf-8", errors="replace")
+    raw = _inflate(data, _MAX_DECOMPRESSED_LOG_BYTES)
+    if _is_tar(raw):
+        return _tar_text(raw)
+    return raw.decode("utf-8", errors="replace")
 
 
 def split_log_sections(text: str) -> dict[str, str]:
@@ -991,8 +1261,12 @@ async def analyse_collected_logs(
     ordered: list[tuple[str, str, str]] = []
     for request in requests:
         source = str(request.get("source") or "")
+        reason = str(request.get("reason") or "")
         if source in sections:
-            ordered.append((source, str(request.get("reason") or ""), sections.pop(source)))
+            ordered.append((source, reason, sections.pop(source)))
+        # A file request can match several files, each in its own section.
+        for section in [key for key in sections if file_source_matches(source, key)]:
+            ordered.append((section, reason, sections.pop(section)))
     # Sources the device read without being asked (older agents read defaults).
     for source, body in sections.items():
         ordered.append((source, "Collected by the endpoint agent's default log set.", body))
@@ -1094,11 +1368,16 @@ __all__ = [
     "WINDOWS_LOG_SOURCES",
     "MACOS_LOG_SOURCES",
     "allowed_log_sources",
+    "allowed_log_file_roots",
+    "extra_log_folders",
+    "normalise_file_source",
+    "file_source_matches",
     "analyse_collected_logs",
     "command_payload",
     "decompress_log_bundle",
     "endpoint_platform",
     "is_collect_logs_command",
+    "is_tar_bundle",
     "run_research_and_plan",
     "schedule_log_analysis",
     "split_log_sections",

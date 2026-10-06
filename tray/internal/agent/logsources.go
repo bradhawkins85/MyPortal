@@ -36,8 +36,8 @@ type LogSpec struct {
 
 // WindowsLogSources is the allowlist of Windows Event Log channels the agent
 // may read. The server offers the LLM exactly these names; anything else is
-// refused here, so a request can never name an arbitrary channel. Names are
-// embedded in a single-quoted PowerShell string, so none may contain a quote.
+// refused here, so a request can never name an arbitrary channel. Log files
+// are requested separately with FileSourcePrefix (see logfiles.go).
 // Keep in sync with WINDOWS_LOG_SOURCES in app/services/ai_troubleshooter.py.
 var WindowsLogSources = []string{
 	"System",

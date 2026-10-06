@@ -1,0 +1,7 @@
+{
+  "guid": "255aad68-1d62-46e6-8355-237c1dfc0f22",
+  "occurred_at": "2026-10-06T12:20Z",
+  "change_type": "Feature",
+  "summary": "AI troubleshooter can now collect the log files troubleshooting articles name (such as CBS.log, setupapi.dev.log or Intune logs) from allowlisted log folders on the endpoint, alongside event logs.",
+  "content_hash": "a5c98a7d56d04f5a1f1f8357408ac6e75f40f66bf1820cfc5d8a7311997551e5"
+}
