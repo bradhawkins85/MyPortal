@@ -183,3 +183,49 @@ func gunzip(b []byte) (string, error) {
 	}
 	return string(data), nil
 }
+
+func TestRunReportsProgress(t *testing.T) {
+	a := testAgent(
+		func(context.Context, time.Duration) (string, []string, error) {
+			return "some log", []string{"System"}, nil
+		},
+		func(context.Context, LLMConfig, string, string) (string, error) {
+			return "guidance", nil
+		},
+	)
+	var stages []string
+	a.OnProgress = func(stage, message string) {
+		if message == "" {
+			t.Errorf("stage %q reported an empty message", stage)
+		}
+		stages = append(stages, stage)
+	}
+	req := Request{Endpoint: "h", Prompt: "p", LLM: LLMConfig{BaseURL: "http://x", Model: "m"}}
+	if _, err := a.Run(context.Background(), req); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	want := []string{StageCollectingLogs, StageLogsCollected, StageAnalysing}
+	if strings.Join(stages, ",") != strings.Join(want, ",") {
+		t.Errorf("stages = %v, want %v", stages, want)
+	}
+}
+
+func TestRunProgressSkipsAnalysingWithoutModel(t *testing.T) {
+	a := testAgent(
+		func(context.Context, time.Duration) (string, []string, error) {
+			return "", nil, errors.New("boom")
+		},
+		nil,
+	)
+	var stages []string
+	a.OnProgress = func(stage, _ string) { stages = append(stages, stage) }
+	_, _ = a.Run(context.Background(), Request{Endpoint: "h"})
+	for _, s := range stages {
+		if s == StageAnalysing {
+			t.Error("analysing should not be reported when no model is configured")
+		}
+	}
+	if len(stages) != 2 {
+		t.Errorf("stages = %v, want collecting + collected", stages)
+	}
+}

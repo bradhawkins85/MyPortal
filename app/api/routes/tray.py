@@ -2663,6 +2663,14 @@ async def run_troubleshoot(
         payload=troubleshoot_payload,
         initiated_by_user_id=int(current_user["id"]),
     )
+    await tray_service.add_troubleshoot_requested_note(
+        ticket_id=int(payload.ticket_id),
+        command_id=command_id,
+        delivered=delivered,
+        device=device,
+        model=llm["model"],
+        requested_by=current_user,
+    )
     return TrayTroubleshootResponse(
         command_id=command_id,
         device_uid=device_uid,

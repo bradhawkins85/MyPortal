@@ -1278,6 +1278,11 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
     await websocket.accept()
     tray_service.register_connection(device_uid, websocket)
     await tray_service.deliver_queued_commands(device)
+    # Commands issued from a worker that does not hold this socket stay
+    # ``queued``; re-drain periodically (piggy-backing on the device's
+    # keep-alive pongs) so they are delivered without waiting for a reconnect.
+    loop = asyncio.get_running_loop()
+    last_drain = loop.time()
     try:
         while True:
             try:
@@ -1286,6 +1291,17 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
                 break
             except Exception:  # pragma: no cover - malformed payload
                 continue
+            now = loop.time()
+            if now - last_drain >= tray_service.QUEUED_COMMAND_DRAIN_INTERVAL_SECONDS:
+                last_drain = now
+                try:
+                    await tray_service.deliver_queued_commands(device)
+                except Exception as exc:  # pragma: no cover - defensive
+                    log_warning(
+                        "Tray queued command drain failed",
+                        device_uid=device_uid,
+                        error=str(exc),
+                    )
             msg_type = message.get("type") if isinstance(message, dict) else None
             if msg_type == "pong":
                 continue

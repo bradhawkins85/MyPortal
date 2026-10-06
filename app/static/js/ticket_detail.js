@@ -1656,8 +1656,8 @@
           })
           .then((data) => {
             const message = data.delivered
-              ? `AI troubleshooter started on ${assetName}. The result will post to this ticket as a note and log bundle.`
-              : `AI troubleshooter queued for ${assetName}. It will run when the device reconnects.`;
+              ? `AI troubleshooter started on ${assetName}. Progress and the result will be posted to this ticket as internal notes.`
+              : `AI troubleshooter queued for ${assetName}. It will start when the device next checks in; progress will be posted as internal notes.`;
             if (!showToast(message, 'success')) {
               window.alert(message);
             }
