@@ -1739,7 +1739,7 @@ async def troubleshoot_ticket_asset(
     ticket_id: int,
     asset_id: int,
     payload: TicketAssetTroubleshootRequest | None = None,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_helpdesk_technician),
 ) -> TrayTroubleshootResponse:
     """Trigger the AI troubleshooter on the device linked to a ticket asset.
 
@@ -1754,13 +1754,6 @@ async def troubleshoot_ticket_asset(
     Requires helpdesk / super-admin access. The asset must be linked to the
     ticket and have an active tray device in the same company as the ticket.
     """
-    if not (
-        current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Helpdesk access required."
-        )
-
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(

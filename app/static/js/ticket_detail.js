@@ -1305,6 +1305,23 @@
         chatButton.innerHTML = '<span aria-hidden="true">💬</span>';
         actions.appendChild(chatButton);
 
+        const troubleshootButton = document.createElement('button');
+        troubleshootButton.type = 'button';
+        troubleshootButton.className = 'button button--ghost button--icon ticket-assets-linked__action';
+        troubleshootButton.setAttribute('data-linked-asset-troubleshoot', '');
+        troubleshootButton.setAttribute('data-asset-id', assetIdValue);
+        troubleshootButton.setAttribute('data-asset-name', displayName);
+        troubleshootButton.title = 'Run AI troubleshooter on this asset';
+        troubleshootButton.setAttribute('aria-label', `Run AI troubleshooter on ${displayName}`);
+        if (record.tray_device_uid) {
+          troubleshootButton.setAttribute('data-device-uid', record.tray_device_uid);
+        } else {
+          troubleshootButton.disabled = true;
+          troubleshootButton.setAttribute('aria-disabled', 'true');
+        }
+        troubleshootButton.innerHTML = '<span aria-hidden="true">🤖</span>';
+        actions.appendChild(troubleshootButton);
+
         const removeButton = document.createElement('button');
         removeButton.type = 'button';
         removeButton.className = 'button button--ghost button--icon ticket-assets-linked__remove';
