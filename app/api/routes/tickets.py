@@ -1484,40 +1484,29 @@ async def add_reply(
     )
 
 
-@router.post(
-    "/{ticket_id}/troubleshoot-complete",
-    status_code=status.HTTP_200_OK,
-    summary="Receive AI troubleshooting result from a tray device",
-)
-async def receive_troubleshoot_result(
-    ticket_id: int,
-    request: Request,
-    command_id: int = Form(..., gt=0),
-    guidance: str = Form("", max_length=65536),
-    endpoint: str = Form(""),
-    log_bundle: UploadFile | None = File(None),
-    device: dict = Depends(get_current_tray_device),
-) -> JSONResponse:
-    """Tray-device callback for the AI troubleshooting agent.
+# Progress stages a tray device may report while the troubleshooter runs.
+# Each maps to the human-readable heading used in the internal ticket note.
+_TROUBLESHOOT_STAGES: dict[str, str] = {
+    "received": "Device received the request and started the troubleshooter",
+    "collecting_logs": "Collecting endpoint logs",
+    "logs_collected": "Endpoint logs collected",
+    "analysing": "Sending logs to the AI model for analysis",
+    "failed": "Troubleshooter failed",
+}
 
-    The Go agent authenticates with the device token (``get_current_tray_device``),
-    collects up to 24 h of endpoint logs, calls the configured LLM for guidance,
-    and posts the result back here. This route:
+# Command-log states after which no further device updates are accepted.
+_TROUBLESHOOT_TERMINAL_STATES = frozenset({"completed", "error"})
 
-    1. Verifies the command is a ``troubleshoot`` command that was issued to
-       *this* device and targets *this* ticket.
-    2. Stores the LLM guidance as an **internal** (staff-only) ticket note.
-    3. Attaches the read-only log bundle as a staff-only (``closed``) attachment.
-    4. Marks the command ``completed`` in the tray command log.
 
-    Device tokens scope the caller to its own company, so a compromised device
-    can only write to tickets owned by its own company (enforced below).
+async def _resolve_troubleshoot_command(
+    *, ticket_id: int, command_id: int, device: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Validate a device callback for a troubleshoot command.
+
+    Verifies the command is a ``troubleshoot`` command issued to *this*
+    device, targets *this* ticket, and that the ticket belongs to the
+    device's company. Returns ``(command, ticket)``.
     """
-    device_id = device.get("id")
-    device_uid = str(device.get("device_uid") or "")
-    hostname = str(device.get("hostname") or "")
-
-    # --- Verify the command is a troubleshoot command for this device/ticket --
     command = await tray_repo.get_command(command_id)
     if command is None:
         raise HTTPException(
@@ -1529,7 +1518,7 @@ async def receive_troubleshoot_result(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Command is not a troubleshoot command",
         )
-    if command.get("device_id") != device_id:
+    if command.get("device_id") != device.get("id"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Command was not issued to this device",
@@ -1558,7 +1547,6 @@ async def receive_troubleshoot_result(
             detail="Command does not target this ticket",
         )
 
-    # --- Verify the ticket exists and belongs to the device's company ---------
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(
@@ -1573,39 +1561,161 @@ async def receive_troubleshoot_result(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Ticket does not belong to this device's company",
         )
+    return command, ticket
 
-    guidance_text = (guidance or "").strip()
-    if not guidance_text and log_bundle is None:
+
+async def _add_troubleshoot_note(ticket_id: int, body_html: str) -> dict[str, Any] | None:
+    """Store an internal (staff-only) troubleshooter note and notify viewers."""
+    return await tray_service.add_troubleshoot_note(ticket_id, body_html)
+
+
+def _troubleshoot_endpoint_label(device: dict[str, Any], endpoint: str | None = None) -> str:
+    return (
+        (endpoint or "").strip()
+        or str(device.get("hostname") or "").strip()
+        or str(device.get("device_uid") or "").strip()
+        or "device"
+    )
+
+
+@router.post(
+    "/{ticket_id}/troubleshoot-status",
+    status_code=status.HTTP_200_OK,
+    summary="Receive an AI troubleshooting progress update from a tray device",
+)
+async def receive_troubleshoot_status(
+    ticket_id: int,
+    command_id: int = Form(..., gt=0),
+    stage: str = Form(..., max_length=32),
+    message: str = Form("", max_length=4096),
+    endpoint: str = Form("", max_length=255),
+    device: dict = Depends(get_current_tray_device),
+) -> JSONResponse:
+    """Tray-device progress callback for the AI troubleshooting agent.
+
+    Each update is stored as an internal ticket note so technicians can see
+    that the agent actually started on the endpoint and how far it got. A
+    ``failed`` stage also marks the command as errored in the tray command log.
+    """
+    stage_key = (stage or "").strip().lower()
+    heading = _TROUBLESHOOT_STAGES.get(stage_key)
+    if heading is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Provide guidance or a log bundle",
+            detail="Unknown troubleshoot stage",
+        )
+
+    command, _ticket = await _resolve_troubleshoot_command(
+        ticket_id=ticket_id, command_id=command_id, device=device
+    )
+    if str(command.get("status") or "") in _TROUBLESHOOT_TERMINAL_STATES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Troubleshoot command has already finished",
+        )
+
+    endpoint_label = html.escape(_troubleshoot_endpoint_label(device, endpoint))
+    body_html = (
+        f"<p><strong>AI Troubleshooting Agent</strong> - {html.escape(heading)} "
+        f"on {endpoint_label} (command #{command_id}).</p>"
+    )
+    message_text = (message or "").strip()
+    if message_text:
+        body_html += f"<p>{html.escape(message_text)}</p>"
+
+    reply = await _add_troubleshoot_note(ticket_id, body_html)
+
+    if stage_key == "failed":
+        await tray_repo.mark_command_completed(
+            command_id, error=(message_text or "Troubleshooter failed")[:1000]
+        )
+    elif command.get("status") == "queued":
+        # The device has the command, so it was delivered (e.g. via another
+        # worker's reconnect drain) even if this row was never updated.
+        await tray_repo.mark_command_delivered(command_id)
+
+    return JSONResponse(
+        {
+            "status": "ok",
+            "command_id": command_id,
+            "ticket_id": ticket_id,
+            "stage": stage_key,
+            "reply_id": reply.get("id") if reply else None,
+        }
+    )
+
+
+@router.post(
+    "/{ticket_id}/troubleshoot-complete",
+    status_code=status.HTTP_200_OK,
+    summary="Receive AI troubleshooting result from a tray device",
+)
+async def receive_troubleshoot_result(
+    ticket_id: int,
+    request: Request,
+    command_id: int = Form(..., gt=0),
+    guidance: str = Form("", max_length=65536),
+    endpoint: str = Form(""),
+    error: str = Form("", max_length=4096),
+    log_bundle: UploadFile | None = File(None),
+    device: dict = Depends(get_current_tray_device),
+) -> JSONResponse:
+    """Tray-device callback for the AI troubleshooting agent.
+
+    The Go agent authenticates with the device token (``get_current_tray_device``),
+    collects up to 24 h of endpoint logs, calls the configured LLM for guidance,
+    and posts the result back here. This route:
+
+    1. Verifies the command is a ``troubleshoot`` command that was issued to
+       *this* device and targets *this* ticket.
+    2. Stores the LLM guidance (and any errors the agent hit) as an
+       **internal** (staff-only) ticket note.
+    3. Attaches the read-only log bundle as a staff-only (``closed``) attachment.
+    4. Marks the command ``completed`` (or ``error``) in the tray command log.
+
+    Device tokens scope the caller to its own company, so a compromised device
+    can only write to tickets owned by its own company (enforced below).
+    """
+    await _resolve_troubleshoot_command(
+        ticket_id=ticket_id, command_id=command_id, device=device
+    )
+
+    guidance_text = (guidance or "").strip()
+    error_text = (error or "").strip()
+    if not guidance_text and log_bundle is None and not error_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide guidance, a log bundle or an error",
         )
 
     # --- Compose the internal note -------------------------------------------
-    endpoint_label = (endpoint or "").strip() or hostname or device_uid or "device"
+    endpoint_label = html.escape(_troubleshoot_endpoint_label(device, endpoint))
     header_html = (
         "<p><strong>AI Troubleshooting Agent</strong> - guidance for "
         f"{endpoint_label}</p>"
     )
     if guidance_text:
         guidance_html = sanitize_rich_text(guidance_text).html
-    else:
+    elif log_bundle is not None:
         guidance_html = (
             "<p><em>No guidance produced - see the attached log bundle.</em></p>"
+        )
+    else:
+        guidance_html = "<p><em>No guidance produced.</em></p>"
+    error_html = ""
+    if error_text:
+        error_html = (
+            "<p><strong>The agent reported problems:</strong> "
+            f"{html.escape(error_text)}</p>"
         )
     footer_html = (
         "<p><em>Log bundle attached read-only from the device (last 24 hours). "
         "Generated by the MyPortal troubleshooting agent.</em></p>"
+        if log_bundle is not None
+        else "<p><em>Generated by the MyPortal troubleshooting agent.</em></p>"
     )
-    body_html = sanitize_rich_text(header_html + guidance_html + footer_html).html
-
-    reply = await tickets_repo.create_reply(
-        ticket_id=ticket_id,
-        author_id=None,
-        body=body_html,
-        is_internal=True,
-        author_email="troubleshooting-agent@myportal.local",
-        author_display_name="Troubleshooting Agent",
+    reply = await _add_troubleshoot_note(
+        ticket_id, header_html + guidance_html + error_html + footer_html
     )
 
     # --- Attach the log bundle (best effort) ---------------------------------
@@ -1632,7 +1742,12 @@ async def receive_troubleshoot_result(
                 )
 
     # --- Mark the command completed -----------------------------------------
-    await tray_repo.mark_command_completed(command_id)
+    # Only a run that produced no guidance is recorded as an error; a partial
+    # failure that still yielded guidance is a completed run.
+    await tray_repo.mark_command_completed(
+        command_id,
+        error=error_text[:1000] if (error_text and not guidance_text) else None,
+    )
 
     ticket_url = str(request.base_url).rstrip("/") + f"/tickets/{ticket_id}"
 
@@ -1820,6 +1935,16 @@ async def troubleshoot_ticket_asset(
         device_uid=device_uid,
         payload=troubleshoot_payload,
         initiated_by_user_id=int(current_user["id"]),
+    )
+
+    await tray_service.add_troubleshoot_requested_note(
+        ticket_id=ticket_id,
+        command_id=command_id,
+        delivered=delivered,
+        device=device,
+        model=llm["model"],
+        requested_by=current_user,
+        target_label=str(asset.get("name") or f"asset #{asset_id}"),
     )
 
     log_info(

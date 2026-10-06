@@ -645,22 +645,58 @@ func (d *daemon) handleTroubleshoot(msg map[string]json.RawMessage) {
 	logger.Info("troubleshoot: running agent (ticket %d, command %d, model %q)",
 		req.TicketID, req.CommandID, llm.Model)
 
+	if req.TicketID <= 0 || req.CommandID <= 0 {
+		logger.Warn("troubleshoot: ignoring command with missing ticket/command id (ticket %d, command %d)",
+			req.TicketID, req.CommandID)
+		return
+	}
+
+	ag := agent.NewAgent()
+	endpoint := ""
+	if h, err := os.Hostname(); err == nil {
+		endpoint = h
+	}
+	report := func(stage, message string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := d.client.PostTroubleshootStatus(ctx, req.TicketID, req.CommandID, stage, message, endpoint); err != nil {
+			logger.Warn("troubleshoot: status %q report failed: %v", stage, err)
+		}
+	}
+	ag.OnProgress = report
+
+	report("received", fmt.Sprintf("Troubleshooter agent %s started (model %q).", updater.AgentVersion, llm.Model))
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	result, runErr := agent.NewAgent().Run(ctx, req)
+	result, runErr := ag.Run(ctx, req)
+	errMsg := ""
 	if runErr != nil {
 		// The agent still returns whatever it managed to produce; log the
 		// partial failure and report below so the ticket gets the degraded
-		// result (guidance without bundle, or bundle without guidance).
+		// result (guidance without bundle, or bundle without guidance) along
+		// with the reason.
 		logger.Warn("troubleshoot: agent partial failure: %v", runErr)
+		errMsg = runErr.Error()
 	}
 
-	postCtx, postCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer postCancel()
-	if err := d.client.PostTroubleshootComplete(postCtx, req.TicketID, req.CommandID,
-		result.Guidance, result.Endpoint, result.LogBundle); err != nil {
-		logger.Warn("troubleshoot: report back failed: %v", err)
+	var postErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt*5) * time.Second)
+		}
+		postCtx, postCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		postErr = d.client.PostTroubleshootComplete(postCtx, req.TicketID, req.CommandID,
+			result.Guidance, result.Endpoint, errMsg, result.LogBundle)
+		postCancel()
+		if postErr == nil {
+			break
+		}
+		logger.Warn("troubleshoot: report back failed (attempt %d): %v", attempt+1, postErr)
+	}
+	if postErr != nil {
+		report("failed", fmt.Sprintf("The agent finished but could not upload its result: %v", postErr))
 		return
 	}
 	logger.Info("troubleshoot: reported ticket %d (guidance=%d bytes, bundle=%d bytes, truncated=%t)",

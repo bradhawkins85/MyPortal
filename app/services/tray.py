@@ -15,6 +15,7 @@ Responsibilities
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import os
 import secrets
@@ -624,6 +625,11 @@ def is_device_connected(device_uid: str) -> bool:
     return device_uid in _active_connections
 
 
+# How often an open device WebSocket re-checks the command log for commands
+# that were queued by another worker (see ``/ws/tray/{device_uid}``).
+QUEUED_COMMAND_DRAIN_INTERVAL_SECONDS = 15.0
+
+
 async def send_to_device(
     device_uid: str,
     payload: dict[str, Any],
@@ -780,6 +786,101 @@ async def dispatch_troubleshoot_command(
         delivered=delivered,
     )
     return command_id, delivered
+
+
+TROUBLESHOOT_AGENT_EMAIL = "troubleshooting-agent@myportal.local"
+TROUBLESHOOT_AGENT_NAME = "Troubleshooting Agent"
+
+
+async def add_troubleshoot_note(ticket_id: int, body_html: str) -> dict[str, Any] | None:
+    """Store an internal (staff-only) troubleshooter status note on a ticket.
+
+    Notes are authored by the "Troubleshooting Agent" pseudo-user and a ticket
+    refresh is broadcast so an open ticket view picks the note up live.
+    """
+
+    # Imported lazily: the ticket modules import this service.
+    from app.repositories import tickets as tickets_repo
+    from app.services import tickets as tickets_service
+    from app.services.sanitization import sanitize_rich_text
+
+    reply = await tickets_repo.create_reply(
+        ticket_id=ticket_id,
+        author_id=None,
+        body=sanitize_rich_text(body_html).html,
+        is_internal=True,
+        author_email=TROUBLESHOOT_AGENT_EMAIL,
+        author_display_name=TROUBLESHOOT_AGENT_NAME,
+    )
+    try:
+        await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
+    except Exception as exc:  # noqa: BLE001 - realtime refresh is best-effort
+        log_warning(
+            "Failed to broadcast troubleshooter note",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
+    return reply
+
+
+async def add_troubleshoot_requested_note(
+    *,
+    ticket_id: int,
+    command_id: int,
+    delivered: bool,
+    device: dict[str, Any],
+    model: str,
+    requested_by: dict[str, Any] | None,
+    target_label: str | None = None,
+) -> None:
+    """Record on the ticket that a technician started the troubleshooter.
+
+    Best effort: the command has already been dispatched, so a failure to
+    write the note is logged rather than surfaced to the caller.
+    """
+
+    requester = requested_by or {}
+    requester_label = str(
+        requester.get("display_name")
+        or " ".join(
+            part
+            for part in (
+                str(requester.get("first_name") or "").strip(),
+                str(requester.get("last_name") or "").strip(),
+            )
+            if part
+        )
+        or requester.get("email")
+        or "a technician"
+    ).strip()
+    device_label = str(device.get("hostname") or device.get("device_uid") or "device").strip()
+    target = (target_label or "").strip()
+    target_html = f"{html.escape(target)} ({html.escape(device_label)})" if target else html.escape(device_label)
+    if delivered:
+        delivery_html = (
+            "<p>Sent to the device. Progress updates will be posted here as "
+            "the agent runs.</p>"
+        )
+    else:
+        delivery_html = (
+            "<p>The device is not currently connected to this server, so the "
+            "request is queued and will start when the device next checks in.</p>"
+        )
+    body_html = (
+        "<p><strong>AI Troubleshooting Agent</strong> - troubleshooter requested by "
+        f"{html.escape(requester_label)} for {target_html} "
+        f"(command #{int(command_id)}, model {html.escape(model or 'default')}).</p>"
+        + delivery_html
+    )
+    try:
+        await add_troubleshoot_note(ticket_id, body_html)
+    except Exception as exc:  # noqa: BLE001 - the command is already dispatched
+        log_error(
+            "Failed to record troubleshooter request note",
+            ticket_id=ticket_id,
+            command_id=command_id,
+            error=str(exc),
+        )
 
 
 async def push_notification_to_company_devices(

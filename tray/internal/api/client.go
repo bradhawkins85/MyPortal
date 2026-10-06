@@ -629,8 +629,10 @@ func (c *Client) UploadDiagnostics(ctx context.Context, logDir string) error {
 // PostTroubleshootComplete reports the result of an AI troubleshooting run back
 // to the server. The server stores the guidance as an internal ticket note and
 // the gzip log bundle as a staff-only attachment on the target ticket. The
-// device authenticates with its per-device Bearer token.
-func (c *Client) PostTroubleshootComplete(ctx context.Context, ticketID, commandID int, guidance, endpoint string, logBundle []byte) error {
+// device authenticates with its per-device Bearer token. A non-empty errMsg
+// describes any partial failure (e.g. the LLM was unreachable) so it is
+// visible on the ticket rather than only in the device log.
+func (c *Client) PostTroubleshootComplete(ctx context.Context, ticketID, commandID int, guidance, endpoint, errMsg string, logBundle []byte) error {
 	var body bytes.Buffer
 	w := multipart.NewWriter(&body)
 
@@ -642,6 +644,11 @@ func (c *Client) PostTroubleshootComplete(ctx context.Context, ticketID, command
 	}
 	if err := w.WriteField("endpoint", endpoint); err != nil {
 		return err
+	}
+	if errMsg != "" {
+		if err := w.WriteField("error", errMsg); err != nil {
+			return err
+		}
 	}
 	if len(logBundle) > 0 {
 		fw, err := w.CreateFormFile("log_bundle", fmt.Sprintf("troubleshoot-logs-%d.gz", commandID))
@@ -671,6 +678,37 @@ func (c *Client) PostTroubleshootComplete(ctx context.Context, ticketID, command
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		return fmt.Errorf("troubleshoot-complete: HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// PostTroubleshootStatus reports a progress update for a running AI
+// troubleshooting job. The server records each update as an internal note on
+// the ticket so technicians can see the agent is running. stage is one of
+// "received", "collecting_logs", "logs_collected", "analysing" or "failed".
+func (c *Client) PostTroubleshootStatus(ctx context.Context, ticketID, commandID int, stage, message, endpoint string) error {
+	form := url.Values{}
+	form.Set("command_id", fmt.Sprintf("%d", commandID))
+	form.Set("stage", stage)
+	form.Set("message", message)
+	form.Set("endpoint", endpoint)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s/api/tickets/%d/troubleshoot-status", c.baseURL, ticketID),
+		strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	c.setAuthHeader(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("troubleshoot-status: HTTP %d", resp.StatusCode)
 	}
 	return nil
 }

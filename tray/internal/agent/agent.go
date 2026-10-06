@@ -77,8 +77,26 @@ type Agent struct {
 	CollectLogs func(ctx context.Context, window time.Duration) (string, []string, error)
 	// CallLLM asks the model for guidance given a system and a user prompt.
 	CallLLM func(ctx context.Context, cfg LLMConfig, system, user string) (string, error)
+	// OnProgress, when set, is called as the job moves between stages so the
+	// caller can report progress to the server. Stage is one of the Stage*
+	// constants; message is a short human-readable detail.
+	OnProgress func(stage, message string)
 
 	Window time.Duration
+}
+
+// Progress stages reported through Agent.OnProgress. They match the stages
+// the server accepts on POST /api/tickets/{id}/troubleshoot-status.
+const (
+	StageCollectingLogs = "collecting_logs"
+	StageLogsCollected  = "logs_collected"
+	StageAnalysing      = "analysing"
+)
+
+func (a *Agent) progress(stage, message string) {
+	if a.OnProgress != nil {
+		a.OnProgress(stage, message)
+	}
 }
 
 // NewAgent returns an Agent wired with the real platform log collector and the
@@ -106,12 +124,22 @@ func (a *Agent) Run(ctx context.Context, req Request) (Result, error) {
 
 	var errs []string
 
+	a.progress(StageCollectingLogs, fmt.Sprintf("Collecting endpoint logs from the last %s.", window))
 	rawLogs, sources, collectErr := a.CollectLogs(ctx, window)
 	var redacted string
 	if collectErr != nil {
 		errs = append(errs, fmt.Sprintf("log collection: %v", collectErr))
 	} else if strings.TrimSpace(rawLogs) != "" {
 		redacted = Scrub(rawLogs)
+	}
+	switch {
+	case collectErr != nil:
+		a.progress(StageLogsCollected, fmt.Sprintf("Log collection failed: %v", collectErr))
+	case redacted == "":
+		a.progress(StageLogsCollected, "No log entries were found in the collection window.")
+	default:
+		a.progress(StageLogsCollected, fmt.Sprintf("Collected %d bytes of logs from %d source(s): %s.",
+			len(redacted), len(sources), strings.Join(sources, ", ")))
 	}
 
 	sample := redacted
@@ -134,6 +162,7 @@ func (a *Agent) Run(ctx context.Context, req Request) (Result, error) {
 			errs = append(errs, "no LLM client configured")
 		} else {
 			userPrompt := buildUserPrompt(req, sources, sample)
+			a.progress(StageAnalysing, fmt.Sprintf("Asking model %q at %s for guidance.", req.LLM.Model, req.LLM.BaseURL))
 			guidance, llmErr := a.CallLLM(ctx, req.LLM, SystemPrompt, userPrompt)
 			if llmErr != nil {
 				errs = append(errs, fmt.Sprintf("llm: %v", llmErr))
