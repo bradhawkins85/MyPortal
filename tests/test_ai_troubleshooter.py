@@ -686,3 +686,41 @@ def test_searxng_and_brave_results_are_parsed(monkeypatch):
     searx, brave = asyncio.run(run())
     assert searx == [{"title": "Fix it", "url": "https://a.example/x", "snippet": "steps"}]
     assert brave == [{"title": "Brave", "url": "https://b.example", "snippet": "d"}]
+
+
+def _tar_gz(files):
+    import io
+    import tarfile
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as archive:
+        for name, text in files:
+            data = text.encode()
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+def test_tar_bundle_with_one_file_per_log_is_read():
+    bundle = _tar_gz(
+        [
+            ("System.log", "### System Log\n2024-05-01 [Information] id=1 boot\n"),
+            (
+                "Microsoft-Windows-WLAN-AutoConfig_Operational.log",
+                "### Microsoft-Windows-WLAN-AutoConfig/Operational Log\n2024-05-01 [Error] id=8002 failed\n",
+            ),
+        ]
+    )
+    assert ts.is_tar_bundle(bundle)
+    assert not ts.is_tar_bundle(gzip.compress(BUNDLE_TEXT.encode()))
+    sections = ts.split_log_sections(ts.decompress_log_bundle(bundle))
+    assert sections == {
+        "System": "2024-05-01 [Information] id=1 boot",
+        "Microsoft-Windows-WLAN-AutoConfig/Operational": "2024-05-01 [Error] id=8002 failed",
+    }
+
+
+def test_tar_bundle_is_attached_as_tar_gz(rec, completion):
+    _complete(log_bundle=_Upload(_tar_gz([("System.log", "### System Log\nline\n")])))
+    assert completion["attached"][0]["original_filename"].endswith(".tar.gz")

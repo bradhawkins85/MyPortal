@@ -1,0 +1,7 @@
+{
+  "guid": "c915ea32-53a3-402f-8964-cfbac1d6fb2d",
+  "occurred_at": "2026-10-06T12:10Z",
+  "change_type": "Fix",
+  "summary": "Fixed AI troubleshooter log collection on Windows (now read with wevtutil) and saved each collected log as its own file in the troubleshoot log bundle.",
+  "content_hash": "1f14b590bdd8eef2e62043039a822e51bfb60f6644afebfc33bea8356e2aeb2c"
+}

@@ -19,8 +19,6 @@
 package agent
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -73,7 +71,7 @@ type Request struct {
 // should still report whatever was produced.
 type Result struct {
 	Guidance  string // LLM remediation guidance (redacted); may be empty
-	LogBundle []byte // gzip-compressed redacted log bundle; may be empty
+	LogBundle []byte // .tar.gz of redacted logs, one file per source; may be empty
 	Endpoint  string // resolved endpoint label used in the ticket note
 	Truncated bool   // true if the prompt's log sample was truncated
 }
@@ -180,11 +178,16 @@ func (a *Agent) Run(ctx context.Context, req Request) (Result, error) {
 	// Only attach a bundle when we actually captured logs; a bundle of just a
 	// "[no logs]" placeholder would be noise on the ticket.
 	if redacted != "" {
-		bundle := gzipText(redacted)
-		if len(bundle) > maxBundleBytes {
-			bundle = bundle[:maxBundleBytes]
+		// One file per log source. A bundle that is still too large is
+		// dropped rather than cut, since a truncated archive cannot be opened.
+		if bundle := bundleLogs(redacted); len(bundle) <= maxBundleBytes {
+			result.LogBundle = bundle
+		} else {
+			errs = append(errs, fmt.Sprintf("log bundle too large to upload (%d bytes)", len(bundle)))
 		}
-		result.LogBundle = bundle
+	}
+	if collectErr == nil && redacted != "" && len(sources) == 0 {
+		errs = append(errs, "no log source could be read; each file in the bundle shows why")
 	}
 
 	// In collect-only mode the server analyses the logs itself.
@@ -244,17 +247,4 @@ func (a *Agent) resolveEndpoint(req Request) string {
 		return h
 	}
 	return "this device"
-}
-
-// gzipText compresses s and returns the gzip bytes, or nil on failure.
-func gzipText(s string) []byte {
-	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	if _, err := zw.Write([]byte(s)); err != nil {
-		return nil
-	}
-	if err := zw.Close(); err != nil {
-		return nil
-	}
-	return buf.Bytes()
 }

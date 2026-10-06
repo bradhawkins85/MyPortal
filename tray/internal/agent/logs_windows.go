@@ -3,14 +3,12 @@
 package agent
 
 import (
+	"bytes"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
-	"time"
-	"unicode/utf16"
 )
 
 // defaultPlatformSources are the event channels read when the server names
@@ -21,69 +19,60 @@ var defaultPlatformSources = []string{"System", "Application", "Security"}
 // isPlatformLogSource reports whether source is an allowlisted channel.
 func isPlatformLogSource(source string) bool { return isWindowsLogSource(source) }
 
-// maxWinEvents caps the number of entries read per channel so a busy machine
-// cannot blow past the prompt budget.
-const maxWinEvents = 500
-
-// collectPlatformLogs reads each requested Windows Event Log channel as plain
-// text via PowerShell's Get-WinEvent. It is read-only. Only allowlisted
-// channels are read: the name is embedded in the script, so an unlisted name
-// is refused rather than quoted.
+// collectPlatformLogs reads each requested Windows Event Log channel with
+// wevtutil, which is built into Windows and read-only. It is used instead of
+// PowerShell's Get-WinEvent because PowerShell module auto-loading on a
+// fresh SYSTEM profile wrote progress records to stderr and failed the query.
+// Only allowlisted channels are read; the channel is passed as its own
+// argument, never through a shell.
 func collectPlatformLogs(ctx context.Context, specs []LogSpec) (string, []string, error) {
+	wevtutil, err := exec.LookPath("wevtutil.exe")
+	if err != nil {
+		return "", nil, fmt.Errorf("locate wevtutil: %w", err)
+	}
 	var b strings.Builder
 	var sources []string
 	for _, spec := range specs {
 		if !isWindowsLogSource(spec.Source) {
-			b.WriteString(fmt.Sprintf("### %s Log\n[refused: not an allowlisted channel]\n\n", spec.Source))
+			fmt.Fprintf(&b, "### %s Log\n[refused: not an allowlisted channel]\n\n", spec.Source)
 			continue
 		}
-		since := time.Now().Add(-spec.Window).Format("2006-01-02T15:04:05")
-		script := fmt.Sprintf(logQueryScript, spec.Source, since, maxWinEvents)
-		out, err := runReadOnlyPowerShell(ctx, script)
+		out, err := runWevtutil(ctx, wevtutil, WevtutilQueryArgs(spec))
 		if err != nil {
-			b.WriteString(fmt.Sprintf("### %s Log\n[unavailable: %s]\n\n", spec.Source, err))
+			fmt.Fprintf(&b, "### %s Log\n[unavailable: %s]\n\n", spec.Source, err)
 			continue
 		}
-		text := strings.TrimSpace(string(out))
+		text, parseErr := FormatRenderedEvents(out)
+		if parseErr != nil && text == "" {
+			fmt.Fprintf(&b, "### %s Log\n[unavailable: could not read events: %s]\n\n", spec.Source, parseErr)
+			continue
+		}
 		if text == "" {
 			text = "[no entries in this window]"
 		}
-		b.WriteString(fmt.Sprintf("### %s Log\n%s\n\n", spec.Source, text))
+		fmt.Fprintf(&b, "### %s Log\n%s\n\n", spec.Source, text)
 		sources = append(sources, spec.Source)
 	}
 	return b.String(), sources, nil
 }
 
-// runReadOnlyPowerShell executes script and returns its standard output. The
-// script is passed with -EncodedCommand so no argument quoting is involved.
-// This mirrors internal/defender's runner and is duplicated here to keep the
-// agent package self-contained.
-func runReadOnlyPowerShell(ctx context.Context, script string) ([]byte, error) {
-	powershell, err := exec.LookPath("powershell.exe")
-	if err != nil {
-		return nil, fmt.Errorf("locate PowerShell: %w", err)
-	}
-	cmd := exec.CommandContext(ctx, powershell,
-		"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-		"-EncodedCommand", encodePowerShell(script))
-	var stderr strings.Builder
+func runWevtutil(ctx context.Context, wevtutil string, args []string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, wevtutil, args...)
+	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, fmt.Errorf("timed out: %w", ctx.Err())
 		}
-		return nil, fmt.Errorf("%w: %s", err, PowerShellErrorText(stderr.String()))
+		msg := strings.Join(strings.Fields(stderr.String()), " ")
+		if msg == "" {
+			msg = strings.Join(strings.Fields(string(out)), " ")
+		}
+		if len(msg) > 400 {
+			msg = msg[:400] + "…"
+		}
+		return nil, fmt.Errorf("%w: %s", err, msg)
 	}
 	return out, nil
-}
-
-func encodePowerShell(script string) string {
-	encoded := utf16.Encode([]rune(script))
-	buf := make([]byte, len(encoded)*2)
-	for i, value := range encoded {
-		buf[i*2] = byte(value)
-		buf[i*2+1] = byte(value >> 8)
-	}
-	return base64.StdEncoding.EncodeToString(buf)
 }

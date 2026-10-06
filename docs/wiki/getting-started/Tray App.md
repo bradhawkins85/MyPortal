@@ -445,7 +445,12 @@ in stages, each posted to the ticket as an internal note:
    `collect_logs` troubleshoot command to the asset's tray device. The
    device re-checks every source against its own allowlist, collects and
    scrubs the logs, and uploads them to `troubleshoot-complete`. The bundle
-   is attached to the ticket as a staff-only file.
+   is a `.tar.gz` with one file per log source (for example `System.log`,
+   `Microsoft-Windows-WLAN-AutoConfig_Operational.log`), attached to the
+   ticket as a staff-only file. On Windows the channels are read with the
+   built-in `wevtutil qe` (one line per event: time, level, event ID,
+   provider and message); a source that cannot be read keeps its own file
+   with the reason.
 4. **Log analysis** - the server sends the logs to the LLM along with the
    reason each was collected and the recommended steps, and posts the
    findings, likely causes and possible solutions.
@@ -491,8 +496,8 @@ raw log data is never uploaded unsanitised.
 3. It prompts the LLM for **actionable guidance** (the LLM never executes
    anything; the response is advisory text).
 4. The result — `guidance`, the `endpoint` hostname, and the sanitized
-   `log_bundle` (a gzip-compressed, redacted archive sent as a multipart
-   form file) — is posted to
+   `log_bundle` (a redacted `.tar.gz` with one file per log source, sent
+   as a multipart form file) — is posted to
    `POST /api/tickets/{ticket_id}/troubleshoot-complete`.
 5. The server verifies the command, attaches the bundle as a read-only
    (staff-only) ticket attachment, and stores the guidance as an internal
@@ -511,7 +516,7 @@ make run-agent ARGS="-prompt 'WiFi keeps dropping' -llm-base-url http://127.0.0.
 ```
 
 Flags: `-prompt`, `-endpoint`, `-llm-base-url`, `-llm-model`, `-llm-api-key`,
-`-window` (default `24h`), `-out` (write the gzip bundle to a file), and
+`-window` (default `24h`), `-out` (write the `.tar.gz` bundle to a file), and
 `-no-llm` (skip the LLM, bundle-only). Guidance is printed to stdout; the
 log bundle is written to `-out` when provided (otherwise the CLI only
 reports its size). Ctrl-C cancels an in-flight LLM call.

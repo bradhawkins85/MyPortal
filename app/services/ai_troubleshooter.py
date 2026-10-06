@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import asyncio
 import html
+import io
 import json
 import re
+import tarfile
 import time
 import zlib
 from collections.abc import Awaitable, Mapping, Sequence
@@ -854,21 +856,58 @@ def is_collect_logs_command(command: Mapping[str, Any]) -> bool:
     return command_payload(command).get("mode") == MODE_COLLECT_LOGS
 
 
-def decompress_log_bundle(data: bytes) -> str:
-    """Inflate a gzip log bundle, bounded and tolerant of truncation.
+def _inflate(data: bytes, limit: int) -> bytes:
+    inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    try:
+        return inflater.decompress(data, limit)
+    except zlib.error:
+        return b""
 
-    The device caps the bundle by cutting the compressed bytes, so the stream
-    may end early; whatever inflated cleanly is kept.
+
+def _is_tar(raw: bytes) -> bool:
+    return len(raw) >= 512 and raw[257:262] == b"ustar"
+
+
+def is_tar_bundle(data: bytes) -> bool:
+    """True when the bundle is a .tar.gz with one file per log source."""
+
+    return _is_tar(_inflate(data, 1024)) if data else False
+
+
+def _tar_text(raw: bytes) -> str:
+    """Join the files of an in-memory tar (each starts with its log header)."""
+
+    parts: list[str] = []
+    try:
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:
+            for member in archive:
+                if not member.isfile():
+                    continue
+                handle = archive.extractfile(member)
+                if handle is None:
+                    continue
+                text = handle.read(_MAX_DECOMPRESSED_LOG_BYTES).decode("utf-8", errors="replace")
+                parts.append(text.rstrip("\n") + "\n\n")
+    except (tarfile.TarError, EOFError, OSError):
+        # The bounded inflate can cut the last file; keep the complete ones.
+        pass
+    return "".join(parts)
+
+
+def decompress_log_bundle(data: bytes) -> str:
+    """Inflate a log bundle, bounded and tolerant of truncation.
+
+    Current agents send a .tar.gz with one file per log source; older agents
+    send a single gzip text stream. Both come back as one text with a
+    ``### <source> Log`` header per section.
     """
 
     if not data:
         return ""
-    inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
-    try:
-        out = inflater.decompress(data, _MAX_DECOMPRESSED_LOG_BYTES)
-    except zlib.error:
-        return ""
-    return out.decode("utf-8", errors="replace")
+    raw = _inflate(data, _MAX_DECOMPRESSED_LOG_BYTES)
+    if _is_tar(raw):
+        return _tar_text(raw)
+    return raw.decode("utf-8", errors="replace")
 
 
 def split_log_sections(text: str) -> dict[str, str]:
@@ -1099,6 +1138,7 @@ __all__ = [
     "decompress_log_bundle",
     "endpoint_platform",
     "is_collect_logs_command",
+    "is_tar_bundle",
     "run_research_and_plan",
     "schedule_log_analysis",
     "split_log_sections",
