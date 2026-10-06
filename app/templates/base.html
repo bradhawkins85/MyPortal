@@ -1015,6 +1015,14 @@
                   <span class="menu__label">AI Quality</span>
                 </a>
               </li>{% endif %}
+              {% if feature_pack_available('llm_usage') %}<li class="menu__item">
+                <a href="/admin/llm-usage" {% if current_path.startswith('/admin/llm-usage') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M4 19h16v2H4zM5 10h3v7H5zm5.5-5h3v12h-3zM16 13h3v4h-3z"/></svg>
+                  </span>
+                  <span class="menu__label">LLM Usage</span>
+                </a>
+              </li>{% endif %}
               {% if feature_pack_available('ai_tag_synonyms') %}<li class="menu__item">
                 <a href="/admin/chat/ai-tag-synonyms" {% if current_path.startswith('/admin/chat/ai-tag-synonyms') or current_path.startswith('/chat/configuration') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">

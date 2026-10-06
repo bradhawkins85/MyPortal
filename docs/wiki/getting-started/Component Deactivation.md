@@ -103,6 +103,7 @@ one with its current status.
 | Backups (Assets & Network) | `backup_register` | `/backups` | pack `backups` is disabled |
 | RAG Index | `rag_index` | `/admin/rag`, `/rag`, `/api/rag` | — |
 | AI Quality | `ai_quality` | `/admin/ai-quality` | — |
+| LLM Usage | `llm_usage` | `/admin/llm-usage`, `/api/admin/llm-usage` | — |
 | AI Tag Synonyms | `ai_tag_synonyms` | `/admin/chat/ai-tag-synonyms`, `/chat/configuration` | — |
 | Tray Agent / Tray Settings | `tray` | `/admin/tray`, `/api/tray`, `/tray` | — |
 | Outlook Contacts (My Profile) | `outlook_contacts` | `/admin/profile/m365-contacts`, `/api/profile/m365-contacts` | — |

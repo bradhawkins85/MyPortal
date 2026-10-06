@@ -7400,6 +7400,47 @@ async def admin_ai_quality_page(request: Request):
     )
 
 
+@app.get("/admin/llm-usage", response_class=HTMLResponse)
+async def admin_llm_usage_page(
+    request: Request,
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.services import llm_usage
+
+    start_date, end_date = llm_usage.resolve_date_range(start, end)
+    today = datetime.now(timezone.utc).date()
+    presets = [
+        {"label": label, "start": (today - timedelta(days=days - 1)).isoformat(), "end": today.isoformat()}
+        for label, days in (("Last 7 days", 7), ("Last 30 days", 30), ("Last 90 days", 90))
+    ]
+    return await _render_template(
+        "admin/llm_usage.html", request, current_user,
+        extra={
+            "title": "LLM Usage",
+            "report": await llm_usage.build_report(start_date, end_date),
+            "presets": presets,
+        },
+    )
+
+
+@app.get("/api/admin/llm-usage", response_class=JSONResponse, tags=["LLM Usage"])
+async def api_llm_usage(
+    start: str | None = Query(default=None, description="Start date (YYYY-MM-DD, UTC, inclusive)"),
+    end: str | None = Query(default=None, description="End date (YYYY-MM-DD, UTC, inclusive)"),
+    _: dict = Depends(require_super_admin),
+):
+    """Return LLM request and token totals for a date range, broken down by MyPortal function, model and day."""
+
+    from app.services import llm_usage
+
+    start_date, end_date = llm_usage.resolve_date_range(start, end)
+    return JSONResponse(jsonable_encoder(await llm_usage.build_report(start_date, end_date)))
+
+
 @app.get("/admin/impersonation", response_class=HTMLResponse)
 async def admin_impersonation_page(
     request: Request,

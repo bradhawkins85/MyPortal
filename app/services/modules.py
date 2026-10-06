@@ -16,6 +16,7 @@ from html.parser import HTMLParser
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import asyncio
+import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, TypedDict
 from urllib.parse import urljoin
@@ -37,7 +38,7 @@ from app.repositories import integration_modules as module_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import webhook_events as webhook_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
-from app.services import module_dispatch
+from app.services import llm_usage, module_dispatch
 from app.services.module_constants import ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS
 from app.services.ai_prompt_security import UntrustedRecord, build_prompt, validate_object
 from app.services.realtime import RefreshNotifier, refresh_notifier
@@ -3086,10 +3087,15 @@ async def trigger_module(
                     )
             return consent_block
 
+    usage_feature = llm_usage.feature_for_trigger(slug, payload)
+
     async def _invoke_handler(
         *,
         event_future: asyncio.Future[int | None] | None,
     ) -> dict[str, Any]:
+        usage_token = (
+            llm_usage.set_current_feature(usage_feature) if usage_feature else None
+        )
         try:
             result = await handler(settings, payload or {}, event_future=event_future)
         except Exception as exc:
@@ -3105,6 +3111,9 @@ async def trigger_module(
                 "error": "An internal module error occurred",
                 "module": slug,
             }
+        finally:
+            if usage_token is not None:
+                llm_usage.reset_current_feature(usage_token)
         if event_future and not event_future.done():
             event_id_value = result.get("event_id")
             event_future.set_result(
@@ -3381,6 +3390,9 @@ async def _invoke_ollama(
             body["response_format"] = payload.get("response_format")
         elif payload.get("format") == "json":
             body["response_format"] = {"type": "json_object"}
+        if streaming and provider == "openai":
+            # OpenAI only reports token usage for streamed responses on request.
+            body["stream_options"] = {"include_usage": True}
         api_key = str(payload.get("api_key") or settings.get("api_key") or "").strip()
         if api_key:
             request_headers["Authorization"] = f"Bearer {api_key}"
@@ -3404,6 +3416,27 @@ async def _invoke_ollama(
     if event_future and not event_future.done():
         event_future.set_result(event_id)
     attempt_number = 1
+    usage_feature = llm_usage.current_feature()
+    usage_prompt = llm_usage.prompt_text(prompt, body.get("messages"))
+    usage_started = time.monotonic()
+    usage: tuple[int, int] | None = None
+    usage_response_text: str | None = None
+
+    async def _record_usage(status: str) -> None:
+        await llm_usage.record_usage(
+            feature=usage_feature,
+            provider=provider,
+            model=model,
+            status=status,
+            # Failed requests are recorded with no tokens: providers do not
+            # report (or bill) usage for requests they rejected.
+            usage=usage if status == "succeeded" else (0, 0),
+            prompt=usage_prompt,
+            response_text=usage_response_text,
+            duration_ms=int((time.monotonic() - usage_started) * 1000),
+            webhook_event_id=event_id,
+        )
+
     recorded_headers = {
         k: ("********" if k.lower() == "authorization" else v)
         for k, v in request_headers.items()
@@ -3414,6 +3447,17 @@ async def _invoke_ollama(
                 response = await client.post(endpoint, json=body, headers=request_headers)
                 response.raise_for_status()
                 response_body = response.text
+                try:
+                    parsed_response = json.loads(response_body)
+                except (TypeError, ValueError):
+                    parsed_response = None
+                usage = llm_usage.extract_token_usage(parsed_response)
+                if isinstance(parsed_response, Mapping):
+                    usage_response_text = str(
+                        parsed_response.get("response")
+                        or _extract_openai_compatible_text(parsed_response)
+                        or ""
+                    )
             else:
                 chunks: list[str] = []
                 async with client.stream(
@@ -3428,6 +3472,7 @@ async def _invoke_ollama(
                             item = json.loads(data)
                         except json.JSONDecodeError:
                             continue
+                        usage = llm_usage.extract_token_usage(item) or usage
                         if provider == "ollama":
                             delta = item.get("response") or ""
                         else:
@@ -3441,6 +3486,7 @@ async def _invoke_ollama(
                             chunks.append(str(delta))
                             await on_delta(str(delta))
                 complete_text = "".join(chunks)
+                usage_response_text = complete_text
                 response_body = json.dumps(
                     {"response": complete_text, "message": complete_text}
                 )
@@ -3458,6 +3504,7 @@ async def _invoke_ollama(
             request_headers=recorded_headers,
             request_body=body,
         )
+        await _record_usage("failed")
         return _build_event_result(
             updated_event,
             extra={"model": model, "endpoint": endpoint, "provider": provider},
@@ -3473,11 +3520,13 @@ async def _invoke_ollama(
             request_headers=recorded_headers,
             request_body=body,
         )
+        await _record_usage("error")
         return _build_event_result(
             updated_event,
             extra={"model": model, "endpoint": endpoint, "provider": provider},
         )
 
+    await _record_usage("succeeded")
     updated_event = await _record_success(
         event_id,
         attempt_number=attempt_number,

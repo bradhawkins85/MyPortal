@@ -5,6 +5,7 @@ import hashlib
 import html
 import json
 import re
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
@@ -23,6 +24,7 @@ from app.repositories import matrix_ai_tag_synonyms as tag_synonyms_repo
 from app.services import ai_consent
 from app.services import audit as audit_service
 from app.services import knowledge_base as knowledge_base_service
+from app.services import llm_usage
 from app.services import matrix as matrix_service
 from app.services import webhook_monitor
 from app.services.ai_prompt_security import UntrustedRecord, build_prompt, validate_object
@@ -328,12 +330,23 @@ async def _ollama_generate(prompt: str, *, json_format: bool = False) -> str:
         target_url,
         {"provider": provider, "model": model, "json_format": json_format, "prompt": prompt},
     )
+    started = time.monotonic()
     try:
         async with monitored_client(httpx.AsyncClient, timeout=45) as client:
             response = await client.post(target_url, json=body, headers=headers)
         response.raise_for_status()
         payload = response.json()
         result = (str(payload.get("response") or "").strip() if provider == "ollama" else _openai_chat_response_text(payload))
+        await llm_usage.record_usage(
+            feature="matrix_waiting_assistant",
+            provider=provider,
+            model=model,
+            status="succeeded",
+            usage=llm_usage.extract_token_usage(payload),
+            prompt=prompt,
+            response_text=result,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
         await _record_monitor_success(
             monitor_event,
             response_status=response.status_code,
@@ -346,6 +359,14 @@ async def _ollama_generate(prompt: str, *, json_format: bool = False) -> str:
             monitor_event,
             error_message=str(exc),
             request_body={"provider": provider, "model": model, "json_format": json_format, "prompt": prompt},
+        )
+        await llm_usage.record_usage(
+            feature="matrix_waiting_assistant",
+            provider=provider,
+            model=model,
+            status="failed",
+            usage=(0, 0),
+            duration_ms=int((time.monotonic() - started) * 1000),
         )
         raise
 
