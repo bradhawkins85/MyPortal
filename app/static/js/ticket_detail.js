@@ -3150,9 +3150,9 @@
       showHiddenButton.hidden = false;
       showHiddenButton.addEventListener('click', () => {
         const shouldShow = showHiddenButton.getAttribute('aria-pressed') !== 'true';
-        hiddenReplies.forEach((reply) => { reply.hidden = !shouldShow; });
         showHiddenButton.setAttribute('aria-pressed', shouldShow ? 'true' : 'false');
         showHiddenButton.textContent = shouldShow ? 'Hide split history' : 'Show hidden split history';
+        timeline.dispatchEvent(new Event('ticket-history-change'));
       });
     }
 
@@ -3211,20 +3211,45 @@
 
   function initialiseTicketHistory() {
     const timeline = document.querySelector('[data-ticket-timeline]');
-    if (!timeline) return;
-    const messages = Array.from(timeline.querySelectorAll('[data-ticket-reply]'));
-    const loadButton = timeline.querySelector('[data-history-load-earlier]');
-    const filters = Array.from(document.querySelectorAll('[data-history-filter]'));
+    const controls = document.querySelector('.ticket-history-filters');
+    if (!controls) return;
+    const messages = Array.from(timeline?.querySelectorAll('[data-ticket-reply]') || []);
+    const loadButton = timeline?.querySelector('[data-history-load-earlier]');
+    const emptyMessage = timeline?.querySelector('[data-history-empty]');
+    const filters = Array.from(controls.querySelectorAll('[data-history-filter]'));
+    const kinds = filters.map((button) => button.dataset.historyFilter).filter((kind) => kind !== 'all');
+    const storageKey = `portal.tickets.history.${controls.dataset.historyUserId || 'anonymous'}`;
+    const showHiddenButton = document.querySelector('[data-show-split-hidden]');
     let visibleLimit = 8;
-    let activeFilter = 'all';
+    // Store exclusions so newly introduced reply types (such as AI) default
+    // to visible. Retain unknown exclusions across mixed-version deployments.
+    let hiddenKinds = new Set();
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(storageKey));
+      if (stored && Array.isArray(stored.hidden) && stored.hidden.every((kind) => typeof kind === 'string')) {
+        hiddenKinds = new Set(stored.hidden);
+      }
+    } catch (error) {
+      console.warn('Unable to read ticket conversation preferences:', error);
+    }
 
     function render() {
-      const matching = messages.filter((message) => activeFilter === 'all' || message.dataset.messageKind === activeFilter);
+      const showSplitHistory = showHiddenButton?.getAttribute('aria-pressed') === 'true';
+      const eligible = messages.filter((message) => message.dataset.splitHidden !== 'true' || showSplitHistory);
+      const matching = eligible.filter((message) => !hiddenKinds.has(message.dataset.messageKind));
+      const visible = new Set(matching.slice(0, visibleLimit));
       messages.forEach((message) => {
-        const matches = matching.includes(message);
-        const withinLimit = matching.indexOf(message) < visibleLimit;
-        message.hidden = !matches || !withinLimit || message.dataset.splitHidden === 'true';
+        message.hidden = !visible.has(message);
       });
+      filters.forEach((button) => {
+        const kind = button.dataset.historyFilter;
+        const active = kind === 'all' ? kinds.every((item) => !hiddenKinds.has(item)) : !hiddenKinds.has(kind);
+        button.classList.toggle('stat-strip__stat--active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+        const count = button.querySelector('[data-history-count]');
+        if (count) count.textContent = String(kind === 'all' ? eligible.length : eligible.filter((message) => message.dataset.messageKind === kind).length);
+      });
+      if (emptyMessage) emptyMessage.hidden = matching.length > 0;
       if (loadButton) {
         loadButton.hidden = matching.length <= visibleLimit;
         const remaining = Math.max(0, matching.length - visibleLimit);
@@ -3233,15 +3258,27 @@
     }
 
     filters.forEach((button) => button.addEventListener('click', () => {
-      activeFilter = button.dataset.historyFilter || 'all';
+      const kind = button.dataset.historyFilter;
+      if (kind === 'all') {
+        const hideAll = kinds.every((item) => !hiddenKinds.has(item));
+        kinds.forEach((item) => {
+          if (hideAll) hiddenKinds.add(item);
+          else hiddenKinds.delete(item);
+        });
+      } else if (hiddenKinds.has(kind)) {
+        hiddenKinds.delete(kind);
+      } else {
+        hiddenKinds.add(kind);
+      }
       visibleLimit = 8;
-      filters.forEach((candidate) => {
-        const active = candidate === button;
-        candidate.classList.toggle('is-active', active);
-        candidate.setAttribute('aria-pressed', active ? 'true' : 'false');
-      });
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify({ hidden: Array.from(hiddenKinds) }));
+      } catch (error) {
+        console.warn('Unable to save ticket conversation preferences:', error);
+      }
       render();
     }));
+    timeline?.addEventListener('ticket-history-change', render);
     loadButton?.addEventListener('click', () => {
       visibleLimit += 8;
       render();
