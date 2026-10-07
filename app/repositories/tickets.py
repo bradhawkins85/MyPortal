@@ -2015,7 +2015,6 @@ async def get_automation_filter_context_by_ticket_ids(
             CASE WHEN tr.is_internal = 1 THEN 'internal_note' ELSE 'message' END AS kind,
             CASE
                 WHEN tr.external_reference LIKE 'shipment-watch:%%' THEN 'system'
-                WHEN tr.external_reference LIKE 'automation:%%' THEN 'automation'
                 WHEN tr.is_internal = 1 THEN 'technician'
                 ELSE 'requester'
             END AS ticket_update_actor_type
@@ -2024,6 +2023,10 @@ async def get_automation_filter_context_by_ticket_ids(
             SELECT ticket_id, MAX(id) AS latest_reply_id
             FROM ticket_replies
             WHERE ticket_id IN ({placeholders})
+              AND (
+                external_reference IS NULL
+                OR external_reference NOT LIKE 'automation:%%'
+              )
             GROUP BY ticket_id
         ) AS latest ON latest.latest_reply_id = tr.id
         """,  # nosec B608

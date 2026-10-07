@@ -292,3 +292,66 @@ async def test_legacy_single_module_exception_records_failed_note(audit_env, mon
     assert created[0]["ticket_id"] == 7
     assert "failed" in created[0]["body"]
     assert "Error: module exploded" in created[0]["body"]
+
+
+@pytest.mark.anyio
+async def test_reply_visibility_read_from_top_level_module_result(audit_env):
+    created, _ = audit_env
+
+    await automations_service._record_action_history(
+        AUTOMATION,
+        action_name="add-ticket-reply",
+        action_module="add-ticket-reply",
+        status="succeeded",
+        result={
+            "module": "add-ticket-reply",
+            "status": "succeeded",
+            "result": {
+                "ticket_id": 7,
+                "status": "succeeded",
+                "reply_id": 81,
+                "is_internal": True,
+            },
+        },
+        error_message=None,
+        context=CONTEXT,
+    )
+
+    assert "Added reply #81 (internal note)" in created[0]["body"]
+
+
+@pytest.mark.anyio
+async def test_raised_failures_keep_explicit_ticket_target(audit_env, monkeypatch):
+    created, _ = audit_env
+
+    async def failing_trigger(slug, payload, *, background=True):
+        raise RuntimeError("module exploded")
+
+    monkeypatch.setattr(automations_service.module_dispatch, "trigger_module", failing_trigger)
+
+    # Legacy single-module action on a global scheduled run (no ticket context).
+    with pytest.raises(RuntimeError):
+        await automations_service._invoke_automation_actions_for_context(
+            {
+                "id": 5,
+                "name": "Legacy",
+                "kind": "scheduled",
+                "action_module": "update-ticket",
+                "action_payload": {"ticket_id": 42},
+            },
+            context=None,
+        )
+    # Multi-action event automation targeting a different ticket.
+    await automations_service._invoke_automation_actions_for_context(
+        {
+            "id": 6,
+            "name": "Escalate",
+            "kind": "event",
+            "action_payload": {
+                "actions": [{"module": "update-ticket", "payload": {"ticket_id": 43}}]
+            },
+        },
+        context=CONTEXT,
+    )
+
+    assert [note["ticket_id"] for note in created] == [42, 43]

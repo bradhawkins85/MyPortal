@@ -417,10 +417,7 @@ async def test_automation_filter_context_treats_shipment_reply_as_system(monkeyp
         "WHEN tr.external_reference LIKE 'shipment-watch:%%' THEN 'system'"
         in latest_query
     )
-    assert (
-        "WHEN tr.external_reference LIKE 'automation:%%' THEN 'automation'"
-        in latest_query
-    )
+    assert "external_reference NOT LIKE 'automation:%%'" in latest_query
 
 
 @pytest.mark.anyio
