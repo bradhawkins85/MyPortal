@@ -2015,6 +2015,7 @@ async def get_automation_filter_context_by_ticket_ids(
             CASE WHEN tr.is_internal = 1 THEN 'internal_note' ELSE 'message' END AS kind,
             CASE
                 WHEN tr.external_reference LIKE 'shipment-watch:%%' THEN 'system'
+                WHEN tr.external_reference LIKE 'automation:%%' THEN 'automation'
                 WHEN tr.is_internal = 1 THEN 'technician'
                 ELSE 'requester'
             END AS ticket_update_actor_type
