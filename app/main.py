@@ -10606,20 +10606,19 @@ async def _render_portal_ticket_detail(
         else:
             company_record = None
 
-    replies = await tickets_repo.list_replies(ticket_id, include_internal=has_helpdesk_access)
-
-    # End users (viewers without helpdesk access) see the
-    # technician/customer conversation plus public shipment-tracking updates.
-    # Internal notes, AI troubleshooter notes, internal shipment updates, and
-    # automation actions are filtered out; helpdesk and super-admin viewers
-    # keep the full history.
-    if not has_helpdesk_access:
-        ticket_requester_id = ticket.get("requester_id")
-        replies = [
-            reply
-            for reply in replies
-            if _portal_reply_kind(reply, ticket_requester_id) in CUSTOMER_VISIBLE_REPLY_KINDS
-        ]
+    # The portal (non-admin) ticket detail is the customer-facing view, so it
+    # always renders the customer/technician conversation plus public
+    # shipment-tracking updates for every viewer — end users, technicians, and
+    # admins previewing a ticket all see the same replies. Internal notes, AI
+    # troubleshooter notes, internal shipment updates, and automation actions
+    # are hidden here; staff who need the full timeline use the admin view.
+    replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
+    ticket_requester_id = ticket.get("requester_id")
+    replies = [
+        reply
+        for reply in replies
+        if _portal_reply_kind(reply, ticket_requester_id) in CUSTOMER_VISIBLE_REPLY_KINDS
+    ]
 
     ordered_replies = sorted(
         replies,
@@ -10644,6 +10643,9 @@ async def _render_portal_ticket_detail(
     from app.repositories import call_recordings as call_recordings_repo
     call_recordings = await call_recordings_repo.list_ticket_call_recordings(ticket_id)
 
+    # Get ticket watchers (fetched early so user IDs are included in the batch lookup)
+    watcher_records = await tickets_repo.list_watchers(ticket_id)
+
     related_user_ids: set[int] = set()
     for key in ("assigned_user_id", "requester_id"):
         value = ticket.get(key)
@@ -10657,6 +10659,13 @@ async def _render_portal_ticket_detail(
         try:
             if author_id is not None:
                 related_user_ids.add(int(author_id))
+        except (TypeError, ValueError):
+            continue
+    for watcher in watcher_records:
+        watcher_user_id = watcher.get("user_id")
+        try:
+            if watcher_user_id is not None:
+                related_user_ids.add(int(watcher_user_id))
         except (TypeError, ValueError):
             continue
 
@@ -10828,8 +10837,7 @@ async def _render_portal_ticket_detail(
             min_matching_tags=min_matching_tags,
         )
 
-    # Get ticket watchers
-    watcher_records = await tickets_repo.list_watchers(ticket_id)
+    # Build watcher display list (watcher_records fetched earlier for batch user lookup)
     watchers = []
     for watcher in watcher_records:
         if watcher.get("user_id"):

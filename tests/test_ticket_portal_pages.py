@@ -495,14 +495,17 @@ def test_portal_reply_kind_classification():
 
 @pytest.mark.anyio("asyncio")
 @pytest.mark.parametrize(
-    ("has_helpdesk_access", "expected_reply_ids"),
+    "has_helpdesk_access",
     [
-        pytest.param(False, {201, 202, 204}, id="end-user-sees-conversation-and-public-shipment"),
-        pytest.param(True, {201, 202, 203, 204, 205, 206}, id="helpdesk-sees-all-replies"),
+        pytest.param(False, id="end-user"),
+        pytest.param(True, id="technician"),
     ],
 )
-async def test_render_portal_ticket_detail_reply_visibility(monkeypatch, has_helpdesk_access, expected_reply_ids):
-    """End users see the conversation + public shipment; helpdesk sees all."""
+async def test_render_portal_ticket_detail_reply_visibility(monkeypatch, has_helpdesk_access):
+    """The portal (non-admin) view always shows the customer conversation —
+    customer + technician replies + public shipment — for every viewer.
+    End users, technicians, and admins all see the same replies; internal
+    notes, AI notes, and automation entries are hidden in the non-admin view."""
     request = _make_request("/tickets/41")
     user = {"id": 5, "is_super_admin": False}
 
@@ -582,7 +585,9 @@ async def test_render_portal_ticket_detail_reply_visibility(monkeypatch, has_hel
     assert captured["template"] == "tickets/detail.html"
 
     rendered_reply_ids = {entry["id"] for entry in captured["extra"]["ticket_replies"] if entry.get("type") == "reply"}
-    assert rendered_reply_ids == expected_reply_ids
+    # The template receives only the customer-visible timeline, whether the
+    # viewer is an end user or a technician.
+    assert rendered_reply_ids == {201, 202, 204}
 
 
 @pytest.mark.anyio("asyncio")

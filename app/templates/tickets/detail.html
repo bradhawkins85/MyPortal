@@ -5,7 +5,6 @@
   <div class="page-header-bar page-header-bar--record">
     <span class="header__title-text" title="{{ ticket.subject or 'Ticket' }}">{{ ticket.subject or 'Ticket' }}</span>
     <span class="page-header-bar__meta">
-      <span class="badge {{ ticket.status_badge }}">{{ ticket.status_label }}</span>
       <span>Ticket #{{ ticket.id }}</span>
     </span>
   </div>
@@ -31,6 +30,10 @@
               <div class="card__body">
                 <dl class="description-list">
                   <div class="description-list__row">
+                    <dt>Ticket</dt>
+                    <dd>Ticket #{{ ticket.id }}</dd>
+                  </div>
+                  <div class="description-list__row">
                     <dt>Status</dt>
                     <dd><span class="badge {{ ticket.status_badge }}">{{ ticket.status_label }}</span></dd>
                   </div>
@@ -55,21 +58,13 @@
                   <div class="description-list__row">
                     <dt>Created</dt>
                     <dd>
-                      {% if ticket.created_iso %}
-                        <span data-utc="{{ ticket.created_iso }}"></span>
-                      {% else %}
-                        <span class="text-muted">—</span>
-                      {% endif %}
+                      {{ ticket.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.created_at else '—' }}
                     </dd>
                   </div>
                   <div class="description-list__row">
                     <dt>Updated</dt>
                     <dd>
-                      {% if ticket.updated_iso %}
-                        <span data-utc="{{ ticket.updated_iso }}"></span>
-                      {% else %}
-                        <span class="text-muted">—</span>
-                      {% endif %}
+                      {{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}
                     </dd>
                   </div>
                   {% if ticket.xero_invoice_number %}
@@ -78,11 +73,11 @@
                       <dd><strong>{{ ticket.xero_invoice_number }}</strong></dd>
                     </div>
                   {% endif %}
-                  {% if ticket.billed_at_iso %}
+                  {% if ticket.billed_at %}
                     <div class="description-list__row">
                       <dt>Billed At</dt>
                       <dd>
-                        <span data-utc="{{ ticket.billed_at_iso }}"></span>
+                        {{ ticket.billed_at.astimezone().strftime('%Y-%m-%d %H:%M') }}
                       </dd>
                     </div>
                   {% endif %}
