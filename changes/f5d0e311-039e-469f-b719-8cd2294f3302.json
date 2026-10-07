@@ -1,0 +1,7 @@
+{
+  "guid": "f5d0e311-039e-469f-b719-8cd2294f3302",
+  "occurred_at": "2026-10-07T08:15Z",
+  "change_type": "Fix",
+  "summary": "Fix the New onboarding link modal not closing with its close button, Cancel or Escape.",
+  "content_hash": "1911e9db7326f66df6efe40a9131e5c76634e75206e31587cb56372633773e3d"
+}

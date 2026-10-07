@@ -112,6 +112,109 @@
     return !message;
   }
 
+  // Each question owns its error and controls, including checkbox/radio groups.
+  // Step validation skips site questions: validateSite checks those in their tabs.
+  function customQuestions(root) {
+    const owner = root.closest('[data-cof-site-modal]');
+    return Array.from(root.querySelectorAll('[data-cof-custom-question]'))
+      .filter((question) => question.closest('[data-cof-site-modal]') === owner);
+  }
+
+  function isValidCustomUrl(text) {
+    try {
+      const address = new URL(text);
+      return ['http:', 'https:'].includes(address.protocol)
+        && Boolean(address.hostname) && !address.username && !address.password
+        && !/\s|\\/.test(text);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function setCustomError(question, message) {
+    const error = question.querySelector('[data-cof-custom-error]');
+    error.textContent = message || '';
+    error.hidden = !message;
+    question.querySelectorAll('[data-cof-custom-control]').forEach((input) => {
+      input.classList.toggle('is-invalid', Boolean(message));
+      input.setAttribute('aria-invalid', message ? 'true' : 'false');
+    });
+  }
+
+  function validateCustomQuestions(root, show) {
+    let firstBad = null;
+    customQuestions(root).forEach((question) => {
+      const controls = Array.from(question.querySelectorAll('[data-cof-custom-control]'));
+      const input = controls[0];
+      const type = question.dataset.cofCustomType;
+      const required = question.dataset.cofCustomRequired === 'true';
+      let message = '';
+      if (type === 'multi_select' || type === 'radio') {
+        if (required && !controls.some((control) => control.checked)) {
+          message = type === 'multi_select' ? 'Select at least one option.' : 'Select an option.';
+        }
+      } else if (type === 'checkbox') {
+        if (required && !input.checked) {
+          message = 'Tick the box to answer this question.';
+        }
+      } else if (required && !input.value.trim()) {
+        message = type === 'dropdown' ? 'Select an option.' : 'Answer this question.';
+      } else if (input.value && type === 'email' && !isValidEmail(input.value)) {
+        message = 'Enter a valid email address, like name@example.com.';
+      } else if (input.value && type === 'phone'
+        && (!/^\+?[0-9().\- ]+(?: *(?:x|ext\.?) *[0-9]{1,8})?$/i.test(input.value.trim())
+          || (input.value.match(/[0-9]/g) || []).length < 3
+          || (input.value.match(/[0-9]/g) || []).length > 20)) {
+        message = 'Enter a valid phone number.';
+      } else if (input.value && type === 'url' && !isValidCustomUrl(input.value.trim())) {
+        message = 'Enter a valid website URL beginning with http:// or https://.';
+      } else if (input.maxLength > -1 && input.value.length > input.maxLength) {
+        message = `Use no more than ${input.maxLength} characters.`;
+      } else if (!input.validity.valid) {
+        message = input.validationMessage || 'Enter a valid answer.';
+      }
+      if (show) {
+        setCustomError(question, message);
+      }
+      if (message && !firstBad) {
+        firstBad = question;
+      }
+    });
+    return firstBad;
+  }
+
+  function customReviewRows(root) {
+    return customQuestions(root).map((question) => {
+      const controls = Array.from(question.querySelectorAll('[data-cof-custom-control]'));
+      const type = question.dataset.cofCustomType;
+      let answer;
+      if (type === 'checkbox') {
+        answer = controls[0].checked ? 'Yes' : 'No';
+      } else if (type === 'multi_select' || type === 'radio') {
+        answer = controls.filter((control) => control.checked).map((control) => control.value).join(', ');
+      } else {
+        answer = controls[0].value.trim();
+      }
+      return [question.dataset.cofCustomLabel, answer];
+    });
+  }
+
+  function focusStepError(name) {
+    const step = form.querySelector(`[data-cof-step="${name}"]`);
+    const firstError = Array.from(step.querySelectorAll('.is-invalid'))
+      .find((input) => !input.closest('[data-cof-site-modal]'));
+    if (firstError) {
+      firstError.focus();
+    } else if (name === 'sites') {
+      const incomplete = siteModals().find((modal) => validateSite(modal, false) !== null);
+      if (incomplete) {
+        open(incomplete, { tab: validateSite(incomplete, true) });
+      } else if (addButton) {
+        addButton.focus();
+      }
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Sites
   // ---------------------------------------------------------------------------
@@ -250,6 +353,11 @@
       }
     });
 
+    const customBad = validateCustomQuestions(modal, show);
+    if (customBad) {
+      firstBadTab = firstBadTab || customBad.closest('[data-cof-panel]').dataset.cofPanel;
+    }
+
     if (show) {
       modal.querySelectorAll('[data-cof-tab]').forEach((tab) => {
         const panel = tab.dataset.cofTab;
@@ -286,7 +394,8 @@
     }
     modal.querySelectorAll('[data-cof-tab]').forEach((tab) => {
       const panel = modal.querySelector(`[data-cof-panel="${tab.dataset.cofTab}"]`);
-      const filled = Array.from(panel.querySelectorAll('[data-cof-field][required]')).every((input) => input.value.trim());
+      const filled = Array.from(panel.querySelectorAll('[data-cof-field][required]')).every((input) => input.value.trim())
+        && !validateCustomQuestions(panel, false);
       tab.classList.toggle('is-configured', filled);
     });
     return { name, address, contactName, email: siteField(modal, 'contact_email') };
@@ -354,6 +463,7 @@
       input,
       value: input.value,
       checked: input.checked,
+      selected: input.options ? Array.from(input.options).map((option) => option.selected) : null,
     }));
   }
 
@@ -361,6 +471,9 @@
     saved.forEach((entry) => {
       entry.input.value = entry.value;
       entry.input.checked = entry.checked;
+      if (entry.selected) {
+        Array.from(entry.input.options).forEach((option, index) => { option.selected = entry.selected[index]; });
+      }
     });
     dayRows(modal).forEach((row) => {
       const breakSpan = row.querySelector('[data-cof-break]');
@@ -370,6 +483,7 @@
     });
     modal.querySelectorAll('.scf-error').forEach((error) => { error.hidden = true; });
     modal.querySelectorAll('.is-invalid').forEach((input) => input.classList.remove('is-invalid'));
+    modal.querySelectorAll('[aria-invalid]').forEach((input) => input.removeAttribute('aria-invalid'));
     modal.querySelectorAll('.has-error').forEach((tab) => tab.classList.remove('has-error'));
   }
 
@@ -403,7 +517,7 @@
     openModal = modal;
     selectTab(modal, options.tab || 'address', false);
     refreshPreview(modal);
-    const first = modal.querySelector(`[data-cof-panel="${options.tab || 'address'}"] input:not([type="hidden"]), [data-cof-panel="${options.tab || 'address'}"] select`);
+    const first = modal.querySelector(`[data-cof-panel="${options.tab || 'address'}"] input:not([type="hidden"]), [data-cof-panel="${options.tab || 'address'}"] select, [data-cof-panel="${options.tab || 'address'}"] textarea`);
     window.requestAnimationFrame(() => (first || modal.querySelector('.modal__close')).focus());
   }
 
@@ -651,6 +765,8 @@
   // ---------------------------------------------------------------------------
 
   function validateStep(name, show) {
+    const section = form.querySelector(`[data-cof-step="${name}"]`);
+    const customOk = !validateCustomQuestions(section, show);
     if (name === 'business') {
       const nameOk = Boolean(value(form, '#client_name'));
       const phoneOk = Boolean(value(form, '#company_phone'));
@@ -663,7 +779,7 @@
         setError(form, 'company_phone', phoneOk ? '' : 'Enter your main phone number.');
         setError(form, 'company_email', emailMessage);
       }
-      return nameOk && phoneOk && !emailMessage;
+      return nameOk && phoneOk && !emailMessage && customOk;
     }
     if (name === 'sites') {
       const modals = siteModals();
@@ -680,11 +796,11 @@
           ? `Finish the details for ${incomplete.map((modal) => siteField(modal, 'name') || 'your new site').join(', ')}.`
           : '');
       }
-      return incomplete.length === 0;
+      return incomplete.length === 0 && customOk;
     }
     if (name === 'billing') {
       if (billingSame()) {
-        return siteModals().length > 0;
+        return siteModals().length > 0 && customOk;
       }
       let ok = true;
       [['billing_first_name', 'Enter a first name.'], ['billing_last_name', 'Enter a last name.']].forEach(([key, message]) => {
@@ -699,16 +815,16 @@
       if (show) {
         setError(form, 'billing_email', emailMessage);
       }
-      return ok && !emailMessage;
+      return ok && !emailMessage && customOk;
     }
     if (name === 'review') {
       const confirmed = form.querySelector('[data-cof-field="confirm_details"]').checked;
       if (show) {
         setError(form, 'confirm_details', confirmed ? '' : 'Tick the box to confirm your details are correct.');
       }
-      return confirmed;
+      return confirmed && customOk;
     }
-    return true;
+    return customOk;
   }
 
   function renderSteps() {
@@ -759,17 +875,7 @@
   function next() {
     const name = STEPS[currentStep];
     if (!validateStep(name, true)) {
-      const firstError = form.querySelector(`[data-cof-step="${name}"] .is-invalid`);
-      if (firstError) {
-        firstError.focus();
-      } else if (name === 'sites') {
-        const incomplete = siteModals().find((modal) => validateSite(modal, false) !== null);
-        if (incomplete) {
-          open(incomplete, { tab: validateSite(incomplete, true) });
-        } else if (addButton) {
-          addButton.focus();
-        }
-      }
+      focusStepError(name);
       return;
     }
     goTo(currentStep + 1);
@@ -815,10 +921,15 @@
       ['Main phone', value(form, '#company_phone')],
       ['General email', value(form, '#company_email')],
       ['Website', value(form, '#website')],
+      ...customReviewRows(form.querySelector('[data-cof-step="business"]')),
     ]));
     target.append(business);
 
     const sites = reviewSection(siteModals().length === 1 ? 'Site' : 'Sites', 'sites');
+    const siteQuestions = customReviewRows(form.querySelector('[data-cof-step="sites"]'));
+    if (siteQuestions.length) {
+      sites.append(reviewList(siteQuestions));
+    }
     siteModals().forEach((modal, position) => {
       const block = el('div', 'cof-review__site');
       const summary = refreshPreview(modal);
@@ -829,6 +940,7 @@
         ['Primary contact', [summary.contactName, summary.email, siteField(modal, 'contact_phone')].filter(Boolean).join(' · ')],
         ['Opening hours', hoursSummary(modal)],
         ['Time zone', (siteField(modal, 'timezone') || '').replace(/_/g, ' ')],
+        ...customReviewRows(modal),
       ]));
       sites.append(block);
     });
@@ -849,6 +961,10 @@
         ['Phone', value(form, '#billing_phone')],
         ['Payment terms', 'Invoices issued in advance, due within 7 days'],
       ]));
+    }
+    const billingQuestions = customReviewRows(form.querySelector('[data-cof-step="billing"]'));
+    if (billingQuestions.length) {
+      billing.append(reviewList(billingQuestions));
     }
     target.append(billing);
   }
@@ -885,7 +1001,19 @@
   form.querySelectorAll('[data-cof-next]').forEach((button) => button.addEventListener('click', next));
   form.querySelectorAll('[data-cof-back]').forEach((button) => button.addEventListener('click', () => goTo(currentStep - 1)));
   document.querySelectorAll('[data-cof-goto]').forEach((button) => {
-    button.addEventListener('click', () => goTo(STEPS.indexOf(button.dataset.cofGoto)));
+    button.addEventListener('click', () => {
+      const targetStep = STEPS.indexOf(button.dataset.cofGoto);
+      for (let index = currentStep; index < targetStep; index += 1) {
+        if (!validateStep(STEPS[index], true)) {
+          if (currentStep !== index) {
+            goTo(index);
+          }
+          focusStepError(STEPS[index]);
+          return;
+        }
+      }
+      goTo(targetStep);
+    });
   });
   form.querySelectorAll('[data-cof-billing-mode]').forEach((radio) => radio.addEventListener('change', syncBilling));
 
@@ -902,6 +1030,21 @@
   }
 
   form.addEventListener('input', () => { dirty = true; });
+  form.addEventListener('change', () => { dirty = true; });
+  const clearCustomError = (event) => {
+    const question = event.target.closest('[data-cof-custom-question]');
+    if (question) {
+      setCustomError(question, '');
+      const modal = question.closest('[data-cof-site-modal]');
+      if (modal) {
+        const panel = question.closest('[data-cof-panel]');
+        modal.querySelector(`[data-cof-tab="${panel.dataset.cofPanel}"]`)
+          .classList.toggle('has-error', Boolean(panel.querySelector('.scf-error:not([hidden])')));
+      }
+    }
+  };
+  form.addEventListener('input', clearCustomError);
+  form.addEventListener('change', clearCustomError);
   // Clear a field's error as soon as it's edited (see the site editor note).
   form.addEventListener('input', (event) => {
     const field = event.target.dataset ? event.target.dataset.cofField : null;
@@ -964,10 +1107,7 @@
         if (index !== currentStep) {
           goTo(index);
         }
-        const firstError = form.querySelector(`[data-cof-step="${STEPS[index]}"] .is-invalid`);
-        if (firstError) {
-          firstError.focus();
-        }
+        focusStepError(STEPS[index]);
         return;
       }
     }

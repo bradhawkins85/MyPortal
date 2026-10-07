@@ -48,6 +48,28 @@ Both can use these variables:
 Replies go to the technician who sent the link. If a template is deleted, MyPortal falls back to
 its built-in wording.
 
+## Custom questions
+
+Select **Custom questions** from **Client Onboarding** to open
+`/admin/client-onboarding/questions`. Super admins can add, edit, delete and order questions
+for every client onboarding form.
+
+For each question, enter its label, choose a field type and decide where it appears:
+**Your business**, **Sites**, **Billing**, **Review**, or **Each site**. Questions assigned to
+**Each site** repeat for every location the client adds. You can make a question required and
+add help text to explain what the client should enter.
+
+Available field types are **Short answer**, **Long answer**, **Email**, **Phone number**,
+**Date**, **Dropdown**, **Multi-select**, **Tick box**, **Single choice (radio buttons)**,
+**Number**, **Website URL**, **Time** and **Date and time**. Dropdown, multi-select and
+single-choice questions need their choices entered **one per line**. Use a tick box for a
+single yes/no answer, and multi-select when the client can choose several options.
+
+Saved questions apply to every open onboarding form, including links created before the
+question was added. Required questions and field formats are checked before submission.
+Changing or deleting a question does not change earlier submissions: each submitted answer
+keeps its original question label, field type and displayed value.
+
 ## What the client fills in
 
 The form is a branded, four-step page that works on phones and desktops:
@@ -61,6 +83,9 @@ The form is a branded, four-step page that works on phones and desktops:
 3. **Billing:** *Same as the main site contact*, or someone else's name, email and phone.
 4. **Review:** everything on one page with **Edit** links, optional notes, and a confirmation
    tick box before **Send my details**.
+
+Custom questions appear in their selected step or in each site's editor. The **Review** step
+also shows the client's custom answers before they submit.
 
 Each step is checked before the client moves on, with messages next to the fields that need
 attention. If the server finds a problem, the client sees a summary at the top and lands on the
@@ -85,6 +110,7 @@ MyPortal automatically:
   contact of the first site as requester and a summary of everything submitted. Use this ticket
   to send the client their onboarding information. The `New Client` status is added by the
   upgrade and recreated automatically if it has been removed.
+- Includes the custom answers, grouped by form section and site, in the **New Client** ticket.
 
 ## Reviewing and approving the company
 
@@ -93,6 +119,12 @@ status shows **Pending approval**. Open one to review it: the company page shows
 approval** panel summarising each site's address, primary contact, phone and business hours
 as the client entered them. Edit anything that needs correcting with the normal company page
 sections (details, addresses, business hours, staff), then select **Approve company**.
+
+Select **Company > Onboarding answers** on the company page to see its **Onboarding custom
+questions** panel. Answers also appear on the submitted form's page under **Client Onboarding**,
+grouped by section and site. These displays use the saved answers so they remain readable after
+questions are edited or deleted. Super admins can still review them on the company page after
+approval.
 
 Approving activates the company, enables the contacts created by the form and marks the
 onboarding link **Approved**. The approval is recorded in the audit trail. You can also approve

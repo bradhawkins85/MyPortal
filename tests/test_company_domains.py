@@ -154,3 +154,63 @@ def test_parse_raises_on_invalid_domain():
 def test_parse_single_domain_no_separator():
     result = parse_email_domain_text("example.com")
     assert result == ["example.com"]
+
+
+# ---------------------------------------------------------------------------
+# BLOCKED_EMAIL_DOMAINS
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def blocked_domains(monkeypatch):
+    from types import SimpleNamespace
+
+    import app.services.company_domains as company_domains
+
+    def _set(value: str) -> None:
+        monkeypatch.setattr(
+            company_domains,
+            "get_settings",
+            lambda: SimpleNamespace(blocked_email_domains=value),
+        )
+
+    _set("")
+    return _set
+
+
+def test_blocked_domains_parsed_from_settings(blocked_domains):
+    from app.services.company_domains import get_blocked_email_domains
+
+    blocked_domains(" ConnectToTeams.com, *.example.net ,, connecttoteams.com")
+    assert get_blocked_email_domains() == ("connecttoteams.com", "example.net")
+
+
+def test_normalise_skips_blocked_domain_and_subdomains(blocked_domains):
+    blocked_domains("connecttoteams.com")
+    result = normalise_email_domains(
+        [
+            "cust4869.sbcauseast.connecttoteams.com",
+            "CUST4870.sbctransferus.connecttoteams.com",
+            "connecttoteams.com",
+            "example.com",
+            "notconnecttoteams.com",
+        ]
+    )
+    assert result == ["example.com", "notconnecttoteams.com"]
+
+
+def test_normalise_all_blocked_returns_empty_without_error(blocked_domains):
+    blocked_domains("connecttoteams.com")
+    assert normalise_email_domains(["cust4869.sbcauseast.connecttoteams.com"]) == []
+
+
+def test_parse_text_skips_blocked_domains(blocked_domains):
+    blocked_domains("connecttoteams.com")
+    result = parse_email_domain_text(
+        "example.com\ncust4870.sbctransferus.connecttoteams.com, other.org"
+    )
+    assert result == ["example.com", "other.org"]
+
+
+def test_normalise_without_blocklist_keeps_all_domains(blocked_domains):
+    assert normalise_email_domains(["a.connecttoteams.com"]) == ["a.connecttoteams.com"]

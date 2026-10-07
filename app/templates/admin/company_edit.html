@@ -2,6 +2,7 @@
 {% from "macros/scheduled_ticket_payload.html" import scheduled_ticket_payload %}
 {% from "macros/header.html" import page_header_actions with context %}
 {% from "macros/counters.html" import counter_strip %}
+{% from "admin/_client_onboarding_answers.html" import answer_list, answer_sections %}
 
 {% set company_display_name = form_data.name or company.name %}
 {% set ce_email_domains = (form_data.email_domains or '').split(',') | map('trim') | select | list %}
@@ -9,6 +10,10 @@
 {% set ce_has_bh = business_hours_rows is defined %}
 {% set ce_vault = feature_pack_available('shared_credentials') %}
 {% set ce_trello = module_enabled.get('trello', false) %}
+{% set ce_submission = client_onboarding.submission if is_super_admin and client_onboarding is defined and client_onboarding and client_onboarding.submission else none %}
+{% set ce_answers = (ce_submission.custom_answers or []) if ce_submission else [] %}
+{% set ce_sites_with_answers = (ce_submission.sites or []) | selectattr('custom_answers') | list if ce_submission else [] %}
+{% set ce_has_onboarding_answers = ce_answers or ce_sites_with_answers %}
 {% set ce_external_count = namespace(value=0) %}
 {% for module_key, value in [('tacticalrmm', form_data.tacticalrmm_client_id), ('xero', form_data.xero_id), ('hudu', form_data.hudu_id), ('huntress', form_data.huntress_organization_id), ('huntress', form_data.huntress_sat_account_id)] %}
   {% if module_enabled.get(module_key, false) and value %}{% set ce_external_count.value = ce_external_count.value + 1 %}{% endif %}
@@ -129,6 +134,7 @@
             ("general", "ce-general", "Profile", "", true),
             ("addresses", "ce-addresses", "Addresses", company_addresses | length, true),
             ("company-variables", "ce-company-variables", "Variables", company_variables | length, true),
+            ("onboarding-answers", "ce-onboarding-answers", "Onboarding answers", "", ce_has_onboarding_answers),
           ]),
           ("Service", [
             ("sla", "ce-sla", "Service level", "" if company_sla else "None", true),
@@ -181,6 +187,24 @@
       </nav>
 
       <div class="ce-panels" data-ce-panels>
+    {% if ce_has_onboarding_answers %}
+    <section class="card card--panel ce-section" id="ce-onboarding-answers" data-company-edit-section="onboarding-answers" aria-labelledby="ce-onboarding-custom-questions">
+      <header class="ce-section__header">
+        <div class="ce-section__heading">
+          <h2 class="card__title" id="ce-onboarding-custom-questions">Onboarding custom questions</h2>
+          <p class="card__subtitle">Answers as the client submitted them.</p>
+        </div>
+        <a class="button button--ghost" href="/admin/client-onboarding/{{ client_onboarding.id }}">View submitted form</a>
+      </header>
+      <div class="ce-section__body">
+        {{ answer_sections(ce_answers) }}
+        {% for site in ce_sites_with_answers %}
+          <h3 class="scf-panel__title">{{ site.name }}</h3>
+          {{ answer_list(site.custom_answers) }}
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
     <section class="card card--panel ce-section" id="ce-general" data-company-edit-section="general" aria-labelledby="ce-general-title">
       <header class="ce-section__header">
         <div class="ce-section__heading">

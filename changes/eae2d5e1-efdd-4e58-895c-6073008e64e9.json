@@ -1,0 +1,7 @@
+{
+  "guid": "eae2d5e1-efdd-4e58-895c-6073008e64e9",
+  "occurred_at": "2026-10-07T07:40Z",
+  "change_type": "Feature",
+  "summary": "Companies: add BLOCKED_EMAIL_DOMAINS env blocklist that silently skips blocked domains and their subdomains when adding company email domains",
+  "content_hash": "234f42f20fab1c7d8453a2aa3a39ab700f808acbd7f7b672c20ec6ccd8d341df"
+}

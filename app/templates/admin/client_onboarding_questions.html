@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% macro section_name(key, label) -%}
+  {%- if key in ('site_address', 'site_contact', 'site_hours') -%}Each site: {{ label }}
+  {%- elif key == 'sites' -%}{{ label }} (once per form)
+  {%- else -%}{{ label }}{%- endif -%}
+{%- endmacro %}
+
+{% macro question_editor(form, editor_id, question_id=none, default_order=10, can_add=true) -%}
+  {% set chosen_type = form.field_type | default('short_text') %}
+  {% set chosen_section = form.section | default('business') %}
+  {% set entered_options = form.options | default([]) %}
+  <form class="form coq-editor" action="/admin/client-onboarding/questions" method="post" data-coq-editor>
+    {% include "partials/csrf.html" %}
+    {% if question_id is not none %}<input type="hidden" name="question_id" value="{{ question_id }}" />{% endif %}
+    <div class="form-field">
+      <label class="form-label required" for="{{ editor_id }}-label">Question</label>
+      <input class="form-input" id="{{ editor_id }}-label" name="label" required maxlength="255" value="{{ form.label | default('') }}" placeholder="e.g. Which services do you need?" />
+    </div>
+    <div class="form-grid">
+      <div class="form-field">
+        <label class="form-label" for="{{ editor_id }}-type">Answer type</label>
+        <select class="form-input" id="{{ editor_id }}-type" name="field_type" required data-coq-field-type>
+          {% for value, label in field_types.items() %}
+          <option value="{{ value }}"{% if value == chosen_type %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="{{ editor_id }}-section">Where to ask</label>
+        <select class="form-input" id="{{ editor_id }}-section" name="section" required aria-describedby="{{ editor_id }}-section-help">
+          {% for value, label in question_sections.items() %}
+          <option value="{{ value }}"{% if value == chosen_section %} selected{% endif %}>{{ section_name(value, label) }}</option>
+          {% endfor %}
+        </select>
+        <p class="form-help" id="{{ editor_id }}-section-help">Questions under each site's address, contact or opening hours repeat for every site the client adds.</p>
+      </div>
+    </div>
+    <div class="form-field" data-coq-options>
+      <label class="form-label" for="{{ editor_id }}-options">Answer options</label>
+      <textarea class="form-input" id="{{ editor_id }}-options" name="options" rows="5" aria-describedby="{{ editor_id }}-options-help" data-coq-options-input>{{ entered_options if entered_options is string else entered_options | join('\n') }}</textarea>
+      <p class="form-help" id="{{ editor_id }}-options-help">For dropdown, multi-select and radio questions, enter one option per line. Add up to 100 distinct options, with up to 255 characters each.</p>
+    </div>
+    <div class="form-field">
+      <label class="form-label" for="{{ editor_id }}-help">Help text <span class="scf-optional">optional</span></label>
+      <textarea class="form-input" id="{{ editor_id }}-help" name="help_text" rows="2" maxlength="2000" aria-describedby="{{ editor_id }}-help-description">{{ form.help_text | default('') }}</textarea>
+      <p class="form-help" id="{{ editor_id }}-help-description">Shown below the question to help the client answer it.</p>
+    </div>
+    <div class="form-grid">
+      <div class="form-field">
+        <label class="form-label" for="{{ editor_id }}-order">Display order</label>
+        <input class="form-input" id="{{ editor_id }}-order" name="display_order" type="number" min="0" max="10000" step="1" required value="{{ form.display_order | default(default_order) }}" aria-describedby="{{ editor_id }}-order-help" />
+        <p class="form-help" id="{{ editor_id }}-order-help">Lower numbers appear first within the section.</p>
+      </div>
+      <div class="form-field">
+        <span class="form-label">Answer requirement</span>
+        <label class="scf-switch">
+          <input type="checkbox" name="required" value="1"{% if form.required | default(false) %} checked{% endif %} aria-describedby="{{ editor_id }}-required-help" data-coq-required />
+          <span class="scf-switch__track" aria-hidden="true"></span>
+          <span>Require an answer</span>
+        </label>
+        <p class="form-help" id="{{ editor_id }}-required-help" data-coq-required-help>A required tick box must be checked before the client can submit.</p>
+      </div>
+    </div>
+    <div class="form-actions form-actions--inline">
+      <button type="submit" class="button button--primary"{% if question_id is none and not can_add %} disabled{% endif %}>{{ 'Save changes' if question_id is not none else 'Add question' }}</button>
+    </div>
+  </form>
+{%- endmacro %}
+
+{% block styles %}
+  <link rel="stylesheet" href="{{ static_url('/static/css/client_onboarding_questions_admin.css') }}" />
+{% endblock %}
+
+{% block header_title %}
+  <span class="header__title-text">Custom onboarding questions</span>
+{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Onboarding links", "type": "link", "variant": "ghost", "href": "/admin/client-onboarding"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+{% set limit = max_questions | default(100) %}
+{% set default_order = [((questions | map(attribute='display_order') | max) + 10) if questions else 10, 10000] | min %}
+<div class="admin-grid coq-admin">
+  {% if question_errors %}
+  <div class="alert alert--error admin-grid__full" role="alert" tabindex="-1" data-coq-errors>
+    <div>
+      <p class="coq-errors__heading">The question could not be saved.</p>
+      <ul>{% for error in question_errors %}<li>{{ error }}</li>{% endfor %}</ul>
+    </div>
+  </div>
+  {% endif %}
+
+  <section class="card card--panel admin-grid__full" aria-labelledby="coq-add-heading">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title" id="coq-add-heading">Add a question</h2>
+        <p class="card__subtitle">These questions are included on every onboarding form. Changes apply to forms that have not been submitted; submitted answers are kept with their original questions.</p>
+      </div>
+    </div>
+    <div class="card__body">
+      {% if questions | length >= limit %}
+        <p class="form-help">You've reached the limit of {{ limit }} custom questions. Remove a question before adding another.</p>
+      {% endif %}
+      {% if questions | length < limit or (question_errors and editing_question_id is none) %}
+        {{ question_editor(question_form if question_errors and editing_question_id is none else {}, 'coq-add', default_order=default_order, can_add=questions | length < limit) }}
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card card--panel admin-grid__full" aria-labelledby="coq-questions-heading">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title" id="coq-questions-heading">Questions on the form</h2>
+        <p class="card__subtitle">{{ questions | length }} of {{ limit }} custom questions. Open a question to edit its wording, answer type, location or display order.</p>
+      </div>
+    </div>
+    <div class="card__body scf">
+      {% if questions %}
+      <div class="scf-groups">
+        {% for section, section_label in question_sections.items() %}
+        {% set section_questions = questions | selectattr('section', 'equalto', section) | sort(attribute='display_order') | list %}
+        {% if section_questions %}
+        <div class="coq-group">
+          <h3 class="scf-group__title">{{ section_name(section, section_label) }}</h3>
+          <ul class="scf-list">
+            {% for question in section_questions %}
+            {% set is_editing = editing_question_id == question.id and question_errors %}
+            {% set editor_id = 'coq-edit-' ~ question.id %}
+            <li class="coq-item">
+              <details class="coq-question" id="coq-question-{{ question.id }}"{% if is_editing %} open{% endif %}>
+                <summary class="scf-item coq-question__summary">
+                  <span class="scf-type-icon{% if question.field_type in ('dropdown', 'radio') %} scf-type-icon--select{% elif question.field_type == 'multi_select' %} scf-type-icon--multiselect{% elif question.field_type == 'checkbox' %} scf-type-icon--checkbox{% elif question.field_type in ('date', 'datetime_local', 'time') %} scf-type-icon--date{% endif %}" aria-hidden="true"></span>
+                  <span class="scf-item__main">
+                    <span class="coq-question__label">{{ question.label }}</span>
+                    {% if question.help_text %}<span class="scf-item__help">{{ question.help_text }}</span>{% endif %}
+                    <span class="scf-item__chips">
+                      <span class="scf-chip">{{ field_types.get(question.field_type, question.field_type) }}</span>
+                      <span class="scf-chip{% if question.required %} scf-chip--logic{% endif %}">{{ 'Required' if question.required else 'Optional' }}</span>
+                      <span class="scf-chip">Order {{ question.display_order }}</span>
+                      {% if question.options %}<span class="scf-chip">{{ question.options | length }} options</span>{% endif %}
+                    </span>
+                  </span>
+                  <span class="coq-question__action">Edit question <span class="coq-question__chevron" aria-hidden="true">⌄</span></span>
+                </summary>
+                <div class="coq-question__body">
+                  {{ question_editor(question_form if is_editing else question, editor_id, question.id) }}
+                  <form class="coq-delete" action="/admin/client-onboarding/questions/{{ question.id }}/delete" method="post" data-confirm="Remove this question from unsubmitted onboarding forms? Answers on submitted forms will be kept." onsubmit="return window.confirm(this.dataset.confirm);">
+                    {% include "partials/csrf.html" %}
+                    <button type="submit" class="button button--danger">Remove question<span class="visually-hidden">: {{ question.label }}</span></button>
+                    <p class="form-help">Removing a question keeps answers already submitted.</p>
+                  </form>
+                </div>
+              </details>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="scf-empty">
+        <p class="scf-empty__title">No custom questions yet</p>
+        <p class="text-muted">Add your first question above. You can ask once in a form section, or repeat a question for each site.</p>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ static_url('/static/js/client_onboarding_questions_admin.js') }}" defer></script>
+{% endblock %}
