@@ -144,6 +144,23 @@ async def enable_onboarding_contacts(company_id: int) -> int:
     )
 
 
+async def decline_company(company_id: int) -> bool:
+    """Archive a pending company without activating it or its contacts."""
+
+    count = await db.execute_rowcount(
+        "UPDATE companies SET pending_approval = 0, archived = 1 WHERE id = %s AND pending_approval = 1",
+        (company_id,),
+    )
+    return count == 1
+
+
+async def mark_declined(company_id: int) -> None:
+    await db.execute(
+        "UPDATE client_onboardings SET status = 'declined' WHERE company_id = %s AND status = 'submitted'",
+        (company_id,),
+    )
+
+
 async def revoke(onboarding_id: int) -> bool:
     count = await db.execute_rowcount(
         "UPDATE client_onboardings SET status = 'revoked' WHERE id = %s AND status = 'pending'",

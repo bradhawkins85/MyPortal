@@ -562,3 +562,150 @@ def test_invitation_migration_seeds_editable_templates():
     assert f"'{onboarding.INVITATION_TEMPLATE_SLUG}'" in sql
     assert f"'{onboarding.INVITATION_SUBJECT_TEMPLATE_SLUG}'" in sql
     assert "{{ onboarding.message }}" in sql
+
+
+@pytest.mark.anyio
+async def test_decline_preserves_details_and_disabled_contacts(monkeypatch):
+    connection = sqlite3.connect(":memory:")
+    connection.executescript("""
+        CREATE TABLE companies (id INTEGER PRIMARY KEY, pending_approval INTEGER, archived INTEGER);
+        CREATE TABLE client_onboardings (id INTEGER PRIMARY KEY, company_id INTEGER, status TEXT, submission TEXT);
+        CREATE TABLE staff (id INTEGER PRIMARY KEY, company_id INTEGER, source TEXT, enabled INTEGER);
+        INSERT INTO companies VALUES (42, 1, 0), (43, 0, 0);
+        INSERT INTO client_onboardings VALUES (1, 42, 'submitted', '{"client_name":"Acme"}'),
+                                              (2, 43, 'approved', '{}');
+        INSERT INTO staff VALUES (1, 42, 'client_onboarding', 0);
+    """)
+
+    async def execute_rowcount(sql, params):
+        return connection.execute(sql.replace("%s", "?"), params).rowcount
+
+    async def execute(sql, params):
+        connection.execute(sql.replace("%s", "?"), params)
+
+    monkeypatch.setattr(db, "execute_rowcount", execute_rowcount)
+    monkeypatch.setattr(db, "execute", execute)
+    try:
+        assert await onboarding.decline_company(42) is True
+        assert connection.execute("SELECT pending_approval, archived FROM companies WHERE id = 42").fetchone() == (0, 1)
+        assert connection.execute("SELECT status, submission FROM client_onboardings WHERE id = 1").fetchone() == (
+            "declined", '{"client_name":"Acme"}'
+        )
+        assert connection.execute("SELECT enabled FROM staff WHERE id = 1").fetchone() == (0,)
+        assert await onboarding.decline_company(42) is False
+        assert await onboarding.approve_company(42, approved_by_user_id=3) is False
+        assert await onboarding.decline_company(43) is False
+        assert await onboarding.decline_company(999) is False
+        assert connection.execute("SELECT pending_approval, archived FROM companies WHERE id = 43").fetchone() == (0, 0)
+        assert connection.execute("SELECT status FROM client_onboardings WHERE id = 2").fetchone() == ("approved",)
+    finally:
+        connection.close()
+
+
+@pytest.mark.anyio
+async def test_revoked_link_cannot_open_submit_or_regenerate(monkeypatch):
+    connection = sqlite3.connect(":memory:")
+    connection.executescript("""
+        CREATE TABLE client_onboardings (id INTEGER PRIMARY KEY, status TEXT, submission TEXT,
+                                        token_hash TEXT, expires_at TEXT);
+        INSERT INTO client_onboardings (id, status) VALUES (1, 'pending'), (2, 'submitted');
+    """)
+
+    async def execute_rowcount(sql, params):
+        return connection.execute(sql.replace("%s", "?"), params).rowcount
+
+    monkeypatch.setattr(db, "execute_rowcount", execute_rowcount)
+    try:
+        assert await onboarding_repo.revoke(1) is True
+        assert await onboarding_repo.revoke(1) is False
+        assert await onboarding_repo.revoke(2) is False
+        assert await onboarding_repo.claim_for_processing(1, {}) is False
+        assert await onboarding.regenerate_link(1, None) is None
+        monkeypatch.setattr(onboarding_repo, "get_by_token_hash", AsyncMock(return_value={"id": 1, "status": "revoked"}))
+        with pytest.raises(onboarding.OnboardingUnavailable, match="revoked"):
+            await onboarding.get_open_onboarding("a" * 43)
+    finally:
+        connection.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("outcome", ["denied", "not_pending", "declined"])
+async def test_decline_route_requires_admin_and_audits_only_success(monkeypatch, outcome):
+    from types import SimpleNamespace
+    from starlette.requests import Request
+    from starlette.responses import RedirectResponse
+    from app.features.client_onboarding import routes
+
+    denied = RedirectResponse("/login", status_code=303)
+    main = SimpleNamespace(_require_super_admin_page=AsyncMock(return_value=(
+        {"id": 3}, denied if outcome == "denied" else None
+    )))
+    monkeypatch.setattr(routes, "_main", lambda: main)
+    decline = AsyncMock(return_value=outcome == "declined")
+    audit = AsyncMock()
+    monkeypatch.setattr(onboarding, "decline_company", decline)
+    monkeypatch.setattr(routes.audit_service, "record", audit)
+    request = Request({"type": "http", "method": "POST", "path": "/admin/companies/42/decline", "headers": []})
+    response = await routes.admin_decline_onboarded_company(42, request)
+    assert response.status_code == 303
+    if outcome == "denied":
+        assert response is denied
+        decline.assert_not_awaited()
+    else:
+        decline.assert_awaited_once_with(42)
+    if outcome == "declined":
+        assert response.headers["location"].startswith("/admin/client-onboarding")
+        assert audit.await_args.kwargs["action"] == "client_onboarding.decline"
+        assert audit.await_args.kwargs["user_id"] == 3
+        assert audit.await_args.kwargs["entity_id"] == 42
+    else:
+        audit.assert_not_awaited()
+
+
+@pytest.mark.parametrize("state", ["pending", "submitted", "approved", "declined", "revoked"])
+def test_onboarding_detail_actions_match_state_and_include_csrf(state):
+    from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader
+
+    env = Environment(
+        loader=ChoiceLoader([
+            DictLoader({"base.html": "{% block header_actions %}{% endblock %}{% block content %}{% endblock %}"}),
+            FileSystemLoader("app/templates"),
+        ]),
+        autoescape=True,
+    )
+    html = env.get_template("admin/client_onboarding_detail.html").render(
+        onboarding={"id": 1, "status": state, "effective_status": state,
+                    "company_id": 42 if state != "pending" else None, "client_name": "Acme"},
+        submission=None, csrf_token="test-csrf-token",
+    )
+    assert ('action="/admin/client-onboarding/1/revoke"' in html) == (state == "pending")
+    assert ('action="/admin/companies/42/decline"' in html) == (state == "submitted")
+    assert ('action="/admin/companies/42/approve"' in html) == (state == "submitted")
+    if state in {"pending", "submitted"}:
+        assert 'name="_csrf" value="test-csrf-token"' in html
+        assert "window.confirm" in html
+    if state == "declined":
+        assert "Declined" in html
+        assert "contacts remain disabled" in html
+
+
+@pytest.mark.parametrize("pending", [True, False])
+def test_company_header_decline_requires_pending_company_and_csrf(pending):
+    from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader
+
+    env = Environment(
+        loader=ChoiceLoader([
+            DictLoader({"base.html": "{% block header_actions %}{% endblock %}"}),
+            FileSystemLoader("app/templates"),
+        ]),
+        autoescape=True,
+    )
+    html = env.get_template("admin/company_edit.html").render(
+        company={"id": 42, "name": "Acme", "pending_approval": pending},
+        form_data={}, module_enabled={}, feature_pack_available=lambda _: False,
+        is_super_admin=True, csrf_token="test-csrf-token",
+    )
+    assert ('action="/admin/companies/42/decline"' in html) == pending
+    if pending:
+        assert 'name="_csrf" value="test-csrf-token"' in html
+        assert "window.confirm" in html
