@@ -457,8 +457,131 @@ async def test_render_portal_ticket_detail_includes_replies(monkeypatch):
             "has_email_tracking": False,
             "is_email_opened": False,
             "recipient_count": 0,
+            "is_split_hidden": False,
+            "split_to_ticket_id": None,
+            "split_to_ticket_number": None,
         }
     ]
+
+
+def test_portal_reply_kind_classification():
+    """_portal_reply_kind must mirror the admin timeline's reply kinds."""
+    # Customer reply: authored by the requester.
+    assert main._portal_reply_kind({"author_id": 5, "is_internal": False}, 5) == "customer"
+    # Technician reply: authored by a staff member who is not the requester.
+    assert main._portal_reply_kind({"author_id": 9, "is_internal": False}, 5) == "technician"
+    # Internal note: staff-only, hidden from customers.
+    assert main._portal_reply_kind({"author_id": 9, "is_internal": True}, 5) == "internal"
+    # Shipment-watch automation entry.
+    assert main._portal_reply_kind(
+        {"author_id": None, "is_internal": False, "external_reference": "shipment-watch:fedex:abc123"},
+        5,
+    ) == "automation"
+    # Generic automation entry.
+    assert main._portal_reply_kind(
+        {"author_id": 9, "is_internal": False, "external_reference": "automation:status-update"},
+        5,
+    ) == "automation"
+    # An internal automation entry is still classified as automation.
+    assert main._portal_reply_kind(
+        {"author_id": None, "is_internal": True, "external_reference": "shipment-watch:fedex:abc123"},
+        5,
+    ) == "automation"
+    # AI troubleshooter notes are stored as internal, so they classify as internal.
+    assert main._portal_reply_kind({"author_id": None, "is_internal": True}, 5) == "internal"
+    # A plain public entry with no author is a customer message (matches admin view).
+    assert main._portal_reply_kind({"author_id": None, "is_internal": False}, 5) == "customer"
+
+
+@pytest.mark.anyio("asyncio")
+@pytest.mark.parametrize(
+    ("has_helpdesk_access", "expected_reply_ids"),
+    [
+        pytest.param(False, {201, 202}, id="end-user-sees-only-technician-and-customer"),
+        pytest.param(True, {201, 202, 203, 204, 205}, id="helpdesk-sees-all-replies"),
+    ],
+)
+async def test_render_portal_ticket_detail_reply_visibility(monkeypatch, has_helpdesk_access, expected_reply_ids):
+    """End users see only technician + customer replies; helpdesk sees all."""
+    request = _make_request("/tickets/41")
+    user = {"id": 5, "is_super_admin": False}
+
+    ticket = {
+        "id": 41,
+        "subject": "Printer offline",
+        "description": "Needs toner",
+        "status": "open",
+        "priority": "high",
+        "company_id": 22,
+        "requester_id": 5,
+        "assigned_user_id": 9,
+        "created_at": datetime(2025, 1, 9, 16, 45, tzinfo=timezone.utc),
+        "updated_at": datetime(2025, 1, 10, 9, 30, tzinfo=timezone.utc),
+    }
+    replies = [
+        {"id": 201, "author_id": 5, "body": "Still no toner", "is_internal": False, "external_reference": None, "created_at": datetime(2025, 1, 10, 8, 0, tzinfo=timezone.utc)},
+        {"id": 202, "author_id": 9, "body": "Replaced toner", "is_internal": False, "external_reference": None, "created_at": datetime(2025, 1, 10, 10, 0, tzinfo=timezone.utc)},
+        {"id": 203, "author_id": 9, "body": "Escalated internally", "is_internal": True, "external_reference": None, "created_at": datetime(2025, 1, 10, 10, 5, tzinfo=timezone.utc)},
+        {"id": 204, "author_id": None, "body": "Shipment in transit", "is_internal": False, "external_reference": "shipment-watch:fedex:abc123", "created_at": datetime(2025, 1, 10, 10, 6, tzinfo=timezone.utc)},
+        {"id": 205, "author_id": None, "body": "Checking device", "is_internal": True, "external_reference": None, "created_at": datetime(2025, 1, 10, 10, 7, tzinfo=timezone.utc)},
+    ]
+
+    class DummySanitized:
+        def __init__(self, html: str, has_content: bool):
+            self.html = html
+            self.text_content = html
+            self.has_rich_content = has_content
+
+    def fake_sanitize(value: str | None) -> DummySanitized:
+        text = (value or "").strip()
+        if not text:
+            return DummySanitized("", False)
+        return DummySanitized(f"<p>{text}</p>", True)
+
+    async def fake_get_user_by_id(identifier: int) -> dict[str, Any] | None:
+        if identifier == 5:
+            return {"id": 5, "first_name": "Pat", "last_name": "Requester", "email": "pat@example.com"}
+        if identifier == 9:
+            return {"id": 9, "first_name": "Taylor", "last_name": "Agent", "email": "agent@example.com"}
+        return None
+
+    monkeypatch.setattr(main, "sanitize_rich_text", fake_sanitize)
+    monkeypatch.setattr(main.tickets_repo, "get_ticket", AsyncMock(return_value=ticket))
+    monkeypatch.setattr(main.tickets_repo, "list_replies", AsyncMock(return_value=replies))
+    monkeypatch.setattr(main.tickets_repo, "is_ticket_watcher", AsyncMock(return_value=False))
+    monkeypatch.setattr(main, "_has_admin_technician_access", AsyncMock(return_value=has_helpdesk_access))
+    monkeypatch.setattr(main.tickets_service, "get_public_status_map", AsyncMock(return_value={"open": "Open"}))
+    monkeypatch.setattr(
+        main.tickets_service,
+        "format_reply_time_summary",
+        lambda minutes, is_billable, labour=None: f"{minutes} minutes" if minutes is not None else "",
+    )
+    monkeypatch.setattr(main.company_repo, "get_company_by_id", AsyncMock(return_value={"id": 22, "name": "Example"}))
+    monkeypatch.setattr(main.user_repo, "get_user_by_id", AsyncMock(side_effect=fake_get_user_by_id))
+
+    from app.repositories import call_recordings as call_recordings_repo
+    monkeypatch.setattr(call_recordings_repo, "list_ticket_call_recordings", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.tickets_repo, "list_watchers", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.tickets_repo, "list_ticket_assets", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.staff_repo, "list_enabled_staff_users", AsyncMock(return_value=[]))
+
+    captured: dict[str, Any] = {}
+
+    async def fake_render_template(template_name, request_obj, user_obj, *, extra):
+        captured["template"] = template_name
+        captured["extra"] = extra
+        return HTMLResponse("OK")
+
+    monkeypatch.setattr(main, "_render_template", fake_render_template)
+
+    response = await main._render_portal_ticket_detail(request, user, ticket_id=41)
+
+    assert isinstance(response, HTMLResponse)
+    assert response.status_code == status.HTTP_200_OK
+    assert captured["template"] == "tickets/detail.html"
+
+    rendered_reply_ids = {entry["id"] for entry in captured["extra"]["ticket_replies"] if entry.get("type") == "reply"}
+    assert rendered_reply_ids == expected_reply_ids
 
 
 @pytest.mark.anyio("asyncio")

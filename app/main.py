@@ -10460,6 +10460,34 @@ def _format_booking_requester_name(user_record: Mapping[str, Any] | None) -> str
     ).strip()
 
 
+# Reply kinds shown to end users (customers) on the portal ticket detail.
+# The admin ticket timeline classifies every reply into one of: 'customer',
+# 'technician', 'internal', 'automation', or 'ai'. End users should only see
+# the customer and technician parts of the conversation; internal notes, AI
+# troubleshooter notes, and automation-generated entries (e.g. shipment
+# tracking updates, automation actions) are hidden from them.
+CUSTOMER_VISIBLE_REPLY_KINDS = {"customer", "technician"}
+
+
+def _portal_reply_kind(reply: Mapping[str, Any], requester_id: Any) -> str:
+    """Classify a reply the same way the admin ticket timeline does.
+
+    Returns one of ``'automation'``, ``'internal'``, ``'technician'``, or
+    ``'customer'``. AI troubleshooter notes are always stored as internal
+    replies, so they are classified as ``'internal'`` here.
+    """
+    external_reference = str(reply.get("external_reference") or "")
+    if external_reference.startswith("shipment-watch:") or external_reference.startswith(
+        "automation:"
+    ):
+        return "automation"
+    if reply.get("is_internal"):
+        return "internal"
+    if reply.get("author_id") and reply.get("author_id") != requester_id:
+        return "technician"
+    return "customer"
+
+
 async def _render_portal_ticket_detail(
     request: Request,
     user: dict[str, Any],
@@ -10572,6 +10600,20 @@ async def _render_portal_ticket_detail(
             company_record = None
 
     replies = await tickets_repo.list_replies(ticket_id, include_internal=has_helpdesk_access)
+
+    # End users (viewers without helpdesk access) should only see the
+    # technician/customer conversation. Internal notes, AI troubleshooter
+    # notes, and automation-generated entries (e.g. shipment tracking
+    # updates) are filtered out; helpdesk and super-admin viewers keep the
+    # full history.
+    if not has_helpdesk_access:
+        ticket_requester_id = ticket.get("requester_id")
+        replies = [
+            reply
+            for reply in replies
+            if _portal_reply_kind(reply, ticket_requester_id) in CUSTOMER_VISIBLE_REPLY_KINDS
+        ]
+
     ordered_replies = sorted(
         replies,
         key=lambda item: item.get("created_at") or datetime.min.replace(tzinfo=timezone.utc),
