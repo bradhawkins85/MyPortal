@@ -152,7 +152,7 @@ licences, subscriptions and compliance, with PDF download and a report designer.
   system covering tickets, companies, and staff.
 - **AI:** [Ollama](https://ollama.com)-powered ticket summaries, tags, and resolution steps. Also a RAG index over
   tickets and the knowledge base, AI quality evaluation, and an
-  [MCP server](docs/wiki/integrations/MCP%20Integration.md) for ChatGPT and other MCP clients.
+  [MCP server](docs/wiki/integrations/MCP%20Integration.md) for ChatGPT and other MCP clients. AI Ticket Troubleshooter collects log files from devices, analyses, then reports possible solutions.
 - **Administration:** companies, users, roles, sessions, impersonation, approvals, API keys, modules, feature packs,
   tray app configuration, system updates, a change log, and an audit trail.
 
