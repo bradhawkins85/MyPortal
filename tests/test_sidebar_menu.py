@@ -259,6 +259,23 @@ def test_top_navigation_dropdowns_are_exclusive_and_aligned():
     assert "top: 4.5rem" not in top_header_rule
 
 
+def test_top_navigation_nested_submenus_fly_out_to_the_side():
+    """In the top menu, sub-menus of nested expandable items (e.g. Compliance
+    Checks / Continuity inside a Security & Compliance group) fly out to the
+    side instead of stacking under the panel, and the panel must not clip them."""
+    stylesheet = Path("app/static/css/app.css").read_text()
+
+    flyout = stylesheet.split("body.navigation--top .menu__submenu .menu__item--expanded > .menu__submenu {", 1)
+    assert len(flyout) == 2, "nested top-menu fly-out rule is missing"
+    flyout_body = flyout[1].split("}", 1)[0]
+    assert "top: 0;" in flyout_body
+    assert "left: calc(100% + var(--space-gap-tight));" in flyout_body
+
+    overflow = stylesheet.split("body.navigation--top .menu__submenu:has(.menu__item--expandable) {", 1)
+    assert len(overflow) == 2, "top-menu fly-out overflow rule is missing"
+    assert "overflow: visible;" in overflow[1].split("}", 1)[0]
+
+
 def test_profile_menu_permission_shows_my_profile_for_non_admin(monkeypatch):
     user = {"id": 7, "email": "user@example.com", "is_super_admin": False}
     membership = {
