@@ -7,8 +7,13 @@ magic link, so they do not need a portal account.
 ## Sending an onboarding link
 
 1. Open **Client Onboarding** and select **+ New onboarding link**:
-   - **Client name** (optional) pre-fills the business name on the form.
-   - **Client email** (optional) is where the link is sent when **Email the link to the client** is ticked.
+   - **Company name** and **Contact name**: enter at least one. The company name pre-fills the
+     business name on the form; the contact name pre-fills the main site's primary contact. The
+     form and email greet the contact by first name, or the company when there's no contact.
+   - **Contact email** (optional) is where the link is sent when **Email the link to the contact**
+     is ticked.
+   - **Personal message** (optional) is added to the invitation email, for example a note about
+     your call or next steps.
    - **Link works for** sets how long the link stays valid (7–90 days, default 30).
 2. Select **Create link** (or **Create and email link**). The link is shown once with a
    **Copy link** button, so copy it now if you are not emailing it.
@@ -16,6 +21,31 @@ magic link, so they do not need a portal account.
 Only a hash of the link token is stored. If a link is lost, use **Regenerate link** from the
 row's **Actions** menu (the old link stops working). **Revoke link** cancels a link that has not
 been submitted.
+
+## Customising the invitation email
+
+The invitation email comes from two message templates under **Automation & AI > Message
+Templates**, shared by every onboarding link. They're labelled *Used for client onboarding
+invitation*. The modal links straight to the body template.
+
+- **Client onboarding invitation subject** (`client-onboarding-invitation-subject`, plain text)
+- **Client onboarding invitation** (`client-onboarding-invitation`, HTML)
+
+Both can use these variables:
+
+| Variable | Value |
+| --- | --- |
+| `{{ recipient.greeting_name }}` | Contact's first name, else the company name |
+| `{{ contact.name }}`, `{{ contact.first_name }}`, `{{ contact.email }}` | The contact entered in the modal |
+| `{{ company.name }}` | The company name (or "your business" when only a contact was entered) |
+| `{{ onboarding.link }}` | The client's magic link |
+| `{{ onboarding.expires }}`, `{{ onboarding.expires_days }}` | When the link stops working |
+| `{{ onboarding.message }}` | The personal message, as paragraphs (empty when none was entered) |
+| `{{ sender.name }}`, `{{ sender.email }}` | The technician who created or regenerated the link |
+| `{{ app.name }}`, `{{ portal.url }}` | Portal name and address |
+
+Replies go to the technician who sent the link. If a template is deleted, MyPortal falls back to
+its built-in wording.
 
 ## What the client fills in
 

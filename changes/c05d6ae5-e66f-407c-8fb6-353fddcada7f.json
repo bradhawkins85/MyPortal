@@ -1,0 +1,7 @@
+{
+  "guid": "c05d6ae5-e66f-407c-8fb6-353fddcada7f",
+  "occurred_at": "2026-10-07T08:00Z",
+  "change_type": "Feature",
+  "summary": "Send the client onboarding invitation from editable message templates, and add a contact name (company or contact name required) and an optional personal message to the New onboarding link form.",
+  "content_hash": "b284dcf743f31aa45dbfd0e2d5a1a76ebbf000a1c4530c47c96d1cff677f84f1"
+}

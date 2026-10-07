@@ -38,7 +38,7 @@
       {% set step_titles = [("business", "Your business"), ("sites", "Sites"), ("billing", "Billing"), ("review", "Review")] %}
       <section class="cof-intro" aria-labelledby="cof-title">
         <p class="cof-eyebrow">New client onboarding</p>
-        <h1 class="cof-intro__title" id="cof-title">Welcome{% if form.client_name %}, {{ form.client_name }}{% endif %}</h1>
+        <h1 class="cof-intro__title" id="cof-title">{% set greeting = form.greeting_name or form.client_name %}Welcome{% if greeting %}, {{ greeting }}{% endif %}</h1>
         <p class="cof-intro__lead">Tell us about your business so we can set up your support. It takes about five minutes, and you can check everything before you send it.</p>
         <ul class="cof-intro__needs" aria-label="What you'll need">
           <li>{{ icon("building") }}<span>Your business details</span></li>

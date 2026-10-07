@@ -48,11 +48,14 @@
     ], total=onboardings | length, total_label="Links") }}
   {% endif %}
 
+  {% if link_error %}
+  <div class="alert alert--error admin-grid__full" role="alert">{{ link_error }} <button type="button" class="button-link" data-cof-link-modal-open aria-haspopup="dialog" aria-controls="cof-link-modal">Fix the link details</button></div>
+  {% endif %}
   {% if new_link %}
   <section class="card card--panel admin-grid__full" aria-labelledby="cof-new-link-heading" data-cof-new-link>
     <div class="card__header">
       <div>
-        <h2 class="card__title" id="cof-new-link-heading">Onboarding link ready{% if new_link.record.client_name %} for {{ new_link.record.client_name }}{% endif %}</h2>
+        <h2 class="card__title" id="cof-new-link-heading">{% set ready_for = new_link.record.client_name or new_link.record.contact_name %}Onboarding link ready{% if ready_for %} for {{ ready_for }}{% endif %}</h2>
         <p class="card__subtitle">
           {% if new_link.email_requested and new_link.emailed %}We've emailed this link to {{ new_link.record.recipient_email }}. You can also copy it below.
           {% elif new_link.email_requested %}We couldn't email {{ new_link.record.recipient_email }}. Copy the link and send it to the client yourself.
@@ -99,9 +102,9 @@
         <tbody>
           {% for item in onboardings %}
           {% set state = item.effective_status %}
-          {% set client = (item.submission.client_name if item.submission else none) or item.client_name or 'Unnamed client' %}
+          {% set client = (item.submission.client_name if item.submission else none) or item.client_name or item.contact_name or 'Unnamed client' %}
           <tr>
-            <td data-label="Client"><a href="/admin/client-onboarding/{{ item.id }}">{{ client }}</a></td>
+            <td data-label="Client"><a href="/admin/client-onboarding/{{ item.id }}">{{ client }}</a>{% if item.contact_name %}<br><span class="text-muted">{{ item.contact_name }}</span>{% endif %}</td>
             <td data-label="Email">{{ item.recipient_email or '—' }}</td>
             <td data-label="Status" data-value="{{ status_labels.get(state, state) }}"><span class="status status--{{ status_variants.get(state, 'neutral') }}">{{ status_labels.get(state, state) }}</span></td>
             <td data-label="Created" data-value="{{ item.created_at.isoformat() if item.created_at and item.created_at.isoformat is defined else '' }}">{{ utc_time(item.created_at) }}</td>
@@ -151,41 +154,64 @@
   </section>
 </div>
 
-<div class="modal" id="cof-link-modal" role="dialog" aria-modal="true" aria-labelledby="cof-link-modal-title" hidden>
+{% set lf = link_form or {} %}
+<div class="modal" id="cof-link-modal" role="dialog" aria-modal="true" aria-labelledby="cof-link-modal-title" hidden data-cof-link-modal{% if link_error %} data-cof-open-on-load{% endif %}>
   <form class="modal__panel" method="post" action="/admin/client-onboarding" novalidate data-cof-link-form>
     {% include "partials/csrf.html" %}
     <header class="modal__header">
       <div>
         <h2 class="modal__title" id="cof-link-modal-title">New onboarding link</h2>
-        <p class="text-muted">Creates a single-use link to the client onboarding form.</p>
+        <p class="text-muted">Creates a single-use link to the client onboarding form and, if you like, emails it to the client.</p>
       </div>
       <button type="button" class="modal__close" data-modal-close aria-label="Close new onboarding link"></button>
     </header>
     <div class="modal__body">
-      <div class="form-field">
-        <label class="form-label" for="cof-link-name">Client name <span class="scf-optional">optional</span></label>
-        <input class="form-input" id="cof-link-name" name="clientName" maxlength="255" autocomplete="off" placeholder="e.g. Acme Pty Ltd" />
-        <p class="form-help">Pre-fills the business name and greets the client by name.</p>
-      </div>
+      <p class="form-help form-help--error" role="alert" data-cof-link-error {% if not link_error %}hidden{% endif %}>{{ link_error or '' }}</p>
+      <fieldset class="scf-fieldset">
+        <legend class="form-label">Who is it for?</legend>
+        <p class="form-help" id="cof-link-who-help">Enter the company name, the contact's name, or both. The email greets the contact by first name, or the company if there's no contact.</p>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="cof-link-name">Company name</label>
+            <input class="form-input" id="cof-link-name" name="clientName" maxlength="255" autocomplete="off" placeholder="e.g. Acme Pty Ltd" value="{{ lf.client_name or '' }}" aria-describedby="cof-link-who-help" data-cof-link-who />
+            <p class="form-help">Pre-fills the business name on the form.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="cof-link-contact">Contact name</label>
+            <input class="form-input" id="cof-link-contact" name="contactName" maxlength="255" autocomplete="off" placeholder="e.g. Jo Bloggs" value="{{ lf.contact_name or '' }}" aria-describedby="cof-link-who-help" data-cof-link-who />
+            <p class="form-help">Pre-fills them as the main site contact.</p>
+          </div>
+        </div>
+      </fieldset>
       <div class="form-grid">
         <div class="form-field">
-          <label class="form-label" for="cof-link-email">Client email <span class="scf-optional">optional</span></label>
-          <input class="form-input" id="cof-link-email" name="recipientEmail" type="email" maxlength="255" autocomplete="off" placeholder="e.g. owner@acme.com.au" data-cof-link-email />
+          <label class="form-label" for="cof-link-email">Contact email <span class="scf-optional">optional</span></label>
+          <input class="form-input" id="cof-link-email" name="recipientEmail" type="email" maxlength="255" autocomplete="off" placeholder="e.g. jo@acme.com.au" value="{{ lf.recipient_email or '' }}" data-cof-link-email />
           <p class="form-help form-help--error" data-cof-link-email-error hidden>Enter a valid email address.</p>
         </div>
         <div class="form-field">
           <label class="form-label" for="cof-link-expiry">Link works for</label>
+          {% set chosen_expiry = (lf.expiry_days or default_expiry_days) | string %}
           <select class="form-input" id="cof-link-expiry" name="expiryDays">
-            {% for days in [7, 14, 30, 60, 90] %}<option value="{{ days }}"{% if days == default_expiry_days %} selected{% endif %}>{{ days }} days</option>{% endfor %}
+            {% for days in [7, 14, 30, 60, 90] %}<option value="{{ days }}"{% if days | string == chosen_expiry %} selected{% endif %}>{{ days }} days</option>{% endfor %}
           </select>
         </div>
       </div>
+      <div class="form-field">
+        <label class="form-label" for="cof-link-message">Personal message <span class="scf-optional">optional</span></label>
+        <textarea class="form-input" id="cof-link-message" name="inviteMessage" rows="4" maxlength="{{ max_invite_message }}" placeholder="e.g. Great to chat today! Once this is done we'll book your setup visit." data-cof-link-message>{{ lf.invite_message or '' }}</textarea>
+        <p class="form-help">Added to the invitation email where the template uses <code>{{ '{{ onboarding.message }}' }}</code>. <span data-cof-link-message-count aria-live="polite"></span></p>
+      </div>
       <label class="scf-switch">
-        <input type="checkbox" name="sendEmail" value="1" checked data-cof-link-send />
+        <input type="checkbox" name="sendEmail" value="1" {% if not lf or lf.send_email %}checked{% endif %} data-cof-link-send />
         <span class="scf-switch__track" aria-hidden="true"></span>
-        <span>Email the link to the client</span>
+        <span>Email the link to the contact</span>
       </label>
       <p class="form-help" data-cof-link-send-help>We'll send the link as soon as you create it. You'll also be able to copy it.</p>
+      <p class="form-help">
+        The email uses the <strong>Client onboarding invitation</strong> message template, shared by every onboarding link.
+        {% if invitation_template %}<a href="/admin/message-templates/{{ invitation_template.id }}/edit">Edit the invitation template</a>{% else %}<a href="/admin/message-templates">Manage message templates</a>{% endif %}
+      </p>
     </div>
     <footer class="modal__footer">
       <button type="button" class="button button--ghost" data-modal-close>Cancel</button>

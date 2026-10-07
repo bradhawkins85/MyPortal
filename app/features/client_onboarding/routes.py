@@ -34,9 +34,16 @@ async def _render_admin(
     user: dict[str, Any],
     *,
     new_link: dict[str, Any] | None = None,
+    link_form: dict[str, Any] | None = None,
+    link_error: str | None = None,
     status_code: int = status.HTTP_200_OK,
 ):
+    from app.services import message_templates as message_templates_service
+
     records = await onboarding_repo.list_recent()
+    invitation_template = await message_templates_service.get_template_by_slug(
+        onboarding_service.INVITATION_TEMPLATE_SLUG
+    )
     for record in records:
         record["effective_status"] = onboarding_service.effective_status(record)
     response = await _main()._render_template(
@@ -49,6 +56,10 @@ async def _render_admin(
             "new_link": new_link,
             "default_expiry_days": onboarding_service.DEFAULT_EXPIRY_DAYS,
             "max_expiry_days": onboarding_service.MAX_EXPIRY_DAYS,
+            "max_invite_message": onboarding_service.MAX_INVITE_MESSAGE,
+            "link_form": link_form or {},
+            "link_error": link_error,
+            "invitation_template": invitation_template,
         },
     )
     response.status_code = status_code
@@ -69,25 +80,45 @@ async def admin_create_client_onboarding(request: Request):
     if redirect:
         return redirect
     form = await request.form()
-    raw_email = str(form.get("recipientEmail") or "").strip()
-    if raw_email and not onboarding_service.normalise_email(raw_email):
-        return flash_redirect(_ADMIN_URL, "Enter a valid email address for the client.", "error")
+    link_form = {
+        "client_name": str(form.get("clientName") or "").strip(),
+        "contact_name": str(form.get("contactName") or "").strip(),
+        "recipient_email": str(form.get("recipientEmail") or "").strip(),
+        "invite_message": str(form.get("inviteMessage") or "").strip(),
+        "expiry_days": str(form.get("expiryDays") or ""),
+        "send_email": bool(form.get("sendEmail")),
+    }
+    error = onboarding_service.validate_link_details(
+        client_name=link_form["client_name"],
+        contact_name=link_form["contact_name"],
+        recipient_email=link_form["recipient_email"],
+    )
+    if error:
+        return await _render_admin(
+            request, user, link_form=link_form, link_error=error, status_code=status.HTTP_400_BAD_REQUEST
+        )
     record, token = await onboarding_service.create_link(
-        client_name=str(form.get("clientName") or ""),
-        recipient_email=raw_email,
-        expiry_days=form.get("expiryDays"),
+        client_name=link_form["client_name"],
+        contact_name=link_form["contact_name"],
+        recipient_email=link_form["recipient_email"],
+        invite_message=link_form["invite_message"],
+        expiry_days=link_form["expiry_days"],
         created_by_user_id=int(user["id"]),
     )
     emailed = False
-    if form.get("sendEmail") and record.get("recipient_email"):
-        emailed = await onboarding_service.send_link_email(record, token)
+    if link_form["send_email"] and record.get("recipient_email"):
+        emailed = await onboarding_service.send_link_email(record, token, sender=user)
     await audit_service.record(
         action="client_onboarding.create",
         request=request,
         user_id=int(user["id"]),
         entity_type="client_onboarding",
         entity_id=int(record["id"]),
-        metadata={"client_name": record.get("client_name"), "emailed": emailed},
+        metadata={
+            "client_name": record.get("client_name"),
+            "contact_name": record.get("contact_name"),
+            "emailed": emailed,
+        },
     )
     return await _render_admin(
         request,
@@ -113,7 +144,7 @@ async def admin_regenerate_client_onboarding(onboarding_id: int, request: Reques
     record = await onboarding_repo.get_by_id(onboarding_id) or {}
     emailed = False
     if form.get("sendEmail") and record.get("recipient_email"):
-        emailed = await onboarding_service.send_link_email(record, token)
+        emailed = await onboarding_service.send_link_email(record, token, sender=user)
     await audit_service.record(
         action="client_onboarding.regenerate",
         request=request,
@@ -241,7 +272,9 @@ async def public_client_onboarding_form(token: str, request: Request):
         request,
         token=token,
         state="open",
-        form=onboarding_service.form_state(None, client_name=record.get("client_name")),
+        form=onboarding_service.form_state(
+            None, client_name=record.get("client_name"), contact_name=record.get("contact_name")
+        ),
     )
 
 

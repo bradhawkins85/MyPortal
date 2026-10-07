@@ -36,6 +36,22 @@ _RENEWAL_VARIABLES: tuple[tuple[str, str], ...] = (
     ("renewal.items_table", "Items table"),
 )
 
+_CLIENT_ONBOARDING_VARIABLES: tuple[tuple[str, str], ...] = (
+    ("recipient.greeting_name", "Greeting name (contact first name, else company)"),
+    ("contact.name", "Contact name"),
+    ("contact.first_name", "Contact first name"),
+    ("contact.email", "Contact email"),
+    ("company.name", "Company name"),
+    ("onboarding.link", "Onboarding link"),
+    ("onboarding.expires", "Link expiry date"),
+    ("onboarding.expires_days", "Days until the link expires"),
+    ("onboarding.message", "Personal message from the technician"),
+    ("sender.name", "Technician name"),
+    ("sender.email", "Technician email"),
+    ("app.name", "Portal name"),
+    ("portal.url", "Portal address"),
+)
+
 # Templates MyPortal looks up by slug. Editing them changes a built-in email;
 # renaming or deleting them makes MyPortal fall back to its default wording.
 SYSTEM_TEMPLATE_USES: dict[str, dict[str, Any]] = {
@@ -62,6 +78,14 @@ SYSTEM_TEMPLATE_USES: dict[str, dict[str, Any]] = {
     "third-party-monthly-subscription-renewal-reminder": {
         "label": "Third-party monthly renewal reminder",
         "variables": _RENEWAL_VARIABLES,
+    },
+    "client-onboarding-invitation": {
+        "label": "Client onboarding invitation",
+        "variables": _CLIENT_ONBOARDING_VARIABLES,
+    },
+    "client-onboarding-invitation-subject": {
+        "label": "Client onboarding invitation subject",
+        "variables": _CLIENT_ONBOARDING_VARIABLES,
     },
 }
 

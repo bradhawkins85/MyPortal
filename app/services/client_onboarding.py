@@ -21,6 +21,7 @@ import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 from typing import Any
 
 from loguru import logger
@@ -158,12 +159,30 @@ def effective_status(record: Mapping[str, Any], now: datetime | None = None) -> 
     return status
 
 
+MAX_INVITE_MESSAGE = 2000
+
+
+def validate_link_details(
+    *, client_name: str | None, contact_name: str | None, recipient_email: str | None
+) -> str | None:
+    """Return an error for the New onboarding link form, or ``None`` when valid."""
+
+    if not (client_name or "").strip() and not (contact_name or "").strip():
+        return "Enter the client's company name or contact name so we know who the link is for."
+    raw_email = (recipient_email or "").strip()
+    if raw_email and not normalise_email(raw_email):
+        return "Enter a valid email address for the client."
+    return None
+
+
 async def create_link(
     *,
     client_name: str | None,
     recipient_email: str | None,
     expiry_days: Any,
     created_by_user_id: int | None,
+    contact_name: str | None = None,
+    invite_message: str | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Create an onboarding link and return the record and its one-time token."""
 
@@ -171,7 +190,9 @@ async def create_link(
     record = await onboarding_repo.create(
         token_hash=hash_token(token),
         client_name=(client_name or "").strip()[:255] or None,
+        contact_name=(contact_name or "").strip()[:255] or None,
         recipient_email=normalise_email(recipient_email),
+        invite_message=(invite_message or "").strip()[:MAX_INVITE_MESSAGE] or None,
         expires_at=_utcnow() + timedelta(days=_clamp_expiry_days(expiry_days)),
         created_by_user_id=created_by_user_id,
     )
@@ -204,35 +225,178 @@ async def get_open_onboarding(token: str | None) -> dict[str, Any]:
     return record
 
 
-async def send_link_email(record: Mapping[str, Any], token: str) -> bool:
+INVITATION_TEMPLATE_SLUG = "client-onboarding-invitation"
+INVITATION_SUBJECT_TEMPLATE_SLUG = "client-onboarding-invitation-subject"
+
+DEFAULT_INVITATION_SUBJECT = "Welcome to {{ app.name }} - let's get {{ recipient.greeting_name }} set up"
+DEFAULT_INVITATION = (
+    "<p>Hi {{ recipient.greeting_name }},</p>"
+    "<p>Welcome to {{ app.name }}! To set up support for {{ company.name }}, please tell us about "
+    "your business, your sites and who should receive invoices. It takes about five minutes.</p>"
+    "{{ onboarding.message }}"
+    '<p><a href="{{ onboarding.link }}">Complete your onboarding form</a></p>'
+    "<p>This link is unique to you and works until {{ onboarding.expires }}. "
+    "It can only be submitted once.</p>"
+    "<p>Kind regards,<br>{{ sender.name }}<br>{{ app.name }}</p>"
+)
+
+# Stands in for the personal message while the template is rendered, so the
+# message can be inserted as escaped paragraphs afterwards.
+_MESSAGE_PLACEHOLDER = "\u0000client-onboarding-message\u0000"
+
+
+def _person_name(person: Mapping[str, Any] | None) -> str:
+    if not person:
+        return ""
+    full = " ".join(
+        str(person.get(key) or "").strip() for key in ("first_name", "last_name")
+    ).strip()
+    return full or str(person.get("display_name") or person.get("name") or person.get("email") or "").strip()
+
+
+def _format_expiry(expires_at: Any) -> str:
+    if not isinstance(expires_at, datetime):
+        return ""
+    aware = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)
+    local = aware.astimezone(business_hours_service.resolve_zone(None))
+    return f"{local.day} {local:%B %Y}"
+
+
+def invitation_context(
+    record: Mapping[str, Any], token: str, sender: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """Variables available to the invitation subject and body templates."""
+
+    settings = get_settings()
+    contact_name = str(record.get("contact_name") or "").strip()
+    company_name = str(record.get("client_name") or "").strip()
+    contact_first = contact_name.split()[0] if contact_name else ""
+    expires_at = record.get("expires_at")
+    days_left = ""
+    if isinstance(expires_at, datetime):
+        remaining = expires_at.replace(tzinfo=None) - _utcnow()
+        days_left = str(max(0, remaining.days + (1 if remaining.seconds else 0)))
+    portal_url = str(settings.portal_url or "").rstrip("/")
+    return {
+        "app": {"name": settings.app_name or "MyPortal"},
+        "portal": {"url": portal_url},
+        "recipient": {"greeting_name": contact_first or company_name or "there"},
+        "contact": {
+            "name": contact_name,
+            "first_name": contact_first,
+            "email": str(record.get("recipient_email") or ""),
+        },
+        "company": {"name": company_name or "your business"},
+        "onboarding": {
+            "link": onboarding_url(token),
+            "expires": _format_expiry(expires_at),
+            "expires_days": days_left,
+            "message": _MESSAGE_PLACEHOLDER,
+        },
+        "sender": {
+            "name": _person_name(sender) or (settings.app_name or "MyPortal"),
+            "email": str((sender or {}).get("email") or ""),
+        },
+    }
+
+
+def _message_html(message: str) -> str:
+    paragraphs = [part.strip() for part in message.replace("\r\n", "\n").split("\n\n") if part.strip()]
+    return "".join(
+        "<p>" + "<br>".join(html.escape(line) for line in part.split("\n")) + "</p>"
+        for part in paragraphs
+    )
+
+
+class _TextExtractor(HTMLParser):
+    """Plain-text version of a simple HTML email (paragraphs, line breaks, links, lists)."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._href: str | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "br":
+            self.parts.append("\n")
+        elif tag == "li":
+            self.parts.append("\n- ")
+        elif tag == "a":
+            self._href = dict(attrs).get("href")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "a" and self._href:
+            self.parts.append(f": {self._href}")
+            self._href = None
+        elif tag in {"p", "div", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6"}:
+            self.parts.append("\n\n")
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+
+def _html_to_text(markup: str) -> str:
+    extractor = _TextExtractor()
+    extractor.feed(markup)
+    extractor.close()
+    lines = [line.strip() for line in "".join(extractor.parts).split("\n")]
+    text = "\n".join(lines)
+    while "\n\n\n" in text:
+        text = text.replace("\n\n\n", "\n\n")
+    return text.strip()
+
+
+async def render_invitation(
+    record: Mapping[str, Any], token: str, sender: Mapping[str, Any] | None = None
+) -> tuple[str, str, str]:
+    """Render the invitation email as (subject, html, text) from its message templates."""
+
+    from app.services import message_templates as message_templates_service
+
+    context = invitation_context(record, token, sender)
+    message = str(record.get("invite_message") or "").strip()
+
+    subject, _ = await message_templates_service.render_template_content(
+        INVITATION_SUBJECT_TEMPLATE_SLUG,
+        {**context, "onboarding": {**context["onboarding"], "message": message}},
+        default_content=DEFAULT_INVITATION_SUBJECT,
+        default_content_type="text/plain",
+    )
+    subject = " ".join(subject.split())[:255] or "Complete your client onboarding"
+
+    body, content_type = await message_templates_service.render_template_content(
+        INVITATION_TEMPLATE_SLUG,
+        context,
+        default_content=DEFAULT_INVITATION,
+        default_content_type="text/html",
+    )
+    if content_type == "text/html":
+        html_body = body.replace(_MESSAGE_PLACEHOLDER, _message_html(message) if message else "")
+        return subject, html_body, _html_to_text(html_body)
+    text_body = body.replace(_MESSAGE_PLACEHOLDER, message)
+    paragraphs = [part for part in text_body.split("\n\n")]
+    html_body = "".join(
+        "<p>" + "<br>".join(html.escape(line) for line in part.split("\n")) + "</p>" for part in paragraphs if part.strip()
+    )
+    return subject, html_body, text_body
+
+
+async def send_link_email(
+    record: Mapping[str, Any], token: str, sender: Mapping[str, Any] | None = None
+) -> bool:
     from app.services import email as email_service
 
     recipient = record.get("recipient_email")
     if not recipient:
         return False
-    settings = get_settings()
-    app_name = html.escape(str(settings.app_name or "MyPortal"))
-    url = onboarding_url(token)
-    greeting = html.escape(str(record.get("client_name") or "there"))
-    html_body = (
-        f"<p>Hi {greeting},</p>"
-        f"<p>Welcome aboard! Please complete our new client onboarding form so we can set up "
-        f"support for your business.</p>"
-        f'<p><a href="{html.escape(url)}">Complete the onboarding form</a></p>'
-        f"<p>This link is unique to you and can only be submitted once.</p>"
-        f"<p>Thanks,<br>{app_name}</p>"
-    )
-    text_body = (
-        f"Hi {record.get('client_name') or 'there'},\n\n"
-        "Please complete our new client onboarding form so we can set up support for your business:\n"
-        f"{url}\n\nThis link is unique to you and can only be submitted once."
-    )
     try:
+        subject, html_body, text_body = await render_invitation(record, token, sender)
         sent, _ = await email_service.send_email(
-            subject="Complete your client onboarding",
+            subject=subject,
             recipients=[str(recipient)],
             html_body=html_body,
             text_body=text_body,
+            reply_to=str((sender or {}).get("email") or "") or None,
         )
     except Exception as exc:  # pragma: no cover - mail transport failures
         logger.warning("Failed to send client onboarding email: {}", exc)
@@ -400,14 +564,26 @@ def parse_submission(form: Any) -> tuple[Submission | None, list[str]]:
     )
 
 
-def form_state(form: Any | None, *, client_name: str | None = None) -> dict[str, Any]:
-    """Values for (re-)rendering the public form, including per-site hour rows."""
+def form_state(
+    form: Any | None, *, client_name: str | None = None, contact_name: str | None = None
+) -> dict[str, Any]:
+    """Values for (re-)rendering the public form, including per-site hour rows.
+
+    A fresh form greets the contact by first name and pre-fills them as the
+    main site's primary contact.
+    """
 
     default_tz = business_hours_service.default_timezone_name()
     if form is None:
+        first_site = _blank_site("0", default_tz)
+        contact_parts = (contact_name or "").split(maxsplit=1)
+        if contact_parts:
+            first_site["values"]["contact_first_name"] = contact_parts[0]
+            first_site["values"]["contact_last_name"] = contact_parts[1] if len(contact_parts) > 1 else ""
         return {
             "client_name": client_name or "",
-            "sites": [_blank_site("0", default_tz)],
+            "greeting_name": contact_parts[0] if contact_parts else (client_name or ""),
+            "sites": [first_site],
             "values": {},
             "billing_same_as_primary": True,
             "confirm_details": False,
