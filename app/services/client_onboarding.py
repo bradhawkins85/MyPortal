@@ -376,6 +376,9 @@ def parse_submission(form: Any) -> tuple[Submission | None, list[str]]:
     else:
         billing = _parse_contact(form, "billing_", "Billing contact", errors)
 
+    if not form.get("confirm_details"):
+        errors.append("Confirm that your details are correct before sending them.")
+
     if errors or not client_name or billing is None:
         return None, errors
     return (
@@ -401,7 +404,8 @@ def form_state(form: Any | None, *, client_name: str | None = None) -> dict[str,
             "client_name": client_name or "",
             "sites": [_blank_site("0", default_tz)],
             "values": {},
-            "billing_same_as_primary": False,
+            "billing_same_as_primary": True,
+            "confirm_details": False,
         }
     sites = []
     for index in site_indexes(form)[:MAX_SITES] or ["0"]:
@@ -432,6 +436,7 @@ def form_state(form: Any | None, *, client_name: str | None = None) -> dict[str,
             )
         },
         "billing_same_as_primary": bool(form.get("billing_same_as_primary")),
+        "confirm_details": bool(form.get("confirm_details")),
     }
 
 

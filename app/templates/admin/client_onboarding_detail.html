@@ -1,73 +1,128 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}Client onboarding{% endblock %}
+{% set status_variants = {"pending": "info", "processing": "warning", "submitted": "warning", "approved": "success", "failed": "danger", "revoked": "neutral", "expired": "neutral"} %}
+{% set status_labels = {"pending": "Awaiting client", "processing": "Processing", "submitted": "Awaiting approval", "approved": "Approved", "failed": "Needs attention", "revoked": "Revoked", "expired": "Expired"} %}
+{% set state = onboarding.effective_status %}
+{% set client = (submission.client_name if submission else none) or onboarding.client_name or 'Unnamed client' %}
+
+{% macro utc_time(value) -%}
+  {%- if value and value.isoformat is defined -%}
+    {%- set iso = value.isoformat() ~ ('' if value.tzinfo else 'Z') -%}
+    <time data-utc="{{ iso }}">{{ iso }}</time>
+  {%- else -%}—{%- endif -%}
+{%- endmacro %}
 
 {% macro contact(c) -%}
-  {{ c.first_name }} {{ c.last_name }} · <a href="mailto:{{ c.email }}">{{ c.email }}</a>{% if c.phone %} · {{ c.phone }}{% endif %}
+  {%- if c -%}{{ c.first_name }} {{ c.last_name }} · <a href="mailto:{{ c.email }}">{{ c.email }}</a>{% if c.phone %} · {{ c.phone }}{% endif %}{%- else -%}—{%- endif -%}
 {%- endmacro %}
+
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">{{ client }}</span>
+    <span class="status status--{{ status_variants.get(state, 'neutral') }}">{{ status_labels.get(state, state) }}</span>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  {% set actions = [] %}
+  {% if onboarding.status == "submitted" and onboarding.company_id %}
+    {% set _ = actions.append({"label": "Approve company", "type": "form", "variant": "primary", "action": "/admin/companies/" ~ onboarding.company_id ~ "/approve", "confirm": "Approve " ~ client ~ "? The company becomes active and its contacts are enabled."}) %}
+  {% endif %}
+  {% if onboarding.company_id %}
+    {% set _ = actions.append({"label": "Review and edit company" if onboarding.status == "submitted" else "Open company", "type": "link", "href": "/admin/companies/" ~ onboarding.company_id ~ "/edit"}) %}
+  {% endif %}
+  {% if onboarding.ticket_id %}
+    {% set _ = actions.append({"label": "Open New Client ticket", "type": "link", "href": "/admin/tickets/" ~ onboarding.ticket_id}) %}
+  {% endif %}
+  {% set _ = actions.append({"label": "Back to onboarding links", "type": "link", "href": "/admin/client-onboarding"}) %}
+  {{ page_header_actions(actions) }}
+{% endblock %}
 
 {% block content %}
 <div class="admin-grid">
-  <section class="card card--panel admin-grid__full">
+  <section class="card card--panel admin-grid__full" aria-labelledby="cof-detail-status">
     <div class="card__header">
       <div>
-        <h2 class="card__title">{{ (submission.client_name if submission else none) or onboarding.client_name or 'Unnamed client' }}</h2>
-        <p class="card__subtitle">Status: {{ onboarding.effective_status | replace('_', ' ') | title }}{% if onboarding.submitted_at %} · submitted {{ onboarding.submitted_at }}{% endif %}</p>
+        <h2 class="card__title" id="cof-detail-status">
+          {% if state == "submitted" %}Waiting for your approval
+          {% elif state == "approved" %}Approved and active
+          {% elif state == "failed" %}Setup needs attention
+          {% elif state == "pending" %}Waiting for the client
+          {% else %}{{ status_labels.get(state, state) }}{% endif %}
+        </h2>
+        <p class="card__subtitle">
+          {% if state == "submitted" %}Check what the client entered, correct anything on the company page, then approve the company to activate it and enable its contacts.
+          {% elif state == "approved" %}This company is active and its contacts are enabled.
+          {% elif state == "failed" %}Automatic setup stopped part-way. Finish setting up the client from the details below.
+          {% elif state == "pending" %}The client hasn't submitted the form yet.
+          {% elif state == "expired" %}The link expired before the client submitted it. Regenerate it from the onboarding links list.
+          {% else %}This link can no longer be used.{% endif %}
+        </p>
       </div>
-      <a class="button button--ghost" href="/admin/client-onboarding">Back to onboarding links</a>
     </div>
-    <div class="card__body">
-      {% if onboarding.error_message %}
-        <p class="form-help" role="alert">Automatic setup failed: {{ onboarding.error_message }}. Finish setting up the client from the details below.</p>
-      {% endif %}
-      {% if onboarding.company_id %}<p><a href="/admin/companies/{{ onboarding.company_id }}/edit">{{ 'Review and edit company' if onboarding.status == 'submitted' else 'Open company' }}</a>{% if onboarding.ticket_id %} · <a href="/admin/tickets/{{ onboarding.ticket_id }}">Open New Client ticket #{{ onboarding.ticket_id }}</a>{% endif %}</p>{% endif %}
-      {% if onboarding.status == 'submitted' and onboarding.company_id %}
-        <form action="/admin/companies/{{ onboarding.company_id }}/approve" method="post" class="form-actions">
-          {% include "partials/csrf.html" %}
-          <button class="button button--primary" type="submit">Approve company</button>
-          <span class="form-help">Approving activates the company and enables its contacts. Edit any details on the company page first.</span>
-        </form>
-      {% elif onboarding.approved_at %}
-        <p class="form-help">Approved {{ onboarding.approved_at }}.</p>
-      {% endif %}
-      {% if not submission %}
-        <p class="text-muted">The client has not submitted the form yet.</p>
-      {% else %}
-        <dl class="definition-list">
-          <dt>Main phone</dt><dd>{{ submission.phone or '—' }}</dd>
-          <dt>General email</dt><dd>{{ submission.email or '—' }}</dd>
-          <dt>Website</dt><dd>{{ submission.website or '—' }}</dd>
-          <dt>Billing contact</dt><dd>{{ contact(submission.billing_contact) }}</dd>
-          {% if submission.notes %}<dt>Notes</dt><dd>{{ submission.notes }}</dd>{% endif %}
-        </dl>
-      {% endif %}
-    </div>
+    <dl class="definition-list">
+      <dt>Link sent to</dt><dd>{{ onboarding.recipient_email or '—' }}</dd>
+      <dt>Created</dt><dd>{{ utc_time(onboarding.created_at) }}</dd>
+      {% if onboarding.submitted_at %}<dt>Submitted</dt><dd>{{ utc_time(onboarding.submitted_at) }}</dd>{% endif %}
+      {% if onboarding.approved_at %}<dt>Approved</dt><dd>{{ utc_time(onboarding.approved_at) }}</dd>{% endif %}
+      {% if onboarding.error_message %}<dt>Error</dt><dd>{{ onboarding.error_message }}</dd>{% endif %}
+    </dl>
   </section>
 
   {% if submission %}
-  {% for site in submission.sites %}
-  <section class="card card--panel admin-grid__full">
-    <div class="card__header"><div><h2 class="card__title">{{ site.name }}</h2><p class="card__subtitle">{{ site.street }}{% for part in [site.city, site.state, site.postcode, site.country] if part %}, {{ part }}{% endfor %}</p></div></div>
-    <div class="card__body">
-      <dl class="definition-list">
-        <dt>Site phone</dt><dd>{{ site.phone or '—' }}</dd>
-        <dt>Primary contact</dt><dd>{{ contact(site.primary_contact) }}</dd>
-        <dt>Time zone</dt><dd>{{ site.timezone }}</dd>
-      </dl>
-      <div class="table-wrapper">
-        <table class="table">
-          <thead><tr><th scope="col">Day</th><th scope="col">Hours</th></tr></thead>
-          <tbody>
-            {% for key, label in weekdays %}
-              {% set windows = site.weekly_hours.get(key) or [] %}
-              <tr><th scope="row">{{ label }}</th><td>{% if windows %}{% for w in windows %}{{ w.start }}–{{ w.end }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}Closed{% endif %}</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
+  <section class="card card--panel" aria-labelledby="cof-detail-business">
+    <div class="card__header"><div><h2 class="card__title" id="cof-detail-business">Business</h2></div></div>
+    <dl class="definition-list">
+      <dt>Business name</dt><dd>{{ submission.client_name }}</dd>
+      <dt>Main phone</dt><dd>{{ submission.phone or '—' }}</dd>
+      <dt>General email</dt><dd>{{ submission.email or '—' }}</dd>
+      <dt>Website</dt><dd>{{ submission.website or '—' }}</dd>
+    </dl>
+  </section>
+
+  <section class="card card--panel" aria-labelledby="cof-detail-billing">
+    <div class="card__header"><div><h2 class="card__title" id="cof-detail-billing">Billing</h2></div></div>
+    <dl class="definition-list">
+      <dt>Billing contact</dt><dd>{{ contact(submission.billing_contact) }}</dd>
+      <dt>Payment terms</dt><dd>Invoice prepay, due in 7 days</dd>
+    </dl>
+    {% if submission.notes %}
+      <h3 class="scf-panel__title">Notes from the client</h3>
+      <p class="scf-item__help">{{ submission.notes }}</p>
+    {% endif %}
+  </section>
+
+  <section class="card card--panel admin-grid__full" aria-labelledby="cof-detail-sites">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title" id="cof-detail-sites">Sites</h2>
+        <p class="card__subtitle">{{ submission.sites | length }} {{ 'site' if submission.sites | length == 1 else 'sites' }}, as the client entered them.</p>
       </div>
     </div>
+    <ul class="scf-list">
+      {% for site in submission.sites %}
+      <li class="scf-item">
+        <span class="scf-type-icon" aria-hidden="true">{{ loop.index }}</span>
+        <div class="scf-item__main">
+          <div class="scf-item__heading">
+            <span class="scf-item__label">{{ site.name }}</span>
+            <span class="scf-item__key">{{ 'Main site' if loop.first else 'Site ' ~ loop.index }}</span>
+          </div>
+          <p class="scf-item__help">{{ site.street }}{% for part in [site.city, site.state, site.postcode, site.country] if part %}, {{ part }}{% endfor %}{% if site.phone %} · {{ site.phone }}{% endif %}</p>
+          <p class="scf-item__help">Primary contact: {{ contact(site.primary_contact) }}</p>
+          <ul class="scf-item__chips" aria-label="Opening hours">
+            <li class="scf-chip">{{ site.timezone | replace('_', ' ') }}</li>
+            {% for key, label in weekdays %}
+              {% set windows = site.weekly_hours.get(key) or [] %}
+              <li class="scf-chip{% if windows %} scf-chip--logic{% endif %}">{{ label[:3] }} {% if windows %}{% for w in windows %}{{ w.start }}–{{ w.end }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}closed{% endif %}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
   </section>
-  {% endfor %}
   {% endif %}
 </div>
 {% endblock %}

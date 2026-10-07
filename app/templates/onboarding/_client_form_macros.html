@@ -1,0 +1,212 @@
+{# Pieces of the public client onboarding form (onboarding/client_form.html). #}
+
+{% macro icon(name) -%}
+<svg class="cof-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+  {%- if name == "building" -%}
+  <path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4h2a2 2 0 0 1 2 2v10h-2v-10h-2v10H4zm2-2h8V5H6v14zm2-12h2v2H8V7zm0 4h2v2H8v-2zm0 4h2v2H8v-2zm4-8h2v2h-2V7zm0 4h2v2h-2v-2z"/>
+  {%- elif name == "pin" -%}
+  <path d="M12 2a7 7 0 0 1 7 7c0 5.2-7 13-7 13S5 14.2 5 9a7 7 0 0 1 7-7zm0 4.5A2.5 2.5 0 1 0 12 11.5 2.5 2.5 0 0 0 12 6.5z"/>
+  {%- elif name == "card" -%}
+  <path d="M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6zm2 0v2h14V6H5zm0 5v7h14v-7H5zm2 4h5v2H7v-2z"/>
+  {%- elif name == "check" -%}
+  <path d="M9.5 16.2 5.3 12l-1.4 1.4 5.6 5.6L20.1 8.4 18.7 7l-9.2 9.2z"/>
+  {%- elif name == "clock" -%}
+  <path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20zm0 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16zm1 3v4.6l3.5 2.1-1 1.7L11 12.7V7h2z"/>
+  {%- elif name == "lock" -%}
+  <path d="M7 10V7a5 5 0 0 1 10 0v3h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1zm2 0h6V7a3 3 0 0 0-6 0v3z"/>
+  {%- elif name == "alert" -%}
+  <path d="M12 2 1 21h22L12 2zm0 6 .01 0L13 15h-2l1-7zm-1 9h2v2h-2v-2z"/>
+  {%- endif -%}
+</svg>
+{%- endmacro %}
+
+{# One site in the "Sites" step list. The summary is refreshed by client_onboarding.js. #}
+{% macro site_item(site, position) -%}
+{% set i = site.index %}
+{% set v = site.get("values", {}) %}
+<li class="scf-item cof-site" data-cof-site-item="{{ i }}">
+  <span class="cof-site__icon" aria-hidden="true">{{ icon("pin") }}</span>
+  <div class="scf-item__main">
+    <div class="scf-item__heading">
+      <button type="button" class="scf-item__label" data-cof-site-edit="{{ i }}" aria-haspopup="dialog" aria-controls="cof-site-modal-{{ i }}" data-cof-site-name>{{ v.name or "New site" }}</button>
+      <span class="scf-item__key" data-cof-site-role>{{ "Main site" if position == 1 else "Site " ~ position }}</span>
+    </div>
+    <p class="scf-item__help" data-cof-site-address>{{ v.street or "Add the address, primary contact and opening hours." }}</p>
+    <ul class="scf-item__chips" data-cof-site-chips aria-label="Site summary"></ul>
+  </div>
+  <div class="scf-item__actions">
+    <button type="button" class="button button--ghost button--small" data-cof-site-edit="{{ i }}" aria-haspopup="dialog" aria-controls="cof-site-modal-{{ i }}">Edit<span class="visually-hidden"> site</span></button>
+  </div>
+</li>
+{%- endmacro %}
+
+{#
+  The editor for one site. Its inputs belong to the onboarding form, so the
+  modal holds no <form> of its own. Without JavaScript the editor is shown in
+  place (see the <noscript> styles in client_form.html).
+#}
+{% macro site_editor(site, position, timezones, default_timezone) -%}
+{% set i = site.index %}
+{% set p = "site-" ~ i ~ "-" %}
+{% set v = site.get("values", {}) %}
+{% set selected_tz = v.timezone or default_timezone %}
+<div class="modal cof-site-modal" id="cof-site-modal-{{ i }}" role="dialog" aria-modal="true" aria-labelledby="cof-site-title-{{ i }}" data-cof-site-modal="{{ i }}" hidden>
+  <div class="modal__panel modal__panel--wide scf-editor cof-editor">
+    <input type="hidden" name="site_index" value="{{ i }}" />
+    <header class="modal__header scf-editor__header">
+      <div>
+        <p class="cof-eyebrow">Site <span data-cof-site-number>{{ position }}</span></p>
+        <h2 class="modal__title" id="cof-site-title-{{ i }}" data-cof-editor-title>{{ v.name or "Add a site" }}</h2>
+        <p class="scf-editor__subtitle">Where we'll support you, who to contact there, and when you're open.</p>
+      </div>
+      <button type="button" class="modal__close" data-cof-modal-cancel aria-label="Close site editor"></button>
+    </header>
+
+    <nav class="scf-tabs" role="tablist" aria-label="Site details">
+      <button type="button" class="scf-tab is-active" role="tab" id="cof-tab-{{ i }}-address" aria-controls="cof-panel-{{ i }}-address" aria-selected="true" data-cof-tab="address">Address<span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="cof-tab-{{ i }}-contact" aria-controls="cof-panel-{{ i }}-contact" aria-selected="false" tabindex="-1" data-cof-tab="contact">Primary contact<span class="scf-tab__dot" aria-hidden="true"></span></button>
+      <button type="button" class="scf-tab" role="tab" id="cof-tab-{{ i }}-hours" aria-controls="cof-panel-{{ i }}-hours" aria-selected="false" tabindex="-1" data-cof-tab="hours">Opening hours<span class="scf-tab__dot" aria-hidden="true"></span></button>
+    </nav>
+
+    <div class="modal__body scf-editor__body">
+      <div class="scf-editor__main">
+        <section class="cof-panel" id="cof-panel-{{ i }}-address" role="tabpanel" aria-labelledby="cof-tab-{{ i }}-address" data-cof-panel="address">
+          <h3 class="cof-panel__title cof-noscript-only">Address</h3>
+          <div class="scf-grid">
+            <div class="form-field">
+              <label class="form-label" for="{{ p }}name">Site name</label>
+              <input class="form-input" id="{{ p }}name" name="{{ p }}name" maxlength="100" placeholder="e.g. Head office" value="{{ v.name }}" autocomplete="off" required data-cof-field="name" />
+              <p class="form-help">How your team refers to this location.</p>
+              <p class="scf-error" data-cof-error="name" hidden></p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="{{ p }}phone">Site phone <span class="scf-optional">optional</span></label>
+              <input class="form-input" id="{{ p }}phone" name="{{ p }}phone" type="tel" maxlength="50" autocomplete="tel" value="{{ v.phone }}" data-cof-field="phone" />
+              <p class="form-help">The main number for this location.</p>
+            </div>
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="{{ p }}street">Street address</label>
+              <input class="form-input" id="{{ p }}street" name="{{ p }}street" maxlength="255" autocomplete="address-line1" placeholder="e.g. Level 2, 10 Smith Street" value="{{ v.street }}" required data-cof-field="street" />
+              <p class="scf-error" data-cof-error="street" hidden></p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="{{ p }}city">Suburb or city <span class="scf-optional">optional</span></label>
+              <input class="form-input" id="{{ p }}city" name="{{ p }}city" maxlength="100" autocomplete="address-level2" value="{{ v.city }}" data-cof-field="city" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="{{ p }}state">State <span class="scf-optional">optional</span></label>
+              <input class="form-input" id="{{ p }}state" name="{{ p }}state" maxlength="100" autocomplete="address-level1" value="{{ v.state }}" data-cof-field="state" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="{{ p }}postcode">Postcode <span class="scf-optional">optional</span></label>
+              <input class="form-input" id="{{ p }}postcode" name="{{ p }}postcode" maxlength="20" autocomplete="postal-code" inputmode="numeric" value="{{ v.postcode }}" data-cof-field="postcode" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="{{ p }}country">Country <span class="scf-optional">optional</span></label>
+              <input class="form-input" id="{{ p }}country" name="{{ p }}country" maxlength="100" autocomplete="country-name" value="{{ v.country }}" data-cof-field="country" />
+            </div>
+          </div>
+        </section>
+
+        <section class="cof-panel" id="cof-panel-{{ i }}-contact" role="tabpanel" aria-labelledby="cof-tab-{{ i }}-contact" data-cof-panel="contact" hidden>
+          <div class="scf-panel__intro">
+            <h3 class="scf-panel__title">Who should we contact at this site?</h3>
+            <p class="text-muted">We'll get in touch with this person about support at this location.</p>
+          </div>
+          <div class="scf-grid">
+            <div class="form-field">
+              <label class="form-label" for="{{ p }}contact_first_name">First name</label>
+              <input class="form-input" id="{{ p }}contact_first_name" name="{{ p }}contact_first_name" maxlength="100" autocomplete="off" value="{{ v.contact_first_name }}" required data-cof-field="contact_first_name" />
+              <p class="scf-error" data-cof-error="contact_first_name" hidden></p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="{{ p }}contact_last_name">Last name</label>
+              <input class="form-input" id="{{ p }}contact_last_name" name="{{ p }}contact_last_name" maxlength="100" autocomplete="off" value="{{ v.contact_last_name }}" required data-cof-field="contact_last_name" />
+              <p class="scf-error" data-cof-error="contact_last_name" hidden></p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="{{ p }}contact_email">Email</label>
+              <input class="form-input" id="{{ p }}contact_email" name="{{ p }}contact_email" type="email" maxlength="255" autocomplete="off" inputmode="email" value="{{ v.contact_email }}" required data-cof-field="contact_email" />
+              <p class="scf-error" data-cof-error="contact_email" hidden></p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="{{ p }}contact_phone">Phone <span class="scf-optional">optional</span></label>
+              <input class="form-input" id="{{ p }}contact_phone" name="{{ p }}contact_phone" type="tel" maxlength="50" autocomplete="off" value="{{ v.contact_phone }}" data-cof-field="contact_phone" />
+              <p class="form-help">A mobile number is best for urgent issues.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="cof-panel" id="cof-panel-{{ i }}-hours" role="tabpanel" aria-labelledby="cof-tab-{{ i }}-hours" data-cof-panel="hours" hidden>
+          <div class="scf-panel__intro">
+            <h3 class="scf-panel__title">When is this site open?</h3>
+            <p class="text-muted">We use these hours for response times at this site. Turn a day off if you're closed.</p>
+          </div>
+          <div class="form-field cof-timezone">
+            <label class="form-label" for="{{ p }}timezone">Time zone</label>
+            <select class="form-input" id="{{ p }}timezone" name="{{ p }}timezone" required data-cof-field="timezone">
+              {% for zone in timezones %}<option value="{{ zone }}"{% if zone == selected_tz %} selected{% endif %}>{{ zone | replace("_", " ") }}</option>{% endfor %}
+            </select>
+            <p class="scf-error" data-cof-error="timezone" hidden></p>
+          </div>
+          <div class="cof-presets cof-js-only" role="group" aria-label="Quick fill opening hours">
+            <span class="cof-presets__label">Quick fill</span>
+            <button type="button" class="button button--ghost button--small" data-cof-preset="weekdays-9-5">Mon–Fri, 9am–5pm</button>
+            <button type="button" class="button button--ghost button--small" data-cof-preset="weekdays-830-5">Mon–Fri, 8:30am–5pm</button>
+            <button type="button" class="button button--ghost button--small" data-cof-preset="always">Open 24/7</button>
+            <button type="button" class="button button--ghost button--small" data-cof-preset="copy-monday">Copy Monday to weekdays</button>
+          </div>
+          <ul class="cof-days" aria-label="Opening hours by day">
+            {% for row in site.hours %}
+            {% set has_break = row.start2 or row.end2 %}
+            <li class="cof-day{% if not row.open %} is-closed{% endif %}" data-cof-day="{{ row.key }}">
+              <span class="cof-day__name" id="{{ p }}day-{{ row.key }}-label">{{ row.label }}</span>
+              <label class="scf-switch cof-day__switch">
+                <input type="checkbox" name="{{ p }}day_{{ row.key }}_open" value="1" {% if row.open %}checked{% endif %} data-cof-day-open aria-describedby="{{ p }}day-{{ row.key }}-label" />
+                <span class="scf-switch__track" aria-hidden="true"></span>
+                <span class="cof-day__state" data-cof-day-state>{{ "Open" if row.open else "Closed" }}</span>
+              </label>
+              <span class="cof-day__times">
+                <input class="form-input cof-time" type="time" name="{{ p }}day_{{ row.key }}_start" value="{{ row.start }}" aria-label="{{ row.label }} opens" data-cof-time="start" />
+                <span class="cof-day__to" aria-hidden="true">to</span>
+                <input class="form-input cof-time" type="time" name="{{ p }}day_{{ row.key }}_end" value="{{ row.end }}" aria-label="{{ row.label }} closes" data-cof-time="end" />
+              </span>
+              <span class="cof-day__break" data-cof-break{% if not has_break %} data-cof-break-empty{% endif %}>
+                <span class="cof-day__and" aria-hidden="true">and</span>
+                <input class="form-input cof-time" type="time" name="{{ p }}day_{{ row.key }}_start2" value="{{ row.start2 }}" aria-label="{{ row.label }} reopens after a break" data-cof-time="start2" />
+                <span class="cof-day__to" aria-hidden="true">to</span>
+                <input class="form-input cof-time" type="time" name="{{ p }}day_{{ row.key }}_end2" value="{{ row.end2 }}" aria-label="{{ row.label }} closes after the break" data-cof-time="end2" />
+                <button type="button" class="button button--ghost button--icon cof-day__remove-break cof-js-only" data-cof-break-remove aria-label="Remove the break on {{ row.label }}">×</button>
+              </span>
+              <button type="button" class="button-link cof-day__add-break cof-js-only" data-cof-break-add>+ Add a break</button>
+              <p class="scf-error cof-day__error" data-cof-error="day-{{ row.key }}" hidden></p>
+            </li>
+            {% endfor %}
+          </ul>
+          <p class="form-help">Closed for lunch? Use <strong>Add a break</strong> to split the day. A closing time of 12:00am means midnight.</p>
+        </section>
+      </div>
+
+      <aside class="scf-preview cof-preview" aria-label="Site summary">
+        <p class="scf-preview__eyebrow">Summary</p>
+        <div class="scf-preview__card cof-preview__card">
+          <p class="cof-preview__name" data-cof-preview="name">{{ v.name or "New site" }}</p>
+          <p class="cof-preview__line" data-cof-preview="address"></p>
+          <p class="cof-preview__line" data-cof-preview="contact"></p>
+        </div>
+        <ul class="scf-preview__rules">
+          <li class="scf-preview__rule scf-preview__rule--logic" data-cof-preview="hours" aria-live="polite"></li>
+          <li class="scf-preview__rule" data-cof-preview="timezone"></li>
+        </ul>
+      </aside>
+    </div>
+
+    <footer class="modal__footer scf-editor__footer cof-js-only">
+      <button type="button" class="button button--danger" data-cof-site-remove>Remove site</button>
+      <span class="scf-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-cof-modal-cancel>Cancel</button>
+      <button type="button" class="button" data-cof-site-save>Save site</button>
+    </footer>
+  </div>
+</div>
+{%- endmacro %}

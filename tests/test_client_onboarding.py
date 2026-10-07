@@ -57,6 +57,7 @@ def _form(*sites: list[tuple[str, str]], **overrides: str) -> FormData:
         "billing_last_name": "Smith",
         "billing_email": "accounts@acme.com.au",
         "billing_phone": "",
+        "confirm_details": "1",
     }
     fields.update(overrides)
     items = list(fields.items())

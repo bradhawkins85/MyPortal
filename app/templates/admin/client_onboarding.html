@@ -1,126 +1,197 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
 
-{% block header_title %}Client onboarding{% endblock %}
-
-{% set status_variants = {"pending": "info", "processing": "warning", "submitted": "warning", "approved": "success", "failed": "error", "revoked": "neutral", "expired": "neutral"} %}
+{% set status_variants = {"pending": "info", "processing": "warning", "submitted": "warning", "approved": "success", "failed": "danger", "revoked": "neutral", "expired": "neutral"} %}
 {% set status_labels = {"pending": "Awaiting client", "processing": "Processing", "submitted": "Awaiting approval", "approved": "Approved", "failed": "Needs attention", "revoked": "Revoked", "expired": "Expired"} %}
 
+{% macro utc_time(value) -%}
+  {%- if value and value.isoformat is defined -%}
+    {%- set iso = value.isoformat() ~ ('' if value.tzinfo else 'Z') -%}
+    <time data-utc="{{ iso }}">{{ iso }}</time>
+  {%- else -%}—{%- endif -%}
+{%- endmacro %}
+
+{% block header_title %}
+  <div class="page-header-bar">
+    <span class="header__title-text">Client onboarding</span>
+    {% if onboardings %}
+      <div class="page-header-toolbar">
+        <label class="visually-hidden" for="client-onboarding-filter">Filter onboarding links</label>
+        <input id="client-onboarding-filter" type="search" class="form-input page-header-toolbar__search" placeholder="Filter by client or email" data-table-filter="client-onboarding-table" />
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "+ New onboarding link", "type": "button", "variant": "primary", "attrs": {"data-cof-link-modal-open": "", "aria-haspopup": "dialog", "aria-controls": "cof-link-modal"}}
+  ]) }}
+{% endblock %}
+
 {% block content %}
+{% set counts = namespace(pending=0, submitted=0, approved=0, failed=0) %}
+{% for item in onboardings %}
+  {% if item.effective_status == "pending" %}{% set counts.pending = counts.pending + 1 %}
+  {% elif item.effective_status == "submitted" %}{% set counts.submitted = counts.submitted + 1 %}
+  {% elif item.effective_status == "approved" %}{% set counts.approved = counts.approved + 1 %}
+  {% elif item.effective_status == "failed" %}{% set counts.failed = counts.failed + 1 %}{% endif %}
+{% endfor %}
 <div class="admin-grid">
+  {% if onboardings %}
+    {{ counter_strip([
+      {"label": "Awaiting client", "value": counts.pending, "variant": "info"},
+      {"label": "Awaiting approval", "value": counts.submitted, "variant": ("warning" if counts.submitted else "neutral")},
+      {"label": "Approved", "value": counts.approved, "variant": "success"},
+      {"label": "Needs attention", "value": counts.failed, "variant": ("danger" if counts.failed else "neutral")},
+    ], total=onboardings | length, total_label="Links") }}
+  {% endif %}
+
   {% if new_link %}
-  <section class="card card--panel admin-grid__full" aria-labelledby="client-onboarding-link-heading">
+  <section class="card card--panel admin-grid__full" aria-labelledby="cof-new-link-heading" data-cof-new-link>
     <div class="card__header">
       <div>
-        <h2 class="card__title" id="client-onboarding-link-heading">Onboarding link ready{% if new_link.record.client_name %} for {{ new_link.record.client_name }}{% endif %}</h2>
-        <p class="card__subtitle">Copy this link now. For security it is only shown once; regenerate the link if it is lost.</p>
+        <h2 class="card__title" id="cof-new-link-heading">Onboarding link ready{% if new_link.record.client_name %} for {{ new_link.record.client_name }}{% endif %}</h2>
+        <p class="card__subtitle">
+          {% if new_link.email_requested and new_link.emailed %}We've emailed this link to {{ new_link.record.recipient_email }}. You can also copy it below.
+          {% elif new_link.email_requested %}We couldn't email {{ new_link.record.recipient_email }}. Copy the link and send it to the client yourself.
+          {% else %}Copy the link and send it to the client.{% endif %}
+          For security it's only shown once — regenerate it if it's lost.
+        </p>
       </div>
+      <span class="status status--{{ 'success' if new_link.emailed else ('warning' if new_link.email_requested else 'info') }}">{{ 'Emailed' if new_link.emailed else ('Not emailed' if new_link.email_requested else 'Ready to share') }}</span>
     </div>
     <div class="card__body">
       <div class="form-field">
-        <label class="form-label" for="client-onboarding-url">Magic link</label>
-        <input class="form-input" id="client-onboarding-url" value="{{ new_link.url }}" readonly onclick="this.select()" />
+        <label class="form-label" for="cof-new-link-url">Magic link</label>
+        <div class="form-field__input-row">
+          <input class="form-input form-input--monospace" id="cof-new-link-url" value="{{ new_link.url }}" readonly data-cof-copy-source />
+          <button type="button" class="button button--ghost" data-cof-copy aria-describedby="cof-copy-status">Copy link</button>
+        </div>
+        <p class="form-help" id="cof-copy-status" role="status" aria-live="polite" data-cof-copy-status></p>
       </div>
-      {% if new_link.email_requested %}
-        {% if new_link.emailed %}
-          <p class="form-help">The link was emailed to {{ new_link.record.recipient_email }}.</p>
-        {% else %}
-          <p class="form-help">The link could not be emailed to {{ new_link.record.recipient_email }}. Copy it and send it to the client yourself.</p>
-        {% endif %}
-      {% endif %}
     </div>
   </section>
   {% endif %}
 
-  <section class="card card--panel admin-grid__full">
+  <section class="card card--panel admin-grid__full" aria-labelledby="cof-links-heading">
     <div class="card__header">
       <div>
-        <h2 class="card__title">New onboarding link</h2>
-        <p class="card__subtitle">Send a client a single-use link to a public form. Submitting it creates the company (invoice prepay, due in 7 days) pending your approval, with its sites, contacts and business hours, and a support ticket in the New Client status.</p>
+        <h2 class="card__title" id="cof-links-heading">Onboarding links</h2>
+        <p class="card__subtitle">Each client gets a single-use link to a public form. Their company is created pending your approval, with a support ticket in the New Client status.</p>
       </div>
     </div>
-    <div class="card__body">
-      <form action="/admin/client-onboarding" method="post" class="form">
-        {% include "partials/csrf.html" %}
-        <div class="form-grid">
-          <div class="form-field">
-            <label class="form-label" for="client-onboarding-name">Client name</label>
-            <input class="form-input" id="client-onboarding-name" name="clientName" maxlength="255" />
-            <p class="form-help">Optional. Pre-fills the business name on the form.</p>
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="client-onboarding-email">Client email</label>
-            <input class="form-input" id="client-onboarding-email" name="recipientEmail" type="email" maxlength="255" />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="client-onboarding-expiry">Link expires after (days)</label>
-            <input class="form-input" id="client-onboarding-expiry" name="expiryDays" type="number" min="1" max="{{ max_expiry_days }}" value="{{ default_expiry_days }}" />
-          </div>
-        </div>
-        <label class="form-checkbox">
-          <input type="checkbox" name="sendEmail" value="1" checked />
-          <span>Email the link to the client</span>
-        </label>
-        <div class="form-actions"><button class="button button--primary" type="submit">Create onboarding link</button></div>
-      </form>
+    {% if onboardings %}
+    <div class="table-wrapper">
+      <table class="table" id="client-onboarding-table" data-table data-table-id="client-onboarding">
+        <caption class="visually-hidden">Client onboarding links</caption>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string">Client</th>
+            <th scope="col" data-sort="string">Email</th>
+            <th scope="col" data-sort="string">Status</th>
+            <th scope="col" data-sort="string">Created</th>
+            <th scope="col" data-sort="string">Expires</th>
+            <th scope="col" class="table__actions"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in onboardings %}
+          {% set state = item.effective_status %}
+          {% set client = (item.submission.client_name if item.submission else none) or item.client_name or 'Unnamed client' %}
+          <tr>
+            <td data-label="Client"><a href="/admin/client-onboarding/{{ item.id }}">{{ client }}</a></td>
+            <td data-label="Email">{{ item.recipient_email or '—' }}</td>
+            <td data-label="Status" data-value="{{ status_labels.get(state, state) }}"><span class="status status--{{ status_variants.get(state, 'neutral') }}">{{ status_labels.get(state, state) }}</span></td>
+            <td data-label="Created" data-value="{{ item.created_at.isoformat() if item.created_at and item.created_at.isoformat is defined else '' }}">{{ utc_time(item.created_at) }}</td>
+            <td data-label="Expires" data-value="{{ item.expires_at.isoformat() if item.expires_at and item.expires_at.isoformat is defined else '' }}">{{ utc_time(item.expires_at) if state in ("pending", "expired") else '—' }}</td>
+            <td class="table__actions">
+              <details class="header-title-menu__dropdown" data-header-menu>
+                <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+                  Actions
+                  <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon"><path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" /></svg>
+                  <span class="visually-hidden">for {{ client }}</span>
+                </summary>
+                <ul class="header-title-menu__list" role="menu">
+                  <li class="header-title-menu__item" role="none"><a class="header-title-menu__link" role="menuitem" href="/admin/client-onboarding/{{ item.id }}">View details</a></li>
+                  {% if item.company_id %}<li class="header-title-menu__item" role="none"><a class="header-title-menu__link" role="menuitem" href="/admin/companies/{{ item.company_id }}/edit">{{ 'Review and approve company' if item.status == 'submitted' else 'Open company' }}</a></li>{% endif %}
+                  {% if item.ticket_id %}<li class="header-title-menu__item" role="none"><a class="header-title-menu__link" role="menuitem" href="/admin/tickets/{{ item.ticket_id }}">Open New Client ticket</a></li>{% endif %}
+                  {% if item.status == "pending" %}
+                  <li class="header-title-menu__item" role="none">
+                    <form action="/admin/client-onboarding/{{ item.id }}/regenerate" method="post">
+                      {% include "partials/csrf.html" %}
+                      <input type="hidden" name="expiryDays" value="{{ default_expiry_days }}" />
+                      {% if item.recipient_email %}<input type="hidden" name="sendEmail" value="1" />{% endif %}
+                      <button type="submit" class="header-title-menu__link" role="menuitem">{{ 'Regenerate and email link' if item.recipient_email else 'Regenerate link' }}</button>
+                    </form>
+                  </li>
+                  <li class="header-title-menu__item" role="none">
+                    <form action="/admin/client-onboarding/{{ item.id }}/revoke" method="post" data-confirm="Revoke the onboarding link for {{ client }}? It will stop working immediately." onsubmit="return window.confirm(this.dataset.confirm);">
+                      {% include "partials/csrf.html" %}
+                      <button type="submit" class="header-title-menu__link header-title-menu__link--danger" role="menuitem">Revoke link</button>
+                    </form>
+                  </li>
+                  {% endif %}
+                </ul>
+              </details>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
-  </section>
-
-  <section class="card card--panel admin-grid__full">
-    <div class="card__header"><div><h2 class="card__title">Onboarding links</h2></div></div>
-    <div class="card__body">
-      {% if onboardings %}
-      <div class="table-wrapper">
-        <table class="table">
-          <thead>
-            <tr>
-              <th scope="col">Client</th>
-              <th scope="col">Email</th>
-              <th scope="col">Status</th>
-              <th scope="col">Created</th>
-              <th scope="col">Expires</th>
-              <th scope="col">Result</th>
-              <th scope="col"><span class="visually-hidden">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for item in onboardings %}
-            {% set state = item.effective_status %}
-            <tr>
-              <td data-label="Client"><a href="/admin/client-onboarding/{{ item.id }}">{{ (item.submission.client_name if item.submission else none) or item.client_name or 'Unnamed client' }}</a></td>
-              <td data-label="Email">{{ item.recipient_email or '—' }}</td>
-              <td data-label="Status"><span class="status status--{{ status_variants.get(state, 'neutral') }}">{{ status_labels.get(state, state) }}</span></td>
-              <td data-label="Created">{{ item.created_at.strftime('%Y-%m-%d') if item.created_at and item.created_at.strftime is defined else (item.created_at or '—') }}</td>
-              <td data-label="Expires">{{ item.expires_at.strftime('%Y-%m-%d') if item.expires_at and item.expires_at.strftime is defined else (item.expires_at or '—') }}</td>
-              <td data-label="Result">
-                {% if item.company_id %}<a href="/admin/companies/{{ item.company_id }}/edit">Company</a>{% endif %}
-                {% if item.ticket_id %}{% if item.company_id %} · {% endif %}<a href="/admin/tickets/{{ item.ticket_id }}">Ticket #{{ item.ticket_id }}</a>{% endif %}
-                {% if not item.company_id and not item.ticket_id %}—{% endif %}
-              </td>
-              <td data-label="Actions">
-                {% if state in ("pending", "expired") and item.status == "pending" %}
-                <div class="table__actions">
-                  <form action="/admin/client-onboarding/{{ item.id }}/regenerate" method="post">
-                    {% include "partials/csrf.html" %}
-                    <input type="hidden" name="expiryDays" value="{{ default_expiry_days }}" />
-                    {% if item.recipient_email %}<input type="hidden" name="sendEmail" value="1" />{% endif %}
-                    <button class="button button--ghost button--small" type="submit">{{ 'Regenerate & email' if item.recipient_email else 'Regenerate link' }}</button>
-                  </form>
-                  <form action="/admin/client-onboarding/{{ item.id }}/revoke" method="post">
-                    {% include "partials/csrf.html" %}
-                    <button class="button button--ghost button--small" type="submit">Revoke</button>
-                  </form>
-                </div>
-                {% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+    {% else %}
+      <div class="scf-empty">
+        <p class="scf-empty__title">No onboarding links yet</p>
+        <p class="text-muted">Send a new client a link to tell us about their business, sites and billing contact. You review and approve their company before it goes live.</p>
+        <button type="button" class="button button--ghost" data-cof-link-modal-open aria-haspopup="dialog" aria-controls="cof-link-modal">+ Create your first link</button>
       </div>
-      {% else %}
-        <p class="text-muted">No onboarding links have been created yet.</p>
-      {% endif %}
-    </div>
+    {% endif %}
   </section>
 </div>
+
+<div class="modal" id="cof-link-modal" role="dialog" aria-modal="true" aria-labelledby="cof-link-modal-title" hidden>
+  <form class="modal__panel" method="post" action="/admin/client-onboarding" novalidate data-cof-link-form>
+    {% include "partials/csrf.html" %}
+    <header class="modal__header">
+      <div>
+        <h2 class="modal__title" id="cof-link-modal-title">New onboarding link</h2>
+        <p class="text-muted">Creates a single-use link to the client onboarding form.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close new onboarding link"></button>
+    </header>
+    <div class="modal__body">
+      <div class="form-field">
+        <label class="form-label" for="cof-link-name">Client name <span class="scf-optional">optional</span></label>
+        <input class="form-input" id="cof-link-name" name="clientName" maxlength="255" autocomplete="off" placeholder="e.g. Acme Pty Ltd" />
+        <p class="form-help">Pre-fills the business name and greets the client by name.</p>
+      </div>
+      <div class="form-grid">
+        <div class="form-field">
+          <label class="form-label" for="cof-link-email">Client email <span class="scf-optional">optional</span></label>
+          <input class="form-input" id="cof-link-email" name="recipientEmail" type="email" maxlength="255" autocomplete="off" placeholder="e.g. owner@acme.com.au" data-cof-link-email />
+          <p class="form-help form-help--error" data-cof-link-email-error hidden>Enter a valid email address.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="cof-link-expiry">Link works for</label>
+          <select class="form-input" id="cof-link-expiry" name="expiryDays">
+            {% for days in [7, 14, 30, 60, 90] %}<option value="{{ days }}"{% if days == default_expiry_days %} selected{% endif %}>{{ days }} days</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <label class="scf-switch">
+        <input type="checkbox" name="sendEmail" value="1" checked data-cof-link-send />
+        <span class="scf-switch__track" aria-hidden="true"></span>
+        <span>Email the link to the client</span>
+      </label>
+      <p class="form-help" data-cof-link-send-help>We'll send the link as soon as you create it. You'll also be able to copy it.</p>
+    </div>
+    <footer class="modal__footer">
+      <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      <button type="submit" class="button button--primary" data-cof-link-submit>Create link</button>
+    </footer>
+  </form>
+</div>
+<script src="{{ static_url('/static/js/client_onboarding_admin.js') }}" defer></script>
 {% endblock %}
