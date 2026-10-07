@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block header_title %}Client onboarding{% endblock %}
+
+{% macro contact(c) -%}
+  {{ c.first_name }} {{ c.last_name }} · <a href="mailto:{{ c.email }}">{{ c.email }}</a>{% if c.phone %} · {{ c.phone }}{% endif %}
+{%- endmacro %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="card card--panel admin-grid__full">
+    <div class="card__header">
+      <div>
+        <h2 class="card__title">{{ (submission.client_name if submission else none) or onboarding.client_name or 'Unnamed client' }}</h2>
+        <p class="card__subtitle">Status: {{ onboarding.effective_status | replace('_', ' ') | title }}{% if onboarding.submitted_at %} · submitted {{ onboarding.submitted_at }}{% endif %}</p>
+      </div>
+      <a class="button button--ghost" href="/admin/client-onboarding">Back to onboarding links</a>
+    </div>
+    <div class="card__body">
+      {% if onboarding.error_message %}
+        <p class="form-help" role="alert">Automatic setup failed: {{ onboarding.error_message }}. Finish setting up the client from the details below.</p>
+      {% endif %}
+      {% if onboarding.company_id %}<p><a href="/admin/companies/{{ onboarding.company_id }}/edit">{{ 'Review and edit company' if onboarding.status == 'submitted' else 'Open company' }}</a>{% if onboarding.ticket_id %} · <a href="/admin/tickets/{{ onboarding.ticket_id }}">Open New Client ticket #{{ onboarding.ticket_id }}</a>{% endif %}</p>{% endif %}
+      {% if onboarding.status == 'submitted' and onboarding.company_id %}
+        <form action="/admin/companies/{{ onboarding.company_id }}/approve" method="post" class="form-actions">
+          {% include "partials/csrf.html" %}
+          <button class="button button--primary" type="submit">Approve company</button>
+          <span class="form-help">Approving activates the company and enables its contacts. Edit any details on the company page first.</span>
+        </form>
+      {% elif onboarding.approved_at %}
+        <p class="form-help">Approved {{ onboarding.approved_at }}.</p>
+      {% endif %}
+      {% if not submission %}
+        <p class="text-muted">The client has not submitted the form yet.</p>
+      {% else %}
+        <dl class="definition-list">
+          <dt>Main phone</dt><dd>{{ submission.phone or '—' }}</dd>
+          <dt>General email</dt><dd>{{ submission.email or '—' }}</dd>
+          <dt>Website</dt><dd>{{ submission.website or '—' }}</dd>
+          <dt>Billing contact</dt><dd>{{ contact(submission.billing_contact) }}</dd>
+          {% if submission.notes %}<dt>Notes</dt><dd>{{ submission.notes }}</dd>{% endif %}
+        </dl>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if submission %}
+  {% for site in submission.sites %}
+  <section class="card card--panel admin-grid__full">
+    <div class="card__header"><div><h2 class="card__title">{{ site.name }}</h2><p class="card__subtitle">{{ site.street }}{% for part in [site.city, site.state, site.postcode, site.country] if part %}, {{ part }}{% endfor %}</p></div></div>
+    <div class="card__body">
+      <dl class="definition-list">
+        <dt>Site phone</dt><dd>{{ site.phone or '—' }}</dd>
+        <dt>Primary contact</dt><dd>{{ contact(site.primary_contact) }}</dd>
+        <dt>Time zone</dt><dd>{{ site.timezone }}</dd>
+      </dl>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead><tr><th scope="col">Day</th><th scope="col">Hours</th></tr></thead>
+          <tbody>
+            {% for key, label in weekdays %}
+              {% set windows = site.weekly_hours.get(key) or [] %}
+              <tr><th scope="row">{{ label }}</th><td>{% if windows %}{% for w in windows %}{{ w.start }}–{{ w.end }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}Closed{% endif %}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+  {% endfor %}
+  {% endif %}
+</div>
+{% endblock %}

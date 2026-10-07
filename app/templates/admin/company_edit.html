@@ -35,6 +35,50 @@
 {% block content %}
 
   <div class="company-edit-page ce-workspace" data-company-id="{{ company.id }}" data-company-edit>
+    {% if company.pending_approval and is_super_admin %}
+    <section class="card card--panel" aria-labelledby="ce-pending-approval-heading" data-company-pending-approval>
+      <div class="card__header">
+        <div>
+          <h2 class="card__title" id="ce-pending-approval-heading">Pending approval</h2>
+          <p class="card__subtitle">This company was created from the client onboarding form. Check and edit the details the client entered below, then approve it. Until then its contacts are disabled.</p>
+        </div>
+        <span class="status status--warning">Pending approval</span>
+      </div>
+      <div class="card__body">
+        {% if client_onboarding_sites %}
+        <div class="table-wrapper">
+          <table class="table">
+            <thead><tr><th scope="col">Site</th><th scope="col">Primary contact</th><th scope="col">Site phone</th><th scope="col">Business hours</th></tr></thead>
+            <tbody>
+              {% set ce_days = [("mon", "Mon"), ("tue", "Tue"), ("wed", "Wed"), ("thu", "Thu"), ("fri", "Fri"), ("sat", "Sat"), ("sun", "Sun")] %}
+              {% for site in client_onboarding_sites %}
+              <tr>
+                <td data-label="Site"><strong>{{ site.label }}</strong><br><span class="text-muted">{{ site.street }}{% for part in [site.city, site.state, site.postcode, site.country] if part %}, {{ part }}{% endfor %}</span></td>
+                <td data-label="Primary contact">{% if site.email %}{{ site.first_name }} {{ site.last_name }}<br><span class="text-muted">{{ site.email }}{% if site.mobile_phone %} · {{ site.mobile_phone }}{% endif %}</span>{% else %}—{% endif %}</td>
+                <td data-label="Site phone">{{ site.phone or '—' }}</td>
+                <td data-label="Business hours">
+                  <span class="text-muted">{{ site.timezone or '' }}</span><br>
+                  {% for key, label in ce_days %}{% set windows = (site.weekly_hours or {}).get(key) or [] %}{{ label }} {% if windows %}{% for w in windows %}{{ w.start }}–{{ w.end }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}closed{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+        <div class="form-actions">
+          <form action="/admin/companies/{{ company.id }}/approve" method="post">
+            {% include "partials/csrf.html" %}
+            <button class="button button--primary" type="submit">Approve company</button>
+          </form>
+          {% if client_onboarding %}
+            <a class="button button--ghost" href="/admin/client-onboarding/{{ client_onboarding.id }}">View submitted form</a>
+            {% if client_onboarding.ticket_id %}<a class="button button--ghost" href="/admin/tickets/{{ client_onboarding.ticket_id }}">Open New Client ticket</a>{% endif %}
+          {% endif %}
+        </div>
+      </div>
+    </section>
+    {% endif %}
     <section class="ce-overview" aria-label="Company at a glance">
       <div class="ce-overview__identity">
         <span class="ce-overview__avatar" aria-hidden="true">{{ (company_display_name or '?')[:1] | upper }}</span>

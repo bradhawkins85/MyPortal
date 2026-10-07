@@ -960,6 +960,12 @@ async def _render_company_edit_page(
 
         log_error("Failed to load company business hours", company_id=company_id, error=str(exc))
 
+    if company_record.get("pending_approval"):
+        from app.repositories import client_onboarding as client_onboarding_repo
+
+        extra["client_onboarding"] = await client_onboarding_repo.get_by_company_id(company_id)
+        extra["client_onboarding_sites"] = await client_onboarding_repo.list_site_profiles(company_id)
+
     response = await _main()._render_template(
         "admin/company_edit.html", request, user, extra=extra
     )

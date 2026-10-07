@@ -849,6 +849,9 @@ app.add_middleware(
         # Unsubscribe links authenticate with the recipient's unguessable
         # token and must accept RFC 8058 one-click POSTs from mail clients.
         "/marketing/unsubscribe/",
+        # The public client onboarding form authenticates with the single-use
+        # magic-link token in its URL; clients have no portal session.
+        "/onboarding/",
         "/api/integration-modules/uptimekuma/alerts",
         "/api/integration-modules/trello/webhook",
         "/api/integration-modules/xero/webhook",

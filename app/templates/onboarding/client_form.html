@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Client onboarding · {{ app_name }}</title>
+  <link rel="stylesheet" href="{{ static_url('/static/css/app.css') }}" />
+  <style>
+    .onboarding-shell { max-width: 960px; margin: 0 auto; padding: 2rem 1rem 4rem; display: grid; gap: 1.5rem; }
+    .onboarding-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    .onboarding-site { border: 1px solid var(--color-border, #d0d7de); border-radius: 0.75rem; padding: 1rem; display: grid; gap: 1rem; }
+    .onboarding-site__header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+    .onboarding-site__title { margin: 0; font-size: 1.1rem; }
+    .onboarding-site h4 { margin: 0.5rem 0 0; font-size: 1rem; }
+    .onboarding-hours input[type="time"] { width: auto; display: inline-block; }
+    .onboarding-errors { margin: 0; padding-left: 1.25rem; }
+    .onboarding-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+{% macro site_block(site, position) -%}
+  {% set p = "site-" ~ site.index ~ "-" %}
+  {% set v = site.get("values", {}) %}
+  <section class="onboarding-site" data-site>
+    <input type="hidden" name="site_index" value="{{ site.index }}" />
+    <div class="onboarding-site__header">
+      <h3 class="onboarding-site__title">Site <span data-site-number>{{ position }}</span></h3>
+      <button type="button" class="button button--ghost button--small" data-remove-site>Remove site</button>
+    </div>
+    <div class="onboarding-grid">
+      <div class="form-field">
+        <label class="form-label required" for="{{ p }}name">Site name</label>
+        <input class="form-input" id="{{ p }}name" name="{{ p }}name" maxlength="100" placeholder="Head office" value="{{ v.name }}" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="{{ p }}phone">Site phone</label>
+        <input class="form-input" id="{{ p }}phone" name="{{ p }}phone" type="tel" maxlength="50" value="{{ v.phone }}" />
+      </div>
+    </div>
+    <h4>Address</h4>
+    <div class="form-field">
+      <label class="form-label required" for="{{ p }}street">Street address</label>
+      <input class="form-input" id="{{ p }}street" name="{{ p }}street" maxlength="255" autocomplete="street-address" value="{{ v.street }}" required />
+    </div>
+    <div class="onboarding-grid">
+      <div class="form-field">
+        <label class="form-label" for="{{ p }}city">Suburb / city</label>
+        <input class="form-input" id="{{ p }}city" name="{{ p }}city" maxlength="100" value="{{ v.city }}" />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="{{ p }}state">State</label>
+        <input class="form-input" id="{{ p }}state" name="{{ p }}state" maxlength="100" value="{{ v.state }}" />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="{{ p }}postcode">Postcode</label>
+        <input class="form-input" id="{{ p }}postcode" name="{{ p }}postcode" maxlength="20" value="{{ v.postcode }}" />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="{{ p }}country">Country</label>
+        <input class="form-input" id="{{ p }}country" name="{{ p }}country" maxlength="100" value="{{ v.country }}" />
+      </div>
+    </div>
+    <h4>Primary contact for this site</h4>
+    <div class="onboarding-grid">
+      <div class="form-field">
+        <label class="form-label required" for="{{ p }}contact_first_name">First name</label>
+        <input class="form-input" id="{{ p }}contact_first_name" name="{{ p }}contact_first_name" maxlength="100" value="{{ v.contact_first_name }}" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label required" for="{{ p }}contact_last_name">Last name</label>
+        <input class="form-input" id="{{ p }}contact_last_name" name="{{ p }}contact_last_name" maxlength="100" value="{{ v.contact_last_name }}" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label required" for="{{ p }}contact_email">Email</label>
+        <input class="form-input" id="{{ p }}contact_email" name="{{ p }}contact_email" type="email" maxlength="255" value="{{ v.contact_email }}" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="{{ p }}contact_phone">Phone</label>
+        <input class="form-input" id="{{ p }}contact_phone" name="{{ p }}contact_phone" type="tel" maxlength="50" value="{{ v.contact_phone }}" />
+      </div>
+    </div>
+    <h4>Business hours</h4>
+    <div class="form-field">
+      <label class="form-label required" for="{{ p }}timezone">Time zone</label>
+      <input class="form-input" id="{{ p }}timezone" name="{{ p }}timezone" list="onboarding-timezones" value="{{ v.timezone or default_timezone }}" required />
+    </div>
+    <div class="table-wrapper onboarding-hours">
+      <table class="table">
+        <thead><tr><th scope="col">Day</th><th scope="col">Open</th><th scope="col">Hours</th><th scope="col">Second period (optional)</th></tr></thead>
+        <tbody>
+          {% for row in site.hours %}
+            <tr>
+              <th scope="row">{{ row.label }}</th>
+              <td><input type="checkbox" name="{{ p }}day_{{ row.key }}_open" value="1" aria-label="Open on {{ row.label }}" {% if row.open %}checked{% endif %} /></td>
+              <td>
+                <input class="form-input" type="time" name="{{ p }}day_{{ row.key }}_start" value="{{ row.start }}" aria-label="{{ row.label }} opens" />
+                <span aria-hidden="true">–</span>
+                <input class="form-input" type="time" name="{{ p }}day_{{ row.key }}_end" value="{{ row.end }}" aria-label="{{ row.label }} closes" />
+              </td>
+              <td>
+                <input class="form-input" type="time" name="{{ p }}day_{{ row.key }}_start2" value="{{ row.start2 }}" aria-label="{{ row.label }} second period opens" />
+                <span aria-hidden="true">–</span>
+                <input class="form-input" type="time" name="{{ p }}day_{{ row.key }}_end2" value="{{ row.end2 }}" aria-label="{{ row.label }} second period closes" />
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="form-help">Tick the days this site is open. Use a second period for split shifts such as a lunch closure.</p>
+  </section>
+{%- endmacro %}
+
+  <main class="onboarding-shell">
+    <header>
+      <h1>Client onboarding</h1>
+      <p class="text-muted">{{ app_name }}</p>
+    </header>
+
+    {% if state == "complete" %}
+      <section class="card card--panel">
+        <div class="card__body">
+          <h2 class="card__title">Thank you!</h2>
+          <p>Your details have been received. Our team will review them and be in touch shortly with your onboarding information.</p>
+        </div>
+      </section>
+    {% elif state == "failed" %}
+      <section class="card card--panel">
+        <div class="card__body">
+          <h2 class="card__title">Thanks, we have your details</h2>
+          <p>We received your form but could not finish setting up your account automatically. Our team has been notified and will complete it for you. There is no need to submit the form again.</p>
+        </div>
+      </section>
+    {% elif state != "open" %}
+      <section class="card card--panel">
+        <div class="card__body">
+          <h2 class="card__title">This onboarding link is not available</h2>
+          {% if state == "expired" %}
+            <p>This link has expired. Please contact us for a new onboarding link.</p>
+          {% elif state in ("submitted", "processing") %}
+            <p>This onboarding form has already been submitted. Please contact us if you need to change any details.</p>
+          {% else %}
+            <p>This link is not valid. It may have been copied incorrectly or cancelled. Please contact us for a new onboarding link.</p>
+          {% endif %}
+        </div>
+      </section>
+    {% else %}
+      {% if errors %}
+        <section class="card card--panel" role="alert">
+          <div class="card__body">
+            <h2 class="card__title">Please check the following</h2>
+            <ul class="onboarding-errors">{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
+          </div>
+        </section>
+      {% endif %}
+
+      <form method="post" action="/onboarding/{{ token }}" class="form" data-onboarding-form data-max-sites="{{ max_sites }}" novalidate>
+        <datalist id="onboarding-timezones">{% for zone in timezones %}<option value="{{ zone }}"></option>{% endfor %}</datalist>
+
+        <section class="card card--panel">
+          <div class="card__header"><div><h2 class="card__title">Your business</h2></div></div>
+          <div class="card__body">
+            <div class="form-field">
+              <label class="form-label required" for="client_name">Business name</label>
+              <input class="form-input" id="client_name" name="client_name" maxlength="255" autocomplete="organization" value="{{ form.client_name }}" required />
+            </div>
+            <div class="onboarding-grid">
+              <div class="form-field">
+                <label class="form-label" for="company_phone">Main phone</label>
+                <input class="form-input" id="company_phone" name="company_phone" type="tel" maxlength="50" value="{{ form['values'].company_phone }}" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="company_email">General email</label>
+                <input class="form-input" id="company_email" name="company_email" type="email" maxlength="255" value="{{ form['values'].company_email }}" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="website">Website</label>
+                <input class="form-input" id="website" name="website" maxlength="255" value="{{ form['values'].website }}" />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card card--panel">
+          <div class="card__header">
+            <div>
+              <h2 class="card__title">Sites</h2>
+              <p class="card__subtitle">Add each location we will support, with its primary contact and opening hours. The first site is treated as your main site.</p>
+            </div>
+          </div>
+          <div class="card__body">
+            <div data-sites>
+              {% for site in form.sites %}{{ site_block(site, loop.index) }}{% endfor %}
+            </div>
+            <div class="onboarding-actions">
+              <button type="button" class="button button--secondary" data-add-site>Add another site</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="card card--panel">
+          <div class="card__header"><div><h2 class="card__title">Billing contact</h2><p class="card__subtitle">Who should receive invoices?</p></div></div>
+          <div class="card__body">
+            <label class="form-checkbox">
+              <input type="checkbox" name="billing_same_as_primary" value="1" data-billing-same {% if form.billing_same_as_primary %}checked{% endif %} />
+              <span>Same as the primary contact for the first site</span>
+            </label>
+            <div class="onboarding-grid" data-billing-fields>
+              <div class="form-field">
+                <label class="form-label required" for="billing_first_name">First name</label>
+                <input class="form-input" id="billing_first_name" name="billing_first_name" maxlength="100" value="{{ form['values'].billing_first_name }}" />
+              </div>
+              <div class="form-field">
+                <label class="form-label required" for="billing_last_name">Last name</label>
+                <input class="form-input" id="billing_last_name" name="billing_last_name" maxlength="100" value="{{ form['values'].billing_last_name }}" />
+              </div>
+              <div class="form-field">
+                <label class="form-label required" for="billing_email">Email</label>
+                <input class="form-input" id="billing_email" name="billing_email" type="email" maxlength="255" value="{{ form['values'].billing_email }}" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="billing_phone">Phone</label>
+                <input class="form-input" id="billing_phone" name="billing_phone" type="tel" maxlength="50" value="{{ form['values'].billing_phone }}" />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card card--panel">
+          <div class="card__header"><div><h2 class="card__title">Anything else?</h2></div></div>
+          <div class="card__body">
+            <div class="form-field">
+              <label class="form-label" for="notes">Notes for our team</label>
+              <textarea class="form-input" id="notes" name="notes" rows="4" maxlength="4000">{{ form['values'].notes }}</textarea>
+            </div>
+          </div>
+        </section>
+
+        <div class="onboarding-actions">
+          <button type="submit" class="button button--primary">Submit onboarding form</button>
+        </div>
+      </form>
+
+      <template data-site-template>
+        {{ site_block({"index": "__INDEX__", "values": {"timezone": default_timezone}, "hours": blank_hours}, "__NUMBER__") }}
+      </template>
+    {% endif %}
+  </main>
+  <script src="{{ static_url('/static/js/client_onboarding.js') }}" defer></script>
+</body>
+</html>
