@@ -247,7 +247,7 @@ def test_top_navigation_dropdowns_are_exclusive_and_aligned():
     base_template = Path("app/templates/base.html").read_text()
     stylesheet = Path("app/static/css/app.css").read_text()
 
-    assert "if (item !== menuItem) setMenuItemExpanded(item, false);" in base_template
+    assert "if (item !== menuItem && !item.contains(menuItem)) setMenuItemExpanded(item, false);" in base_template
     assert "setMenuItemExpanded(item, false);" in base_template
     assert "let activeDropdownFound = false;" not in base_template
     assert "const selectedLink = event.target.closest('.menu__submenu a[href]');" in base_template

@@ -2140,7 +2140,10 @@
           const expanded = !menuItem.classList.contains('menu__item--expanded');
           if (document.body.classList.contains('navigation--top') && expanded) {
             sidebarMenuRoot.querySelectorAll(':scope > .menu__item--expandable').forEach((item) => {
-              if (item !== menuItem) setMenuItemExpanded(item, false);
+              // Never collapse the item an expanded sub-item lives inside, or
+              // opening a nested submenu (Compliance Checks / Continuity) would
+              // take the whole group down with it.
+              if (item !== menuItem && !item.contains(menuItem)) setMenuItemExpanded(item, false);
             });
           }
           setMenuItemExpanded(menuItem, expanded);
