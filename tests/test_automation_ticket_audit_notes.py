@@ -271,3 +271,24 @@ async def test_identical_actions_in_one_run_each_get_a_note(audit_env):
         note["external_reference"].startswith("automation:3:run-one:")
         for note in created
     )
+
+
+@pytest.mark.anyio
+async def test_legacy_single_module_exception_records_failed_note(audit_env, monkeypatch):
+    created, _ = audit_env
+
+    async def failing_trigger(slug, payload, *, background=True):
+        raise RuntimeError("module exploded")
+
+    monkeypatch.setattr(automations_service.module_dispatch, "trigger_module", failing_trigger)
+
+    with pytest.raises(RuntimeError):
+        await automations_service._invoke_automation_actions_for_context(
+            {"id": 5, "name": "Legacy", "kind": "event", "action_module": "update-ticket"},
+            context=CONTEXT,
+        )
+
+    assert len(created) == 1
+    assert created[0]["ticket_id"] == 7
+    assert "failed" in created[0]["body"]
+    assert "Error: module exploded" in created[0]["body"]

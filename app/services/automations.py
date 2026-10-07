@@ -412,6 +412,26 @@ async def _record_ticket_conversation_audit(
         )
 
 
+async def _record_legacy_action_exception(
+    automation: Mapping[str, Any],
+    module_slug: str,
+    exc: Exception,
+    context: Mapping[str, Any] | None,
+) -> None:
+    """Record a raised legacy ``action_module`` failure before re-raising it."""
+
+    exc_message = str(exc)
+    await _record_action_history(
+        automation,
+        action_name=module_slug,
+        action_module=module_slug,
+        status="failed",
+        result={"module": module_slug, "status": "failed", "error": exc_message},
+        error_message=exc_message,
+        context=context,
+    )
+
+
 def _normalise_actions(actions: Any) -> list[dict[str, Any]]:
     normalised: list[dict[str, Any]] = []
     if not isinstance(actions, list):
@@ -1204,9 +1224,13 @@ async def _invoke_automation_actions_for_context_inner(
         )
         if context:
             module_payload.setdefault("context", context)
-        result = await module_dispatch.trigger_module(
-            str(module_slug), module_payload, background=False
-        )
+        try:
+            result = await module_dispatch.trigger_module(
+                str(module_slug), module_payload, background=False
+            )
+        except Exception as exc:
+            await _record_legacy_action_exception(automation, str(module_slug), exc, context)
+            raise
         history_error = None
         history_status = "succeeded"
         if isinstance(result, Mapping):
@@ -1813,9 +1837,15 @@ async def _execute_automation_inner(
                     )
                     if context:
                         module_payload.setdefault("context", context)
-                    result_payload = await module_dispatch.trigger_module(
-                        str(module_slug), module_payload, background=False
-                    )
+                    try:
+                        result_payload = await module_dispatch.trigger_module(
+                            str(module_slug), module_payload, background=False
+                        )
+                    except Exception as exc:
+                        await _record_legacy_action_exception(
+                            automation, str(module_slug), exc, context
+                        )
+                        raise
                     action_status = "succeeded"
                     action_error = None
                     if isinstance(result_payload, Mapping):
