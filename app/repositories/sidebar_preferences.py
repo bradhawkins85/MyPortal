@@ -122,6 +122,7 @@ _DEFAULT_LAYOUT: tuple[tuple[str, ...] | tuple[str, str, str, tuple[str, ...]], 
         "settings",
         (
             "/admin/companies",
+            "/admin/client-onboarding",
             "/admin/users",
             "/admin/roles",
             "/admin/sessions",

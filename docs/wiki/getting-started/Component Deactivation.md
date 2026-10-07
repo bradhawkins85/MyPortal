@@ -70,8 +70,8 @@ lives in `app/features/help/requirements.py`.
 ### Valid feature-pack slugs
 
 `api_keys`, `assets`, `automations`, `backups`, `call_recordings`, `calls`,
-`cart`, `chat`, `chatgpt_mcp`, `companies`, `compliance`, `continuity`, `dmarc`,
-`help`, `hudu`, `huntress`, `imap`, `invoices`, `issue_tracker`,
+`cart`, `chat`, `chatgpt_mcp`, `client_onboarding`, `companies`, `compliance`,
+`continuity`, `dmarc`, `help`, `hudu`, `huntress`, `imap`, `invoices`, `issue_tracker`,
 `knowledge_base`, `m365_admin`, `m365_mail`, `marketing`, `matrix_chat_assign`,
 `message_templates`, `notifications`, `ntfy`, `ollama`, `orders`,
 `password_pusher`, `quotes`, `receive_sms`, `reporting`, `reports`,
