@@ -1,0 +1,55 @@
+{# Native controls shared by all onboarding sections and each site's editor. #}
+{% macro custom_questions(questions, answers={}, prefix="") -%}
+{% if questions %}
+<div class="cof-custom-questions" data-cof-custom-questions>
+  {% for question in questions %}
+  {% set key = question.id | string %}
+  {% set field_id = prefix ~ "custom-" ~ key %}
+  {% set answer = answers.get(key, "") %}
+  {% set grouped = question.field_type in ("multi_select", "radio") %}
+  {% set description = field_id ~ "-help " ~ field_id ~ "-error" if question.help_text else field_id ~ "-error" %}
+  <{{ "fieldset" if grouped else "div" }} class="form-field cof-custom-question" data-cof-custom-question="{{ key }}" data-cof-custom-type="{{ question.field_type }}" data-cof-custom-label="{{ question.label }}" data-cof-custom-required="{{ 'true' if question.required else 'false' }}"{% if grouped %} aria-describedby="{{ description }}"{% endif %}>
+    {% if grouped %}
+    <legend class="form-label">{{ question.label }} <span class="{{ 'cof-required' if question.required else 'scf-optional' }}">{{ 'required' if question.required else 'optional' }}</span></legend>
+    <div class="cof-custom-options">
+      {% for option in question.options %}
+      <label class="cof-custom-choice" for="{{ field_id }}-{{ loop.index }}">
+        <input id="{{ field_id }}-{{ loop.index }}" name="{{ field_id }}" type="{{ 'checkbox' if question.field_type == 'multi_select' else 'radio' }}" value="{{ option }}"{% if (question.field_type == 'multi_select' and answer is not string and option in answer) or (question.field_type == 'radio' and option == answer) %} checked{% endif %}{% if question.required and question.field_type == 'radio' %} required{% endif %} aria-describedby="{{ description }}" data-cof-custom-control />
+        <span>{{ option }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    {% elif question.field_type == "checkbox" %}
+    <label class="cof-custom-choice" for="{{ field_id }}">
+      <input id="{{ field_id }}" name="{{ field_id }}" type="checkbox" value="1"{% if answer in (true, "1", "on", "true") %} checked{% endif %}{% if question.required %} required{% endif %} aria-describedby="{{ description }}" data-cof-custom-control />
+      <span>{{ question.label }} <span class="{{ 'cof-required' if question.required else 'scf-optional' }}">{{ 'required' if question.required else 'optional' }}</span></span>
+    </label>
+    {% else %}
+    <label class="form-label" for="{{ field_id }}">{{ question.label }} <span class="{{ 'cof-required' if question.required else 'scf-optional' }}">{{ 'required' if question.required else 'optional' }}</span></label>
+    {% if question.field_type == "long_text" %}
+    <textarea class="form-input" id="{{ field_id }}" name="{{ field_id }}" rows="4" maxlength="10000"{% if question.required %} required{% endif %} aria-describedby="{{ description }}" data-cof-custom-control>{{ answer if answer is string else '' }}</textarea>
+    {% elif question.field_type == "dropdown" %}
+    <select class="form-input" id="{{ field_id }}" name="{{ field_id }}"{% if question.required %} required{% endif %} aria-describedby="{{ description }}" data-cof-custom-control>
+      <option value="">Select an option</option>
+      {% for option in question.options %}<option value="{{ option }}"{% if option == answer %} selected{% endif %}>{{ option }}</option>{% endfor %}
+    </select>
+    {% else %}
+    {% set input_types = {"short_text": "text", "email": "email", "phone": "tel", "date": "date", "number": "number", "url": "url", "time": "time", "datetime_local": "datetime-local"} %}
+    {% set limits = {"short_text": 1000, "email": 255, "phone": 50, "url": 2048, "number": 100, "date": 10, "time": 8, "datetime_local": 19} %}
+    <input class="form-input" id="{{ field_id }}" name="{{ field_id }}"
+      type="{{ input_types.get(question.field_type, 'text') }}" value="{{ answer if answer is string or answer is number else '' }}"
+      {% if question.field_type in limits %}maxlength="{{ limits[question.field_type] }}"{% endif %}
+      {% if question.field_type == "number" %}step="any" min="-1e100" max="1e100"{% endif %}
+      {% if question.field_type in ("time", "datetime_local") %}step="1"{% endif %}
+      {% if question.field_type == "date" %}min="0001-01-01" max="9999-12-31"{% endif %}
+      {% if question.field_type == "datetime_local" %}min="0001-01-01T00:00" max="9999-12-31T23:59:59"{% endif %}
+      {% if question.required %}required{% endif %} aria-describedby="{{ description }}" data-cof-custom-control />
+    {% endif %}
+    {% endif %}
+    {% if question.help_text %}<p class="form-help" id="{{ field_id }}-help">{{ question.help_text }}</p>{% endif %}
+    <p class="scf-error" id="{{ field_id }}-error" data-cof-custom-error hidden></p>
+  </{{ "fieldset" if grouped else "div" }}>
+  {% endfor %}
+</div>
+{% endif %}
+{%- endmacro %}

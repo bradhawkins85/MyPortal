@@ -1,0 +1,21 @@
+{# Render the saved label and display value, never the current question definition. #}
+{% macro answer_rows(answers) -%}
+  {% for answer in answers or [] %}
+    <dt>{{ answer.label }}</dt>
+    <dd style="white-space: pre-wrap; overflow-wrap: anywhere;">{{ answer.display_value if answer.display_value is defined and answer.display_value is not none and answer.display_value != '' else 'Not answered' }}</dd>
+  {% endfor %}
+{%- endmacro %}
+
+{% macro answer_list(answers) -%}
+  {% if answers %}
+    <dl class="definition-list">{{ answer_rows(answers) }}</dl>
+  {% endif %}
+{%- endmacro %}
+
+{% macro answer_sections(answers) -%}
+  {% set section_labels = {'business': 'Your business', 'sites': 'Sites', 'billing': 'Billing', 'review': 'Review', 'site': 'Site'} %}
+  {% for group in (answers or []) | groupby('section') %}
+    <h3 class="scf-panel__title">{{ section_labels.get(group.grouper, group.grouper | replace('_', ' ') | title) }}</h3>
+    {{ answer_list(group.list) }}
+  {% endfor %}
+{%- endmacro %}

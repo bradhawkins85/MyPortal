@@ -34,6 +34,7 @@ from app.repositories import company_addresses as company_addresses_repo
 from app.repositories import companies as company_repo
 from app.repositories import staff as staff_repo
 from app.services import business_hours as business_hours_service
+from app.services import client_onboarding_questions as questions_service
 
 INVOICE_DUE_DAYS = 7
 PAYMENT_METHOD = "invoice_prepay"
@@ -74,6 +75,7 @@ class Site:
     contact: Contact
     timezone_name: str
     weekly_hours: dict[str, list[dict[str, str]]]
+    custom_answers: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -85,6 +87,7 @@ class Submission:
     notes: str | None
     billing_contact: Contact
     sites: list[Site] = field(default_factory=list)
+    custom_answers: list[dict[str, Any]] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         def contact(value: Contact) -> dict[str, Any]:
@@ -102,6 +105,7 @@ class Submission:
             "website": self.website,
             "notes": self.notes,
             "billing_contact": contact(self.billing_contact),
+            "custom_answers": self.custom_answers,
             "sites": [
                 {
                     "name": site.name,
@@ -114,6 +118,7 @@ class Submission:
                     "primary_contact": contact(site.contact),
                     "timezone": site.timezone_name,
                     "weekly_hours": site.weekly_hours,
+                    "custom_answers": site.custom_answers,
                 }
                 for site in self.sites
             ],
@@ -476,10 +481,16 @@ def _parse_contact(
     return Contact(first_name=first_name, last_name=last_name, email=email, phone=phone)
 
 
-def parse_submission(form: Any) -> tuple[Submission | None, list[str]]:
+def parse_submission(
+    form: Any, questions: list[dict[str, Any]] | None = None
+) -> tuple[Submission | None, list[str]]:
     """Validate the public form. Returns the submission or a list of errors."""
 
     errors: list[str] = []
+    custom_answers, custom_errors = questions_service.parse_answers(
+        form, questions or [], sections=("business", "sites", "billing", "review")
+    )
+    errors.extend(custom_errors)
     client_name = _text(form, "client_name", 255)
     if not client_name:
         errors.append("Enter your business name.")
@@ -506,6 +517,13 @@ def parse_submission(form: Any) -> tuple[Submission | None, list[str]]:
         prefix = f"site-{index}-"
         name = _text(form, f"{prefix}name", 100)
         label = f"Site {position}" + (f" ({name})" if name else "")
+        site_answers, site_errors = questions_service.parse_answers(
+            form,
+            questions or [],
+            sections=("site_address", "site_contact", "site_hours"),
+            prefix=prefix,
+        )
+        errors.extend(f"{label} {error}" for error in site_errors)
         street = _text(form, f"{prefix}street", 255)
         if not name:
             errors.append(f"Site {position}: enter a site name.")
@@ -537,6 +555,7 @@ def parse_submission(form: Any) -> tuple[Submission | None, list[str]]:
                     contact=contact,
                     timezone_name=timezone_name,
                     weekly_hours=weekly,
+                    custom_answers=site_answers,
                 )
             )
 
@@ -559,13 +578,18 @@ def parse_submission(form: Any) -> tuple[Submission | None, list[str]]:
             notes=_text(form, "notes", 4000),
             billing_contact=billing,
             sites=sites,
+            custom_answers=custom_answers,
         ),
         [],
     )
 
 
 def form_state(
-    form: Any | None, *, client_name: str | None = None, contact_name: str | None = None
+    form: Any | None,
+    *,
+    client_name: str | None = None,
+    contact_name: str | None = None,
+    questions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Values for (re-)rendering the public form, including per-site hour rows.
 
@@ -585,6 +609,7 @@ def form_state(
             "greeting_name": contact_parts[0] if contact_parts else (client_name or ""),
             "sites": [first_site],
             "values": {},
+            "custom_answers": {},
             "billing_same_as_primary": True,
             "confirm_details": False,
         }
@@ -604,10 +629,14 @@ def form_state(
                 "index": index,
                 "values": values,
                 "hours": _hours_rows_from_form(form, prefix),
+                "custom_answers": questions_service.answer_state(
+                    form, questions or [], prefix=prefix
+                ),
             }
         )
     return {
         "client_name": str(form.get("client_name") or ""),
+        "custom_answers": questions_service.answer_state(form, questions or []),
         "sites": sites,
         "values": {
             key: str(form.get(key) or "")
@@ -626,6 +655,7 @@ def _blank_site(index: str, timezone_name: str) -> dict[str, Any]:
         "index": index,
         "values": {"timezone": timezone_name},
         "hours": business_hours_service.weekly_form_rows(None),
+        "custom_answers": {},
     }
 
 
@@ -704,6 +734,13 @@ def ticket_description(submission: Submission, *, company_id: int | None = None)
         phone = f", {e(contact.phone)}" if contact.phone else ""
         return f"{e(contact.display_name)} &lt;{e(contact.email)}&gt;{phone}"
 
+    def answer_lines(answers: list[dict[str, Any]]) -> str:
+        return "".join(
+            f"<li>{e(questions_service.SECTIONS.get(answer['section'], answer['section']))} — "
+            f"{e(answer['label'])}: {e(answer['display_value']).replace(chr(10), '<br>')}</li>"
+            for answer in answers
+        )
+
     lines = [
         f"<p><strong>{e(submission.client_name)}</strong> has completed the client onboarding form.</p>",
         "<ul>",
@@ -723,7 +760,18 @@ def ticket_description(submission: Submission, *, company_id: int | None = None)
             f"Primary contact: {contact_line(site.contact)}<br>"
             f"Business hours ({e(site.timezone_name)}): {e(_hours_summary(site.weekly_hours))}</li>"
         )
+        if site.custom_answers:
+            lines.append(
+                f"<li>Custom questions for {e(site.name)}"
+                f"<ul>{answer_lines(site.custom_answers)}</ul></li>"
+            )
     lines.append("</ul>")
+    if submission.custom_answers:
+        lines.append(
+            "<p><strong>Custom onboarding questions</strong></p><ul>"
+            + answer_lines(submission.custom_answers)
+            + "</ul>"
+        )
     if submission.notes:
         lines.append(f"<p><strong>Notes from the client</strong></p><p>{e(submission.notes)}</p>")
     review = (

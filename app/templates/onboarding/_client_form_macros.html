@@ -1,4 +1,5 @@
 {# Pieces of the public client onboarding form (onboarding/client_form.html). #}
+{% from "onboarding/_custom_questions.html" import custom_questions %}
 
 {% macro icon(name) -%}
 <svg class="cof-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -45,7 +46,7 @@
   modal holds no <form> of its own. Without JavaScript the editor is shown in
   place (see the <noscript> styles in client_form.html).
 #}
-{% macro site_editor(site, position, timezones, default_timezone) -%}
+{% macro site_editor(site, position, timezones, default_timezone, question_sections={}) -%}
 {% set i = site.index %}
 {% set p = "site-" ~ i ~ "-" %}
 {% set v = site.get("values", {}) %}
@@ -106,6 +107,7 @@
               <input class="form-input" id="{{ p }}country" name="{{ p }}country" maxlength="100" autocomplete="country-name" value="{{ v.country }}" data-cof-field="country" />
             </div>
           </div>
+          {{ custom_questions(question_sections.get("site_address", []), site.get("custom_answers", {}), p) }}
         </section>
 
         <section class="cof-panel" id="cof-panel-{{ i }}-contact" role="tabpanel" aria-labelledby="cof-tab-{{ i }}-contact" data-cof-panel="contact" hidden>
@@ -135,6 +137,7 @@
               <p class="form-help">A mobile number is best for urgent issues.</p>
             </div>
           </div>
+          {{ custom_questions(question_sections.get("site_contact", []), site.get("custom_answers", {}), p) }}
         </section>
 
         <section class="cof-panel" id="cof-panel-{{ i }}-hours" role="tabpanel" aria-labelledby="cof-tab-{{ i }}-hours" data-cof-panel="hours" hidden>
@@ -184,6 +187,7 @@
             {% endfor %}
           </ul>
           <p class="form-help">Closed for lunch? Use <strong>Add a break</strong> to split the day. A closing time of 12:00am means midnight.</p>
+          {{ custom_questions(question_sections.get("site_hours", []), site.get("custom_answers", {}), p) }}
         </section>
       </div>
 
