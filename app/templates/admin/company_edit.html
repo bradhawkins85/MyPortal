@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/scheduled_ticket_payload.html" import scheduled_ticket_payload %}
-{% from "macros/header.html" import page_header_actions %}
+{% from "macros/header.html" import page_header_actions with context %}
 {% from "macros/counters.html" import counter_strip %}
 
 {% set company_display_name = form_data.name or company.name %}
@@ -27,6 +27,9 @@
   {% if is_super_admin and company.pending_approval %}
     {% set _ = ce_actions.append({"label": "Approve company", "type": "form", "action": "/admin/companies/" ~ company.id ~ "/approve", "confirm": "Approve " ~ (company.name or "this company") ~ "? It becomes active and its contacts are enabled. Save any changes first."}) %}
   {% endif %}
+  {% if is_super_admin and company.pending_approval %}
+    {% set _ = ce_actions.append({"label": "Decline company", "type": "form", "variant": "danger", "action": "/admin/companies/" ~ company.id ~ "/decline", "confirm": "Decline " ~ (company.name or "this company") ~ "? The company will be archived and its contacts will remain disabled. Submitted details will be retained."}) %}
+  {% endif %}
   {% if is_super_admin %}
     {% set _ = ce_actions.append({"label": "Microsoft 365 connection", "type": "link", "href": "/admin/companies/" ~ company.id ~ "/m365"}) %}
     {% set _ = ce_actions.append({"label": "Tray settings", "type": "link", "href": "/admin/companies/" ~ company.id ~ "/tray"}) %}
@@ -43,7 +46,7 @@
       <div class="card__header">
         <div>
           <h2 class="card__title" id="ce-pending-approval-heading">Pending approval</h2>
-          <p class="card__subtitle">This company was created from the client onboarding form. Check and edit the details the client entered below, then approve it. Until then its contacts are disabled.</p>
+          <p class="card__subtitle">This company was created from the client onboarding form. Check and edit the details the client entered below, then approve it or decline it to archive the company. Until then its contacts are disabled.</p>
         </div>
         <span class="status status--warning">Pending approval</span>
       </div>
@@ -73,6 +76,10 @@
           <form action="/admin/companies/{{ company.id }}/approve" method="post" data-confirm="Approve {{ company.name }}? It becomes active and its contacts are enabled. Save any changes first." onsubmit="return window.confirm(this.dataset.confirm);">
             {% include "partials/csrf.html" %}
             <button class="button button--secondary" type="submit">Approve company</button>
+          </form>
+          <form action="/admin/companies/{{ company.id }}/decline" method="post" data-confirm="Decline {{ company.name }}? The company will be archived and its contacts will remain disabled. Submitted details will be retained." onsubmit="return window.confirm(this.dataset.confirm);">
+            {% include "partials/csrf.html" %}
+            <button class="button button--danger" type="submit">Decline company</button>
           </form>
           {% if client_onboarding %}
             <a class="button button--ghost" href="/admin/client-onboarding/{{ client_onboarding.id }}">View submitted form</a>
