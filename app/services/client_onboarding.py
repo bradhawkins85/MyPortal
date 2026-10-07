@@ -38,7 +38,6 @@ MAX_EXPIRY_DAYS = 90
 MAX_SITES = 20
 
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,64}")
-_EMAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 _SITE_INDEX_PATTERN = re.compile(r"\d{1,3}")
 
 
@@ -244,7 +243,13 @@ async def send_link_email(record: Mapping[str, Any], token: str) -> bool:
 
 def normalise_email(value: Any) -> str | None:
     text = str(value or "").strip().lower()
-    if not text or len(text) > 255 or not _EMAIL_PATTERN.fullmatch(text):
+    if not text or len(text) > 255 or any(char.isspace() for char in text):
+        return None
+    local, sep, domain = text.partition("@")
+    if not sep or not local or "@" in domain:
+        return None
+    labels = domain.split(".")
+    if len(labels) < 2 or not all(labels):
         return None
     return text
 

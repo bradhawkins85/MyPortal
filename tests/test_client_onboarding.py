@@ -345,3 +345,19 @@ def test_migration_runs_on_sqlite():
         "INSERT INTO client_onboardings (token_hash, expires_at) VALUES ('x', '2026-01-01')"
     )
     assert connection.execute("SELECT status FROM client_onboardings").fetchone() == ("pending",)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (" Jo@Acme.com.au ", "jo@acme.com.au"),
+        ("jo@acme", None),
+        ("jo@@acme.com", None),
+        ("@acme.com", None),
+        ("jo@acme..com", None),
+        ("jo @acme.com", None),
+        ("jo@" + "!" * 5000 + ".com", None),
+    ],
+)
+def test_normalise_email(value, expected):
+    assert onboarding.normalise_email(value) == expected
