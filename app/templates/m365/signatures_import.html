@@ -29,14 +29,14 @@
     </header>
     <div class="card__body">
       <div class="alert alert--info" role="status">
-        <strong>How to export from Outlook:</strong>
+        <strong>How to create the ZIP from Classic Outlook:</strong>
         <ol class="list" style="margin-top:6px;">
-          <li>Open <strong>Outlook</strong> and go to <strong>File &gt; Options &gt; Mail &gt; Signatures</strong>.</li>
-          <li>Select the signature you want to import.</li>
-          <li>Click <strong>Export</strong> and save the <code>.zip</code> file.</li>
+          <li>Press <strong>Windows + R</strong>, enter <code>%APPDATA%\Microsoft\Signatures</code> and press <strong>Enter</strong>.</li>
+          <li>Select the signature's <code>.htm</code>, <code>.rtf</code> and <code>.txt</code> files <strong>and</strong> its <code>&lt;name&gt;_files</code> folder.</li>
+          <li>Right-click the selection and choose <strong>Compress to ZIP file</strong> (Windows 11) or <strong>Send to &gt; Compressed (zipped) folder</strong>.</li>
           <li>Upload that ZIP file here.</li>
         </ol>
-        <p style="margin-top:8px;">The ZIP should contain an HTML file, a TXT file, an RTF file, and a <code>files/</code> folder with any embedded images.</p>
+        <p style="margin-top:8px;">The <code>_files</code> folder holds the signature's images; they are embedded in the imported signature. Signature ZIPs exported from new Outlook are also accepted.</p>
       </div>
 
       <form method="post" action="/m365/signatures/import" enctype="multipart/form-data" class="form">
