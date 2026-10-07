@@ -27,6 +27,7 @@ from app.services.module_gate import require_module_enabled
 from loguru import logger
 
 from app.core.config import get_settings
+from app.services.email_sender import resolve_sender
 from app.services import module_runtime as module_runtime_service
 from app.core.database import db
 
@@ -839,11 +840,11 @@ async def send_email_via_api(
             raise SMTP2GoError("Email body (html_body or text_body) is required")
         
         # Determine sender - REQUIRED by SMTP2Go API
-        sender_address = sender or settings.smtp_user
+        sender_address = resolve_sender(settings, sender)
         if not sender_address:
             raise SMTP2GoError(
                 "Sender email address is required. "
-                "Provide 'sender' parameter or configure SMTP_USER in settings."
+                "Provide 'sender' parameter or configure SMTP_FROM or SMTP_USER in settings."
             )
         
         # Build request payload

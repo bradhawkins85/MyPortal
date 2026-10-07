@@ -246,6 +246,7 @@ CORE_SECTIONS: tuple[Section, ...] = (
         "Outgoing email (SMTP server)",
         "Server used for password resets, notifications and other system email.",
         (
+            S("COMPANY_NAME", "Company name", help="Display name for default outbound email senders."),
             S("SMTP_HOST", "SMTP host", help="Leave blank to disable outgoing email."),
             S("SMTP_PORT", "SMTP port", "int", default="587"),
             S("SMTP_USER", "SMTP username"),

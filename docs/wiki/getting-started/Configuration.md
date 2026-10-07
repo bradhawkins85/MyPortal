@@ -13,6 +13,25 @@ For integration-specific guidance refer to the dedicated documentation under
 `docs/`. For example, [docs/xero.md](xero.md) outlines the callback URL and
 credential requirements for the Xero module.
 
+## Outbound email sender
+
+Set `COMPANY_NAME` in `.env` to the name recipients should see on outbound
+emails, including client onboarding invitations. For example:
+
+```dotenv
+COMPANY_NAME="My Company"
+SMTP_FROM=support@mydomain.com
+```
+
+The default sender becomes `My Company <support@mydomain.com>`. The address
+comes from `SMTP_FROM`, falling back to `SMTP_USER`; authentication still uses
+`SMTP_USER`. This applies to SMTP relay and SMTP2Go API delivery. An explicit
+sender override takes precedence. Leave `COMPANY_NAME` blank to keep the
+existing sender format. Restart the application after updating `.env`.
+
+Use `{{env.company.name}}` in message templates to include this organisation
+name. `{{company.name}}` continues to refer to the client company.
+
 ## UI Auto Refresh
 
 `ENABLE_AUTO_REFRESH` controls whether browser clients automatically poll the

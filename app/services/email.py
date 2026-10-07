@@ -13,6 +13,7 @@ from loguru import logger
 
 from app.core.config import get_settings
 from app.services import webhook_monitor
+from app.services.email_sender import resolve_sender
 
 
 class EmailDispatchError(Exception):
@@ -78,7 +79,7 @@ async def send_email(
         recipients: List of recipient email addresses
         html_body: HTML content of the email
         text_body: Plain text version of the email (optional)
-        sender: Sender email address (optional, uses SMTP_USER if not provided)
+        sender: Optional sender override; otherwise COMPANY_NAME with SMTP_FROM or SMTP_USER
         reply_to: Reply-to email address (optional)
         timeout: SMTP connection timeout in seconds
         enable_tracking: Enable email tracking (opens and clicks)
@@ -373,7 +374,7 @@ async def send_email(
 
     message = EmailMessage()
     message["Subject"] = subject
-    from_address = sender or settings.smtp_from or settings.smtp_user or "no-reply@localhost"
+    from_address = resolve_sender(settings, sender) or "no-reply@localhost"
     message["From"] = from_address
     message["To"] = ", ".join(to_addresses)
     if settings.outbound_audit_bcc:

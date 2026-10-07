@@ -74,3 +74,16 @@ def test_template_replacements_include_message_templates(monkeypatch):
 
     assert replacements["{{TEMPLATE_GREETING}}"] == "Hello Sam"
     assert replacements["{{template.greeting}}"] == "Hello Sam"
+
+
+def test_company_environment_variable_is_distinct_from_client(monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "company_name", "Our Company")
+    context = template_variables.TemplateContext(
+        company=template_variables.TemplateContextCompany(name="Client Company"),
+    )
+    replacements = template_variables.build_template_replacement_map(context)
+    assert template_variables.apply_template_variables(
+        "{{env.company.name}} invites {{company.name}}", replacements
+    ) == "Our Company invites Client Company"

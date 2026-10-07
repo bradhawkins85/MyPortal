@@ -106,13 +106,26 @@ def test_send_email_success(monkeypatch):
     assert event_metadata["response_status"] == 250
 
 
-def test_send_email_uses_smtp_from_as_sender(monkeypatch):
+@pytest.mark.parametrize(
+    "company_name,smtp_from,sender,expected_name,expected_address",
+    [
+        ("", "noreply@myportal.example.com", None, "", "noreply@myportal.example.com"),
+        ("My Company", "support@mydomain.com", None, "My Company", "support@mydomain.com"),
+        ('Acme, "Services"', None, None, 'Acme, "Services"', "user@example.com"),
+        ("Équipe Support", None, None, "Équipe Support", "user@example.com"),
+        ("My Company", "support@mydomain.com", "Agent <agent@example.com>", "Agent", "agent@example.com"),
+    ],
+)
+def test_send_email_uses_smtp_from_as_sender(
+    monkeypatch, company_name, smtp_from, sender, expected_name, expected_address
+):
     """smtp_from takes precedence over smtp_user as the From address."""
     settings = get_settings()
     monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
     monkeypatch.setattr(settings, "smtp_port", 587)
     monkeypatch.setattr(settings, "smtp_user", "user@example.com")
-    monkeypatch.setattr(settings, "smtp_from", "noreply@myportal.example.com")
+    monkeypatch.setattr(settings, "smtp_from", smtp_from)
+    monkeypatch.setattr(settings, "company_name", company_name)
     monkeypatch.setattr(settings, "smtp_password", "secret")
     monkeypatch.setattr(settings, "smtp_use_tls", False)
 
@@ -151,13 +164,16 @@ def test_send_email_uses_smtp_from_as_sender(monkeypatch):
     asyncio.run(
         email_service.send_email(
             subject="From test",
+            sender=sender,
             recipients=["user@example.com"],
             html_body="<p>Hello</p>",
         )
     )
 
     message = captured["message"]
-    assert message["From"] == "noreply@myportal.example.com"
+    from_header = message["From"].addresses[0]
+    assert from_header.display_name == expected_name
+    assert from_header.addr_spec == expected_address
     # smtp_user is still used for authentication
     assert captured["login"] == "user@example.com"
 

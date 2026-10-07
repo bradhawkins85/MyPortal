@@ -304,6 +304,7 @@ def get_system_variables(*, ticket: Mapping[str, Any] | None = None) -> dict[str
     variables = dict(_static_variables())
     variables.update(_safe_environment_variables())
     variables.update(_runtime_variables())
+    variables["env.company.name"] = get_settings().company_name
     if ticket:
         variables.update(build_context_variables(ticket, prefix="ticket", stringify=True))
         company_name = variables.get("TICKET_COMPANY_NAME")

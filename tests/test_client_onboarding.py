@@ -564,6 +564,14 @@ def test_invitation_migration_seeds_editable_templates():
     assert "{{ onboarding.message }}" in sql
 
 
+def test_invitation_context_includes_environment_company_name(monkeypatch):
+    from app.core.config import get_settings
+    from app.services import message_templates
+
+    monkeypatch.setattr(get_settings(), "company_name", "Our Company")
+    context = onboarding.invitation_context(_invite_record(), "t" * 43)
+    assert message_templates.render_content("{{env.company.name}}", context) == "Our Company"
+    assert context["company"]["name"] == _invite_record()["client_name"]
 @pytest.mark.anyio
 async def test_decline_preserves_details_and_disabled_contacts(monkeypatch):
     connection = sqlite3.connect(":memory:")
