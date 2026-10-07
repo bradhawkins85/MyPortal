@@ -426,3 +426,25 @@ def test_pack_registers_approve_route():
 
 def test_company_repository_accepts_pending_approval():
     company_repo._validate_company_fields({"name": "Acme", "pending_approval": 1})
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"company_phone": ""}, "Enter your main phone number."),
+        ({"company_email": ""}, "Enter your general email address."),
+        ({"company_email": "hello@acme"}, "Enter a valid general email address."),
+    ],
+)
+def test_main_phone_and_general_email_are_required(overrides, message):
+    submission, errors = onboarding.parse_submission(_form(**overrides))
+    assert submission is None
+    assert message in errors
+
+
+@pytest.mark.anyio
+async def test_company_phone_is_the_main_phone(monkeypatch):
+    calls = _patch_completion(monkeypatch)
+    submission, _ = onboarding.parse_submission(_form())
+    await onboarding.complete_onboarding({"id": 3}, submission)
+    assert calls["create_company"].await_args.kwargs["phone"] == "07 3000 0001"

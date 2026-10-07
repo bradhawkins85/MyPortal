@@ -1,0 +1,7 @@
+{
+  "guid": "a8a2245a-d0b9-416e-a689-70da72a21feb",
+  "occurred_at": "2026-10-07T07:45Z",
+  "change_type": "Fix",
+  "summary": "Require the main phone and general email on step 1 of the client onboarding form, and stop error messages on the form from swallowing clicks on Continue and Save.",
+  "content_hash": "b69b65ec971a929f9c41594d3cab74ea3a8ce1ab7172e52c23b1dacb4d16997b"
+}

@@ -21,7 +21,8 @@ been submitted.
 
 The form is a branded, four-step page that works on phones and desktops:
 
-1. **Your business:** business name, plus optional main phone, general email and website.
+1. **Your business:** business name, main phone and general email (all required), plus an
+   optional website.
 2. **Sites:** one card per location (up to 20). **+ Add a site** opens an editor with three
    tabs: **Address**, **Primary contact** (name, email, phone) and **Opening hours** (time zone,
    an on/off switch per day, an optional break for split shifts, and quick-fill buttons such as
@@ -40,8 +41,8 @@ show on one page), and the client is warned before leaving with unsaved changes.
 MyPortal automatically:
 
 - Creates the **company** in a **Pending approval** state with **Invoice Due Days = 7** and
-  **Payment Methods = Invoice prepay**. The company address and phone come from the first site
-  when no main phone is given.
+  **Payment Methods = Invoice prepay**. The company phone is the main phone, and the company
+  address comes from the first site.
 - Adds each site as a **company address** (labelled with the site name) with its phone,
   primary contact and business hours.
 - Creates a **staff contact** for each primary contact and the billing contact (a person used

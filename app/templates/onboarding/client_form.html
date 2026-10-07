@@ -95,13 +95,15 @@
               <p class="scf-error" data-cof-error="client_name" hidden></p>
             </div>
             <div class="form-field">
-              <label class="form-label" for="company_phone">Main phone <span class="scf-optional">optional</span></label>
-              <input class="form-input" id="company_phone" name="company_phone" type="tel" maxlength="50" autocomplete="tel" value="{{ form['values'].company_phone }}" />
-              <p class="form-help">If you leave this blank we'll use your main site's number.</p>
+              <label class="form-label" for="company_phone">Main phone</label>
+              <input class="form-input" id="company_phone" name="company_phone" type="tel" maxlength="50" autocomplete="tel" value="{{ form['values'].company_phone }}" required data-cof-field="company_phone" />
+              <p class="form-help">The number we'll call to reach your business.</p>
+              <p class="scf-error" data-cof-error="company_phone" hidden></p>
             </div>
             <div class="form-field">
-              <label class="form-label" for="company_email">General email <span class="scf-optional">optional</span></label>
-              <input class="form-input" id="company_email" name="company_email" type="email" maxlength="255" autocomplete="email" inputmode="email" placeholder="e.g. hello@yourbusiness.com" value="{{ form['values'].company_email }}" data-cof-field="company_email" />
+              <label class="form-label" for="company_email">General email</label>
+              <input class="form-input" id="company_email" name="company_email" type="email" maxlength="255" autocomplete="email" inputmode="email" placeholder="e.g. hello@yourbusiness.com" value="{{ form['values'].company_email }}" required data-cof-field="company_email" />
+              <p class="form-help">A shared inbox, such as info@ or admin@, is best.</p>
               <p class="scf-error" data-cof-error="company_email" hidden></p>
             </div>
             <div class="form-field scf-grid__full">

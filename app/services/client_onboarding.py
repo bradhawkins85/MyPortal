@@ -319,10 +319,15 @@ def parse_submission(form: Any) -> tuple[Submission | None, list[str]]:
     client_name = _text(form, "client_name", 255)
     if not client_name:
         errors.append("Enter your business name.")
+    company_phone = _text(form, "company_phone", 50)
+    if not company_phone:
+        errors.append("Enter your main phone number.")
     raw_company_email = str(form.get("company_email") or "").strip()
     company_email = normalise_email(raw_company_email)
-    if raw_company_email and not company_email:
-        errors.append("Enter a valid business email address.")
+    if not raw_company_email:
+        errors.append("Enter your general email address.")
+    elif not company_email:
+        errors.append("Enter a valid general email address.")
 
     indexes = site_indexes(form)
     if not indexes:
@@ -384,7 +389,7 @@ def parse_submission(form: Any) -> tuple[Submission | None, list[str]]:
     return (
         Submission(
             client_name=client_name,
-            phone=_text(form, "company_phone", 50),
+            phone=company_phone,
             email=company_email,
             website=_text(form, "website", 255),
             notes=_text(form, "notes", 4000),
@@ -578,7 +583,7 @@ async def complete_onboarding(record: Mapping[str, Any], submission: Submission)
         primary_site = submission.sites[0]
         company = await company_repo.create_company(
             name=submission.client_name,
-            phone=submission.phone or primary_site.phone,
+            phone=submission.phone,
             address=_format_address(primary_site),
             invoice_due_days=INVOICE_DUE_DAYS,
             payment_method=PAYMENT_METHOD,
