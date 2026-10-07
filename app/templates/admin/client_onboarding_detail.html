@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
+{% from "admin/_client_onboarding_answers.html" import answer_rows, answer_list, answer_sections %}
 
 {% set status_variants = {"pending": "info", "processing": "warning", "submitted": "warning", "approved": "success", "failed": "danger", "revoked": "neutral", "expired": "neutral"} %}
 {% set status_labels = {"pending": "Awaiting client", "processing": "Processing", "submitted": "Awaiting approval", "approved": "Approved", "failed": "Needs attention", "revoked": "Revoked", "expired": "Expired"} %}
@@ -80,6 +81,7 @@
       <dt>Main phone</dt><dd>{{ submission.phone or '—' }}</dd>
       <dt>General email</dt><dd>{{ submission.email or '—' }}</dd>
       <dt>Website</dt><dd>{{ submission.website or '—' }}</dd>
+      {{ answer_rows((submission.custom_answers or []) | selectattr('section', 'equalto', 'business') | list) }}
     </dl>
   </section>
 
@@ -88,6 +90,7 @@
     <dl class="definition-list">
       <dt>Billing contact</dt><dd>{{ contact(submission.billing_contact) }}</dd>
       <dt>Payment terms</dt><dd>Invoice prepay, due in 7 days</dd>
+      {{ answer_rows((submission.custom_answers or []) | selectattr('section', 'equalto', 'billing') | list) }}
     </dl>
     {% if submission.notes %}
       <h3 class="scf-panel__title">Notes from the client</h3>
@@ -120,11 +123,19 @@
               <li class="scf-chip{% if windows %} scf-chip--logic{% endif %}">{{ label[:3] }} {% if windows %}{% for w in windows %}{{ w.start }}–{{ w.end }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}closed{% endif %}</li>
             {% endfor %}
           </ul>
+          {{ answer_list(site.custom_answers) }}
         </div>
       </li>
       {% endfor %}
     </ul>
   </section>
+  {% set other_answers = (submission.custom_answers or []) | rejectattr('section', 'in', ['business', 'billing']) | list %}
+  {% if other_answers %}
+  <section class="card card--panel admin-grid__full" aria-labelledby="cof-detail-custom-questions">
+    <div class="card__header"><div><h2 class="card__title" id="cof-detail-custom-questions">Custom questions</h2></div></div>
+    {{ answer_sections(other_answers) }}
+  </section>
+  {% endif %}
   {% endif %}
 </div>
 {% endblock %}

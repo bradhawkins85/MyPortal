@@ -12,6 +12,7 @@ from app.security.flash import flash_redirect
 from app.services import audit as audit_service
 from app.services import business_hours as business_hours_service
 from app.services import client_onboarding as onboarding_service
+from app.services import client_onboarding_questions as questions_service
 
 router = APIRouter(tags=["Client Onboarding"])
 
@@ -72,6 +73,107 @@ async def admin_client_onboarding_page(request: Request):
     if redirect:
         return redirect
     return await _render_admin(request, user)
+
+
+async def _render_questions(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    question_form: dict[str, Any] | None = None,
+    question_errors: list[str] | None = None,
+    editing_question_id: int | None = None,
+    status_code: int = status.HTTP_200_OK,
+):
+    response = await _main()._render_template(
+        "admin/client_onboarding_questions.html",
+        request,
+        user,
+        extra={
+            "title": "Custom onboarding questions",
+            "questions": await questions_service.list_questions(),
+            "field_types": questions_service.FIELD_TYPES,
+            "question_sections": questions_service.SECTIONS,
+            "question_form": question_form or {},
+            "question_errors": question_errors or [],
+            "editing_question_id": editing_question_id,
+            "max_questions": questions_service.MAX_QUESTIONS,
+        },
+    )
+    response.status_code = status_code
+    return response
+
+
+# Register this static path before /{onboarding_id}.
+@router.get(_ADMIN_URL + "/questions", response_class=HTMLResponse)
+async def admin_client_onboarding_questions(request: Request):
+    user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    return await _render_questions(request, user)
+
+
+@router.post(_ADMIN_URL + "/questions", response_class=HTMLResponse)
+async def admin_save_client_onboarding_question(request: Request):
+    user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    raw_id = str(form.get("question_id") or "").strip()
+    question_id = None
+    if raw_id:
+        try:
+            question_id = int(raw_id)
+        except ValueError:
+            return flash_redirect(_ADMIN_URL + "/questions", "Question not found.", "error")
+        if question_id < 1:
+            return flash_redirect(_ADMIN_URL + "/questions", "Question not found.", "error")
+    questions = await questions_service.list_questions()
+    if question_id is not None and not any(q["id"] == question_id for q in questions):
+        return flash_redirect(_ADMIN_URL + "/questions", "Question not found.", "error")
+    data, errors = questions_service.validate_question(form)
+    if question_id is None and len(questions) >= questions_service.MAX_QUESTIONS:
+        errors.append(f"Add no more than {questions_service.MAX_QUESTIONS} custom questions.")
+    if errors:
+        return await _render_questions(
+            request,
+            user,
+            question_form={
+                key: str(form.get(key) or "")
+                for key in ("label", "field_type", "section", "help_text", "options", "display_order")
+            } | {"required": bool(form.get("required"))},
+            question_errors=errors,
+            editing_question_id=question_id,
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    saved = await questions_service.save_question(question_id, data)
+    if saved is None:
+        return flash_redirect(_ADMIN_URL + "/questions", "Question not found.", "error")
+    await audit_service.record(
+        action="client_onboarding.question.update" if question_id else "client_onboarding.question.create",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="client_onboarding_question",
+        entity_id=int(saved["id"]),
+        metadata={"section": saved["section"], "field_type": saved["field_type"]},
+    )
+    return flash_redirect(_ADMIN_URL + "/questions", "Custom question saved.", "success")
+
+
+@router.post(_ADMIN_URL + "/questions/{question_id}/delete", response_class=HTMLResponse)
+async def admin_delete_client_onboarding_question(question_id: int, request: Request):
+    user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    if not await questions_service.delete_question(question_id):
+        return flash_redirect(_ADMIN_URL + "/questions", "Question not found.", "error")
+    await audit_service.record(
+        action="client_onboarding.question.delete",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="client_onboarding_question",
+        entity_id=question_id,
+    )
+    return flash_redirect(_ADMIN_URL + "/questions", "Custom question removed. Submitted answers are kept.", "success")
 
 
 @router.post(_ADMIN_URL, response_class=HTMLResponse)
@@ -234,6 +336,7 @@ async def _render_public(
     state: str,
     form: dict[str, Any] | None = None,
     errors: list[str] | None = None,
+    questions: list[dict[str, Any]] | None = None,
     status_code: int = status.HTTP_200_OK,
 ):
     context = await _main()._build_public_context(
@@ -249,6 +352,7 @@ async def _render_public(
             "default_timezone": business_hours_service.default_timezone_name(),
             "max_sites": onboarding_service.MAX_SITES,
             "blank_hours": business_hours_service.weekly_form_rows(None),
+            "question_sections": questions_service.group_questions(questions or []),
         },
     )
     response = _main().templates.TemplateResponse(
@@ -268,12 +372,15 @@ async def public_client_onboarding_form(token: str, request: Request):
         return await _render_public(
             request, token="", state=str(exc), status_code=status.HTTP_404_NOT_FOUND
         )
+    questions = await questions_service.list_questions()
     return await _render_public(
         request,
         token=token,
         state="open",
+        questions=questions,
         form=onboarding_service.form_state(
-            None, client_name=record.get("client_name"), contact_name=record.get("contact_name")
+            None, client_name=record.get("client_name"), contact_name=record.get("contact_name"),
+            questions=questions,
         ),
     )
 
@@ -287,13 +394,15 @@ async def public_client_onboarding_submit(token: str, request: Request):
             request, token="", state=str(exc), status_code=status.HTTP_404_NOT_FOUND
         )
     form = await request.form()
-    submission, errors = onboarding_service.parse_submission(form)
+    questions = await questions_service.list_questions()
+    submission, errors = onboarding_service.parse_submission(form, questions)
     if submission is None:
         return await _render_public(
             request,
             token=token,
             state="open",
-            form=onboarding_service.form_state(form),
+            form=onboarding_service.form_state(form, questions=questions),
+            questions=questions,
             errors=errors,
             status_code=status.HTTP_400_BAD_REQUEST,
         )
@@ -304,7 +413,8 @@ async def public_client_onboarding_submit(token: str, request: Request):
             request,
             token=token,
             state="open",
-            form=onboarding_service.form_state(form),
+            form=onboarding_service.form_state(form, questions=questions),
+            questions=questions,
             errors=[
                 "A client with this business name is already registered. "
                 "Check the name, or contact us if you are already a client."

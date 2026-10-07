@@ -1,5 +1,7 @@
 {% from "auth/_auth_macros.html" import brand_mark %}
 {% from "onboarding/_client_form_macros.html" import icon, site_item, site_editor %}
+{% from "onboarding/_custom_questions.html" import custom_questions %}
+{% set question_sections = question_sections | default({}) %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -14,7 +16,7 @@
   <link rel="stylesheet" href="{{ static_url('/static/css/client_onboarding.css') }}" />
   <noscript>
     <style>
-      .cof-js-only, .cof-steps, .cof-step__nav { display: none !important; }
+      .cof-js-only, .cof-steps, .cof-step__nav:not(.cof-step__nav--submit) { display: none !important; }
       .cof-site-modal[hidden], .cof-site-modal [data-cof-panel][hidden] { display: block !important; }
       .cof-site-modal { position: static; padding: 0; background: none; backdrop-filter: none; }
       .cof-site-modal .modal__panel { width: auto; max-height: none; }
@@ -70,7 +72,7 @@
               {% for error in errors %}
                 {% if error.startswith("Site") or error.startswith("Add at least one site") or error.startswith("Add no more") %}{% set error_step = "sites" %}
                 {% elif error.startswith("Billing") %}{% set error_step = "billing" %}
-                {% elif error.startswith("Confirm") %}{% set error_step = "review" %}
+                {% elif error.startswith("Confirm") or error.startswith("Review:") %}{% set error_step = "review" %}
                 {% else %}{% set error_step = "business" %}{% endif %}
                 <li data-cof-error-step="{{ error_step }}">{{ error }}</li>
               {% endfor %}
@@ -111,6 +113,7 @@
               <input class="form-input" id="website" name="website" type="text" inputmode="url" maxlength="255" autocomplete="url" placeholder="e.g. yourbusiness.com" value="{{ form['values'].website }}" />
             </div>
           </div>
+          {{ custom_questions(question_sections.get("business", []), form.get("custom_answers", {})) }}
           <footer class="cof-step__nav">
             <span class="scf-editor__spacer"></span>
             <button type="button" class="button" data-cof-next>Continue to sites</button>
@@ -138,8 +141,10 @@
           </div>
 
           <div data-cof-site-editors>
-            {% for site in form.sites %}{{ site_editor(site, loop.index, timezones, default_timezone) }}{% endfor %}
+            {% for site in form.sites %}{{ site_editor(site, loop.index, timezones, default_timezone, question_sections) }}{% endfor %}
           </div>
+
+          {{ custom_questions(question_sections.get("sites", []), form.get("custom_answers", {})) }}
 
           <footer class="cof-step__nav">
             <button type="button" class="button button--ghost" data-cof-back>Back</button>
@@ -189,6 +194,7 @@
               <input class="form-input" id="billing_phone" name="billing_phone" type="tel" maxlength="50" autocomplete="off" value="{{ form['values'].billing_phone }}" />
             </div>
           </div>
+          {{ custom_questions(question_sections.get("billing", []), form.get("custom_answers", {})) }}
           <footer class="cof-step__nav">
             <button type="button" class="button button--ghost" data-cof-back>Back</button>
             <span class="scf-editor__spacer"></span>
@@ -203,6 +209,7 @@
             <p class="cof-step__subtitle">Check your details. Select <strong>Edit</strong> to change anything.</p>
           </header>
           <div class="cof-review cof-js-only" data-cof-review aria-live="polite"></div>
+          {{ custom_questions(question_sections.get("review", []), form.get("custom_answers", {})) }}
           <div class="form-field">
             <label class="form-label" for="notes">Anything else we should know? <span class="scf-optional">optional</span></label>
             <textarea class="form-input" id="notes" name="notes" rows="4" maxlength="4000" placeholder="For example, systems you use, upcoming moves or anything urgent." data-cof-notes>{{ form['values'].notes }}</textarea>
@@ -224,7 +231,7 @@
 
       <template data-cof-site-template>
         {{ site_item({"index": "__INDEX__", "values": {}}, "__NUMBER__") }}
-        {{ site_editor({"index": "__INDEX__", "values": {"timezone": default_timezone}, "hours": blank_hours}, "__NUMBER__", timezones, default_timezone) }}
+        {{ site_editor({"index": "__INDEX__", "values": {"timezone": default_timezone}, "hours": blank_hours, "custom_answers": {}}, "__NUMBER__", timezones, default_timezone, question_sections) }}
       </template>
 
     {% else %}
