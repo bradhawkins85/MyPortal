@@ -6,6 +6,10 @@ their company details, each site's address, primary contact and business
 hours, and a billing contact. Submitting the form creates the company with
 invoice prepay payment terms due in 7 days, its sites and contacts, and a
 support ticket in the ``New Client`` status so the team can follow up.
+
+The company is created pending approval with its contacts disabled. An admin
+reviews and edits the details on the company page, then approves it, which
+activates the company and enables its contacts.
 """
 
 from __future__ import annotations
@@ -487,6 +491,7 @@ async def _create_contact(
         state=site.state if site else None,
         postcode=site.postcode if site else None,
         country=site.country if site else None,
+        enabled=False,
         source="client_onboarding",
         onboarding_status="approved",
         approval_status="approved",
@@ -506,7 +511,7 @@ def _hours_summary(weekly: Mapping[str, Any]) -> str:
     return "; ".join(parts)
 
 
-def ticket_description(submission: Submission) -> str:
+def ticket_description(submission: Submission, *, company_id: int | None = None) -> str:
     e = html.escape
 
     def contact_line(contact: Contact) -> str:
@@ -535,8 +540,15 @@ def ticket_description(submission: Submission) -> str:
     lines.append("</ul>")
     if submission.notes:
         lines.append(f"<p><strong>Notes from the client</strong></p><p>{e(submission.notes)}</p>")
+    review = (
+        f'<a href="/admin/companies/{int(company_id)}/edit">company page</a>'
+        if company_id is not None
+        else "company page"
+    )
     lines.append(
-        "<p>Use this ticket to send the client their onboarding information and track setup.</p>"
+        "<p>The company is <strong>pending approval</strong> and its contacts are disabled. "
+        f"Check and edit the details on the {review}, then approve it to activate the company. "
+        "Use this ticket to send the client their onboarding information and track setup.</p>"
     )
     return "".join(lines)
 
@@ -565,6 +577,7 @@ async def complete_onboarding(record: Mapping[str, Any], submission: Submission)
             address=_format_address(primary_site),
             invoice_due_days=INVOICE_DUE_DAYS,
             payment_method=PAYMENT_METHOD,
+            pending_approval=1,
         )
         company_id = int(company["id"])
 
@@ -604,7 +617,7 @@ async def complete_onboarding(record: Mapping[str, Any], submission: Submission)
         requester_id = contacts[primary_site.contact.email]
         ticket = await tickets_service.create_ticket(
             subject=f"New client onboarding: {submission.client_name}",
-            description=ticket_description(submission),
+            description=ticket_description(submission, company_id=company_id),
             requester_id=None,
             requester_staff_id=requester_id,
             requester_email=primary_site.contact.email,
@@ -631,3 +644,18 @@ async def complete_onboarding(record: Mapping[str, Any], submission: Submission)
         )
         raise
     return {"company_id": company_id, "ticket_id": ticket_id}
+
+
+async def approve_company(company_id: int, *, approved_by_user_id: int) -> bool:
+    """Activate a pending company and enable the contacts created by the form.
+
+    Returns ``False`` when the company was not pending approval.
+    """
+
+    if not await onboarding_repo.approve_company(company_id):
+        return False
+    await onboarding_repo.enable_onboarding_contacts(company_id)
+    await onboarding_repo.mark_approved(
+        company_id, approved_by_user_id=approved_by_user_id, approved_at=_utcnow()
+    )
+    return True

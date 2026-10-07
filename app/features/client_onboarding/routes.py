@@ -173,6 +173,24 @@ async def admin_client_onboarding_detail(onboarding_id: int, request: Request):
     )
 
 
+@router.post("/admin/companies/{company_id}/approve", response_class=HTMLResponse)
+async def admin_approve_onboarded_company(company_id: int, request: Request):
+    user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    edit_url = f"/admin/companies/{company_id}/edit"
+    if not await onboarding_service.approve_company(company_id, approved_by_user_id=int(user["id"])):
+        return flash_redirect(edit_url, "This company is not waiting for approval.", "error")
+    await audit_service.record(
+        action="client_onboarding.approve",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="company",
+        entity_id=company_id,
+    )
+    return flash_redirect(edit_url, "Company approved. It is now active and its contacts are enabled.", "success")
+
+
 # ---------------------------------------------------------------------------
 # Public magic-link form
 # ---------------------------------------------------------------------------

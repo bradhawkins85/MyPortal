@@ -2,6 +2,6 @@
   "guid": "0c8dd550-31a9-4220-9ca7-e5947ab0025b",
   "occurred_at": "2026-10-07T00:00Z",
   "change_type": "Feature",
-  "summary": "Add a public Client Onboarding form sent by single-use magic link that creates the company (invoice prepay, due in 7 days), its sites with primary contacts and business hours, a billing contact, and a support ticket in the New Client status.",
-  "content_hash": "83c58733cd8ef753c2b39927d9562611a5c1fa60b17a0fa205db49c5da4acf42"
+  "summary": "Add a public Client Onboarding form sent by single-use magic link that creates the company pending admin approval (invoice prepay, due in 7 days), with its sites, primary contacts, business hours and billing contact, plus a support ticket in the New Client status; approving the company activates it and enables its contacts.",
+  "content_hash": "504678ba8d39c977ef80e88e190ba232cff7b8446c1c2521cddb68afc3492c68"
 }

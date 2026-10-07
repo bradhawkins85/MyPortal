@@ -31,18 +31,32 @@ client's entries are kept.
 
 MyPortal automatically:
 
-- Creates the **company** with **Invoice Due Days = 7** and **Payment Methods = Invoice prepay**.
-  The company address and phone come from the first site when no main phone is given.
+- Creates the **company** in a **Pending approval** state with **Invoice Due Days = 7** and
+  **Payment Methods = Invoice prepay**. The company address and phone come from the first site
+  when no main phone is given.
 - Adds each site as a **company address** (labelled with the site name) with its phone,
   primary contact and business hours.
 - Creates a **staff contact** for each primary contact and the billing contact (a person used
   for several roles is created once) and marks the billing contact as a **billing contact**.
+  These contacts stay **disabled** until the company is approved.
 - Saves the first site's hours as the company's **business hours**, which drive SLAs and
   business-hours automations.
 - Raises a **support ticket** for the company in the **New Client** status, with the primary
   contact of the first site as requester and a summary of everything submitted. Use this ticket
   to send the client their onboarding information. The `New Client` status is added by the
   upgrade and recreated automatically if it has been removed.
+
+## Reviewing and approving the company
+
+Pending companies are listed under **Waiting for approval** at the top of **Companies**, and their
+status shows **Pending approval**. Open one to review it: the company page shows a **Pending
+approval** panel summarising each site's address, primary contact, phone and business hours
+as the client entered them. Edit anything that needs correcting with the normal company page
+sections (details, addresses, business hours, staff), then select **Approve company**.
+
+Approving activates the company, enables the contacts created by the form and marks the
+onboarding link **Approved**. The approval is recorded in the audit trail. You can also approve
+from the submission's page under **Client Onboarding**.
 
 If a company with the same name already exists the client is asked to check the name. If setup
 fails part-way, the link shows **Needs attention**; open it to see the submitted details and the

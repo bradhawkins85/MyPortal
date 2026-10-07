@@ -231,6 +231,8 @@ async def test_complete_onboarding_creates_company_sites_contacts_and_ticket(mon
     assert company["name"] == "Acme Pty Ltd"
     assert company["invoice_due_days"] == 7
     assert company["payment_method"] == "invoice_prepay"
+    assert company["pending_approval"] == 1
+    assert all(c.kwargs["enabled"] is False for c in calls["create_staff"].await_args_list)
     assert company["address"] == "1 Main St, Brisbane QLD 4000, Australia"
     assert [c.kwargs["label"] for c in calls["create_address"].await_args_list] == ["Head office", "Warehouse"]
     emails = [c.kwargs["email"] for c in calls["create_staff"].await_args_list]
@@ -247,6 +249,8 @@ async def test_complete_onboarding_creates_company_sites_contacts_and_ticket(mon
     assert ticket["requester_staff_id"] == 7
     assert "Acme Pty Ltd" in ticket["subject"]
     assert "Warehouse" in ticket["description"]
+    assert "pending approval" in ticket["description"]
+    assert "/admin/companies/42/edit" in ticket["description"]
     calls["ensure_status"].assert_awaited_once()
     calls["mark_submitted"].assert_awaited_once()
     assert calls["mark_submitted"].await_args.kwargs["ticket_id"] == 555
@@ -330,6 +334,7 @@ def test_migration_runs_on_sqlite():
     adapted = db._adapt_sql_for_sqlite(migration)
     connection = sqlite3.connect(":memory:")
     connection.execute("CREATE TABLE companies (id INTEGER PRIMARY KEY)")
+    connection.execute("INSERT INTO companies (id) VALUES (1)")
     connection.execute("CREATE TABLE company_addresses (id INTEGER PRIMARY KEY)")
     connection.execute(
         "CREATE TABLE ticket_statuses (id INTEGER PRIMARY KEY, tech_status TEXT UNIQUE, "
@@ -345,6 +350,7 @@ def test_migration_runs_on_sqlite():
         "INSERT INTO client_onboardings (token_hash, expires_at) VALUES ('x', '2026-01-01')"
     )
     assert connection.execute("SELECT status FROM client_onboardings").fetchone() == ("pending",)
+    assert connection.execute("SELECT pending_approval FROM companies").fetchone() == (0,)
 
 
 @pytest.mark.parametrize(
@@ -361,3 +367,61 @@ def test_migration_runs_on_sqlite():
 )
 def test_normalise_email(value, expected):
     assert onboarding.normalise_email(value) == expected
+
+
+@pytest.mark.anyio
+async def test_approve_company_activates_company_and_contacts(monkeypatch):
+    approve = AsyncMock(return_value=True)
+    enable = AsyncMock(return_value=2)
+    mark = AsyncMock()
+    monkeypatch.setattr(onboarding_repo, "approve_company", approve)
+    monkeypatch.setattr(onboarding_repo, "enable_onboarding_contacts", enable)
+    monkeypatch.setattr(onboarding_repo, "mark_approved", mark)
+
+    assert await onboarding.approve_company(42, approved_by_user_id=3) is True
+    approve.assert_awaited_once_with(42)
+    enable.assert_awaited_once_with(42)
+    assert mark.await_args.args == (42,)
+    assert mark.await_args.kwargs["approved_by_user_id"] == 3
+
+
+@pytest.mark.anyio
+async def test_approve_company_ignores_companies_not_pending(monkeypatch):
+    monkeypatch.setattr(onboarding_repo, "approve_company", AsyncMock(return_value=False))
+    enable = AsyncMock()
+    monkeypatch.setattr(onboarding_repo, "enable_onboarding_contacts", enable)
+    assert await onboarding.approve_company(42, approved_by_user_id=3) is False
+    enable.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_approval_queries_only_touch_pending_company_and_form_contacts(monkeypatch):
+    calls = []
+
+    async def execute_rowcount(sql, params):
+        calls.append((sql, params))
+        return 1
+
+    monkeypatch.setattr(db, "execute_rowcount", execute_rowcount)
+    assert await onboarding_repo.approve_company(42) is True
+    await onboarding_repo.enable_onboarding_contacts(42)
+    approve_sql, approve_params = calls[0]
+    assert "pending_approval = 0" in approve_sql and "pending_approval = 1" in approve_sql
+    assert approve_params == (42,)
+    enable_sql, enable_params = calls[1]
+    assert "source = %s" in enable_sql
+    assert enable_params == (42, "client_onboarding")
+
+
+def test_pack_registers_approve_route():
+    routes = {
+        (method, route.path)
+        for router in PACK.routers
+        for route in router.routes
+        for method in route.methods
+    }
+    assert ("POST", "/admin/companies/{company_id}/approve") in routes
+
+
+def test_company_repository_accepts_pending_approval():
+    company_repo._validate_company_fields({"name": "Acme", "pending_approval": 1})

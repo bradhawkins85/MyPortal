@@ -2,8 +2,8 @@
 
 {% block header_title %}Client onboarding{% endblock %}
 
-{% set status_variants = {"pending": "info", "processing": "warning", "submitted": "success", "failed": "danger", "revoked": "neutral", "expired": "neutral"} %}
-{% set status_labels = {"pending": "Awaiting client", "processing": "Processing", "submitted": "Completed", "failed": "Needs attention", "revoked": "Revoked", "expired": "Expired"} %}
+{% set status_variants = {"pending": "info", "processing": "warning", "submitted": "warning", "approved": "success", "failed": "error", "revoked": "neutral", "expired": "neutral"} %}
+{% set status_labels = {"pending": "Awaiting client", "processing": "Processing", "submitted": "Awaiting approval", "approved": "Approved", "failed": "Needs attention", "revoked": "Revoked", "expired": "Expired"} %}
 
 {% block content %}
 <div class="admin-grid">
@@ -35,7 +35,7 @@
     <div class="card__header">
       <div>
         <h2 class="card__title">New onboarding link</h2>
-        <p class="card__subtitle">Send a client a single-use link to a public form. Submitting it creates the company (invoice prepay, due in 7 days), its sites, contacts and business hours, and a support ticket in the New Client status.</p>
+        <p class="card__subtitle">Send a client a single-use link to a public form. Submitting it creates the company (invoice prepay, due in 7 days) pending your approval, with its sites, contacts and business hours, and a support ticket in the New Client status.</p>
       </div>
     </div>
     <div class="card__body">

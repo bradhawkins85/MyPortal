@@ -13,8 +13,13 @@
 -- business hours) to the company_addresses rows the form creates for each
 -- site.
 --
+-- companies.pending_approval marks a company created from the form. It stays
+-- pending (with its contacts disabled) until an admin reviews and approves it.
+--
 -- The "New Client" ticket status is used for the support ticket raised when
 -- a client completes the form.
+
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS pending_approval TINYINT(1) NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS client_onboardings (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -29,6 +34,8 @@ CREATE TABLE IF NOT EXISTS client_onboardings (
     submission LONGTEXT NULL,
     error_message VARCHAR(500) NULL,
     submitted_at DATETIME NULL,
+    approved_at DATETIME NULL,
+    approved_by_user_id INT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT uq_client_onboardings_token UNIQUE (token_hash),

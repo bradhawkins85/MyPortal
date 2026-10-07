@@ -61,6 +61,22 @@
 {% block content %}
   <div class="admin-grid admin-grid--columns">
     {% if is_super_admin %}
+      {% set pending_companies = managed_companies | selectattr("pending_approval") | list %}
+      {% if pending_companies %}
+      <section class="card card--panel admin-grid__full" aria-labelledby="companies-pending-heading" data-companies-pending>
+        <div class="card__header">
+          <div>
+            <h2 class="card__title" id="companies-pending-heading">Waiting for approval</h2>
+            <p class="card__subtitle">{{ pending_companies | length }} {{ 'company was' if pending_companies | length == 1 else 'companies were' }} created from the client onboarding form. Check, edit and approve each one to activate it.</p>
+          </div>
+        </div>
+        <div class="card__body">
+          <ul class="scf-item__chips">
+            {% for company in pending_companies %}<li class="scf-chip"><a href="/admin/companies/{{ company.id }}/edit">{{ company.name }}</a></li>{% endfor %}
+          </ul>
+        </div>
+      </section>
+      {% endif %}
       <section class="card card--panel admin-grid__full">
         <div class="table-wrapper">
           <table class="table" id="companies-table" data-table data-table-id="companies" data-page-size-max="25">
@@ -184,9 +200,11 @@
                         <span class="tag tag--muted">Standard</span>
                       {% endif %}
                     </td>
-                    {% set is_archived = 1 if company.archived else 0 %}
+                    {% set is_archived = 2 if company.pending_approval else (1 if company.archived else 0) %}
                     <td data-label="Status" data-value="{{ is_archived }}" data-column-key="status">
-                      {% if company.archived %}
+                      {% if company.pending_approval %}
+                        <a class="status status--warning" href="/admin/companies/{{ company.id }}/edit">Pending approval</a>
+                      {% elif company.archived %}
                         <span class="tag tag--muted">Archived</span>
                       {% else %}
                         <span class="tag tag--success">Active</span>

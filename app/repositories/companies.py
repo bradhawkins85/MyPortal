@@ -22,7 +22,7 @@ _ALLOWED_COMPANY_COLUMNS = frozenset({
     "defender_scheduled_scan_time", "defender_auto_ticket_min_severity",
     "defender_auto_ticket_antivirus_off", "defender_auto_ticket_realtime_off",
     "defender_auto_ticket_tamper_off", "defender_auto_ticket_threat_detected",
-    "classic_outlook_signatures_enabled",
+    "classic_outlook_signatures_enabled", "pending_approval",
 })
 _ALLOWED_COMPANY_INPUTS = _ALLOWED_COMPANY_COLUMNS | frozenset({"email_domains"})
 
@@ -41,6 +41,8 @@ def _normalise_company(row: dict[str, Any]) -> dict[str, Any]:
         normalised["id"] = int(normalised["id"])
     if "archived" in normalised and normalised["archived"] is not None:
         normalised["archived"] = int(normalised["archived"])
+    if "pending_approval" in normalised and normalised["pending_approval"] is not None:
+        normalised["pending_approval"] = int(normalised["pending_approval"])
     if "invoice_due_days" in normalised and normalised["invoice_due_days"] is not None:
         normalised["invoice_due_days"] = int(normalised["invoice_due_days"])
     for field in (

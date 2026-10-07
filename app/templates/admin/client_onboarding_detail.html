@@ -20,7 +20,16 @@
       {% if onboarding.error_message %}
         <p class="form-help" role="alert">Automatic setup failed: {{ onboarding.error_message }}. Finish setting up the client from the details below.</p>
       {% endif %}
-      {% if onboarding.company_id %}<p><a href="/admin/companies/{{ onboarding.company_id }}/edit">Open company</a>{% if onboarding.ticket_id %} · <a href="/admin/tickets/{{ onboarding.ticket_id }}">Open New Client ticket #{{ onboarding.ticket_id }}</a>{% endif %}</p>{% endif %}
+      {% if onboarding.company_id %}<p><a href="/admin/companies/{{ onboarding.company_id }}/edit">{{ 'Review and edit company' if onboarding.status == 'submitted' else 'Open company' }}</a>{% if onboarding.ticket_id %} · <a href="/admin/tickets/{{ onboarding.ticket_id }}">Open New Client ticket #{{ onboarding.ticket_id }}</a>{% endif %}</p>{% endif %}
+      {% if onboarding.status == 'submitted' and onboarding.company_id %}
+        <form action="/admin/companies/{{ onboarding.company_id }}/approve" method="post" class="form-actions">
+          {% include "partials/csrf.html" %}
+          <button class="button button--primary" type="submit">Approve company</button>
+          <span class="form-help">Approving activates the company and enables its contacts. Edit any details on the company page first.</span>
+        </form>
+      {% elif onboarding.approved_at %}
+        <p class="form-help">Approved {{ onboarding.approved_at }}.</p>
+      {% endif %}
       {% if not submission %}
         <p class="text-muted">The client has not submitted the form yet.</p>
       {% else %}

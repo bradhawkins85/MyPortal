@@ -11,7 +11,7 @@ from app.core.database import db
 _SELECT = (
     "SELECT id, token_hash, client_name, recipient_email, status, expires_at, "
     "created_by_user_id, company_id, ticket_id, submission, error_message, "
-    "submitted_at, created_at FROM client_onboardings"
+    "submitted_at, approved_at, approved_by_user_id, created_at FROM client_onboardings"
 )
 
 
@@ -19,7 +19,7 @@ def _normalise(row: dict[str, Any] | None) -> dict[str, Any] | None:
     if not row:
         return None
     record = dict(row)
-    for key in ("id", "created_by_user_id", "company_id", "ticket_id"):
+    for key in ("id", "created_by_user_id", "company_id", "ticket_id", "approved_by_user_id"):
         if record.get(key) is not None:
             record[key] = int(record[key])
     raw = record.get("submission")
@@ -64,6 +64,14 @@ async def get_by_token_hash(token_hash: str) -> dict[str, Any] | None:
     return _normalise(row)
 
 
+async def get_by_company_id(company_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        _SELECT + " WHERE company_id = %s ORDER BY id DESC LIMIT 1",
+        (company_id,),
+    )
+    return _normalise(row)
+
+
 async def list_recent(limit: int = 200) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         _SELECT + " ORDER BY created_at DESC, id DESC LIMIT %s",
@@ -104,6 +112,32 @@ async def mark_failed(onboarding_id: int, *, error_message: str, company_id: int
         """UPDATE client_onboardings SET status = 'failed', error_message = %s, company_id = %s
            WHERE id = %s""",
         (error_message[:500], company_id, onboarding_id),
+    )
+
+
+async def mark_approved(company_id: int, *, approved_by_user_id: int, approved_at: datetime) -> None:
+    await db.execute(
+        """UPDATE client_onboardings
+           SET status = 'approved', approved_at = %s, approved_by_user_id = %s
+           WHERE company_id = %s AND status = 'submitted'""",
+        (approved_at, approved_by_user_id, company_id),
+    )
+
+
+async def approve_company(company_id: int) -> bool:
+    """Clear the company's pending flag. Returns False when it was not pending."""
+
+    count = await db.execute_rowcount(
+        "UPDATE companies SET pending_approval = 0 WHERE id = %s AND pending_approval = 1",
+        (company_id,),
+    )
+    return count == 1
+
+
+async def enable_onboarding_contacts(company_id: int) -> int:
+    return await db.execute_rowcount(
+        "UPDATE staff SET enabled = 1 WHERE company_id = %s AND source = %s AND enabled = 0",
+        (company_id, "client_onboarding"),
     )
 
 
