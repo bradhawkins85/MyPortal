@@ -97,6 +97,13 @@ async def import_outlook_signature(
         images = _extract_images(zf, files_dir)
         html_content = _convert_outlook_html(html_content, images)
         html_content = _sanitize_signature_html(html_content)
+        # An image referenced several times is embedded at every reference,
+        # so the final HTML is what must fit under the request limit.
+        if len(html_content.encode("utf-8")) > _MAX_EMBEDDED_IMAGE_BYTES:
+            raise ValueError(
+                "The signature is too large once its images are embedded (5 MB limit). "
+                "Reduce the image sizes in Outlook and export the signature again."
+            )
 
     files = [
         {"name": image["name"], "content_type": image["content_type"], "size": image["size"]}
