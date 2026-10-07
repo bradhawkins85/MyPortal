@@ -4,6 +4,7 @@ import asyncio
 import html
 import json
 from collections.abc import Awaitable, Mapping, Sequence
+from contextvars import ContextVar
 from datetime import date, datetime, time, timedelta, timezone
 from importlib import import_module
 import re
@@ -220,6 +221,9 @@ async def _record_action_history(
 
 
 AUTOMATION_AUDIT_AUTHOR = "Automation"
+# Identifies the automation run currently executing actions so audit notes
+# from separate actions in the same run are never collapsed together.
+_audit_run_id: ContextVar[str | None] = ContextVar("automation_audit_run_id", default=None)
 AUTOMATION_AUDIT_REFERENCE_PREFIX = tickets_repo.AUTOMATION_AUDIT_REFERENCE_PREFIX
 _AUDITED_ACTION_STATUSES = {"succeeded", "failed", "deferred"}
 _AUDIT_STATUS_LABELS = {
@@ -375,16 +379,20 @@ async def _record_ticket_conversation_audit(
             context=context,
         )
         # ticket_replies has a unique key on (ticket_id, external_reference),
-        # so each note gets its own reference under the automation's prefix.
+        # so each note gets its own reference under the automation's prefix:
+        # automation:<id>:<run>:<note>.  The run segment lets separate actions
+        # in one run keep identical notes while repeated runs are collapsed.
         reference_prefix = f"{AUTOMATION_AUDIT_REFERENCE_PREFIX}{automation_id}:"
+        run_id = _audit_run_id.get() or uuid.uuid4().hex[:16]
         latest = await tickets_repo.get_latest_reply(ticket_id)
+        latest_reference = str((latest or {}).get("external_reference") or "")
         if (
-            latest
-            and str(latest.get("external_reference") or "").startswith(reference_prefix)
+            latest_reference.startswith(reference_prefix)
+            and not latest_reference.startswith(f"{reference_prefix}{run_id}:")
             and latest.get("body") == body
         ):
             return
-        external_reference = f"{reference_prefix}{uuid.uuid4().hex}"
+        external_reference = f"{reference_prefix}{run_id}:{uuid.uuid4().hex[:16]}"
         await tickets_repo.create_reply(
             ticket_id=ticket_id,
             author_id=None,
@@ -1074,6 +1082,21 @@ async def _invoke_automation_actions_for_context(
 ) -> tuple[Any, str | None]:
     """Invoke configured module action(s) without recording an automation run."""
 
+    run_token = _audit_run_id.set(uuid.uuid4().hex[:16])
+    try:
+        return await _invoke_automation_actions_for_context_inner(
+            automation, context=context
+        )
+    finally:
+        _audit_run_id.reset(run_token)
+
+
+async def _invoke_automation_actions_for_context_inner(
+    automation: Mapping[str, Any],
+    *,
+    context: Mapping[str, Any] | None,
+) -> tuple[Any, str | None]:
+
     payload = automation.get("action_payload")
     actions = (
         _normalise_actions(payload.get("actions"))
@@ -1608,6 +1631,18 @@ async def _execute_scheduled_ticket_automation(
 
 
 async def _execute_automation(
+    automation: Mapping[str, Any],
+    *,
+    context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    run_token = _audit_run_id.set(uuid.uuid4().hex[:16])
+    try:
+        return await _execute_automation_inner(automation, context=context)
+    finally:
+        _audit_run_id.reset(run_token)
+
+
+async def _execute_automation_inner(
     automation: Mapping[str, Any],
     *,
     context: Mapping[str, Any] | None = None,

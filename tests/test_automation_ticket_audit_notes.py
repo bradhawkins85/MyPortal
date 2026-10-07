@@ -238,3 +238,36 @@ def test_context_ticket_number_not_borrowed_for_a_different_ticket():
     )
     assert ticket_id == 42
     assert ticket_number is None
+
+
+@pytest.mark.anyio
+async def test_identical_actions_in_one_run_each_get_a_note(audit_env):
+    created, _ = audit_env
+    kwargs = dict(
+        action_name="ntfy",
+        action_module="ntfy",
+        status="succeeded",
+        result={"module": "ntfy", "status": "succeeded"},
+        error_message=None,
+        context=CONTEXT,
+    )
+
+    run_token = automations_service._audit_run_id.set("run-one")
+    try:
+        await automations_service._record_action_history(AUTOMATION, **kwargs)
+        await automations_service._record_action_history(AUTOMATION, **kwargs)
+    finally:
+        automations_service._audit_run_id.reset(run_token)
+    assert len(created) == 2
+
+    # A later run repeating the identical outcome is collapsed.
+    run_token = automations_service._audit_run_id.set("run-two")
+    try:
+        await automations_service._record_action_history(AUTOMATION, **kwargs)
+    finally:
+        automations_service._audit_run_id.reset(run_token)
+    assert len(created) == 2
+    assert all(
+        note["external_reference"].startswith("automation:3:run-one:")
+        for note in created
+    )
