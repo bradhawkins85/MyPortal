@@ -12,7 +12,8 @@ from app.repositories import m365_signatures as signatures_repo
 from app.repositories import staff as staff_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.services import value_templates
-from app.services.sanitization import sanitize_rich_text
+from app.services.m365_signature_import import sanitize_signature_html
+from app.services.sanitization import SanitizedRichText, sanitize_rich_text
 
 _SLUG_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,118}[a-z0-9])?$")
 _TOKEN_PATTERN = re.compile(r"\{\{\s*([^\s{}]+)\s*\}\}")
@@ -295,6 +296,25 @@ def resolve_staff_signatures(
     return {"primary": primary, "additional": additional}
 
 
+def _sanitise_signature(html_content: str | None) -> SanitizedRichText:
+    """Sanitise signature HTML while keeping inline styles and embedded images.
+
+    The generic rich-text sanitiser strips ``style`` attributes, which would
+    destroy the layout of imported Outlook signatures on every save.
+    """
+    raw = str(html_content or "").strip()
+    if raw and "<" not in raw and ">" not in raw:
+        raw = raw.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br />")
+    cleaned = sanitize_signature_html(raw)
+    text_content = sanitize_rich_text(cleaned).text_content
+    has_media = bool(re.search(r"<img\b[^>]*\bsrc=", cleaned, flags=re.IGNORECASE))
+    if not text_content and not has_media:
+        cleaned = ""
+    return SanitizedRichText(
+        html=cleaned, text_content=text_content, has_rich_content=bool(text_content) or has_media
+    )
+
+
 def generate_initial_text(html_content: str | None) -> str:
     cleaned = sanitize_rich_text(html_content)
     lines = [
@@ -346,7 +366,7 @@ async def create_template(
         # Content was already sanitised upstream (e.g. Outlook signature import).
         sanitised = type("S", (), {"html": html_content, "text": text_content or ""})()
     else:
-        sanitised = sanitize_rich_text(html_content)
+        sanitised = _sanitise_signature(html_content)
     final_text = str(text_content or "").strip() or generate_initial_text(sanitised.html)
     parsed_start_on = _normalise_date(schedule_start_on)
     parsed_end_on = _normalise_date(schedule_end_on)
@@ -409,7 +429,7 @@ async def update_template(
     existing = await signatures_repo.get_template_by_slug(company_id, normalised_slug)
     if existing and int(existing["id"]) != int(template_id):
         raise ValueError("A signature template with this slug already exists")
-    sanitised = sanitize_rich_text(html_content)
+    sanitised = _sanitise_signature(html_content)
     final_text = str(text_content or "").strip() or generate_initial_text(sanitised.html)
     parsed_start_on = _normalise_date(schedule_start_on)
     parsed_end_on = _normalise_date(schedule_end_on)
@@ -565,7 +585,7 @@ async def render_preview(
 ) -> dict[str, Any]:
     context = await build_preview_context(company_id, staff_id)
     rendered_html = str(await value_templates.render_string_async(html_content or "", context))
-    sanitised_html = sanitize_rich_text(rendered_html)
+    sanitised_html = _sanitise_signature(rendered_html)
     resolved_text_source = str(text_content or "").strip() or generate_initial_text(sanitised_html.html)
     rendered_text = str(await value_templates.render_string_async(resolved_text_source, context)).strip()
     missing_tokens: list[str] = []
