@@ -472,19 +472,19 @@ def test_portal_reply_kind_classification():
     assert main._portal_reply_kind({"author_id": 9, "is_internal": False}, 5) == "technician"
     # Internal note: staff-only, hidden from customers.
     assert main._portal_reply_kind({"author_id": 9, "is_internal": True}, 5) == "internal"
-    # Shipment-watch automation entry.
+    # Public shipment-watch entry stays customer-visible.
     assert main._portal_reply_kind(
         {"author_id": None, "is_internal": False, "external_reference": "shipment-watch:fedex:abc123"},
         5,
-    ) == "automation"
+    ) == "shipment"
+    # Internal shipment-watch entry is hidden like any internal note.
+    assert main._portal_reply_kind(
+        {"author_id": None, "is_internal": True, "external_reference": "shipment-watch:fedex:abc123"},
+        5,
+    ) == "internal"
     # Generic automation entry.
     assert main._portal_reply_kind(
         {"author_id": 9, "is_internal": False, "external_reference": "automation:status-update"},
-        5,
-    ) == "automation"
-    # An internal automation entry is still classified as automation.
-    assert main._portal_reply_kind(
-        {"author_id": None, "is_internal": True, "external_reference": "shipment-watch:fedex:abc123"},
         5,
     ) == "automation"
     # AI troubleshooter notes are stored as internal, so they classify as internal.
@@ -497,12 +497,12 @@ def test_portal_reply_kind_classification():
 @pytest.mark.parametrize(
     ("has_helpdesk_access", "expected_reply_ids"),
     [
-        pytest.param(False, {201, 202}, id="end-user-sees-only-technician-and-customer"),
-        pytest.param(True, {201, 202, 203, 204, 205}, id="helpdesk-sees-all-replies"),
+        pytest.param(False, {201, 202, 204}, id="end-user-sees-conversation-and-public-shipment"),
+        pytest.param(True, {201, 202, 203, 204, 205, 206}, id="helpdesk-sees-all-replies"),
     ],
 )
 async def test_render_portal_ticket_detail_reply_visibility(monkeypatch, has_helpdesk_access, expected_reply_ids):
-    """End users see only technician + customer replies; helpdesk sees all."""
+    """End users see the conversation + public shipment; helpdesk sees all."""
     request = _make_request("/tickets/41")
     user = {"id": 5, "is_super_admin": False}
 
@@ -524,6 +524,7 @@ async def test_render_portal_ticket_detail_reply_visibility(monkeypatch, has_hel
         {"id": 203, "author_id": 9, "body": "Escalated internally", "is_internal": True, "external_reference": None, "created_at": datetime(2025, 1, 10, 10, 5, tzinfo=timezone.utc)},
         {"id": 204, "author_id": None, "body": "Shipment in transit", "is_internal": False, "external_reference": "shipment-watch:fedex:abc123", "created_at": datetime(2025, 1, 10, 10, 6, tzinfo=timezone.utc)},
         {"id": 205, "author_id": None, "body": "Checking device", "is_internal": True, "external_reference": None, "created_at": datetime(2025, 1, 10, 10, 7, tzinfo=timezone.utc)},
+        {"id": 206, "author_id": None, "body": "Shipment held for customs", "is_internal": True, "external_reference": "shipment-watch:fedex:xyz987", "created_at": datetime(2025, 1, 10, 10, 8, tzinfo=timezone.utc)},
     ]
 
     class DummySanitized:

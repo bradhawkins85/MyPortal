@@ -10462,24 +10462,28 @@ def _format_booking_requester_name(user_record: Mapping[str, Any] | None) -> str
 
 # Reply kinds shown to end users (customers) on the portal ticket detail.
 # The admin ticket timeline classifies every reply into one of: 'customer',
-# 'technician', 'internal', 'automation', or 'ai'. End users should only see
-# the customer and technician parts of the conversation; internal notes, AI
-# troubleshooter notes, and automation-generated entries (e.g. shipment
-# tracking updates, automation actions) are hidden from them.
-CUSTOMER_VISIBLE_REPLY_KINDS = {"customer", "technician"}
+# 'technician', 'internal', 'automation', or 'ai'. End users should see the
+# customer/technician conversation plus public shipment-tracking updates;
+# internal notes, AI troubleshooter notes, internal shipment updates, and
+# automation actions are hidden from them.
+CUSTOMER_VISIBLE_REPLY_KINDS = {"customer", "technician", "shipment"}
 
 
 def _portal_reply_kind(reply: Mapping[str, Any], requester_id: Any) -> str:
     """Classify a reply the same way the admin ticket timeline does.
 
-    Returns one of ``'automation'``, ``'internal'``, ``'technician'``, or
-    ``'customer'``. AI troubleshooter notes are always stored as internal
-    replies, so they are classified as ``'internal'`` here.
+    Returns one of ``'shipment'``, ``'automation'``, ``'internal'``,
+    ``'technician'``, or ``'customer'``. Shipment-watch entries are split
+    into public (customer-visible) and internal. AI troubleshooter notes are
+    always stored as internal replies, so they are classified as
+    ``'internal'`` here.
     """
     external_reference = str(reply.get("external_reference") or "")
-    if external_reference.startswith("shipment-watch:") or external_reference.startswith(
-        "automation:"
-    ):
+    if external_reference.startswith("shipment-watch:"):
+        # Public shipment-tracking updates are customer-facing and stay
+        # visible on the portal; internal ones are hidden like other notes.
+        return "internal" if reply.get("is_internal") else "shipment"
+    if external_reference.startswith("automation:"):
         return "automation"
     if reply.get("is_internal"):
         return "internal"
@@ -10601,11 +10605,11 @@ async def _render_portal_ticket_detail(
 
     replies = await tickets_repo.list_replies(ticket_id, include_internal=has_helpdesk_access)
 
-    # End users (viewers without helpdesk access) should only see the
-    # technician/customer conversation. Internal notes, AI troubleshooter
-    # notes, and automation-generated entries (e.g. shipment tracking
-    # updates) are filtered out; helpdesk and super-admin viewers keep the
-    # full history.
+    # End users (viewers without helpdesk access) see the
+    # technician/customer conversation plus public shipment-tracking updates.
+    # Internal notes, AI troubleshooter notes, internal shipment updates, and
+    # automation actions are filtered out; helpdesk and super-admin viewers
+    # keep the full history.
     if not has_helpdesk_access:
         ticket_requester_id = ticket.get("requester_id")
         replies = [
