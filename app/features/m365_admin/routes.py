@@ -5,10 +5,9 @@ from __future__ import annotations
 from datetime import date
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from pydantic import ValidationError
-from typing import Annotated
 
 from app.repositories import companies as companies_repo
 from app.repositories import m365_reported_email_ignores as ignores_repo
@@ -448,13 +447,13 @@ async def import_signature_page(request: Request):
 
 
 @router.post("/m365/signatures/import")
-async def import_signature_zip(request: Request, form: Annotated[dict, Form()]):
+async def import_signature_zip(request: Request):
     user, company_id, redirect = await _signature_context(request, write=True)
     if redirect:
         return redirect
 
-    uploaded = await request.form()
-    file_obj = uploaded.get("file")
+    form = await request.form()
+    file_obj = form.get("file")
 
     if not file_obj or not getattr(file_obj, "filename", ""):
         return await _render_import_error(request, user, company_id, "Please select a ZIP file to upload.")
