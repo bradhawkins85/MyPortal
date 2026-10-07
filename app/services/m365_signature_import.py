@@ -14,6 +14,7 @@ import base64
 import html
 import io
 import re
+import warnings
 import zipfile
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
@@ -37,6 +38,8 @@ _MAX_FILES = 200  # safety cap on number of files in the ZIP
 # Embedded images are base64-encoded into the HTML, which must still fit in a
 # form post under the reverse proxy's 15 MB request limit when edited.
 _MAX_EMBEDDED_IMAGE_BYTES = 5 * 1024 * 1024
+# Images converted to PNG are decoded in memory; signature images are small.
+_MAX_CONVERT_PIXELS = 4096 * 4096
 
 # Allowed image extensions in the files/ folder
 _ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
@@ -303,10 +306,21 @@ def _image_data_uri(name: str, data: bytes) -> tuple[str, str] | None:
         if suffix == ".svg":
             return None
         try:
-            with Image.open(io.BytesIO(data)) as img:
-                buffer = io.BytesIO()
-                img.save(buffer, format="PNG")
-        except (UnidentifiedImageError, OSError, ValueError):
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                with Image.open(io.BytesIO(data)) as img:
+                    # Image.open only reads the header; refuse to decode
+                    # oversized images (a tiny file can declare huge sizes).
+                    width, height = img.size
+                    if width * height > _MAX_CONVERT_PIXELS:
+                        raise ValueError(
+                            f"The signature image {name} is too large ({width}x{height} pixels)."
+                        )
+                    buffer = io.BytesIO()
+                    img.save(buffer, format="PNG")
+        except (Image.DecompressionBombError, Image.DecompressionBombWarning):
+            raise ValueError(f"The signature image {name} is too large.") from None
+        except (UnidentifiedImageError, OSError):
             return None
         data = buffer.getvalue()
         content_type = "image/png"

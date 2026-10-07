@@ -354,17 +354,18 @@ func signatureFileBase(name string) string {
 }
 
 // signatureFilesExist reports whether every file for the signature is on
-// disk. A signature with embedded images also needs its "<base>_files"
-// folder; this rewrites signatures saved by agents that predate image
-// extraction even though their content hash is unchanged.
+// disk, including each image extracted into "<base>_files". This also
+// rewrites signatures saved by agents that predate image extraction even
+// though their content hash is unchanged.
 func signatureFilesExist(dir, base string, signature outlookSignature) bool {
 	for _, ext := range []string{".htm", ".rtf", ".txt"} {
 		if _, err := os.Stat(filepath.Join(dir, base+ext)); err != nil {
 			return false
 		}
 	}
-	if signatureDataImagePattern.MatchString(signature.HTML) {
-		if info, err := os.Stat(filepath.Join(dir, base+"_files")); err != nil || !info.IsDir() {
+	_, images := extractSignatureImages(signature.HTML, base)
+	for _, image := range images {
+		if _, err := os.Stat(filepath.Join(dir, base+"_files", image.Name)); err != nil {
 			return false
 		}
 	}

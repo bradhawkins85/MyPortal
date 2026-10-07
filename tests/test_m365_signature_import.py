@@ -434,3 +434,19 @@ async def test_import_rejects_html_too_large_after_repeated_images(monkeypatch):
     )
     with pytest.raises(ValueError, match="too large once its images are embedded"):
         await import_outlook_signature(zip_bytes, filename="Sig.zip")
+
+
+@pytest.mark.anyio
+async def test_import_rejects_oversized_image_before_decoding(monkeypatch):
+    from PIL import Image
+
+    from app.services import m365_signature_import as module
+
+    monkeypatch.setattr(module, "_MAX_CONVERT_PIXELS", 100)
+    buffer = io.BytesIO()
+    Image.new("RGB", (20, 20), "red").save(buffer, format="BMP")
+    zip_bytes = _make_zip(
+        {"Sig.htm": b'<img src="files/a.bmp">', "files/a.bmp": buffer.getvalue()}
+    )
+    with pytest.raises(ValueError, match="too large"):
+        await import_outlook_signature(zip_bytes, filename="Sig.zip")

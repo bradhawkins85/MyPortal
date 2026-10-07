@@ -307,4 +307,15 @@ func TestSyncWritesEmbeddedImagesForClassicOutlook(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(platform.sigDir, base+"_files", "image001.png")); err != nil {
 		t.Fatalf("image not restored: %v", err)
 	}
+
+	// A missing image inside an existing folder is also restored.
+	if err := os.Remove(filepath.Join(platform.sigDir, base+"_files", "image001.png")); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncOutlookSignatures(context.Background(), platform, server.URL, "token"); err != nil {
+		t.Fatalf("third sync: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(platform.sigDir, base+"_files", "image001.png")); err != nil {
+		t.Fatalf("missing image file not restored: %v", err)
+	}
 }
