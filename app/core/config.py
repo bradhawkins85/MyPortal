@@ -101,6 +101,15 @@ class Settings(BaseSettings):
     """
 
     app_name: str = "MyPortal"
+    company_name: str = Field(default="", validation_alias="COMPANY_NAME")
+
+    @field_validator("company_name")
+    @classmethod
+    def validate_company_name(cls, value: str) -> str:
+        if "\r" in value or "\n" in value:
+            raise ValueError("COMPANY_NAME must not contain line breaks")
+        return value.strip()
+
     legal_entity_name: str = Field(
         default="",
         validation_alias="LEGAL_ENTITY_NAME",

@@ -284,6 +284,7 @@ def invitation_context(
     portal_url = str(settings.portal_url or "").rstrip("/")
     return {
         "app": {"name": settings.app_name or "MyPortal"},
+        "env": {"company": {"name": settings.company_name}},
         "portal": {"url": portal_url},
         "recipient": {"greeting_name": contact_first or company_name or "there"},
         "contact": {

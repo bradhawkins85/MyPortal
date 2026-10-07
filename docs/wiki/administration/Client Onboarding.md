@@ -37,6 +37,7 @@ Both can use these variables:
 | --- | --- |
 | `{{ recipient.greeting_name }}` | Contact's first name, else the company name |
 | `{{ contact.name }}`, `{{ contact.first_name }}`, `{{ contact.email }}` | The contact entered in the modal |
+| `{{ env.company.name }}` | Your organisation name configured by `COMPANY_NAME` in `.env` |
 | `{{ company.name }}` | The company name (or "your business" when only a contact was entered) |
 | `{{ onboarding.link }}` | The client's magic link |
 | `{{ onboarding.expires }}`, `{{ onboarding.expires_days }}` | When the link stops working |
@@ -44,6 +45,8 @@ Both can use these variables:
 | `{{ sender.name }}`, `{{ sender.email }}` | The technician who created or regenerated the link |
 | `{{ app.name }}`, `{{ portal.url }}` | Portal name and address |
 
+The From display name uses `COMPANY_NAME` from `.env`, with the address from
+`SMTP_FROM` (or `SMTP_USER` when unset). Restart MyPortal after changing it.
 Replies go to the technician who sent the link. If a template is deleted, MyPortal falls back to
 its built-in wording.
 

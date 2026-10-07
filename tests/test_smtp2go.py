@@ -91,9 +91,16 @@ def test_format_template_payload_escapes_html():
     
 
 @pytest.mark.asyncio
-async def test_send_email_via_api_success(monkeypatch):
+@pytest.mark.parametrize("sender", [None, "sender@example.com"])
+async def test_send_email_via_api_success(monkeypatch, sender):
     """Test successful email sending via SMTP2Go API."""
     
+    from app.core.config import get_settings
+    settings = get_settings()
+    monkeypatch.setattr(settings, "company_name", "My Company")
+    monkeypatch.setattr(settings, "smtp_from", "support@mydomain.com")
+    monkeypatch.setattr(settings, "smtp_user", "smtp-login@example.com")
+
     # Mock httpx AsyncClient
     class MockResponse:
         def __init__(self):
@@ -125,7 +132,7 @@ async def test_send_email_via_api_success(monkeypatch):
             assert "api_key" in json
             assert "to" in json
             assert "subject" in json
-            assert "sender" in json  # Verify sender is included
+            assert json["sender"] == (sender or "My Company <support@mydomain.com>")
             return MockResponse()
     
     # Mock modules service
@@ -136,7 +143,7 @@ async def test_send_email_via_api_success(monkeypatch):
         }
     
     from app.services import modules as modules_service
-    monkeypatch.setattr(modules_service, "get_module_settings", mock_get_module_settings)
+    monkeypatch.setattr(smtp2go.module_runtime_service, "get_module_settings", mock_get_module_settings)
     
     # Mock httpx
     import httpx
@@ -148,7 +155,7 @@ async def test_send_email_via_api_success(monkeypatch):
         subject="Test Subject",
         html_body="<p>Test body</p>",
         text_body="Test body",
-        sender="sender@example.com",  # Explicitly provide sender
+        sender=sender,
     )
 
     assert result["email_id"] == "test-message-id-123"
@@ -373,7 +380,7 @@ async def test_send_email_via_api_failure(monkeypatch):
             to=["test@example.com"],
             subject="Test Subject",
             html_body="<p>Test body</p>",
-            sender="sender@example.com",  # Explicitly provide sender
+            sender=sender,
         )
     
     assert "Invalid API key" in str(exc_info.value)

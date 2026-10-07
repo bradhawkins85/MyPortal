@@ -171,6 +171,7 @@ def build_template_replacement_map(context: TemplateContext) -> Dict[str, str]:
 
     context_mapping = _context_to_mapping(context)
     base_tokens = value_templates.build_base_token_map(context_mapping or None)
+    replacements["{{env.company.name}}"] = _to_string(base_tokens.get("env.company.name"))
     template_tokens = value_templates.build_template_token_map(context_mapping or None, base_tokens=base_tokens)
     for token_name, value in template_tokens.items():
         replacements[f"{{{{{token_name}}}}}"] = value
