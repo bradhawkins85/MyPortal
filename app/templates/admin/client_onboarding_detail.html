@@ -4,7 +4,7 @@
 {% set status_variants = {"pending": "info", "processing": "warning", "submitted": "warning", "approved": "success", "failed": "danger", "revoked": "neutral", "expired": "neutral"} %}
 {% set status_labels = {"pending": "Awaiting client", "processing": "Processing", "submitted": "Awaiting approval", "approved": "Approved", "failed": "Needs attention", "revoked": "Revoked", "expired": "Expired"} %}
 {% set state = onboarding.effective_status %}
-{% set client = (submission.client_name if submission else none) or onboarding.client_name or 'Unnamed client' %}
+{% set client = (submission.client_name if submission else none) or onboarding.client_name or onboarding.contact_name or 'Unnamed client' %}
 
 {% macro utc_time(value) -%}
   {%- if value and value.isoformat is defined -%}
@@ -62,7 +62,9 @@
       </div>
     </div>
     <dl class="definition-list">
+      {% if onboarding.contact_name %}<dt>Contact</dt><dd>{{ onboarding.contact_name }}</dd>{% endif %}
       <dt>Link sent to</dt><dd>{{ onboarding.recipient_email or '—' }}</dd>
+      {% if onboarding.invite_message %}<dt>Personal message</dt><dd style="white-space: pre-line">{{ onboarding.invite_message }}</dd>{% endif %}
       <dt>Created</dt><dd>{{ utc_time(onboarding.created_at) }}</dd>
       {% if onboarding.submitted_at %}<dt>Submitted</dt><dd>{{ utc_time(onboarding.submitted_at) }}</dd>{% endif %}
       {% if onboarding.approved_at %}<dt>Approved</dt><dd>{{ utc_time(onboarding.approved_at) }}</dd>{% endif %}

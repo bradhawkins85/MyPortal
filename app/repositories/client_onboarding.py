@@ -9,7 +9,7 @@ from typing import Any
 from app.core.database import db
 
 _SELECT = (
-    "SELECT id, token_hash, client_name, recipient_email, status, expires_at, "
+    "SELECT id, token_hash, client_name, contact_name, recipient_email, invite_message, status, expires_at, "
     "created_by_user_id, company_id, ticket_id, submission, error_message, "
     "submitted_at, approved_at, approved_by_user_id, created_at FROM client_onboardings"
 )
@@ -35,15 +35,18 @@ async def create(
     *,
     token_hash: str,
     client_name: str | None,
+    contact_name: str | None,
     recipient_email: str | None,
+    invite_message: str | None,
     expires_at: datetime,
     created_by_user_id: int | None,
 ) -> dict[str, Any]:
     onboarding_id = await db.execute_returning_lastrowid(
         """INSERT INTO client_onboardings
-           (token_hash, client_name, recipient_email, status, expires_at, created_by_user_id)
-           VALUES (%s, %s, %s, 'pending', %s, %s)""",
-        (token_hash, client_name, recipient_email, expires_at, created_by_user_id),
+           (token_hash, client_name, contact_name, recipient_email, invite_message,
+            status, expires_at, created_by_user_id)
+           VALUES (%s, %s, %s, %s, %s, 'pending', %s, %s)""",
+        (token_hash, client_name, contact_name, recipient_email, invite_message, expires_at, created_by_user_id),
     )
     return (await get_by_id(int(onboarding_id))) or {}
 

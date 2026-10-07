@@ -575,12 +575,21 @@
       }
       refreshPreview(modal);
     });
-    modal.addEventListener('focusout', (event) => {
+    // Clear a field's error as soon as it's edited. Re-checking on blur instead
+    // moves the layout under the pointer and swallows clicks on Save.
+    modal.addEventListener('input', (event) => {
       const field = event.target.dataset ? event.target.dataset.cofField : null;
-      const error = field ? modal.querySelector(`[data-cof-error="${field}"]`) : null;
-      if (error && !error.hidden) {
-        validateSite(modal, true);
+      if (field) {
+        setError(modal, field, '');
       }
+      const day = event.target.closest('[data-cof-day]');
+      if (day) {
+        setError(modal, `day-${day.dataset.cofDay}`, '');
+      }
+      modal.querySelectorAll('[data-cof-tab]').forEach((tab) => {
+        const panel = modal.querySelector(`[data-cof-panel="${tab.dataset.cofTab}"]`);
+        tab.classList.toggle('has-error', Boolean(panel.querySelector('.scf-error:not([hidden])')));
+      });
     });
   }
 
@@ -644,13 +653,17 @@
   function validateStep(name, show) {
     if (name === 'business') {
       const nameOk = Boolean(value(form, '#client_name'));
+      const phoneOk = Boolean(value(form, '#company_phone'));
       const email = value(form, '#company_email');
-      const emailOk = !email || isValidEmail(email);
+      const emailMessage = !email
+        ? 'Enter your general email address.'
+        : (isValidEmail(email) ? '' : 'Enter a valid email address, like hello@example.com.');
       if (show) {
         setError(form, 'client_name', nameOk ? '' : 'Enter your business name.');
-        setError(form, 'company_email', emailOk ? '' : 'Enter a valid email address, like hello@example.com.');
+        setError(form, 'company_phone', phoneOk ? '' : 'Enter your main phone number.');
+        setError(form, 'company_email', emailMessage);
       }
-      return nameOk && emailOk;
+      return nameOk && phoneOk && !emailMessage;
     }
     if (name === 'sites') {
       const modals = siteModals();
@@ -889,14 +902,11 @@
   }
 
   form.addEventListener('input', () => { dirty = true; });
-  form.addEventListener('focusout', (event) => {
+  // Clear a field's error as soon as it's edited (see the site editor note).
+  form.addEventListener('input', (event) => {
     const field = event.target.dataset ? event.target.dataset.cofField : null;
-    if (!field || event.target.closest('[data-cof-site-modal]')) {
-      return;
-    }
-    const error = form.querySelector(`[data-cof-error="${field}"]`);
-    if (error && !error.hidden) {
-      validateStep(STEPS[currentStep], true);
+    if (field && !event.target.closest('[data-cof-site-modal]')) {
+      setError(form, field, '');
     }
   });
   form.querySelector('[data-cof-field="confirm_details"]').addEventListener('change', () => {

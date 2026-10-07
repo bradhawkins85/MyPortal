@@ -28,6 +28,26 @@
     }).observe(modal, { attributes: true, attributeFilter: ['hidden'] });
 
     const form = modal.querySelector('[data-cof-link-form]');
+    const who = Array.from(modal.querySelectorAll('[data-cof-link-who]'));
+    const formError = modal.querySelector('[data-cof-link-error]');
+    const message = modal.querySelector('[data-cof-link-message]');
+    const messageCount = modal.querySelector('[data-cof-link-message-count]');
+    const countMessage = () => {
+      if (message && messageCount) {
+        messageCount.textContent = message.value.length ? `${message.value.length} / ${message.maxLength} characters` : '';
+      }
+    };
+    if (message) {
+      message.addEventListener('input', countMessage);
+      countMessage();
+    }
+    who.forEach((input) => input.addEventListener('input', () => {
+      formError.hidden = true;
+      who.forEach((field) => {
+        field.classList.remove('is-invalid');
+        field.removeAttribute('aria-invalid');
+      });
+    }));
     const email = modal.querySelector('[data-cof-link-email]');
     const emailError = modal.querySelector('[data-cof-link-email-error]');
     const send = modal.querySelector('[data-cof-link-send]');
@@ -62,6 +82,17 @@
     });
     send.addEventListener('change', syncSend);
     form.addEventListener('submit', (event) => {
+      if (!who.some((input) => input.value.trim())) {
+        event.preventDefault();
+        formError.textContent = "Enter the client's company name or contact name so we know who the link is for.";
+        formError.hidden = false;
+        who.forEach((input) => {
+          input.classList.add('is-invalid');
+          input.setAttribute('aria-invalid', 'true');
+        });
+        who[0].focus();
+        return;
+      }
       if (!validEmail(email.value)) {
         event.preventDefault();
         emailError.hidden = false;
@@ -74,6 +105,13 @@
       submit.classList.add('button--processing');
     });
     syncSend();
+
+    // The server sends the modal back open when the details need fixing.
+    if (modal.hasAttribute('data-cof-open-on-load')) {
+      openModal();
+      const first = who.find((input) => !input.value.trim()) || who[0];
+      window.requestAnimationFrame(() => first && first.focus());
+    }
   }
 
   const copyButton = document.querySelector('[data-cof-copy]');

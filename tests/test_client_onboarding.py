@@ -176,12 +176,19 @@ async def test_create_link_stores_only_the_token_hash(monkeypatch):
     create = AsyncMock(return_value={"id": 5})
     monkeypatch.setattr(onboarding_repo, "create", create)
     record, token = await onboarding.create_link(
-        client_name=" Acme ", recipient_email="Jo@Acme.com.au", expiry_days="500", created_by_user_id=2
+        client_name=" Acme ",
+        contact_name=" Jo Bloggs ",
+        recipient_email="Jo@Acme.com.au",
+        invite_message="  Great to chat today!  ",
+        expiry_days="500",
+        created_by_user_id=2,
     )
     kwargs = create.await_args.kwargs
     assert kwargs["token_hash"] == onboarding.hash_token(token)
     assert token not in kwargs.values()
     assert kwargs["client_name"] == "Acme"
+    assert kwargs["contact_name"] == "Jo Bloggs"
+    assert kwargs["invite_message"] == "Great to chat today!"
     assert kwargs["recipient_email"] == "jo@acme.com.au"
     assert kwargs["expires_at"] - datetime.utcnow() <= timedelta(days=onboarding.MAX_EXPIRY_DAYS)
 
@@ -426,3 +433,132 @@ def test_pack_registers_approve_route():
 
 def test_company_repository_accepts_pending_approval():
     company_repo._validate_company_fields({"name": "Acme", "pending_approval": 1})
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"company_phone": ""}, "Enter your main phone number."),
+        ({"company_email": ""}, "Enter your general email address."),
+        ({"company_email": "hello@acme"}, "Enter a valid general email address."),
+    ],
+)
+def test_main_phone_and_general_email_are_required(overrides, message):
+    submission, errors = onboarding.parse_submission(_form(**overrides))
+    assert submission is None
+    assert message in errors
+
+
+@pytest.mark.anyio
+async def test_company_phone_is_the_main_phone(monkeypatch):
+    calls = _patch_completion(monkeypatch)
+    submission, _ = onboarding.parse_submission(_form())
+    await onboarding.complete_onboarding({"id": 3}, submission)
+    assert calls["create_company"].await_args.kwargs["phone"] == "07 3000 0001"
+
+
+
+def test_link_needs_a_company_or_contact_name():
+    assert onboarding.validate_link_details(client_name="", contact_name=" ", recipient_email="") is not None
+    assert onboarding.validate_link_details(client_name="Acme", contact_name="", recipient_email="") is None
+    assert onboarding.validate_link_details(client_name="", contact_name="Jo", recipient_email="") is None
+    assert "valid email" in onboarding.validate_link_details(
+        client_name="Acme", contact_name="", recipient_email="jo@acme"
+    )
+
+
+def _invite_record(**overrides):
+    record = {
+        "client_name": "Acme Pty Ltd",
+        "contact_name": "Jo Bloggs",
+        "recipient_email": "jo@acme.com.au",
+        "invite_message": "Great to chat today!\n\nSee you <soon> & thanks.",
+        "expires_at": datetime.utcnow() + timedelta(days=30),
+    }
+    record.update(overrides)
+    return record
+
+
+@pytest.fixture
+def default_templates(monkeypatch):
+    from app.services import message_templates as message_templates_service
+
+    monkeypatch.setattr(message_templates_service, "get_template_by_slug", AsyncMock(return_value=None))
+    return message_templates_service
+
+
+@pytest.mark.anyio
+async def test_invitation_uses_every_modal_value(default_templates):
+    sender = {"first_name": "Sam", "last_name": "Tech", "email": "sam@msp.example"}
+    subject, html, text = await onboarding.render_invitation(_invite_record(), "t" * 43, sender)
+    assert "Jo" in subject
+    assert "Hi Jo," in html
+    assert "Acme Pty Ltd" in html
+    assert "/onboarding/" + "t" * 43 in html
+    assert "<p>Great to chat today!</p><p>See you &lt;soon&gt; &amp; thanks.</p>" in html
+    assert "Sam Tech" in html
+    assert "\u0000" not in html and "\u0000" not in text
+    assert "/onboarding/" + "t" * 43 in text
+    assert "See you <soon> & thanks." in text
+
+
+@pytest.mark.anyio
+async def test_invitation_without_contact_or_message_greets_the_company(default_templates):
+    subject, html, _ = await onboarding.render_invitation(
+        _invite_record(contact_name=None, invite_message=None), "t" * 43, None
+    )
+    assert "Hi Acme Pty Ltd," in html
+    assert "Acme Pty Ltd" in subject
+    assert "\u0000" not in html
+
+
+@pytest.mark.anyio
+async def test_invitation_uses_the_stored_message_template(monkeypatch):
+    from app.services import message_templates as message_templates_service
+
+    templates = {
+        onboarding.INVITATION_SUBJECT_TEMPLATE_SLUG: {"content": "Onboarding for {{ company.name }}", "content_type": "text/plain"},
+        onboarding.INVITATION_TEMPLATE_SLUG: {
+            "content": "Hello {{ contact.name }}\n\n{{ onboarding.message }}\n\n{{ onboarding.link }}",
+            "content_type": "text/plain",
+        },
+    }
+    monkeypatch.setattr(
+        message_templates_service, "get_template_by_slug", AsyncMock(side_effect=lambda slug: templates.get(slug))
+    )
+    subject, html, text = await onboarding.render_invitation(
+        _invite_record(invite_message="Line one"), "t" * 43, None
+    )
+    assert subject == "Onboarding for Acme Pty Ltd"
+    assert text.startswith("Hello Jo Bloggs\n\nLine one\n\n")
+    assert "<p>Line one</p>" in html
+
+
+@pytest.mark.anyio
+async def test_link_email_is_sent_from_the_template(monkeypatch, default_templates):
+    from app.services import email as email_service
+
+    send = AsyncMock(return_value=(True, {}))
+    monkeypatch.setattr(email_service, "send_email", send)
+    assert await onboarding.send_link_email(_invite_record(), "t" * 43, {"email": "sam@msp.example"}) is True
+    kwargs = send.await_args.kwargs
+    assert kwargs["recipients"] == ["jo@acme.com.au"]
+    assert kwargs["reply_to"] == "sam@msp.example"
+    assert "Great to chat today!" in kwargs["html_body"]
+
+
+def test_fresh_form_greets_and_prefills_the_contact():
+    state = onboarding.form_state(None, client_name="Acme", contact_name="Jo van Bloggs")
+    assert state["greeting_name"] == "Jo"
+    values = state["sites"][0]["values"]
+    assert values["contact_first_name"] == "Jo"
+    assert values["contact_last_name"] == "van Bloggs"
+
+
+def test_invitation_migration_seeds_editable_templates():
+    sql = Path("migrations/462_client_onboarding_invitation.sql").read_text(encoding="utf-8")
+    assert "ADD COLUMN IF NOT EXISTS contact_name" in sql
+    assert "ADD COLUMN IF NOT EXISTS invite_message" in sql
+    assert f"'{onboarding.INVITATION_TEMPLATE_SLUG}'" in sql
+    assert f"'{onboarding.INVITATION_SUBJECT_TEMPLATE_SLUG}'" in sql
+    assert "{{ onboarding.message }}" in sql

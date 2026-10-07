@@ -472,7 +472,7 @@ def test_message_template_editor_for_new_template():
 
 def test_message_template_system_uses_match_the_slugs_myportal_sends():
     from app.features.message_templates.routes import SYSTEM_TEMPLATE_USES
-    from app.services import subscription_renewals
+    from app.services import client_onboarding, subscription_renewals
 
     sources = Path("app/api/routes/auth.py").read_text() + Path("app/features/staff/handlers.py").read_text()
     assert '_render_email_template("signup_verification"' in sources
@@ -483,7 +483,11 @@ def test_message_template_system_uses_match_the_slugs_myportal_sends():
         subscription_renewals._THIRD_PARTY_ANNUAL_TEMPLATE_SLUG,
         subscription_renewals._THIRD_PARTY_MONTHLY_TEMPLATE_SLUG,
     }
-    assert renewal_slugs | {"signup_verification", "staff_invitation"} == set(SYSTEM_TEMPLATE_USES)
+    onboarding_slugs = {
+        client_onboarding.INVITATION_TEMPLATE_SLUG,
+        client_onboarding.INVITATION_SUBJECT_TEMPLATE_SLUG,
+    }
+    assert renewal_slugs | onboarding_slugs | {"signup_verification", "staff_invitation"} == set(SYSTEM_TEMPLATE_USES)
 
 
 def _issue_tracker_context(**overrides):
