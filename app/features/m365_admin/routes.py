@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import date
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 from pydantic import ValidationError
+from typing import Annotated
 
 from app.repositories import companies as companies_repo
 from app.repositories import m365_reported_email_ignores as ignores_repo
@@ -23,6 +24,7 @@ from app.services import m365_signatures as signatures_service
 from app.services import m365_spam_purge as purge_service
 from app.services import m365_out_of_office as oof_service
 from app.services import m365_reported_emails as reported_service
+from app.services.m365_signature_import import import_outlook_signature
 
 
 router = APIRouter(tags=["Office365 Spam Purge"])
@@ -138,6 +140,14 @@ def _optional_int(value) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _slugify_name(name: str) -> str:
+    """Convert a display name to a URL-safe slug."""
+    import re as _re
+    slug = name.strip().lower().replace(" ", "-")
+    slug = _re.sub(r"[^a-z0-9._-]", "", slug)
+    return slug or "imported-signature"
 
 
 def _signature_form_values(record: dict | None = None, *, form=None) -> dict[str, str]:
@@ -427,6 +437,104 @@ async def create_signature_template(request: Request):
         },
     )
     return flash_redirect(f"/m365/signatures/{created['id']}/edit", "Signature template created.", "success")
+
+
+@router.get("/m365/signatures/import", response_class=HTMLResponse)
+async def import_signature_page(request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    return _render_import_page(request, user, company_id, form_values={})
+
+
+@router.post("/m365/signatures/import")
+async def import_signature_zip(request: Request, form: Annotated[dict, Form()]):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+
+    uploaded = await request.form()
+    file_obj = uploaded.get("file")
+
+    if not file_obj or not getattr(file_obj, "filename", ""):
+        return await _render_import_error(request, user, company_id, "Please select a ZIP file to upload.")
+
+    filename = file_obj.filename or ""
+    if not filename.lower().endswith(".zip"):
+        return await _render_import_error(request, user, company_id, "The uploaded file must be a .zip file exported from Outlook.")
+
+    zip_bytes = await file_obj.read()
+
+    try:
+        parsed = await import_outlook_signature(
+            zip_bytes,
+            filename=filename,
+            uploads_root=_main()._private_uploads_path,
+        )
+    except ValueError as exc:
+        return await _render_import_error(request, user, company_id, str(exc))
+
+    # Build template fields
+    name = (form.get("name") or parsed.source_name or "Imported signature").strip()
+    if not name:
+        name = "Imported signature"
+    slug = (form.get("slug") or "").strip().lower().replace(" ", "-") or _slugify_name(name)
+    description = (form.get("description") or "Imported from Outlook signature export").strip()
+
+    try:
+        created = await signatures_service.create_template(
+            company_id=company_id,
+            slug=slug,
+            name=name,
+            description=description or None,
+            html_content=parsed.html_content,
+            text_content=parsed.text_content or None,
+            is_default=False,
+            user_id=int(user["id"]),
+            signature_role="primary",
+            targeting_match="all",
+            targeting_rules=[],
+            skip_sanitization=True,
+        )
+    except ValueError as exc:
+        return await _render_import_error(request, user, company_id, f"Could not create template: {exc}")
+
+    await audit_service.record(
+        action="m365.signatures.import",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="m365_signature_template",
+        entity_id=int(created["id"]),
+        after={
+            "slug": created["slug"],
+            "name": name,
+            "signature_role": "primary",
+            "embedded_files": [f["name"] for f in parsed.files],
+            "source_zip": filename,
+        },
+    )
+
+    return flash_redirect(
+        f"/m365/signatures/{created['id']}/edit",
+        f"Signature '{name}' imported from Outlook successfully.",
+        "success",
+    )
+
+
+async def _render_import_page(request: Request, user: dict, company_id: int, *, form_values: dict) -> HTMLResponse:
+    """Render the import form page."""
+    return await _main()._render_template(
+        "m365/signatures_import.html", request, user,
+        extra={"form_values": form_values},
+    )
+
+
+async def _render_import_error(request: Request, user: dict, company_id: int, message: str) -> HTMLResponse:
+    """Render the import form with an error message."""
+    return await _main()._render_template(
+        "m365/signatures_import.html", request, user,
+        extra={"form_values": {}, "import_error": message},
+    )
 
 
 @router.get("/m365/signatures/{template_id}/edit", response_class=HTMLResponse)

@@ -1758,6 +1758,9 @@ def _classify_private_upload(sanitized_path: PurePosixPath) -> tuple[bool, bool]
         return (False, True) if is_image else None
     if len(parts) == 2 and parts[0] == "knowledge-base":
         return (True, True) if is_image else None
+    if len(parts) == 4 and parts[0] == "m365-signatures":
+        # m365-signatures/<uuid>/files/<image>
+        return (False, True) if is_image else None
     return None
 
 

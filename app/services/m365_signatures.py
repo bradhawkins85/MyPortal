@@ -336,12 +336,17 @@ async def create_template(
     targeting_match: Any = "all",
     targeting_rules: Any = None,
     user_id: int | None,
+    skip_sanitization: bool = False,
 ) -> dict[str, Any]:
     normalised_slug = _normalise_slug(slug)
     existing = await signatures_repo.get_template_by_slug(company_id, normalised_slug)
     if existing:
         raise ValueError("A signature template with this slug already exists")
-    sanitised = sanitize_rich_text(html_content)
+    if skip_sanitization:
+        # Content was already sanitised upstream (e.g. Outlook signature import).
+        sanitised = type("S", (), {"html": html_content, "text": text_content or ""})()
+    else:
+        sanitised = sanitize_rich_text(html_content)
     final_text = str(text_content or "").strip() or generate_initial_text(sanitised.html)
     parsed_start_on = _normalise_date(schedule_start_on)
     parsed_end_on = _normalise_date(schedule_end_on)
