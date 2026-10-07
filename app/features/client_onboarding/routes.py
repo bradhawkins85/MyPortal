@@ -324,6 +324,27 @@ async def admin_approve_onboarded_company(company_id: int, request: Request):
     return flash_redirect(edit_url, "Company approved. It is now active and its contacts are enabled.", "success")
 
 
+@router.post("/admin/companies/{company_id}/decline", response_class=HTMLResponse)
+async def admin_decline_onboarded_company(company_id: int, request: Request):
+    user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    if not await onboarding_service.decline_company(company_id):
+        return flash_redirect(
+            f"/admin/companies/{company_id}/edit", "This company is not waiting for approval.", "error"
+        )
+    await audit_service.record(
+        action="client_onboarding.decline",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="company",
+        entity_id=company_id,
+    )
+    return flash_redirect(
+        _ADMIN_URL, "Company declined and archived. Its contacts remain disabled.", "success"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public magic-link form
 # ---------------------------------------------------------------------------

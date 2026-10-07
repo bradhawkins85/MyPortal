@@ -894,3 +894,12 @@ async def approve_company(company_id: int, *, approved_by_user_id: int) -> bool:
         company_id, approved_by_user_id=approved_by_user_id, approved_at=_utcnow()
     )
     return True
+
+
+async def decline_company(company_id: int) -> bool:
+    """Decline a pending company, preserving its submission and disabled contacts."""
+
+    if not await onboarding_repo.decline_company(company_id):
+        return False
+    await onboarding_repo.mark_declined(company_id)
+    return True

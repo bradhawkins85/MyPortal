@@ -20,7 +20,8 @@ magic link, so they do not need a portal account.
 
 Only a hash of the link token is stored. If a link is lost, use **Regenerate link** from the
 row's **Actions** menu (the old link stops working). **Revoke link** cancels a link that has not
-been submitted.
+been submitted. It is available in the row's **Actions** menu and on the link's detail page.
+Revoked links stop working immediately and cannot be regenerated.
 
 ## Customising the invitation email
 
@@ -131,6 +132,12 @@ approval.
 Approving activates the company, enables the contacts created by the form and marks the
 onboarding link **Approved**. The approval is recorded in the audit trail. You can also approve
 from the submission's page under **Client Onboarding**.
+
+To reject a pending company, select **Decline company** from its company page, the
+onboarding detail page, or the onboarding row's **Actions** menu and confirm. Declining
+removes the company from pending approvals and archives it. Its contacts stay disabled,
+and its submission, sites and ticket are retained. The onboarding status becomes
+**Declined**, and the action is recorded in the audit trail.
 
 If a company with the same name already exists the client is asked to check the name. If setup
 fails part-way, the link shows **Needs attention**; open it to see the submitted details and the
