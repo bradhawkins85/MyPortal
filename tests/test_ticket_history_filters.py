@@ -16,6 +16,7 @@ CONTROLS = TEMPLATE[TEMPLATE.index('              <div class="stat-strip ticket-
 
 @pytest.mark.parametrize('reply, expected', [
     ({'is_internal': True, 'author_id': None, 'external_reference': 'shipment-watch:provider:update'}, 'automation'),
+    ({'is_internal': True, 'author_id': None, 'external_reference': 'automation:3:abc123'}, 'automation'),
     ({'is_internal': False, 'author_id': None, 'external_reference': 'imap:customer-message'}, 'customer'),
     ({'is_internal': True, 'author_id': 2, 'external_reference': None}, 'internal'),
     ({'is_internal': False, 'author_id': 2, 'external_reference': None}, 'technician'),

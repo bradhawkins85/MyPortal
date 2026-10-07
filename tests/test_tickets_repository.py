@@ -417,6 +417,7 @@ async def test_automation_filter_context_treats_shipment_reply_as_system(monkeyp
         "WHEN tr.external_reference LIKE 'shipment-watch:%%' THEN 'system'"
         in latest_query
     )
+    assert "external_reference NOT LIKE 'automation:%%'" in latest_query
 
 
 @pytest.mark.anyio
@@ -838,7 +839,8 @@ async def test_automation_scan_orders_by_status_age_candidates(monkeypatch):
     records = await tickets.list_tickets_for_automation_scan(limit=250)
 
     assert records == []
-    assert dummy_db.fetch_params == (250, 0)
+    assert dummy_db.fetch_params == ("automation:%", 250, 0)
+    assert "tr.external_reference NOT LIKE %s" in dummy_db.fetch_sql
     assert (
         "ORDER BY COALESCE(t.status_changed_at, t.created_at, t.updated_at) ASC, "
         "t.updated_at ASC, t.id ASC"

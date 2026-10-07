@@ -1,0 +1,7 @@
+{
+  "guid": "4d487b1e-356f-45cd-8daa-2a63060b69ea",
+  "occurred_at": "2026-10-06T12:57Z",
+  "change_type": "Feature",
+  "summary": "Automations: ticket scheduled and event automation actions now add an internal \"Automation\" audit note to the ticket conversation history.",
+  "content_hash": "ebd2934382e108e9fdc96e59267280d00ff1e8e16d04a2b09ac2d9950d67a808"
+}

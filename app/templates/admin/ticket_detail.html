@@ -1725,7 +1725,7 @@
                       </article>
                     {% else %}
                       {% set reply = timeline_entry %}
-                      {% set reply_is_automation = reply.external_reference and reply.external_reference.startswith('shipment-watch:') %}
+                      {% set reply_is_automation = reply.external_reference and (reply.external_reference.startswith('shipment-watch:') or reply.external_reference.startswith('automation:')) %}
                       {% set reply_kind = 'ai' if reply.is_ai else ('automation' if reply_is_automation else ('internal' if reply.is_internal else ('technician' if reply.author_id and reply.author_id != ticket.requester_id else 'customer'))) %}
                       <article
                         class="timeline__event timeline__event--{{ reply_kind }}{% if reply.is_split_hidden %} timeline__event--split-hidden{% endif %}"

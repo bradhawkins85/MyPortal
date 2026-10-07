@@ -15,6 +15,10 @@ TicketRecord = dict[str, Any]
 
 _UNSET = object()
 _FULLTEXT_MIN_SEARCH_LENGTH = 3
+# Conversation entries recorded by automations as an audit trail. These are
+# excluded from reply-activity timestamps so audit notes do not reset the
+# inactivity timers that scheduled automations filter on.
+AUTOMATION_AUDIT_REFERENCE_PREFIX = "automation:"
 _SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SQL_UPDATE_TICKET_REPLIES = "UPDATE ticket_replies SET "
 _SQL_INSERT_TICKET_WATCHERS = "INSERT INTO ticket_watchers (ticket_id, user_id) VALUES "
@@ -646,13 +650,17 @@ async def list_tickets_for_automation_scan(
                 SELECT MAX(tr.created_at)
                 FROM ticket_replies tr
                 WHERE tr.ticket_id = t.id
+                  AND (
+                    tr.external_reference IS NULL
+                    OR tr.external_reference NOT LIKE %s
+                  )
             ) AS latest_reply_at
         FROM tickets t
         WHERE t.merged_into_ticket_id IS NULL
         ORDER BY COALESCE(t.status_changed_at, t.created_at, t.updated_at) ASC, t.updated_at ASC, t.id ASC
         LIMIT %s OFFSET %s
         """,
-        (safe_limit, safe_offset),
+        (f"{AUTOMATION_AUDIT_REFERENCE_PREFIX}%", safe_limit, safe_offset),
     )
     records: list[TicketRecord] = []
     for row in rows:
@@ -1693,6 +1701,22 @@ async def set_reply_resolution_step(
     return bool(affected)
 
 
+async def get_latest_reply(ticket_id: int) -> TicketRecord | None:
+    """Return the most recent conversation entry for a ticket, if any."""
+
+    row = await db.fetch_one(
+        """
+        SELECT id, ticket_id, body, is_internal, external_reference, created_at
+        FROM ticket_replies
+        WHERE ticket_id = %s
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """,
+        (ticket_id,),
+    )
+    return _normalise_reply(row) if row else None
+
+
 async def list_replies(
     ticket_id: int, *, include_internal: bool = True
 ) -> list[TicketRecord]:
@@ -1999,6 +2023,10 @@ async def get_automation_filter_context_by_ticket_ids(
             SELECT ticket_id, MAX(id) AS latest_reply_id
             FROM ticket_replies
             WHERE ticket_id IN ({placeholders})
+              AND (
+                external_reference IS NULL
+                OR external_reference NOT LIKE 'automation:%%'
+              )
             GROUP BY ticket_id
         ) AS latest ON latest.latest_reply_id = tr.id
         """,  # nosec B608
