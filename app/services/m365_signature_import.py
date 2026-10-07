@@ -468,6 +468,9 @@ class _OutlookHtmlConverter(HTMLParser):
         return ";".join(f"{prop}:{value}" for prop, value in merged.items())
 
     def handle_starttag(self, tag, attrs):
+        if tag == "body":
+            # </head> is optional; <body> always ends any skipped head content.
+            self._skip_depth = 0
         if tag in _SKIP_CONTENT_TAGS:
             self._skip_depth += 1
             return

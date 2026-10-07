@@ -171,6 +171,12 @@ def test_convert_inlines_outlook_stylesheet_and_drops_office_markup():
     assert "mso-" not in result
 
 
+def test_convert_handles_implicitly_closed_head():
+    html = "<html><head><title>Sig</title><meta charset=utf-8><body><p>Regards,</p></body></html>"
+    result = _sanitize_signature_html(_convert_outlook_html(html, {}))
+    assert result == "<p>Regards,</p>"
+
+
 def test_convert_inline_style_overrides_stylesheet():
     html = "<style>p {margin:0; color:red}</style><p style='color:blue'>x</p>"
     assert '<p style="margin:0;color:blue">x</p>' in _convert_outlook_html(html, {})
