@@ -1207,7 +1207,15 @@ body.navigation--top.navigation--top-compact .menu > .menu__item > a > .menu__ba
   line-height: 1.6;
   font-size: 0.975rem;
   display: grid;
+  /* Constrain the single implicit column to the container width. Without an
+     explicit track size the `auto` track grows to its content's max-content
+     width (e.g. long <pre>/code lines), pushing the whole panel past the
+     card and often the viewport. minmax(0, 1fr) caps the track at the box
+     width so <pre> scrolls internally and text wraps within the box. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.75rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .rich-text-viewer p {
@@ -1219,6 +1227,11 @@ body.navigation--top.navigation--top-compact .menu > .menu__item > a > .menu__ba
   margin: 0;
   padding-left: 1.4rem;
   display: grid;
+  /* Same fix as the viewer itself: cap the implicit `auto` column so long
+     <li> content (long URLs, inline <code>, etc.) wraps/scrolls within the
+     list instead of widening the list past its parent. */
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 0.4rem;
 }
 
@@ -4537,10 +4550,17 @@ body:not(.navigation--top) .policies-banner--overlay .policies-banner__logout .s
   position: relative;
   border-radius: 0.75rem;
   transition: max-height 0.2s ease;
+  min-width: 0;
 }
 
 .timeline__message-content {
   overflow-wrap: anywhere;
+  /* Contain any over-wide content (long code/log lines that use
+     white-space: pre) inside the message box: it scrolls horizontally
+     here instead of widening the timeline card past the box and often the
+     whole viewport. The --collapsed state below still wins during collapse. */
+  overflow-x: auto;
+  min-width: 0;
 }
 
 .timeline__message-content--collapsed {
@@ -7561,7 +7581,8 @@ body:has(.stf-modal.is-visible) {
 }
 
 .management__column--activity,
-.management__column--conversation {
+.management__column--conversation,
+.management__column--timeline {
   min-width: 0;
 }
 
