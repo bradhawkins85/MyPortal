@@ -282,4 +282,77 @@ async def test_import_preserves_outlook_table_structure(tmp_path):
     assert "style=" in result.html_content
     assert "<strong>Jane Smith</strong>" in result.html_content
     assert "/uploads/m365-signatures/" in result.html_content
-    assert files_dir is None
+
+
+@pytest.mark.anyio
+async def test_import_classic_outlook_export_with_named_files_folder(tmp_path):
+    """Classic Outlook exports use ``<name>_files`` and URL-encoded paths."""
+    html = (
+        "<html><head><style>p.MsoNormal{margin:0}</style></head><body>"
+        "<!--[if gte vml 1]><v:imagedata src=\"Jane%20Smith_files/image001.png\"/><![endif]-->"
+        '<p class="MsoNormal"><img width="120" src="Jane%20Smith_files/image002.png" '
+        'alt="Logo"></p>'
+        '<p><img src="cid:image003.jpg@01DA1234.ABCD5678"></p>'
+        "</body></html>"
+    )
+    zip_bytes = _make_zip(
+        {
+            "Jane Smith/Jane Smith.htm": html.encode("windows-1252"),
+            "Jane Smith/Jane Smith.txt": "Jane Smith".encode("utf-16"),
+            "Jane Smith/Jane Smith.rtf": b"{\\rtf1}",
+            "Jane Smith/Jane Smith_files/image002.png": b"\x89PNG",
+            "Jane Smith/Jane Smith_files/image003.jpg": b"\xff\xd8",
+            "Jane Smith/Jane Smith_files/filelist.xml": b"<xml/>",
+            "__MACOSX/Jane Smith/._Jane Smith.htm": b"junk",
+        }
+    )
+    result = await import_outlook_signature(
+        zip_bytes, filename="export.zip", uploads_root=tmp_path
+    )
+    assert result.source_name == "Jane Smith"
+    assert result.text_content == "Jane Smith"
+    assert sorted(f["name"] for f in result.files) == ["image002.png", "image003.jpg"]
+    base = f"/uploads/m365-signatures/{result.files[0]['stored_path'].split('/')[1]}/files/"
+    assert f'src="{base}image002.png"' in result.html_content
+    assert f'src="{base}image003.jpg"' in result.html_content
+    assert "_files/" not in result.html_content
+    assert "MsoNormal{" not in result.html_content
+
+
+def test_locate_entries_prefers_named_files_folder():
+    zip_bytes = _make_zip(
+        {
+            "Sig.htm": b"<p>hi</p>",
+            "Sig_files/image001.png": b"\x89PNG",
+            "Sig_files/filelist.xml": b"<xml/>",
+        }
+    )
+    zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    html, txt, files_dir = _locate_entries(zf.infolist())
+    assert html == "Sig.htm"
+    assert txt is None
+    assert files_dir == "Sig_files"
+
+
+def test_import_route_accepts_multipart_upload_without_form_field(monkeypatch):
+    """The import endpoint must not require a JSON/form field named ``form``."""
+    from fastapi import FastAPI
+    from fastapi.responses import PlainTextResponse
+    from fastapi.testclient import TestClient
+
+    from app.features.m365_admin import routes
+
+    async def fake_context(request, *, write=False):
+        form = await request.form()
+        return None, None, PlainTextResponse(f"reached:{form.get('file').filename}")
+
+    monkeypatch.setattr(routes, "_signature_context", fake_context)
+    app = FastAPI()
+    app.include_router(routes.router)
+    response = TestClient(app).post(
+        "/m365/signatures/import",
+        files={"file": ("sig.zip", b"PK", "application/zip")},
+        data={"name": "", "slug": "", "description": ""},
+    )
+    assert response.status_code == 200
+    assert response.text == "reached:sig.zip"

@@ -10,12 +10,14 @@ identical to the Outlook original.
 
 from __future__ import annotations
 
+import html
 import io
 import re
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
+from urllib.parse import quote as quote_url, unquote
 from uuid import uuid4
 
 import aiofiles
@@ -94,22 +96,22 @@ async def import_outlook_signature(
 
         # Process embedded files
         storage_subdir = uuid4().hex
-        files: list[dict[str, Any]] = []
-        if files_dir:
-            files = await _extract_and_store_files(
-                zf, files_dir, storage_subdir, uploads_root
-            )
+        files = await _extract_and_store_files(
+            zf, files_dir, storage_subdir, uploads_root
+        )
 
         # Rewrite image src attributes to absolute portal URLs
-        html_content = _rewrite_image_sources(html_content, storage_subdir)
+        html_content = _rewrite_image_sources(
+            html_content, storage_subdir, [f["name"] for f in files]
+        )
 
         # Sanitize the HTML (signature mode preserves inline styles)
         html_content = _sanitize_signature_html(html_content)
 
     log_info(
-        "Imported Outlook signature '{}' ({} embedded files)",
-        signature_name,
-        len(files),
+        "Imported Outlook signature",
+        signature_name=signature_name,
+        embedded_files=len(files),
     )
 
     return ParsedSignature(
@@ -148,50 +150,113 @@ def _validate_zip_contents(zf: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
             continue
         suffix = PurePosixPath(info.filename).suffix.lower()
         if suffix not in _ALLOWED_IMAGE_EXTENSIONS | {".html", ".txt", ".rtf", ".htm"}:
-            log_warning("Skipping unexpected file type in signature ZIP: {}", info.filename)
+            log_warning("Skipping unexpected file type in signature ZIP", path=info.filename)
 
     return entries
 
 
+def _is_asset_dir(name: str) -> bool:
+    """Return True for Outlook asset folders (``files`` or ``<name>_files``)."""
+    lowered = name.lower()
+    return lowered in {"files", "images"} or lowered.endswith("_files")
+
+
+def _in_asset_dir(path: str) -> bool:
+    return any(_is_asset_dir(part) for part in PurePosixPath(path).parts[:-1])
+
+
+def _file_entries(entries: list[zipfile.ZipInfo]) -> list[zipfile.ZipInfo]:
+    """Return real file entries, skipping directories and macOS metadata."""
+    result: list[zipfile.ZipInfo] = []
+    for entry in entries:
+        if entry.is_dir():
+            continue
+        parts = PurePosixPath(entry.filename).parts
+        if not parts or parts[0] == "__MACOSX" or parts[-1].startswith("."):
+            continue
+        result.append(entry)
+    return result
+
+
+def _pick_shallowest(paths: list[str], preferred_stem: str | None = None) -> str | None:
+    if not paths:
+        return None
+    if preferred_stem:
+        matching = [p for p in paths if PurePosixPath(p).stem == preferred_stem]
+        if matching:
+            paths = matching
+    return min(paths, key=lambda p: (len(PurePosixPath(p).parts), p.lower()))
+
+
+def _find_html_entry(entries: list[zipfile.ZipInfo]) -> str | None:
+    candidates = [
+        e.filename
+        for e in _file_entries(entries)
+        if PurePosixPath(e.filename).suffix.lower() in {".html", ".htm"}
+        and not _in_asset_dir(e.filename)
+    ]
+    return _pick_shallowest(candidates)
+
+
 def _extract_signature_name(entries: list[zipfile.ZipInfo], filename: str) -> str:
     """Determine the display name of the imported signature."""
-    for entry in entries:
-        if entry.is_file() and PurePosixPath(entry.filename).suffix.lower() in {".html", ".htm"}:
-            stem = PurePosixPath(entry.filename).name
-            stem = PurePosixPath(stem).stem
-            if stem:
-                return stem
+    html_path = _find_html_entry(entries)
+    if html_path:
+        stem = PurePosixPath(html_path).stem.strip()
+        if stem:
+            return stem
     return PurePosixPath(filename).stem or "Imported signature"
 
 
 def _locate_entries(
     entries: list[zipfile.ZipInfo],
 ) -> tuple[str, str | None, str | None]:
-    """Find the HTML file, TXT file, and files/ directory in the ZIP."""
-    html_path: str | None = None
-    txt_path: str | None = None
-    files_dir: str | None = None
+    """Find the HTML file, TXT file, and asset folder in the ZIP.
 
-    for entry in entries:
-        if entry.is_dir():
-            name = entry.filename.rstrip("/")
-            if name.lower() == "files":
-                files_dir = name
-            continue
-
-        suffix = PurePosixPath(entry.filename).suffix.lower()
-        if suffix in {".html", ".htm"}:
-            if html_path is None:
-                html_path = entry.filename
-        elif suffix == ".txt":
-            if txt_path is None:
-                txt_path = entry.filename
-
+    Outlook exports may or may not include explicit directory entries, may
+    wrap everything in a top-level folder, and name the asset folder either
+    ``files`` or ``<signature name>_files``.
+    """
+    html_path = _find_html_entry(entries)
     if html_path is None:
         raise ValueError(
             "The ZIP does not contain a signature HTML file. "
             "Export the signature from Outlook first (File > Signatures > Manage > Export)."
         )
+    html_stem = PurePosixPath(html_path).stem
+
+    file_entries = _file_entries(entries)
+    txt_candidates = [
+        e.filename
+        for e in file_entries
+        if PurePosixPath(e.filename).suffix.lower() == ".txt" and not _in_asset_dir(e.filename)
+    ]
+    txt_path = _pick_shallowest(txt_candidates, html_stem)
+
+    # Collect asset folders from both directory entries and file paths.
+    asset_dirs: set[str] = set()
+    for entry in entries:
+        parts = PurePosixPath(entry.filename.rstrip("/")).parts
+        depth = len(parts) if entry.is_dir() else len(parts) - 1
+        for idx in range(depth):
+            if _is_asset_dir(parts[idx]):
+                asset_dirs.add("/".join(parts[: idx + 1]))
+                break
+    files_dir: str | None = None
+    if asset_dirs:
+        html_parent = PurePosixPath(html_path).parent
+        preferred = [
+            str(html_parent / f"{html_stem}_files"),
+            str(html_parent / "files"),
+        ]
+        preferred = [p[2:] if p.startswith("./") else p for p in preferred]
+        lowered = {d.lower(): d for d in asset_dirs}
+        for candidate in preferred:
+            if candidate.lower() in lowered:
+                files_dir = lowered[candidate.lower()]
+                break
+        if files_dir is None:
+            files_dir = min(asset_dirs, key=lambda d: (len(PurePosixPath(d).parts), d.lower()))
 
     return html_path, txt_path, files_dir
 
@@ -199,11 +264,17 @@ def _locate_entries(
 def _read_entry(zf: zipfile.ZipFile, path: str) -> str:
     """Read a text entry from the ZIP, trying multiple encodings."""
     raw = zf.read(path)
-    for encoding in ("utf-8", "utf-8-sig", "windows-1252", "latin-1"):
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            return raw.decode("utf-16")
+        except UnicodeDecodeError:
+            pass
+    for encoding in ("utf-8-sig", "windows-1252"):
         try:
             return raw.decode(encoding)
         except (UnicodeDecodeError, LookupError):
             continue
+    return raw.decode("latin-1")
 
 
 # ---------------------------------------------------------------------------
@@ -213,35 +284,36 @@ def _read_entry(zf: zipfile.ZipFile, path: str) -> str:
 
 async def _extract_and_store_files(
     zf: zipfile.ZipFile,
-    files_dir: str,
+    files_dir: str | None,
     storage_subdir: str,
     uploads_root: Any,
 ) -> list[dict[str, Any]]:
-    """Extract image files from the files/ folder and store them."""
+    """Extract every image in the ZIP and store it.
+
+    Images in the asset folder are taken first so that, if two images share a
+    file name, the one the HTML most likely references wins.
+    """
     stored: list[dict[str, Any]] = []
-    prefix = files_dir.rstrip("/") + "/"
+    seen: set[str] = set()
+    prefix = (files_dir.rstrip("/") + "/").lower() if files_dir else None
 
-    for info in zf.infolist():
-        if not info.filename.startswith(prefix) or info.is_dir():
-            continue
+    images = [
+        info
+        for info in _file_entries(zf.infolist())
+        if PurePosixPath(info.filename).suffix.lower() in _ALLOWED_IMAGE_EXTENSIONS
+    ]
+    images.sort(key=lambda info: 0 if prefix and info.filename.lower().startswith(prefix) else 1)
 
-        relative = info.filename[len(prefix):]
-        clean_name = PurePosixPath(relative).name
-        if not clean_name or clean_name.startswith("."):
+    target_dir = uploads_root / "m365-signatures" / storage_subdir / "files"
+    for info in images:
+        clean_name = PurePosixPath(info.filename).name
+        if not clean_name or clean_name.lower() in seen:
             continue
-
-        suffix = PurePosixPath(clean_name).suffix.lower()
-        if suffix not in _ALLOWED_IMAGE_EXTENSIONS:
-            log_warning("Skipping non-image file in signature ZIP: {}", info.filename)
-            continue
+        seen.add(clean_name.lower())
 
         file_data = zf.read(info.filename)
-
-        target_dir = uploads_root / "m365-signatures" / storage_subdir / "files"
         target_dir.mkdir(parents=True, exist_ok=True)
-
-        target_file = target_dir / clean_name
-        async with aiofiles.open(target_file, "wb") as fh:
+        async with aiofiles.open(target_dir / clean_name, "wb") as fh:
             await fh.write(file_data)
 
         stored.append(
@@ -259,28 +331,45 @@ async def _extract_and_store_files(
 # HTML rewriting
 # ---------------------------------------------------------------------------
 
+_URL_ATTR_PATTERN = re.compile(
+    r"""(?P<attr>\b(?:src|href))\s*=\s*(?P<quote>["'])(?P<value>.*?)(?P=quote)""",
+    re.IGNORECASE | re.DOTALL,
+)
 
-def _rewrite_image_sources(html_content: str, storage_subdir: str) -> str:
-    """Rewrite relative image src attributes to absolute portal URLs."""
+
+def _rewrite_image_sources(
+    html_content: str,
+    storage_subdir: str,
+    known_files: list[str] | None = None,
+) -> str:
+    """Rewrite references to exported assets to absolute portal URLs.
+
+    Handles ``files/...``, ``<name>_files/...`` (URL-encoded or with
+    backslashes) and ``cid:`` references to images extracted from the ZIP.
+    """
     base_url = f"/uploads/m365-signatures/{storage_subdir}/files/"
+    known = {name.lower(): name for name in (known_files or [])}
 
     def _replace(match: re.Match) -> str:
-        full_match = match.group(0)
-        src_value = full_match.split("=", 1)[1].strip(" '\"")
-        src_value = src_value.replace("%3E", "").replace("%20", " ")
-        filename = PurePosixPath(src_value.replace("\\", "/")).name
-        if not filename:
-            return full_match
-        attr = "src" if 'src=' in full_match.lower() else "href"
-        quote = '"' if '"' in full_match else "'"
-        return f'{attr}={quote}{base_url}{filename}{quote}'
+        value = html.unescape(match.group("value")).strip()
+        lowered = value.lower()
+        target: str | None = None
+        if lowered.startswith("cid:"):
+            cid_name = unquote(value[4:]).split("@", 1)[0]
+            target = known.get(cid_name.lower())
+        elif not re.match(r"^[a-z][a-z0-9+.-]*:", lowered) and not value.startswith(("/", "#")):
+            path = unquote(value).replace("\\", "/").split("?", 1)[0].split("#", 1)[0]
+            name = PurePosixPath(path).name.lstrip(">")
+            if name.lower() in known:
+                target = known[name.lower()]
+            elif name and _in_asset_dir(path):
+                target = name
+        if not target:
+            return match.group(0)
+        quote = match.group("quote")
+        return f"{match.group('attr')}={quote}{base_url}{quote_url(target)}{quote}"
 
-    pattern = re.compile(
-        r'''(src|href)\s*=\s*["'](?:files|images)[/\\%][^"']*["']''',
-        re.IGNORECASE,
-    )
-    html_content = pattern.sub(_replace, html_content)
-    return html_content
+    return _URL_ATTR_PATTERN.sub(_replace, html_content)
 
 
 # ---------------------------------------------------------------------------
@@ -306,7 +395,7 @@ for _tag in _SIGNATURE_ALLOWED_TAGS:
     elif _tag == "font":
         _attrs |= {"face", "size", "color"}
     elif _tag in ("table", "td", "th", "tr"):
-        _attrs |= {"border", "cellspacing", "cellpadding", "colspan", "rowspan", "valign", "scope"}
+        _attrs |= {"border", "cellspacing", "cellpadding", "colspan", "rowspan", "valign", "scope", "role"}
     elif _tag == "ol":
         _attrs |= {"start", "type"}
     elif _tag == "li":
