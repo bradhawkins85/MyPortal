@@ -6,26 +6,34 @@ magic link, so they do not need a portal account.
 
 ## Sending an onboarding link
 
-1. Open **Client Onboarding** and fill in **New onboarding link**:
+1. Open **Client Onboarding** and select **+ New onboarding link**:
    - **Client name** (optional) pre-fills the business name on the form.
    - **Client email** (optional) is where the link is sent when **Email the link to the client** is ticked.
-   - **Link expires after** sets how many days the link works (1–90, default 30).
-2. Select **Create onboarding link**. The link is shown once, so copy it now if you are not emailing it.
+   - **Link works for** sets how long the link stays valid (7–90 days, default 30).
+2. Select **Create link** (or **Create and email link**). The link is shown once with a
+   **Copy link** button, so copy it now if you are not emailing it.
 
-Only a hash of the link token is stored. If a link is lost, use **Regenerate link** (the old link
-stops working). **Revoke** cancels a link that has not been submitted.
+Only a hash of the link token is stored. If a link is lost, use **Regenerate link** from the
+row's **Actions** menu (the old link stops working). **Revoke link** cancels a link that has not
+been submitted.
 
 ## What the client fills in
 
-- Business name, main phone, general email and website.
-- One or more **sites** (up to 20), each with its address, site phone, a primary contact
-  (name, email, phone) and its business hours: time zone and opening times per day, with an
-  optional second period for split shifts.
-- A **billing contact**, or *Same as the primary contact for the first site*.
-- Optional notes for your team.
+The form is a branded, four-step page that works on phones and desktops:
 
-The form can be submitted once. Validation problems are listed at the top of the form and the
-client's entries are kept.
+1. **Your business:** business name, plus optional main phone, general email and website.
+2. **Sites:** one card per location (up to 20). **+ Add a site** opens an editor with three
+   tabs: **Address**, **Primary contact** (name, email, phone) and **Opening hours** (time zone,
+   an on/off switch per day, an optional break for split shifts, and quick-fill buttons such as
+   *Mon–Fri, 8:30am–5pm* or *Open 24/7*). A live summary shows the site as it will be saved.
+3. **Billing:** *Same as the main site contact*, or someone else's name, email and phone.
+4. **Review:** everything on one page with **Edit** links, optional notes, and a confirmation
+   tick box before **Send my details**.
+
+Each step is checked before the client moves on, with messages next to the fields that need
+attention. If the server finds a problem, the client sees a summary at the top and lands on the
+step to fix; everything they typed is kept. The form still works without JavaScript (all steps
+show on one page), and the client is warned before leaving with unsaved changes.
 
 ## What happens on submission
 

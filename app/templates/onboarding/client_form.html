@@ -1,3 +1,5 @@
+{% from "auth/_auth_macros.html" import brand_mark %}
+{% from "onboarding/_client_form_macros.html" import icon, site_item, site_editor %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -5,249 +7,267 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex, nofollow" />
   <meta name="referrer" content="no-referrer" />
+  <meta name="color-scheme" content="dark" />
   <title>Client onboarding · {{ app_name }}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
   <link rel="stylesheet" href="{{ static_url('/static/css/app.css') }}" />
-  <style>
-    .onboarding-shell { max-width: 960px; margin: 0 auto; padding: 2rem 1rem 4rem; display: grid; gap: 1.5rem; }
-    .onboarding-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-    .onboarding-site { border: 1px solid var(--color-border, #d0d7de); border-radius: 0.75rem; padding: 1rem; display: grid; gap: 1rem; }
-    .onboarding-site__header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
-    .onboarding-site__title { margin: 0; font-size: 1.1rem; }
-    .onboarding-site h4 { margin: 0.5rem 0 0; font-size: 1rem; }
-    .onboarding-hours input[type="time"] { width: auto; display: inline-block; }
-    .onboarding-errors { margin: 0; padding-left: 1.25rem; }
-    .onboarding-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
-  </style>
+  <link rel="stylesheet" href="{{ static_url('/static/css/client_onboarding.css') }}" />
+  <noscript>
+    <style>
+      .cof-js-only, .cof-steps, .cof-step__nav { display: none !important; }
+      .cof-site-modal[hidden], .cof-site-modal [data-cof-panel][hidden] { display: block !important; }
+      .cof-site-modal { position: static; padding: 0; background: none; backdrop-filter: none; }
+      .cof-site-modal .modal__panel { width: auto; max-height: none; }
+      .cof-noscript-only { display: block !important; }
+      .cof-site { display: none; }
+      .cof-site-modal .scf-tabs, .cof-site-modal .modal__close, .cof-site-modal .cof-preview { display: none !important; }
+      .cof-site-modal .scf-editor__body.modal__body { display: block; }
+      .cof-site-modal .cof-panel + .cof-panel { margin-top: 1.5rem; }
+      .cof-site-modal .cof-day__break { grid-column: 3 / -1; grid-row: 2; }
+    </style>
+  </noscript>
 </head>
-<body>
-{% macro site_block(site, position) -%}
-  {% set p = "site-" ~ site.index ~ "-" %}
-  {% set v = site.get("values", {}) %}
-  <section class="onboarding-site" data-site>
-    <input type="hidden" name="site_index" value="{{ site.index }}" />
-    <div class="onboarding-site__header">
-      <h3 class="onboarding-site__title">Site <span data-site-number>{{ position }}</span></h3>
-      <button type="button" class="button button--ghost button--small" data-remove-site>Remove site</button>
-    </div>
-    <div class="onboarding-grid">
-      <div class="form-field">
-        <label class="form-label required" for="{{ p }}name">Site name</label>
-        <input class="form-input" id="{{ p }}name" name="{{ p }}name" maxlength="100" placeholder="Head office" value="{{ v.name }}" required />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="{{ p }}phone">Site phone</label>
-        <input class="form-input" id="{{ p }}phone" name="{{ p }}phone" type="tel" maxlength="50" value="{{ v.phone }}" />
-      </div>
-    </div>
-    <h4>Address</h4>
-    <div class="form-field">
-      <label class="form-label required" for="{{ p }}street">Street address</label>
-      <input class="form-input" id="{{ p }}street" name="{{ p }}street" maxlength="255" autocomplete="street-address" value="{{ v.street }}" required />
-    </div>
-    <div class="onboarding-grid">
-      <div class="form-field">
-        <label class="form-label" for="{{ p }}city">Suburb / city</label>
-        <input class="form-input" id="{{ p }}city" name="{{ p }}city" maxlength="100" value="{{ v.city }}" />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="{{ p }}state">State</label>
-        <input class="form-input" id="{{ p }}state" name="{{ p }}state" maxlength="100" value="{{ v.state }}" />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="{{ p }}postcode">Postcode</label>
-        <input class="form-input" id="{{ p }}postcode" name="{{ p }}postcode" maxlength="20" value="{{ v.postcode }}" />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="{{ p }}country">Country</label>
-        <input class="form-input" id="{{ p }}country" name="{{ p }}country" maxlength="100" value="{{ v.country }}" />
-      </div>
-    </div>
-    <h4>Primary contact for this site</h4>
-    <div class="onboarding-grid">
-      <div class="form-field">
-        <label class="form-label required" for="{{ p }}contact_first_name">First name</label>
-        <input class="form-input" id="{{ p }}contact_first_name" name="{{ p }}contact_first_name" maxlength="100" value="{{ v.contact_first_name }}" required />
-      </div>
-      <div class="form-field">
-        <label class="form-label required" for="{{ p }}contact_last_name">Last name</label>
-        <input class="form-input" id="{{ p }}contact_last_name" name="{{ p }}contact_last_name" maxlength="100" value="{{ v.contact_last_name }}" required />
-      </div>
-      <div class="form-field">
-        <label class="form-label required" for="{{ p }}contact_email">Email</label>
-        <input class="form-input" id="{{ p }}contact_email" name="{{ p }}contact_email" type="email" maxlength="255" value="{{ v.contact_email }}" required />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="{{ p }}contact_phone">Phone</label>
-        <input class="form-input" id="{{ p }}contact_phone" name="{{ p }}contact_phone" type="tel" maxlength="50" value="{{ v.contact_phone }}" />
-      </div>
-    </div>
-    <h4>Business hours</h4>
-    <div class="form-field">
-      <label class="form-label required" for="{{ p }}timezone">Time zone</label>
-      <input class="form-input" id="{{ p }}timezone" name="{{ p }}timezone" list="onboarding-timezones" value="{{ v.timezone or default_timezone }}" required />
-    </div>
-    <div class="table-wrapper onboarding-hours">
-      <table class="table">
-        <thead><tr><th scope="col">Day</th><th scope="col">Open</th><th scope="col">Hours</th><th scope="col">Second period (optional)</th></tr></thead>
-        <tbody>
-          {% for row in site.hours %}
-            <tr>
-              <th scope="row">{{ row.label }}</th>
-              <td><input type="checkbox" name="{{ p }}day_{{ row.key }}_open" value="1" aria-label="Open on {{ row.label }}" {% if row.open %}checked{% endif %} /></td>
-              <td>
-                <input class="form-input" type="time" name="{{ p }}day_{{ row.key }}_start" value="{{ row.start }}" aria-label="{{ row.label }} opens" />
-                <span aria-hidden="true">–</span>
-                <input class="form-input" type="time" name="{{ p }}day_{{ row.key }}_end" value="{{ row.end }}" aria-label="{{ row.label }} closes" />
-              </td>
-              <td>
-                <input class="form-input" type="time" name="{{ p }}day_{{ row.key }}_start2" value="{{ row.start2 }}" aria-label="{{ row.label }} second period opens" />
-                <span aria-hidden="true">–</span>
-                <input class="form-input" type="time" name="{{ p }}day_{{ row.key }}_end2" value="{{ row.end2 }}" aria-label="{{ row.label }} second period closes" />
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <p class="form-help">Tick the days this site is open. Use a second period for split shifts such as a lunch closure.</p>
-  </section>
-{%- endmacro %}
-
-  <main class="onboarding-shell">
-    <header>
-      <h1>Client onboarding</h1>
-      <p class="text-muted">{{ app_name }}</p>
+<body class="cof-body">
+  <main class="cof-shell">
+    <header class="cof-brand">
+      {{ brand_mark("cof-brand__mark") }}
+      <span class="cof-brand__name">{{ app_name }}</span>
     </header>
 
-    {% if state == "complete" %}
-      <section class="card card--panel">
-        <div class="card__body">
-          <h2 class="card__title">Thank you!</h2>
-          <p>Your details have been received. Our team will review them and be in touch shortly with your onboarding information.</p>
-        </div>
+    {% if state == "open" %}
+      {% set step_titles = [("business", "Your business"), ("sites", "Sites"), ("billing", "Billing"), ("review", "Review")] %}
+      <section class="cof-intro" aria-labelledby="cof-title">
+        <p class="cof-eyebrow">New client onboarding</p>
+        <h1 class="cof-intro__title" id="cof-title">Welcome{% if form.client_name %}, {{ form.client_name }}{% endif %}</h1>
+        <p class="cof-intro__lead">Tell us about your business so we can set up your support. It takes about five minutes, and you can check everything before you send it.</p>
+        <ul class="cof-intro__needs" aria-label="What you'll need">
+          <li>{{ icon("building") }}<span>Your business details</span></li>
+          <li>{{ icon("pin") }}<span>Each site's address, contact and opening hours</span></li>
+          <li>{{ icon("card") }}<span>Who should receive invoices</span></li>
+        </ul>
       </section>
-    {% elif state == "failed" %}
-      <section class="card card--panel">
-        <div class="card__body">
-          <h2 class="card__title">Thanks, we have your details</h2>
-          <p>We received your form but could not finish setting up your account automatically. Our team has been notified and will complete it for you. There is no need to submit the form again.</p>
-        </div>
-      </section>
-    {% elif state != "open" %}
-      <section class="card card--panel">
-        <div class="card__body">
-          <h2 class="card__title">This onboarding link is not available</h2>
-          {% if state == "expired" %}
-            <p>This link has expired. Please contact us for a new onboarding link.</p>
-          {% elif state in ("submitted", "processing") %}
-            <p>This onboarding form has already been submitted. Please contact us if you need to change any details.</p>
-          {% else %}
-            <p>This link is not valid. It may have been copied incorrectly or cancelled. Please contact us for a new onboarding link.</p>
-          {% endif %}
-        </div>
-      </section>
-    {% else %}
+
+      <nav class="cof-steps cof-js-only" aria-label="Onboarding progress">
+        <ol class="cof-steps__list">
+          {% for key, label in step_titles %}
+          <li class="cof-steps__item" data-cof-step-indicator="{{ key }}">
+            <button type="button" class="cof-steps__button" data-cof-goto="{{ key }}" disabled>
+              <span class="cof-steps__number" aria-hidden="true"><span class="cof-steps__digit">{{ loop.index }}</span>{{ icon("check") }}</span>
+              <span class="cof-steps__label">{{ label }}</span>
+              <span class="visually-hidden" data-cof-step-status></span>
+            </button>
+          </li>
+          {% endfor %}
+        </ol>
+      </nav>
+
       {% if errors %}
-        <section class="card card--panel" role="alert">
-          <div class="card__body">
-            <h2 class="card__title">Please check the following</h2>
-            <ul class="onboarding-errors">{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
+        <div class="cof-alert" role="alert" tabindex="-1" data-cof-error-summary>
+          <span class="cof-alert__icon" aria-hidden="true">{{ icon("alert") }}</span>
+          <div>
+            <h2 class="cof-alert__title">Please check {{ "this detail" if errors | length == 1 else "these details" }}</h2>
+            <ul class="cof-alert__list">
+              {% for error in errors %}
+                {% if error.startswith("Site") or error.startswith("Add at least one site") or error.startswith("Add no more") %}{% set error_step = "sites" %}
+                {% elif error.startswith("Billing") %}{% set error_step = "billing" %}
+                {% elif error.startswith("Confirm") %}{% set error_step = "review" %}
+                {% else %}{% set error_step = "business" %}{% endif %}
+                <li data-cof-error-step="{{ error_step }}">{{ error }}</li>
+              {% endfor %}
+            </ul>
           </div>
-        </section>
+        </div>
       {% endif %}
 
-      <form method="post" action="/onboarding/{{ token }}" class="form" data-onboarding-form data-max-sites="{{ max_sites }}" novalidate>
-        <datalist id="onboarding-timezones">{% for zone in timezones %}<option value="{{ zone }}"></option>{% endfor %}</datalist>
+      <form id="cof-form" class="cof-form" method="post" action="/onboarding/{{ token }}" novalidate data-cof-form data-cof-max-sites="{{ max_sites }}">
 
-        <section class="card card--panel">
-          <div class="card__header"><div><h2 class="card__title">Your business</h2></div></div>
-          <div class="card__body">
+        <section class="card card--panel cof-step" id="cof-step-business" data-cof-step="business" aria-labelledby="cof-step-business-title">
+          <header class="cof-step__header">
+            <p class="cof-eyebrow">Step 1 of 4</p>
+            <h2 class="card__title" id="cof-step-business-title" tabindex="-1">Your business</h2>
+            <p class="cof-step__subtitle">The name we'll set your account up under, and how to reach you.</p>
+          </header>
+          <div class="scf-grid cof-fields">
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="client_name">Business name</label>
+              <input class="form-input" id="client_name" name="client_name" maxlength="255" autocomplete="organization" value="{{ form.client_name }}" required data-cof-field="client_name" />
+              <p class="form-help">Use your registered or trading name.</p>
+              <p class="scf-error" data-cof-error="client_name" hidden></p>
+            </div>
             <div class="form-field">
-              <label class="form-label required" for="client_name">Business name</label>
-              <input class="form-input" id="client_name" name="client_name" maxlength="255" autocomplete="organization" value="{{ form.client_name }}" required />
+              <label class="form-label" for="company_phone">Main phone <span class="scf-optional">optional</span></label>
+              <input class="form-input" id="company_phone" name="company_phone" type="tel" maxlength="50" autocomplete="tel" value="{{ form['values'].company_phone }}" />
+              <p class="form-help">If you leave this blank we'll use your main site's number.</p>
             </div>
-            <div class="onboarding-grid">
-              <div class="form-field">
-                <label class="form-label" for="company_phone">Main phone</label>
-                <input class="form-input" id="company_phone" name="company_phone" type="tel" maxlength="50" value="{{ form['values'].company_phone }}" />
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="company_email">General email</label>
-                <input class="form-input" id="company_email" name="company_email" type="email" maxlength="255" value="{{ form['values'].company_email }}" />
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="website">Website</label>
-                <input class="form-input" id="website" name="website" maxlength="255" value="{{ form['values'].website }}" />
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="card card--panel">
-          <div class="card__header">
-            <div>
-              <h2 class="card__title">Sites</h2>
-              <p class="card__subtitle">Add each location we will support, with its primary contact and opening hours. The first site is treated as your main site.</p>
-            </div>
-          </div>
-          <div class="card__body">
-            <div data-sites>
-              {% for site in form.sites %}{{ site_block(site, loop.index) }}{% endfor %}
-            </div>
-            <div class="onboarding-actions">
-              <button type="button" class="button button--secondary" data-add-site>Add another site</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="card card--panel">
-          <div class="card__header"><div><h2 class="card__title">Billing contact</h2><p class="card__subtitle">Who should receive invoices?</p></div></div>
-          <div class="card__body">
-            <label class="form-checkbox">
-              <input type="checkbox" name="billing_same_as_primary" value="1" data-billing-same {% if form.billing_same_as_primary %}checked{% endif %} />
-              <span>Same as the primary contact for the first site</span>
-            </label>
-            <div class="onboarding-grid" data-billing-fields>
-              <div class="form-field">
-                <label class="form-label required" for="billing_first_name">First name</label>
-                <input class="form-input" id="billing_first_name" name="billing_first_name" maxlength="100" value="{{ form['values'].billing_first_name }}" />
-              </div>
-              <div class="form-field">
-                <label class="form-label required" for="billing_last_name">Last name</label>
-                <input class="form-input" id="billing_last_name" name="billing_last_name" maxlength="100" value="{{ form['values'].billing_last_name }}" />
-              </div>
-              <div class="form-field">
-                <label class="form-label required" for="billing_email">Email</label>
-                <input class="form-input" id="billing_email" name="billing_email" type="email" maxlength="255" value="{{ form['values'].billing_email }}" />
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="billing_phone">Phone</label>
-                <input class="form-input" id="billing_phone" name="billing_phone" type="tel" maxlength="50" value="{{ form['values'].billing_phone }}" />
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="card card--panel">
-          <div class="card__header"><div><h2 class="card__title">Anything else?</h2></div></div>
-          <div class="card__body">
             <div class="form-field">
-              <label class="form-label" for="notes">Notes for our team</label>
-              <textarea class="form-input" id="notes" name="notes" rows="4" maxlength="4000">{{ form['values'].notes }}</textarea>
+              <label class="form-label" for="company_email">General email <span class="scf-optional">optional</span></label>
+              <input class="form-input" id="company_email" name="company_email" type="email" maxlength="255" autocomplete="email" inputmode="email" placeholder="e.g. hello@yourbusiness.com" value="{{ form['values'].company_email }}" data-cof-field="company_email" />
+              <p class="scf-error" data-cof-error="company_email" hidden></p>
+            </div>
+            <div class="form-field scf-grid__full">
+              <label class="form-label" for="website">Website <span class="scf-optional">optional</span></label>
+              <input class="form-input" id="website" name="website" type="text" inputmode="url" maxlength="255" autocomplete="url" placeholder="e.g. yourbusiness.com" value="{{ form['values'].website }}" />
             </div>
           </div>
+          <footer class="cof-step__nav">
+            <span class="scf-editor__spacer"></span>
+            <button type="button" class="button" data-cof-next>Continue to sites</button>
+          </footer>
         </section>
 
-        <div class="onboarding-actions">
-          <button type="submit" class="button button--primary">Submit onboarding form</button>
-        </div>
+        <section class="card card--panel cof-step" id="cof-step-sites" data-cof-step="sites" aria-labelledby="cof-step-sites-title">
+          <header class="cof-step__header">
+            <p class="cof-eyebrow">Step 2 of 4</p>
+            <h2 class="card__title" id="cof-step-sites-title" tabindex="-1">Your sites</h2>
+            <p class="cof-step__subtitle">Add each location we'll support. Your first site is your main site.</p>
+          </header>
+
+          <ul class="scf-list cof-site-list" data-cof-site-list aria-label="Sites">
+            {% for site in form.sites %}{{ site_item(site, loop.index) }}{% endfor %}
+          </ul>
+          <div class="scf-empty cof-js-only" data-cof-sites-empty hidden>
+            <p class="scf-empty__title">No sites yet</p>
+            <p class="text-muted">Add the locations we'll support, starting with your main office.</p>
+          </div>
+          <p class="scf-error" data-cof-error="sites" hidden></p>
+          <div class="cof-site-actions cof-js-only">
+            <button type="button" class="button button--secondary" data-cof-site-add aria-haspopup="dialog">+ Add a site</button>
+            <span class="form-help" data-cof-site-count aria-live="polite"></span>
+          </div>
+
+          <div data-cof-site-editors>
+            {% for site in form.sites %}{{ site_editor(site, loop.index, timezones, default_timezone) }}{% endfor %}
+          </div>
+
+          <footer class="cof-step__nav">
+            <button type="button" class="button button--ghost" data-cof-back>Back</button>
+            <span class="scf-editor__spacer"></span>
+            <button type="button" class="button" data-cof-next>Continue to billing</button>
+          </footer>
+        </section>
+
+        <section class="card card--panel cof-step" id="cof-step-billing" data-cof-step="billing" aria-labelledby="cof-step-billing-title">
+          <header class="cof-step__header">
+            <p class="cof-eyebrow">Step 3 of 4</p>
+            <h2 class="card__title" id="cof-step-billing-title" tabindex="-1">Billing contact</h2>
+            <p class="cof-step__subtitle">Who should receive invoices? Invoices are issued in advance and are due within 7 days.</p>
+          </header>
+          <fieldset class="scf-fieldset cof-billing-choice">
+            <legend class="visually-hidden">Billing contact</legend>
+            <div class="scf-choice-list">
+              <label class="scf-choice cof-choice">
+                <input type="radio" name="billing_same_as_primary" value="1" {% if form.billing_same_as_primary %}checked{% endif %} data-cof-billing-mode />
+                <span><strong>Same as the main site contact</strong><span class="cof-choice__help" data-cof-billing-same-label>Use the primary contact for your first site.</span></span>
+              </label>
+              <label class="scf-choice cof-choice">
+                <input type="radio" name="billing_same_as_primary" value="" {% if not form.billing_same_as_primary %}checked{% endif %} data-cof-billing-mode />
+                <span><strong>Someone else</strong><span class="cof-choice__help">For example, your accounts team.</span></span>
+              </label>
+            </div>
+          </fieldset>
+          <div class="scf-grid cof-fields" data-cof-billing-fields>
+            <div class="form-field">
+              <label class="form-label" for="billing_first_name">First name</label>
+              <input class="form-input" id="billing_first_name" name="billing_first_name" maxlength="100" autocomplete="off" value="{{ form['values'].billing_first_name }}" data-cof-field="billing_first_name" />
+              <p class="scf-error" data-cof-error="billing_first_name" hidden></p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="billing_last_name">Last name</label>
+              <input class="form-input" id="billing_last_name" name="billing_last_name" maxlength="100" autocomplete="off" value="{{ form['values'].billing_last_name }}" data-cof-field="billing_last_name" />
+              <p class="scf-error" data-cof-error="billing_last_name" hidden></p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="billing_email">Email</label>
+              <input class="form-input" id="billing_email" name="billing_email" type="email" maxlength="255" autocomplete="off" inputmode="email" placeholder="e.g. accounts@yourbusiness.com" value="{{ form['values'].billing_email }}" data-cof-field="billing_email" />
+              <p class="form-help">Invoices are emailed here.</p>
+              <p class="scf-error" data-cof-error="billing_email" hidden></p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="billing_phone">Phone <span class="scf-optional">optional</span></label>
+              <input class="form-input" id="billing_phone" name="billing_phone" type="tel" maxlength="50" autocomplete="off" value="{{ form['values'].billing_phone }}" />
+            </div>
+          </div>
+          <footer class="cof-step__nav">
+            <button type="button" class="button button--ghost" data-cof-back>Back</button>
+            <span class="scf-editor__spacer"></span>
+            <button type="button" class="button" data-cof-next>Review your details</button>
+          </footer>
+        </section>
+
+        <section class="card card--panel cof-step" id="cof-step-review" data-cof-step="review" aria-labelledby="cof-step-review-title">
+          <header class="cof-step__header">
+            <p class="cof-eyebrow">Step 4 of 4</p>
+            <h2 class="card__title" id="cof-step-review-title" tabindex="-1">Review and send</h2>
+            <p class="cof-step__subtitle">Check your details. Select <strong>Edit</strong> to change anything.</p>
+          </header>
+          <div class="cof-review cof-js-only" data-cof-review aria-live="polite"></div>
+          <div class="form-field">
+            <label class="form-label" for="notes">Anything else we should know? <span class="scf-optional">optional</span></label>
+            <textarea class="form-input" id="notes" name="notes" rows="4" maxlength="4000" placeholder="For example, systems you use, upcoming moves or anything urgent." data-cof-notes>{{ form['values'].notes }}</textarea>
+            <p class="form-help scf-counter" data-cof-notes-counter aria-live="polite"></p>
+          </div>
+          <label class="cof-confirm">
+            <input type="checkbox" name="confirm_details" value="1" {% if form.confirm_details %}checked{% endif %} data-cof-field="confirm_details" />
+            <span>I confirm these details are correct and I'm authorised to provide them for this business.</span>
+          </label>
+          <p class="scf-error" data-cof-error="confirm_details" hidden></p>
+          <p class="cof-privacy">{{ icon("lock") }}<span>Your details are sent securely and only used to set up and support your account. This link can only be used once.</span></p>
+          <footer class="cof-step__nav cof-step__nav--submit">
+            <button type="button" class="button button--ghost" data-cof-back>Back</button>
+            <span class="scf-editor__spacer"></span>
+            <button type="submit" class="button cof-submit" data-cof-submit>Send my details</button>
+          </footer>
+        </section>
       </form>
 
-      <template data-site-template>
-        {{ site_block({"index": "__INDEX__", "values": {"timezone": default_timezone}, "hours": blank_hours}, "__NUMBER__") }}
+      <template data-cof-site-template>
+        {{ site_item({"index": "__INDEX__", "values": {}}, "__NUMBER__") }}
+        {{ site_editor({"index": "__INDEX__", "values": {"timezone": default_timezone}, "hours": blank_hours}, "__NUMBER__", timezones, default_timezone) }}
       </template>
+
+    {% else %}
+      {% if state == "complete" %}
+        {% set panel_variant, panel_icon, panel_title = "success", "check", "Thank you — we've got your details" %}
+      {% elif state == "failed" %}
+        {% set panel_variant, panel_icon, panel_title = "success", "check", "Thanks — we've received your details" %}
+      {% elif state == "expired" %}
+        {% set panel_variant, panel_icon, panel_title = "warning", "clock", "This link has expired" %}
+      {% elif state in ("submitted", "processing") %}
+        {% set panel_variant, panel_icon, panel_title = "success", "check", "This form has already been sent" %}
+      {% else %}
+        {% set panel_variant, panel_icon, panel_title = "warning", "alert", "This link isn't available" %}
+      {% endif %}
+      <section class="card card--panel cof-result cof-result--{{ panel_variant }}" aria-labelledby="cof-result-title">
+        <span class="cof-result__icon" aria-hidden="true">{{ icon(panel_icon) }}</span>
+        <h1 class="cof-result__title" id="cof-result-title">{{ panel_title }}</h1>
+        {% if state == "complete" %}
+          <p class="cof-result__lead">We'll review everything and be in touch shortly.</p>
+          <ol class="cof-next" aria-label="What happens next">
+            <li><strong>We check your details.</strong> Our team reviews what you've sent and sets up your account.</li>
+            <li><strong>We confirm your setup.</strong> We'll contact your main site contact if anything needs clarifying.</li>
+            <li><strong>You get your welcome pack.</strong> We'll send onboarding information, including how to get support.</li>
+          </ol>
+          <p class="cof-result__fineprint">You can close this page.</p>
+        {% elif state == "failed" %}
+          <p class="cof-result__lead">We couldn't finish setting up your account automatically, but your details are safe. Our team will complete the setup for you, so there's no need to send the form again.</p>
+        {% elif state == "expired" %}
+          <p class="cof-result__lead">For your security, onboarding links only work for a limited time. Please contact us and we'll send you a new one.</p>
+        {% elif state in ("submitted", "processing") %}
+          <p class="cof-result__lead">We've already received this onboarding form. If you need to change anything, just let us know.</p>
+        {% else %}
+          <p class="cof-result__lead">This link may have been copied incorrectly or cancelled. Please check the link in your email, or contact us for a new one.</p>
+        {% endif %}
+      </section>
     {% endif %}
+
+    <footer class="cof-footer">
+      <span>{{ app_name }}</span>
+      <span aria-hidden="true">·</span>
+      <a href="/legal/privacy">Privacy Policy</a>
+    </footer>
   </main>
+  {% if state == "open" %}
   <script src="{{ static_url('/static/js/client_onboarding.js') }}" defer></script>
+  {% endif %}
 </body>
 </html>
