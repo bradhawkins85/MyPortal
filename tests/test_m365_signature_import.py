@@ -406,3 +406,15 @@ def test_import_route_accepts_multipart_upload_without_form_field(monkeypatch):
     )
     assert response.status_code == 200
     assert response.text == "reached:sig.zip"
+
+
+@pytest.mark.anyio
+async def test_import_rejects_images_too_large_to_embed(monkeypatch):
+    from app.services import m365_signature_import as module
+
+    monkeypatch.setattr(module, "_MAX_EMBEDDED_IMAGE_BYTES", 100)
+    zip_bytes = _make_zip(
+        {"Sig.htm": b'<img src="files/a.png">', "files/a.png": b"\x89PNG" * 50}
+    )
+    with pytest.raises(ValueError, match="too large to embed"):
+        await import_outlook_signature(zip_bytes, filename="Sig.zip")

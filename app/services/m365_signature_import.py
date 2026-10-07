@@ -34,6 +34,9 @@ from app.services.sanitization import _filter_attribute, _ALLOWED_PROTOCOLS
 _MAX_ZIP_SIZE = 10 * 1024 * 1024  # 10 MB
 _MAX_EXTRACTED_SIZE = 50 * 1024 * 1024  # 50 MB total for all files
 _MAX_FILES = 200  # safety cap on number of files in the ZIP
+# Embedded images are base64-encoded into the HTML, which must still fit in a
+# form post under the reverse proxy's 15 MB request limit when edited.
+_MAX_EMBEDDED_IMAGE_BYTES = 5 * 1024 * 1024
 
 # Allowed image extensions in the files/ folder
 _ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
@@ -313,6 +316,7 @@ def _extract_images(
     file name, the one the HTML most likely references wins.
     """
     images: dict[str, dict[str, Any]] = {}
+    embedded_total = 0
     prefix = (files_dir.rstrip("/") + "/").lower() if files_dir else None
 
     candidates = [
@@ -334,6 +338,12 @@ def _extract_images(
             log_warning("Skipping unsupported image in signature ZIP", path=info.filename)
             continue
         content_type, data_uri = converted
+        embedded_total += len(data_uri)
+        if embedded_total > _MAX_EMBEDDED_IMAGE_BYTES:
+            raise ValueError(
+                "The signature images are too large to embed (5 MB limit once encoded). "
+                "Reduce the image sizes in Outlook and export the signature again."
+            )
         images[name.lower()] = {
             "name": name,
             "content_type": content_type,
