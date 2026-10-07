@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone
 from importlib import import_module
 import re
+import uuid
 from functools import lru_cache
 from time import monotonic
 from typing import Any
@@ -129,6 +130,12 @@ def _context_ticket_identity(
 ) -> tuple[int | None, str | None]:
     ticket_id: int | None = None
     ticket_number: str | None = None
+    if isinstance(result, Mapping) and result.get("ticket_id") is None:
+        # Configured action lists wrap the module result as
+        # {"module": ..., "status": ..., "result": module_result}.
+        nested = result.get("result")
+        if isinstance(nested, Mapping):
+            result = nested
     if isinstance(result, Mapping):
         raw_ticket_id = result.get("ticket_id")
         if raw_ticket_id is not None:
@@ -142,12 +149,15 @@ def _context_ticket_identity(
     if isinstance(context, Mapping):
         ticket = context.get("ticket")
         if isinstance(ticket, Mapping):
-            if ticket_id is None and ticket.get("id") is not None:
-                try:
-                    ticket_id = int(ticket.get("id"))
-                except (TypeError, ValueError):
-                    ticket_id = None
-            if ticket_number is None:
+            try:
+                context_ticket_id = (
+                    int(ticket.get("id")) if ticket.get("id") is not None else None
+                )
+            except (TypeError, ValueError):
+                context_ticket_id = None
+            if ticket_id is None:
+                ticket_id = context_ticket_id
+            if ticket_number is None and ticket_id == context_ticket_id:
                 raw_number = ticket.get("ticket_number") or ticket.get("number")
                 if raw_number is not None:
                     ticket_number = str(raw_number)
@@ -364,14 +374,17 @@ async def _record_ticket_conversation_audit(
             error_message=error_message,
             context=context,
         )
-        external_reference = f"{AUTOMATION_AUDIT_REFERENCE_PREFIX}{automation_id}"
+        # ticket_replies has a unique key on (ticket_id, external_reference),
+        # so each note gets its own reference under the automation's prefix.
+        reference_prefix = f"{AUTOMATION_AUDIT_REFERENCE_PREFIX}{automation_id}:"
         latest = await tickets_repo.get_latest_reply(ticket_id)
         if (
             latest
-            and latest.get("external_reference") == external_reference
+            and str(latest.get("external_reference") or "").startswith(reference_prefix)
             and latest.get("body") == body
         ):
             return
+        external_reference = f"{reference_prefix}{uuid.uuid4().hex}"
         await tickets_repo.create_reply(
             ticket_id=ticket_id,
             author_id=None,

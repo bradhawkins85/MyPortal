@@ -20,6 +20,10 @@ def audit_env(monkeypatch):
         return None
 
     async def fake_create_reply(**kwargs):
+        # Mirror the uq_ticket_replies_external unique key.
+        key = (kwargs.get("ticket_id"), kwargs.get("external_reference"))
+        if any((c["ticket_id"], c["external_reference"]) == key for c in created):
+            raise RuntimeError("Duplicate entry for key uq_ticket_replies_external")
         created.append(kwargs)
         state["latest"] = {
             "external_reference": kwargs.get("external_reference"),
@@ -75,7 +79,7 @@ async def test_successful_ticket_action_adds_internal_automation_note(audit_env)
     assert note["is_internal"] is True
     assert note["author_id"] is None
     assert note["author_display_name"] == "Automation"
-    assert note["external_reference"] == "automation:3"
+    assert note["external_reference"].startswith("automation:3:")
     assert "Close stale &lt;tickets&gt;" in note["body"]
     assert "Scheduled automation" in note["body"]
     assert "Close ticket (update-ticket)" in note["body"]
@@ -172,3 +176,65 @@ async def test_audit_note_failure_does_not_break_automation(audit_env, monkeypat
         error_message=None,
         context=CONTEXT,
     )
+
+
+@pytest.mark.anyio
+async def test_each_note_gets_a_unique_external_reference(audit_env):
+    created, _ = audit_env
+
+    for module in ("update-ticket", "add-ticket-reply"):
+        await automations_service._record_action_history(
+            AUTOMATION,
+            action_name=module,
+            action_module=module,
+            status="succeeded",
+            result={"module": module, "status": "succeeded"},
+            error_message=None,
+            context=CONTEXT,
+        )
+
+    assert len(created) == 2
+    references = {note["external_reference"] for note in created}
+    assert len(references) == 2
+    assert all(ref.startswith("automation:3:") for ref in references)
+
+
+@pytest.mark.anyio
+async def test_wrapped_action_result_ticket_id_targets_the_note(audit_env):
+    created, _ = audit_env
+    wrapped = {
+        "module": "update-ticket",
+        "status": "succeeded",
+        "result": {"ticket_id": 42, "status": "succeeded"},
+    }
+
+    # Global scheduled automation with no ticket in context.
+    await automations_service._record_action_history(
+        AUTOMATION,
+        action_name="update-ticket",
+        action_module="update-ticket",
+        status="succeeded",
+        result=wrapped,
+        error_message=None,
+        context=None,
+    )
+    # Ticket event whose action targets a different ticket.
+    await automations_service._record_action_history(
+        {"id": 4, "name": "Escalate", "kind": "event"},
+        action_name="update-ticket",
+        action_module="update-ticket",
+        status="succeeded",
+        result=wrapped,
+        error_message=None,
+        context=CONTEXT,
+    )
+
+    assert [note["ticket_id"] for note in created] == [42, 42]
+
+
+def test_context_ticket_number_not_borrowed_for_a_different_ticket():
+    ticket_id, ticket_number = automations_service._context_ticket_identity(
+        CONTEXT, {"module": "x", "result": {"ticket_id": 42}}
+    )
+    assert ticket_id == 42
+    assert ticket_number is None
