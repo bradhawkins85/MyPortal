@@ -781,6 +781,20 @@ body.navigation--top .menu__item--expanded > .menu__submenu {
   flex-direction: column;
 }
 
+/* Nested expandable items (e.g. Compliance Checks / Continuity grouped under
+ * Security & Compliance) fly their sub-menus out to the side instead of
+ * stacking them under the panel, so the panel keeps its original height. */
+body.navigation--top .menu__submenu .menu__item--expanded > .menu__submenu {
+  top: 0;
+  left: calc(100% + var(--space-gap-tight));
+}
+
+/* The panel hosting those fly-outs must not clip them; overflow-y: auto would
+ * otherwise also imply overflow-x: auto and crop the sub-menu at the edge. */
+body.navigation--top .menu__submenu:has(.menu__item--expandable) {
+  overflow: visible;
+}
+
 body.navigation--top .sidebar__logout-form,
 body.navigation--top .sidebar__footer {
   flex: 0 0 auto;
