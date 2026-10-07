@@ -192,6 +192,15 @@ class Settings(BaseSettings):
             "detection. Prefixes are compared after removing display formatting."
         ),
     )
+    blocked_email_domains: str = Field(
+        default="",
+        validation_alias="BLOCKED_EMAIL_DOMAINS",
+        description=(
+            "Comma-separated domains that can never be added to a company's email "
+            "domains. Each entry also blocks all of its subdomains. Blocked domains "
+            "are skipped silently so imports continue with the remaining domains."
+        ),
+    )
     smtp_host: str | None = Field(default=None, validation_alias="SMTP_HOST")
     smtp_port: int = Field(default=587, validation_alias="SMTP_PORT")
     smtp_user: str | None = Field(default=None, validation_alias="SMTP_USER")
