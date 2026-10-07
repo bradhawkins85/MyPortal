@@ -179,7 +179,11 @@ record_step() {
 cleanup_old_releases() {
   # Cleanup is deliberately best-effort: an inability to reclaim disk space
   # must not turn an otherwise verified deployment into a reported failure.
-  if ! python3 "${PROJECT_ROOT}/scripts/cleanup_releases.py" "$RELEASE_ROOT" "$CURRENT_LINK" --retain 3; then
+  # Feature-pack and migration-only deployments move links without restarting
+  # workers, so the script also keeps every slot's target and any release a
+  # running process still works from.
+  if ! python3 "${PROJECT_ROOT}/scripts/cleanup_releases.py" "$RELEASE_ROOT" "$CURRENT_LINK" --retain 3 \
+      --protect "$INSTANCE_ROOT/blue" --protect "$INSTANCE_ROOT/green"; then
     echo "WARNING: post-deployment release cleanup failed; deployment remains successful." >&2
   fi
 }
