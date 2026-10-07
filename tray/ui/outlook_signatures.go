@@ -11,7 +11,8 @@
 //  2. asks the portal to render the signatures available to each of them
 //     (the portal returns nothing unless the company opted in);
 //  3. writes the .htm, .rtf and .txt signature files when their content
-//     changed;
+//     changed, saving images embedded as base64 data: URIs into the
+//     "<name>_files" folder Outlook expects;
 //  4. makes each account's primary signature the default for new messages
 //     and replies, leaving additional signatures available in the picker; and
 //  5. removes additional signatures it wrote earlier that no longer apply.
@@ -22,12 +23,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -194,7 +197,7 @@ func syncOutlookSignatures(ctx context.Context, platform outlookPlatform, portal
 			logger.Warn("Outlook signatures: ignoring signature with an unusable name for %s", signature.Address)
 			continue
 		}
-		if state.Hashes[base] != signature.Hash || !signatureFilesExist(dir, base) {
+		if state.Hashes[base] != signature.Hash || !signatureFilesExist(dir, base, signature) {
 			if err := writeSignatureFiles(dir, base, signature); err != nil {
 				logger.Warn("Outlook signatures: write %s: %v", base, err)
 				continue
@@ -228,7 +231,7 @@ func syncOutlookSignatures(ctx context.Context, platform outlookPlatform, portal
 		}
 		current[base] = true
 		state.Additional[base] = strings.ToLower(strings.TrimSpace(signature.Address))
-		if state.Hashes[base] != signature.Hash || !signatureFilesExist(dir, base) {
+		if state.Hashes[base] != signature.Hash || !signatureFilesExist(dir, base, signature) {
 			if err := writeSignatureFiles(dir, base, signature); err != nil {
 				logger.Warn("Outlook signatures: write %s: %v", base, err)
 				continue
@@ -350,9 +353,18 @@ func signatureFileBase(name string) string {
 	return base
 }
 
-func signatureFilesExist(dir, base string) bool {
+// signatureFilesExist reports whether every file for the signature is on
+// disk. A signature with embedded images also needs its "<base>_files"
+// folder; this rewrites signatures saved by agents that predate image
+// extraction even though their content hash is unchanged.
+func signatureFilesExist(dir, base string, signature outlookSignature) bool {
 	for _, ext := range []string{".htm", ".rtf", ".txt"} {
 		if _, err := os.Stat(filepath.Join(dir, base+ext)); err != nil {
+			return false
+		}
+	}
+	if signatureDataImagePattern.MatchString(signature.HTML) {
+		if info, err := os.Stat(filepath.Join(dir, base+"_files")); err != nil || !info.IsDir() {
 			return false
 		}
 	}
@@ -360,13 +372,96 @@ func signatureFilesExist(dir, base string) bool {
 }
 
 func writeSignatureFiles(dir, base string, signature outlookSignature) error {
+	html, images := extractSignatureImages(signature.HTML, base)
+	if err := writeSignatureImages(dir, base, images); err != nil {
+		return err
+	}
 	files := map[string][]byte{
-		".htm": signatureHTMLDocument(signature.HTML),
+		".htm": signatureHTMLDocument(html),
 		".rtf": []byte(signatureRTF(signature.Text)),
 		".txt": utf16LEWithBOM(crlf(signature.Text)),
 	}
 	for _, ext := range []string{".htm", ".rtf", ".txt"} {
 		if err := writeFileAtomic(filepath.Join(dir, base+ext), files[ext]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// signatureImage is an image saved next to a signature's .htm file.
+type signatureImage struct {
+	Name string
+	Data []byte
+}
+
+// signatureDataImagePattern matches an <img> src holding a base64 data: URI.
+// The portal embeds signature images this way, but Classic Outlook (Word's
+// HTML engine) does not reliably render or send data: URIs, so they are
+// written out as files instead.
+var signatureDataImagePattern = regexp.MustCompile(
+	`(?i)(<img\b[^>]*?\ssrc\s*=\s*)(["'])data:image/(png|jpe?g|gif|bmp|webp);base64,([A-Za-z0-9+/=\s]+)(["'])`)
+
+// signatureFolderURL escapes a signature folder name for a relative URL the
+// way Outlook writes it (e.g. "My%20Sig_files"). signatureFileBase already
+// strips characters that are invalid in file names.
+var signatureFolderURL = strings.NewReplacer("%", "%25", " ", "%20", "#", "%23", "'", "%27")
+
+var signatureImageExtensions = map[string]string{
+	"png": ".png", "jpg": ".jpg", "jpeg": ".jpg", "gif": ".gif", "bmp": ".bmp", "webp": ".webp",
+}
+
+// extractSignatureImages replaces data: URI images with references to files
+// in the "<base>_files" folder, the layout Outlook itself uses for HTML
+// signatures. Identical images share one file.
+func extractSignatureImages(html, base string) (string, []signatureImage) {
+	matches := signatureDataImagePattern.FindAllStringSubmatchIndex(html, -1)
+	if len(matches) == 0 {
+		return html, nil
+	}
+	folder := signatureFolderURL.Replace(base + "_files")
+	var images []signatureImage
+	byContent := map[string]string{}
+	var b strings.Builder
+	last := 0
+	for _, m := range matches {
+		openQuote, closeQuote := html[m[4]:m[5]], html[m[10]:m[11]]
+		encoded := strings.Join(strings.Fields(html[m[8]:m[9]]), "")
+		data, err := base64.StdEncoding.DecodeString(encoded)
+		if openQuote != closeQuote || err != nil || len(data) == 0 {
+			continue
+		}
+		name, seen := byContent[string(data)]
+		if !seen {
+			ext := signatureImageExtensions[strings.ToLower(html[m[6]:m[7]])]
+			name = fmt.Sprintf("image%03d%s", len(images)+1, ext)
+			byContent[string(data)] = name
+			images = append(images, signatureImage{Name: name, Data: data})
+		}
+		b.WriteString(html[last:m[0]])
+		b.WriteString(html[m[2]:m[3]])
+		b.WriteString(openQuote + folder + "/" + name + closeQuote)
+		last = m[1]
+	}
+	b.WriteString(html[last:])
+	return b.String(), images
+}
+
+// writeSignatureImages replaces the "<base>_files" folder with the given
+// images, removing it when the signature has none.
+func writeSignatureImages(dir, base string, images []signatureImage) error {
+	folder := filepath.Join(dir, base+"_files")
+	if err := os.RemoveAll(folder); err != nil {
+		return err
+	}
+	if len(images) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(folder, 0o700); err != nil {
+		return err
+	}
+	for _, image := range images {
+		if err := writeFileAtomic(filepath.Join(folder, image.Name), image.Data); err != nil {
 			return err
 		}
 	}

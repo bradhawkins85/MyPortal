@@ -280,15 +280,15 @@ _IMAGE_CONTENT_TYPES = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".gif": "image/gif",
-    ".webp": "image/webp",
 }
 
 
 def _image_data_uri(name: str, data: bytes) -> tuple[str, str] | None:
     """Return ``(content_type, data_uri)`` for an image, or ``None`` if unusable.
 
-    PNG/JPEG/GIF/WebP are embedded as-is; other raster formats (e.g. BMP) are
-    converted to PNG.  SVG is never embedded because it can carry script.
+    PNG/JPEG/GIF are embedded as-is; other raster formats (BMP, WebP) are
+    converted to PNG because Classic Outlook cannot display them.  SVG is
+    never embedded because it can carry script.
     """
     suffix = PurePosixPath(name).suffix.lower()
     content_type = _IMAGE_CONTENT_TYPES.get(suffix)

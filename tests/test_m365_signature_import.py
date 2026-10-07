@@ -353,15 +353,16 @@ async def test_import_classic_outlook_export_with_named_files_folder(tmp_path):
 
 
 @pytest.mark.anyio
-async def test_import_converts_bmp_to_png():
+@pytest.mark.parametrize("fmt,ext", [("BMP", "bmp"), ("WEBP", "webp")])
+async def test_import_converts_unsupported_formats_to_png(fmt, ext):
     from PIL import Image
 
     buffer = io.BytesIO()
-    Image.new("RGB", (2, 2), "red").save(buffer, format="BMP")
+    Image.new("RGB", (2, 2), "red").save(buffer, format=fmt)
     zip_bytes = _make_zip(
         {
-            "Sig.htm": b'<p><img src="Sig_files/logo.bmp"></p>',
-            "Sig_files/logo.bmp": buffer.getvalue(),
+            "Sig.htm": f'<p><img src="Sig_files/logo.{ext}"></p>'.encode(),
+            f"Sig_files/logo.{ext}": buffer.getvalue(),
         }
     )
     result = await import_outlook_signature(zip_bytes, filename="Sig.zip")

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -143,7 +144,7 @@ func TestSyncSkipsUnchangedFilesAndRestoresMissingOnes(t *testing.T) {
 	if err := syncOutlookSignatures(context.Background(), platform, server.URL, "token"); err != nil {
 		t.Fatal(err)
 	}
-	if !signatureFilesExist(platform.sigDir, "MyPortal (ada@example.com)") {
+	if !signatureFilesExist(platform.sigDir, "MyPortal (ada@example.com)", outlookSignature{}) {
 		t.Fatal("missing signature files must be recreated")
 	}
 }
@@ -203,7 +204,7 @@ func TestSyncWritesAdditionalSignaturesAndRemovesOnesThatNoLongerApply(t *testin
 		t.Fatal(err)
 	}
 	for _, base := range []string{"MyPortal - Short reply (ada@example.com)", "MyPortal - Sales (grace@example.com)"} {
-		if !signatureFilesExist(platform.sigDir, base) {
+		if !signatureFilesExist(platform.sigDir, base, outlookSignature{}) {
 			t.Fatalf("additional signature %q was not written", base)
 		}
 	}
@@ -224,10 +225,10 @@ func TestSyncWritesAdditionalSignaturesAndRemovesOnesThatNoLongerApply(t *testin
 	if _, err := os.Stat(filepath.Join(platform.sigDir, "MyPortal - Short reply (ada@example.com).htm")); !os.IsNotExist(err) {
 		t.Fatal("additional signature that no longer applies must be removed")
 	}
-	if !signatureFilesExist(platform.sigDir, "MyPortal - Sales (grace@example.com)") {
+	if !signatureFilesExist(platform.sigDir, "MyPortal - Sales (grace@example.com)", outlookSignature{}) {
 		t.Fatal("signatures for a skipped address must be left in place")
 	}
-	if !signatureFilesExist(platform.sigDir, "MyPortal (ada@example.com)") {
+	if !signatureFilesExist(platform.sigDir, "MyPortal (ada@example.com)", outlookSignature{}) {
 		t.Fatal("primary signature must be kept")
 	}
 
@@ -242,5 +243,68 @@ func TestSyncWritesAdditionalSignaturesAndRemovesOnesThatNoLongerApply(t *testin
 	}
 	if state := loadOutlookSignatureState(platform); len(state.Additional) != 0 {
 		t.Fatalf("state still tracks removed signatures: %v", state.Additional)
+	}
+}
+
+func TestExtractSignatureImagesWritesDataURIsAsFiles(t *testing.T) {
+	png := []byte("\x89PNG\r\n\x1a\nfake")
+	encoded := base64.StdEncoding.EncodeToString(png)
+	html := `<p><img alt="Logo" src="data:image/png;base64,` + encoded + `"></p>` +
+		`<p><img src='data:image/jpeg;base64,/9j/'></p>` +
+		`<p><img src="data:image/png;base64,` + encoded + `" width="10"></p>` +
+		`<p><a href="https://example.com">data:image/png;base64,AAAA</a></p>`
+
+	out, images := extractSignatureImages(html, "My Sig")
+
+	if len(images) != 2 || images[0].Name != "image001.png" || images[1].Name != "image002.jpg" {
+		t.Fatalf("images = %+v", images)
+	}
+	if !bytes.Equal(images[0].Data, png) {
+		t.Fatalf("decoded image = %q", images[0].Data)
+	}
+	if strings.Count(out, `src="My%20Sig_files/image001.png"`) != 2 ||
+		!strings.Contains(out, `src='My%20Sig_files/image002.jpg'`) {
+		t.Fatalf("unexpected html: %s", out)
+	}
+	if strings.Contains(out, "src=\"data:") || !strings.Contains(out, ">data:image/png;base64,AAAA</a>") {
+		t.Fatalf("only img src attributes must be rewritten: %s", out)
+	}
+}
+
+func TestSyncWritesEmbeddedImagesForClassicOutlook(t *testing.T) {
+	platform := newFakePlatform(t, outlookAccount{Key: "profile\\0001", Address: "ada@example.com"})
+	png := []byte("\x89PNG\r\n\x1a\nlogo")
+	signature := outlookSignature{
+		Address: "ada@example.com", Name: "MyPortal (ada@example.com)",
+		HTML: `<p>Ada</p><img src="data:image/png;base64,` + base64.StdEncoding.EncodeToString(png) + `">`,
+		Text: "Ada", Hash: "h1",
+	}
+	var requests [][]string
+	server := signaturePortal(t, outlookSignaturesResponse{Enabled: true, Signatures: []outlookSignature{signature}}, &requests)
+	defer server.Close()
+
+	if err := syncOutlookSignatures(context.Background(), platform, server.URL, "token"); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	base := "MyPortal (ada@example.com)"
+	htm, _ := os.ReadFile(filepath.Join(platform.sigDir, base+".htm"))
+	if !strings.Contains(string(htm), `src="MyPortal%20(ada@example.com)_files/image001.png"`) {
+		t.Fatalf("htm does not reference the image file: %s", htm)
+	}
+	written, err := os.ReadFile(filepath.Join(platform.sigDir, base+"_files", "image001.png"))
+	if err != nil || !bytes.Equal(written, png) {
+		t.Fatalf("image file = %q, %v", written, err)
+	}
+
+	// An agent that predates image extraction left no _files folder; the
+	// unchanged hash must not stop the images from being written.
+	if err := os.RemoveAll(filepath.Join(platform.sigDir, base+"_files")); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncOutlookSignatures(context.Background(), platform, server.URL, "token"); err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(platform.sigDir, base+"_files", "image001.png")); err != nil {
+		t.Fatalf("image not restored: %v", err)
 	}
 }
