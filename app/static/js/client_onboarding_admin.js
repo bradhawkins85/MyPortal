@@ -10,8 +10,21 @@
     }
     lastFocus = document.activeElement;
     modal.hidden = false;
+    document.body.classList.add('scf-modal-open');
     const first = modal.querySelector('input:not([type="hidden"])');
     window.requestAnimationFrame(() => first && first.focus());
+  }
+
+  function closeModal() {
+    if (!modal || modal.hidden) {
+      return;
+    }
+    modal.hidden = true;
+    document.body.classList.remove('scf-modal-open');
+    if (lastFocus && document.contains(lastFocus)) {
+      lastFocus.focus();
+    }
+    lastFocus = null;
   }
 
   document.querySelectorAll('[data-cof-link-modal-open]').forEach((trigger) => {
@@ -19,13 +32,20 @@
   });
 
   if (modal) {
-    // main.js closes the modal (Escape, backdrop, [data-modal-close]); return focus afterwards.
-    new MutationObserver(() => {
-      if (modal.hidden && lastFocus && document.contains(lastFocus)) {
-        lastFocus.focus();
-        lastFocus = null;
+    // main.js only blocks backdrop clicks and turns Escape into a click on the
+    // close button, so the page closes the modal itself.
+    modal.addEventListener('click', (event) => {
+      if (event.target.closest('[data-modal-close]')) {
+        event.preventDefault();
+        closeModal();
       }
-    }).observe(modal, { attributes: true, attributeFilter: ['hidden'] });
+    });
+    document.addEventListener('keydown', (event) => {
+      if ((event.key === 'Escape' || event.key === 'Esc') && !modal.hidden) {
+        event.preventDefault();
+        closeModal();
+      }
+    });
 
     const form = modal.querySelector('[data-cof-link-form]');
     const who = Array.from(modal.querySelectorAll('[data-cof-link-who]'));
