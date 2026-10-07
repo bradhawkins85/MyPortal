@@ -98,6 +98,52 @@ async def test_sync_email_domains_excludes_onmicrosoft(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_sync_email_domains_skips_blocked_domains(monkeypatch):
+    """Domains on BLOCKED_EMAIL_DOMAINS (and their subdomains) are never added."""
+    from types import SimpleNamespace
+
+    from app.services import company_domains
+
+    monkeypatch.setattr(
+        company_domains,
+        "get_settings",
+        lambda: SimpleNamespace(blocked_email_domains="connecttoteams.com"),
+    )
+    monkeypatch.setattr(
+        m365_service,
+        "acquire_access_token",
+        AsyncMock(return_value="fake-token"),
+    )
+    monkeypatch.setattr(
+        m365_service,
+        "_graph_get",
+        AsyncMock(return_value={
+            "value": [
+                {"id": "cust4869.sbcauseast.connecttoteams.com", "isVerified": True},
+                {"id": "cust4870.sbctransferus.connecttoteams.com", "isVerified": True},
+                {"id": "contoso.com", "isVerified": True},
+            ]
+        }),
+    )
+    monkeypatch.setattr(
+        companies_repo,
+        "get_email_domains_for_company",
+        AsyncMock(return_value=[]),
+    )
+    replaced: list[tuple] = []
+
+    async def fake_replace(company_id, domains):
+        replaced.append((company_id, sorted(domains)))
+
+    monkeypatch.setattr(companies_repo, "replace_company_email_domains", fake_replace)
+
+    result = await m365_service.sync_email_domains(7)
+
+    assert result["added"] == ["contoso.com"]
+    assert replaced == [(7, ["contoso.com"])]
+
+
+@pytest.mark.anyio
 async def test_sync_email_domains_preserves_existing(monkeypatch):
     """Domains already on the company record are kept; only genuinely new ones are added."""
     monkeypatch.setattr(

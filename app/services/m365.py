@@ -24,6 +24,7 @@ from app.services.monitored_http import monitored_client
 
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
+from app.services import company_domains
 from app.repositories import apps as apps_repo
 from app.repositories import companies as companies_repo
 from app.repositories import licenses as license_repo
@@ -4880,6 +4881,8 @@ async def sync_email_domains(company_id: int) -> dict[str, Any]:
         if not domain_id:
             continue
         if domain_id.endswith(".onmicrosoft.com"):
+            continue
+        if company_domains.is_blocked_email_domain(domain_id):
             continue
         if domain.get("isVerified"):
             tenant_domains.append(domain_id)
