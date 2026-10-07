@@ -53,6 +53,8 @@ class ParsedSignature:
     text_content: str
     files: list[dict[str, Any]] = field(default_factory=list)
     source_name: str = ""
+    # Image references in the HTML with no matching image in the ZIP.
+    missing_images: list[str] = field(default_factory=list)
 
     @property
     def has_images(self) -> bool:
@@ -98,7 +100,8 @@ async def import_outlook_signature(
             )
 
         images = _extract_images(zf, files_dir)
-        html_content = _convert_outlook_html(html_content, images)
+        missing_images: list[str] = []
+        html_content = _convert_outlook_html(html_content, images, missing_images)
         html_content = _sanitize_signature_html(html_content)
         # An image referenced several times is embedded at every reference,
         # so the final HTML is what must fit under the request limit.
@@ -116,6 +119,7 @@ async def import_outlook_signature(
         "Imported Outlook signature",
         signature_name=signature_name,
         embedded_files=len(files),
+        missing_images=missing_images,
     )
 
     return ParsedSignature(
@@ -123,6 +127,7 @@ async def import_outlook_signature(
         text_content=text_content,
         files=files,
         source_name=signature_name,
+        missing_images=missing_images,
     )
 
 
@@ -131,8 +136,26 @@ async def import_outlook_signature(
 # ---------------------------------------------------------------------------
 
 
+def _normalise_entry_names(zf: zipfile.ZipFile) -> None:
+    """Use ``/`` separators for entries written with Windows backslashes.
+
+    Windows PowerShell's ``Compress-Archive`` (and some other Windows tools)
+    store paths such as ``Name_files\\image001.png``; without this the
+    ``_files`` folder is not recognised and image references never match.
+    """
+    for info in zf.infolist():
+        if "\\" in info.filename:
+            normalised = info.filename.replace("\\", "/")
+            # Lookups by name go through NameToInfo; reads still verify the
+            # local header against the untouched ``orig_filename``.
+            zf.NameToInfo.pop(info.filename, None)
+            info.filename = normalised
+            zf.NameToInfo[normalised] = info
+
+
 def _validate_zip_contents(zf: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
     """Validate the ZIP structure and return all entries."""
+    _normalise_entry_names(zf)
     entries = zf.infolist()
 
     if not entries:
@@ -375,6 +398,22 @@ def _extract_images(
     return images
 
 
+def _local_image_name(value: str) -> str | None:
+    """Return the file name an image ``src`` expects from the ZIP, if any.
+
+    ``None`` for absolute/remote URLs and inline ``data:`` images, which do
+    not need a file from the export.
+    """
+    value = value.strip()
+    lowered = value.lower()
+    if lowered.startswith("cid:"):
+        return unquote(value[4:]).split("@", 1)[0] or None
+    if re.match(r"^[a-z][a-z0-9+.-]*:", lowered) or value.startswith(("/", "#")) or not value:
+        return None
+    path = unquote(value).replace("\\", "/").split("?", 1)[0].split("#", 1)[0]
+    return PurePosixPath(path).name.lstrip(">") or None
+
+
 def _resolve_image_reference(value: str, images: dict[str, dict[str, Any]]) -> str | None:
     """Map an Outlook ``src``/``href`` value to an embedded image's data URI.
 
@@ -382,16 +421,8 @@ def _resolve_image_reference(value: str, images: dict[str, dict[str, Any]]) -> s
     backslashes) and ``cid:`` references.  Returns ``None`` when the value does
     not refer to an image from the ZIP.
     """
-    value = value.strip()
-    lowered = value.lower()
-    if lowered.startswith("cid:"):
-        name = unquote(value[4:]).split("@", 1)[0]
-    elif re.match(r"^[a-z][a-z0-9+.-]*:", lowered) or value.startswith(("/", "#")):
-        return None
-    else:
-        path = unquote(value).replace("\\", "/").split("?", 1)[0].split("#", 1)[0]
-        name = PurePosixPath(path).name.lstrip(">")
-    image = images.get(name.lower())
+    name = _local_image_name(value)
+    image = images.get(name.lower()) if name else None
     return image["data_uri"] if image else None
 
 
@@ -480,6 +511,7 @@ class _OutlookHtmlConverter(HTMLParser):
         self._out: list[str] = []
         self._skip_depth = 0
         self._anchor_stack: list[bool] = []
+        self.missing_images: list[str] = []
 
     def result(self) -> str:
         return "".join(self._out)
@@ -522,6 +554,10 @@ class _OutlookHtmlConverter(HTMLParser):
                 resolved = _resolve_image_reference(attr_map[url_attr], self._images)
                 if resolved:
                     attr_map[url_attr] = resolved
+                elif tag == "img" and url_attr == "src":
+                    missing = _local_image_name(attr_map["src"])
+                    if missing and missing not in self.missing_images:
+                        self.missing_images.append(missing)
         style = self._inline_style(tag, attr_map)
         attr_map.pop("class", None)
         attr_map.pop("style", None)
@@ -558,8 +594,16 @@ class _OutlookHtmlConverter(HTMLParser):
         self._out.append(html.escape(_WHITESPACE.sub(" ", data), quote=False))
 
 
-def _convert_outlook_html(html_content: str, images: dict[str, dict[str, Any]]) -> str:
-    """Inline Outlook stylesheet rules, embed images and normalise whitespace."""
+def _convert_outlook_html(
+    html_content: str,
+    images: dict[str, dict[str, Any]],
+    missing_images: list[str] | None = None,
+) -> str:
+    """Inline Outlook stylesheet rules, embed images and normalise whitespace.
+
+    Image references with no matching image are appended to
+    ``missing_images`` when a list is given.
+    """
     collector = _StyleCollector()
     collector.feed(html_content)
     collector.close()
@@ -568,6 +612,8 @@ def _convert_outlook_html(html_content: str, images: dict[str, dict[str, Any]]) 
     converter = _OutlookHtmlConverter(rules, images)
     converter.feed(html_content)
     converter.close()
+    if missing_images is not None:
+        missing_images.extend(converter.missing_images)
     return converter.result()
 
 

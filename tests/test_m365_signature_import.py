@@ -450,3 +450,42 @@ async def test_import_rejects_oversized_image_before_decoding(monkeypatch):
     )
     with pytest.raises(ValueError, match="too large"):
         await import_outlook_signature(zip_bytes, filename="Sig.zip")
+
+
+@pytest.mark.anyio
+async def test_import_handles_backslash_paths_from_windows_zip_tools():
+    """PowerShell's Compress-Archive stores ``Name_files\\image.png``."""
+    zip_bytes = _make_zip(
+        {
+            "Tanya Salis.htm": (
+                b"<html><body><!--[if gte vml 1]><v:imagedata src=\"Tanya%20Salis_files/image001.png\"/>"
+                b"<![endif]--><![if !vml]><img width=200 height=60 "
+                b"src=\"Tanya%20Salis_files/image002.png\" v:shapes=\"Picture_x0020_1\"><![endif]>"
+                b"</body></html>"
+            ),
+            "Tanya Salis_files\\image001.png": b"\x89PNG-vml",
+            "Tanya Salis_files\\image002.png": b"\x89PNG-img",
+            "Tanya Salis_files\\filelist.xml": b"<xml/>",
+        }
+    )
+    result = await import_outlook_signature(zip_bytes, filename="Tanya.zip")
+    expected = base64.b64encode(b"\x89PNG-img").decode()
+    assert f'src="data:image/png;base64,{expected}"' in result.html_content
+    assert result.missing_images == []
+    zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    _validate_zip_contents(zf)
+    assert _locate_entries(zf.infolist())[2] == "Tanya Salis_files"
+
+
+@pytest.mark.anyio
+async def test_import_reports_images_missing_from_zip():
+    zip_bytes = _make_zip(
+        {
+            "Sig.htm": (
+                b'<p><img src="Sig_files/image001.png"><img src="cid:image002.jpg@01DA">'
+                b'<img src="https://example.com/logo.png"></p>'
+            ),
+        }
+    )
+    result = await import_outlook_signature(zip_bytes, filename="Sig.zip")
+    assert result.missing_images == ["image001.png", "image002.jpg"]

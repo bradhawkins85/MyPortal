@@ -508,10 +508,19 @@ async def import_signature_zip(request: Request):
             "name": name,
             "signature_role": "primary",
             "embedded_files": [f["name"] for f in parsed.files],
+            "missing_images": parsed.missing_images,
             "source_zip": filename,
         },
     )
 
+    if parsed.missing_images:
+        return flash_redirect(
+            f"/m365/signatures/{created['id']}/edit",
+            f"Signature '{name}' imported, but these images were not found in the ZIP: "
+            f"{', '.join(parsed.missing_images)}. Include the signature's _files folder "
+            "in the ZIP and import it again.",
+            "warning",
+        )
     return flash_redirect(
         f"/m365/signatures/{created['id']}/edit",
         f"Signature '{name}' imported from Outlook successfully.",
