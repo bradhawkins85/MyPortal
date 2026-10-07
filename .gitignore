@@ -13,6 +13,7 @@ var/
 venv/
 test_venv/
 test_env/
+uv.lock
 changes/*.json
 changes/.change-log-cache
 myportal.egg-info/
