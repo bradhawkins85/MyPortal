@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import zipfile
 from pathlib import Path
@@ -12,7 +13,8 @@ from app.services.m365_signature_import import (
     ParsedSignature,
     _locate_entries,
     _read_entry,
-    _rewrite_image_sources,
+    _convert_outlook_html,
+    _resolve_image_reference,
     _sanitize_signature_html,
     _validate_zip_contents,
     import_outlook_signature,
@@ -118,33 +120,66 @@ def test_read_entry_windows_1252():
 
 
 # ---------------------------------------------------------------------------
-# _rewrite_image_sources
+# _resolve_image_reference
+# ---------------------------------------------------------------------------
+
+_IMAGES = {"image001.png": {"name": "image001.png", "data_uri": "data:image/png;base64,AAA="}}
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "files/image001.png",
+        "files\\image001.png",
+        "files/%3Eimage001.png",
+        "My%20Sig_files/image001.png",
+        "cid:image001.png@01DA1234.ABCD5678",
+    ],
+)
+def test_resolve_image_reference_matches_outlook_paths(value):
+    assert _resolve_image_reference(value, _IMAGES) == "data:image/png;base64,AAA="
+
+
+@pytest.mark.parametrize(
+    "value", ["/external/image001.png", "https://example.com/image001.png", "files/other.png"]
+)
+def test_resolve_image_reference_ignores_unrelated(value):
+    assert _resolve_image_reference(value, _IMAGES) is None
+
+
+# ---------------------------------------------------------------------------
+# _convert_outlook_html
 # ---------------------------------------------------------------------------
 
 
-def test_rewrite_image_sources_forward_slash():
-    html = '<img src="files/image001.png" alt="Logo" />'
-    result = _rewrite_image_sources(html, "abc123")
-    assert "/uploads/m365-signatures/abc123/files/image001.png" in result
+def test_convert_inlines_outlook_stylesheet_and_drops_office_markup():
+    html = (
+        "<html><head><title>Sig</title><style><!--\n"
+        "@font-face {font-family:Calibri;}\n"
+        "p.MsoNormal, li.MsoNormal\n\t{margin:0cm;\n\tfont-size:11.0pt;\n\tmso-fareast-language:EN-US;}\n"
+        "a:link {color:blue;}\n"
+        "--></style></head>\n<body><div class=WordSection1>\n"
+        "<p class=MsoNormal><a name=\"_MailAutoSig\"><span\nstyle='color:#333'>Regards,<o:p></o:p></span></a></p>\n"
+        "</div></body></html>"
+    )
+    result = _convert_outlook_html(html, {})
+    assert "Sig" not in result.replace("Regards", "")
+    assert '<p style="margin:0cm;font-size:11.0pt">' in result
+    assert '<span style="color:#333">Regards,</span>' in result
+    assert "<a" not in result
+    assert "o:p" not in result
+    assert "mso-" not in result
 
 
-def test_rewrite_image_sources_backslash():
-    html = '<img src="files\\image001.png" alt="Logo" />'
-    result = _rewrite_image_sources(html, "abc123")
-    assert "/uploads/m365-signatures/abc123/files/image001.png" in result
+def test_convert_handles_implicitly_closed_head():
+    html = "<html><head><title>Sig</title><meta charset=utf-8><body><p>Regards,</p></body></html>"
+    result = _sanitize_signature_html(_convert_outlook_html(html, {}))
+    assert result == "<p>Regards,</p>"
 
 
-def test_rewrite_image_sources_url_encoded():
-    html = '<img src="files/%3Eimage001.png" alt="Logo" />'
-    result = _rewrite_image_sources(html, "abc123")
-    assert "/uploads/m365-signatures/abc123/files/image001.png" in result
-
-
-def test_rewrite_preserves_unrelated_src():
-    html = '<img src="/external/photo.jpg" /><img src="files/logo.png" />'
-    result = _rewrite_image_sources(html, "abc123")
-    assert "/external/photo.jpg" in result
-    assert "/uploads/m365-signatures/abc123/files/logo.png" in result
+def test_convert_inline_style_overrides_stylesheet():
+    html = "<style>p {margin:0; color:red}</style><p style='color:blue'>x</p>"
+    assert '<p style="margin:0;color:blue">x</p>' in _convert_outlook_html(html, {})
 
 
 # ---------------------------------------------------------------------------
@@ -173,11 +208,20 @@ def test_sanitize_strips_dangerous_protocols():
     assert "javascript:" not in result
 
 
-def test_sanitize_preserves_img_tags():
-    html = '<img src="/uploads/m365-signatures/abc/files/logo.png" alt="Logo" width="100" />'
+def test_sanitize_preserves_data_uri_images():
+    html = '<img src="data:image/png;base64,iVBORw0KGgo=" alt="Logo" width="100" />'
     result = _sanitize_signature_html(html)
-    assert "<img" in result
-    assert "src=" in result
+    assert 'src="data:image/png;base64,iVBORw0KGgo="' in result
+
+
+def test_sanitize_drops_svg_data_uri():
+    html = '<img src="data:image/svg+xml;base64,PHN2Zz4=" />'
+    assert "data:" not in _sanitize_signature_html(html)
+
+
+def test_sanitize_collapses_whitespace_between_blocks():
+    html = "<p>\n  Regards,\n</p>\n\n<p>Jane\n   Smith</p>"
+    assert _sanitize_signature_html(html) == "<p>Regards,</p><p>Jane Smith</p>"
 
 
 # ---------------------------------------------------------------------------
@@ -194,24 +238,18 @@ async def test_import_simple_signature(tmp_path):
         images=[("avatar.png", b"\x89PNG\r\n\x1a\n fake data")],
     )
     result = await import_outlook_signature(
-        zip_bytes, filename="Test Sig.zip", uploads_root=tmp_path
-    )
+        zip_bytes, filename="Test Sig.zip")
     assert result.source_name == "Test Sig"
     assert "Name" in result.html_content
     assert "Name" in result.text_content
     assert len(result.files) == 1
     assert result.files[0]["name"] == "avatar.png"
 
-    # Verify the image was written to disk
-    expected_dir = tmp_path / "m365-signatures"
-    subdirs = list(expected_dir.iterdir())
-    assert len(subdirs) == 1
-    img_file = subdirs[0] / "files" / "avatar.png"
-    assert img_file.exists()
-
-    # Verify the HTML src was rewritten
-    assert "/uploads/m365-signatures/" in result.html_content
-    assert "files/avatar.png" in result.html_content
+    # The image is embedded, nothing is written to disk
+    expected = base64.b64encode(b"\x89PNG\r\n\x1a\n fake data").decode()
+    assert f'src="data:image/png;base64,{expected}"' in result.html_content
+    assert "files/avatar.png" not in result.html_content
+    assert not list(tmp_path.iterdir())
 
 
 @pytest.mark.anyio
@@ -223,8 +261,7 @@ async def test_import_no_images(tmp_path):
         images=None,
     )
     result = await import_outlook_signature(
-        zip_bytes, filename="Plain.zip", uploads_root=tmp_path
-    )
+        zip_bytes, filename="Plain.zip")
     assert result.has_images is False
     assert "Just text" in result.html_content
 
@@ -235,7 +272,6 @@ async def test_import_rejects_non_zip(tmp_path):
         await import_outlook_signature(
             b"this is not a zip file",
             filename="bad.zip",
-            uploads_root=tmp_path,
         )
 
 
@@ -244,8 +280,7 @@ async def test_import_rejects_oversized(tmp_path):
     big_bytes = b"\x00" * (11 * 1024 * 1024)
     with pytest.raises(ValueError, match="exceeds the 10 MB"):
         await import_outlook_signature(
-            big_bytes, filename="big.zip", uploads_root=tmp_path
-        )
+            big_bytes, filename="big.zip")
 
 
 @pytest.mark.anyio
@@ -253,8 +288,7 @@ async def test_import_zip_without_html(tmp_path):
     zip_bytes = _make_zip({"only.txt": b"hello", "only.rtf": b"{\\rtf1}"})
     with pytest.raises(ValueError, match="HTML file"):
         await import_outlook_signature(
-            zip_bytes, filename="nograph.zip", uploads_root=tmp_path
-        )
+            zip_bytes, filename="nograph.zip")
 
 
 @pytest.mark.anyio
@@ -276,12 +310,11 @@ async def test_import_preserves_outlook_table_structure(tmp_path):
         images=[("photo.jpg", b"\xff\xd8JFIF")],
     )
     result = await import_outlook_signature(
-        zip_bytes, filename="Jane.zip", uploads_root=tmp_path
-    )
+        zip_bytes, filename="Jane.zip")
     assert 'role="presentation"' in result.html_content
     assert "style=" in result.html_content
     assert "<strong>Jane Smith</strong>" in result.html_content
-    assert "/uploads/m365-signatures/" in result.html_content
+    assert 'src="data:image/jpeg;base64,' in result.html_content
 
 
 @pytest.mark.anyio
@@ -306,17 +339,35 @@ async def test_import_classic_outlook_export_with_named_files_folder(tmp_path):
             "__MACOSX/Jane Smith/._Jane Smith.htm": b"junk",
         }
     )
-    result = await import_outlook_signature(
-        zip_bytes, filename="export.zip", uploads_root=tmp_path
-    )
+    result = await import_outlook_signature(zip_bytes, filename="export.zip")
     assert result.source_name == "Jane Smith"
     assert result.text_content == "Jane Smith"
     assert sorted(f["name"] for f in result.files) == ["image002.png", "image003.jpg"]
-    base = f"/uploads/m365-signatures/{result.files[0]['stored_path'].split('/')[1]}/files/"
-    assert f'src="{base}image002.png"' in result.html_content
-    assert f'src="{base}image003.jpg"' in result.html_content
+    png = base64.b64encode(b"\x89PNG").decode()
+    jpg = base64.b64encode(b"\xff\xd8").decode()
+    assert f'src="data:image/png;base64,{png}"' in result.html_content
+    assert f'src="data:image/jpeg;base64,{jpg}"' in result.html_content
+    assert '<p style="margin:0">' in result.html_content
     assert "_files/" not in result.html_content
-    assert "MsoNormal{" not in result.html_content
+    assert "MsoNormal" not in result.html_content
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("fmt,ext", [("BMP", "bmp"), ("WEBP", "webp")])
+async def test_import_converts_unsupported_formats_to_png(fmt, ext):
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (2, 2), "red").save(buffer, format=fmt)
+    zip_bytes = _make_zip(
+        {
+            "Sig.htm": f'<p><img src="Sig_files/logo.{ext}"></p>'.encode(),
+            f"Sig_files/logo.{ext}": buffer.getvalue(),
+        }
+    )
+    result = await import_outlook_signature(zip_bytes, filename="Sig.zip")
+    assert 'src="data:image/png;base64,' in result.html_content
+    assert result.files[0]["content_type"] == "image/png"
 
 
 def test_locate_entries_prefers_named_files_folder():
@@ -356,3 +407,46 @@ def test_import_route_accepts_multipart_upload_without_form_field(monkeypatch):
     )
     assert response.status_code == 200
     assert response.text == "reached:sig.zip"
+
+
+@pytest.mark.anyio
+async def test_import_rejects_images_too_large_to_embed(monkeypatch):
+    from app.services import m365_signature_import as module
+
+    monkeypatch.setattr(module, "_MAX_EMBEDDED_IMAGE_BYTES", 100)
+    zip_bytes = _make_zip(
+        {"Sig.htm": b'<img src="files/a.png">', "files/a.png": b"\x89PNG" * 50}
+    )
+    with pytest.raises(ValueError, match="too large to embed"):
+        await import_outlook_signature(zip_bytes, filename="Sig.zip")
+
+
+@pytest.mark.anyio
+async def test_import_rejects_html_too_large_after_repeated_images(monkeypatch):
+    from app.services import m365_signature_import as module
+
+    monkeypatch.setattr(module, "_MAX_EMBEDDED_IMAGE_BYTES", 400)
+    zip_bytes = _make_zip(
+        {
+            "Sig.htm": b'<img src="files/a.png">' * 4,
+            "files/a.png": b"\x89PNG" * 40,  # ~220 chars encoded: passes per-image cap
+        }
+    )
+    with pytest.raises(ValueError, match="too large once its images are embedded"):
+        await import_outlook_signature(zip_bytes, filename="Sig.zip")
+
+
+@pytest.mark.anyio
+async def test_import_rejects_oversized_image_before_decoding(monkeypatch):
+    from PIL import Image
+
+    from app.services import m365_signature_import as module
+
+    monkeypatch.setattr(module, "_MAX_CONVERT_PIXELS", 100)
+    buffer = io.BytesIO()
+    Image.new("RGB", (20, 20), "red").save(buffer, format="BMP")
+    zip_bytes = _make_zip(
+        {"Sig.htm": b'<img src="files/a.bmp">', "files/a.bmp": buffer.getvalue()}
+    )
+    with pytest.raises(ValueError, match="too large"):
+        await import_outlook_signature(zip_bytes, filename="Sig.zip")

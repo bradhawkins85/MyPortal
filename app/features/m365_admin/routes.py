@@ -468,7 +468,6 @@ async def import_signature_zip(request: Request):
         parsed = await import_outlook_signature(
             zip_bytes,
             filename=filename,
-            uploads_root=_main()._private_uploads_path,
         )
     except ValueError as exc:
         return await _render_import_error(request, user, company_id, str(exc))
