@@ -444,7 +444,7 @@ async def import_signature_page(request: Request):
     user, company_id, redirect = await _signature_context(request, write=True)
     if redirect:
         return redirect
-    return _render_import_page(request, user, company_id, form_values={})
+    return await _render_import_page(request, user, company_id, form_values={})
 
 
 @router.post("/m365/signatures/import")
