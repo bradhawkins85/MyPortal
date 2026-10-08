@@ -976,6 +976,7 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
     # Edges under the device cards; labels are drawn after the cards so they stay readable.
     labels: list[str] = []
     side_slots: dict[str, int] = {}
+    topo_slots: dict[str, dict[str, int]] = {}
     pair_counts: dict[tuple[str, str], int] = {}
     for index, edge in enumerate(graph.edges):
         a, b = graph.nodes[edge.a], graph.nodes[edge.b]
@@ -1023,7 +1024,22 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
             if not port:
                 continue
             if topology:
-                labels.append(_label("nm-port", point[0], point[1], escape(_clip(port, 18)), anchor=point[2]))
+                # Place the port label right next to the device icon, on the
+                # side where the link leaves; stack multiple ports vertically.
+                peer = b if node is a else a
+                if abs(node.anchor[0] - peer.anchor[0]) < 1 or node.anchor[0] < peer.anchor[0]:
+                    side = "right"
+                    x = node.anchor[0] + ICON / 2 + 8
+                    anchor = "start"
+                else:
+                    side = "left"
+                    x = node.anchor[0] - ICON / 2 - 8
+                    anchor = "end"
+                slots = topo_slots.setdefault(node.id, {"right": 0, "left": 0})
+                slot = slots[side]
+                slots[side] = slot + 1
+                y = node.anchor[1] - 8 + slot * 13
+                labels.append(_label("nm-port", x, y, escape(_clip(port, 18)), anchor=anchor))
                 continue
             if edge.lane is not None:
                 # Rack-internal links leave from the card's right edge; stack
