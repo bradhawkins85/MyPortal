@@ -66,6 +66,10 @@ LANE_W = 12
 CARD_W = 150
 ICON = 40
 LINE_H = 13
+# Vertical pitch between stacked port names and link labels in the topology
+# view. Wider than LINE_H because those labels carry a white halo (see
+# _label) that would otherwise make two adjacent lines merge into one blob.
+TOPO_LINE_H = 16
 SITE_PAD = 18
 SITE_HEADER = 34
 RACK_HEADER = 26
@@ -931,6 +935,19 @@ def _topology_path(a: Node, b: Node, bend: float) -> tuple[str, tuple[float, flo
     return (path, mid, right_label, left_label) if flip else (path, mid, left_label, right_label)
 
 
+def _link_label_parts(edge: Edge) -> list[str]:
+    """The textual parts of a link's label, in display order.
+
+    Wireless links lead with their frequency, distance and signal; every other
+    medium leads with the label. A count of bundled links is appended last.
+    """
+    ordered = (*edge.details, edge.label) if edge.medium == "wireless" else (edge.label, *edge.details)
+    parts = [part for part in ordered if part]
+    if edge.count > 1:
+        parts.append(f"×{edge.count}")
+    return parts
+
+
 def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
                interactive: bool = False) -> str:
     """Draw the graph as a standalone SVG document."""
@@ -978,6 +995,25 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
     side_slots: dict[str, int] = {}
     topo_slots: dict[str, dict[str, int]] = {}
     pair_counts: dict[tuple[str, str], int] = {}
+    # In the topology view a device can have several ports (and their link
+    # labels) leaving the same side. Count each side's lines up front so the
+    # block can be centred on the icon rather than drifting down onto the name.
+    topo_line_counts: dict[str, dict[str, int]] = {}
+    if topology:
+        for edge in graph.edges:
+            if detail == "overview" or edge.medium == "subnet":
+                continue
+            a, b = graph.nodes[edge.a], graph.nodes[edge.b]
+            a_labelled = edge.medium != "wireless" and bool(_link_label_parts(edge))
+            for node, peer, is_a, port in ((a, b, True, edge.a_port), (b, a, False, edge.b_port)):
+                if not port and not (is_a and a_labelled):
+                    continue
+                if abs(node.anchor[0] - peer.anchor[0]) < 1 or node.anchor[0] < peer.anchor[0]:
+                    side = "right"
+                else:
+                    side = "left"
+                counts = topo_line_counts.setdefault(node.id, {"right": 0, "left": 0})
+                counts[side] += (1 if port else 0) + (1 if (is_a and a_labelled) else 0)
     for index, edge in enumerate(graph.edges):
         a, b = graph.nodes[edge.a], graph.nodes[edge.b]
         pair = tuple(sorted((edge.a, edge.b)))
@@ -1003,13 +1039,10 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
             continue
         # A wireless link's frequency, distance and signal matter most, so
         # they lead and survive when the label is shortened.
-        ordered = (*edge.details, edge.label) if edge.medium == "wireless" else (edge.label, *edge.details)
-        text_parts = [part for part in ordered if part]
+        text_parts = _link_label_parts(edge)
         # In the topology view a label must fit between the two devices.
         room = abs(a.anchor[0] - b.anchor[0]) - ICON - 24
         fit = max(12, int(room / 5.6)) if topology and room > 0 else 60
-        if edge.count > 1:
-            text_parts.append(f"×{edge.count}")
         topo_edge_label: str | None = None
         if topology and edge.medium != "wireless" and text_parts:
             # Rendered in the port-label loop below, beside the a-side port name.
@@ -1040,19 +1073,22 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
                     x = node.anchor[0] - ICON / 2 - 8
                     anchor = "end"
                 slots = topo_slots.setdefault(node.id, {"right": 0, "left": 0})
-                slot = slots[side]
-                y = node.anchor[1] - 8 + slot * 13
+                total = topo_line_counts.get(node.id, {"right": 0, "left": 0})[side]
+                # Centre this side's block of port names and link labels on the
+                # icon so several stacked labels stay clear of the device name.
+                base = node.anchor[1] - (total - 1) * TOPO_LINE_H / 2
+                y = base + slots[side] * TOPO_LINE_H
                 if port:
                     labels.append(_label("nm-port", x, y, escape(_clip(port, 18)), anchor=anchor))
                 # The link's label sits on the line under its a-side port name,
                 # so it reads as that port's annotation rather than floating on
                 # the line between the two devices.
                 if node is a and topo_edge_label:
-                    labels.append(_label("nm-edge-label", x, y + (13 if port else 0),
+                    labels.append(_label("nm-edge-label", x, y + (TOPO_LINE_H if port else 0),
                                          topo_edge_label, anchor=anchor))
-                    slots[side] = slot + (2 if port else 1)
+                    slots[side] += (2 if port else 1)
                 else:
-                    slots[side] = slot + 1
+                    slots[side] += 1
                 continue
             if edge.lane is not None:
                 # Rack-internal links leave from the card's right edge; stack
