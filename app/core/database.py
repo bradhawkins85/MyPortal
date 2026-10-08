@@ -157,8 +157,9 @@ class Database:
                 autocommit=True,
                 minsize=1,
                 maxsize=10,
+                # wait_timeout is a MySQL/MariaDB server variable, not an
+                # aiomysql connection option. Recycle via the pool instead.
                 pool_recycle=600,
-                wait_timeout=self._settings.db_pool_wait_timeout,
                 init_command="SET time_zone = '+00:00'",
             )
 
