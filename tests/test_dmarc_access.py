@@ -135,3 +135,23 @@ def test_dmarc_range_rejects_more_than_one_year():
             datetime(2025, 1, 1, tzinfo=timezone.utc),
             datetime(2026, 1, 3, tzinfo=timezone.utc),
         )
+
+
+def test_dmarc_range_returns_naive_utc_datetimes():
+    """Regression test: _range must return naive UTC datetimes so the MySQL
+    driver formats them as 'YYYY-MM-DD HH:MM:SS' without a '+00:00' suffix
+    that would break DATETIME column comparisons."""
+    from datetime import datetime, timezone
+
+    start, end = routes._range(
+        datetime(2025, 1, 1, tzinfo=timezone.utc),
+        datetime(2025, 1, 16, tzinfo=timezone.utc),
+    )
+
+    assert start == datetime(2025, 1, 1)
+    assert end == datetime(2025, 1, 16)
+    assert start.tzinfo is None
+    assert end.tzinfo is None
+    # str() on a naive datetime must NOT include a timezone offset
+    assert "+" not in str(start)
+    assert "+" not in str(end)

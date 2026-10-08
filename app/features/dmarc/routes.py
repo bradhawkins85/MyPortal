@@ -61,7 +61,13 @@ def _range(start: datetime | None, end: datetime | None) -> tuple[datetime, date
         raise HTTPException(
             400, "Date range must be positive and no more than 366 days"
         )
-    return start.astimezone(timezone.utc), end.astimezone(timezone.utc)
+    # Return naive UTC datetimes so the MySQL driver formats them as
+    # 'YYYY-MM-DD HH:MM:SS' without a '+00:00' suffix that can break
+    # comparisons against DATETIME columns.
+    return (
+        start.astimezone(timezone.utc).replace(tzinfo=None),
+        end.astimezone(timezone.utc).replace(tzinfo=None),
+    )
 
 
 @router.get("/dmarc", response_class=HTMLResponse)
