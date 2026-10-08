@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator, Iterable, Any
@@ -158,7 +159,6 @@ class Database:
                 minsize=1,
                 maxsize=10,
                 pool_recycle=600,
-                wait_timeout=self._settings.db_pool_wait_timeout,
                 init_command="SET time_zone = '+00:00'",
             )
 
@@ -192,7 +192,13 @@ class Database:
         else:
             if not self._pool:
                 raise RuntimeError("Database pool not initialised")
-            conn = await self._pool.acquire()
+            timeout = self._settings.db_pool_wait_timeout
+            try:
+                conn = await asyncio.wait_for(self._pool.acquire(), timeout=timeout)
+            except asyncio.TimeoutError:
+                raise TimeoutError(
+                    f"Timed out waiting {timeout}s for a free MySQL connection from the pool"
+                ) from None
             try:
                 yield conn
             finally:
