@@ -10,6 +10,7 @@
   let attemptResponseBody = null;
   let attemptResponseStatus = null;
   let attemptResponseError = null;
+  let deletionRulesModal = null;
 
   const OPERATORS = [
     ['equals', 'is'],
@@ -671,6 +672,11 @@
     openModal(modal, trigger);
   }
 
+  function openDeletionRulesModal(trigger) {
+    if (!deletionRulesModal) return;
+    openModal(deletionRulesModal, trigger);
+  }
+
   function validateRule(form) {
     clearRuleErrors(form);
     let valid = true;
@@ -749,6 +755,18 @@
   function bindDeletionRules() {
     const modal = query('webhook-deletion-rule-modal');
     const form = ruleForm();
+    deletionRulesModal = query('webhook-deletion-rules-modal');
+
+    // Bind the Actions menu item to open the rules list modal
+    document.querySelectorAll('[data-deletion-rules-modal-open]').forEach((button) => {
+      button.addEventListener('click', () => openDeletionRulesModal(button));
+    });
+
+    // Bind dismissal for the rules list modal
+    if (deletionRulesModal) {
+      bindModalDismissal(deletionRulesModal);
+    }
+
     if (!modal || !form) {
       return;
     }

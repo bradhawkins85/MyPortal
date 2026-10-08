@@ -53,7 +53,7 @@
 {% endblock %}
 {% block header_actions %}
   {{ page_header_actions([
-    {"label": "New deletion rule", "variant": "primary", "attrs": {"data-deletion-rule-new": true, "aria-haspopup": "dialog", "aria-controls": "webhook-deletion-rule-modal"}},
+    {"label": "Manage deletion rules", "attrs": {"data-deletion-rules-modal-open": true, "aria-haspopup": "dialog", "aria-controls": "webhook-deletion-rules-modal"}},
     {"label": "Delete all failed", "variant": "danger", "attrs": {"data-webhook-delete-status": "failed"}},
     {"label": "Delete all succeeded", "variant": "danger", "attrs": {"data-webhook-delete-status": "succeeded"}},
   ], menu_id="webhook-page-actions") }}
@@ -190,55 +190,10 @@
   <header class="card__header card__header--stacked">
     <div>
       <h2 class="card__title" id="webhook-cleanup-title">Automatic cleanup</h2>
-      <p class="card__subtitle">Deletion rules remove matching entries and their stored attempts first. The retention rule runs last and sweeps up whatever is left.</p>
+      <p class="card__subtitle">The retention rule sweeps up whatever remains after deletion rules have run.</p>
     </div>
   </header>
   <div class="card__body whm-cleanup__body">
-    <div class="whm-cleanup__heading">
-      <h3 class="scf-panel__title">Deletion rules</h3>
-      {% if deletion_rules %}
-        <button type="button" class="button button--ghost button--small" data-deletion-rule-new aria-haspopup="dialog" aria-controls="webhook-deletion-rule-modal">Add rule</button>
-      {% endif %}
-    </div>
-    {% if deletion_rules %}
-      <ul class="scf-list whm-rules" id="webhook-deletion-rules">
-        {% for rule in deletion_rules %}
-          <li class="scf-item{% if not rule.enabled %} scf-item--inactive{% endif %}" data-deletion-rule data-rule='{{ rule|tojson }}'>
-            <div class="scf-item__main">
-              <div class="scf-item__heading">
-                <span class="scf-item__label whm-rule__name">{{ rule.name }}</span>
-              </div>
-              <ul class="scf-item__chips" aria-label="Rule details">
-                {% if rule.enabled %}
-                  <li class="scf-chip sif-chip--optional">Enabled</li>
-                {% else %}
-                  <li class="scf-chip scf-chip--muted">Disabled</li>
-                {% endif %}
-                {% if rule.execution_type == 'scheduled' %}
-                  <li class="scf-chip scf-chip--logic">Scheduled · <code>{{ rule.cron_expression or 'no schedule' }}</code> UTC</li>
-                  {% if rule.enabled and rule.next_run_at %}<li class="scf-chip">Next run <span data-utc="{{ rule.next_run_at }}"></span></li>{% endif %}
-                  {% if rule.last_run_at %}<li class="scf-chip scf-chip--muted">Last run <span data-utc="{{ rule.last_run_at }}"></span></li>{% endif %}
-                {% else %}
-                  <li class="scf-chip scf-chip--logic">After each webhook event</li>
-                {% endif %}
-              </ul>
-              <p class="scf-item__help whm-rule__summary">Deletes entries where {% for condition in rule.conditions %}{% if not loop.first %} and {% endif %}<code>{{ condition.field }}</code> {{ whm_operator_labels.get(condition.operator, condition.operator) }}{% if condition.operator not in ('is_empty', 'is_not_empty') %} “{{ condition.value if condition.value is not none else '' }}”{% endif %}{% endfor %}.</p>
-            </div>
-            <div class="scf-item__actions">
-              <button type="button" class="button button--ghost button--small" data-deletion-rule-edit aria-haspopup="dialog" aria-controls="webhook-deletion-rule-modal">Edit<span class="visually-hidden"> {{ rule.name }}</span></button>
-              <button type="button" class="button button--danger button--small" data-deletion-rule-delete>Delete<span class="visually-hidden"> {{ rule.name }}</span></button>
-            </div>
-          </li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <div class="scf-empty">
-        <p class="scf-empty__title">No deletion rules yet</p>
-        <p class="text-muted">Add a rule to clear out noise automatically, for example successful health-check pings or events for a retired endpoint.</p>
-        <button type="button" class="button button--ghost button--small" data-deletion-rule-new aria-haspopup="dialog" aria-controls="webhook-deletion-rule-modal">Add a rule</button>
-      </div>
-    {% endif %}
-
     <form class="whm-retention" data-retention-form novalidate aria-labelledby="webhook-retention-title">
       <div class="whm-cleanup__heading">
         <h3 class="scf-panel__title" id="webhook-retention-title">Final retention</h3>
@@ -291,6 +246,67 @@
   <option value="payload."></option>
   <option value="metadata."></option>
 </datalist>
+
+<div class="modal" id="webhook-deletion-rules-modal" role="dialog" aria-modal="true" aria-labelledby="webhook-deletion-rules-title" aria-hidden="true" hidden>
+  <div class="modal__panel modal__panel--wide">
+    <header class="modal__header">
+      <div>
+        <p class="scf-preview__eyebrow">Automatic cleanup</p>
+        <h2 class="modal__title" id="webhook-deletion-rules-title">Deletion rules</h2>
+        <p class="scf-editor__subtitle">Rules remove matching entries and their stored attempts before the retention sweep runs.</p>
+      </div>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close deletion rules"></button>
+    </header>
+    <div class="modal__body">
+      <div class="whm-cleanup__heading">
+        <h3 class="scf-panel__title">Rules</h3>
+        <button type="button" class="button button--ghost button--small" data-deletion-rule-new aria-haspopup="dialog" aria-controls="webhook-deletion-rule-modal">Add rule</button>
+      </div>
+      {% if deletion_rules %}
+        <ul class="scf-list whm-rules" id="webhook-deletion-rules">
+          {% for rule in deletion_rules %}
+            <li class="scf-item{% if not rule.enabled %} scf-item--inactive{% endif %}" data-deletion-rule data-rule='{{ rule|tojson }}'>
+              <div class="scf-item__main">
+                <div class="scf-item__heading">
+                  <span class="scf-item__label whm-rule__name">{{ rule.name }}</span>
+                </div>
+                <ul class="scf-item__chips" aria-label="Rule details">
+                  {% if rule.enabled %}
+                    <li class="scf-chip sif-chip--optional">Enabled</li>
+                  {% else %}
+                    <li class="scf-chip scf-chip--muted">Disabled</li>
+                  {% endif %}
+                  {% if rule.execution_type == 'scheduled' %}
+                    <li class="scf-chip scf-chip--logic">Scheduled · <code>{{ rule.cron_expression or 'no schedule' }}</code> UTC</li>
+                    {% if rule.enabled and rule.next_run_at %}<li class="scf-chip">Next run <span data-utc="{{ rule.next_run_at }}"></span></li>{% endif %}
+                    {% if rule.last_run_at %}<li class="scf-chip scf-chip--muted">Last run <span data-utc="{{ rule.last_run_at }}"></span></li>{% endif %}
+                  {% else %}
+                    <li class="scf-chip scf-chip--logic">After each webhook event</li>
+                  {% endif %}
+                </ul>
+                <p class="scf-item__help whm-rule__summary">Deletes entries where {% for condition in rule.conditions %}{% if not loop.first %} and {% endif %}<code>{{ condition.field }}</code> {{ whm_operator_labels.get(condition.operator, condition.operator) }}{% if condition.operator not in ('is_empty', 'is_not_empty') %} “{{ condition.value if condition.value is not none else '' }}”{% endif %}{% endfor %}.</p>
+              </div>
+              <div class="scf-item__actions">
+                <button type="button" class="button button--ghost button--small" data-deletion-rule-edit aria-haspopup="dialog" aria-controls="webhook-deletion-rule-modal">Edit<span class="visually-hidden"> {{ rule.name }}</span></button>
+                <button type="button" class="button button--danger button--small" data-deletion-rule-delete>Delete<span class="visually-hidden"> {{ rule.name }}</span></button>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <div class="scf-empty">
+          <p class="scf-empty__title">No deletion rules yet</p>
+          <p class="text-muted">Add a rule to clear out noise automatically, for example successful health-check pings or events for a retired endpoint.</p>
+          <button type="button" class="button button--ghost button--small" data-deletion-rule-new aria-haspopup="dialog" aria-controls="webhook-deletion-rule-modal">Add a rule</button>
+        </div>
+      {% endif %}
+    </div>
+    <footer class="modal__footer">
+      <span class="scf-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-modal-close>Close</button>
+    </footer>
+  </div>
+</div>
 
 <div class="modal scf-modal" id="webhook-deletion-rule-modal" role="dialog" aria-modal="true" aria-labelledby="webhook-rule-modal-title" aria-hidden="true" hidden>
   <form class="modal__panel modal__panel--wide scf-editor whm-rule-editor" data-deletion-rule-form novalidate>
