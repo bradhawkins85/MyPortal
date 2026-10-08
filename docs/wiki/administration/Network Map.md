@@ -48,12 +48,14 @@ every asset.
 | --- | --- | --- |
 | Overview | Icons, names and links | – |
 | Standard | Types, IP addresses, port names, wireless frequency/distance/signal | A device list |
-| Detailed | Every interface, radio settings (mode, frequency, width, SSID, azimuth), serial and OS | A full inventory with interfaces and links |
+| Detailed | Every interface, radio settings (mode, frequency, width, SSID, azimuth), serial and OS | A full inventory with interfaces and links, plus device identification images |
 
 Choose the **device types** to include (quick picks: all, types in use, network only) and,
 for PDF, the paper size. The map is scaled to fit one page in the best orientation. PNG
 exports are rendered at up to 3× resolution in the browser. Exports are recorded in the
 audit log.
+
+Detailed PDF exports append identification pages for the devices visible on the map. These pages use product images attached to the rack item first, device images second, and accessible asset photos as the final fallback. Devices without an available image are omitted from the identification pages. Images are embedded in the PDF for offline use.
 
 ## Asset types
 

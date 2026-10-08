@@ -10,6 +10,11 @@
   .map-page { page-break-after: {{ 'always' if inventory else 'auto' }}; }
   svg.pdf-map { display: block; width: {{ map_width_mm }}mm; height: auto; margin: 0 auto; }
   .inventory { page: inventory; }
+  .identification { page: inventory; break-before: page; }
+  .identification__device { width: 48mm; }
+  .identification__images figure { display: inline-block; width: 58mm; margin: 2mm; vertical-align: top; }
+  .identification__images img { display: block; max-width: 58mm; max-height: 46mm; margin: 0 auto; }
+  .identification__images figcaption { font-size: 7.5pt; margin-top: 2mm; text-align: center; color: #475569; }
   h1 { font-size: 15pt; margin: 0 0 2mm; }
   .subtitle { color: #475569; font-size: 8.5pt; margin: 0 0 5mm; }
   table { width: 100%; border-collapse: collapse; font-size: 8pt; }
@@ -37,6 +42,19 @@
       {% if detail == 'detailed' %}<td>{% if row.interfaces %}<ul>{% for interface in row.interfaces %}<li{% if interface.radio %} class="radio"{% endif %}>{{ interface.name }}{% if interface.ip %} · <code>{{ interface.ip }}</code>{% endif %}{% if interface.mac %} · <code>{{ interface.mac }}</code>{% endif %}{% if interface.radio %} · {{ interface.radio }}{% elif interface.speed %} · {{ interface.speed }}{% endif %}{% if interface.vlan %} · VLAN {{ interface.vlan }}{% endif %}</li>{% endfor %}</ul>{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
       <td>{% if row.links %}<ul>{% for link in row.links %}<li>{% if link.port %}{{ link.port }} → {% endif %}{{ link.peer }}{% if link.peer_port %} · {{ link.peer_port }}{% endif %} <span class="muted">({{ link.medium }}{% if link.details %}, {{ link.details|join(', ') }}{% endif %}{% if link.label %}, {{ link.label }}{% endif %}{% if link.count > 1 %}, ×{{ link.count }}{% endif %})</span></li>{% endfor %}</ul>{% else %}<span class="muted">—</span>{% endif %}</td>
     </tr>{% endfor %}</tbody>
+  </table>
+</section>{% endif %}
+{% if detail == 'detailed' and identification %}<section class="identification">
+  <h1>Device identification</h1>
+  <p class="subtitle">{{ subtitle }}</p>
+  <table>
+    <thead><tr><th class="identification__device">Device</th><th>Identification images</th></tr></thead>
+    <tbody>
+    {% for item in identification %}{% for images in item.images|batch(2) %}<tr>
+      <td><strong>{{ item.name }}</strong>{% if not loop.first %} <span class="muted">(continued)</span>{% endif %}<br>{{ item.type }}<br>{{ item.site }}{% if item.rack %}<br>{{ item.rack }}{% endif %}{% for ip in item.ips %}<br><code>{{ ip }}</code>{% endfor %}{% for label, value in item.facts if label == 'Serial' %}<br><span class="muted">{{ label }}: {{ value }}</span>{% endfor %}<br><span class="muted">{{ item.source }}</span></td>
+      <td class="identification__images">{% for image in images %}<figure><img src="{{ image.src }}" alt="{{ item.name }} — {{ item.source }}">{% if image.caption %}<figcaption>{{ image.caption }}</figcaption>{% endif %}</figure>{% endfor %}</td>
+    </tr>{% endfor %}{% endfor %}
+    </tbody>
   </table>
 </section>{% endif %}
 </body>

@@ -18,6 +18,6 @@ from app.core.features import FeaturePack
 
 from .routes import router
 
-PACK = FeaturePack(slug="network_map", version="1.0.0", routers=(router,))
+PACK = FeaturePack(slug="network_map", version="1.1.0", routers=(router,))
 
 __all__ = ["PACK"]
