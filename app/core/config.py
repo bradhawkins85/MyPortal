@@ -140,6 +140,17 @@ class Settings(BaseSettings):
     database_user: str | None = Field(default=None, validation_alias="DB_USER")
     database_password: str | None = Field(default=None, validation_alias="DB_PASSWORD")
     database_name: str | None = Field(default=None, validation_alias="DB_NAME")
+    db_pool_wait_timeout: float = Field(
+        default=10.0,
+        ge=0.5,
+        le=600,
+        validation_alias="DB_POOL_WAIT_TIMEOUT",
+        description=(
+            "Seconds to wait for a free connection from the MySQL pool before "
+            "raising instead of blocking forever when the pool is exhausted. "
+            "Default: 10."
+        ),
+    )
     migration_lock_timeout: int = Field(
         default=60, validation_alias="MIGRATION_LOCK_TIMEOUT"
     )
@@ -148,6 +159,24 @@ class Settings(BaseSettings):
         description="Run migrations during application startup (development/test only).",
     )
     redis_url: str | None = Field(default=None, validation_alias="REDIS_URL")
+    redis_socket_timeout: float = Field(
+        default=5.0,
+        ge=0.1,
+        le=300,
+        validation_alias="REDIS_SOCKET_TIMEOUT",
+        description=(
+            "Seconds to wait for a Redis response before raising. Prevents a "
+            "half-open connection from blocking a worker indefinitely. "
+            "Default: 5."
+        ),
+    )
+    redis_connect_timeout: float = Field(
+        default=5.0,
+        ge=0.1,
+        le=300,
+        validation_alias="REDIS_CONNECT_TIMEOUT",
+        description="Seconds to wait while establishing a Redis connection. Default: 5.",
+    )
     website_check_interval_seconds: int = Field(default=86400, ge=60, le=2592000)
     website_check_poll_seconds: int = Field(default=30, ge=5, le=3600)
     website_check_lease_seconds: int = Field(default=120, ge=30, le=3600)
