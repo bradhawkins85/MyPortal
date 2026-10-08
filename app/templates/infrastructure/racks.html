@@ -281,8 +281,9 @@
             <template data-outlet-options><option value="">No documented outlet</option>{% for outlet in power_outlets %}<option value="{{ outlet.id }}" data-equipment-id="{{ outlet.equipment_id }}">{{ outlet.label }}</option>{% endfor %}</template>
           </fieldset>
           <section class="rack-dialog__section rack-images" data-rack-images>
+            <input type="hidden" name="image_ids" value="[]" disabled>
             <h3 class="rack-images__heading">Images</h3>
-            <p class="rack-dialog__hint">Photos are stored in this rack's library and can be reused across items of the same type. Attach the ones that belong to this item.</p>
+            <p class="rack-dialog__hint">Photos are stored in this rack's library and can be reused across items of the same type. Choose images for this item, then save changes to keep your selection.</p>
             {% for kind, label in [('device', 'Device'), ('product', 'Product')] %}
             <fieldset class="rack-images__panel" data-image-kind="{{ kind }}">
               <legend>{{ label }} images</legend>
@@ -301,7 +302,7 @@
               </div>
             </fieldset>
             {% endfor %}
-            <p class="rack-dialog__hint" data-image-status hidden></p>
+            <p class="rack-dialog__hint" data-image-status role="status" aria-live="polite" hidden></p>
           </section>
         </div>
         <div class="rack-dialog__section rack-fields" data-reservation-fields hidden>

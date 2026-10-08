@@ -137,6 +137,33 @@ async def detach(company_id: int, equipment_id: int, image_id: int) -> None:
         (company_id, equipment_id, image_id))
 
 
+async def validate_selection(company_id: int, item_type: str, image_ids: list[int]) -> None:
+    """Validate every selection before the rack item or its attachments change."""
+    item_type = rack_item_types.normalise(item_type)
+    for image_id in image_ids:
+        image = await get_image(company_id, image_id)
+        if not image:
+            raise ValueError("Image not found in this company's library")
+        if image["item_type"] != item_type:
+            raise ValueError("Image type does not match this rack item")
+
+
+async def save_selection(company_id: int, equipment_id: int, image_ids: list[int]) -> None:
+    """Persist the form's selected images, leaving the shared library untouched."""
+    item = await db.fetch_one(
+        "SELECT item_type FROM rack_equipment WHERE id=%s AND company_id=%s", (equipment_id, company_id))
+    if not item:
+        raise ValueError("Rack item not found")
+    await validate_selection(company_id, item["item_type"], image_ids)
+    previous = await list_equipment_images(company_id, equipment_id)
+    old_ids = {int(image["id"]) for images in previous.values() for image in images}
+    selected_ids = set(image_ids)
+    for image_id in selected_ids - old_ids:
+        await attach(company_id, equipment_id, image_id)
+    for image_id in old_ids - selected_ids:
+        await detach(company_id, equipment_id, image_id)
+
+
 async def list_equipment_images(company_id: int, equipment_id: int) -> dict[str, list[dict[str, Any]]]:
     """Return this item's attached images grouped by kind."""
     rows = list(await db.fetch_all(

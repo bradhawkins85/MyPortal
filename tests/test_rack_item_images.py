@@ -177,7 +177,7 @@ def test_template_and_js_wire_the_gallery():
         assert marker in template, marker
     for endpoint in ("rack-item-images/library", "rack-item-images/import-shop",
                      "rack-equipment/${encodeURIComponent(editingId)}/images",
-                     "addEventListener('open', load)"):
+                     "addEventListener('rack-dialog-open'"):
         assert endpoint in script, endpoint
 
 
@@ -270,3 +270,70 @@ def test_repo_shop_lookup_prefers_company_and_type_without_exposing_captions(mon
     assert "ORDER BY (company_id=%s AND item_type=%s) DESC" in query
     assert "caption" not in query
     assert params == (9, "product", 2, "switch")
+
+
+@pytest.mark.parametrize("editing", [True, False])
+def test_save_form_persists_selected_images(monkeypatch, editing):
+    from types import SimpleNamespace
+    from starlette.datastructures import FormData
+    from app.features.assets import routes
+
+    monkeypatch.setattr(routes, "_infrastructure_write_context", AsyncMock(return_value=({"id": 3}, 1, None)))
+    monkeypatch.setattr(routes.audit_service, "record", AsyncMock())
+    monkeypatch.setattr(routes, "_main", lambda: SimpleNamespace(flash_redirect=lambda *args: routes.Response(status_code=303)))
+    validate = AsyncMock()
+    save = AsyncMock()
+    monkeypatch.setattr(repo, "validate_selection", validate)
+    monkeypatch.setattr(repo, "save_selection", save)
+    monkeypatch.setattr(routes.infrastructure_repo, "place_asset", AsyncMock(return_value=8))
+    monkeypatch.setattr(routes.infrastructure_repo, "update_rack_equipment", AsyncMock())
+    request = AsyncMock()
+    request.form.return_value = FormData({"rack_id": "2", "item_type": "switch", "start_unit": "1",
+                                        "unit_height": "1", "image_ids": "[70, 70, 71]"})
+    response = asyncio.run(routes.edit_rack_equipment(request, 8) if editing else routes.place_rack_asset(request))
+    assert response.status_code == 303
+    validate.assert_awaited_once_with(1, "switch", [70, 71])
+    save.assert_awaited_once_with(1, 8, [70, 71])
+
+
+@pytest.mark.parametrize("raw", ['"70"', '{}', '[true]', '[0]', '["70"]', 'invalid'])
+def test_image_selection_rejects_invalid_form_data(monkeypatch, raw):
+    from app.features.assets import routes
+    validate = AsyncMock()
+    monkeypatch.setattr(repo, "validate_selection", validate)
+    with pytest.raises(ValueError, match="Invalid image selection"):
+        asyncio.run(routes._rack_image_selection({"image_ids": raw}, 1, "switch"))
+    validate.assert_not_awaited()
+
+
+def test_older_forms_preserve_existing_image_selection():
+    from app.features.assets import routes
+    assert asyncio.run(routes._rack_image_selection({}, 1, "switch")) is None
+
+
+@pytest.mark.parametrize("image", [None, {"item_type": "server"}])
+def test_save_rejects_foreign_or_wrong_type_images_before_updating_item(monkeypatch, image):
+    from app.features.assets import routes
+    from starlette.datastructures import FormData
+    monkeypatch.setattr(routes, "_infrastructure_write_context", AsyncMock(return_value=({"id": 3}, 1, None)))
+    monkeypatch.setattr(repo, "get_image", AsyncMock(return_value=image))
+    update = AsyncMock()
+    monkeypatch.setattr(routes.infrastructure_repo, "update_rack_equipment", update)
+    request = AsyncMock()
+    request.form.return_value = FormData({"item_type": "switch", "image_ids": "[70]"})
+    with pytest.raises(routes.HTTPException) as error:
+        asyncio.run(routes.edit_rack_equipment(request, 8))
+    assert error.value.status_code == 422
+    update.assert_not_awaited()
+
+
+def test_save_selection_adds_and_removes_links_without_deleting_library(monkeypatch):
+    _mock_db(monkeypatch, fetch_one=[{"item_type": "switch"}])
+    monkeypatch.setattr(repo, "validate_selection", AsyncMock())
+    monkeypatch.setattr(repo, "list_equipment_images", AsyncMock(return_value={"device": [{"id": 1}], "product": [{"id": 2}]}))
+    attach, detach = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(repo, "attach", attach)
+    monkeypatch.setattr(repo, "detach", detach)
+    asyncio.run(repo.save_selection(1, 8, [2, 3]))
+    attach.assert_awaited_once_with(1, 8, 3)
+    detach.assert_awaited_once_with(1, 8, 1)

@@ -1,0 +1,7 @@
+{
+  "guid": "23e9b60a-7e10-4fdb-9a0b-39900a3faa45",
+  "occurred_at": "2026-10-08T13:11Z",
+  "change_type": "Fix",
+  "summary": "Fix rack image cards rendering as text and persist selected images with Save changes for new and existing rack items, reloading attachments whenever the editor opens.",
+  "content_hash": "03370901384cf17967e6091648ff61e97b2a978f730adc536a707f62e0b8b268"
+}

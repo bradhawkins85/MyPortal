@@ -1158,7 +1158,25 @@ async def resize_rack(request: Request, rack_id: int):
     return _main().flash_redirect(_rack_location(form, rack_id), "Rack size updated.", "success")
 
 
-@router.post("/api/infrastructure/rack-equipment", status_code=201, summary="Place equipment in a rack")
+async def _rack_image_selection(form: Any, company_id: int, item_type: str) -> list[int] | None:
+    raw = form.get("image_ids")
+    if raw is None:
+        return None  # Older clients leave existing attachments untouched.
+    try:
+        image_ids = json.loads(str(raw))
+    except (ValueError, TypeError):
+        raise ValueError("Invalid image selection") from None
+    if (not isinstance(image_ids, list) or len(image_ids) > 100
+            or any(type(value) is not int or value <= 0 for value in image_ids)):
+        raise ValueError("Invalid image selection")
+    image_ids = list(dict.fromkeys(image_ids))
+    await rack_image_repo.validate_selection(company_id, item_type, image_ids)
+    return image_ids
+
+
+@router.post("/api/infrastructure/rack-equipment", status_code=201, summary="Place equipment in a rack",
+             description="Optional image_ids form field contains a JSON list of company library image IDs "
+                         "to attach to the newly placed rack item.")
 async def place_rack_asset(request: Request):
     _user, company_id, redirect = await _infrastructure_write_context(request, "menu.racks")
     if redirect:
@@ -1167,6 +1185,7 @@ async def place_rack_asset(request: Request):
     try:
         asset_id = int(form.get("asset_id")) if form.get("asset_id") else None
         item_type = str(form.get("item_type") or rack_item_types.DEFAULT_KEY)
+        image_ids = await _rack_image_selection(form, company_id, item_type)
         connections = _rack_connections(form, item_type)
         record_id = await infrastructure_repo.place_asset(
             company_id, int(form.get("rack_id")), asset_id, int(form.get("start_unit")),
@@ -1177,6 +1196,8 @@ async def place_rack_asset(request: Request):
             int(form.get("power_draw_watts")) if form.get("power_draw_watts") else None,
             item_type, _optional_text(form, "name"),
             int(form.get("port_count") or 0), **connections)
+        if image_ids is not None:
+            await rack_image_repo.save_selection(company_id, record_id, image_ids)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await audit_service.record(action="infrastructure.rack_equipment.create", request=request,
@@ -1204,7 +1225,9 @@ async def link_rack_item_port(request: Request, equipment_id: int, port_number: 
     return _main().flash_redirect(_rack_location(form), "Port link updated.", "success")
 
 
-@router.post("/api/infrastructure/rack-equipment/{equipment_id}/edit", summary="Edit a rack item")
+@router.post("/api/infrastructure/rack-equipment/{equipment_id}/edit", summary="Edit a rack item",
+             description="Optional image_ids form field contains a JSON list of company library image IDs. "
+                         "Replaces the item's attachments when provided; preserves them when omitted.")
 async def edit_rack_equipment(request: Request, equipment_id: int):
     _user, company_id, redirect = await _infrastructure_write_context(request, "menu.racks")
     if redirect:
@@ -1213,6 +1236,7 @@ async def edit_rack_equipment(request: Request, equipment_id: int):
     try:
         asset_id = int(form.get("asset_id")) if form.get("asset_id") else None
         item_type = str(form.get("item_type") or rack_item_types.DEFAULT_KEY)
+        image_ids = await _rack_image_selection(form, company_id, item_type)
         extra: dict[str, Any] = {}
         if form.get("start_unit"):
             # The full edit form sends the same position and connection
@@ -1226,6 +1250,8 @@ async def edit_rack_equipment(request: Request, equipment_id: int):
             company_id, equipment_id, _optional_text(form, "name"), item_type, asset_id,
             int(form.get("power_draw_watts")) if form.get("power_draw_watts") else None,
             str(form.get("notes") or "").strip()[:1000] or None, **extra)
+        if image_ids is not None:
+            await rack_image_repo.save_selection(company_id, equipment_id, image_ids)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await audit_service.record(action="infrastructure.rack_equipment.update", request=request,
