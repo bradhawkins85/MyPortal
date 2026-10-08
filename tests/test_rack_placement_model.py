@@ -205,7 +205,7 @@ def _place(monkeypatch, asset_row=None, **kwargs):
 
 @pytest.mark.parametrize("key", [
     "server", "switch", "storage", "patch_panel", "kvm", "pdu", "ups", "fan_tray",
-    "shelf", "cable_management",
+    "shelf", "cable_management", "poe_injector",
 ])
 def test_every_catalogue_type_can_be_placed(monkeypatch, key):
     assert _place(monkeypatch, item_type=key, name="Item")[0] == key

@@ -150,6 +150,8 @@ ITEM_TYPES: tuple[RackItemType, ...] = (
     RackItemType("shelf", "Shelf or blanking panel", "Shelf / blank", category=RACK_CATEGORY, active=False),
     RackItemType("cable_management", "Cable management ring or bar", "Cable management",
                  category=RACK_CATEGORY, active=False),
+    RackItemType("poe_injector", "PoE Injector", "PoE Injector", category=RACK_CATEGORY,
+                 connectors=(("data", 2), ("psu", 1)), rear_connectors=("data", "psu")),
 )
 
 BY_KEY = {item_type.key: item_type for item_type in ITEM_TYPES}
