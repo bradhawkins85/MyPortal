@@ -1013,14 +1013,15 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
     # Edges under the device cards; labels are drawn after the cards so they stay readable.
     labels: list[str] = []
     side_slots: dict[str, int] = {}
-    topo_slots: dict[str, dict[str, int]] = {}
+    topo_slots: dict[tuple[str, int], tuple[int, int]] = {}
     pair_counts: dict[tuple[str, str], int] = {}
     # In the topology view a device can have several ports (and their link
-    # labels) leaving the same side. Count each side's lines up front so the
-    # block can be centred on the icon rather than drifting down onto the name.
-    topo_line_counts: dict[str, dict[str, int]] = {}
+    # labels) leaving the same side. Order each side by the connected devices'
+    # drawn positions, rather than link-record order, so labels follow their
+    # branches. Reserve annotation lines and centre the block on the icon.
+    topo_groups: dict[tuple[str, str], list[tuple[float, int, int]]] = {}
     if topology:
-        for edge in graph.edges:
+        for index, edge in enumerate(graph.edges):
             if detail == "overview" or edge.medium == "subnet":
                 continue
             a, b = graph.nodes[edge.a], graph.nodes[edge.b]
@@ -1032,8 +1033,14 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
                     side = "right"
                 else:
                     side = "left"
-                counts = topo_line_counts.setdefault(node.id, {"right": 0, "left": 0})
-                counts[side] += (1 if port else 0) + (1 if (is_a and a_labelled) else 0)
+                lines = (1 if port else 0) + (1 if (is_a and a_labelled) else 0)
+                topo_groups.setdefault((node.id, side), []).append((peer.anchor[1], index, lines))
+        for (node_id, _side), entries in topo_groups.items():
+            total = sum(lines for _peer_y, _index, lines in entries)
+            slot = 0
+            for _peer_y, index, lines in sorted(entries):
+                topo_slots[(node_id, index)] = (slot, total)
+                slot += lines
         # When several links leave the same device, spread their uplink-side
         # port labels along the curves so they fan out instead of stacking
         # on one point. Each uplink end gets a fan position; the main loop
@@ -1107,22 +1114,19 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
                 # away instead of stacking on one point.
                 peer = b if node is a else a
                 if abs(node.anchor[0] - peer.anchor[0]) < 1 or node.anchor[0] < peer.anchor[0]:
-                    side = "right"
                     x = node.anchor[0] + ICON / 2 + 8
                     anchor = "start"
                     fan_value = fan_t.get((edge.a, edge.b))
                     if fan_value is not None:
                         x += _topology_fan_x(a, b, bend, fan_value)
                 else:
-                    side = "left"
                     x = node.anchor[0] - ICON / 2 - 8
                     anchor = "end"
-                slots = topo_slots.setdefault(node.id, {"right": 0, "left": 0})
-                total = topo_line_counts.get(node.id, {"right": 0, "left": 0})[side]
+                slot, total = topo_slots[(node.id, index)]
                 # Centre this side's block of port names and link labels on the
                 # icon so several stacked labels stay clear of the device name.
                 base = node.anchor[1] - (total - 1) * TOPO_LINE_H / 2
-                y = base + slots[side] * TOPO_LINE_H
+                y = base + slot * TOPO_LINE_H
                 if port:
                     labels.append(_label("nm-port", x, y, escape(_clip(port, 18)), anchor=anchor))
                 # The link's label sits on the line under its a-side port name,
@@ -1131,9 +1135,6 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
                 if node is a and topo_edge_label:
                     labels.append(_label("nm-edge-label", x, y + (TOPO_LINE_H if port else 0),
                                          topo_edge_label, anchor=anchor))
-                    slots[side] += (2 if port else 1)
-                else:
-                    slots[side] += 1
                 continue
             if edge.lane is not None:
                 # Rack-internal links leave from the card's right edge; stack
