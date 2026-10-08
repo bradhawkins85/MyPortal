@@ -415,6 +415,48 @@ def test_topology_places_each_device_right_of_its_uplink():
         assert min(ys) <= graph.nodes[parent].y <= max(ys)
 
 
+def test_topology_fans_out_multiple_links_from_one_device():
+    """Several links leaving one device must fan their port labels apart.
+
+    Regression guard for the uplink labels stacking on a single point: a
+    switch with four downlinks used to draw all four of its port names at the
+    same x (the icon's right edge), overlapping into an unreadable column.
+    They now spread out along their curves to distinct x-coordinates.
+    """
+    overview = {
+        "racks": [{"id": 1, "name": "Core", "location": "HQ", "unit_count": 42}],
+        "equipment": [{"id": 1, "rack_id": 1, "asset_id": 1, "start_unit": 30,
+                       "item_type": "switch", "ports": [
+                           {"id": 10, "connector": "data", "display_label": "Port 1", "asset_id": 2},
+                           {"id": 11, "connector": "data", "display_label": "Port 2", "asset_id": 3},
+                           {"id": 12, "connector": "data", "display_label": "Port 3", "asset_id": 4},
+                           {"id": 13, "connector": "data", "display_label": "Port 4", "asset_id": 5}]}],
+        "networks": [], "addresses": [],
+    }
+    extra = {
+        "assets": [
+            {"id": 1, "name": "Core Switch", "type": "switch", "location": "HQ"},
+            {"id": 2, "name": "AP 1", "type": "access_point", "location": "HQ"},
+            {"id": 3, "name": "NVR", "type": "nvr", "location": "HQ"},
+            {"id": 4, "name": "Printer", "type": "other", "location": "HQ"},
+            {"id": 5, "name": "Workstation", "type": "workstation", "location": "HQ"},
+        ],
+        "interfaces": [], "links": [], "relationships": [],
+    }
+    graph = nm.build_graph(overview, extra, nm.MapOptions(layout="topology", detail="standard"))
+    svg = nm.render_svg(graph, title="Map")
+
+    # The switch is the uplink (leftmost device), so its four port labels sit
+    # on the icon's right side and are drawn start-anchored. Their x values
+    # must be distinct -- not stacked on one point.
+    labels = re.findall(
+        r'<text class="nm-port"[^>]*?x="([\d.-]+)" y="([\d.-]+)" text-anchor="(\w+)"[^>]*>([^<]*)</text>',
+        svg)
+    switch_x = sorted(float(x) for x, _y, anchor, _text in labels if anchor == "start")
+    assert len(switch_x) == 4
+    assert len({round(x, 1) for x in switch_x}) == 4, f"uplink labels stacked on one x: {switch_x}"
+
+
 def test_topology_lists_unlinked_devices_separately():
     graph = _graph(include_unlinked=True, hide_unlinked=False)
     svg = nm.render_svg(graph, title="Map")

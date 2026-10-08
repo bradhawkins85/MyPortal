@@ -935,6 +935,26 @@ def _topology_path(a: Node, b: Node, bend: float) -> tuple[str, tuple[float, flo
     return (path, mid, right_label, left_label) if flip else (path, mid, left_label, right_label)
 
 
+def _topology_fan_x(a: Node, b: Node, bend: float, t: float) -> float:
+    """How far past the uplink icon the curve is at ``t`` (a 0.3-ish label sits
+    a little way along the link). With several links leaving the same device
+    each one is nudged a different distance out so its port label fans away
+    instead of every label piling up at the icon's edge.
+
+    ``a`` and ``b`` are the two endpoints (in any order); the curve leaving the
+    left/uplink end is used, and the returned offset is always >= 0.
+    """
+    (ax, _ay), (bx, _by) = a.anchor, b.anchor
+    reach = ICON / 2 + 4
+    if abs(ax - bx) < 1:
+        return 0.0
+    (lx, ly), (rx, ry) = ((bx, _by), (ax, _ay)) if ax > bx else ((ax, _ay), (bx, _by))
+    x1, x2 = lx + reach, rx - reach
+    pull = (x2 - x1) * 0.5
+    p0, p1, p2, p3 = (x1, ly), (x1 + pull, ly + bend), (x2 - pull, ry + bend), (x2, ry)
+    return max(0.0, _bezier(p0, p1, p2, p3, t)[0] - x1)
+
+
 def _link_label_parts(edge: Edge) -> list[str]:
     """The textual parts of a link's label, in display order.
 
@@ -1014,6 +1034,25 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
                     side = "left"
                 counts = topo_line_counts.setdefault(node.id, {"right": 0, "left": 0})
                 counts[side] += (1 if port else 0) + (1 if (is_a and a_labelled) else 0)
+        # When several links leave the same device, spread their uplink-side
+        # port labels along the curves so they fan out instead of stacking
+        # on one point. Each uplink end gets a fan position; the main loop
+        # turns it into a distance out along that link's curve.
+        fan_t: dict[tuple[str, str], float] = {}
+        fan_groups: dict[str, list[tuple[str, str, float]]] = {}
+        for edge in graph.edges:
+            if detail == "overview" or edge.medium in ("subnet", "wireless"):
+                continue
+            a, b = graph.nodes[edge.a], graph.nodes[edge.b]
+            uplink = edge.a if a.anchor[0] <= b.anchor[0] else edge.b
+            other = edge.b if uplink == edge.a else edge.a
+            fan_groups.setdefault(uplink, []).append((edge.a, edge.b, graph.nodes[other].anchor[1]))
+        for uplink, group in fan_groups.items():
+            if len(group) < 2:
+                continue
+            ordered = sorted(group, key=lambda item: item[2])
+            for pos, (ea, eb, _y) in enumerate(ordered):
+                fan_t[(ea, eb)] = max(0.18, min(0.7, 0.42 + (pos - (len(ordered) - 1) / 2) * 0.13))
     for index, edge in enumerate(graph.edges):
         a, b = graph.nodes[edge.a], graph.nodes[edge.b]
         pair = tuple(sorted((edge.a, edge.b)))
@@ -1063,11 +1102,17 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
             if topology:
                 # Place the port label right next to the device icon, on the
                 # side where the link leaves; stack multiple ports vertically.
+                # When several links leave this device, push the uplink-side
+                # label further out along its own curve so the labels fan
+                # away instead of stacking on one point.
                 peer = b if node is a else a
                 if abs(node.anchor[0] - peer.anchor[0]) < 1 or node.anchor[0] < peer.anchor[0]:
                     side = "right"
                     x = node.anchor[0] + ICON / 2 + 8
                     anchor = "start"
+                    fan_value = fan_t.get((edge.a, edge.b))
+                    if fan_value is not None:
+                        x += _topology_fan_x(a, b, bend, fan_value)
                 else:
                     side = "left"
                     x = node.anchor[0] - ICON / 2 - 8
