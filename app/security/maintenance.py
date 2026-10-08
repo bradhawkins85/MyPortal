@@ -1,5 +1,6 @@
 """Reject unsafe work and provide content-negotiated planned-maintenance responses."""
 
+from loguru import logger
 from starlette.datastructures import Headers
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -20,10 +21,25 @@ class MaintenanceMiddleware:
         if path in {"/health", "/healthz", "/readyz", "/upgrade-status"} or path.startswith("/static/"):
             await self.app(scope, receive, send)
             return
-        state = get_public_upgrade_state()
+        try:
+            state = get_public_upgrade_state()
+        except Exception as exc:
+            # Fail open: an unreadable or corrupted state file must not take
+            # the entire portal offline.
+            logger.error(
+                "Maintenance state check failed; allowing request through",
+                path=path, error=str(exc),
+            )
+            await self.app(scope, receive, send)
+            return
         if not state.get("maintenance"):
             await self.app(scope, receive, send)
             return
+        logger.warning(
+            "Blocking request during planned maintenance",
+            path=path, phase=state.get("phase"),
+            upgrade_id=state.get("upgrade_id"),
+        )
         headers = {"Retry-After": "15", "Cache-Control": "no-store"}
         method = scope.get("method", "GET").upper()
         accepts_html = "text/html" in Headers(scope=scope).get("accept", "")

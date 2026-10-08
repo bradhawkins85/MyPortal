@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _STATE_DIR = _PROJECT_ROOT / "var" / "state"
 _SYSTEM_UPDATE_FLAG_PATH = _STATE_DIR / "system_update.flag"
@@ -120,13 +122,20 @@ def get_public_upgrade_state(*, recover_stale: bool = True) -> dict[str, Any]:
             stale = True
         if stale:
             if recover_stale:
-                state = write_upgrade_state(
-                    upgrade_id=str(state.get("upgrade_id", "unknown")),
-                    target_revision=str(state.get("target_revision", "unknown")),
-                    phase="interrupted", message="Upgrade was interrupted; normal service has resumed.",
-                    mode=str(state.get("mode", _DEFAULT_UPGRADE_MODE)), outcome="interrupted",
-                    started_at=state.get("started_at"),
-                )
+                try:
+                    state = write_upgrade_state(
+                        upgrade_id=str(state.get("upgrade_id", "unknown")),
+                        target_revision=str(state.get("target_revision", "unknown")),
+                        phase="interrupted", message="Upgrade was interrupted; normal service has resumed.",
+                        mode=str(state.get("mode", _DEFAULT_UPGRADE_MODE)), outcome="interrupted",
+                        started_at=state.get("started_at"),
+                    )
+                except OSError as exc:
+                    logger.warning(
+                        "Could not persist stale upgrade recovery; using in-memory state",
+                        error=str(exc),
+                    )
+                    state = {**state, "phase": "interrupted", "maintenance": False, "outcome": "interrupted"}
             else:
                 state = {**state, "phase": "interrupted", "maintenance": False, "outcome": "interrupted"}
     allowed = ("schema_version", "upgrade_id", "target_revision", "phase", "started_at",
