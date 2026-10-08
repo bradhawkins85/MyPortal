@@ -18,6 +18,8 @@ from app.core.logging import log_info
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import assets as asset_repo
 from app.repositories import asset_photos as asset_photo_repo
+from app.repositories import rack_item_images as rack_image_repo
+from app.repositories import shop as shop_repo
 from app.repositories import expirations as expiration_repo
 from app.repositories import users as users_repo
 from app.repositories import companies as company_repo
@@ -36,6 +38,7 @@ from app.services import audit as audit_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import automations as automations_service
 from app.services import asset_photos as asset_photo_service
+from app.services import rack_item_images as rack_image_service
 from app.services import asset_types
 from app.services import rack_dashboard
 from app.services import rack_item_types
@@ -2005,6 +2008,183 @@ async def delete_asset_photo(request: Request, asset_id: int, photo_id: int):
     asset_photo_service.remove(company_id, asset_id, item["storage_name"], item["thumbnail_name"])
     await audit_service.record(action="asset.photo.delete", request=request, user_id=int(user["id"]), entity_type="asset", entity_id=asset_id, before={"photo_id": photo_id, "size_bytes": item["size_bytes"]}, metadata={"company_id": company_id})
     return _main().flash_redirect(f"/assets/{asset_id}#asset-photos", "Photo deleted.", "success")
+
+
+async def _rack_image_context(request: Request, *, write: bool = False):
+    main_module = _main()
+    user, membership, _company, company_id, redirect = await _load_asset_context(request, "menu.racks")
+    if redirect:
+        raise HTTPException(status_code=403, detail="Rack access denied")
+    if write and not (user.get("is_super_admin") or main_module._membership_menu_can(
+            user, membership, "menu.racks", write=True)):
+        raise HTTPException(status_code=403, detail="Rack image write access required")
+    return user, company_id
+
+
+def _rack_image_item_type(value: str) -> str:
+    try:
+        return rack_item_types.normalise(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Unknown item type") from exc
+
+
+def _rack_image_kind(value: str) -> str:
+    kind = str(value or "").strip().lower()
+    if kind not in {"device", "product"}:
+        raise HTTPException(status_code=422, detail="Image kind must be device or product")
+    return kind
+
+
+@router.get("/api/infrastructure/rack-item-images/library", response_class=JSONResponse,
+            summary="List rack item library images for a type")
+async def list_rack_item_library(request: Request, item_type: str = Query(...),
+                                 kind: str | None = Query(None)):
+    _user, company_id = await _rack_image_context(request)
+    clean_type = _rack_image_item_type(item_type)
+    kind_value = str(kind or "").strip().lower() if kind else ""
+    clean_kind = kind_value if kind_value in {"device", "product"} else None
+    return JSONResponse(await rack_image_repo.list_library(company_id, clean_type, clean_kind))
+
+
+async def _serve_rack_image(request: Request, image_id: int, variant: str) -> FileResponse:
+    _user, company_id = await _rack_image_context(request)
+    row = await rack_image_repo.get_image(company_id, image_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Image not found")
+    serve = "full" if (variant == "thumb" and not row.get("thumbnail_name")) else variant
+    path = rack_image_service.resolve_rack_image(str(row["storage_name"]), serve)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(path, media_type=str(row.get("content_type") or "image/jpeg"),
+                        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@router.get("/api/infrastructure/rack-item-images/{image_id}", response_class=FileResponse,
+            summary="Serve a rack item image")
+async def get_rack_item_image(request: Request, image_id: int):
+    return await _serve_rack_image(request, image_id, "full")
+
+
+@router.get("/api/infrastructure/rack-item-images/{image_id}/thumb", response_class=FileResponse,
+            summary="Serve a rack item image thumbnail")
+async def get_rack_item_image_thumb(request: Request, image_id: int):
+    return await _serve_rack_image(request, image_id, "thumb")
+
+
+@router.post("/api/infrastructure/rack-item-images", response_class=JSONResponse, status_code=201,
+             summary="Upload a rack item image to the library")
+async def upload_rack_item_image(request: Request, image: UploadFile = File(...),
+                                 item_type: str = Form(...), kind: str = Form("device"),
+                                 caption: str = Form("")):
+    user, company_id = await _rack_image_context(request, write=True)
+    clean_type, clean_kind = _rack_image_item_type(item_type), _rack_image_kind(kind)
+    prepared = await rack_image_service.prepare_rack_image(image, company_id, clean_type, clean_kind)
+    try:
+        image_id, created = await rack_image_repo.create_image(
+            company_id, clean_type, clean_kind,
+            caption=str(caption or "").strip()[:191] or None, uploaded_by=int(user["id"]), **prepared)
+    except Exception:
+        rack_image_service.remove_rack_image(str(prepared["storage_name"]), prepared["thumbnail_name"])
+        raise
+    if not created:
+        # Identical bytes already exist in the library; drop the files just written.
+        rack_image_service.remove_rack_image(str(prepared["storage_name"]), prepared["thumbnail_name"])
+    await audit_service.record(action="infrastructure.rack_item_image.upload", request=request,
+                               user_id=int(user["id"]), entity_type="rack_item_image", entity_id=image_id,
+                               after={"company_id": company_id, "item_type": clean_type, "kind": clean_kind,
+                                      "duplicate": not created}, metadata={"company_id": company_id})
+    return JSONResponse({"id": image_id, "duplicate": not created}, status_code=201 if created else 200)
+
+
+@router.delete("/api/infrastructure/rack-item-images/{image_id}", response_class=JSONResponse,
+               summary="Delete a rack item image from the library")
+async def delete_rack_item_image(request: Request, image_id: int):
+    user, company_id = await _rack_image_context(request, write=True)
+    row = await rack_image_repo.delete_image(company_id, image_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Image not found")
+    rack_image_service.remove_rack_image(str(row["storage_name"]), row.get("thumbnail_name"))
+    await audit_service.record(action="infrastructure.rack_item_image.delete", request=request,
+                               user_id=int(user["id"]), entity_type="rack_item_image", entity_id=image_id,
+                               before={"company_id": company_id, "item_type": row.get("item_type"),
+                                       "kind": row.get("kind")}, metadata={"company_id": company_id})
+    return JSONResponse({"id": image_id, "deleted": True})
+
+
+@router.post("/api/infrastructure/rack-equipment/{equipment_id}/images/{image_id}/attach",
+             response_class=JSONResponse, summary="Attach a library image to a rack item")
+async def attach_rack_item_image(request: Request, equipment_id: int, image_id: int):
+    user, company_id = await _rack_image_context(request, write=True)
+    try:
+        await rack_image_repo.attach(company_id, equipment_id, image_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await audit_service.record(action="infrastructure.rack_item_image.attach", request=request,
+                               user_id=int(user["id"]), entity_type="rack_equipment", entity_id=equipment_id,
+                               after={"company_id": company_id, "image_id": image_id},
+                               metadata={"company_id": company_id})
+    return JSONResponse({"equipment_id": equipment_id, "image_id": image_id, "attached": True})
+
+
+@router.post("/api/infrastructure/rack-equipment/{equipment_id}/images/{image_id}/detach",
+             response_class=JSONResponse, summary="Detach a library image from a rack item")
+async def detach_rack_item_image(request: Request, equipment_id: int, image_id: int):
+    user, company_id = await _rack_image_context(request, write=True)
+    await rack_image_repo.detach(company_id, equipment_id, image_id)
+    await audit_service.record(action="infrastructure.rack_item_image.detach", request=request,
+                               user_id=int(user["id"]), entity_type="rack_equipment", entity_id=equipment_id,
+                               before={"company_id": company_id, "image_id": image_id},
+                               metadata={"company_id": company_id})
+    return JSONResponse({"equipment_id": equipment_id, "image_id": image_id, "detached": True})
+
+
+@router.post("/api/infrastructure/rack-item-images/import-shop", response_class=JSONResponse,
+             status_code=201, summary="Import a shop product image into the library")
+async def import_shop_rack_item_image(request: Request):
+    user, company_id = await _rack_image_context(request, write=True)
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=422, detail="Invalid JSON body") from None
+    payload = payload if isinstance(payload, dict) else {}
+    try:
+        product_id = int(payload.get("product_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="product_id is required") from None
+    clean_type = _rack_image_item_type(str(payload.get("item_type") or ""))
+    clean_kind = _rack_image_kind(str(payload.get("kind") or "product"))
+    product = await shop_repo.get_product_by_id(product_id, include_archived=True, company_id=company_id)
+    image_url = (product or {}).get("image_url")
+    if not image_url:
+        raise HTTPException(status_code=422, detail="That product has no image to import")
+    bundle = rack_image_service.read_shop_product_image(str(image_url))
+    if not bundle:
+        raise HTTPException(status_code=422, detail="That product image cannot be imported")
+    image_bytes, filename, content_type = bundle
+    prepared = await rack_image_service.prepare_bytes_rack_image(
+        image_bytes, filename, company_id, clean_type, clean_kind)
+    try:
+        image_id, created = await rack_image_repo.create_image(
+            company_id, clean_type, clean_kind, source_product_id=product_id,
+            uploaded_by=int(user["id"]), **prepared)
+    except Exception:
+        rack_image_service.remove_rack_image(str(prepared["storage_name"]), prepared["thumbnail_name"])
+        raise
+    if not created:
+        rack_image_service.remove_rack_image(str(prepared["storage_name"]), prepared["thumbnail_name"])
+    await audit_service.record(action="infrastructure.rack_item_image.import_shop", request=request,
+                               user_id=int(user["id"]), entity_type="rack_item_image", entity_id=image_id,
+                               after={"company_id": company_id, "item_type": clean_type, "kind": clean_kind,
+                                      "product_id": product_id, "duplicate": not created},
+                               metadata={"company_id": company_id})
+    return JSONResponse({"id": image_id, "duplicate": not created}, status_code=201 if created else 200)
+
+
+@router.get("/api/infrastructure/rack-equipment/{equipment_id}/images", response_class=JSONResponse,
+            summary="List images attached to a rack item")
+async def list_rack_equipment_images(request: Request, equipment_id: int):
+    _user, company_id = await _rack_image_context(request)
+    return JSONResponse(await rack_image_repo.list_equipment_images(company_id, equipment_id))
 
 
 @router.get("/asset-exports/csv")

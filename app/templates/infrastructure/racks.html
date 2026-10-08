@@ -280,6 +280,29 @@
             <template data-asset-options><option value="">No asset</option><optgroup label="Assets">{% for asset in assets %}<option value="{{ asset.id }}">{{ asset.name }}</option>{% endfor %}</optgroup>{% for group in workspace.link_targets %}<optgroup label="{{ 'This rack' if group.current else 'Rack' }} · {{ group.rack }}" data-rack-items>{% for entry in group.entries %}<option value="item:{{ entry.id }}">{{ entry.name }}</option>{% endfor %}</optgroup>{% endfor %}</template>
             <template data-outlet-options><option value="">No documented outlet</option>{% for outlet in power_outlets %}<option value="{{ outlet.id }}" data-equipment-id="{{ outlet.equipment_id }}">{{ outlet.label }}</option>{% endfor %}</template>
           </fieldset>
+          <section class="rack-dialog__section rack-images" data-rack-images>
+            <h3 class="rack-images__heading">Images</h3>
+            <p class="rack-dialog__hint">Photos are stored in this rack's library and can be reused across items of the same type. Attach the ones that belong to this item.</p>
+            {% for kind, label in [('device', 'Device'), ('product', 'Product')] %}
+            <fieldset class="rack-images__panel" data-image-kind="{{ kind }}">
+              <legend>{{ label }} images</legend>
+              <div class="rack-images__row" data-image-attached-row>
+                <p class="rack-images__rowlabel">On this item</p>
+                <div class="rack-images__grid" data-image-attached role="list" aria-label="Images on this item"></div>
+              </div>
+              <div class="rack-images__row">
+                <p class="rack-images__rowlabel">Library</p>
+                <div class="rack-images__grid" data-image-library role="list" aria-label="Available library images"></div>
+              </div>
+              <div class="rack-images__actions">
+                <label class="rack-images__upload"><input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden data-image-upload><span class="button button--secondary">Upload {{ label|lower }} image</span></label>
+                <label class="rack-images__caption"><span class="sr-only">Caption for new {{ label|lower }} image</span><input class="input" maxlength="191" placeholder="Caption (optional)" data-image-caption></label>
+                {% if kind == 'product' %}<label class="rack-images__caption"><span class="sr-only">Shop product ID to import</span><input class="input" type="number" min="1" inputmode="numeric" placeholder="Shop product ID" data-image-import-product></label><button type="button" class="button button--secondary" data-image-import>Import from shop</button>{% endif %}
+              </div>
+            </fieldset>
+            {% endfor %}
+            <p class="rack-dialog__hint" data-image-status hidden></p>
+          </section>
         </div>
         <div class="rack-dialog__section rack-fields" data-reservation-fields hidden>
           <label class="rack-field"><span>Reservation label <small>optional</small></span><input class="input" name="label" maxlength="191" placeholder="e.g. Future firewall"></label>
