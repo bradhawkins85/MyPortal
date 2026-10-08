@@ -1,11 +1,17 @@
 """Reject unsafe work and provide content-negotiated planned-maintenance responses."""
 
+import asyncio
+
 from loguru import logger
 from starlette.datastructures import Headers
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.services.system_state import get_public_upgrade_state
+
+# Maximum seconds to wait for the (synchronous) state-file check before
+# failing open.  A hung filesystem or stale lock must not stall the event loop.
+_STATE_CHECK_TIMEOUT = 2.0
 
 
 class MaintenanceMiddleware:
@@ -22,10 +28,15 @@ class MaintenanceMiddleware:
             await self.app(scope, receive, send)
             return
         try:
-            state = get_public_upgrade_state()
-        except Exception as exc:
-            # Fail open: an unreadable or corrupted state file must not take
-            # the entire portal offline.
+            # Run in a thread so a slow/hung filesystem read cannot block the
+            # entire event loop (which would stall ALL requests).
+            state = await asyncio.wait_for(
+                asyncio.to_thread(get_public_upgrade_state),
+                timeout=_STATE_CHECK_TIMEOUT,
+            )
+        except (asyncio.TimeoutError, Exception) as exc:
+            # Fail open: an unreadable, slow, or corrupted state file must not
+            # take the entire portal offline.
             logger.error(
                 "Maintenance state check failed; allowing request through",
                 path=path, error=str(exc),
