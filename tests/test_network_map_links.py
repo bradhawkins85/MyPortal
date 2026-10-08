@@ -157,7 +157,12 @@ def test_pdf_svg_scales_to_the_page():
     svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800" class="network-map-svg">'
     assert routes._svg_size(svg) == (1200.0, 800.0)
     fitted = routes._fit_svg(svg)
-    assert 'width="1200"' not in fitted and 'class="pdf-map"' in fitted
+    # The fixed pixel size is stripped so the page CSS can scale the map.
+    assert 'width="1200"' not in fitted and 'height="800"' not in fitted
+    # pdf-map is merged into the renderer's existing class rather than appended
+    # as a second class attribute (a duplicate would make the SVG invalid XML,
+    # which the sanitizer rejects and leaves page one blank).
+    assert 'pdf-map' in fitted and fitted.count('class="') == 1
 
 
 def test_svg_sanitization_removes_active_content_and_keeps_encoded_text():
