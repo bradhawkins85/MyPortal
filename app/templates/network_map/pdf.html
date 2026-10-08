@@ -35,7 +35,7 @@
       <td>{{ row.site }}{% if row.rack %}<br><span class="muted">{{ row.rack }}</span>{% endif %}</td>
       <td>{% for ip in row.ips %}<code>{{ ip }}</code>{% if not loop.last %}<br>{% endif %}{% else %}<span class="muted">—</span>{% endfor %}</td>
       {% if detail == 'detailed' %}<td>{% if row.interfaces %}<ul>{% for interface in row.interfaces %}<li{% if interface.radio %} class="radio"{% endif %}>{{ interface.name }}{% if interface.ip %} · <code>{{ interface.ip }}</code>{% endif %}{% if interface.mac %} · <code>{{ interface.mac }}</code>{% endif %}{% if interface.radio %} · {{ interface.radio }}{% elif interface.speed %} · {{ interface.speed }}{% endif %}{% if interface.vlan %} · VLAN {{ interface.vlan }}{% endif %}</li>{% endfor %}</ul>{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
-      <td>{% if row.links %}<ul>{% for link in row.links %}<li>{% if link.port %}{{ link.port }} → {% endif %}{{ link.peer }}{% if link.peer_port %} · {{ link.peer_port }}{% endif %} <span class="muted">({{ link.medium }}{% if link.details %}, {{ link.details|join(', ') }}{% endif %}{% if link.count > 1 %}, ×{{ link.count }}{% endif %})</span></li>{% endfor %}</ul>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>{% if row.links %}<ul>{% for link in row.links %}<li>{% if link.port %}{{ link.port }} → {% endif %}{{ link.peer }}{% if link.peer_port %} · {{ link.peer_port }}{% endif %} <span class="muted">({{ link.medium }}{% if link.details %}, {{ link.details|join(', ') }}{% endif %}{% if link.label %}, {{ link.label }}{% endif %}{% if link.count > 1 %}, ×{{ link.count }}{% endif %})</span></li>{% endfor %}</ul>{% else %}<span class="muted">—</span>{% endif %}</td>
     </tr>{% endfor %}</tbody>
   </table>
 </section>{% endif %}

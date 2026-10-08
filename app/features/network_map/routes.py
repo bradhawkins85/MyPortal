@@ -222,8 +222,31 @@ def _svg_size(svg: str) -> tuple[float, float]:
 
 
 def _fit_svg(svg: str) -> str:
-    """Let the SVG scale to the PDF page instead of using its pixel size."""
-    return re.sub(r'^<svg([^>]*?) width="[\d.]+" height="[\d.]+"', r'<svg\1 class="pdf-map"', svg, count=1)
+    """Let the SVG scale to the PDF page instead of using its pixel size.
+
+    The renderer already puts a class on the root element, so we merge
+    pdf-map into it rather than appending a second class attribute. A
+    duplicated attribute makes the markup invalid XML; the sanitizer would
+    reject it and fall back to an empty SVG, leaving page one blank.
+    """
+    # Strip the root fixed pixel size so the page CSS can scale the map.
+    for name in ("width", "height"):
+        needle = name + '="'
+        i = svg.find(needle)
+        if i == -1:
+            continue
+        j = svg.index('"', i + len(needle))
+        start = i - 1 if (i > 0 and svg[i - 1] == " ") else i
+        svg = svg[:start] + svg[j + 1:]
+    # Merge the pdf-map class into the existing one (never a duplicate).
+    ci = svg.find('class="')
+    if ci != -1:
+        cj = svg.index('"', ci + 7)
+        svg = svg[:cj] + ' pdf-map' + svg[cj:]
+    else:
+        tag_end = svg.index(">")
+        svg = svg[:tag_end] + ' class="pdf-map"' + svg[tag_end:]
+    return svg
 
 
 def _tag_name(value: str) -> str:
