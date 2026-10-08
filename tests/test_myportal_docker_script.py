@@ -217,8 +217,11 @@ def _upgrade_harness(tmp_path, *, installed: str, latest: str, published: bool) 
     """Shell prelude that stubs out Docker, GitHub and root checks for cmd_upgrade."""
     project_env = tmp_path / ".env"
     project_env.write_text(f"MYPORTAL_VERSION={installed}\n", encoding="utf-8")
+    app_env = tmp_path / "myportal.env"
+    app_env.write_text("REDIS_URL=redis://redis:6379/0\n")
     return (
         f'PROJECT_ENV="{project_env}"\n'
+        f'APP_ENV="{app_env}"\n'
         "require_root() { :; }; require_installed() { :; }; ensure_docker() { :; }\n"
         f"latest_release_tag() {{ printf '%s' '{latest}'; }}\n"
         f"release_published() {{ echo \"published? $1\" >&2; {'true' if published else 'false'}; }}\n"
@@ -332,7 +335,7 @@ def test_compose_file_publishes_the_port_only_on_the_proxy(tmp_path):
     result = _run(f'COMPOSE_FILE="{compose_file}"; write_compose_file')
     assert result.returncode == 0, result.stderr
     services = yaml.safe_load(compose_file.read_text(encoding="utf-8"))["services"]
-    assert set(services) == {"db", "app_blue", "app_green", "proxy"}
+    assert set(services) == {"db", "redis", "app_blue", "app_green", "proxy"}
     assert services["proxy"]["ports"] == ["${HTTP_BIND}:${HTTP_PORT}:8080"]
     for slot in ("blue", "green"):
         app = services[f"app_{slot}"]
@@ -342,6 +345,63 @@ def test_compose_file_publishes_the_port_only_on_the_proxy(tmp_path):
         assert app["environment"]["PORT"] == "8000"
         assert app["environment"]["TRUSTED_PROXIES"] == "${APP_TRUSTED_PROXIES}"
     assert services["app_blue"]["volumes"] == services["app_green"]["volumes"]
+    assert "ports" not in services["redis"]
+    assert services["redis"]["volumes"] == ["redis_data:/data"]
+    assert services["redis"]["healthcheck"]["test"] == ["CMD", "redis-cli", "ping"]
+
+
+@pytest.mark.parametrize("contents", ["", "REDIS_URL=\n", 'export REDIS_URL = ""\n', "# REDIS_URL=old\n"])
+def test_redis_defaults_are_applied_once(tmp_path, contents):
+    app_env = tmp_path / "myportal.env"
+    app_env.write_text(contents + "DB_NAME=existing\n")
+    app_env.chmod(0o600)
+    project_env = tmp_path / ".env"
+    project_env.write_text("")
+    result = _run(
+        f'APP_ENV="{app_env}"; PROJECT_ENV="{project_env}"\n'
+        "ensure_redis_settings\nensure_redis_settings\n"
+        "compose() { [[ $1 == ps ]] || echo \"$*\"; }\nensure_local_redis"
+    )
+    assert result.returncode == 0, result.stderr
+    assert app_env.read_text().count("REDIS_URL=redis://redis:6379/0") == 1
+    assert "DB_NAME=existing" in app_env.read_text()
+    assert app_env.stat().st_mode & 0o777 == 0o600
+    assert result.stderr.strip() == "up -d --no-recreate --pull missing --wait redis"
+
+
+def test_configured_external_redis_is_preserved_and_not_installed(tmp_path):
+    app_env = tmp_path / "myportal.env"
+    contents = 'export REDIS_URL = "rediss://user:secret@cache.internal:6380/2"\n'
+    app_env.write_text(contents)
+    project_env = tmp_path / ".env"
+    project_env.write_text("REDIS_IMAGE=custom:7\n")
+    result = _run(
+        f'APP_ENV="{app_env}"; PROJECT_ENV="{project_env}"\n'
+        "ensure_redis_settings\ncompose() { exit 99; }\nensure_local_redis"
+    )
+    assert result.returncode == 0, result.stderr
+    assert app_env.read_text() == contents
+    assert project_env.read_text() == "REDIS_IMAGE=custom:7\n"
+
+
+def test_existing_redis_container_is_never_pulled_or_recreated(tmp_path):
+    app_env = tmp_path / "myportal.env"
+    app_env.write_text("REDIS_URL=redis://redis:6379/0\n")
+    result = _run(
+        f'APP_ENV="{app_env}"\n'
+        'compose() { if [[ $1 == ps ]]; then echo existing-container; else echo "$*"; fi; }\n'
+        "ensure_local_redis"
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr.strip() == "up -d --no-recreate --pull never --wait redis"
+
+
+def test_upgrade_applies_redis_defaults_even_on_current_release(tmp_path):
+    harness = _upgrade_harness(tmp_path, installed="v1", latest="v1", published=True)
+    (tmp_path / "myportal.env").write_text("REDIS_URL=\n")
+    result = _run(harness + 'deploy_release() { echo "deploy $2"; }\ncmd_upgrade --yes')
+    assert result.returncode == 0, result.stderr
+    assert "deploy v1" in result.stdout
 
 
 def test_proxy_config_applies_only_valid_trusted_proxies(tmp_path):
@@ -387,6 +447,7 @@ def _deploy_harness(tmp_path, *, ready: bool) -> str:
         "BLUE_IMAGE=img:v1\nGREEN_IMAGE=img:v0\nBLUE_VERSION=v1\nGREEN_VERSION=v0\n",
         encoding="utf-8",
     )
+    (tmp_path / "myportal.env").write_text("DB_NAME=myportal\n")
     calls = tmp_path / "calls"
     return (
         f'PROJECT_ENV="{project_env}"; COMPOSE_FILE="{tmp_path}/docker-compose.yml"\n'

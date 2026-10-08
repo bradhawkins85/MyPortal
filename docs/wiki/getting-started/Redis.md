@@ -10,6 +10,16 @@ are not shared between workers.
 
 ## 1. Install Redis
 
+The Baremetal install and upgrade scripts install `redis-server` only when it
+is missing, then start the service without changing its existing configuration.
+Missing or blank `REDIS_URL` settings default to `redis://127.0.0.1:6379/0`.
+
+The Docker install and upgrade script provisions a persistent Redis service
+on the private Compose network, with no published host port. Its default is
+`redis://redis:6379/0`; existing containers are reused without recreation.
+Both deployment paths preserve configured URLs and skip local provisioning
+when the URL points to an external Redis instance.
+
 ### Debian or Ubuntu
 
 Install the distribution package, then enable and start the service:
@@ -76,7 +86,8 @@ REDIS_URL=redis://127.0.0.1:6379/0
 ```
 
 Restart every MyPortal web and worker process after changing this value. An
-empty value disables Redis:
+empty value disables Redis when starting MyPortal manually. Install and upgrade
+scripts replace an empty value with their local connection default:
 
 ```dotenv
 REDIS_URL=

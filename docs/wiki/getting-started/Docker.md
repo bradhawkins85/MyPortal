@@ -26,7 +26,7 @@ The installer:
    `ghcr.io/bradhawkins85/myportal:<release>`. If the image can't be pulled,
    it builds the image locally from that release's source archive.
 3. Creates `/opt/myportal-docker` containing `docker-compose.yml` (MariaDB
-   11.4, the blue and green MyPortal slots and an nginx proxy) and the
+   11.4, Redis 7 with a persistent volume, the blue and green MyPortal slots and an nginx proxy) and the
    configuration files, with generated secrets and database passwords.
 4. Starts the stack. It waits until `/readyz` reports the new release;
    database migrations run automatically when the container starts.
@@ -246,6 +246,7 @@ These environment variables change the script's behaviour:
 | `MYPORTAL_DIR` | `/opt/myportal-docker` | Installation directory |
 | `MYPORTAL_IMAGE_REPO` | `ghcr.io/bradhawkins85/myportal` | Where release images are pulled from |
 | `MYPORTAL_DB_IMAGE` | `mariadb:11.4` | Database image (MariaDB 10.10 or newer) |
+| `MYPORTAL_REDIS_IMAGE` | `redis:7-alpine` | Local Redis image (existing containers are reused) |
 | `MYPORTAL_BUILD_CA_FILE` | – | CA bundle for local builds behind a TLS-inspecting proxy. It's passed as a build secret and never stored in the image. |
 | `MYPORTAL_BUILD_NETWORK` | – | Network for local builds, e.g. `host` when the proxy only listens on localhost |
 | `MYPORTAL_BASE_IMAGE` | `ubuntu:24.04` | Base image for local builds (e.g. a registry mirror) |

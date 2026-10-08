@@ -1133,6 +1133,9 @@ install_backup_command || echo "Warning: could not install the myportal-backup c
 record_control_checkout || echo "Warning: could not record MYPORTAL_CONTROL_CHECKOUT in ${ENV_FILE}." >&2
 validate_origin_remote "$(git config --get remote.origin.url)"
 validate_required_configuration
+redis_env_before=$(sha256sum "$ENV_FILE")
+bash "${SCRIPT_DIR}/provision_redis.sh" "$ENV_FILE"
+redis_env_after=$(sha256sum "$ENV_FILE")
 UPGRADE_STARTED_AT=$(date --iso-8601=seconds)
 PREVIOUS_RELEASE=$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)
 git fetch --quiet origin main
@@ -1140,6 +1143,23 @@ TARGET_REVISION=$(git rev-parse 'origin/main^{commit}')
 RELEASE_DIR="${RELEASE_ROOT}/${TARGET_REVISION}"
 PLAN_BASE=$(resolve_plan_base "$PREVIOUS_RELEASE")
 generate_deployment_plan "$PLAN_BASE" "$TARGET_REVISION"
+if [[ "$redis_env_before" != "$redis_env_after" ]]; then
+  # Applying connection defaults also requires refreshing the workers, even
+  # when this revision would otherwise only publish static files or be a no-op.
+  DEPLOYMENT_ACTION="staged-cutover"
+  DEPLOYMENT_REASON="redis_connection_defaults"
+  python3 - "$DEPLOYMENT_PLAN_FILE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+plan = json.loads(path.read_text())
+plan.update(action="staged-cutover", reason="redis_connection_defaults", requires_worker_reload=True)
+path.write_text(json.dumps(plan))
+PY
+  DEPLOYMENT_PLAN=$(<"$DEPLOYMENT_PLAN_FILE")
+fi
 
 # The plan and every subsequent decision are recorded before preparation or
 # live-release changes begin.
@@ -1284,7 +1304,7 @@ fi
 repair_assigned_release_uploads
 run_pre_upgrade_backup || exit 1
 run_migration_phase "$RELEASE_DIR" "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"
-if is_additive_migration_only_release "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"; then
+if [[ "$redis_env_before" == "$redis_env_after" ]] && is_additive_migration_only_release "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"; then
   # Schema-only expands need no worker signal: the serving revision was
   # explicitly declared compatible and the database lock applied them once.
   atomic_link "$RELEASE_DIR" "$CURRENT_LINK"
