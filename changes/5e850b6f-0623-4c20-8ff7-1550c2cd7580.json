@@ -1,0 +1,7 @@
+{
+  "guid": "5e850b6f-0623-4c20-8ff7-1550c2cd7580",
+  "occurred_at": "2026-10-08T13:31Z",
+  "change_type": "Feature",
+  "summary": "Detailed Network Map PDF exports now include device identification pages using product images, device images, or accessible asset photos, omitting items without an available image.",
+  "content_hash": "b0f5846fe3bb9e0db661b854a5669b9e280628936d92aa3168b71e3dee898c2a"
+}

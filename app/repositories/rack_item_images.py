@@ -188,3 +188,14 @@ async def equipment_image_map(company_id: int) -> dict[int, dict[str, list[dict[
         grouped = result.setdefault(int(row["equipment_id"]), {"device": [], "product": []})
         grouped[row["kind"]].append(_shape(row))
     return result
+
+
+async def equipment_image_files(company_id: int) -> list[dict[str, Any]]:
+    """Private file metadata for company-scoped exports, including linked assets."""
+    return list(await db.fetch_all(
+        "SELECT e.id AS equipment_id, e.asset_id, i.id, i.kind, i.caption, i.storage_name "
+        "FROM rack_equipment_images a "
+        "JOIN rack_equipment e ON e.id=a.equipment_id "
+        "JOIN rack_item_images i ON i.id=a.image_id "
+        "WHERE a.company_id=%s AND e.company_id=%s AND i.company_id=%s "
+        "ORDER BY e.id, i.created_at, i.id", (company_id, company_id, company_id)) or [])

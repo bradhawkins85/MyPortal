@@ -31,7 +31,7 @@ from app.services import asset_types, rack_item_types
 DETAIL_LEVELS: dict[str, dict[str, str]] = {
     "overview": {"label": "Overview", "help": "Device icons and names with the links between them."},
     "standard": {"label": "Standard", "help": "Adds device types, IP addresses, port names and wireless link details."},
-    "detailed": {"label": "Detailed", "help": "Adds every interface, radio settings, serial numbers and a device inventory in PDF exports."},
+    "detailed": {"label": "Detailed", "help": "Adds every interface, radio settings, serial numbers, a device inventory and identification images in PDF exports."},
 }
 DEFAULT_DETAIL = "standard"
 LAYOUTS: dict[str, dict[str, str]] = {

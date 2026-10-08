@@ -24,6 +24,7 @@ from app.security.flash import _safe_redirect_target
 from app.services import asset_types
 from app.services import audit as audit_service
 from app.services import network_map
+from app.services import network_map_images
 
 router = APIRouter(tags=["Network map"])
 
@@ -173,7 +174,33 @@ async def export_svg(request: Request):
                     media_type="image/svg+xml", headers=headers)
 
 
-@router.get("/network-map/export.pdf", summary="Export the network map as PDF")
+async def _identification_images(request: Request, company_id: int, graph: network_map.Graph):
+    assets_routes = _routes()
+    try:
+        _user, image_company_id = await assets_routes._rack_image_context(request)
+        allow_rack_images = image_company_id == company_id
+    except HTTPException as exc:
+        if exc.status_code not in {403, 404}:
+            raise
+        allow_rack_images = False
+
+    async def photo_access(asset_id: int) -> bool | None:
+        try:
+            _user, photo_company_id, can_write = await assets_routes._photo_context(request, asset_id)
+            return not can_write if photo_company_id == company_id else None
+        except HTTPException as exc:
+            if exc.status_code not in {403, 404}:
+                raise
+            return None
+
+    return await network_map_images.identification_images(
+        company_id, graph, allow_rack_images=allow_rack_images, asset_photo_access=photo_access)
+
+
+@router.get("/network-map/export.pdf", summary="Export the network map as PDF",
+            description="Detailed exports append identification pages using attached product images, "
+                        "device images, or accessible asset photos, in that order. Devices without images "
+                        "are omitted from these additional pages.")
 async def export_pdf(request: Request):
     context = await _context(request)
     if isinstance(context, RedirectResponse):
@@ -193,12 +220,14 @@ async def export_pdf(request: Request):
     avail_w, avail_h = page_w - 2 * PDF_MARGIN_MM, page_h - 2 * PDF_MARGIN_MM - 6
     map_width_mm = min(avail_w, avail_h * width / height)
     safe_pdf_svg = Markup(_sanitize_svg(_fit_svg(svg)))  # nosec B704  # internally-generated SVG, sanitized above
+    identification = await _identification_images(request, company_id, graph) if options.detail == "detailed" else []
     html = _routes()._main().templates.env.get_template("network_map/pdf.html").render(
         svg=safe_pdf_svg,
         company=company, subtitle=subtitle, options=options,
         page_size=f"{page_w}mm {page_h}mm", map_width_mm=round(map_width_mm, 1),
         inventory=network_map.inventory(graph) if options.detail != "overview" else [],
         detail=options.detail,
+        identification=identification,
     )
     try:
         from weasyprint import HTML  # type: ignore
