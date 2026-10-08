@@ -43,15 +43,7 @@
         phase.textContent = s.phase === 'idle'
           ? 'Waiting for the service…'
           : `Current stage: ${String(s.phase).replaceAll('_', ' ')}`;
-        if (
-          !s.maintenance
-          && (
-            s.phase === 'succeeded'
-            || s.phase === 'idle'
-            || s.outcome === 'rolled_back'
-            || s.outcome === 'interrupted'
-          )
-        ) {
+        if (s.maintenance === false) {
           sessionStorage.removeItem('myportal-upgrade-return');
           location.replace(original);
           return;

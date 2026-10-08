@@ -74,6 +74,41 @@ async def test_list_articles_filters_unreachable_scopes(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
+async def test_admin_catalogue_loads_metadata_without_editor_relations(monkeypatch):
+    now = datetime.now(timezone.utc)
+    fetch = AsyncMock(return_value=[{
+        "id": 4, "slug": "draft", "title": "Restricted draft",
+        "is_published": 0, "lifecycle_status": "in_review",
+        "permission_scope": "super_admin", "updated_at": now,
+        "review_due_at": now, "ai_tags": '["vpn"]',
+    }])
+    monkeypatch.setattr(knowledge_base_service.kb_repo.db, "fetch_all", fetch)
+    relations = AsyncMock(side_effect=AssertionError("Catalogue must not load editor relations"))
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "_attach_relations", relations)
+
+    articles = await knowledge_base_service.list_admin_article_summaries({"is_super_admin": True})
+
+    assert articles[0]["slug"] == "draft"
+    assert articles[0]["lifecycle_status"] == "in_review"
+    assert articles[0]["review_due_at"] == now
+    assert articles[0]["ai_tags"] == ["vpn"]
+    assert articles[0]["sections"] == []
+    assert "content" not in articles[0]
+    assert "content" not in fetch.call_args.args[0].lower()
+    fetch.assert_awaited_once()
+    relations.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_admin_catalogue_rejects_non_admin_before_reading_drafts(monkeypatch):
+    load = AsyncMock()
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "list_article_summaries", load)
+    with pytest.raises(PermissionError):
+        await knowledge_base_service.list_admin_article_summaries({"id": 9, "is_super_admin": False})
+    load.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
 async def test_get_article_by_slug_respects_user_permissions(monkeypatch):
     restricted = _article_factory(
         id=3,

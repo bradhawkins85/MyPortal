@@ -635,6 +635,17 @@ def _serialise_article(
     return base
 
 
+async def list_admin_article_summaries(user: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return the unrestricted catalogue only for a super administrator."""
+    if not user.get("is_super_admin"):
+        raise PermissionError("Super administrator access is required")
+    articles = await kb_repo.list_article_summaries()
+    return [
+        _serialise_article(article, include_content=False, include_permissions=False)
+        for article in articles
+    ]
+
+
 async def list_articles_for_context(
     context: ArticleAccessContext,
     *,

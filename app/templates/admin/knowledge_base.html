@@ -52,6 +52,9 @@
 
 {% block content %}
 <div class="kb-cat">
+  {% if kb_review_signals_unavailable %}
+  <p role="status">AI review signals are temporarily unavailable. You can still view and edit all articles.</p>
+  {% endif %}
   <section class="card card--panel">
     <div class="table-wrapper table-wrapper--short">
       <table class="table table--compact" id="kb-admin-table" data-table data-table-id="knowledge-base-admin">
