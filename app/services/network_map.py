@@ -1010,18 +1010,22 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
         fit = max(12, int(room / 5.6)) if topology and room > 0 else 60
         if edge.count > 1:
             text_parts.append(f"×{edge.count}")
+        topo_edge_label: str | None = None
+        if topology and edge.medium != "wireless" and text_parts:
+            # Rendered in the port-label loop below, beside the a-side port name.
+            topo_edge_label = escape(_clip(" · ".join(text_parts), min(44, fit)))
         if edge.medium == "wireless":
             labels.append(f'<use href="#nm-radio-badge" xlink:href="#nm-radio-badge" x="{mid[0] - 9:.1f}" '
                           f'y="{mid[1] - 9:.1f}" width="18" height="18"/>')
             if text_parts:
                 labels.append(_label("nm-edge-label-radio", mid[0], mid[1] + 22,
                                      escape(_clip(" · ".join(text_parts), min(60, fit)))))
-        elif text_parts:
-            # Port names sit above a topology link, so its own label goes below.
-            labels.append(_label("nm-edge-label", mid[0], mid[1] + 14 if topology else mid[1] + 3,
+        elif text_parts and topo_edge_label is None:
+            # The non-topology view keeps the label at the line's midpoint.
+            labels.append(_label("nm-edge-label", mid[0], mid[1] + 3,
                                  escape(_clip(" · ".join(text_parts), min(44, fit)))))
         for port, point, node in ((edge.a_port, spot_a, a), (edge.b_port, spot_b, b)):
-            if not port:
+            if not port and not (node is a and topo_edge_label):
                 continue
             if topology:
                 # Place the port label right next to the device icon, on the
@@ -1037,9 +1041,18 @@ def render_svg(graph: Graph, *, title: str, subtitle: str | None = None,
                     anchor = "end"
                 slots = topo_slots.setdefault(node.id, {"right": 0, "left": 0})
                 slot = slots[side]
-                slots[side] = slot + 1
                 y = node.anchor[1] - 8 + slot * 13
-                labels.append(_label("nm-port", x, y, escape(_clip(port, 18)), anchor=anchor))
+                if port:
+                    labels.append(_label("nm-port", x, y, escape(_clip(port, 18)), anchor=anchor))
+                # The link's label sits on the line under its a-side port name,
+                # so it reads as that port's annotation rather than floating on
+                # the line between the two devices.
+                if node is a and topo_edge_label:
+                    labels.append(_label("nm-edge-label", x, y + (13 if port else 0),
+                                         topo_edge_label, anchor=anchor))
+                    slots[side] = slot + (2 if port else 1)
+                else:
+                    slots[side] = slot + 1
                 continue
             if edge.lane is not None:
                 # Rack-internal links leave from the card's right edge; stack
