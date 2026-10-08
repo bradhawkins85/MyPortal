@@ -297,7 +297,7 @@
               <div class="rack-images__actions">
                 <label class="rack-images__upload"><input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden data-image-upload><span class="button button--secondary">Upload {{ label|lower }} image</span></label>
                 <label class="rack-images__caption"><span class="sr-only">Caption for new {{ label|lower }} image</span><input class="input" maxlength="191" placeholder="Caption (optional)" data-image-caption></label>
-                {% if kind == 'product' %}<label class="rack-images__caption"><span class="sr-only">Shop product ID to import</span><input class="input" type="number" min="1" inputmode="numeric" placeholder="Shop product ID" data-image-import-product></label><button type="button" class="button button--secondary" data-image-import>Import from shop</button>{% endif %}
+                {% if kind == 'product' %}<label class="rack-images__caption"><span class="sr-only">Search a shop product to import an image from</span><input class="input" type="search" autocomplete="off" placeholder="Search product by name or SKU" list="rack-image-product-suggestions" data-image-import-product-search><input type="hidden" data-image-import-product></label><datalist id="rack-image-product-suggestions"></datalist><button type="button" class="button button--secondary" data-image-import>Import from shop</button>{% endif %}
               </div>
             </fieldset>
             {% endfor %}

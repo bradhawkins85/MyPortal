@@ -180,3 +180,54 @@ def test_product_filter_queries_use_shared_stock_filter_property():
 
     assert "if not include_out_of_stock:" not in query_section
     assert query_section.count("if filters.require_in_stock:") == 3
+
+
+def test_search_products_for_company_lookup_builds_scoped_query(monkeypatch):
+    """Company-scoped search hides excluded products and matches name/sku."""
+    captured: dict[str, object] = {}
+
+    async def fake_fetch_all(query, params=None):
+        captured["query"] = query
+        captured["params"] = params
+        return [
+            {"id": 11, "name": "PoE Switch", "sku": "PSE-24"},
+            {"id": 0, "name": "Ghost", "sku": "GHO-1"},
+        ]
+
+    monkeypatch.setattr(shop_repo.db, "fetch_all", fake_fetch_all)
+
+    results = asyncio.run(
+        shop_repo.search_products_for_company_lookup("switch", company_id=99, limit=8)
+    )
+
+    # Company visibility mirrors get_product_by_id: excluded products are hidden.
+    query = str(captured["query"])
+    assert "shop_product_exclusions" in query
+    assert "e.product_id IS NULL" in query
+    assert "p.archived = 0" in query
+    # Only products that actually have an image are offered to import.
+    assert "p.image_url IS NOT NULL" in query
+    # Match on name and sku.
+    assert "p.name LIKE %s" in query
+    assert "p.sku LIKE %s" in query
+    params = tuple(captured["params"])
+    assert params[0] == 99       # company_id is bound first
+    assert params[-1] == 8       # limit is bound last
+    assert "%switch%" in params
+    # id<=0 rows are dropped; fields are shaped.
+    assert results == [{"id": 11, "name": "PoE Switch", "sku": "PSE-24"}]
+
+
+def test_search_products_for_company_lookup_blank_term_returns_empty(monkeypatch):
+    """A blank term short-circuits before touching the database."""
+
+    async def fake_fetch_all(query, params=None):
+        raise AssertionError("fetch_all should not be called for a blank term")
+
+    monkeypatch.setattr(shop_repo.db, "fetch_all", fake_fetch_all)
+
+    results = asyncio.run(
+        shop_repo.search_products_for_company_lookup("   ", company_id=1)
+    )
+
+    assert results == []

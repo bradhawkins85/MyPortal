@@ -2381,6 +2381,66 @@ async def search_products_for_admin_lookup(
     ]
 
 
+async def search_products_for_company_lookup(
+    term: str, *, company_id: int, limit: int = 10
+) -> list[dict[str, Any]]:
+    """Return a short list of non-archived products a company may use.
+
+    Company visibility mirrors :func:`get_product_by_id`: products excluded for
+    *company_id* via ``shop_product_exclusions`` are omitted, so the rack-image
+    "import from shop" picker only offers products that import can actually
+    resolve. This lets a tech type a product name (or SKU) instead of an ID.
+    """
+    cleaned_term = term.strip()
+    if not cleaned_term or limit <= 0:
+        return []
+
+    like = f"%{cleaned_term}%"
+    rows = await db.fetch_all(
+        """
+        SELECT p.id, p.name, p.sku
+        FROM shop_products AS p
+        LEFT JOIN shop_product_exclusions AS e
+          ON e.product_id = p.id AND e.company_id = %s
+        WHERE p.archived = 0
+          AND e.product_id IS NULL
+          AND p.image_url IS NOT NULL
+          AND p.image_url <> ''
+          AND (p.sku LIKE %s OR p.name LIKE %s OR p.vendor_sku LIKE %s)
+        ORDER BY
+            CASE
+                WHEN p.sku = %s THEN 0
+                WHEN p.sku LIKE %s THEN 1
+                WHEN p.vendor_sku = %s THEN 2
+                WHEN p.vendor_sku LIKE %s THEN 3
+                ELSE 4
+            END,
+            p.name ASC
+        LIMIT %s
+        """,
+        (
+            company_id,
+            like,
+            like,
+            like,
+            cleaned_term,
+            f"{cleaned_term}%",
+            cleaned_term,
+            f"{cleaned_term}%",
+            int(limit),
+        ),
+    )
+    return [
+        {
+            "id": _coerce_int(row.get("id"), default=0),
+            "name": row.get("name") or "",
+            "sku": row.get("sku") or "",
+        }
+        for row in rows
+        if _coerce_int(row.get("id"), default=0) > 0
+    ]
+
+
 async def get_product_ids_by_skus(skus: Sequence[str]) -> list[int]:
     """Return the IDs of non-archived products whose SKU or vendor SKU matches any of *skus*.
 

@@ -698,13 +698,74 @@
         await load();
       } catch (error) { say(error.message); }
     }));
+    // "Import from shop" picker: a searchable product dropdown (native datalist)
+    // so a tech types a product name/SKU instead of an ID. Mirrors the
+    // cross-sell/up-sell SKU typeahead; the chosen product's id is captured in
+    // the hidden input that the import request reads.
+    const productSearchInput = imagesRoot.querySelector('[data-image-import-product-search]');
+    const productHiddenInput = imagesRoot.querySelector('[data-image-import-product]');
+    const productDatalist = document.getElementById('rack-image-product-suggestions');
+    if (productSearchInput && productHiddenInput && productDatalist) {
+      let productResults = [];
+      let latestProductQuery = '';
+      let productSearchTimer = null;
+      const resolveProductId = () => {
+        const text = String(productSearchInput.value || '').trim();
+        const lower = text.toLowerCase();
+        const match = productResults.find((p) => (p.sku || '').toLowerCase() === lower)
+          || productResults.find((p) => (p.name || '').toLowerCase() === lower)
+          || productResults.find((p) => String(p.id) === text);
+        productHiddenInput.value = match ? String(match.id) : '';
+      };
+      const runProductSearch = async (query) => {
+        const trimmed = String(query || '').trim();
+        latestProductQuery = trimmed;
+        if (trimmed.length < 2) {
+          productResults = [];
+          productDatalist.innerHTML = '';
+          productHiddenInput.value = '';
+          return;
+        }
+        try {
+          const url = new URL('/api/infrastructure/rack-item-images/products/search', window.location.origin);
+          url.searchParams.set('q', trimmed);
+          url.searchParams.set('limit', '8');
+          const res = await fetch(url.toString(), { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+          if (!res.ok) throw new Error(`Product search failed (${res.status})`);
+          const data = await res.json().catch(() => []);
+          if (latestProductQuery !== trimmed) return; // ignore out-of-order responses
+          productResults = Array.isArray(data) ? data : [];
+          productDatalist.innerHTML = '';
+          productResults.forEach((product) => {
+            const option = document.createElement('option');
+            option.value = product.sku || product.name || String(product.id);
+            option.label = product.sku ? `${product.name || ''} (${product.sku})` : (product.name || String(product.id));
+            productDatalist.appendChild(option);
+          });
+          resolveProductId();
+        } catch (error) {
+          console.error('Unable to search shop products', error);
+        }
+      };
+      const scheduleProductSearch = (query) => {
+        if (productSearchTimer) window.clearTimeout(productSearchTimer);
+        productSearchTimer = window.setTimeout(() => runProductSearch(query), 200);
+      };
+      productSearchInput.addEventListener('input', () => {
+        productHiddenInput.value = '';
+        resolveProductId();
+        scheduleProductSearch(productSearchInput.value);
+      });
+      productSearchInput.addEventListener('change', resolveProductId);
+      productSearchInput.addEventListener('blur', () => { window.setTimeout(resolveProductId, 0); });
+    }
     imagesRoot.querySelectorAll('[data-image-import]').forEach((button) => button.addEventListener('click', async () => {
       const panel = panelOf(button);
       const input = panel?.querySelector('[data-image-import-product]');
       const productId = Number(input?.value);
       const kind = kindOf(button);
       const type = currentType();
-      if (!panel || !productId || !kind || !type) { say('Enter a shop product ID to import.'); return; }
+      if (!panel || !productId || !kind || !type) { say('Search and pick a product to import.'); return; }
       button.disabled = true;
       say('Importing…');
       try {
@@ -718,6 +779,8 @@
         await linkAfterAdd(data.id);
         say('Product image imported.');
         input.value = '';
+        if (productSearchInput) productSearchInput.value = '';
+        if (productDatalist) productDatalist.innerHTML = '';
         await load();
       } catch (error) { say(error.message); }
       finally { button.disabled = false; }

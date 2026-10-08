@@ -2046,6 +2046,15 @@ async def list_rack_item_library(request: Request, item_type: str = Query(...),
     return JSONResponse(await rack_image_repo.list_library(company_id, clean_type, clean_kind))
 
 
+@router.get("/api/infrastructure/rack-item-images/products/search", response_class=JSONResponse,
+            summary="Search shop products for the rack image import picker")
+async def search_rack_image_products(request: Request, q: str = Query(..., min_length=1),
+                                     limit: int = Query(8, ge=1, le=25)):
+    _user, company_id = await _rack_image_context(request)
+    results = await shop_repo.search_products_for_company_lookup(q, company_id=company_id, limit=limit)
+    return JSONResponse(results)
+
+
 async def _serve_rack_image(request: Request, image_id: int, variant: str) -> FileResponse:
     _user, company_id = await _rack_image_context(request)
     row = await rack_image_repo.get_image(company_id, image_id)
