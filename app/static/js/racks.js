@@ -666,7 +666,11 @@
     };
     const linkAfterAdd = async (imageId) => {
       if (editingId !== null && imageId) {
-        await fetch(`/api/infrastructure/rack-equipment/${encodeURIComponent(editingId)}/images/${encodeURIComponent(imageId)}/attach`, { method: 'POST' });
+        const res = await fetch(`/api/infrastructure/rack-equipment/${encodeURIComponent(editingId)}/images/${encodeURIComponent(imageId)}/attach`, { method: 'POST' });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.detail || 'Could not attach image to this item.');
+        }
       }
     };
     imagesRoot.addEventListener('click', (event) => {
@@ -777,7 +781,7 @@
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || 'Import failed');
         await linkAfterAdd(data.id);
-        say('Product image imported.');
+        say(data.duplicate ? 'Already in the library; linked to this item.' : 'Product image imported.');
         input.value = '';
         if (productSearchInput) productSearchInput.value = '';
         if (productDatalist) productDatalist.innerHTML = '';

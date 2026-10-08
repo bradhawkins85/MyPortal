@@ -1,0 +1,7 @@
+{
+  "guid": "3da4b306-cc55-4134-82be-4c6786c9678b",
+  "occurred_at": "2026-10-08T12:17Z",
+  "change_type": "Fix",
+  "summary": "Fix rack shop image imports with symlinked uploads and reuse imported originals and thumbnails across clients while preserving company-scoped libraries.",
+  "content_hash": "511566742af71fe6787ccc5f0b89acee42972b25eaa8e9dddc6fb82a9de81516"
+}

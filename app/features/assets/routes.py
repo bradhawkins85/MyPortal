@@ -2112,7 +2112,8 @@ async def delete_rack_item_image(request: Request, image_id: int):
     row = await rack_image_repo.delete_image(company_id, image_id)
     if not row:
         raise HTTPException(status_code=404, detail="Image not found")
-    rack_image_service.remove_rack_image(str(row["storage_name"]), row.get("thumbnail_name"))
+    if not await rack_image_repo.storage_is_referenced(str(row["storage_name"])):
+        rack_image_service.remove_rack_image(str(row["storage_name"]), row.get("thumbnail_name"))
     await audit_service.record(action="infrastructure.rack_item_image.delete", request=request,
                                user_id=int(user["id"]), entity_type="rack_item_image", entity_id=image_id,
                                before={"company_id": company_id, "item_type": row.get("item_type"),
@@ -2148,7 +2149,10 @@ async def detach_rack_item_image(request: Request, equipment_id: int, image_id: 
 
 
 @router.post("/api/infrastructure/rack-item-images/import-shop", response_class=JSONResponse,
-             status_code=201, summary="Import a shop product image into the library")
+             status_code=201, summary="Import a shop product image into the library",
+             description="Imports a local shop image once and reuses its stored files on subsequent imports, "
+                         "including across companies. Library entries and attachments remain company-scoped. "
+                         "Returns 200 with duplicate=true when reusing an image, or 201 for a new import.")
 async def import_shop_rack_item_image(request: Request):
     user, company_id = await _rack_image_context(request, write=True)
     try:
@@ -2166,21 +2170,36 @@ async def import_shop_rack_item_image(request: Request):
     image_url = (product or {}).get("image_url")
     if not image_url:
         raise HTTPException(status_code=422, detail="That product has no image to import")
-    bundle = rack_image_service.read_shop_product_image(str(image_url))
-    if not bundle:
-        raise HTTPException(status_code=422, detail="That product image cannot be imported")
-    image_bytes, filename, content_type = bundle
-    prepared = await rack_image_service.prepare_bytes_rack_image(
-        image_bytes, filename, company_id, clean_type, clean_kind)
-    try:
-        image_id, created = await rack_image_repo.create_image(
-            company_id, clean_type, clean_kind, source_product_id=product_id,
-            uploaded_by=int(user["id"]), **prepared)
-    except Exception:
-        rack_image_service.remove_rack_image(str(prepared["storage_name"]), prepared["thumbnail_name"])
-        raise
-    if not created:
-        rack_image_service.remove_rack_image(str(prepared["storage_name"]), prepared["thumbnail_name"])
+    existing = await rack_image_repo.find_shop_image(company_id, clean_type, clean_kind, product_id)
+    if existing and not rack_image_service.resolve_rack_image(str(existing["storage_name"])).is_file():
+        existing = None
+    if existing:
+        if int(existing["company_id"]) == company_id and existing["item_type"] == clean_type:
+            image_id = int(existing["id"])
+        else:
+            # Give this company its own library entry pointing at the same files.
+            image_id, _ = await rack_image_repo.create_image(
+                company_id, clean_type, clean_kind, source_product_id=product_id,
+                uploaded_by=int(user["id"]),
+                **{key: existing[key] for key in (
+                    "storage_name", "thumbnail_name", "content_type", "size_bytes", "content_hash")})
+        created = False
+    else:
+        bundle = rack_image_service.read_shop_product_image(str(image_url))
+        if not bundle:
+            raise HTTPException(status_code=422, detail="That product image cannot be imported")
+        image_bytes, filename, _content_type = bundle
+        prepared = await rack_image_service.prepare_bytes_rack_image(
+            image_bytes, filename, company_id, clean_type, clean_kind)
+        try:
+            image_id, created = await rack_image_repo.create_image(
+                company_id, clean_type, clean_kind, source_product_id=product_id,
+                uploaded_by=int(user["id"]), **prepared)
+        except Exception:
+            rack_image_service.remove_rack_image(str(prepared["storage_name"]), prepared["thumbnail_name"])
+            raise
+        if not created:
+            rack_image_service.remove_rack_image(str(prepared["storage_name"]), prepared["thumbnail_name"])
     await audit_service.record(action="infrastructure.rack_item_image.import_shop", request=request,
                                user_id=int(user["id"]), entity_type="rack_item_image", entity_id=image_id,
                                after={"company_id": company_id, "item_type": clean_type, "kind": clean_kind,
