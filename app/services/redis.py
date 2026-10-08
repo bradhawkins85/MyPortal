@@ -30,7 +30,13 @@ def get_redis_client() -> Redis | None:
         return None
 
     try:
-        _redis_pool = ConnectionPool.from_url(redis_url, decode_responses=True)
+        _redis_pool = ConnectionPool.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_timeout=settings.redis_socket_timeout,
+            socket_connect_timeout=settings.redis_connect_timeout,
+            health_check_interval=30,
+        )
         _redis_client = Redis(connection_pool=_redis_pool)
     except Exception as exc:  # pragma: no cover - defensive logging
         log_warning("Unable to configure Redis client", error=str(exc))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime, timezone
 
@@ -9,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
+from app.core.logging import log_error
 from app.services import knowledge_base as knowledge_base_service
 from app.services import audit as audit_service
 from app.services import rag_relationships as rag_relationships_service
@@ -18,6 +20,12 @@ from app.repositories import customer_content_audience as audience_repo
 
 
 router = APIRouter(tags=["Knowledge Base"])
+
+# Backstop so the admin KB page can never hold a worker forever if a downstream
+# database or Redis call stalls (e.g. an exhausted connection pool or a
+# half-open socket). Individual calls are already bounded by the DB pool and
+# Redis timeouts; this is the final page-level guard.
+KB_PAGE_TIMEOUT = 30.0
 
 
 def _main():
@@ -143,42 +151,55 @@ async def admin_knowledge_base_page(request: Request):
     if redirect:
         return redirect
 
-    access_context = await knowledge_base_service.build_access_context(current_user)
-    articles = await knowledge_base_service.list_articles_for_context(
-        access_context,
-        include_unpublished=True,
-        include_permissions=True,
-    )
-    now = datetime.now(timezone.utc)
-    update_signals = await rag_relationships_service.kb_articles_needing_update()
-    counts = {
-        "all": len(articles), "published": 0, "draft": 0, "in_review": 0,
-        "retired": 0, "overdue": 0, "needs_update": 0,
-    }
-    for article in articles:
-        lifecycle = "published" if article.get("is_published") else str(article.get("lifecycle_status") or "draft")
-        if lifecycle == "published" and not article.get("is_published"):
-            lifecycle = "draft"
-        counts[lifecycle] = counts.get(lifecycle, 0) + 1
-        review_due = article.get("review_due_at")
-        if review_due is not None and review_due.tzinfo is None:
-            review_due = review_due.replace(tzinfo=timezone.utc)
-        article["review_overdue"] = bool(review_due and review_due < now and lifecycle != "retired")
-        counts["overdue"] += int(article["review_overdue"])
-        signal = update_signals.get(int(article["id"])) if lifecycle != "retired" else None
-        article["needs_update"] = signal
-        counts["needs_update"] += int(bool(signal))
-    extra = {
-        "title": "Knowledge base admin",
-        "kb_articles": jsonable_encoder(articles),
-        "kb_status_counts": counts,
-    }
-    return await main_module._render_template(
-        "admin/knowledge_base.html",
-        request,
-        current_user,
-        extra=extra,
-    )
+    async def _render_page():
+        access_context = await knowledge_base_service.build_access_context(current_user)
+        articles = await knowledge_base_service.list_articles_for_context(
+            access_context,
+            include_unpublished=True,
+            include_permissions=True,
+        )
+        now = datetime.now(timezone.utc)
+        update_signals = await rag_relationships_service.kb_articles_needing_update()
+        counts = {
+            "all": len(articles), "published": 0, "draft": 0, "in_review": 0,
+            "retired": 0, "overdue": 0, "needs_update": 0,
+        }
+        for article in articles:
+            lifecycle = "published" if article.get("is_published") else str(article.get("lifecycle_status") or "draft")
+            if lifecycle == "published" and not article.get("is_published"):
+                lifecycle = "draft"
+            counts[lifecycle] = counts.get(lifecycle, 0) + 1
+            review_due = article.get("review_due_at")
+            if review_due is not None and review_due.tzinfo is None:
+                review_due = review_due.replace(tzinfo=timezone.utc)
+            article["review_overdue"] = bool(review_due and review_due < now and lifecycle != "retired")
+            counts["overdue"] += int(article["review_overdue"])
+            signal = update_signals.get(int(article["id"])) if lifecycle != "retired" else None
+            article["needs_update"] = signal
+            counts["needs_update"] += int(bool(signal))
+        extra = {
+            "title": "Knowledge base admin",
+            "kb_articles": jsonable_encoder(articles),
+            "kb_status_counts": counts,
+        }
+        return await main_module._render_template(
+            "admin/knowledge_base.html",
+            request,
+            current_user,
+            extra=extra,
+        )
+
+    try:
+        return await asyncio.wait_for(_render_page(), timeout=KB_PAGE_TIMEOUT)
+    except asyncio.TimeoutError:
+        log_error(
+            "Knowledge base admin page timed out while loading",
+            error=f"exceeded {KB_PAGE_TIMEOUT:g}s page backstop",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="The knowledge base took too long to load. Please try again.",
+        )
 
 
 @router.get("/admin/knowledge-base/new", response_class=HTMLResponse)
