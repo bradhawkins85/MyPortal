@@ -11,6 +11,7 @@
     if (!dialog) return;
     dialogTriggers.set(dialog, trigger);
     dialog.showModal();
+    dialog.dispatchEvent(new Event('rack-dialog-open'));
   };
   document.querySelector('[data-rack-create-open]')?.addEventListener('click', event => openDialog(createDialog, event.currentTarget));
   document.querySelector('[data-rack-resize-open]')?.addEventListener('click', event => openDialog(document.querySelector('#rack-resize-dialog'), event.currentTarget));
@@ -591,6 +592,13 @@
   // hidden for reservations and inherits the dialog's auth + CSRF handling.
   const imagesRoot = form.querySelector('[data-rack-images]');
   if (imagesRoot) {
+    const imageIdsInput = form.elements.image_ids;
+    let selections = new Map();
+    let library = { device: [], product: [] };
+    let session = 0;
+    let pending = 0;
+    let initialType = '';
+    let ready = false;
     const imagesStatus = imagesRoot.querySelector('[data-image-status]');
     const say = (message) => { imagesStatus.textContent = message || ''; imagesStatus.hidden = !message; };
     const currentType = () => selectedType()?.value || '';
@@ -626,58 +634,84 @@
       }
       return card;
     };
-    const render = (kind, attached, library) => {
+    const selectedImages = () => {
+      const type = currentType();
+      if (!selections.has(type)) selections.set(type, new Map());
+      return selections.get(type);
+    };
+    const render = (kind, attached, available) => {
       const panel = imagesRoot.querySelector(`[data-image-kind="${kind}"]`);
       if (!panel) return;
-      const editing = editingId !== null;
       const attGrid = panel.querySelector('[data-image-attached]');
       const libGrid = panel.querySelector('[data-image-library]');
-      panel.querySelector('[data-image-attached-row]').hidden = !editing;
-      attGrid.replaceChildren(attached.map((image) => imageCard(image, 'detach')));
-      const attachedIds = new Set(attached.map((image) => image.id));
-      libGrid.replaceChildren(library.filter((image) => !attachedIds.has(image.id))
-        .map((image) => imageCard(image, editing ? 'attach' : null)));
+      panel.querySelector('[data-image-attached-row]').hidden = false;
+      attGrid.replaceChildren(...attached.map((image) => imageCard(image, 'detach')));
+      const attachedIds = new Set(attached.map((image) => String(image.id)));
+      libGrid.replaceChildren(...available.filter((image) => !attachedIds.has(String(image.id)))
+        .map((image) => imageCard(image, 'attach')));
     };
-    const load = async () => {
+    const renderSelection = () => {
+      const attached = [...selectedImages().values()];
+      render('device', attached.filter(image => image.kind === 'device'), library.device || []);
+      render('product', attached.filter(image => image.kind === 'product'), library.product || []);
+      imageIdsInput.value = JSON.stringify([...selectedImages().keys()].map(Number));
+      imageIdsInput.disabled = !ready;
+    };
+    const load = async (loadAttached = false) => {
       const type = currentType();
       if (!type || form.elements.entry_kind.value === 'reservation') return;
-      say('');
-      const libraryRequest = fetch(`/api/infrastructure/rack-item-images/library?item_type=${encodeURIComponent(type)}`);
-      const attachedRequest = editingId !== null
-        ? fetch(`/api/infrastructure/rack-equipment/${encodeURIComponent(editingId)}/images`)
-        : Promise.resolve({ ok: true, json: () => Promise.resolve({ device: [], product: [] }) });
-      const [libraryRes, attachedRes] = await Promise.all([libraryRequest, attachedRequest]);
-      if (!libraryRes.ok) { say('Could not load images.'); return; }
-      const library = await libraryRes.json().catch(() => ({ device: [], product: [] }));
-      const attached = attachedRes.ok ? await attachedRes.json().catch(() => ({ device: [], product: [] })) : { device: [], product: [] };
-      render('device', attached.device || [], library.device || []);
-      render('product', attached.product || [], library.product || []);
-    };
-    const attachOrDetach = async (button, imageId, attach) => {
-      if (!editingId || !imageId || !kindOf(button) || !currentType()) return;
-      button.disabled = true;
-      say(attach ? 'Attaching…' : 'Detaching…');
+      const thisSession = session;
+      pending += 1;
       try {
-        const res = await fetch(`/api/infrastructure/rack-equipment/${encodeURIComponent(editingId)}/images/${encodeURIComponent(imageId)}/${attach ? 'attach' : 'detach'}`, { method: 'POST' });
-        if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(body.detail || 'Action failed'); }
-        say(attach ? 'Image attached.' : 'Image detached.');
-        await load();
-      } catch (error) { say(error.message); button.disabled = false; }
-    };
-    const linkAfterAdd = async (imageId) => {
-      if (editingId !== null && imageId) {
-        const res = await fetch(`/api/infrastructure/rack-equipment/${encodeURIComponent(editingId)}/images/${encodeURIComponent(imageId)}/attach`, { method: 'POST' });
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.detail || 'Could not attach image to this item.');
+        const [libraryRes, attachedRes] = await Promise.all([
+          fetch(`/api/infrastructure/rack-item-images/library?item_type=${encodeURIComponent(type)}`),
+          loadAttached && editingId !== null
+            ? fetch(`/api/infrastructure/rack-equipment/${encodeURIComponent(editingId)}/images`)
+            : Promise.resolve(null),
+        ]);
+        if (!libraryRes.ok || (attachedRes && !attachedRes.ok)) throw new Error('Could not load images. Reopen this item to retry.');
+        const available = await libraryRes.json();
+        const attached = attachedRes ? await attachedRes.json() : null;
+        if (thisSession !== session) return;
+        if (attached) {
+          selections.set(initialType, new Map([...attached.device || [], ...attached.product || []]
+            .map(image => [String(image.id), image])));
         }
+        ready = true;
+        if (type !== currentType()) return;
+        library = available;
+        renderSelection();
+      } catch (error) {
+        if (thisSession === session) say(error.message);
+      } finally {
+        if (thisSession === session) pending -= 1;
       }
     };
+    const selectImage = (imageId, attach) => {
+      if (!ready) return;
+      if (attach) {
+        const image = [...library.device || [], ...library.product || []].find(image => String(image.id) === String(imageId));
+        if (!image) return;
+        selectedImages().set(String(image.id), image);
+      } else selectedImages().delete(String(imageId));
+      renderSelection();
+      say('Image selection updated. Save changes to keep it.');
+    };
+    const selectAfterAdd = async (imageId, expectedSession, expectedType) => {
+      await load();
+      if (expectedSession !== session || expectedType !== currentType()) return false;
+      if (![...library.device || [], ...library.product || []].some(image => String(image.id) === String(imageId))) {
+        throw new Error('Image is in the library, but could not be selected. Reopen this item to retry.');
+      }
+      selectImage(imageId, true);
+      return true;
+    };
     imagesRoot.addEventListener('click', (event) => {
+      if (pending) return;
       const attach = event.target.closest('[data-image-attach]');
       const detach = event.target.closest('[data-image-detach]');
-      if (attach) attachOrDetach(attach, attach.dataset.imageAttach, true);
-      else if (detach) attachOrDetach(detach, detach.dataset.imageDetach, false);
+      if (attach) selectImage(attach.dataset.imageAttach, true);
+      else if (detach) selectImage(detach.dataset.imageDetach, false);
     });
     imagesRoot.querySelectorAll('[data-image-upload]').forEach((input) => input.addEventListener('change', async () => {
       const file = input.files?.[0];
@@ -685,7 +719,9 @@
       const kind = kindOf(input);
       const type = currentType();
       input.value = '';
-      if (!file || !panel || !kind || !type) return;
+      if (!file || !panel || !kind || !type || !ready || pending) return;
+      const thisSession = session;
+      pending += 1;
       say('Uploading…');
       const body = new FormData();
       body.set('image', file, file.name);
@@ -696,11 +732,12 @@
         const res = await fetch('/api/infrastructure/rack-item-images', { method: 'POST', body });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || 'Upload failed');
-        await linkAfterAdd(data.id);
-        say(data.duplicate ? 'Already in the library; linked to this item.' : 'Image uploaded.');
+        if (thisSession !== session || type !== currentType()) return;
+        if (!await selectAfterAdd(data.id, thisSession, type)) return;
+        say('Image uploaded. Save changes to attach it to this item.');
         panel.querySelector('[data-image-caption]').value = '';
-        await load();
-      } catch (error) { say(error.message); }
+      } catch (error) { if (thisSession === session) say(error.message); }
+      finally { if (thisSession === session) pending -= 1; }
     }));
     // "Import from shop" picker: a searchable product dropdown (native datalist)
     // so a tech types a product name/SKU instead of an ID. Mirrors the
@@ -770,6 +807,9 @@
       const kind = kindOf(button);
       const type = currentType();
       if (!panel || !productId || !kind || !type) { say('Search and pick a product to import.'); return; }
+      if (!ready || pending) { say('Wait for images to finish loading.'); return; }
+      const thisSession = session;
+      pending += 1;
       button.disabled = true;
       say('Importing…');
       try {
@@ -780,16 +820,42 @@
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || 'Import failed');
-        await linkAfterAdd(data.id);
-        say(data.duplicate ? 'Already in the library; linked to this item.' : 'Product image imported.');
+        if (thisSession !== session || type !== currentType()) return;
+        if (!await selectAfterAdd(data.id, thisSession, type)) return;
+        say(data.duplicate ? 'Image reused. Save changes to attach it to this item.' : 'Product image imported. Save changes to attach it to this item.');
         input.value = '';
         if (productSearchInput) productSearchInput.value = '';
         if (productDatalist) productDatalist.innerHTML = '';
-        await load();
-      } catch (error) { say(error.message); }
-      finally { button.disabled = false; }
+      } catch (error) { if (thisSession === session) say(error.message); }
+      finally { button.disabled = false; if (thisSession === session) pending -= 1; }
     }));
-    placeDialog.addEventListener('open', load);
-    form.querySelectorAll('input[name="item_type"]').forEach((input) => input.addEventListener('change', load));
+    placeDialog.addEventListener('rack-dialog-open', () => {
+      session += 1;
+      pending = 0;
+      ready = false;
+      selections = new Map();
+      library = { device: [], product: [] };
+      initialType = currentType();
+      say('');
+      renderSelection();
+      load(true);
+    });
+    form.querySelectorAll('input[name="item_type"]').forEach((input) => input.addEventListener('change', () => {
+      library = { device: [], product: [] };
+      renderSelection();
+      load();
+    }));
+    form.elements.asset_id.addEventListener('change', () => {
+      library = { device: [], product: [] };
+      renderSelection();
+      load();
+    });
+    form.addEventListener('submit', event => {
+      if (form.elements.entry_kind.value === 'reservation') return;
+      if (pending) {
+        event.preventDefault();
+        say('Wait for images to finish loading before saving.');
+      }
+    });
   }
 })();
