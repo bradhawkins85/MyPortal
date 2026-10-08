@@ -5,6 +5,7 @@ the upload root, no live DB) and ``test_rack_connections.py`` (repository tests 
 monkeypatch ``db`` with ``AsyncMock``).
 """
 import asyncio
+import json
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -53,6 +54,26 @@ def test_resolve_rack_image_rejects_traversal(monkeypatch, tmp_path):
     assert error.value.status_code == 400
 
 
+def test_shop_import_and_rack_resolution_support_symlinked_uploads(monkeypatch, tmp_path):
+    shared = tmp_path / "shared"
+    (shared / "shop").mkdir(parents=True)
+    uploads = tmp_path / "release-uploads"
+    uploads.symlink_to(shared, target_is_directory=True)
+    monkeypatch.setattr(service, "_UPLOADS_ROOT", uploads)
+    payload = b"shop image"
+    (shared / "shop/widget.jpg").write_bytes(payload)
+
+    assert service.read_shop_product_image("/uploads/shop/widget.jpg") == (payload, "widget.jpg", "image/jpeg")
+    assert service.resolve_rack_image("shop/widget.jpg") == shared / "shop/widget.jpg"
+    (shared / "shop/escape.jpg").symlink_to(tmp_path / "outside.jpg")
+    with pytest.raises(service.RackImageError):
+        service.read_shop_product_image("/uploads/shop/escape.jpg")
+    with pytest.raises(service.RackImageError):
+        service.resolve_rack_image("../outside.jpg")
+    service.remove_rack_image("shop/widget.jpg", None)
+    assert not (shared / "shop/widget.jpg").exists()
+
+
 def test_read_shop_product_image_resolves_local_and_rejects_other(monkeypatch, tmp_path):
     monkeypatch.setattr(service, "_UPLOADS_ROOT", tmp_path)
     image_dir = tmp_path / "shop"
@@ -84,18 +105,23 @@ def test_prepare_bytes_rejects_tiny_image(monkeypatch, tmp_path):
     assert error.value.status_code == 400
 
 
-def test_prepare_bytes_writes_original_and_thumbnail(monkeypatch, tmp_path):
+@pytest.mark.parametrize("image_format, suffix", [("PNG", "png"), ("JPEG", "jpg"),
+                                                 ("JPEG", "jpeg"), ("GIF", "gif"), ("WEBP", "webp")])
+def test_prepare_bytes_writes_original_and_thumbnail(monkeypatch, tmp_path, image_format, suffix):
     monkeypatch.setattr(service, "_UPLOADS_ROOT", tmp_path)
     buffer = BytesIO()
-    Image.new("RGB", (400, 300), "blue").save(buffer, "PNG")
+    Image.new("RGB", (400, 300), "blue").save(buffer, image_format)
 
-    result = asyncio.run(service.prepare_bytes_rack_image(buffer.getvalue(), "big.png", 1, "switch", "product"))
+    result = asyncio.run(service.prepare_bytes_rack_image(buffer.getvalue(), "big." + suffix, 1, "switch", "product"))
 
     assert set(result) == {"storage_name", "thumbnail_name", "content_type", "size_bytes", "content_hash"}
-    assert result["content_type"] == "image/png"
+    assert result["content_type"] == "image/" + ("jpeg" if image_format == "JPEG" else suffix)
     assert len(result["content_hash"]) == 64
     assert (tmp_path / result["storage_name"]).is_file()
     assert result["thumbnail_name"] is not None and (tmp_path / result["thumbnail_name"]).is_file()
+    with Image.open(tmp_path / result["thumbnail_name"]) as thumbnail:
+        assert thumbnail.format == image_format
+        assert thumbnail.size == (360, 270)
 
 
 def test_repo_create_image_dedupes_by_hash(monkeypatch):
@@ -153,3 +179,94 @@ def test_template_and_js_wire_the_gallery():
                      "rack-equipment/${encodeURIComponent(editingId)}/images",
                      "addEventListener('open', load)"):
         assert endpoint in script, endpoint
+
+
+def _import_context(monkeypatch, company_id=1):
+    from app.features.assets import routes
+
+    monkeypatch.setattr(routes, "_rack_image_context", AsyncMock(return_value=({"id": 3}, company_id)))
+    monkeypatch.setattr(routes.shop_repo, "get_product_by_id", AsyncMock(return_value={
+        "id": 9, "image_url": "/uploads/shop/widget.png"}))
+    monkeypatch.setattr(routes.audit_service, "record", AsyncMock())
+    request = AsyncMock()
+    request.json.return_value = {"product_id": 9, "item_type": "switch", "kind": "product"}
+    return routes, request
+
+
+def test_import_shop_image_once_then_reuses_files_across_clients(monkeypatch, tmp_path):
+    routes, request = _import_context(monkeypatch)
+    monkeypatch.setattr(service, "_UPLOADS_ROOT", tmp_path)
+    (tmp_path / "shop").mkdir()
+    buffer = BytesIO()
+    Image.new("RGB", (400, 300), "blue").save(buffer, "PNG")
+    (tmp_path / "shop/widget.png").write_bytes(buffer.getvalue())
+    find = AsyncMock(return_value=None)
+    insert = AsyncMock(return_value=(70, True))
+    monkeypatch.setattr(repo, "find_shop_image", find)
+    monkeypatch.setattr(repo, "create_image", insert)
+
+    response = asyncio.run(routes.import_shop_rack_item_image(request))
+    assert response.status_code == 201
+    assert json.loads(response.body) == {"id": 70, "duplicate": False}
+    metadata = {key: value for key, value in insert.await_args.kwargs.items()
+                if key not in {"source_product_id", "uploaded_by"}}
+    find.return_value = {"id": 70, "company_id": 1, "item_type": "switch", **metadata}
+    files = set(tmp_path.rglob("*"))
+    # Reuse must succeed without reading the shop image or preparing any files.
+    monkeypatch.setattr(service, "read_shop_product_image", lambda *args: pytest.fail("Read duplicate shop image"))
+    prepare = AsyncMock(side_effect=AssertionError("Prepared duplicate image"))
+    monkeypatch.setattr(service, "prepare_bytes_rack_image", prepare)
+    insert.reset_mock()
+    response = asyncio.run(routes.import_shop_rack_item_image(request))
+    assert response.status_code == 200
+    assert json.loads(response.body) == {"id": 70, "duplicate": True}
+    insert.assert_not_awaited()
+
+    # Another client's library entry references the same original and thumbnail.
+    monkeypatch.setattr(routes, "_rack_image_context", AsyncMock(return_value=({"id": 3}, 2)))
+    insert.return_value = (71, True)
+    response = asyncio.run(routes.import_shop_rack_item_image(request))
+    assert response.status_code == 200
+    assert json.loads(response.body) == {"id": 71, "duplicate": True}
+    assert insert.await_args.args == (2, "switch", "product")
+    assert insert.await_args.kwargs["storage_name"] == metadata["storage_name"]
+    assert insert.await_args.kwargs["thumbnail_name"] == metadata["thumbnail_name"]
+    assert set(tmp_path.rglob("*")) == files
+    prepare.assert_not_awaited()
+    routes.shop_repo.get_product_by_id.assert_awaited_with(9, include_archived=True, company_id=2)
+
+
+def test_import_cannot_reuse_an_inaccessible_shop_product(monkeypatch):
+    routes, request = _import_context(monkeypatch)
+    routes.shop_repo.get_product_by_id.return_value = None
+    find = AsyncMock()
+    monkeypatch.setattr(repo, "find_shop_image", find)
+    with pytest.raises(routes.HTTPException) as error:
+        asyncio.run(routes.import_shop_rack_item_image(request))
+    assert error.value.status_code == 422
+    find.assert_not_awaited()
+
+
+@pytest.mark.parametrize("referenced", [True, False])
+def test_delete_preserves_files_referenced_by_other_clients(monkeypatch, tmp_path, referenced):
+    routes, request = _import_context(monkeypatch)
+    monkeypatch.setattr(service, "_UPLOADS_ROOT", tmp_path)
+    (tmp_path / "image.png").write_bytes(b"original")
+    (tmp_path / "image.png-thumb").write_bytes(b"thumbnail")
+    monkeypatch.setattr(repo, "delete_image", AsyncMock(return_value={
+        "storage_name": "image.png", "thumbnail_name": "image.png-thumb"}))
+    monkeypatch.setattr(repo, "storage_is_referenced", AsyncMock(return_value=referenced))
+    response = asyncio.run(routes.delete_rack_item_image(request, 70))
+    assert response.status_code == 200
+    assert (tmp_path / "image.png").exists() == referenced
+    assert (tmp_path / "image.png-thumb").exists() == referenced
+
+
+def test_repo_shop_lookup_prefers_company_and_type_without_exposing_captions(monkeypatch):
+    _mock_db(monkeypatch, fetch_one=[{"id": 70}])
+    assert asyncio.run(repo.find_shop_image(2, "switch", "product", 9)) == {"id": 70}
+    query, params = repo.db.fetch_one.await_args.args
+    assert "source_product_id=%s AND kind=%s" in query
+    assert "ORDER BY (company_id=%s AND item_type=%s) DESC" in query
+    assert "caption" not in query
+    assert params == (9, "product", 2, "switch")

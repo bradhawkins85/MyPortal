@@ -42,6 +42,7 @@ def _image_directory(company_id: int, item_type: str, kind: str) -> Path:
 def _resolve_under_base(base: Path, candidate: Path) -> Path:
     """Resolve *candidate* and prove it stays inside *base* (path-traversal guard)."""
     try:
+        base = base.resolve(strict=False)
         resolved = candidate.resolve(strict=False)
     except OSError as exc:  # pragma: no cover - defensive
         raise RackImageError(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid image path") from exc
@@ -150,7 +151,7 @@ async def prepare_rack_image(
         if suffix == ".jpg":
             thumbnail.convert("RGB").save(thumb_path, "JPEG", quality=85)
         else:
-            thumbnail.save(thumb_path)
+            thumbnail.save(thumb_path, format=Image.registered_extensions()[suffix])
         thumbnail_name = str(Path(directory).relative_to(_UPLOADS_ROOT) / thumb_path.name).replace("\\", "/")
 
     content_hash = hashlib.sha256(original.read_bytes()).hexdigest()
@@ -214,7 +215,7 @@ async def prepare_bytes_rack_image(
         if suffix == ".jpg":
             thumbnail.convert("RGB").save(thumb_path, "JPEG", quality=85)
         else:
-            thumbnail.save(thumb_path)
+            thumbnail.save(thumb_path, format=Image.registered_extensions()[suffix])
         thumbnail_name = str(Path(directory).relative_to(_UPLOADS_ROOT) / thumb_path.name).replace("\\", "/")
 
     content_hash = hashlib.sha256(payload).hexdigest()

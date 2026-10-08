@@ -65,6 +65,27 @@ async def get_image(company_id: int, image_id: int) -> dict[str, Any] | None:
     return row
 
 
+async def find_shop_image(company_id: int, item_type: str, kind: str,
+                          product_id: int) -> dict[str, Any] | None:
+    """Find an imported shop image, preferring this company's library entry.
+
+    Callers must check access to the shop product first. Only the stored file
+    metadata is reused across companies; library entries remain company-scoped.
+    """
+    return await db.fetch_one(
+        "SELECT id, company_id, item_type, storage_name, thumbnail_name, content_type, "
+        "size_bytes, content_hash FROM rack_item_images "
+        "WHERE source_product_id=%s AND kind=%s "
+        "ORDER BY (company_id=%s AND item_type=%s) DESC, id LIMIT 1",
+        (product_id, kind, company_id, rack_item_types.normalise(item_type)))
+
+
+async def storage_is_referenced(storage_name: str) -> bool:
+    """Keep shared originals and thumbnails until their last library entry is removed."""
+    return bool(await db.fetch_one(
+        "SELECT id FROM rack_item_images WHERE storage_name=%s LIMIT 1", (storage_name,)))
+
+
 async def delete_image(company_id: int, image_id: int) -> dict[str, Any] | None:
     """Delete a library image (attachments cascade) and return the row so files can be removed."""
     row = await get_image(company_id, image_id)
