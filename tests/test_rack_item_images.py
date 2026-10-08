@@ -38,6 +38,12 @@ def test_migration_creates_library_and_attachment_tables():
     assert "REFERENCES rack_item_images (id) ON DELETE CASCADE" in sql
     # Attaching is idempotent via a unique pair.
     assert "UNIQUE (equipment_id, image_id)" in sql
+    # The deployment runs MariaDB, so the DDL must be MySQL dialect (the SQLite
+    # fallback is produced by `_adapt_sql_for_sqlite`, never stored here).
+    assert "AUTO_INCREMENT" in sql
+    assert "AUTOINCREMENT" not in sql
+    assert "ENGINE=InnoDB" in sql
+    assert "CREATE INDEX IF NOT EXISTS" not in sql
 
 
 def test_resolve_rack_image_rejects_traversal(monkeypatch, tmp_path):
