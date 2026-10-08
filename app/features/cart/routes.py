@@ -1400,16 +1400,60 @@ async def place_order(request: Request) -> RedirectResponse:
             error=str(exc),
         )
 
-    success = quote("Your order is being processed.")
     return RedirectResponse(
-        url=f"{request.url_for('cart_page')}?orderMessage={success}",
+        url=f"{request.url_for('order_placed_page')}?orderNumber={quote(order_number)}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
+
+
+@router.get("/cart/order-placed", response_class=HTMLResponse, name="order_placed_page")
+async def order_placed_page(
+    request: Request,
+    order_number: str | None = Query(None, alias="orderNumber"),
+):
+    """Show a brief order-placed confirmation before returning the user to the shop."""
+    main_module = _main()
+    (
+        user,
+        membership,
+        company,
+        company_id,
+        redirect,
+    ) = await main_module._load_company_section_context(
+        request,
+        permission_field="can_access_cart",
+    )
+    if redirect:
+        return redirect
+
+    session = await main_module.session_manager.load_session(request)
+    if not session:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    normalised_order_number = (order_number or "").strip() or None
+    redirect_url = request.url_for("shop_page")
+    redirect_delay_ms = 5000
+
+    extra = {
+        "title": "Order placed",
+        "order_number": normalised_order_number,
+        "redirect_url": redirect_url,
+        "redirect_delay_ms": redirect_delay_ms,
+        "countdown_seconds": max(1, int(redirect_delay_ms // 1000)),
+    }
+    response = await main_module._render_template(
+        "shop/order_placed.html", request, user, extra=extra
+    )
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 __all__ = [
     "add_package_to_cart",
     "add_to_cart",
+    "order_placed_page",
     "place_order",
     "remove_cart_items",
     "router",

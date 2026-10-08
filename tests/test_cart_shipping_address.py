@@ -306,8 +306,8 @@ def test_place_order_stores_local_pickup_option(monkeypatch, active_session):
         form_data={"shippingOption": "local_pickup"},
         capture_create_order_kwargs=captured,
     )
-    # Order should succeed
-    assert "orderMessage" in location
+    # Order should redirect to the confirmation page
+    assert "/cart/order-placed" in location
     assert captured[0]["shipping_option"] == "local_pickup"
     assert captured[0]["shipping_street"] is None
 
@@ -346,8 +346,8 @@ def test_place_order_specific_address_allowed_with_street(monkeypatch, active_se
         capture_create_order_kwargs=captured,
         capture_create_ticket_kwargs=captured_tickets,
     )
-    # Order should succeed (success message, not a street validation error)
-    assert "orderMessage" in location
+    # Order should redirect to the confirmation page (not a street validation error)
+    assert "/cart/order-placed" in location
     assert "street" not in location.lower()
     assert captured
     assert captured[0]["shipping_option"] == "specific_address"
@@ -392,7 +392,7 @@ def test_place_order_generates_invoice_for_xero(monkeypatch, active_session):
         form_data={"shippingOption": "local_pickup"},
         capture_invoice_kwargs=captured_invoices,
     )
-    assert "orderMessage" in location
+    assert "/cart/order-placed" in location
     assert len(captured_invoices) == 1
     invoice_kwargs = captured_invoices[0]
     assert invoice_kwargs["order_number"].startswith("ORD")
