@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -54,13 +55,14 @@ def mocked_deps(monkeypatch):
 
     monkeypatch.setattr(main_module, "_render_template", _render_template)
 
-    async def _access_context(user):
-        return object()
-
     async def _no_signals(*args, **kwargs):
         return {}
 
-    monkeypatch.setattr(kb_service, "build_access_context", _access_context)
+    monkeypatch.setattr(
+        kb_service, "build_access_context",
+        AsyncMock(side_effect=AssertionError("Catalogue must not load company memberships")),
+    )
+    monkeypatch.setattr(kb_routes, "KB_REVIEW_SIGNALS_TIMEOUT", 0.05)
     monkeypatch.setattr(rag_service, "kb_articles_needing_update", _no_signals)
     return monkeypatch
 
@@ -71,7 +73,7 @@ def test_admin_kb_page_renders_when_services_are_fast(
     async def _articles(context, **kwargs):
         return []
 
-    monkeypatch.setattr(kb_service, "list_articles_for_context", _articles)
+    monkeypatch.setattr(kb_service, "list_admin_article_summaries", _articles)
 
     client = _make_client()
     with client:
@@ -89,7 +91,7 @@ def test_admin_kb_page_returns_504_instead_of_hanging(
         await asyncio.sleep(5)
         return []
 
-    monkeypatch.setattr(kb_service, "list_articles_for_context", _stall)
+    monkeypatch.setattr(kb_service, "list_admin_article_summaries", _stall)
 
     client = _make_client()
     started = time.monotonic()
@@ -101,3 +103,64 @@ def test_admin_kb_page_returns_504_instead_of_hanging(
     # Must resolve at the backstop (~0.5s), not after the 5s stall.
     assert elapsed < 3.0
     assert "too long" in response.text.lower()
+
+
+@pytest.mark.parametrize("failure", ["stall", "error"])
+def test_admin_kb_still_renders_when_optional_review_signals_fail(
+    mocked_deps, fast_page_timeout, monkeypatch, failure
+):
+    article = {"id": 7, "is_published": False, "lifecycle_status": "draft"}
+    monkeypatch.setattr(
+        kb_service, "list_admin_article_summaries", AsyncMock(return_value=[article])
+    )
+
+    async def _signals():
+        if failure == "error":
+            raise RuntimeError("Relationship database unavailable")
+        await asyncio.sleep(5)
+        return {}
+
+    render = AsyncMock(return_value=HTMLResponse("Knowledge base admin"))
+    monkeypatch.setattr(rag_service, "kb_articles_needing_update", _signals)
+    monkeypatch.setattr(main_module, "_render_template", render)
+    with _make_client() as client:
+        response = client.get("/admin/knowledge-base")
+    assert response.status_code == 200
+    extra = render.call_args.kwargs["extra"]
+    assert extra["kb_articles"][0]["id"] == 7
+    assert extra["kb_status_counts"]["draft"] == 1
+    assert extra["kb_review_signals_unavailable"] is True
+
+
+def test_admin_kb_keeps_review_signals_when_available(
+    mocked_deps, fast_page_timeout, monkeypatch
+):
+    monkeypatch.setattr(
+        kb_service, "list_admin_article_summaries",
+        AsyncMock(return_value=[{"id": 7, "is_published": True}]),
+    )
+    signal = {"ticket_count": 3, "tickets": []}
+    monkeypatch.setattr(rag_service, "kb_articles_needing_update", AsyncMock(return_value={7: signal}))
+    render = AsyncMock(return_value=HTMLResponse("Knowledge base admin"))
+    monkeypatch.setattr(main_module, "_render_template", render)
+    with _make_client() as client:
+        assert client.get("/admin/knowledge-base").status_code == 200
+    extra = render.call_args.kwargs["extra"]
+    assert extra["kb_articles"][0]["needs_update"] == signal
+    assert extra["kb_status_counts"]["needs_update"] == 1
+    assert extra["kb_review_signals_unavailable"] is False
+
+
+def test_admin_kb_redirect_does_not_load_catalogue(monkeypatch):
+    from fastapi.responses import RedirectResponse
+
+    monkeypatch.setattr(
+        main_module, "_require_super_admin_page",
+        AsyncMock(return_value=(None, RedirectResponse("/login"))),
+    )
+    load = AsyncMock()
+    monkeypatch.setattr(kb_service, "list_admin_article_summaries", load)
+    with _make_client() as client:
+        response = client.get("/admin/knowledge-base", follow_redirects=False)
+    assert response.status_code == 307
+    load.assert_not_awaited()

@@ -1,0 +1,7 @@
+{
+  "guid": "8c5b92c3-71dd-4711-8f66-933089cfc351",
+  "occurred_at": "2026-10-08T05:36Z",
+  "change_type": "Fix",
+  "summary": "Fix admin knowledge base loading with metadata-only catalogue queries and bounded AI review signals; preserve page timeout errors and return from the upgrade screen whenever maintenance ends.",
+  "content_hash": "8435943fe88262324622165f2df94a7c2f817c2c54dc05c8c5688442e0efe97a"
+}

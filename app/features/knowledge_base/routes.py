@@ -26,6 +26,7 @@ router = APIRouter(tags=["Knowledge Base"])
 # half-open socket). Individual calls are already bounded by the DB pool and
 # Redis timeouts; this is the final page-level guard.
 KB_PAGE_TIMEOUT = 30.0
+KB_REVIEW_SIGNALS_TIMEOUT = 2.0
 
 
 def _main():
@@ -152,14 +153,18 @@ async def admin_knowledge_base_page(request: Request):
         return redirect
 
     async def _render_page():
-        access_context = await knowledge_base_service.build_access_context(current_user)
-        articles = await knowledge_base_service.list_articles_for_context(
-            access_context,
-            include_unpublished=True,
-            include_permissions=True,
-        )
+        articles = await knowledge_base_service.list_admin_article_summaries(current_user)
         now = datetime.now(timezone.utc)
-        update_signals = await rag_relationships_service.kb_articles_needing_update()
+        review_signals_unavailable = False
+        try:
+            update_signals = await asyncio.wait_for(
+                rag_relationships_service.kb_articles_needing_update(),
+                timeout=KB_REVIEW_SIGNALS_TIMEOUT,
+            )
+        except Exception as exc:
+            log_error("Knowledge base review signals unavailable", error=str(exc))
+            update_signals = {}
+            review_signals_unavailable = True
         counts = {
             "all": len(articles), "published": 0, "draft": 0, "in_review": 0,
             "retired": 0, "overdue": 0, "needs_update": 0,
@@ -181,6 +186,7 @@ async def admin_knowledge_base_page(request: Request):
             "title": "Knowledge base admin",
             "kb_articles": jsonable_encoder(articles),
             "kb_status_counts": counts,
+            "kb_review_signals_unavailable": review_signals_unavailable,
         }
         return await main_module._render_template(
             "admin/knowledge_base.html",

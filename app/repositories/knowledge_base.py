@@ -259,6 +259,18 @@ async def list_articles(*, include_unpublished: bool = False) -> list[dict[str, 
     return await _attach_relations(rows)
 
 
+async def list_article_summaries() -> list[dict[str, Any]]:
+    """Load catalogue metadata without article bodies or editor relations."""
+    rows = await db.fetch_all(
+        """SELECT id, slug, title, summary, permission_scope, is_published,
+                  lifecycle_status, owner_id, review_due_at, ai_tags,
+                  excluded_ai_tags, manual_ai_tags, created_by, created_at,
+                  updated_at, published_at
+           FROM knowledge_base_articles ORDER BY updated_at DESC, id DESC"""
+    )
+    return [_normalise_article(row) for row in rows]
+
+
 async def get_article_by_id(article_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
         "SELECT * FROM knowledge_base_articles WHERE id = %s",
