@@ -472,6 +472,90 @@ def test_topology_links_are_smooth_curves():
     assert paths and all(" C" in path for path in paths)
 
 
+@pytest.mark.parametrize("detail", ["standard", "detailed"])
+@pytest.mark.parametrize("reverse_links", [False, True])
+@pytest.mark.parametrize("reverse_endpoints", [False, True])
+@pytest.mark.parametrize("mirror", [False, True])
+def test_topology_port_labels_follow_their_connections(monkeypatch, detail, reverse_links,
+                                                       reverse_endpoints, mirror):
+    extra = {
+        "assets": [
+            {"id": 1, "name": "RADIA Unifi Express 7", "asset_type": "router"},
+            {"id": 2, "name": "Printer", "asset_type": "other"},
+            {"id": 3, "name": "PoE Injector", "asset_type": "other"},
+            {"id": 4, "name": "RADIA Teltonika OTD500", "asset_type": "modem"},
+        ],
+        "interfaces": [
+            {"id": 1, "asset_id": 1, "name": "Port 1", "kind": "ethernet"},
+            {"id": 2, "asset_id": 1, "name": "Port 2", "kind": "ethernet"},
+            {"id": 3, "asset_id": 2, "name": "Port 1", "kind": "ethernet"},
+            {"id": 4, "asset_id": 3, "name": "Port 1", "kind": "ethernet"},
+            {"id": 5, "asset_id": 3, "name": "Port 2", "kind": "ethernet"},
+            {"id": 6, "asset_id": 4, "name": "Port 1", "kind": "ethernet"},
+        ],
+        "links": [
+            {"a_kind": "interface", "a_id": 1, "b_kind": "interface", "b_id": 3, "medium": "copper"},
+            {"a_kind": "interface", "a_id": 2, "b_kind": "interface", "b_id": 4,
+             "medium": "copper", "label": "<-->"},
+            {"a_kind": "interface", "a_id": 5, "b_kind": "interface", "b_id": 6, "medium": "copper"},
+        ],
+    }
+    if reverse_links:
+        extra["links"].reverse()
+    if reverse_endpoints:
+        for link in extra["links"]:
+            link["a_id"], link["b_id"] = link["b_id"], link["a_id"]
+    graph = nm.build_graph({}, extra, nm.MapOptions(detail=detail))
+    if mirror:
+        original_layout = nm.layout
+
+        def mirrored_layout(graph):
+            width, height, boxes = original_layout(graph)
+            for node in graph.nodes.values():
+                node.x = width - node.x - nm.CARD_W
+            return width, height, boxes
+
+        monkeypatch.setattr(nm, "layout", mirrored_layout)
+    svg = xml.dom.minidom.parseString(nm.render_svg(graph, title="Map"))
+    texts = svg.getElementsByTagName("text")
+    router = graph.nodes["asset:1"]
+    injector = graph.nodes["asset:3"]
+    printer = graph.nodes["asset:2"]
+    assert injector.y < printer.y
+    direction = -1 if mirror else 1
+    router_port_anchor = "end" if mirror else "start"
+    branch_left, branch_right = sorted((router.anchor[0], injector.anchor[0]))
+    router_ports = {
+        text.firstChild.data: (float(text.getAttribute("x")), float(text.getAttribute("y")))
+        for text in texts if text.getAttribute("class") == "nm-port"
+        and text.getAttribute("text-anchor") == router_port_anchor
+        and branch_left < float(text.getAttribute("x")) < branch_right
+    }
+    # Port 2 must label the upper injector branch; Port 1 the lower printer branch.
+    assert router_ports["Port 2"][1] < router_ports["Port 1"][1]
+    payload = nm.graph_payload(graph)["nodes"]
+    assert {link["port"]: (link["peer"], link["peer_port"])
+            for link in payload[router.id]["links"]} == {
+        "Port 1": ("Printer", "Port 1"), "Port 2": ("PoE Injector", "Port 1"),
+    }
+    # Each remote Port 1 stays beside its own device, regardless of endpoint order.
+    for peer in (injector, printer):
+        peer_port_x = peer.anchor[0] - direction * (nm.ICON / 2 + 8)
+        peer_port_y = peer.anchor[1] - (nm.TOPO_LINE_H / 2 if peer is injector and reverse_endpoints else 0)
+        assert any(text.getAttribute("class") == "nm-port" and text.firstChild.data == "Port 1"
+                   and float(text.getAttribute("x")) == peer_port_x
+                   and float(text.getAttribute("y")) == peer_port_y for text in texts)
+    # Link annotations remain immediately below the port at their owning endpoint.
+    if reverse_endpoints:
+        owner_port_x = injector.anchor[0] - direction * (nm.ICON / 2 + 8)
+        owner_port_y = injector.anchor[1] - nm.TOPO_LINE_H / 2
+    else:
+        owner_port_x, owner_port_y = router_ports["Port 2"]
+    assert any(text.getAttribute("class") == "nm-edge-label" and text.firstChild.data == "<-->"
+               and float(text.getAttribute("x")) == owner_port_x
+               and float(text.getAttribute("y")) == owner_port_y + nm.TOPO_LINE_H for text in texts)
+
+
 def test_sites_layout_still_groups_by_site_and_rack():
     svg = nm.render_svg(_graph(layout="sites"), title="Map")
     assert 'class="nm-site"' in svg and 'class="nm-rack"' in svg
