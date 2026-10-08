@@ -199,7 +199,7 @@ deploy/, docker/    nginx, systemd, fail2ban and container deployment assets
 
 ### Production (Ubuntu 24.04 / Debian 12)
 
-The installer sets up nginx on port 80, MariaDB, and immutable blue/green releases. It works on bare metal, a VM,
+The installer sets up nginx on port 80, MariaDB, local Redis, and immutable blue/green releases. It works on bare metal, a VM,
 or an LXC container.
 
 ```bash

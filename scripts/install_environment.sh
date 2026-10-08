@@ -747,6 +747,7 @@ if [[ "$ENVIRONMENT" == "production" ]]; then
 fi
 
 ensure_env_file
+run_privileged bash "${SCRIPT_DIR}/provision_redis.sh" "$ENV_FILE"
 ensure_env_default "DISABLED_FEATURE_PACKS" ""
 ensure_env_default "DISABLED_MODULES" ""
 ensure_env_default "ENABLE_AUTO_REFRESH" "false"
