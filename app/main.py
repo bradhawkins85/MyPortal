@@ -12341,8 +12341,13 @@ async def liveness_probe() -> dict[str, str]:
     description="Unauthenticated, cache-disabled status used by the deployment-independent upgrade page.",
 )
 async def upgrade_status_endpoint() -> JSONResponse:
+    try:
+        state = system_state_service.get_public_upgrade_state()
+    except Exception as exc:
+        logger.error("Failed to read upgrade state; reporting idle", error=str(exc))
+        state = {"phase": "idle", "maintenance": False, "outcome": None}
     return JSONResponse(
-        system_state_service.get_public_upgrade_state(),
+        state,
         headers={"Cache-Control": "no-store"},
     )
 
