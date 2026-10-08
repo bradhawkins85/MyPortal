@@ -105,7 +105,7 @@ async def attach(company_id: int, equipment_id: int, image_id: int) -> None:
     if image["item_type"] != item["item_type"]:
         raise ValueError("Image type does not match this rack item")
     await db.execute(
-        "INSERT OR IGNORE INTO rack_equipment_images (company_id, equipment_id, image_id) VALUES (%s, %s, %s)",
+        "INSERT IGNORE INTO rack_equipment_images (company_id, equipment_id, image_id) VALUES (%s, %s, %s)",
         (company_id, equipment_id, image_id))
 
 
