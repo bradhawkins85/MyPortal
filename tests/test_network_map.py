@@ -174,6 +174,64 @@ def test_graph_joins_racks_interfaces_and_ipam():
     assert ("asset:11", "internet") in _pairs(graph, "wan")
 
 
+def test_map_port_labels_match_the_documented_connections():
+    """Each edge label must be the physical port it was drawn from.
+
+    Regression guard for the "Router · ports and connections" panel being the
+    source of truth: a router whose Port 1 is patched to the Printer and whose
+    Port 2 is patched to the PoE injector must draw exactly those labels, not
+    have them swapped. The labels are produced by ``_number_ports`` (the same
+    code that feeds the rack dialog), so this pins the numbering and the map
+    together; a stale or re-ordered render would surface as a mismatch here.
+    """
+    from app.repositories import infrastructure as infrastructure_repo
+
+    # The router's ports exactly as documented: Port 1 -> Printer, Port 2 -> PoE.
+    unifi_ports = infrastructure_repo._number_ports([
+        {"id": 101, "port_number": 1, "connector": "data", "asset_id": 2,
+         "source_port_id": None, "peer_port_id": None},
+        {"id": 102, "port_number": 2, "connector": "data", "asset_id": None,
+         "source_port_id": None, "peer_port_id": 201},
+        {"id": 103, "port_number": 3, "connector": "psu", "asset_id": None,
+         "source_port_id": None, "peer_port_id": None},
+    ])
+    poe_ports = infrastructure_repo._number_ports([
+        {"id": 201, "port_number": 1, "connector": "data", "asset_id": None,
+         "source_port_id": None, "peer_port_id": 102},
+    ])
+    overview = {
+        "racks": [{"id": 1, "name": "Comms A", "location": "HQ", "unit_count": 24}],
+        "equipment": [
+            {"id": 11, "rack_id": 1, "asset_id": 1, "start_unit": 20, "item_type": "router", "ports": unifi_ports},
+            {"id": 12, "rack_id": 1, "asset_id": None, "name": "PoE Injector", "start_unit": 19,
+             "item_type": "other", "ports": poe_ports},
+        ],
+        "networks": [], "addresses": [],
+    }
+    extra = {
+        "assets": [
+            {"id": 1, "name": "RADIA Unifi Express 7", "type": "router", "location": "HQ"},
+            {"id": 2, "name": "Printer", "type": "other", "location": "HQ"},
+        ],
+        "interfaces": [], "links": [], "relationships": [],
+    }
+    graph = nm.build_graph(overview, extra, nm.MapOptions(layout="topology", detail="standard"))
+
+    def port_label_on(node_id, other_node_id):
+        for edge in graph.edges:
+            if {edge.a, edge.b} == {node_id, other_node_id}:
+                return edge.a_port if edge.a == node_id else edge.b_port
+        raise AssertionError(f"no edge between {node_id} and {other_node_id}")
+
+    # The router side of each edge carries the label of the physical port used.
+    assert port_label_on("asset:1", "asset:2") == "Port 1"   # Port 1 is patched to the Printer
+    assert port_label_on("asset:1", "item:12") == "Port 2"   # Port 2 is patched to the PoE injector
+    assert port_label_on("item:12", "asset:1") == "Port 1"   # ...into the injector's own Port 1
+    # The hover-panel payload (graph_payload) agrees with what is drawn.
+    links = {link["peer"]: link["port"] for link in nm.graph_payload(graph)["nodes"]["asset:1"]["links"]}
+    assert links == {"Printer": "Port 1", "PoE Injector": "Port 2"}
+
+
 def test_point_to_point_wireless_link_between_sites():
     graph = _graph()
     wireless = [edge for edge in graph.edges if edge.medium == "wireless"]
