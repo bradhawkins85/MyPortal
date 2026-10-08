@@ -193,7 +193,7 @@ def test_catalogue_lists_every_asset_type_plus_rack_hardware_with_images():
     from app.services import asset_types, rack_item_types
 
     keys = [item_type.key for item_type in rack_item_types.ITEM_TYPES]
-    assert keys == [item.key for item in asset_types.ASSET_TYPES] + ["kvm", "fan_tray", "shelf", "cable_management"]
+    assert keys == [item.key for item in asset_types.ASSET_TYPES] + ["kvm", "fan_tray", "shelf", "cable_management", "poe_injector"]
     for item in asset_types.ASSET_TYPES:
         assert rack_item_types.get(item.key).label == item.label
         assert rack_item_types.get(item.key).asset_type == item.key
@@ -218,6 +218,7 @@ def test_catalogue_lists_every_asset_type_plus_rack_hardware_with_images():
     assert connectors["fan_tray"] == {"psu": 1}
     assert connectors["pdu"] == {"iec": 8, "3pin": 0, "psu": 1}
     assert connectors["ups"] == {"iec": 6, "3pin": 2, "psu": 1}
+    assert connectors["poe_injector"] == {"data": 2, "psu": 1}
     assert not rack_item_types.get("shelf").power_input and rack_item_types.get("server").power_input
     assert rack_item_types.connector_label("3pin", 2) == "3-pin 2"
 

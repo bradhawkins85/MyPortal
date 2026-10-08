@@ -498,6 +498,19 @@ def cable_management(f: Face, rear: bool, conns: Connections) -> None:
         f.path(d, stroke="#e5e7eb", sw=1.2, opacity=0.5)
 
 
+def poe_injector(f: Face, rear: bool, conns: Connections) -> None:
+    if rear:
+        rear_panel(f, conns)
+        return
+    # A small mid-span unit: status LEDs, a printed logo and the pass-through
+    # network ports on the front.
+    x = status_leds(f, f.inner_x0, (LED_GREEN, LED_GREEN, LED_AMBER, LED_GREEN))
+    f.rect(x, 8, 30, 28, "#0d1116", rx=3)
+    glyph(f, "route", x + 15, 22, LED_GREEN)
+    x += 36
+    draw_data_ports(f, (x, f.top, f.inner_x1 - 6, f.bottom), conns.get("data", []))
+
+
 # ------------------------------------------------- appliances and devices
 def rear_panel(f: Face, conns: Connections, box=None) -> None:
     """A generic back panel: network ports left, power inputs right, vents between."""
@@ -836,6 +849,7 @@ STYLES = {
     "fan_tray": ("#353b44", "#1a1e24", "#5b6574", "#2b323c"),
     "shelf": ("#2a2f36", "#191c21", "#5b6574", "#22262c"),
     "cable_management": ("#23272d", "#121418", "#5b6574", "#1c1f24"),
+    "poe_injector": ("#33414f", "#18222b", "#5f7d94", "#233139"),
 }
 _APPLIANCE = ("#343b45", "#1b2027", "#5b6574", "#262c35")
 _SHELF = ("#15181d", "#0e1013", "#3b424c", "#22262c")
@@ -854,7 +868,7 @@ STYLES.update({
 DRAWERS = {
     "server": server, "switch": switch, "storage": storage, "patch_panel": patch_panel,
     "kvm": kvm, "pdu": pdu, "ups": ups, "fan_tray": fan_tray, "shelf": shelf,
-    "cable_management": cable_management,
+    "cable_management": cable_management, "poe_injector": poe_injector,
     "modem": appliance("globe", LED_GREEN), "router": appliance("route"),
     "firewall": appliance("shield", LED_RED, lcd=True), "vpn_gateway": appliance("lock", "#a78bfa"),
     "load_balancer": appliance("balance", LED_GREEN, lcd=True), "wireless_controller": appliance("wifi"),
