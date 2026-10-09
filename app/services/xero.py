@@ -548,8 +548,6 @@ def _build_invoice_payload_from_local_invoice(
         "DueDate": due_date.isoformat(),
         "Status": "AUTHORISED" if auto_send else "DRAFT",
     }
-    if auto_send:
-        payload["SentToContact"] = True
     return payload, _quantize(base_amount), _quantize(base_amount + adjustment_amount)
 
 
@@ -1055,6 +1053,44 @@ async def _post_xero_invoice_with_product_retry(
 
     retry_response = await client.post(api_url, json=payload, headers=request_headers)
     return retry_response, ensure_result
+
+
+async def _email_xero_invoice(
+    *,
+    xero_invoice_id: str | None,
+    request_headers: Mapping[str, str],
+    client: httpx.AsyncClient | None = None,
+) -> str | None:
+    """Ask Xero to email an approved invoice to its contact.
+
+    Setting ``SentToContact`` on the invoice only flags it as sent; Xero does not
+    deliver anything until the Email endpoint is called. Returns ``None`` when
+    Xero accepted the request, otherwise a description of the failure.
+    """
+
+    if not xero_invoice_id:
+        return "Xero did not return an InvoiceID to email"
+    email_url = f"https://api.xero.com/api.xro/2.0/Invoices/{xero_invoice_id}/Email"
+    try:
+        if client is None:
+            async with httpx.AsyncClient(timeout=30.0) as email_client:
+                response = await email_client.post(email_url, json={}, headers=dict(request_headers))
+        else:
+            response = await client.post(email_url, json={}, headers=dict(request_headers))
+    except httpx.HTTPError as exc:
+        logger.error("Failed to email Xero invoice", xero_invoice_id=xero_invoice_id, error=str(exc))
+        return str(exc)
+    if 200 <= response.status_code < 300:
+        logger.info("Emailed Xero invoice to contact", xero_invoice_id=xero_invoice_id)
+        return None
+    detail = _extract_xero_error_detail(response.text) or f"HTTP {response.status_code}"
+    logger.error(
+        "Xero rejected invoice email request",
+        xero_invoice_id=xero_invoice_id,
+        response_status=response.status_code,
+        error=detail,
+    )
+    return detail
 
 
 async def _rename_local_invoice_references(
@@ -2255,9 +2291,6 @@ async def sync_billable_tickets(
         "Status": "AUTHORISED" if auto_send else "DRAFT",
     }
 
-    if auto_send:
-        invoice_payload["SentToContact"] = True
-
     # Create webhook monitor event with the exact request payload so manual retries
     # resend the same body that was submitted to Xero.
     webhook_payload = {"Invoices": [invoice_payload]}
@@ -2287,6 +2320,8 @@ async def sync_billable_tickets(
     response_body: str | None = None
     response_headers: dict[str, Any] | None = None
     xero_invoice_number: str | None = None
+    xero_invoice_id: str | None = None
+    email_error: str | None = None
     
     xero_request_payload = {"Invoices": [invoice_payload]}
 
@@ -2316,12 +2351,19 @@ async def sync_billable_tickets(
                 invoices_list = response_data.get("Invoices", [])
                 if invoices_list:
                     xero_invoice_number = invoices_list[0].get("InvoiceNumber")
+                    xero_invoice_id = invoices_list[0].get("InvoiceID")
             except Exception as parse_exc:
                 logger.warning(
                     "Failed to parse Xero invoice number from response",
                     error=str(parse_exc),
                 )
         
+        if success and auto_send:
+            email_error = await _email_xero_invoice(
+                xero_invoice_id=xero_invoice_id,
+                request_headers=request_headers,
+            )
+
         if event_id is not None:
             if success:
                 try:
@@ -2439,6 +2481,7 @@ async def sync_billable_tickets(
                 "status": "succeeded",
                 "company_id": company_id,
                 "invoice_number": xero_invoice_number,
+                "email_error": email_error,
                 "tickets_billed": len(tickets_context),
                 "time_entries_recorded": billed_count,
                 "response_status": response_status,
@@ -2772,12 +2815,23 @@ async def sync_company(
                 synced_invoice,
             )
 
+            email_error: str | None = None
+            if auto_send:
+                email_error = await _email_xero_invoice(
+                    xero_invoice_id=xero_invoice_id,
+                    request_headers=request_headers,
+                )
+
             invoice_updates: dict[str, Any] = {
                 "invoice_number": xero_invoice_number,
                 "status": xero_status.lower(),
                 "xero_invoice_id": xero_invoice_id,
                 "synced_to_xero_at": datetime.now(timezone.utc),
-                "xero_sync_error": None,
+                "xero_sync_error": (
+                    f"Invoice created in Xero but email to contact failed: {email_error}"
+                    if email_error
+                    else None
+                ),
                 "xero_sync_attempted_at": attempted_at,
             }
             if xero_total_amount is not None:
@@ -2794,6 +2848,7 @@ async def sync_company(
                     "xero_invoice_id": xero_invoice_id,
                     "response_status": response_status,
                     "event_id": event_id,
+                    "email_error": email_error,
                 }
             )
         except httpx.HTTPError as exc:
@@ -3054,9 +3109,6 @@ async def send_order_to_xero(
         "DueDate": due_date.isoformat(),
         "Status": "AUTHORISED" if auto_send else "DRAFT",
     }
-    if auto_send:
-        xero_payload["SentToContact"] = True
-
     xero_payloads = [xero_payload]
 
     # Make API call to Xero
@@ -3096,6 +3148,8 @@ async def send_order_to_xero(
     response_body: str | None = None
     response_headers: dict[str, Any] | None = None
     xero_invoice_number: str | None = None
+    xero_invoice_id: str | None = None
+    email_error: str | None = None
     
     xero_request_payload = {"Invoices": xero_payloads}
 
@@ -3125,12 +3179,19 @@ async def send_order_to_xero(
                 invoices_list = response_data.get("Invoices", [])
                 if invoices_list:
                     xero_invoice_number = invoices_list[0].get("InvoiceNumber")
+                    xero_invoice_id = invoices_list[0].get("InvoiceID")
             except Exception as parse_exc:
                 logger.warning(
                     "Failed to parse Xero invoice number from order response",
                     error=str(parse_exc),
                 )
         
+        if success and auto_send:
+            email_error = await _email_xero_invoice(
+                xero_invoice_id=xero_invoice_id,
+                request_headers=request_headers,
+            )
+
         if event_id is not None:
             if success:
                 try:
@@ -3183,6 +3244,7 @@ async def send_order_to_xero(
                 "order_number": order_number,
                 "company_id": company_id,
                 "invoice_number": xero_invoice_number,
+                "email_error": email_error,
                 "response_status": response_status,
                 "event_id": event_id,
             }
@@ -3667,9 +3729,6 @@ async def send_subscription_charge_to_xero(
         "DueDate": due_date.isoformat(),
         "Status": "AUTHORISED" if auto_send else "DRAFT",
     }
-    if auto_send:
-        xero_payload["SentToContact"] = True
-    
     # Make API call to Xero
     api_url = "https://api.xero.com/api.xro/2.0/Invoices"
     request_headers = {
@@ -3716,6 +3775,8 @@ async def send_subscription_charge_to_xero(
     response_body: str | None = None
     response_headers: dict[str, Any] | None = None
     xero_invoice_number: str | None = None
+    xero_invoice_id: str | None = None
+    email_error: str | None = None
     
     xero_request_payload = {"Invoices": [xero_payload]}
 
@@ -3739,12 +3800,19 @@ async def send_subscription_charge_to_xero(
                 invoices_list = response_data.get("Invoices", [])
                 if invoices_list:
                     xero_invoice_number = invoices_list[0].get("InvoiceNumber")
+                    xero_invoice_id = invoices_list[0].get("InvoiceID")
             except Exception as parse_exc:
                 logger.warning(
                     "Failed to parse Xero invoice number from subscription charge response",
                     error=str(parse_exc),
                 )
         
+        if success and auto_send:
+            email_error = await _email_xero_invoice(
+                xero_invoice_id=xero_invoice_id,
+                request_headers=request_headers,
+            )
+
         if event_id is not None:
             if success:
                 try:
@@ -3797,6 +3865,7 @@ async def send_subscription_charge_to_xero(
                 "subscription_id": subscription_id,
                 "customer_id": customer_id,
                 "invoice_number": xero_invoice_number,
+                "email_error": email_error,
                 "response_status": response_status,
                 "event_id": event_id,
             }

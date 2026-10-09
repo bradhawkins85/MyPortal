@@ -211,11 +211,90 @@ async def test_sync_company_auto_send_marks_invoice_authorised_and_sent():
         result = await xero_service.sync_company(company_id=1, auto_send=True)
 
         assert result["status"] == "succeeded"
-        call_args = mock_client_instance.post.call_args
-        invoice_payload = call_args[1]["json"]["Invoices"][0]
+        create_call, email_call = mock_client_instance.post.call_args_list
+        invoice_payload = create_call[1]["json"]["Invoices"][0]
         assert invoice_payload["Status"] == "AUTHORISED"
-        assert invoice_payload["SentToContact"] is True
+        assert "SentToContact" not in invoice_payload
+        # Xero only delivers the invoice when the Email endpoint is called.
+        assert email_call[0][0] == "https://api.xero.com/api.xro/2.0/Invoices/xero-invoice-id/Email"
+        assert result["synced_invoices"][0]["email_error"] is None
+        assert mock_invoice_repo.patch_invoice.await_args.kwargs["xero_sync_error"] is None
 
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_company_auto_send_records_email_failure():
+    module_settings = {
+        "enabled": True,
+        "settings": {
+            "client_id": "test-client-id",
+            "client_secret": "test-client-secret",
+            "refresh_token": "test-refresh-token",
+            "tenant_id": "test-tenant-id",
+            "account_code": "400",
+            "line_amount_type": "Exclusive",
+        },
+    }
+    company = {
+        "id": 1,
+        "name": "Test Company",
+        "xero_id": "xero-test-123",
+    }
+    invoice = {
+        "id": 10,
+        "invoice_number": "INV-202603-0001",
+        "due_date": None,
+    }
+    invoice_lines = [
+        {
+            "description": "Managed services",
+            "quantity": 1,
+            "unit_amount": 150.00,
+            "product_code": None,
+        },
+    ]
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = json.dumps({"Invoices": [{"InvoiceID": "xero-invoice-id", "InvoiceNumber": "XERO-2002"}]})
+    mock_response.headers = {}
+
+    with patch("app.services.xero.modules_service") as mock_modules, \
+         patch("app.services.xero.company_repo") as mock_company_repo, \
+         patch("app.services.xero.invoice_repo") as mock_invoice_repo, \
+         patch("app.services.xero.invoice_lines_repo") as mock_invoice_lines_repo, \
+         patch("app.services.xero.billed_time_repo") as mock_billed_repo, \
+         patch("app.services.xero.tickets_repo") as mock_tickets_repo, \
+         patch("app.services.xero.webhook_monitor") as mock_webhook, \
+         patch("app.services.xero.httpx.AsyncClient") as mock_client:
+
+        mock_modules.get_module = AsyncMock(return_value=module_settings)
+        mock_modules.get_xero_credentials = AsyncMock(return_value={"refresh_token": "test-refresh-token"})
+        mock_modules.acquire_xero_access_token = AsyncMock(return_value="test-access-token")
+        mock_company_repo.get_company_by_id = AsyncMock(return_value=company)
+        mock_invoice_repo.list_unsynced_company_invoices = AsyncMock(return_value=[invoice])
+        mock_invoice_repo.patch_invoice = AsyncMock()
+        mock_invoice_lines_repo.list_invoice_lines = AsyncMock(return_value=invoice_lines)
+        mock_billed_repo.rename_invoice_number = AsyncMock()
+        mock_tickets_repo.rename_xero_invoice_number = AsyncMock()
+        mock_webhook.create_manual_event = AsyncMock(return_value={"id": 1})
+        mock_webhook.record_manual_success = AsyncMock()
+
+        mock_client_instance = MagicMock()
+        email_response = MagicMock()
+        email_response.status_code = 400
+        email_response.text = json.dumps({"Message": "No valid email addresses for contact"})
+        mock_client_instance.post = AsyncMock(side_effect=[mock_response, email_response])
+        mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        mock_client.return_value.__aexit__ = AsyncMock()
+
+        result = await xero_service.sync_company(company_id=1, auto_send=True)
+
+        assert result["status"] == "succeeded"
+        assert mock_client_instance.post.await_count == 2
+        email_error = result["synced_invoices"][0]["email_error"]
+        assert email_error and "No valid email addresses" in email_error
+        stored_error = mock_invoice_repo.patch_invoice.await_args.kwargs["xero_sync_error"]
+        assert stored_error.startswith("Invoice created in Xero but email to contact failed")
 
 @pytest.mark.anyio("asyncio")
 async def test_sync_company_creates_missing_xero_items_and_retries():

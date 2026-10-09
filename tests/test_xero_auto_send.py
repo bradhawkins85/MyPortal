@@ -76,7 +76,7 @@ async def test_sync_billable_tickets_auto_send_sets_authorised_status():
             auto_send=True,
         )
         
-        # Verify the invoice payload has AUTHORISED status and SentToContact
+        # Verify the invoice payload has AUTHORISED status
         assert mock_client_instance.post.called
         call_args = mock_client_instance.post.call_args
         request_payload = call_args.kwargs.get("json")
@@ -86,7 +86,7 @@ async def test_sync_billable_tickets_auto_send_sets_authorised_status():
         assert len(request_payload["Invoices"]) == 1
         invoice_payload = request_payload["Invoices"][0]
         assert invoice_payload["Status"] == "AUTHORISED"
-        assert invoice_payload.get("SentToContact") is True
+        assert "SentToContact" not in invoice_payload
         assert result["status"] == "succeeded"
 
 
