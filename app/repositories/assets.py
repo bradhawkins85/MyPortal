@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import date, datetime, time, timezone
+from collections.abc import Mapping
 from typing import Any
 
 import aiomysql
@@ -535,6 +536,53 @@ def _coerce_float(value: Any) -> float | None:
             return None
 
 
+_PLACEHOLDER_SERIALS = {
+    "",
+    "0",
+    "00000000",
+    "000000000000",
+    "0123456789",
+    "123456789",
+    "1234567890",
+    "default string",
+    "none",
+    "n/a",
+    "na",
+    "not applicable",
+    "not specified",
+    "null",
+    "o.e.m.",
+    "oem",
+    "system serial number",
+    "to be filled by o.e.m.",
+    "to be filled by oem",
+    "unknown",
+}
+
+
+def _is_placeholder_serial(serial: str | None) -> bool:
+    """Return True for generic BIOS serials shared by many unrelated devices."""
+    value = str(serial or "").strip().casefold()
+    return value in _PLACEHOLDER_SERIALS or set(value) <= {"0", " ", "-"}
+
+
+def _identity_conflicts(
+    candidate: Mapping[str, Any] | None,
+    sync_id: str | None,
+    tactical_id: str | None,
+) -> bool:
+    """Return True when ``candidate`` is already bound to a different remote device."""
+    if not candidate:
+        return False
+    existing_sync = str(candidate.get("syncro_asset_id") or "").strip()
+    if sync_id and existing_sync and existing_sync != sync_id:
+        return True
+    existing_tactical = str(candidate.get("tactical_asset_id") or "").strip()
+    if tactical_id and existing_tactical and existing_tactical != tactical_id:
+        return True
+    return False
+
+
 async def upsert_asset(
     *,
     company_id: int,
@@ -587,7 +635,15 @@ async def upsert_asset(
             )
             return None
         if link and link.get("asset_id"):
-            row = {"id": link["asset_id"]}
+            linked = await db.fetch_one(
+                "SELECT id, syncro_asset_id, tactical_asset_id FROM assets WHERE id = %s AND company_id = %s",
+                (link["asset_id"], company_id),
+            )
+            # A link pointing at an asset that now carries a different remote
+            # identity was created when two devices were wrongly merged; drop it
+            # so this device gets its own asset again.
+            if linked and not _identity_conflicts(linked, sync_id, tactical_id):
+                row = {"id": linked["id"]}
     if not row and sync_id:
         row = await db.fetch_one(
             "SELECT id FROM assets WHERE company_id = %s AND syncro_asset_id = %s",
@@ -598,11 +654,14 @@ async def upsert_asset(
             "SELECT id FROM assets WHERE company_id = %s AND tactical_asset_id = %s",
             (company_id, tactical_id),
         )
-    if not row and serial_number:
+    if not row and serial_number and not _is_placeholder_serial(serial_number):
         candidates = await db.fetch_all(
-            "SELECT id, provenance FROM assets WHERE company_id = %s AND serial_number = %s",
+            "SELECT id, provenance, syncro_asset_id, tactical_asset_id FROM assets WHERE company_id = %s AND serial_number = %s",
             (company_id, serial_number),
         )
+        candidates = [
+            c for c in candidates or [] if not _identity_conflicts(c, sync_id, tactical_id)
+        ]
         if len(candidates or []) == 1:
             candidate = candidates[0]
             if source and source_key and candidate.get("provenance") == "manual":
@@ -621,9 +680,12 @@ async def upsert_asset(
             return None
     if not row and name and (match_name or (source and source_key)):
         candidates = await db.fetch_all(
-            "SELECT id, provenance FROM assets WHERE company_id = %s AND LOWER(name) = LOWER(%s)",
+            "SELECT id, provenance, syncro_asset_id, tactical_asset_id FROM assets WHERE company_id = %s AND LOWER(name) = LOWER(%s)",
             (company_id, name),
         )
+        candidates = [
+            c for c in candidates or [] if not _identity_conflicts(c, sync_id, tactical_id)
+        ]
         if len(candidates or []) == 1:
             candidate = candidates[0]
             if source and source_key and candidate.get("provenance") == "manual":

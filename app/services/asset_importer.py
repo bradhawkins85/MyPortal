@@ -363,6 +363,7 @@ async def import_tactical_assets_for_company(
     )
     agents = await tacticalrmm.fetch_agents(client_id)
     processed = 0
+    skipped = 0
     seen: set[tuple[str | None, str | None, str]] = set()
     active_tactical_ids: set[str] = set()
 
@@ -408,7 +409,16 @@ async def import_tactical_assets_for_company(
             source_external_id=tactical_id,
             source_fields=list(details.keys()),
         )
-        if asset_id and tactical_id:
+        if not asset_id:
+            skipped += 1
+            log_info(
+                "Tactical RMM asset held for reconciliation review",
+                company_id=company_id,
+                tactical_asset_id=tactical_id,
+                name=name,
+            )
+            continue
+        if tactical_id:
             try:
                 await _sync_tactical_asset_custom_fields(asset_id, tactical_id, agent)
             except (
@@ -429,20 +439,19 @@ async def import_tactical_assets_for_company(
                     tactical_asset_id=tactical_id,
                     error=str(exc),
                 )
-        if asset_id:
-            try:
-                await _sync_tactical_tray_device_link(
-                    company_id=company_id,
-                    asset_id=asset_id,
-                    agent=agent,
-                )
-            except Exception as exc:  # noqa: BLE001 – tray linking must not abort import
-                log_error(
-                    "Failed to sync Tactical RMM tray device link",
-                    asset_id=asset_id,
-                    tactical_asset_id=tactical_id,
-                    error=str(exc),
-                )
+        try:
+            await _sync_tactical_tray_device_link(
+                company_id=company_id,
+                asset_id=asset_id,
+                agent=agent,
+            )
+        except Exception as exc:  # noqa: BLE001 – tray linking must not abort import
+            log_error(
+                "Failed to sync Tactical RMM tray device link",
+                asset_id=asset_id,
+                tactical_asset_id=tactical_id,
+                error=str(exc),
+            )
         processed += 1
 
     try:
@@ -459,6 +468,7 @@ async def import_tactical_assets_for_company(
         company_id=company_id,
         tactical_client_id=client_id,
         processed=processed,
+        skipped=skipped,
         total=len(agents),
     )
     return processed
