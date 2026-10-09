@@ -1,0 +1,7 @@
+{
+  "guid": "22427d41-448a-4b3e-9287-348d9bdc3e1d",
+  "occurred_at": "2026-10-09T06:54Z",
+  "change_type": "Fix",
+  "summary": "Tactical RMM asset sync no longer merges separate devices that share a serial number or hostname, ignores generic placeholder serials when matching, splits devices that were previously merged, and only counts assets that were actually saved.",
+  "content_hash": "915b4802538f20ea269f8da62f5f2625ed02f5ebb7646a01c87d230c49d8b078"
+}
