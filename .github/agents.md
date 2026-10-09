@@ -2,7 +2,9 @@
 
 ## Project Overview
 
-MyPortal is a Python-first customer portal built with FastAPI, async MySQL, and Jinja-powered views. The application provides a modern, extensible architecture for customer management, ticketing, automation, and integrations.
+MyPortal is a Python-first customer portal built with FastAPI, async MySQL, and Jinja-powered views. Its current focus is professional services automation (PSA), including customer management, ticketing, automation, and integrations. The product is expanding to include native remote monitoring and management (RMM) capabilities alongside its existing PSA features.
+
+RMM is an extension of MyPortal's existing product and architecture. Preserve the application's fundamental design, navigation, workflows, and visual standards while adding monitoring and management features.
 
 ### Technology Stack
 
@@ -134,6 +136,40 @@ Rules:
 - If a change touches both feature-pack code and non-pack code, a
   full restart will be required anyway; bumping the affected pack
   versions in that case keeps the per-pack history accurate.
+
+## RMM Functionality and Requirements
+
+### Product Integration
+
+- Add remote monitoring and management capabilities incrementally alongside the existing PSA functionality; preserve existing behavior as features are added.
+- Extend existing company, asset, ticketing, automation, notification, and audit workflows where applicable rather than introducing parallel systems for the same concepts.
+- Apply existing company scoping, roles, permissions, authentication, and authorization to RMM data and actions. Device access and deployment must remain scoped to the authorized company.
+- Follow the existing backend, API, database, migration, and feature-pack conventions for portal-side RMM functionality.
+- Treat these requirements as the direction for new work, not as a claim that native RMM functionality is already implemented. Implement specific monitoring and management features within the scope of the requested task.
+
+### Separate RMM Agent and Build Lifecycle
+
+- The RMM agent is a separate endpoint application with its own executable, build artifacts, version, and runtime lifecycle. It is not a component of the Tray Agent.
+- Compile and package the RMM agent separately on GitHub using a dedicated build workflow. Do not compile it into the Tray Agent or bundle its binaries in the Tray Agent installer.
+- Store copies of the compiled RMM agent artifacts in MyPortal-managed storage so they are available for deployment as needed. GitHub is the build source; MyPortal supplies the stored deployment artifacts to the Tray Agent.
+- Track artifact versions, supported operating systems and architectures, and integrity metadata so the correct artifact can be selected and verified before installation. Follow existing artifact-storage and download conventions, with authenticated, authorized access.
+- Keep generated executables and installer packages out of source control; store build outputs as deployment artifacts, consistent with the repository's file-management rules.
+- The Python-first guidelines apply to MyPortal's portal-side implementation; keep endpoint-agent build and runtime concerns separate from the portal and from the existing Tray Agent.
+
+### Tray Agent Deployment Responsibilities
+
+- The Tray Agent is responsible for deploying the separate RMM agent when requested through an authorized MyPortal workflow.
+- Deployment consists of obtaining the appropriate stored artifact from MyPortal, verifying it, installing and configuring the separate RMM agent, and reporting deployment status or failure to MyPortal.
+- Installing or updating the Tray Agent must not implicitly install the RMM agent. RMM deployment is a distinct operation performed as needed.
+- Keep the agents' installation, versions, updates, and runtime lifecycles independent. Deploying the RMM agent does not make its monitoring or management runtime part of the Tray Agent.
+- Make deployment safe to retry: detect existing installations, expose progress and actionable errors, and audit deployment actions using existing MyPortal conventions.
+
+### Design Continuity
+
+- All RMM pages and components must follow the UI and Frontend Guidelines below and the canonical Design Guidelines. RMM does not introduce a separate design system or a redesign of MyPortal.
+- Extend the existing sidebar, page headers, content cards, tables, forms, modals, status indicators, and theme tokens with the additional RMM features. Keep existing navigation and workflows familiar.
+- Use the same gold-standard reference pages, accessibility rules, responsive behavior, and progressive enhancement patterns as existing features.
+- Present devices, monitoring state, and deployment actions in plain language using existing list, filter, summary, and focused-editor patterns; keep build and storage implementation details out of routine user workflows.
 
 ## UI and Frontend Guidelines
 
