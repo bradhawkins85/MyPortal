@@ -3049,6 +3049,66 @@ async def resume_workflow_execution(execution_id: int, request: Request):
     return JSONResponse(result)
 
 
+async def _resolve_on_behalf_of_staff(
+    raw_value: Any, user: Mapping[str, Any], request: Request, company_id: int
+) -> dict[str, Any] | None:
+    """Validate the staff member a technician is submitting a request on behalf of."""
+    value = str(raw_value or "").strip()
+    if not value:
+        return None
+    if not await main_module._is_helpdesk_technician(user, request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only technicians can submit requests on behalf of another staff member",
+        )
+    try:
+        staff_id = int(value)
+    except ValueError:
+        staff_id = 0
+    member = await staff_repo.get_staff_by_id(staff_id) if staff_id > 0 else None
+    if (
+        not member
+        or member.get("company_id") != company_id
+        or not member.get("enabled")
+        or member.get("is_ex_staff")
+        or not str(member.get("email") or "").strip()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Select an active staff member with an email address as the requester",
+        )
+    return member
+
+
+async def _on_behalf_of_requester_details(
+    member: Mapping[str, Any],
+) -> tuple[int | None, str | None, str | None]:
+    """Return (user id, name, email) for a staff member requesting via a technician.
+
+    The user id links the request to the staff member's portal login when they have
+    one; otherwise workflows fall back to the stored requester email.
+    """
+    email = str(member.get("email") or "").strip() or None
+    name = (
+        " ".join(
+            part
+            for part in (
+                str(member.get("first_name") or "").strip(),
+                str(member.get("last_name") or "").strip(),
+            )
+            if part
+        )
+        or email
+    )
+    portal_user = await user_repo.get_user_by_email(email) if email else None
+    user_id = (
+        int(portal_user["id"])
+        if portal_user and portal_user.get("id") is not None
+        else None
+    )
+    return user_id, name, email
+
+
 async def create_staff_member(request: Request):
     (
         user,
@@ -3143,10 +3203,20 @@ async def create_staff_member(request: Request):
         else:
             custom_values[key] = str(raw_value or "").strip() or None
 
-    requester_id = int(user["id"]) if user.get("id") is not None else None
+    submitter_id = int(user["id"]) if user.get("id") is not None else None
+    requester_id = submitter_id
     requested_by_name, requested_by_email = (
         staff_onboarding_workflow_service.requested_by_details(user)
     )
+    on_behalf_of = await _resolve_on_behalf_of_staff(
+        submitted.get("requested_on_behalf_of_staff_id"), user, request, company_id
+    )
+    if on_behalf_of is not None:
+        (
+            requester_id,
+            requested_by_name,
+            requested_by_email,
+        ) = await _on_behalf_of_requester_details(on_behalf_of)
 
     created = await staff_requests_repo.create_request(
         company_id=company_id,
@@ -3178,10 +3248,11 @@ async def create_staff_member(request: Request):
                 "approval_status": "pending",
             },
             requester_user_id=requester_id,
+            requester_name=requested_by_name,
         )
     )
     await audit_service.log_action(
-        user_id=requester_id,
+        user_id=submitter_id,
         action="staff.onboarding.requested",
         entity_type="staff_request",
         entity_id=int(created["id"]),
@@ -3189,6 +3260,10 @@ async def create_staff_member(request: Request):
             "company_id": company_id,
             "approval_status": "pending",
             "approver_user_ids": approver_user_ids,
+            "requested_on_behalf_of_staff_id": (
+                int(on_behalf_of["id"]) if on_behalf_of else None
+            ),
+            "requested_by_user_id": requester_id,
             "onboarding_input": {
                 "date_onboarded_local": raw_date_onboarded or None,
                 "timezone": submitted_timezone,

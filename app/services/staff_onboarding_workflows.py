@@ -463,6 +463,7 @@ async def notify_staff_approval_requested(
     staff: dict[str, Any],
     requester_user_id: int | None,
     direction: str = DIRECTION_ONBOARDING,
+    requester_name: str | None = None,
 ) -> list[int]:
     policy = await workflow_repo.get_company_workflow_policy(
         company_id,
@@ -483,8 +484,8 @@ async def notify_staff_approval_requested(
     company = await company_repo.get_company_by_id(company_id)
     company_name = (company or {}).get("name") or f"Company #{company_id}"
 
-    requested_by: str | None = None
-    if requester_user_id is not None:
+    requested_by: str | None = requester_name
+    if requested_by is None and requester_user_id is not None:
         requester = await user_repo.get_user_by_id(requester_user_id)
         if requester:
             requested_by = " ".join(
@@ -3762,18 +3763,17 @@ async def _execute_policy_steps(
 
 
 async def _resolve_requestor_email(staff: dict[str, Any]) -> str | None:
-    requestor_user_id = staff.get("requested_by_user_id")
-    if requestor_user_id is None:
-        return None
-    try:
-        user_id = int(requestor_user_id)
-    except (TypeError, ValueError):
-        return None
+    # A technician may request onboarding on behalf of a staff member without a
+    # portal login; the stored requester email is then the only way to reach them.
+    snapshot_email = str(staff.get("requested_by_email") or "").strip().lower() or None
+    user_id = _coerce_positive_int(staff.get("requested_by_user_id"))
+    if user_id is None:
+        return snapshot_email
     requestor = await user_repo.get_user_by_id(user_id)
     if not requestor:
-        return None
+        return snapshot_email
     email = str(requestor.get("email") or "").strip().lower()
-    return email or None
+    return email or snapshot_email
 
 
 async def run_staff_onboarding_workflow(

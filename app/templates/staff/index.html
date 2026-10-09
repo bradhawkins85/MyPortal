@@ -507,6 +507,21 @@
               <h3 class="stf-panel__title">Who's joining?</h3>
               <p class="text-muted">Their name and start date are the essentials. Anything else helps us prepare their accounts.</p>
             </div>
+            {% if is_helpdesk_technician %}
+              <div class="staff-custom-field-row">
+                <div class="form-field" data-stf-field="requested_on_behalf_of">
+                  <label class="form-label" for="staff-add-requested-on-behalf-of">Requested by</label>
+                  <select class="form-input" id="staff-add-requested-on-behalf-of" name="requested_on_behalf_of_staff_id" data-searchable="on">
+                    <option value="">Me ({{ ((current_user.first_name or '') ~ ' ' ~ (current_user.last_name or ''))|trim or current_user.email }})</option>
+                    {% for member in active_staff_for_offboarding %}
+                      <option value="{{ member.id }}">{{ ((member.first_name or '') ~ ' ' ~ (member.last_name or ''))|trim or member.email }} ({{ member.email }})</option>
+                    {% endfor %}
+                  </select>
+                  <p class="form-help">Choose the staff member who asked for this login. The request, approval updates and new account credentials are sent to them.</p>
+                  <p class="stf-error" data-stf-error-for="requested_on_behalf_of_staff_id" hidden></p>
+                </div>
+              </div>
+            {% endif %}
             {% set ns = namespace(active_order=-1, row_open=False) %}
             {% for field in staff_field_config if field.visible %}
               {% if field.sort_order != ns.active_order and ns.row_open %}

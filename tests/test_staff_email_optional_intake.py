@@ -60,7 +60,7 @@ async def test_create_staff_member_allows_missing_email(monkeypatch):
     )
 
     create_request_mock = AsyncMock(return_value={"id": 42})
-    monkeypatch.setattr(main.staff_requests_repo, "create_request", create_request_mock)
+    monkeypatch.setattr(staff_handlers.staff_requests_repo, "create_request", create_request_mock)
     monkeypatch.setattr(
         main.staff_onboarding_workflow_service,
         "notify_staff_approval_requested",
@@ -68,12 +68,12 @@ async def test_create_staff_member_allows_missing_email(monkeypatch):
     )
     monkeypatch.setattr(main.audit_service, "log_action", AsyncMock(return_value=None))
     monkeypatch.setattr(
-        main.staff_custom_fields_repo,
+        staff_handlers.staff_custom_fields_repo,
         "list_field_definitions",
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
-        main.staff_custom_fields_repo,
+        staff_handlers.staff_custom_fields_repo,
         "set_staff_field_values_by_name",
         AsyncMock(return_value=None),
     )
