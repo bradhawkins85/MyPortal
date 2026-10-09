@@ -78,6 +78,7 @@ async def test_import_tactical_assets_for_company_upserts(monkeypatch):
 
     async def fake_upsert_asset(**kwargs):
         captured.append(kwargs)
+        return len(captured)
 
     async def fake_sync_archive(company_id, active_tactical_ids):
         assert company_id == 7
@@ -88,6 +89,16 @@ async def test_import_tactical_assets_for_company_upserts(monkeypatch):
     monkeypatch.setattr(asset_importer.tacticalrmm, "extract_agent_details", fake_extract)
     monkeypatch.setattr(asset_importer.assets_repo, "upsert_asset", fake_upsert_asset)
     monkeypatch.setattr(asset_importer, "_sync_tactical_archive_asset_fields", fake_sync_archive)
+    monkeypatch.setattr(
+        asset_importer,
+        "_sync_tactical_asset_custom_fields",
+        lambda *args, **kwargs: _async_none(),
+    )
+    monkeypatch.setattr(
+        asset_importer,
+        "_sync_tactical_tray_device_link",
+        lambda **kwargs: _async_none(),
+    )
 
     processed = await asset_importer.import_tactical_assets_for_company(7)
 
@@ -128,6 +139,7 @@ async def test_import_tactical_assets_truncates_long_hdd_size(monkeypatch):
 
     async def fake_upsert_asset(**kwargs):
         captured.append(kwargs)
+        return len(captured)
 
     monkeypatch.setattr(asset_importer.company_repo, "get_company_by_id", fake_get_company)
     monkeypatch.setattr(asset_importer.tacticalrmm, "fetch_agents", fake_fetch_agents)
@@ -137,6 +149,16 @@ async def test_import_tactical_assets_truncates_long_hdd_size(monkeypatch):
         asset_importer,
         "_sync_tactical_archive_asset_fields",
         lambda company_id, active_tactical_ids: _async_none(),
+    )
+    monkeypatch.setattr(
+        asset_importer,
+        "_sync_tactical_asset_custom_fields",
+        lambda *args, **kwargs: _async_none(),
+    )
+    monkeypatch.setattr(
+        asset_importer,
+        "_sync_tactical_tray_device_link",
+        lambda **kwargs: _async_none(),
     )
 
     processed = await asset_importer.import_tactical_assets_for_company(9)
@@ -316,3 +338,46 @@ async def test_import_all_tactical_assets_auto_matches_missing_mapping(monkeypat
     assert summary["processed"] == 2
     assert summary["companies"] == {3: {"processed": 2}}
     assert summary["skipped"] == []
+
+
+@pytest.mark.anyio
+async def test_import_tactical_assets_counts_only_saved_assets(monkeypatch):
+    company_record = {"id": 3, "tacticalrmm_client_id": "c3"}
+    agents = [{"id": 1}, {"id": 2}]
+
+    async def fake_get_company(company_id):
+        return company_record
+
+    async def fake_fetch_agents(client_id):
+        return agents
+
+    def fake_extract(agent):
+        return {"name": f"host-{agent['id']}", "tactical_asset_id": f"a-{agent['id']}"}
+
+    async def fake_upsert_asset(**kwargs):
+        # Second agent is held for reconciliation review.
+        return 10 if kwargs["tactical_asset_id"] == "a-1" else None
+
+    monkeypatch.setattr(asset_importer.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(asset_importer.tacticalrmm, "fetch_agents", fake_fetch_agents)
+    monkeypatch.setattr(asset_importer.tacticalrmm, "extract_agent_details", fake_extract)
+    monkeypatch.setattr(asset_importer.assets_repo, "upsert_asset", fake_upsert_asset)
+    monkeypatch.setattr(
+        asset_importer,
+        "_sync_tactical_archive_asset_fields",
+        lambda company_id, active_tactical_ids: _async_none(),
+    )
+    monkeypatch.setattr(
+        asset_importer,
+        "_sync_tactical_asset_custom_fields",
+        lambda *args, **kwargs: _async_none(),
+    )
+    monkeypatch.setattr(
+        asset_importer,
+        "_sync_tactical_tray_device_link",
+        lambda **kwargs: _async_none(),
+    )
+
+    processed = await asset_importer.import_tactical_assets_for_company(3)
+
+    assert processed == 1
