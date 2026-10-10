@@ -2,9 +2,11 @@
 
 nginx asks MyPortal who is signed in (``GET /api/rmm/gitea/identity``) on each
 ``/gitea/`` request and passes the answer to Gitea in the ``X-WEBAUTH-*``
-headers, which Gitea trusts only from its proxy. Gitea keeps no session of its
-own for these accounts, so a technician who loses Script editing access, or
-signs out of MyPortal, is signed out of Gitea on their next click.
+headers, which Gitea trusts only from its proxy. Gitea itself keeps a
+persistent session, so the proxy forwards the browser's cookies to Gitea only
+while MyPortal forwarded an identity; otherwise it strips them so a stale
+Gitea session cannot linger. That is what signs a technician out of Gitea on
+their next click after they lose Script editing access or sign out of MyPortal.
 
 The first time a technician comes through, MyPortal makes Gitea create their
 account and adds it to the script repository as a collaborator, with read or

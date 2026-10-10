@@ -915,6 +915,15 @@ def test_proxies_always_set_gitea_sign_in_headers_themselves(config):
     assert "auth_request /_myportal/gitea-identity;" in gitea_block
     for header, variable in (("X-WEBAUTH-USER", "user"), ("X-WEBAUTH-EMAIL", "email"), ("X-WEBAUTH-FULLNAME", "name")):
         assert f"proxy_set_header {header} $myportal_gitea_{variable};" in gitea_block
+    # Gitea keeps its own persistent session, so a stale one would keep a
+    # technician signed in after MyPortal sign-out. The proxy forwards the
+    # browser's cookies to Gitea only while an identity is forwarded and
+    # strips them otherwise, so the stale session cannot be reused.
+    assert "proxy_set_header Cookie $myportal_gitea_forward_cookie;" in gitea_block
+    forward_cookie = text[text.index("map $myportal_gitea_user $myportal_gitea_forward_cookie {"):]
+    forward_cookie = forward_cookie[: forward_cookie.index("}")]
+    assert "default    $http_cookie;" in forward_cookie  # signed in: keep cookies
+    assert '""         "";' in forward_cookie  # signed out: strip them
     assets = text[text.index("location ^~ /gitea/assets/ {"):]
     assert 'proxy_set_header X-WEBAUTH-USER "";' in assets[: assets.index("}")]
     identity = text[text.index("location = /_myportal/gitea-identity {"):]

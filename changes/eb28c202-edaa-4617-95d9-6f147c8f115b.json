@@ -1,0 +1,7 @@
+{
+  "guid": "eb28c202-edaa-4617-95d9-6f147c8f115b",
+  "occurred_at": "2026-10-10T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed Gitea automatic sign-in so signing out of MyPortal (or losing the Script editing permission) signs a technician out of Gitea. Gitea keeps its own persistent session, so the reverse proxy now strips the browser's cookies from Gitea requests whenever MyPortal forwards no identity, preventing a stale Gitea session from keeping a technician signed in; signed-in requests keep their cookies so Gitea's CSRF protection still works. Applied to both the blue/green and Docker nginx configs, added a regression test, and corrected the gitea_sign_in docstring that wrongly claimed Gitea keeps no session of its own.",
+  "content_hash": "4bd36e6e183ff3257d3c833a1cd706231f72d1d9a1a784d7951f2aa34688b729"
+}
