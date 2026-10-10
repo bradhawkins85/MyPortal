@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% import "rmm/_macros.html" as rmm %}
+{% block title %}Scripts{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endblock %}
+{% block header_title %}<span class="header__title-text">Scripts</span>{% endblock %}
+{% block header_actions %}
+  {% set actions = [] %}
+  {% if can_run and script_groups %}{% set _ = actions.append({"label": "Run a script", "type": "button", "variant": "primary", "attrs": {"data-rmm-run-open": "", "aria-haspopup": "dialog", "aria-controls": "rmm-run-modal"}}) %}{% endif %}
+  {% if can_sync %}{% set _ = actions.append({"label": "Sync from Gitea", "type": "form", "action": "/rmm/scripts/sync"}) %}{% endif %}
+  {% if actions %}{{ page_header_actions(actions, menu_id="rmm-script-actions") }}{% endif %}
+{% endblock %}
+{% block content %}
+<section class="rmm-page" data-rmm-page>
+  <script type="application/json" id="rmm-config">{{ {"can_run": can_run, "asset_id": None} | tojson }}</script>
+
+  <dl class="rmm-stats" aria-label="Scripting summary">
+    <div><dt>Scripts</dt><dd>{{ summary.scripts }}</dd></div>
+    <div><dt>Devices with the RMM agent</dt><dd>{{ summary.agents }}</dd></div>
+    <div{% if summary.running %} class="is-active"{% endif %}><dt>Running now</dt><dd>{{ summary.running }}</dd></div>
+    <div{% if summary.failed %} class="is-warning"{% endif %}><dt>Failed recently</dt><dd>{{ summary.failed }}</dd></div>
+  </dl>
+
+  {% if can_sync and not gitea_ready %}
+    <p class="alert alert--info">Connect a Gitea repository to load scripts: {{ gitea_message }} See <a href="/help/administration/rmm-scripts">RMM Scripts help</a> for the settings.</p>
+  {% endif %}
+
+  <section class="card card--panel" aria-labelledby="rmm-library-heading">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title" id="rmm-library-heading">Script library</h2>
+        <p class="card__subtitle">Scripts are edited in Gitea. Each one shows the values it asks for when you run it.</p>
+      </div>
+      {% if script_groups %}
+      <div class="rmm-search">
+        <label class="visually-hidden" for="rmm-script-search">Search scripts</label>
+        <input type="search" class="form-input" id="rmm-script-search" placeholder="Search scripts" data-rmm-script-search />
+      </div>
+      {% endif %}
+    </header>
+    <div class="card__body">
+      {% if not script_groups %}
+        <div class="empty-state">
+          <h3 class="empty-state__title">No scripts yet</h3>
+          <p class="empty-state__subtitle">Scripts live in a Gitea repository as .ps1, .sh or .zsh files. {% if can_sync %}Use <strong>Sync from Gitea</strong> to load them.{% else %}Ask a super admin to sync them from Gitea.{% endif %}</p>
+        </div>
+      {% else %}
+        {% for group in script_groups %}
+        <section class="rmm-group" data-rmm-group aria-labelledby="rmm-group-{{ loop.index }}">
+          <h3 class="rmm-group__title" id="rmm-group-{{ loop.index }}">{{ group.folder or 'Scripts' }}</h3>
+          <ul class="rmm-scripts">
+            {% for script in group.scripts %}
+            <li class="rmm-script" data-rmm-script-item data-search="{{ (script.name ~ ' ' ~ script.path ~ ' ' ~ script.description ~ ' ' ~ script.language_label) | lower }}">
+              <div class="rmm-script__main">
+                <span class="rmm-script__name">{{ script.name }}</span>
+                <span class="rmm-script__path">{{ script.path }}</span>
+                {% if script.description %}<p class="rmm-script__help">{{ script.description }}</p>{% endif %}
+                <ul class="rmm-chips" aria-label="Script details">
+                  <li class="rmm-chip rmm-chip--{{ script.language }}">{{ script.language_label }}</li>
+                  {% if script.parameter_count %}<li class="rmm-chip">{{ script.parameter_count }} parameter{{ '' if script.parameter_count == 1 else 's' }}</li>{% endif %}
+                  {% if script.env_count %}<li class="rmm-chip">{{ script.env_count }} environment variable{{ '' if script.env_count == 1 else 's' }}</li>{% endif %}
+                  {% if not script.parameter_count and not script.env_count %}<li class="rmm-chip rmm-chip--muted">No inputs</li>{% endif %}
+                </ul>
+              </div>
+              {% if can_run %}
+              <div class="rmm-script__actions">
+                <button type="button" class="button button--small" data-rmm-run-open="{{ script.id }}" aria-haspopup="dialog" aria-controls="rmm-run-modal">Run<span class="visually-hidden"> {{ script.name }}</span></button>
+              </div>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </section>
+        {% endfor %}
+        <p class="text-muted" data-rmm-script-empty hidden>No scripts match your search.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card card--panel" aria-labelledby="rmm-runs-heading">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title" id="rmm-runs-heading">Recent runs</h2>
+        <p class="card__subtitle">Exit code, output and any custom values each script sent back.</p>
+      </div>
+    </header>
+    <div class="card__body">
+      {% if runs %}
+      <div class="table-wrapper">
+        <table class="table" id="rmm-runs-table" data-table data-table-id="rmm-runs">
+          <caption class="visually-hidden">Recent script runs</caption>
+          <thead><tr>
+            <th scope="col" data-sort="string" data-column-key="script">Script</th>
+            <th scope="col" data-sort="string" data-column-key="device">Device</th>
+            <th scope="col" data-sort="string" data-column-key="status">Status</th>
+            <th scope="col" data-sort="number" data-column-key="exit-code">Exit code</th>
+            <th scope="col" data-sort="string" data-column-key="requested-by" data-mobile-hidden="true">Requested by</th>
+            <th scope="col" data-sort="date" data-column-key="queued">Queued</th>
+            <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
+          </tr></thead>
+          <tbody>{{ rmm.run_rows(runs) }}</tbody>
+        </table>
+      </div>
+      {% else %}
+        <div class="empty-state">
+          <h3 class="empty-state__title">No runs yet</h3>
+          <p class="empty-state__subtitle">Runs appear here once a script is pushed to a device.</p>
+        </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card card--panel" aria-labelledby="rmm-agents-heading">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title" id="rmm-agents-heading">Devices with the RMM agent</h2>
+        <p class="card__subtitle">The tray app installs the RMM agent; it then appears here.</p>
+      </div>
+    </header>
+    <div class="card__body">
+      {% if agents %}
+      <ul class="rmm-agents">
+        {% for agent in agents %}
+        <li class="rmm-agent">
+          <span class="rmm-agent__name">{% if agent.asset_id %}<a href="/assets/{{ agent.asset_id }}">{{ agent.asset_name or agent.hostname }}</a>{% else %}{{ agent.hostname or agent.agent_uid }}{% endif %}</span>
+          <span class="text-muted">{{ (agent.os or 'unknown') | title }}{% if agent.os_version %} {{ agent.os_version }}{% endif %}{% if agent.agent_version %} · agent {{ agent.agent_version }}{% endif %}</span>
+          <span class="text-muted">Last seen {% if agent.last_seen_utc %}<span data-utc="{{ agent.last_seen_utc }}">{{ agent.last_seen_utc }}</span>{% else %}never{% endif %}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+        <p class="text-muted">No devices in {{ company.name if company else 'this company' }} have the RMM agent yet.</p>
+      {% endif %}
+    </div>
+  </section>
+</section>
+{% include "rmm/_run_modal.html" %}
+{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script>{% endblock %}

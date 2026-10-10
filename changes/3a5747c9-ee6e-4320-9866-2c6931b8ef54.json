@@ -1,0 +1,7 @@
+{
+  "guid": "3a5747c9-ee6e-4320-9866-2c6931b8ef54",
+  "occurred_at": "2026-10-10T01:30Z",
+  "change_type": "Feature",
+  "summary": "Add RMM scripting: load PowerShell, Bash and zsh scripts from Gitea, detect their parameters and environment variables, push them to devices through the new MyPortal RMM agent, and update asset custom fields and company variables from the values scripts return",
+  "content_hash": "b3a2a206080c89c4c77dc3eb41080146fe8d42d70afc954af949dd895a679903"
+}

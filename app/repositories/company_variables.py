@@ -44,3 +44,7 @@ async def set_value(company_id: int, variable_id: int, value: str) -> None:
             ON DUPLICATE KEY UPDATE value = VALUES(value)
         """
     await db.execute(sql, (company_id, variable_id, value))
+
+
+async def list_definitions() -> list[dict[str, Any]]:
+    return await db.fetch_all("SELECT id, name FROM company_variable_definitions ORDER BY name")

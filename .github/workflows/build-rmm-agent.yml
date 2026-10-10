@@ -1,0 +1,112 @@
+# Build the MyPortal RMM agent for Windows, macOS and Linux.
+#
+# The RMM agent is a separate program from the tray app with its own build and
+# version. Pull requests and pushes that touch rmm/ run its tests and build
+# every platform so breakage shows up early; a published release (or a manual
+# run with a tag) also uploads the binaries and their SHA-256 checksums to the
+# release, from where MyPortal stores them for the tray app to deploy.
+
+name: Build RMM agent
+
+on:
+  push:
+    branches: [main]
+    paths: ['rmm/**', '.github/workflows/build-rmm-agent.yml']
+  pull_request:
+    paths: ['rmm/**', '.github/workflows/build-rmm-agent.yml']
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag to upload the agent to (leave blank to only build)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rmm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: rmm/go.mod
+          cache-dependency-path: rmm/go.sum
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        run: |
+          go vet ./...
+          GOOS=windows go vet ./...
+          GOOS=darwin go vet ./...
+      - name: Test
+        run: go test ./...
+
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: windows, goarch: amd64, ext: .exe }
+          - { goos: windows, goarch: arm64, ext: .exe }
+          - { goos: darwin, goarch: amd64, ext: '' }
+          - { goos: darwin, goarch: arm64, ext: '' }
+          - { goos: linux, goarch: amd64, ext: '' }
+          - { goos: linux, goarch: arm64, ext: '' }
+    defaults:
+      run:
+        working-directory: rmm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: rmm/go.mod
+          cache-dependency-path: rmm/go.sum
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+          VERSION: ${{ github.event.release.tag_name || inputs.tag_name || github.sha }}
+        run: |
+          if ! printf '%s' "$VERSION" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$'; then
+            echo "Invalid version: $VERSION" >&2
+            exit 1
+          fi
+          name="myportal-rmm-${GOOS}-${GOARCH}${{ matrix.ext }}"
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w -X main.Version=${VERSION}" -o "dist/${name}" ./cmd/myportal-rmm
+          (cd dist && sha256sum "${name}" > "${name}.sha256")
+      - uses: actions/upload-artifact@v7
+        with:
+          name: myportal-rmm-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: rmm/dist/*
+          if-no-files-found: error
+
+  release:
+    name: Upload to release
+    needs: build
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: myportal-rmm-*
+          path: dist
+          merge-multiple: true
+      - name: Upload binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag_name }}
+        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"

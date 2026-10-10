@@ -1190,6 +1190,20 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         },
     },
     {
+        "slug": "gitea",
+        "name": "Gitea scripts",
+        "description": "Load RMM scripts from a Gitea repository so technicians can run them on devices.",
+        "icon": "📜",
+        "settings": {
+            "base_url": "",
+            "api_token": "",
+            "repository": "",
+            "branch": "main",
+            "path": "",
+            "verify_ssl": True,
+        },
+    },
+    {
         "slug": "huntress",
         "name": "Huntress",
         "description": (
@@ -1393,6 +1407,7 @@ _ENV_BACKED_MODULE_FIELDS: dict[str, tuple[str, ...]] = {
         "system_user_id",
     ),
     "hudu": ("base_url", "api_key"),
+    "gitea": ("base_url", "api_token", "repository", "branch", "path", "verify_ssl"),
     "m365-admin": ("client_id", "client_secret"),
     "ntfy": ("base_url", "topic", "auth_token"),
     "ollama": ("provider", "base_url", "model", "prompt", "api_key"),
@@ -2234,6 +2249,45 @@ def _coerce_settings(
         _env = os.getenv("HUDU_API_KEY", "").strip()
         if _env:
             merged["api_key"] = _env
+    elif slug == "gitea":
+        overrides = payload or {}
+        token_override = overrides.get("api_token")
+        if token_override is None:
+            api_token = str(merged.get("api_token") or "").strip()
+        else:
+            candidate = str(token_override or "").strip()
+            if not candidate and existing_settings and existing_settings.get("api_token"):
+                api_token = str(existing_settings.get("api_token") or "").strip()
+            else:
+                api_token = candidate
+        merged.update(
+            {
+                "base_url": str(merged.get("base_url", "")).strip().rstrip("/"),
+                "api_token": api_token,
+                "repository": str(merged.get("repository", "")).strip().strip("/"),
+                "branch": str(merged.get("branch", "")).strip() or "main",
+                "path": str(merged.get("path", "")).strip().strip("/"),
+                "verify_ssl": _ensure_bool(merged.get("verify_ssl"), True),
+            }
+        )
+        _env = os.getenv("GITEA_BASE_URL", "").strip().rstrip("/")
+        if _env:
+            merged["base_url"] = _env
+        _env = os.getenv("GITEA_API_TOKEN", "").strip()
+        if _env:
+            merged["api_token"] = _env
+        _env = os.getenv("GITEA_SCRIPTS_REPOSITORY", "").strip().strip("/")
+        if _env:
+            merged["repository"] = _env
+        _env = os.getenv("GITEA_SCRIPTS_BRANCH", "").strip()
+        if _env:
+            merged["branch"] = _env
+        _env = os.getenv("GITEA_SCRIPTS_PATH", "").strip().strip("/")
+        if _env:
+            merged["path"] = _env
+        _env = os.getenv("GITEA_VERIFY_SSL", "").strip()
+        if _env:
+            merged["verify_ssl"] = _env.lower() not in ("false", "0", "no", "off")
     elif slug == "solidtime":
         overrides = payload or {}
 
@@ -2386,6 +2440,7 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "m365-admin": ("client_secret",),
         "password-pusher": ("api_key",),
         "hudu": ("api_key",),
+        "gitea": ("api_token",),
         "solidtime": ("api_token", "webhook_secret"),
         "trello": ("api_secret",),
     }
@@ -2504,6 +2559,7 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "unifi-talk",  # Unifi Talk - SFTP import module, not an action module
     "m365-admin",  # M365 Admin - configuration only, not an action module
     "hudu",  # Hudu - documentation/password management, not a trigger action module
+    "gitea",  # Gitea - RMM script source, not a trigger action module
     "huntress",  # Huntress - report data ingester, not a trigger action module
     "solidtime",  # Solidtime - dedicated ticket/reply sync, not a generic trigger action module
 }

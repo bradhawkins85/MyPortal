@@ -301,6 +301,7 @@
           {% set can_access_ipam = feature_pack_available('ipam') and (is_super_admin or menu_access.get('menu.ipam') in ['read', 'write']) %}
           {% set can_access_racks = feature_pack_available('racks') and (is_super_admin or menu_access.get('menu.racks') in ['read', 'write']) %}
           {% set can_access_network_map = feature_pack_available('network_map') and feature_pack_available('assets') and (is_super_admin or menu_access.get('menu.network_map') in ['read', 'write']) %}
+          {% set can_access_rmm_scripts = feature_pack_available('rmm') and feature_pack_available('assets') and (is_super_admin or menu_access.get('menu.rmm_scripts') in ['read', 'write']) %}
           {% set can_access_backups = feature_pack_available('backup_register') and (is_super_admin or menu_access.get('menu.backups') in ['read', 'write']) %}
           {% set can_access_defender = feature_pack_available('defender') and (is_super_admin or menu_access.get('menu.defender') in ['read', 'write']) %}
           {% set can_access_voice_monitor = feature_pack_available('voice_monitor') and (is_super_admin or menu_access.get('menu.voice_monitor') in ['read', 'write']) %}
@@ -572,6 +573,12 @@
               <a href="/network-map" {% if current_path.startswith('/network-map') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 2h6v5h-2v3h6v4h2v6h-6v-6h2v-2H7v2h2v6H3v-6h2v-4h6V7H9z"/></svg></span>
                 <span class="menu__label">Network map</span>
+              </a>
+            </li>{% endif %}
+          {% if can_access_rmm_scripts %}<li class="menu__item">
+              <a href="/rmm/scripts" {% if current_path.startswith('/rmm') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 4h18v16H3zm2 4v10h14V8zm1.5 2.5 1-1L11 13l-3.5 3.5-1-1L9 13zM12 15h5v1.5h-5z"/></svg></span>
+                <span class="menu__label">Scripts</span>
               </a>
             </li>{% endif %}
           {% if can_access_backups %}<li class="menu__item">

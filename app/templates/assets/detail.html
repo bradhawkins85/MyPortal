@@ -15,7 +15,7 @@
   </div>
 {% endblock %}
 {% block title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
-{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% if rmm %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endif %}{% endblock %}
 {% block header_actions %}
   <div class="header-actions">
     <a class="button button--ghost" href="/assets">Back to Assets</a>
@@ -48,6 +48,28 @@
       <dt>IP addresses</dt><dd>{% for address in infrastructure_links.addresses %}<a href="/ipam#address-{{ address.id }}"><code>{{ address.address }}</code></a> <span class="text-muted">{{ address.network_name }}</span>{% if not loop.last %}<br>{% endif %}{% else %}<a href="/ipam#addresses">No documented address</a>{% endfor %}</dd>
       <dt>Rack positions</dt><dd>{% for placement in infrastructure_links.placements %}<a href="/racks?rack={{ placement.rack_id }}#rack-{{ placement.rack_id }}">{{ placement.rack_name }} · {{ placement.face|title }} U{{ placement.start_unit }}{% if placement.unit_height > 1 %}–{{ placement.start_unit + placement.unit_height - 1 }}{% endif %}</a>{% if not loop.last %}<br>{% endif %}{% else %}<a href="/racks">Not placed in a rack</a>{% endfor %}</dd>
     </dl></div>
+  </section>{% endif %}
+
+  {% if rmm %}{% import "rmm/_macros.html" as rmm_ui %}<section class="card card--panel admin-grid__full" id="scripts" aria-labelledby="asset-scripts-heading" data-rmm-page>
+    <script type="application/json" id="rmm-config">{{ {"can_run": rmm.can_run, "asset_id": asset.id} | tojson }}</script>
+    <header class="card__header">
+      <div>
+        <h2 class="card__title" id="asset-scripts-heading">Scripts</h2>
+        <p class="card__subtitle">{% if rmm.agent %}RMM agent {{ rmm.agent.agent_version or '' }} on {{ (rmm.agent.os or 'unknown') | title }}{% if rmm.agent.os_version %} {{ rmm.agent.os_version }}{% endif %}, last seen {% if rmm.agent.last_seen_utc %}<span data-utc="{{ rmm.agent.last_seen_utc }}">{{ rmm.agent.last_seen_utc }}</span>{% else %}never{% endif %}.{% else %}The RMM agent is not installed on this device yet, so scripts cannot run here.{% endif %} <a href="/rmm/scripts">All scripts</a></p>
+      </div>
+      {% if rmm.can_run %}<button type="button" class="button button--primary button--small" data-rmm-run-open aria-haspopup="dialog" aria-controls="rmm-run-modal">Run script</button>{% endif %}
+    </header>
+    <div class="card__body">
+      {% if rmm.runs %}
+      <div class="table-wrapper"><table class="table">
+        <caption class="visually-hidden">Recent script runs on this device</caption>
+        <thead><tr><th scope="col">Script</th><th scope="col">Status</th><th scope="col">Exit code</th><th scope="col">Requested by</th><th scope="col">Queued</th><th scope="col" class="table__actions">Actions</th></tr></thead>
+        <tbody>{{ rmm_ui.run_rows(rmm.runs, show_device=false) }}</tbody>
+      </table></div>
+      {% else %}
+      <p class="text-muted">No scripts have run on this device yet.</p>
+      {% endif %}
+    </div>
   </section>{% endif %}
 
   {% if network_interfaces is not none %}{% set ni = network_interfaces %}{% set own_endpoints = [] %}{% for interface in ni.interfaces %}{% set _ = own_endpoints.append('interface:' ~ interface.id) %}{% endfor %}<section class="card card--panel admin-grid__full" id="interfaces">
@@ -303,5 +325,6 @@
   <section class="card card--panel admin-grid__full"><form method="post" action="/assets/{{ asset.id }}/archive"><input type="hidden" name="action" value="{{ 'restore' if asset.archived_at else 'archive' }}"><button class="button button--ghost" type="submit">{{ 'Restore asset' if asset.archived_at else 'Archive asset' }}</button><p class="form-help">Archiving is reversible and retains identifiers, ticket links, custom values, and documentation.</p></form></section>{% endif %}
 </div>
 {% include "partials/csrf.html" %}
+{% if rmm %}{% include "rmm/_run_modal.html" %}{% endif %}
 {% endblock %}
-{% block scripts %}<script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script>{% if can_edit_network_map %}<script src="{{ static_url('/static/js/network_map.js') }}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script>{% if rmm %}<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script>{% endif %}{% if can_edit_network_map %}<script src="{{ static_url('/static/js/network_map.js') }}" defer></script>{% endif %}{% endblock %}
