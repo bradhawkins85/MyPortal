@@ -2211,10 +2211,13 @@ async def admin_list_ticket_canned_responses(ticket_id: int, request: Request):
     context = _ticket_template_context(enriched_ticket, company_variables)
     responses = []
     for response in await canned_responses_repo.list_responses():
+        body = str(response.get("body") or "")
         responses.append({
             "id": response["id"],
             "title": response["title"],
-            "body": message_template_service.render_content(str(response.get("body") or ""), context),
+            "body": message_template_service.render_content(
+                body, await message_template_service.with_tray_deployment_url(body, context)
+            ),
         })
     return JSONResponse({"responses": responses})
 

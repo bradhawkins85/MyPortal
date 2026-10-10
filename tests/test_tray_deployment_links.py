@@ -153,6 +153,36 @@ async def test_create_link_stores_hashes_and_encrypted_values(monkeypatch):
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("days", [365, tray_deployment.NO_EXPIRY])
+async def test_create_long_lived_links(monkeypatch, days):
+    monkeypatch.setattr(
+        tray_deployment.companies_repo,
+        "get_company_by_id",
+        AsyncMock(return_value={"id": 3, "name": "Acme"}),
+    )
+    create_token = AsyncMock(return_value={"id": 11})
+    monkeypatch.setattr(tray_repo, "create_install_token", create_token)
+    create_link = AsyncMock(side_effect=lambda **kwargs: {"id": 7, **kwargs})
+    monkeypatch.setattr(tray_repo, "create_deployment_link", create_link)
+    monkeypatch.setattr(tray_repo, "create_deployment_build", AsyncMock(return_value=1))
+
+    await tray_deployment.create_deployment_link(
+        company_id=3, label=None, created_by_user_id=1, expires_in_days=days
+    )
+
+    expires_at = create_link.await_args.kwargs["expires_at"]
+    assert create_token.await_args.kwargs["expires_at"] == expires_at
+    if days == tray_deployment.NO_EXPIRY:
+        assert expires_at is None
+        monkeypatch.setattr(
+            tray_repo, "get_install_token_by_id", AsyncMock(return_value={"id": 11})
+        )
+        assert await tray_deployment.link_status(_link(expires_at=None)) == "active"
+    else:
+        assert timedelta(days=364) < expires_at - datetime.utcnow() <= timedelta(days=365)
+
+
+@pytest.mark.anyio
 async def test_create_link_rejects_unknown_expiry(monkeypatch):
     monkeypatch.setattr(tray_repo, "create_install_token", AsyncMock())
     with pytest.raises(ValueError):

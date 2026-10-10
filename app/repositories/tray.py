@@ -208,13 +208,20 @@ async def revoke_deployment_link(link_id: int) -> None:
     )
 
 
-async def list_active_deployment_links() -> list[dict[str, Any]]:
+async def list_active_deployment_links(company_id: int | None = None) -> list[dict[str, Any]]:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    rows = await db.fetch_all(
-        "SELECT * FROM tray_deployment_links WHERE revoked_at IS NULL "
-        "AND (expires_at IS NULL OR expires_at > ?) ORDER BY id",
-        (now,),
-    )
+    if company_id is None:
+        rows = await db.fetch_all(
+            "SELECT * FROM tray_deployment_links WHERE revoked_at IS NULL "
+            "AND (expires_at IS NULL OR expires_at > ?) ORDER BY id",
+            (now,),
+        )
+    else:
+        rows = await db.fetch_all(
+            "SELECT * FROM tray_deployment_links WHERE revoked_at IS NULL "
+            "AND (expires_at IS NULL OR expires_at > ?) AND company_id = ? ORDER BY id",
+            (now, company_id),
+        )
     return [dict(r) for r in rows]
 
 

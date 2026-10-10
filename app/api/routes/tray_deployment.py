@@ -253,7 +253,11 @@ async def create_deployment_link(
         user_id=int(current_user["id"]),
         entity_type="tray_deployment_link",
         entity_id=int(record["id"]),
-        new_value={"company_id": payload.company_id, "label": record.get("label")},
+        new_value={
+            "company_id": payload.company_id,
+            "label": record.get("label"),
+            "expires_at": str(record.get("expires_at") or "never"),
+        },
         request=request,
     )
     portal_url = tray_deployment.resolve_portal_url(request)

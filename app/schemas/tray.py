@@ -193,7 +193,7 @@ class TrayInstallTokenResponse(BaseModel):
 class TrayDeploymentLinkCreate(BaseModel):
     company_id: int = Field(ge=1)
     label: Optional[str] = Field(default=None, max_length=150)
-    expires_in_days: Literal[1, 7, 30, 90] = 7
+    expires_in_days: Literal[0, 1, 7, 30, 90, 365] = 7
 
 
 class TrayDeploymentLinkResponse(BaseModel):

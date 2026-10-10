@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -13,7 +14,7 @@ from app.api.routes import tray_deployment as deploy_routes
 from app.core.database import db
 from app.repositories import tray as tray_repo
 from app.security.encryption import encrypt_secret
-from app.services import tray_deployment
+from app.services import message_templates, tray_deployment, value_templates
 from app.services import tray_deployment_builds as builds
 
 PORTAL = "https://portal.example.com"
@@ -268,3 +269,71 @@ async def test_complete_route_maps_state_errors(monkeypatch):
     with pytest.raises(HTTPException) as excinfo:
         await deploy_routes.build_agent_complete(5, _api_key={})
     assert excinfo.value.status_code == 409
+
+
+@pytest.fixture
+def portal_url(monkeypatch):
+    settings = SimpleNamespace(portal_url=PORTAL + "/")
+    monkeypatch.setattr(tray_deployment, "get_settings", lambda: settings)
+    return settings
+
+
+async def _add_link(conn, link_id: int, slug: str, expires_at: datetime | None) -> None:
+    await conn.execute(
+        "INSERT INTO tray_install_tokens (id, company_id, label, token_hash, token_prefix, expires_at) "
+        "VALUES (?, 3, 'Deployment URL', 'h', 'p', ?)",
+        (link_id + 100, expires_at),
+    )
+    await conn.execute(
+        "INSERT INTO tray_deployment_links (id, company_id, label, slug_hash, slug_prefix, "
+        "slug_encrypted, install_token_id, install_token_encrypted, expires_at) "
+        "VALUES (?, 3, 'Acme', ?, 's', ?, ?, ?, ?)",
+        (link_id, slug, encrypt_secret(slug), link_id + 100, encrypt_secret(TOKEN), expires_at),
+    )
+    await conn.commit()
+
+
+@pytest.mark.anyio
+async def test_company_deployment_url_prefers_link_that_lasts_longest(sqlite_db, portal_url):
+    soon = datetime.utcnow() + timedelta(days=1)
+    await _add_link(sqlite_db, 8, "short-lived", soon)
+    await _add_link(sqlite_db, 9, "one-year", datetime.utcnow() + timedelta(days=365))
+
+    # Link 7 never expires, so it wins over newer links that do.
+    assert await tray_deployment.company_deployment_url(3) == PORTAL + "/deploy/slug"
+
+    await tray_deployment.revoke_deployment_link(7)
+    assert await tray_deployment.company_deployment_url(3) == PORTAL + "/deploy/one-year"
+
+    await tray_repo.revoke_install_token(109)
+    assert await tray_deployment.company_deployment_url(3) == PORTAL + "/deploy/short-lived"
+
+    assert await tray_deployment.company_deployment_url(4) == ""
+    assert await tray_deployment.company_deployment_url(None) == ""
+    portal_url.portal_url = None
+    assert await tray_deployment.company_deployment_url(3) == ""
+
+
+@pytest.mark.anyio
+async def test_deployment_url_variable_in_automations_and_templates(
+    sqlite_db, portal_url, monkeypatch
+):
+    expected = PORTAL + "/deploy/slug"
+    rendered = await value_templates.render_string_async(
+        "Install: {{ tray.deploymentUrl }} {{TRAY_DEPLOYMENT_URL}}",
+        {"ticket": {"company_id": 3}},
+        include_templates=False,
+    )
+    assert rendered == f"Install: {expected} {expected}"
+
+    monkeypatch.setattr(message_templates, "get_template_by_slug", AsyncMock(return_value=None))
+    body, _ = await message_templates.render_template_content(
+        "welcome",
+        {"company": {"id": 3, "name": "Acme"}},
+        default_content="Hi {{ company.name }}, install from {{ tray.deploymentUrl }}",
+        default_content_type="text/plain",
+    )
+    assert body == f"Hi Acme, install from {expected}"
+
+    context = {"ticket": {"company_id": 3}}
+    assert await message_templates.with_tray_deployment_url("No variable", context) is context

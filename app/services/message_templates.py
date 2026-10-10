@@ -94,6 +94,29 @@ def render_content(content: str, context: Mapping[str, Any], *, escape_html: boo
     return _TOKEN_PATTERN.sub(replace, content)
 
 
+async def with_tray_deployment_url(content: str, context: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Add the company's tray deployment URL to ``context`` when ``content`` uses it.
+
+    The URL needs a database lookup, so it is only resolved for content that
+    references ``{{ tray.deploymentUrl }}`` or one of its aliases.
+    """
+
+    from app.services import dynamic_variables, tray_deployment
+
+    if not any(
+        match.group(1).lower() in dynamic_variables.TRAY_DEPLOYMENT_URL_VARIABLES
+        for match in _TOKEN_PATTERN.finditer(content or "")
+    ):
+        return context
+    url = await tray_deployment.company_deployment_url(
+        dynamic_variables._extract_company_id(context, None)
+    )
+    existing = context.get("tray")
+    tray = dict(existing) if isinstance(existing, Mapping) else {}
+    tray.update({"deploymentUrl": url, "deployment_url": url})
+    return {**context, "tray": tray, "tray_deployment_url": url, "TRAY_DEPLOYMENT_URL": url}
+
+
 async def render_template_content(
     slug: str,
     context: Mapping[str, Any],
@@ -106,6 +129,7 @@ async def render_template_content(
     template = await get_template_by_slug(slug)
     content = str((template or {}).get("content") or default_content)
     content_type = _normalise_content_type((template or {}).get("content_type") or default_content_type)
+    context = await with_tray_deployment_url(content, context)
     return render_content(content, context, escape_html=content_type == "text/html"), content_type
 
 

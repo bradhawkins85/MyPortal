@@ -8899,7 +8899,7 @@ async def admin_tray_deployment_links_page(
         "hidden_revoked_count": hidden_revoked_count,
         "release_tag": tray_deployment_builds.current_release_tag(),
         "macos_available": tray_deployment_service.installer_path("macos") is not None,
-        "expiry_choices": tray_deployment_service.EXPIRY_CHOICES_DAYS,
+        "expiry_choices": tray_deployment_service.EXPIRY_CHOICES,
         "default_expiry": tray_deployment_service.DEFAULT_EXPIRY_DAYS,
     }
     return await _render_template(
@@ -8941,7 +8941,11 @@ async def admin_tray_create_deployment_link(request: Request):
         user_id=int(current_user["id"]),
         entity_type="tray_deployment_link",
         entity_id=int(record["id"]),
-        new_value={"company_id": int(company_raw), "label": record.get("label")},
+        new_value={
+            "company_id": int(company_raw),
+            "label": record.get("label"),
+            "expires_at": str(record.get("expires_at") or "never"),
+        },
         request=request,
     )
     return flash_redirect(

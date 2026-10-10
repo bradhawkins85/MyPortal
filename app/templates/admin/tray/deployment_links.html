@@ -24,6 +24,7 @@
         </div>
       {% endif %}
       <p class="form-help">Windows installers (EXE and MSI) are built and signed for each company by your Windows build server. They are rebuilt automatically when a new tray release is cached{% if release_tag %} (currently <code>{{ release_tag }}</code>){% endif %}. See <em>Tray Build Server</em> in the wiki to set one up.</p>
+      <p class="form-help">Use <code>{{ "{{ tray.deploymentUrl }}" }}</code> in automations, ticket replies, canned responses, message templates and email signatures to insert the company's deployment URL. When a company has more than one active URL, the one that stays valid longest is used.</p>
       <form method="post" action="/admin/tray/deployment-links" class="form-stack">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <div class="form-row">
@@ -44,11 +45,11 @@
           <div class="form-field">
             <label class="form-label" for="deploy-expiry">Link works for</label>
             <select class="form-input" id="deploy-expiry" name="expires_in_days">
-              {% for days in expiry_choices %}
-                <option value="{{ days }}" {% if days == default_expiry %}selected{% endif %}>{{ days }} day{% if days != 1 %}s{% endif %}</option>
+              {% for days, choice_label in expiry_choices %}
+                <option value="{{ days }}" {% if days == default_expiry %}selected{% endif %}>{{ choice_label }}</option>
               {% endfor %}
             </select>
-            <p class="form-help">After this, the link and every package downloaded from it stop enrolling new devices.</p>
+            <p class="form-help">After this, the link and every package downloaded from it stop enrolling new devices. You can revoke any link early, including links with no expiry.</p>
           </div>
           <div class="form-field form-field--actions">
             <button type="submit" class="button button--primary">Create URL</button>
@@ -107,6 +108,7 @@
                 <td>
                   {% if link.expires_at %}
                     <span data-utc="{{ link.expires_at }}">{{ link.expires_at }}</span>
+                  {% elif link.status == "active" %}Never (until revoked)
                   {% else %}—{% endif %}
                 </td>
                 <td>

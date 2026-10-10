@@ -297,10 +297,20 @@ release installers (MSI, pkg, DMG) are built exactly as before.
   `irm '<link>/install.ps1' | iex` or `curl -fsSL '<link>/install.sh' | sudo bash`.
 
 Each link owns its own company install token, and both expire together after
-the period chosen when the link is created (1, 7, 30 or 90 days, default 7).
+the period chosen when the link is created: 1, 7, 30 or 90 days, 1 year, or
+no expiry (default 7 days). An admin can revoke any link at any time from the
+Deployment URLs page, including links with no expiry.
 Once a link expires or is revoked its page stops working, and any package
 already downloaded from it can no longer enrol new devices. Revoking also
 deletes the link's built installers. Devices already enrolled are unaffected.
+
+`{{ tray.deploymentUrl }}` inserts a company's deployment URL into
+automations, scheduled tickets, notifications, ticket canned responses,
+message templates and email signatures. It resolves for the company in the
+current context (for example the ticket's company), using the active link
+that stays valid longest; links with no expiry come first and the newest wins
+a tie. It is empty when the company has no active link or `PORTAL_URL` is not
+set. `{{ TRAY_DEPLOYMENT_URL }}` and `{{ tray_deployment_url }}` are aliases.
 The link is a credential: the slug is stored as an HMAC hash for lookup and
 encrypted so admins can copy it again, and every `/deploy` response is sent
 with `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.

@@ -11,8 +11,12 @@ never published to GitHub.
 Whoever holds the link can enrol devices into that company, so the slug is a
 long random value, stored hashed for lookup and encrypted so administrators
 can copy it again.  Each link owns one install token and both expire
-together, so a forwarded package stops working when the link lapses.
-Revoking the link revokes the token.
+together, so a forwarded package stops working when the link lapses.  Links
+can also be made to never expire; revoking a link, at any time, revokes the
+token.
+
+The ``{{ tray.deploymentUrl }}`` template variable resolves to a company's
+link through :func:`company_deployment_url`.
 """
 
 from __future__ import annotations
@@ -32,7 +36,17 @@ from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import tray as tray_service
 from app.services import tray_installer
 
-EXPIRY_CHOICES_DAYS = (1, 7, 30, 90)
+# ``NO_EXPIRY`` keeps the link working until an administrator revokes it.
+NO_EXPIRY = 0
+EXPIRY_CHOICES = (
+    (1, "1 day"),
+    (7, "7 days"),
+    (30, "30 days"),
+    (90, "90 days"),
+    (365, "1 year"),
+    (NO_EXPIRY, "No expiry"),
+)
+EXPIRY_CHOICES_DAYS = tuple(days for days, _label in EXPIRY_CHOICES)
 DEFAULT_EXPIRY_DAYS = 7
 
 _INSTALLER_NAMES = {
@@ -110,9 +124,11 @@ async def create_deployment_link(
 
     if expires_in_days not in EXPIRY_CHOICES_DAYS:
         raise ValueError("Choose how long the link should stay valid.")
-    expires_at = (datetime.now(timezone.utc) + timedelta(days=expires_in_days)).replace(
-        tzinfo=None
-    )
+    expires_at = None
+    if expires_in_days != NO_EXPIRY:
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=expires_in_days)).replace(
+            tzinfo=None
+        )
     company = await companies_repo.get_company_by_id(int(company_id))
     if not company:
         raise ValueError("Company not found")
@@ -214,6 +230,39 @@ async def revoke_deployment_link(link_id: int) -> bool:
     if link.get("install_token_id"):
         await tray_repo.revoke_install_token(int(link["install_token_id"]))
     return True
+
+
+def _expiry_sort_key(link: dict[str, Any]) -> tuple[int, str, int]:
+    expires_at = link.get("expires_at")
+    if expires_at is None:
+        return (1, "", int(link["id"]))
+    if isinstance(expires_at, datetime):
+        expires_at = expires_at.isoformat()
+    return (0, str(expires_at), int(link["id"]))
+
+
+async def company_deployment_url(company_id: int | None) -> str:
+    """Return the deployment URL used for the ``tray.deploymentUrl`` variable.
+
+    A company can have several active links, so pick the one that stays valid
+    longest (links with no expiry first, newest on a tie).  Returns an empty
+    string when the company has no usable link or ``PORTAL_URL`` is not set,
+    because templates are rendered outside a request.
+    """
+
+    if company_id is None:
+        return ""
+    portal_url = get_settings().portal_url
+    if not portal_url:
+        return ""
+    links = await tray_repo.list_active_deployment_links(company_id=int(company_id))
+    for link in sorted(links, key=_expiry_sort_key, reverse=True):
+        if await link_status(link) != "active":
+            continue
+        slug = reveal_slug(link)
+        if slug:
+            return str(portal_url).rstrip("/") + link_path(slug)
+    return ""
 
 
 # ---------------------------------------------------------------------------

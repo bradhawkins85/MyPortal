@@ -225,6 +225,17 @@ Security Status:
 - String comparisons are used as a fallback when numeric conversion fails
 - Empty strings and zero values are considered "false" in boolean contexts
 
+## Tray deployment URL
+
+`{{ tray.deploymentUrl }}` (aliases `{{ TRAY_DEPLOYMENT_URL }}` and
+`{{ tray_deployment_url }}`) is the company's tray Deployment URL, so a ticket
+reply or welcome email can say "Install MyPortal Tray from
+{{ tray.deploymentUrl }}". It scopes to the company in the current context,
+such as the ticket's company. When the company has several active links, the
+one that stays valid longest is used (no expiry first, newest on a tie). It is
+empty when the company has no active link or `PORTAL_URL` is not configured.
+Create and revoke links under **Admin → Tray → Deployment URLs**.
+
 ## Message templates
 
 Reusable snippets such as email bodies or webhook payloads can be defined as
