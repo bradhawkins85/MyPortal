@@ -155,7 +155,8 @@ def next_runs(expression: str, tz_name: str, *, after: datetime | None = None, c
         for _ in range(count):
             times.append(iterator.get_next(datetime).astimezone(timezone.utc).replace(tzinfo=None))
     except (CroniterBadDateError, ValueError, KeyError):
-        pass
+        # No (further) times exist, e.g. a date that never occurs: return what we have.
+        return times
     return times
 
 
