@@ -18,6 +18,9 @@ GITEA_VERSION="${MYPORTAL_GITEA_VERSION:-1.24.6}"
 GITEA_DOWNLOAD_URL="${MYPORTAL_GITEA_DOWNLOAD_URL:-https://dl.gitea.com/gitea}"
 GITEA_BIN="${MYPORTAL_GITEA_BIN:-/usr/local/bin/gitea}"
 GITEA_HOME="${MYPORTAL_GITEA_HOME:-/var/lib/gitea}"
+# Git otherwise searches the folders above Gitea's data for a repository, and a
+# stray .git there (even /.git) stops Gitea starting.
+GITEA_GIT_CEILING=$(dirname "$GITEA_HOME")
 GITEA_CONFIG_DIR="${MYPORTAL_GITEA_CONFIG_DIR:-/etc/gitea}"
 GITEA_UNIT="${MYPORTAL_GITEA_UNIT:-/etc/systemd/system/gitea.service}"
 GITEA_CONFIG="${GITEA_CONFIG_DIR}/app.ini"
@@ -283,6 +286,7 @@ User=${GITEA_ACCOUNT}
 Group=${GITEA_ACCOUNT}
 WorkingDirectory=${GITEA_HOME}
 Environment=USER=${GITEA_ACCOUNT} HOME=${GITEA_HOME} GITEA_WORK_DIR=${GITEA_HOME}
+Environment=GIT_CEILING_DIRECTORIES=${GITEA_GIT_CEILING}
 ExecStart=${GITEA_BIN} web --config ${GITEA_CONFIG}
 Restart=always
 RestartSec=5
@@ -315,8 +319,9 @@ wait_for_gitea() {
 # Administrator, repository and MyPortal's token
 # ---------------------------------------------------------------------------
 gitea_cli() {
-  runuser -u "$GITEA_ACCOUNT" -- env HOME="$GITEA_HOME" GITEA_WORK_DIR="$GITEA_HOME" \
-    "$GITEA_BIN" --config "$GITEA_CONFIG" "$@"
+  ( cd "$GITEA_HOME" && runuser -u "$GITEA_ACCOUNT" -- env HOME="$GITEA_HOME" GITEA_WORK_DIR="$GITEA_HOME" \
+    GIT_CEILING_DIRECTORIES="$GITEA_GIT_CEILING" \
+    "$GITEA_BIN" --config "$GITEA_CONFIG" "$@" )
 }
 
 gitea_api() {
