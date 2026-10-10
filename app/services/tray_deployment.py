@@ -1,15 +1,18 @@
 """Tray deployment URLs.
 
-A deployment link is a per-company URL that hands out tray installers that
-already carry the portal address and a company install token: a signed EXE
-and MSI built for that company by the Windows build agent (see
-:mod:`app.services.tray_deployment_builds`), a macOS zip with the cached pkg
-and its settings file, and PowerShell and shell scripts for RMM tools.  Whoever holds the
-link can enrol devices into that company, so the slug is a long random value,
-stored hashed for lookup and encrypted so administrators can copy it again.
+A deployment link is a per-company magic link, created from the admin page,
+that hands out tray installers already carrying the portal address and a
+company install token: a signed EXE and MSI built for that company by the
+Windows build agent (see :mod:`app.services.tray_deployment_builds`), a macOS
+zip with the cached pkg and a launcher, and PowerShell and shell scripts for
+RMM tools.  The installers are only ever served by MyPortal through the link,
+never published to GitHub.
 
-Each link owns one install token.  Revoking the link revokes the token, and a
-link whose token was revoked or expired elsewhere stops serving downloads.
+Whoever holds the link can enrol devices into that company, so the slug is a
+long random value, stored hashed for lookup and encrypted so administrators
+can copy it again.  Each link owns one install token and both expire
+together, so a forwarded package stops working when the link lapses.
+Revoking the link revokes the token.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ from __future__ import annotations
 import re
 import tempfile
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +31,9 @@ from app.repositories import tray as tray_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import tray as tray_service
 from app.services import tray_installer
+
+EXPIRY_CHOICES_DAYS = (1, 7, 30, 90)
+DEFAULT_EXPIRY_DAYS = 7
 
 _INSTALLER_NAMES = {
     "macos": "myportal-tray.pkg",
@@ -75,6 +81,7 @@ async def serialise_link(record: dict[str, Any], portal_url: str) -> dict[str, A
         "url": portal_url + link_path(slug) if slug else None,
         "status": await link_status(record),
         "created_at": record.get("created_at"),
+        "expires_at": record.get("expires_at"),
         "revoked_at": record.get("revoked_at"),
         "download_count": int(record.get("download_count") or 0),
         "last_downloaded_at": record.get("last_downloaded_at"),
@@ -93,9 +100,19 @@ async def create_deployment_link(
     company_id: int,
     label: str | None,
     created_by_user_id: int | None,
+    expires_in_days: int = DEFAULT_EXPIRY_DAYS,
 ) -> tuple[dict[str, Any], str]:
-    """Create a deployment link and its install token. Returns ``(record, slug)``."""
+    """Create a deployment link and its install token. Returns ``(record, slug)``.
 
+    The link and its token expire together, so a forwarded or leaked package
+    stops enrolling devices once the link lapses.
+    """
+
+    if expires_in_days not in EXPIRY_CHOICES_DAYS:
+        raise ValueError("Choose how long the link should stay valid.")
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=expires_in_days)).replace(
+        tzinfo=None
+    )
     company = await companies_repo.get_company_by_id(int(company_id))
     if not company:
         raise ValueError("Company not found")
@@ -109,6 +126,7 @@ async def create_deployment_link(
         token_hash=tray_service.hash_token(raw_token),
         token_prefix=tray_service.token_prefix(raw_token),
         created_by_user_id=created_by_user_id,
+        expires_at=expires_at,
     )
     slug = generate_slug()
     record = await tray_repo.create_deployment_link(
@@ -120,6 +138,7 @@ async def create_deployment_link(
         install_token_id=token_record.get("id"),
         install_token_encrypted=encrypt_secret(raw_token),
         created_by_user_id=created_by_user_id,
+        expires_at=expires_at,
     )
     if record.get("id"):
         await tray_repo.create_deployment_build(int(record["id"]))
@@ -134,22 +153,30 @@ def reveal_slug(record: dict[str, Any]) -> str | None:
         return None
 
 
+def _is_past(value: Any) -> bool:
+    if isinstance(value, str) and value:
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return False
+    if not isinstance(value, datetime):
+        return False
+    return value.replace(tzinfo=value.tzinfo or timezone.utc) < datetime.now(timezone.utc)
+
+
 def _token_is_usable(token: dict[str, Any] | None) -> bool:
     if not token or token.get("revoked_at"):
         return False
-    expires_at = token.get("expires_at")
-    if isinstance(expires_at, datetime):
-        aware = expires_at.replace(tzinfo=expires_at.tzinfo or timezone.utc)
-        if aware < datetime.now(timezone.utc):
-            return False
-    return True
+    return not _is_past(token.get("expires_at"))
 
 
 async def link_status(record: dict[str, Any]) -> str:
-    """Return ``active`` or ``revoked`` for an admin listing."""
+    """Return ``active``, ``expired`` or ``revoked`` for an admin listing."""
 
     if record.get("revoked_at"):
         return "revoked"
+    if _is_past(record.get("expires_at")):
+        return "expired"
     token_id = record.get("install_token_id")
     token = await tray_repo.get_install_token_by_id(int(token_id)) if token_id else None
     return "active" if _token_is_usable(token) else "revoked"
@@ -163,6 +190,8 @@ async def resolve_active_link(slug: str) -> tuple[dict[str, Any], str]:
     link = await tray_repo.get_deployment_link_by_slug_hash(tray_service.hash_token(slug))
     if not link or link.get("revoked_at"):
         raise DeploymentLinkUnavailable("This deployment link is not valid.")
+    if _is_past(link.get("expires_at")):
+        raise DeploymentLinkUnavailable("This deployment link has expired.")
     token_id = link.get("install_token_id")
     token = await tray_repo.get_install_token_by_id(int(token_id)) if token_id else None
     if not _token_is_usable(token):
@@ -297,9 +326,8 @@ _README = (
 
 _MACOS_STEPS = (
     "1. Open the zip file so it extracts into a folder.\n"
-    "2. Double-click myportal-tray.pkg and follow the installer.\n"
-    "   If your Mac asks for the portal address, close the installer and\n"
-    "   instead right-click \"Install MyPortal Tray.command\" and choose Open."
+    "2. Right-click \"Install MyPortal Tray.command\", choose Open, then Open\n"
+    "   again, and enter your Mac password when asked."
 )
 
 

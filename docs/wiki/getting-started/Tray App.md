@@ -278,9 +278,11 @@ If you need advanced nesting, you can still use the **Advanced JSON** toggle to 
 ### Deployment URLs
 
 **Admin → Tray → Deployment URLs** (`/admin/tray/deployment-links`) creates a
-link for one company. Anyone who opens it gets a page with *Download for
-Windows* and *Download for macOS* buttons, so no token needs to be typed or
-pasted.
+private magic link for one company. Whoever opens it gets a page with
+*Download for Windows* and *Download for macOS* buttons, so no token needs to
+be typed or pasted. The company-specific packages are only ever served by
+MyPortal through that link; nothing is published to GitHub, and the public
+release installers (MSI, pkg, DMG) are built exactly as before.
 
 * **Windows** downloads a signed `setup.exe`, with the matching `.msi` linked
   for IT teams. Both are built for that company by the Windows build agent,
@@ -288,20 +290,20 @@ pasted.
   command-line value still overrides them). Until a build server is set up, or
   while a build is running, the page says the Windows installer is being
   prepared. See [Tray Build Server](Tray%20Build%20Server.md).
-* **macOS** downloads a zip with `myportal-tray.pkg`, `myportal-tray.env` and
-  `Install MyPortal Tray.command`. The package's postinstall reads
-  `myportal-tray.env` from beside the pkg, so double-clicking the pkg is
-  enough. Packages built before this change still prompt for settings; use the
-  `.command` launcher with those.
+* **macOS** downloads a zip with the cached `myportal-tray.pkg`, its
+  `myportal-tray.env` settings and `Install MyPortal Tray.command`, which
+  writes the settings and runs the pkg after asking for the Mac password.
 * **RMM tools** can use the one-liners shown on the admin page:
   `irm '<link>/install.ps1' | iex` or `curl -fsSL '<link>/install.sh' | sudo bash`.
 
-Each link owns its own company install token. Revoking the link revokes the
-token and deletes its built installers, and a link stops serving downloads if its token is revoked or expires
-on the Install tokens page. Devices already enrolled are unaffected. The link
-is a credential: the slug is stored as an HMAC hash for lookup and encrypted
-so admins can copy it again, and every `/deploy` response is sent with
-`Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
+Each link owns its own company install token, and both expire together after
+the period chosen when the link is created (1, 7, 30 or 90 days, default 7).
+Once a link expires or is revoked its page stops working, and any package
+already downloaded from it can no longer enrol new devices. Revoking also
+deletes the link's built installers. Devices already enrolled are unaffected.
+The link is a credential: the slug is stored as an HMAC hash for lookup and
+encrypted so admins can copy it again, and every `/deploy` response is sent
+with `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
 
 ### Tactical RMM ticket URL Action
 

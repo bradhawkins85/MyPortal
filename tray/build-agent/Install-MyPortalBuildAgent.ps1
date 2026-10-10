@@ -34,8 +34,14 @@ Set-StrictMode -Version 3
 if ($PortalUrl -notmatch '^https://') { throw 'PortalUrl must start with https://' }
 $CertificateThumbprint = ($CertificateThumbprint -replace '\s', '').ToUpperInvariant()
 
-if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
-    throw 'The .NET SDK 8 or later is required. Install it from https://dotnet.microsoft.com/download and run this script again.'
+$missing = @(
+    @{ Command = 'dotnet'; Name = '.NET SDK 8+ (winget install Microsoft.DotNet.SDK.8)' },
+    @{ Command = 'git'; Name = 'Git (winget install Git.Git)' },
+    @{ Command = 'go'; Name = 'Go (winget install GoLang.Go)' },
+    @{ Command = 'npm'; Name = 'Node.js 20 LTS (winget install OpenJS.NodeJS.LTS)' }
+) | Where-Object { -not (Get-Command $_.Command -ErrorAction SilentlyContinue) } | ForEach-Object { $_.Name }
+if ($missing) {
+    throw ("Install these machine-wide, open a new PowerShell window and run this script again: " + ($missing -join ', '))
 }
 
 $cert = Get-Item -LiteralPath "Cert:\LocalMachine\My\$CertificateThumbprint" -ErrorAction SilentlyContinue

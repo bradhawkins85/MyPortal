@@ -137,12 +137,14 @@ async def create_deployment_link(
     install_token_id: int | None,
     install_token_encrypted: str,
     created_by_user_id: int | None,
+    expires_at: datetime | None,
 ) -> dict[str, Any]:
     await db.execute(
         """INSERT INTO tray_deployment_links
            (company_id, label, slug_hash, slug_prefix, slug_encrypted,
-            install_token_id, install_token_encrypted, created_by_user_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            install_token_id, install_token_encrypted, created_by_user_id,
+            expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             company_id,
             label,
@@ -152,6 +154,7 @@ async def create_deployment_link(
             install_token_id,
             install_token_encrypted,
             created_by_user_id,
+            expires_at,
         ),
     )
     return await get_deployment_link_by_slug_hash(slug_hash) or {}
@@ -206,8 +209,11 @@ async def revoke_deployment_link(link_id: int) -> None:
 
 
 async def list_active_deployment_links() -> list[dict[str, Any]]:
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     rows = await db.fetch_all(
-        "SELECT * FROM tray_deployment_links WHERE revoked_at IS NULL ORDER BY id"
+        "SELECT * FROM tray_deployment_links WHERE revoked_at IS NULL "
+        "AND (expires_at IS NULL OR expires_at > ?) ORDER BY id",
+        (now,),
     )
     return [dict(r) for r in rows]
 

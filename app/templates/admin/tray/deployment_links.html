@@ -15,7 +15,7 @@
   <section class="card card--panel admin-grid__full" aria-labelledby="deploy-create-title">
     <header class="card__header">
       <h2 id="deploy-create-title">New deployment URL</h2>
-      <p class="card__lede">A deployment URL gives someone a ready-made tray installer for one company. They open the link, download the Windows installer or the macOS package and run it. The device enrols into that company with no token to type.</p>
+      <p class="card__lede">A deployment URL is a private magic link to a ready-made tray installer for one company. Send it to the person installing; they open it, download the Windows installer or the macOS package and run it, and the device enrols into that company with no token to type. The installers are only served from this portal through the link, and they stop working when the link expires or is revoked.</p>
     </header>
     <div class="card__body">
       {% if not release_tag %}
@@ -41,6 +41,15 @@
             <input class="form-input" id="deploy-label" name="label" maxlength="150" placeholder="e.g. New starters" />
             <p class="form-help">Shown only to admins. Defaults to the company name.</p>
           </div>
+          <div class="form-field">
+            <label class="form-label" for="deploy-expiry">Link works for</label>
+            <select class="form-input" id="deploy-expiry" name="expires_in_days">
+              {% for days in expiry_choices %}
+                <option value="{{ days }}" {% if days == default_expiry %}selected{% endif %}>{{ days }} day{% if days != 1 %}s{% endif %}</option>
+              {% endfor %}
+            </select>
+            <p class="form-help">After this, the link and every package downloaded from it stop enrolling new devices.</p>
+          </div>
           <div class="form-field form-field--actions">
             <button type="submit" class="button button--primary">Create URL</button>
           </div>
@@ -54,7 +63,7 @@
       <h2 id="deploy-list-title">Deployment URLs</h2>
       <div class="card__controls card__controls--right">
         <input class="form-input" type="search" placeholder="Search" aria-label="Search deployment URLs" data-deploy-search />
-        <a class="button button--ghost button--small" href="/admin/tray/deployment-links{% if not show_revoked %}?show_revoked=true{% endif %}" aria-pressed="{{ 'true' if show_revoked else 'false' }}">{{ "Hide revoked" if show_revoked else "Show revoked" }}</a>
+        <a class="button button--ghost button--small" href="/admin/tray/deployment-links{% if not show_revoked %}?show_revoked=true{% endif %}" aria-pressed="{{ 'true' if show_revoked else 'false' }}">{{ "Hide expired and revoked" if show_revoked else "Show expired and revoked" }}</a>
       </div>
     </header>
     <div class="card__body card__body--table">
@@ -63,7 +72,7 @@
           <caption class="visually-hidden">Tray deployment URLs</caption>
           <thead>
             <tr>
-              <th>Company</th><th>Label</th><th>URL</th><th>Status</th><th>Windows installer</th>
+              <th>Company</th><th>Label</th><th>URL</th><th>Status</th><th>Expires</th><th>Windows installer</th>
               <th>Downloads</th><th>Last download</th><th>Created</th>
               <th class="data-table__col--actions">Actions</th>
             </tr>
@@ -89,9 +98,16 @@
                 <td>
                   {% if link.status == "active" %}
                     <span class="status status--success">Active</span>
+                  {% elif link.status == "expired" %}
+                    <span class="status status--warning">Expired</span>
                   {% else %}
                     <span class="status status--danger">Revoked</span>
                   {% endif %}
+                </td>
+                <td>
+                  {% if link.expires_at %}
+                    <span data-utc="{{ link.expires_at }}">{{ link.expires_at }}</span>
+                  {% else %}—{% endif %}
                 </td>
                 <td>
                   {% set build = link.build %}
@@ -131,7 +147,7 @@
       {% else %}
         <div class="empty-state">
           {% if not show_revoked and hidden_revoked_count %}
-            <p>No active deployment URLs. Choose “Show revoked” to review {{ hidden_revoked_count }} revoked URL{% if hidden_revoked_count != 1 %}s{% endif %}.</p>
+            <p>No active deployment URLs. Choose “Show expired and revoked” to review {{ hidden_revoked_count }} older URL{% if hidden_revoked_count != 1 %}s{% endif %}.</p>
           {% else %}
             <p>No deployment URLs yet. Create one above to give a company a ready-made tray installer.</p>
           {% endif %}

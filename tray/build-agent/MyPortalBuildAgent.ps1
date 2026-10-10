@@ -4,9 +4,10 @@
     Builds company-specific MyPortal Tray installers (MSI and setup EXE).
 
 .DESCRIPTION
-    Polls MyPortal for queued deployment URL builds. For each job it downloads
-    the signed Windows payload for the job's tray release from GitHub, builds
-    myportal-tray.msi with the company's portal URL and install token baked in,
+    Polls MyPortal for queued deployment URL builds. For each job it builds the
+    tray binaries for the job's release tag from source (cached per tag, signed
+    with your certificate), builds myportal-tray.msi with the company's portal
+    URL and install token baked in,
     wraps it in a Burn setup.exe, signs both, uploads them and marks the job
     complete. Failures are reported back so they show on the admin page.
 
@@ -83,28 +84,66 @@ function Set-Signature([string]$Path) {
     }
 }
 
+function Invoke-Native([string]$What) {
+    if ($LASTEXITCODE -ne 0) { throw "$What failed with exit code $LASTEXITCODE" }
+}
+
+# Builds the signed tray binaries for a release tag from source, the same way
+# the Build MSI workflow does, without touching the GitHub release itself.
 function Get-Payload([string]$Tag) {
     if ($Tag -notmatch '^[A-Za-z0-9][A-Za-z0-9._/+-]{0,127}$') { throw "Invalid release tag: $Tag" }
     $dir = Join-Path $PayloadDir ($Tag -replace '[^A-Za-z0-9._-]', '_')
     if (Test-Path -LiteralPath (Join-Path $dir '.complete')) { return $dir }
 
     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Force -Path $dir | Out-Null
-    $zip = Join-Path $dir 'payload.zip'
-    $url = "https://github.com/$GitHubRepo/releases/download/$([uri]::EscapeDataString($Tag))/myportal-tray-windows-payload.zip"
-    Write-Log "Downloading Windows payload for $Tag"
-    try {
-        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
-    } catch {
-        throw "Could not download myportal-tray-windows-payload.zip for release $Tag ($($_.Exception.Message)). Releases published before the build agent existed do not include it; publish a new tray release."
-    }
-    Expand-Archive -LiteralPath $zip -DestinationPath $dir -Force
-    Remove-Item -LiteralPath $zip -Force
+    $src = Join-Path $dir 'src'
+    $bin = Join-Path $dir 'bin'
+    $installer = Join-Path $dir 'installer'
+    New-Item -ItemType Directory -Force -Path $dir, $bin, $installer | Out-Null
 
-    foreach ($exe in Get-ChildItem -LiteralPath (Join-Path $dir 'bin') -Filter '*.exe' -File) {
-        $status = (Get-AuthenticodeSignature -FilePath $exe.FullName).Status
-        if ($status -in @('NotSigned', 'HashMismatch')) { throw "Payload binary $($exe.Name) is not signed ($status)." }
+    Write-Log "Building tray binaries for $Tag"
+    git clone --quiet --depth 1 --branch $Tag "https://github.com/$GitHubRepo.git" $src 2>&1 | Out-Null
+    Invoke-Native "git clone of $Tag"
+
+    $wxs = Join-Path $src 'tray\installer\windows\myportal-tray.wxs'
+    $bundle = Join-Path $src 'tray\installer\windows\myportal-tray-bundle.wxs'
+    if (-not (Test-Path -LiteralPath $bundle) -or -not (Select-String -LiteralPath $wxs -Pattern 'DefaultPortalUrl' -Quiet)) {
+        throw "Release $Tag predates deployment URL support. Publish a newer tray release, then press Rebuild."
     }
+    Copy-Item -LiteralPath $wxs, $bundle -Destination $installer
+
+    $tray = Join-Path $src 'tray'
+    Push-Location $tray
+    try {
+        $env:GOOS = 'windows'; $env:GOARCH = 'amd64'; $env:CGO_ENABLED = '0'
+        $ldflags = "-X 'github.com/bradhawkins85/myportal-tray/internal/updater.AgentVersion=$Tag'"
+        go build -ldflags $ldflags -o (Join-Path $bin 'myportal-tray-service.exe') .\service
+        Invoke-Native 'go build service'
+        $env:GOFLAGS = '-tags=nowebview'
+        go build -ldflags "$ldflags -H windowsgui" -o (Join-Path $bin 'myportal-tray-ui.exe') .\ui
+        Invoke-Native 'go build ui'
+    } finally {
+        Remove-Item Env:GOFLAGS -ErrorAction SilentlyContinue
+        Pop-Location
+    }
+
+    Push-Location (Join-Path $tray 'chat-shell')
+    try {
+        npm ci --no-audit --no-fund | Out-Null
+        Invoke-Native 'npm ci'
+        npm run build:win | Out-Null
+        Invoke-Native 'npm run build:win'
+    } finally {
+        Pop-Location
+    }
+    $unpacked = Join-Path $tray 'chat-shell\dist\win-unpacked'
+    if (-not (Test-Path -LiteralPath $unpacked)) { throw 'electron-builder did not create chat-shell\dist\win-unpacked' }
+    Copy-Item -LiteralPath $unpacked -Destination (Join-Path $bin 'chat-shell') -Recurse -Force
+
+    foreach ($exe in Get-ChildItem -LiteralPath $bin -Filter '*.exe' -File -Recurse) {
+        Set-Signature $exe.FullName
+    }
+    Remove-Item -LiteralPath $src -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType File -Path (Join-Path $dir '.complete') | Out-Null
     return $dir
 }

@@ -202,25 +202,8 @@ jobs:
           }
           $certificate.Dispose()
 
-      # The MyPortal build agent compiles company-specific MSI and EXE
-      # installers from these signed binaries and WiX sources, so it only
-      # needs WiX and a signing certificate rather than the Go and Node tool
-      # chains. See docs/wiki/getting-started/Tray Build Server.md.
-      - name: Package Windows payload for the build agent
-        shell: pwsh
-        run: |
-          $stage = Join-Path $env:RUNNER_TEMP 'windows-payload'
-          Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path (Join-Path $stage 'bin') | Out-Null
-          New-Item -ItemType Directory -Force -Path (Join-Path $stage 'installer') | Out-Null
-          Get-ChildItem dist\windows -Exclude '*.msi' | Copy-Item -Destination (Join-Path $stage 'bin') -Recurse -Force
-          Copy-Item installer\windows\*.wxs (Join-Path $stage 'installer') -Force
-          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath dist\windows\myportal-tray-windows-payload.zip -Force
-
       - name: Upload MSI to release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}
-          files: |
-            tray/dist/windows/myportal-tray.msi
-            tray/dist/windows/myportal-tray-windows-payload.zip
+          files: tray/dist/windows/myportal-tray.msi

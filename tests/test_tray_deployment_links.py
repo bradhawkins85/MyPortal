@@ -133,7 +133,7 @@ async def test_create_link_stores_hashes_and_encrypted_values(monkeypatch):
     monkeypatch.setattr(tray_repo, "create_deployment_build", queue_build)
 
     record, slug = await tray_deployment.create_deployment_link(
-        company_id=3, label="", created_by_user_id=1
+        company_id=3, label="", created_by_user_id=1, expires_in_days=30
     )
 
     token_kwargs = create_token.await_args.kwargs
@@ -147,6 +147,30 @@ async def test_create_link_stores_hashes_and_encrypted_values(monkeypatch):
     assert decrypt_secret(link_kwargs["slug_encrypted"], allow_plaintext=False) == slug
     assert slug not in str(record.get("slug_hash"))
     queue_build.assert_awaited_once_with(7)
+    expires_at = link_kwargs["expires_at"]
+    assert token_kwargs["expires_at"] == expires_at
+    assert timedelta(days=29) < expires_at - datetime.utcnow() <= timedelta(days=30)
+
+
+@pytest.mark.anyio
+async def test_create_link_rejects_unknown_expiry(monkeypatch):
+    monkeypatch.setattr(tray_repo, "create_install_token", AsyncMock())
+    with pytest.raises(ValueError):
+        await tray_deployment.create_deployment_link(
+            company_id=3, label=None, created_by_user_id=1, expires_in_days=3650
+        )
+
+
+@pytest.mark.anyio
+async def test_expired_link_is_unavailable(monkeypatch):
+    expired = _link(expires_at=(datetime.utcnow() - timedelta(minutes=1)).isoformat())
+    monkeypatch.setattr(
+        tray_repo, "get_deployment_link_by_slug_hash", AsyncMock(return_value=expired)
+    )
+    monkeypatch.setattr(tray_repo, "get_install_token_by_id", AsyncMock(return_value={"id": 11}))
+    with pytest.raises(tray_deployment.DeploymentLinkUnavailable, match="expired"):
+        await tray_deployment.resolve_active_link(SLUG)
+    assert await tray_deployment.link_status(expired) == "expired"
 
 
 @pytest.mark.anyio

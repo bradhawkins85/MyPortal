@@ -69,22 +69,6 @@ ensure_configuration() {
         return 0
     fi
 
-    # Deployment URL bundles ship myportal-tray.env next to the pkg so a
-    # double-clicked install configures itself.
-    local pkg_path sidecar
-    for pkg_path in "${PACKAGE_PATH:-}" "${1:-}"; do
-        [ -n "$pkg_path" ] || continue
-        sidecar="$(dirname "$pkg_path")/myportal-tray.env"
-        if [ -s "$sidecar" ] && grep -q '^MYPORTAL_URL=' "$sidecar" && grep -q '^ENROL_TOKEN=' "$sidecar"; then
-            echo "Using MyPortal Tray configuration from $sidecar"
-            local sidecar_url sidecar_token
-            sidecar_url="$(grep -m1 '^MYPORTAL_URL=' "$sidecar" | cut -d= -f2-)"
-            sidecar_token="$(grep -m1 '^ENROL_TOKEN=' "$sidecar" | cut -d= -f2-)"
-            write_env_file "$sidecar_url" "$sidecar_token" "${AUTO_UPDATE:-true}"
-            return 0
-        fi
-    done
-
     echo "MyPortal Tray configuration is missing; prompting for manual install settings."
     local portal_url enrol_token
     portal_url="$(prompt_console_user 'Enter the MyPortal portal URL, for example https://portal.example.com:' 'https://' 'false' || true)"
@@ -105,7 +89,7 @@ mkdir -p "$LOG_DIR" "$STATE_DIR" || warn "failed to create support directories"
 chmod 755 "/Library/Logs/MyPortal" "$LOG_DIR" 2>/dev/null || true
 chmod 755 "/Library/Application Support/MyPortal" "$STATE_DIR" 2>/dev/null || true
 
-ensure_configuration "$@"
+ensure_configuration
 
 # Make payload executables runnable.
 chmod +x "$BIN_DIR/myportal-tray-service" "$BIN_DIR/myportal-tray-ui" "$BIN_DIR/uninstall.sh" 2>/dev/null || true

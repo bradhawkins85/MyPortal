@@ -244,6 +244,7 @@ async def create_deployment_link(
             company_id=payload.company_id,
             label=payload.label,
             created_by_user_id=int(current_user["id"]),
+            expires_in_days=payload.expires_in_days,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

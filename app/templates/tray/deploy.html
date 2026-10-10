@@ -48,7 +48,7 @@
       {% endif %}
       {% if macos_ready %}
         <a class="button {% if windows_ready %}button--secondary {% endif %}auth-card__wide" href="{{ deploy_base }}/macos.zip" rel="noreferrer">Download for macOS</a>
-        <p class="form-help">Open the zip file, then double-click <strong>myportal-tray.pkg</strong> and follow the installer.</p>
+        <p class="form-help">Open the zip file, then right-click <strong>Install MyPortal Tray.command</strong>, choose Open, and enter your Mac password when asked.</p>
       {% endif %}
       {% if not windows_ready %}
         <p class="form-help">The Windows installer is still being prepared. Please check back shortly.</p>

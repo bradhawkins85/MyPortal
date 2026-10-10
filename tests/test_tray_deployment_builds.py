@@ -41,8 +41,8 @@ async def sqlite_db(tmp_path, monkeypatch):
           label TEXT NOT NULL, slug_hash TEXT NOT NULL, slug_prefix TEXT NOT NULL,
           slug_encrypted TEXT NOT NULL, install_token_id INT,
           install_token_encrypted TEXT NOT NULL, created_by_user_id INT,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP, revoked_at DATETIME,
-          download_count INT DEFAULT 0, last_downloaded_at DATETIME);
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP, expires_at DATETIME,
+          revoked_at DATETIME, download_count INT DEFAULT 0, last_downloaded_at DATETIME);
         CREATE TABLE tray_deployment_builds (
           id INTEGER PRIMARY KEY AUTOINCREMENT, deployment_link_id INT NOT NULL,
           status VARCHAR(16) NOT NULL DEFAULT 'queued', release_tag TEXT,
@@ -197,6 +197,29 @@ async def test_revoked_token_fails_build(sqlite_db):
     await tray_repo.revoke_install_token(11)
     assert await builds.claim_next_build(PORTAL) is None
     assert await _status(build_id) == "failed"
+
+
+@pytest.mark.anyio
+async def test_expired_link_is_not_rebuilt(sqlite_db, monkeypatch):
+    build_id = await builds.queue_build(7)
+    await builds.claim_next_build(PORTAL)
+    for kind in builds.ARTIFACT_KINDS:
+        await builds.save_artifact(build_id, kind, _chunks(kind.encode()))
+    await builds.complete_build(build_id)
+    await sqlite_db.execute(
+        "UPDATE tray_deployment_links SET expires_at = ? WHERE id = 7",
+        (datetime.utcnow() - timedelta(minutes=1),),
+    )
+    await sqlite_db.commit()
+    monkeypatch.setattr(
+        builds.tray_installer,
+        "get_cached_latest_release_info",
+        lambda: {"release_tag": "v1.5.0"},
+    )
+    assert await builds.claim_next_build(PORTAL) is None
+    assert await tray_repo.list_deployment_builds(7) == [
+        await tray_repo.get_deployment_build(build_id)
+    ]
 
 
 @pytest.mark.anyio

@@ -8899,6 +8899,8 @@ async def admin_tray_deployment_links_page(
         "hidden_revoked_count": hidden_revoked_count,
         "release_tag": tray_deployment_builds.current_release_tag(),
         "macos_available": tray_deployment_service.installer_path("macos") is not None,
+        "expiry_choices": tray_deployment_service.EXPIRY_CHOICES_DAYS,
+        "default_expiry": tray_deployment_service.DEFAULT_EXPIRY_DAYS,
     }
     return await _render_template(
         "admin/tray/deployment_links.html", request, current_user, extra=extra
@@ -8917,6 +8919,7 @@ async def admin_tray_create_deployment_link(request: Request):
             "/admin/tray/deployment-links", "Choose a company for the deployment URL.", "error"
         )
     label = str(form.get("label", "")).strip()[:150] or None
+    expiry_raw = str(form.get("expires_in_days", "")).strip()
 
     from app.services import tray_deployment as tray_deployment_service
 
@@ -8925,6 +8928,11 @@ async def admin_tray_create_deployment_link(request: Request):
             company_id=int(company_raw),
             label=label,
             created_by_user_id=int(current_user["id"]),
+            expires_in_days=(
+                int(expiry_raw)
+                if expiry_raw.isdigit()
+                else tray_deployment_service.DEFAULT_EXPIRY_DAYS
+            ),
         )
     except ValueError as exc:
         return flash_redirect("/admin/tray/deployment-links", str(exc), "error")

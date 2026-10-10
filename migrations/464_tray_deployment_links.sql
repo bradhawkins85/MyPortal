@@ -4,11 +4,11 @@
 -- maintenance: false
 -- Migration 464: Tray deployment URLs and per-company Windows installer builds.
 --
--- A deployment link is a per-company, unguessable URL that serves a
--- self-contained tray installer bundle with the portal address and a company
--- install token already filled in. The slug is stored as an HMAC hash for
--- lookup and encrypted so administrators can copy the link again later. Each
--- link owns one tray install token; revoking the link revokes that token.
+-- A deployment link is a per-company magic link that serves tray installers
+-- with the portal address and a company install token already filled in. The
+-- slug is stored as an HMAC hash for lookup and encrypted so administrators
+-- can copy the link again later. Each link owns one tray install token that
+-- expires with the link; revoking the link revokes that token.
 
 CREATE TABLE IF NOT EXISTS tray_deployment_links (
   id INT PRIMARY KEY AUTO_INCREMENT,
@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS tray_deployment_links (
   install_token_encrypted TEXT NOT NULL,
   created_by_user_id INT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME NULL,
   revoked_at DATETIME NULL,
   download_count INT NOT NULL DEFAULT 0,
   last_downloaded_at DATETIME NULL,

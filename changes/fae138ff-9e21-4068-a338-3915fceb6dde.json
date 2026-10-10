@@ -2,6 +2,6 @@
   "guid": "fae138ff-9e21-4068-a338-3915fceb6dde",
   "occurred_at": "2026-10-09T23:30Z",
   "change_type": "Feature",
-  "summary": "Tray: add per-company Deployment URLs with signed Windows EXE and MSI installers from a Windows build server, a macOS package and RMM install scripts",
-  "content_hash": "8f034a100ac885efca499385b70e8601726b45efee34643453736f46fa0c3bb8"
+  "summary": "Tray: add expiring per-company Deployment URL magic links that serve signed Windows EXE and MSI installers from a Windows build server, a macOS package and RMM install scripts",
+  "content_hash": "7b613e57873c5f85449484b659730053f30805dcf2a4cb4a09af47e80d433193"
 }

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, IPvAnyAddress
 
@@ -193,6 +193,7 @@ class TrayInstallTokenResponse(BaseModel):
 class TrayDeploymentLinkCreate(BaseModel):
     company_id: int = Field(ge=1)
     label: Optional[str] = Field(default=None, max_length=150)
+    expires_in_days: Literal[1, 7, 30, 90] = 7
 
 
 class TrayDeploymentLinkResponse(BaseModel):
@@ -203,6 +204,7 @@ class TrayDeploymentLinkResponse(BaseModel):
     url: Optional[str] = None
     status: str
     created_at: datetime
+    expires_at: Optional[datetime] = None
     revoked_at: Optional[datetime] = None
     download_count: int = 0
     last_downloaded_at: Optional[datetime] = None
