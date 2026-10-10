@@ -1,7 +1,8 @@
 {% extends "base.html" %}
+{% from "tags/_picker.html" import tag_list %}
 
 {% block title %}Assets{% endblock %}
-{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% if show_tags %}<link rel="stylesheet" href="{{ static_url('/static/css/tags.css') }}">{% endif %}{% endblock %}
 
 {% block header_title %}
   <div class="page-header-bar">
@@ -60,6 +61,7 @@
   {% endif %}
   {% if is_super_admin %}
     {% set _ = asset_actions.append({"label": "Settings", "type": "link", "href": "/assets/settings"}) %}
+    {% if show_tags %}{% set _ = asset_actions.append({"label": "Tags", "type": "link", "href": "/admin/tags"}) %}{% endif %}
   {% endif %}
   {% set _ = asset_actions.append({"label": "Network devices", "type": "link", "href": "/devices"}) %}
   {% set _ = asset_actions.append({"label": "Integration health", "type": "link", "href": "/assets/integration-health"}) %}
@@ -122,6 +124,10 @@
                 {% elif key == 'type' %}
                   <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ value or '' }}" {% if mobile_priority %}data-mobile-priority="{{ mobile_priority }}"{% endif %}{% if asset.reported_type and asset.reported_type != value %} title="Reported as {{ asset.reported_type }}"{% endif %}>
                     {% if asset.asset_type_icon %}<img class="asset-type-icon" src="{{ asset.asset_type_icon }}" alt="" width="20" height="20" loading="lazy">{% endif %}{{ value or '—' }}
+                  </td>
+                {% elif key == 'tags' %}
+                  <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ (asset.tags or []) | map(attribute='name') | join(', ') }}">
+                    {% if asset.tags %}{{ tag_list(asset.tags, compact=true, label="Tags on " ~ (asset.name or 'this asset')) }}{% else %}<span class="text-muted">—</span>{% endif %}
                   </td>
                 {% elif key in ['ram_gb', 'approx_age', 'performance_score'] %}
                   <td

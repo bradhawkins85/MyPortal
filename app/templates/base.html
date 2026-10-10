@@ -1094,6 +1094,14 @@
                   <span class="menu__label">Companies</span>
                 </a>
               </li>{% endif %}
+              {% if feature_pack_available('tags') %}<li class="menu__item">
+                <a href="/admin/tags" {% if current_path.startswith('/admin/tags') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M3 3h8.6l9.4 9.4-8.6 8.6L3 11.6V3zm2 2v5.8l7.4 7.4 5.8-5.8L10.8 5H5zm3 1.5A1.5 1.5 0 1 1 8 9.5a1.5 1.5 0 0 1 0-3z"/></svg>
+                  </span>
+                  <span class="menu__label">Tags</span>
+                </a>
+              </li>{% endif %}
               {% if feature_pack_available('client_onboarding') %}<li class="menu__item">
                 <a href="/admin/client-onboarding" {% if current_path.startswith('/admin/client-onboarding') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">

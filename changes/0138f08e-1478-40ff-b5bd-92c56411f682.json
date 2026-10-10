@@ -1,0 +1,7 @@
+{
+  "guid": "0138f08e-1478-40ff-b5bd-92c56411f682",
+  "occurred_at": "2026-10-10T04:40Z",
+  "change_type": "Feature",
+  "summary": "Add tags to assets and companies: pick or create tags from a searchable list, and assets are tagged Server, Workstation, Laptop, Virtual machine and their OS automatically, ready for filtering scripts and automations",
+  "content_hash": "8e3f4a8eec2fc5bd42e2b8fcc39ce0be1772ac6fc441bea3e614e64cf40b83d1"
+}
