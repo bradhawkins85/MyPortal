@@ -40,6 +40,8 @@ def _script_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
     script["parameters"] = _decode_json(script.pop("parameters_json", None), [])
     script["env_vars"] = _decode_json(script.pop("env_vars_json", None), [])
     script["is_active"] = bool(script.get("is_active"))
+    if "ai_summary_json" in script:
+        script["ai_summary"] = _decode_json(script.pop("ai_summary_json"), None)
     return script
 
 
@@ -94,7 +96,8 @@ async def get_script(script_id: int, *, with_content: bool = False) -> dict[str,
         row = await db.fetch_one(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
             "parameters_json, env_vars_json, default_timeout_seconds, company_id, is_active, synced_at, "
-            "created_at, updated_at, content FROM rmm_scripts WHERE id = %s",
+            "created_at, updated_at, content, ai_summary_json, ai_summary_sha256, ai_summary_model, "
+            "ai_summary_updated_at FROM rmm_scripts WHERE id = %s",
             (script_id,),
         )
     else:
@@ -174,6 +177,18 @@ async def set_script_timeout(script_id: int, timeout_seconds: int) -> None:
     await db.execute(
         "UPDATE rmm_scripts SET default_timeout_seconds = %s, updated_at = %s WHERE id = %s",
         (timeout_seconds, _utcnow(), script_id),
+    )
+
+
+async def save_script_summary(
+    script_id: int, summary: dict[str, Any], *, content_sha256: str, model: str | None
+) -> None:
+    """Store the AI summary of a script as it was at ``content_sha256``."""
+
+    await db.execute(
+        "UPDATE rmm_scripts SET ai_summary_json = %s, ai_summary_sha256 = %s, ai_summary_model = %s, "
+        "ai_summary_updated_at = %s WHERE id = %s",
+        (json.dumps(summary), content_sha256, model, _utcnow(), script_id),
     )
 
 
