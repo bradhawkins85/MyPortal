@@ -1,0 +1,7 @@
+{
+  "guid": "3b0e71ed-dc7e-443a-ae9a-cc26a07bfd4f",
+  "occurred_at": "2026-10-10T06:00Z",
+  "change_type": "Feature",
+  "summary": "RMM scripts: run scripts on a schedule, and run onboarding scripts in order when the RMM agent is first installed",
+  "content_hash": "a7453998a6ba70886b6416676fc5794e780da2054dc523885a538d589fcd4fd4"
+}
