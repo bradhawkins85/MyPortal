@@ -218,7 +218,7 @@ def _upgrade_harness(tmp_path, *, installed: str, latest: str, published: bool) 
     project_env = tmp_path / ".env"
     project_env.write_text(f"MYPORTAL_VERSION={installed}\n", encoding="utf-8")
     app_env = tmp_path / "myportal.env"
-    app_env.write_text("REDIS_URL=redis://redis:6379/0\n")
+    app_env.write_text("REDIS_URL=redis://redis:6379/0\nGITEA_API_TOKEN=connected\n")
     return (
         f'PROJECT_ENV="{project_env}"\n'
         f'APP_ENV="{app_env}"\n'
@@ -335,7 +335,7 @@ def test_compose_file_publishes_the_port_only_on_the_proxy(tmp_path):
     result = _run(f'COMPOSE_FILE="{compose_file}"; write_compose_file')
     assert result.returncode == 0, result.stderr
     services = yaml.safe_load(compose_file.read_text(encoding="utf-8"))["services"]
-    assert set(services) == {"db", "redis", "app_blue", "app_green", "proxy"}
+    assert set(services) == {"db", "redis", "gitea", "app_blue", "app_green", "proxy"}
     assert services["proxy"]["ports"] == ["${HTTP_BIND}:${HTTP_PORT}:8080"]
     for slot in ("blue", "green"):
         app = services[f"app_{slot}"]
@@ -348,6 +348,13 @@ def test_compose_file_publishes_the_port_only_on_the_proxy(tmp_path):
     assert "ports" not in services["redis"]
     assert services["redis"]["volumes"] == ["redis_data:/data"]
     assert services["redis"]["healthcheck"]["test"] == ["CMD", "redis-cli", "ping"]
+    gitea = services["gitea"]
+    assert "ports" not in gitea and gitea["profiles"] == ["local-gitea"]
+    assert gitea["image"] == "${GITEA_IMAGE}" and gitea["env_file"] == "gitea.env"
+    assert gitea["volumes"] == ["gitea_data:/data"]
+    assert gitea["environment"]["GITEA__server__ROOT_URL"] == "${GITEA_ROOT_URL}"
+    assert gitea["environment"]["GITEA__service__DISABLE_REGISTRATION"] == "true"
+    assert gitea["environment"]["GITEA__service__REQUIRE_SIGNIN_VIEW"] == "true"
 
 
 @pytest.mark.parametrize("contents", ["", "REDIS_URL=\n", 'export REDIS_URL = ""\n', "# REDIS_URL=old\n"])
@@ -452,6 +459,7 @@ def _deploy_harness(tmp_path, *, ready: bool) -> str:
     return (
         f'PROJECT_ENV="{project_env}"; COMPOSE_FILE="{tmp_path}/docker-compose.yml"\n'
         f'APP_ENV="{tmp_path}/myportal.env"; PROXY_DIR="{tmp_path}/proxy"; MYPORTAL_DRAIN_SECONDS=0\n'
+        f'GITEA_ENV="{tmp_path}/gitea.env"; GITEA_ADMIN_FILE="{tmp_path}/gitea-admin.txt"\n'
         f'compose() {{ echo "compose $*" >> "{calls}"; }}\n'
         f'switch_proxy() {{ echo "switch_proxy $*" >> "{calls}"; }}\n'
         "refresh_app_trusted_proxies() { :; }\n"
@@ -651,3 +659,159 @@ def test_compose_binary_fails_closed_on_checksum_mismatch(tmp_path, checksum):
     assert result.returncode != 0
     assert "Checksum verification failed" in result.stderr
     assert not (tmp_path / "plugins" / "docker-compose").exists()
+
+
+# ---------------------------------------------------------------------------
+# Gitea (RMM script library)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("contents", "managed"),
+    [
+        ("", True),
+        ("GITEA_BASE_URL=\n", True),
+        ("GITEA_BASE_URL=http://gitea:3000\n", True),
+        ("GITEA_PROVISION=false\n", False),
+        ("GITEA_PROVISION=OFF\n", False),
+        ("GITEA_BASE_URL=https://git.example.com\n", False),
+    ],
+)
+def test_gitea_runs_only_when_not_disabled_or_external(tmp_path, contents, managed):
+    app_env = tmp_path / "myportal.env"
+    app_env.write_text(contents)
+    result = _run(f'APP_ENV="{app_env}"; gitea_managed')
+    assert (result.returncode == 0) is managed
+
+
+def test_gitea_settings_generate_secrets_once(tmp_path):
+    app_env = tmp_path / "myportal.env"
+    app_env.write_text("PORTAL_URL=https://portal.example.com\n")
+    project_env = tmp_path / ".env"
+    project_env.write_text("HTTP_PORT=8080\nGITEA_IMAGE=gitea/gitea:1.0\n")
+    gitea_env = tmp_path / "gitea.env"
+    prelude = f'APP_ENV="{app_env}"; PROJECT_ENV="{project_env}"; GITEA_ENV="{gitea_env}"\n'
+    assert _run(prelude + "ensure_gitea_settings").returncode == 0
+    first = gitea_env.read_text()
+    result = _run(prelude + "MYPORTAL_GITEA_IMAGE=gitea/gitea:2.0; ensure_gitea_settings")
+    assert result.returncode == 0, result.stderr
+    assert gitea_env.read_text() == first
+    assert gitea_env.stat().st_mode & 0o777 == 0o600
+    secrets = dict(line.split("=", 1) for line in first.splitlines())
+    assert set(secrets) == {"GITEA__security__SECRET_KEY", "GITEA__security__INTERNAL_TOKEN", "GITEA__oauth2__JWT_SECRET"}
+    assert len(secrets["GITEA__oauth2__JWT_SECRET"]) == 43
+    settings = project_env.read_text().splitlines()
+    assert "GITEA_IMAGE=gitea/gitea:2.0" in settings
+    assert "GITEA_ROOT_URL=https://portal.example.com/gitea/" in settings
+
+
+def test_gitea_root_url_without_portal_url_uses_host_and_port(tmp_path):
+    project_env = tmp_path / ".env"
+    project_env.write_text("HTTP_PORT=8080\n")
+    result = _run(f'APP_ENV="{tmp_path}/none"; PROJECT_ENV="{project_env}"; hostname() {{ echo box; }}; gitea_root_url')
+    assert result.stdout == "http://box:8080/gitea/"
+
+
+def _gitea_stubs(tmp_path, *, user_exists=False, repo_status="404") -> str:
+    calls = tmp_path / "calls"
+    users = "1 myportal m@x true true" if user_exists else "1 other o@x true true"
+    return (
+        f'gitea_cli() {{ echo "cli $*" >> "{calls}"\n'
+        '  case "$*" in\n'
+        f'    *"user list"*) printf "ID Username Email IsActive IsAdmin\\n{users}\\n" ;;\n'
+        "    *\"user create\"*) echo \"generated random password is 'secret-pw'\" ;;\n"
+        f'    *generate-access-token*) echo "{"b" * 40}" ;;\n'
+        "  esac; }\n"
+        f'gitea_api() {{ echo "api $* stdin=$(cat)" >> "{calls}"; if [[ $1 == GET ]]; then echo {repo_status}; else echo 201; fi; }}\n'
+    )
+
+
+def test_connect_gitea_creates_account_repository_and_token(tmp_path):
+    app_env = tmp_path / "myportal.env"
+    app_env.write_text("DB_NAME=myportal\nGITEA_PUBLIC_URL=/custom\n")
+    app_env.chmod(0o600)
+    admin = tmp_path / "gitea-admin.txt"
+    result = _run(
+        f'APP_ENV="{app_env}"; PROJECT_ENV="{tmp_path}/.env"; GITEA_ADMIN_FILE="{admin}"; hostname() {{ echo box; }}\n'
+        + _gitea_stubs(tmp_path) + "connect_gitea"
+    )
+    assert result.returncode == 0, result.stderr
+    settings = app_env.read_text().splitlines()
+    for line in ("GITEA_API_TOKEN=" + "b" * 40, "GITEA_BASE_URL=http://gitea:3000", "GITEA_PUBLIC_URL=/custom",
+                 "GITEA_SCRIPTS_REPOSITORY=myportal/rmm-scripts", "GITEA_SCRIPTS_BRANCH=main", "DB_NAME=myportal"):
+        assert line in settings
+    assert app_env.stat().st_mode & 0o777 == 0o600
+    assert admin.read_text() == "url=http://box/gitea/\nusername=myportal\npassword=secret-pw\n"
+    assert admin.stat().st_mode & 0o777 == 0o600
+    log = (tmp_path / "calls").read_text()
+    assert "--scopes write:repository" in log
+    assert 'api POST /user/repos' in log and 'stdin=user = "myportal:secret-pw"' in log
+    assert "secret-pw" not in log.split("stdin=")[0]
+
+
+def test_connect_gitea_reuses_an_existing_repository_and_account(tmp_path):
+    app_env = tmp_path / "myportal.env"
+    app_env.write_text("")
+    result = _run(
+        f'APP_ENV="{app_env}"; GITEA_ADMIN_FILE="{tmp_path}/gitea-admin.txt"\n'
+        + _gitea_stubs(tmp_path, user_exists=True, repo_status="200") + "connect_gitea"
+    )
+    assert result.returncode == 0, result.stderr
+    log = (tmp_path / "calls").read_text()
+    assert "user create" not in log and "POST" not in log
+    assert "GITEA_API_TOKEN=" + "b" * 40 in app_env.read_text()
+
+
+def test_external_gitea_is_never_started(tmp_path):
+    app_env = tmp_path / "myportal.env"
+    app_env.write_text("GITEA_BASE_URL=https://git.example.com\n")
+    result = _run(f'APP_ENV="{app_env}"; compose() {{ exit 99; }}; ensure_local_gitea')
+    assert result.returncode == 0, result.stderr
+
+
+def test_gitea_failure_does_not_block_the_deploy(tmp_path):
+    app_env = tmp_path / "myportal.env"
+    app_env.write_text("")
+    result = _run(f'APP_ENV="{app_env}"; compose() {{ return 1; }}; ensure_local_gitea; echo continued')
+    assert result.returncode == 0
+    assert result.stdout.strip() == "continued"
+    assert "Gitea did not start" in result.stderr
+
+
+def test_deploy_starts_gitea_before_the_new_slot(tmp_path):
+    result = _run(_deploy_harness(tmp_path, ready=True) + "deploy_release img:v2 v2")
+    assert result.returncode == 0, result.stderr
+    calls = (tmp_path / "calls").read_text(encoding="utf-8").splitlines()
+    assert calls.index("compose up -d --pull missing --wait gitea") < calls.index(
+        "compose up -d --no-deps --force-recreate app_green"
+    )
+
+
+def test_upgrade_on_current_release_connects_gitea_once(tmp_path):
+    harness = _upgrade_harness(tmp_path, installed="v1", latest="v1", published=True)
+    (tmp_path / "myportal.env").write_text("REDIS_URL=redis://redis:6379/0\n")
+    result = _run(harness + 'deploy_release() { echo "deploy $2"; }\ncmd_upgrade --yes')
+    assert result.returncode == 0, result.stderr
+    assert "deploy v1" in result.stdout
+
+
+def test_proxy_serves_gitea_under_its_path(tmp_path):
+    proxy_dir = tmp_path / "proxy"
+    result = _run(f'APP_ENV="{tmp_path}/none"; PROXY_DIR="{proxy_dir}"; write_proxy_config blue')
+    assert result.returncode == 0, result.stderr
+    config = (proxy_dir / "myportal.conf").read_text(encoding="utf-8")
+    assert "location ^~ /gitea/ {" in config
+    assert "rewrite ^/gitea(/.*)$ $1 break;" in config
+    # A variable keeps the proxy starting when this installation has no Gitea.
+    assert "set $myportal_gitea gitea:3000;" in config and "proxy_pass http://$myportal_gitea;" in config
+
+
+def test_prune_keeps_gitea_backups_per_kind(tmp_path):
+    backups = tmp_path / "backups"
+    backups.mkdir()
+    for index in range(4):
+        (backups / f"gitea-v1-{index}.tar.gz").write_text("x")
+        os.utime(backups / f"gitea-v1-{index}.tar.gz", (1000 + index, 1000 + index))
+    result = _run(f'BACKUP_DIR="{backups}"; MYPORTAL_BACKUPS_TO_KEEP=2; prune_backups')
+    assert result.returncode == 0, result.stderr
+    assert sorted(path.name for path in backups.iterdir()) == ["gitea-v1-2.tar.gz", "gitea-v1-3.tar.gz"]

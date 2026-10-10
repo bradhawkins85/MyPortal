@@ -38,6 +38,7 @@ ARTICLE_REQUIREMENTS: dict[str, tuple[str, ...]] = {
     "administration/Message Templates": ("pack:message_templates",),
     "administration/Network Map": ("pack:network_map",),
     "administration/RAG Relationship Candidate Selection": ("pack:rag_index",),
+    "administration/RMM Scripts": ("pack:rmm",),
     "administration/Service Status Dashboard": ("pack:service_status",),
     "administration/Shop Category Nesting": ("pack:shop",),
     "administration/Shop Packages": ("pack:shop",),

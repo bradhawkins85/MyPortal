@@ -100,6 +100,8 @@ mode flags remain accepted for callers, but never update a live checkout.
 EOF
 }
 
+# Kept for re-running the updated script once the control checkout moves.
+UPGRADE_ARGS=("$@")
 while (($#)); do
   case "$1" in
     --rolling|--graceful|--restart) REQUESTED_UPGRADE_MODE="${1#--}" ;;
@@ -636,13 +638,16 @@ make_release_service_readable() {
 
 prepare_shared_uploads() {
   local shared legacy name
-  for name in private_uploads uploads; do
+  # tray-installers holds the tray MSI/pkg/DMG the app caches from GitHub
+  # Releases into app/static/tray. Releases are read-only, so the cache must
+  # live in shared storage like uploads or the download can never be saved.
+  for name in private_uploads uploads tray-installers; do
     shared="${SHARED_ROOT}/${name}"
-    if [[ "$name" == private_uploads ]]; then
-      legacy="${PROJECT_ROOT}/private_uploads"
-    else
-      legacy="${PROJECT_ROOT}/app/static/uploads"
-    fi
+    case "$name" in
+      private_uploads) legacy="${PROJECT_ROOT}/private_uploads" ;;
+      uploads) legacy="${PROJECT_ROOT}/app/static/uploads" ;;
+      tray-installers) legacy="${PROJECT_ROOT}/app/static/tray" ;;
+    esac
     if [[ ! -d "$shared" ]]; then
       install -d -m 0750 -o myportal -g myportal "$shared"
       # Seed persistent storage for installations upgrading from the original
@@ -662,13 +667,15 @@ prepare_shared_uploads() {
 link_shared_uploads() {
   local release="$1"
   mkdir -p "${release}/app/static"
-  rm -rf "${release}/private_uploads" "${release}/app/static/uploads"
+  rm -rf "${release}/private_uploads" "${release}/app/static/uploads" "${release}/app/static/tray"
   ln -s "${SHARED_ROOT}/private_uploads" "${release}/private_uploads"
   ln -s "${SHARED_ROOT}/uploads" "${release}/app/static/uploads"
+  ln -s "${SHARED_ROOT}/tray-installers" "${release}/app/static/tray"
   # The target is the writable data store, but keep the link metadata owned by
   # the service account as well so ownership checks do not report these paths
   # as root-owned. -h prevents chown from dereferencing the links.
-  chown -h myportal:myportal "${release}/private_uploads" "${release}/app/static/uploads"
+  chown -h myportal:myportal "${release}/private_uploads" "${release}/app/static/uploads" \
+    "${release}/app/static/tray"
 }
 
 validate_release_uploads() {
@@ -685,6 +692,7 @@ validate_release_uploads() {
   done <<EOF
 ${release}/private_uploads|${SHARED_ROOT}/private_uploads
 ${release}/app/static/uploads|${SHARED_ROOT}/uploads
+${release}/app/static/tray|${SHARED_ROOT}/tray-installers
 EOF
 }
 
@@ -708,9 +716,12 @@ repair_assigned_release_uploads() {
     done <<EOF
 ${release}/private_uploads|${SHARED_ROOT}/private_uploads
 ${release}/app/static/uploads|${SHARED_ROOT}/uploads
+${release}/app/static/tray|${SHARED_ROOT}/tray-installers
 EOF
-    chown -R myportal:myportal "${SHARED_ROOT}/private_uploads" "${SHARED_ROOT}/uploads"
-    find "${SHARED_ROOT}/private_uploads" "${SHARED_ROOT}/uploads" -type d -exec chmod u+rwx {} +
+    chown -R myportal:myportal "${SHARED_ROOT}/private_uploads" "${SHARED_ROOT}/uploads" \
+      "${SHARED_ROOT}/tray-installers"
+    find "${SHARED_ROOT}/private_uploads" "${SHARED_ROOT}/uploads" "${SHARED_ROOT}/tray-installers" \
+      -type d -exec chmod u+rwx {} +
     make_release_service_readable "$release"
     validate_release_uploads "$release"
   done
@@ -970,6 +981,41 @@ print(f"Recorded {key}={checkout} in {path}.")
 PY
 }
 
+update_control_checkout() {
+  # Only the release is built from origin/main; this script, the provisioning
+  # helpers it runs and the cron updater all run from the control checkout.
+  # Fast-forward the checkout so a release's new upgrade steps (such as
+  # setting up Gitea) run without updating the checkout by hand. Returns 0
+  # only when the checkout moved. A checkout on another branch, with local
+  # commits or with local changes is left as it is.
+  local target="$1" owner branch
+  [[ "$(git rev-parse HEAD)" != "$target" ]] || return 1
+  branch=$(git symbolic-ref --quiet --short HEAD || true)
+  if [[ "$branch" != main ]]; then
+    echo "Warning: the control checkout at ${PROJECT_ROOT} is not on main; its upgrade scripts were not updated." >&2
+    return 1
+  fi
+  if ! git merge-base --is-ancestor HEAD "$target"; then
+    echo "Warning: the control checkout at ${PROJECT_ROOT} has commits that are not on origin/main; its upgrade scripts were not updated." >&2
+    return 1
+  fi
+  if ! git diff --quiet HEAD --; then
+    echo "Warning: the control checkout at ${PROJECT_ROOT} has local changes; its upgrade scripts were not updated. Commit or discard them so later upgrades can update it." >&2
+    return 1
+  fi
+  # Keep the checkout's files owned by whoever cloned it.
+  owner=$(stat -c %U "$PROJECT_ROOT")
+  if [[ "$owner" == root || "$owner" == UNKNOWN ]]; then
+    git merge --ff-only --quiet "$target"
+  else
+    runuser -u "$owner" -- git merge --ff-only --quiet "$target"
+  fi || {
+    echo "Warning: could not update the control checkout at ${PROJECT_ROOT}; update it by hand." >&2
+    return 1
+  }
+  echo "Updated the control checkout at ${PROJECT_ROOT} to ${target}." >&2
+}
+
 verify_release_sources() {
   # Refuse a release whose Python does not even parse (for example a stray
   # "continue" outside a loop) before migrations run or any slot restarts.
@@ -1133,13 +1179,22 @@ install_backup_command || echo "Warning: could not install the myportal-backup c
 record_control_checkout || echo "Warning: could not record MYPORTAL_CONTROL_CHECKOUT in ${ENV_FILE}." >&2
 validate_origin_remote "$(git config --get remote.origin.url)"
 validate_required_configuration
+git fetch --quiet origin main
+TARGET_REVISION=$(git rev-parse 'origin/main^{commit}')
+if [[ -z "${MYPORTAL_UPGRADE_REEXEC:-}" ]] && update_control_checkout "$TARGET_REVISION"; then
+  # Run the updated upgrade script, which takes the lock itself.
+  exec 9>&-
+  MYPORTAL_UPGRADE_REEXEC=1 exec bash "${SCRIPT_DIR}/upgrade.sh" "${UPGRADE_ARGS[@]}"
+fi
 redis_env_before=$(sha256sum "$ENV_FILE")
 bash "${SCRIPT_DIR}/provision_redis.sh" "$ENV_FILE"
+# Gitea for the RMM script library is optional: a failure is reported and
+# retried by the next upgrade, never blocks this one.
+bash "${SCRIPT_DIR}/provision_gitea.sh" "$ENV_FILE" \
+  || echo "Warning: Gitea for RMM scripts was not set up or upgraded; the next upgrade retries." >&2
 redis_env_after=$(sha256sum "$ENV_FILE")
 UPGRADE_STARTED_AT=$(date --iso-8601=seconds)
 PREVIOUS_RELEASE=$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)
-git fetch --quiet origin main
-TARGET_REVISION=$(git rev-parse 'origin/main^{commit}')
 RELEASE_DIR="${RELEASE_ROOT}/${TARGET_REVISION}"
 PLAN_BASE=$(resolve_plan_base "$PREVIOUS_RELEASE")
 generate_deployment_plan "$PLAN_BASE" "$TARGET_REVISION"

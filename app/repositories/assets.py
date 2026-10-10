@@ -10,6 +10,7 @@ import aiomysql
 import aiosqlite
 
 from app.core.database import db
+from app.core.logging import log_warning
 from app.services import asset_types
 
 
@@ -20,6 +21,21 @@ def _normalise_username(value: Any) -> str:
     if "@" in username:
         username = username.split("@", 1)[0]
     return username
+
+
+async def _refresh_auto_tags(asset_id: Any) -> None:
+    """Re-apply the automatic tag rules after an asset's type or OS may have changed.
+
+    Best effort: tagging must never stop a sync or a save.
+    """
+    if not asset_id:
+        return
+    from app.repositories import tags as tags_repo
+
+    try:
+        await tags_repo.refresh_asset_auto_tags(int(asset_id))
+    except Exception as exc:  # pragma: no cover - logged and ignored
+        log_warning("Could not refresh automatic asset tags", asset_id=asset_id, error=str(exc))
 
 
 async def list_assets_for_ticket_requester(ticket_id: int) -> list[dict[str, Any]]:
@@ -150,13 +166,15 @@ async def create_manual_asset(
     asset_type: str | None = None,
 ) -> int:
     """Create a human-owned canonical asset without integration identifiers."""
-    return await db.execute_returning_lastrowid(
+    asset_id = await db.execute_returning_lastrowid(
         """INSERT INTO assets
            (company_id, name, type, asset_type, asset_type_source, status,
             serial_number, location, provenance, manual_created_by)
            VALUES (%s, %s, %s, %s, 'manual', %s, %s, %s, 'manual', %s)""",
         (company_id, name, type, asset_type, status, serial_number, location, created_by),
     )
+    await _refresh_auto_tags(asset_id)
+    return asset_id
 
 
 async def list_custom_asset_types(company_id: int) -> list[str]:
@@ -181,6 +199,7 @@ async def update_manual_inventory(
            WHERE id = %s AND provenance = 'manual'""",
         (name, type, asset_type, status, serial_number, location, asset_id),
     )
+    await _refresh_auto_tags(asset_id)
 
 
 async def set_asset_type(company_id: int, asset_id: int, asset_type: str | None) -> None:
@@ -202,11 +221,13 @@ async def set_asset_type(company_id: int, asset_id: int, asset_type: str | None)
                                 os_name=record.get("os_name"), machine_type=record.get("machine_type")),
              asset_id, company_id),
         )
+        await _refresh_auto_tags(asset_id)
         return
     await db.execute(
         "UPDATE assets SET asset_type = %s, asset_type_source = 'manual' WHERE id = %s AND company_id = %s",
         (asset_types.normalise(asset_type), asset_id, company_id),
     )
+    await _refresh_auto_tags(asset_id)
 
 
 async def list_reconciliation_candidates(company_id: int, asset_id: int) -> list[dict[str, Any]]:
@@ -823,6 +844,7 @@ async def upsert_asset(
         await _record_asset_source(
             company_id, source, source_key, asset_id, "active", source_fields, None
         )
+    await _refresh_auto_tags(asset_id)
     return asset_id
 
 

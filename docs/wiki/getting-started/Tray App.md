@@ -86,6 +86,16 @@ Migrations are applied automatically at startup and are idempotent.
 | `/api/tray/{device_uid}/chat/start` | POST | Authenticated technician | Create a Matrix room and push `chat_open` |
 | `/api/tray/admin/install-tokens` | GET / POST | Super admin | List / create install tokens |
 | `/api/tray/admin/install-tokens/{id}/revoke` | POST | Super admin | Revoke an install token |
+| `/api/tray/admin/deployment-links` | GET / POST | Super admin | List / create deployment URLs |
+| `/api/tray/admin/deployment-links/{id}/revoke` | POST | Super admin | Revoke a deployment URL and its install token |
+| `/deploy/{slug}` | GET | Deployment URL slug | Public download page for one company |
+| `/deploy/{slug}/windows.exe`, `/windows.msi` | GET | Deployment URL slug | Company-specific signed Windows installers |
+| `/deploy/{slug}/macos.zip` | GET | Deployment URL slug | pkg plus its settings file |
+| `/api/tray/admin/deployment-links/{id}/rebuild` | POST | Super admin | Queue a new Windows installer build |
+| `/api/tray/build-agent/jobs/claim` | POST | API key | Build agent claims the next build |
+| `/api/tray/build-agent/jobs/{id}/artifacts/{msi\|exe}` | PUT | API key | Build agent uploads an installer (raw body) |
+| `/api/tray/build-agent/jobs/{id}/complete`, `/fail` | POST | API key | Build agent finishes or reports a failure |
+| `/deploy/{slug}/install.ps1`, `/install.sh` | GET | Deployment URL slug | RMM install script with the token filled in |
 | `/api/tray/admin/configs` | GET / POST | Super admin | List / create menu configurations |
 | `/api/tray/admin/configs/{id}` | PUT / DELETE | Super admin | Update / delete |
 | `/api/tray/admin/devices` | GET | Helpdesk technician | List enrolled devices |
@@ -264,6 +274,46 @@ If you need advanced nesting, you can still use the **Advanced JSON** toggle to 
 ---
 
 ## 6. RMM deployment
+
+### Deployment URLs
+
+**Admin → Tray → Deployment URLs** (`/admin/tray/deployment-links`) creates a
+private magic link for one company. Whoever opens it gets a page with
+*Download for Windows* and *Download for macOS* buttons, so no token needs to
+be typed or pasted. The company-specific packages are only ever served by
+MyPortal through that link; nothing is published to GitHub, and the public
+release installers (MSI, pkg, DMG) are built exactly as before.
+
+* **Windows** downloads a signed `setup.exe`, with the matching `.msi` linked
+  for IT teams. Both are built for that company by the Windows build agent,
+  with `MYPORTAL_URL` and `ENROL_TOKEN` baked in as MSI property defaults (a
+  command-line value still overrides them). Until a build server is set up, or
+  while a build is running, the page says the Windows installer is being
+  prepared. See [Tray Build Server](Tray%20Build%20Server.md).
+* **macOS** downloads a zip with the cached `myportal-tray.pkg`, its
+  `myportal-tray.env` settings and `Install MyPortal Tray.command`, which
+  writes the settings and runs the pkg after asking for the Mac password.
+* **RMM tools** can use the one-liners shown on the admin page:
+  `irm '<link>/install.ps1' | iex` or `curl -fsSL '<link>/install.sh' | sudo bash`.
+
+Each link owns its own company install token, and both expire together after
+the period chosen when the link is created: 1, 7, 30 or 90 days, 1 year, or
+no expiry (default 7 days). An admin can revoke any link at any time from the
+Deployment URLs page, including links with no expiry.
+Once a link expires or is revoked its page stops working, and any package
+already downloaded from it can no longer enrol new devices. Revoking also
+deletes the link's built installers. Devices already enrolled are unaffected.
+
+`{{ tray.deploymentUrl }}` inserts a company's deployment URL into
+automations, scheduled tickets, notifications, ticket canned responses,
+message templates and email signatures. It resolves for the company in the
+current context (for example the ticket's company), using the active link
+that stays valid longest; links with no expiry come first and the newest wins
+a tie. It is empty when the company has no active link or `PORTAL_URL` is not
+set. `{{ TRAY_DEPLOYMENT_URL }}` and `{{ tray_deployment_url }}` are aliases.
+The link is a credential: the slug is stored as an HMAC hash for lookup and
+encrypted so admins can copy it again, and every `/deploy` response is sent
+with `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
 
 ### Tactical RMM ticket URL Action
 

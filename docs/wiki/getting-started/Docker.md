@@ -26,11 +26,15 @@ The installer:
    `ghcr.io/bradhawkins85/myportal:<release>`. If the image can't be pulled,
    it builds the image locally from that release's source archive.
 3. Creates `/opt/myportal-docker` containing `docker-compose.yml` (MariaDB
-   11.4, Redis 7 with a persistent volume, the blue and green MyPortal slots and an nginx proxy) and the
-   configuration files, with generated secrets and database passwords.
+   11.4, Redis 7 with a persistent volume, Gitea for the RMM script library, the blue and green
+   MyPortal slots and an nginx proxy) and the configuration files, with generated secrets and
+   database passwords.
 4. Starts the stack. It waits until `/readyz` reports the new release;
    database migrations run automatically when the container starts.
-5. Installs itself as `/usr/local/bin/myportal-docker`.
+5. Starts Gitea at `http://<host>/gitea/`, creates its `myportal` administrator (password in
+   `/opt/myportal-docker/gitea-admin.txt`) and the `myportal/rmm-scripts` repository, and
+   connects MyPortal to it (see [RMM Scripts](../administration/RMM%20Scripts.md)).
+6. Installs itself as `/usr/local/bin/myportal-docker`.
 
 Optionally run `sudo myportal-docker setup` to choose which features are
 enabled and configure their settings (see [Onboarding Wizard](Onboarding%20Wizard.md)),
@@ -208,6 +212,8 @@ source `myportal-docker`.
 | --- | --- |
 | `/opt/myportal-docker/myportal.env` | Application settings and secrets. Keep a secure copy: losing `TOTP_ENCRYPTION_KEY` makes stored 2FA secrets and encrypted credentials unrecoverable. |
 | `/opt/myportal-docker/mariadb.env` | Database container credentials |
+| `/opt/myportal-docker/gitea.env` | Gitea's secrets (generated once) |
+| `/opt/myportal-docker/gitea-admin.txt` | Sign-in for Gitea's `myportal` administrator |
 | `/opt/myportal-docker/.env` | Installed release, image, port (managed by the script) |
 | `/opt/myportal-docker/docker-compose.yml` | Generated; rewritten on upgrade |
 | `/opt/myportal-docker/docker-compose.override.yml` | Optional local additions, merged automatically |
@@ -215,7 +221,7 @@ source `myportal-docker`.
 | `/opt/myportal-docker/backups/` | Database and file backups (the newest 10 of each are kept) |
 
 Data lives in the Docker volumes `myportal_db_data`, `myportal_uploads`,
-`myportal_private_uploads` and `myportal_state`.
+`myportal_private_uploads`, `myportal_state` and `myportal_gitea_data`.
 
 Any setting from [`.env.example`](../../../.env.example) can be added to
 `myportal.env`. `DB_HOST`/`DB_PORT` are set by the compose file.
@@ -247,6 +253,7 @@ These environment variables change the script's behaviour:
 | `MYPORTAL_IMAGE_REPO` | `ghcr.io/bradhawkins85/myportal` | Where release images are pulled from |
 | `MYPORTAL_DB_IMAGE` | `mariadb:11.4` | Database image (MariaDB 10.10 or newer) |
 | `MYPORTAL_REDIS_IMAGE` | `redis:7-alpine` | Local Redis image (existing containers are reused) |
+| `MYPORTAL_GITEA_IMAGE` | `gitea/gitea:1.24.6` | Gitea image for the script library, applied on every install, upgrade and restart |
 | `MYPORTAL_BUILD_CA_FILE` | – | CA bundle for local builds behind a TLS-inspecting proxy. It's passed as a build secret and never stored in the image. |
 | `MYPORTAL_BUILD_NETWORK` | – | Network for local builds, e.g. `host` when the proxy only listens on localhost |
 | `MYPORTAL_BASE_IMAGE` | `ubuntu:24.04` | Base image for local builds (e.g. a registry mirror) |

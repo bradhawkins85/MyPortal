@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="License: Prosperity 3.0.0" src="https://img.shields.io/badge/license-Prosperity%203.0.0-blue" /></a>
+  <a href="LICENSE"><img alt="License: AGPL v3" src="https://img.shields.io/badge/license-AGPL%20v3-blue" /></a>
   <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white" />
   <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white" />
   <img alt="MariaDB 10.10+" src="https://img.shields.io/badge/MariaDB-10.10%2B-003545?logo=mariadb&logoColor=white" />
@@ -255,7 +255,7 @@ automatically. It's useful for exploring the UI, and it's what the screenshots a
 
 | Topic | Where to start |
 |---|---|
-| Getting started | [Overview](docs/wiki/getting-started/Overview.md) · [Configuration](docs/wiki/getting-started/Configuration.md) · [Tray App](docs/wiki/getting-started/Tray%20App.md) · [Onboarding Wizard](docs/wiki/getting-started/Onboarding%20Wizard.md) |
+| Getting started | [Overview](docs/wiki/getting-started/Overview.md) · [Configuration](docs/wiki/getting-started/Configuration.md) · [Tray App](docs/wiki/getting-started/Tray%20App.md) · [Tray Build Server](docs/wiki/getting-started/Tray%20Build%20Server.md) · [Onboarding Wizard](docs/wiki/getting-started/Onboarding%20Wizard.md) |
 | Administration | [Message Templates](docs/wiki/administration/Message%20Templates.md) · [Network Map](docs/wiki/administration/Network%20Map.md) · [Company Memberships](docs/wiki/administration/Company%20Memberships.md) · [API Keys](docs/wiki/administration/API%20Keys.md) |
 | Tickets | [IMAP Setup](docs/wiki/tickets/IMAP%20Setup.md) · [Email Reply Handling](docs/wiki/tickets/Email%20Reply%20Handling.md) · [Split and Merge](docs/wiki/tickets/Ticket%20Split%20and%20Merge.md) · [Tickets API](docs/wiki/tickets/Tickets%20API.md) |
 | Compliance | [SMB1001](docs/wiki/compliance/SMB1001.md) · [Essential 8](docs/wiki/compliance/Essential%208%20Requirements.md) · [Security Overview](docs/wiki/compliance/Security%20Overview.md) |
@@ -265,12 +265,6 @@ automatically. It's useful for exploring the UI, and it's what the screenshots a
 
 ## License
 
-MyPortal is licensed under the [Prosperity Public License 3.0.0](LICENSE), with an additional permission
-from the contributor:
-
-- **Free for personal and commercial use.** You can run MyPortal for free, with no time limit, including to
-  operate your business and serve your own customers.
-- **No resale.** You may not sell, rent, sublicense, or resell MyPortal (or a modified version), offer it as a
-  paid hosted product, or bundle it into a product you sell, without a separate written license.
+MyPortal is licensed under the [GNU Affero General Public License v3.0](LICENSE).
 
 See [LICENSE](LICENSE) for the full terms.

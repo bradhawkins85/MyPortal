@@ -3,12 +3,14 @@
 {% from "macros/header.html" import page_header_actions with context %}
 {% from "macros/counters.html" import counter_strip %}
 {% from "admin/_client_onboarding_answers.html" import answer_list, answer_sections %}
+{% from "tags/_picker.html" import tag_picker %}
 
 {% set company_display_name = form_data.name or company.name %}
 {% set ce_email_domains = (form_data.email_domains or '').split(',') | map('trim') | select | list %}
 {% set ce_payment_labels = {'invoice_prepay': 'Invoice prepay', 'invoice_postpay': 'Invoice postpay', 'stripe': 'Stripe'} %}
 {% set ce_has_bh = business_hours_rows is defined %}
 {% set ce_vault = feature_pack_available('shared_credentials') %}
+{% set ce_tags = company_tags if company_tags is defined and company_tags is not none else none %}
 {% set ce_trello = module_enabled.get('trello', false) %}
 {% set ce_submission = client_onboarding.submission if is_super_admin and client_onboarding is defined and client_onboarding and client_onboarding.submission else none %}
 {% set ce_answers = (ce_submission.custom_answers or []) if ce_submission else [] %}
@@ -18,6 +20,8 @@
 {% for module_key, value in [('tacticalrmm', form_data.tacticalrmm_client_id), ('xero', form_data.xero_id), ('hudu', form_data.hudu_id), ('huntress', form_data.huntress_organization_id), ('huntress', form_data.huntress_sat_account_id)] %}
   {% if module_enabled.get(module_key, false) and value %}{% set ce_external_count.value = ce_external_count.value + 1 %}{% endif %}
 {% endfor %}
+
+{% block styles %}{{ super() }}{% if ce_tags is not none %}<link rel="stylesheet" href="{{ static_url('/static/css/tags.css') }}">{% endif %}{% endblock %}
 
 {% block header_title %}
   Edit company
@@ -134,6 +138,7 @@
             ("general", "ce-general", "Profile", "", true),
             ("addresses", "ce-addresses", "Addresses", company_addresses | length, true),
             ("company-variables", "ce-company-variables", "Variables", company_variables | length, true),
+            ("tags", "ce-tags", "Tags", (ce_tags.tags | length) if ce_tags else "", ce_tags is not none),
             ("onboarding-answers", "ce-onboarding-answers", "Onboarding answers", "", ce_has_onboarding_answers),
           ]),
           ("Service", [
@@ -381,6 +386,20 @@
         </noscript>
       </div>
     </section>
+    {% if ce_tags is not none %}
+    <section class="card card--panel ce-section" id="ce-tags" data-company-edit-section="tags" aria-labelledby="ce-tags-title">
+      <header class="ce-section__header">
+        <div class="ce-section__heading">
+          <h2 class="card__title" id="ce-tags-title">Tags</h2>
+          <p class="card__subtitle">Tags pick out this company for automations and scripts. A company's tags also apply to all of its assets when scripts are filtered by tag.</p>
+        </div>
+        <a class="button button--ghost" href="/admin/tags">Manage tags</a>
+      </header>
+      <div class="ce-section__body">
+        {{ tag_picker(ce_tags, "company-tag-picker", "Company tags") }}
+      </div>
+    </section>
+    {% endif %}
     <section class="card card--panel ce-section" id="ce-sla" data-company-edit-section="sla" aria-labelledby="ce-sla-title">
       <header class="ce-section__header">
         <div class="ce-section__heading">
@@ -2734,6 +2753,7 @@
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  {% if ce_tags is not none %}<script src="{{ static_url('/static/js/tag_picker.js') }}" defer></script>{% endif %}
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
   <script src="{{ static_url('/static/js/company_edit_sections.js') }}" defer></script>
   {% if is_super_admin %}

@@ -1,0 +1,7 @@
+{
+  "guid": "a26b5438-aa18-49b6-9b24-fbfbe7977c6e",
+  "occurred_at": "2026-10-10T05:05Z",
+  "change_type": "Improvement",
+  "summary": "Tray build agent: log why MyPortal has no build to hand out, such as no cached tray release, no active deployment URLs or a failed build waiting for Rebuild",
+  "content_hash": "999d04fb2b858ddbc8e1e0d2bdc6cf1a115a2156b41fce96830ebca044a25b9e"
+}

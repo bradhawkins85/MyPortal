@@ -100,6 +100,7 @@ from app.api.routes import (
     tag_synonyms,
     tickets as tickets_api,
     tray as tray_api,
+    tray_deployment as tray_deployment_api,
     users,
     vault as vault_api,
     system,
@@ -1163,6 +1164,14 @@ class _DownloadOnlyStaticFiles(StaticFiles):
 # Must be mounted before ``/static`` so user uploads never reach the generic
 # static handler, which serves files inline with a guessed media type.
 app.mount("/static/uploads", _DownloadOnlyStaticFiles(directory=str(_uploads_path)), name="static-uploads")
+# Blue/green releases link static/tray to shared storage outside the release.
+# The generic handler refuses files whose real path leaves its directory, so
+# the cached tray installers need their own mount rooted at the link.
+app.mount(
+    "/static/tray",
+    StaticFiles(directory=str(templates_config.static_path / "tray"), check_dir=False),
+    name="static-tray",
+)
 app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), name="static")
 
 
@@ -1438,6 +1447,7 @@ app.include_router(tag_exclusions.router)
 app.include_router(tag_synonyms.router)
 app.include_router(chat_api.router)
 app.include_router(tray_api.router)
+app.include_router(tray_deployment_api.router)
 app.include_router(defender_api.router)
 app.include_router(features_api.router)
 app.include_router(plugins_api.router)
@@ -8810,6 +8820,8 @@ async def admin_tray_install_tokens_page(
     from app.services import tray as tray_service
 
     tokens = await tray_repo.list_install_tokens()
+    for token in tokens:
+        token["expires_at_iso"] = _to_iso(token.get("expires_at"))
     hidden_revoked_count = 0
     if not show_revoked:
         hidden_revoked_count = sum(1 for token in tokens if token.get("revoked_at"))
@@ -8861,6 +8873,141 @@ async def admin_tray_create_install_token(request: Request):
     # The token cannot be reconstructed later — only the prefix is displayed.
     return RedirectResponse(
         url=f"/admin/tray/install-tokens?new_token={raw_token}", status_code=303
+    )
+
+
+@app.get("/admin/tray/deployment-links", response_class=HTMLResponse)
+async def admin_tray_deployment_links_page(
+    request: Request,
+    show_revoked: bool = False,
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    from app.repositories import tray as tray_repo
+    from app.repositories import companies as companies_repo
+    from app.services import tray_deployment as tray_deployment_service
+    from app.services import tray_deployment_builds
+
+    portal_url = tray_deployment_service.resolve_portal_url(request)
+    rows = await tray_repo.list_deployment_links()
+    links = [await tray_deployment_service.serialise_link(row, portal_url) for row in rows]
+    hidden_revoked_count = 0
+    if not show_revoked:
+        hidden_revoked_count = sum(1 for link in links if link["status"] != "active")
+        links = [link for link in links if link["status"] == "active"]
+    builds = await tray_deployment_builds.latest_build_by_link()
+    for link in links:
+        link["build"] = builds.get(link["id"])
+    companies = await companies_repo.list_companies(include_archived=False)
+    extra = {
+        "title": "Tray deployment URLs",
+        "links": links,
+        "companies": companies,
+        "show_revoked": show_revoked,
+        "hidden_revoked_count": hidden_revoked_count,
+        "release_tag": tray_deployment_builds.current_release_tag(),
+        "macos_available": tray_deployment_service.installer_path("macos") is not None,
+        "expiry_choices": tray_deployment_service.EXPIRY_CHOICES,
+        "default_expiry": tray_deployment_service.DEFAULT_EXPIRY_DAYS,
+    }
+    return await _render_template(
+        "admin/tray/deployment_links.html", request, current_user, extra=extra
+    )
+
+
+@app.post("/admin/tray/deployment-links", response_class=HTMLResponse)
+async def admin_tray_create_deployment_link(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    company_raw = str(form.get("company_id", "")).strip()
+    if not company_raw.isdigit():
+        return flash_redirect(
+            "/admin/tray/deployment-links", "Choose a company for the deployment URL.", "error"
+        )
+    label = str(form.get("label", "")).strip()[:150] or None
+    expiry_raw = str(form.get("expires_in_days", "")).strip()
+
+    from app.services import tray_deployment as tray_deployment_service
+
+    try:
+        record, _slug = await tray_deployment_service.create_deployment_link(
+            company_id=int(company_raw),
+            label=label,
+            created_by_user_id=int(current_user["id"]),
+            expires_in_days=(
+                int(expiry_raw)
+                if expiry_raw.isdigit()
+                else tray_deployment_service.DEFAULT_EXPIRY_DAYS
+            ),
+        )
+    except ValueError as exc:
+        return flash_redirect("/admin/tray/deployment-links", str(exc), "error")
+    await audit_service.log_action(
+        action="tray.deployment_link.create",
+        user_id=int(current_user["id"]),
+        entity_type="tray_deployment_link",
+        entity_id=int(record["id"]),
+        new_value={
+            "company_id": int(company_raw),
+            "label": record.get("label"),
+            "expires_at": str(record.get("expires_at") or "never"),
+        },
+        request=request,
+    )
+    return flash_redirect(
+        "/admin/tray/deployment-links",
+        f"Deployment URL created for {record.get('label')}.",
+        "success",
+    )
+
+
+@app.post("/admin/tray/deployment-links/{link_id}/rebuild", response_class=HTMLResponse)
+async def admin_tray_rebuild_deployment_link(link_id: int, request: Request):
+    _current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    from app.repositories import tray as tray_repo
+    from app.services import tray_deployment_builds
+
+    link = await tray_repo.get_deployment_link(link_id)
+    if not link or link.get("revoked_at"):
+        return flash_redirect("/admin/tray/deployment-links", "Deployment URL not found.", "error")
+    await tray_deployment_builds.queue_build(link_id)
+    return flash_redirect(
+        "/admin/tray/deployment-links",
+        "Windows installer build queued. The build server picks it up on its next check.",
+        "success",
+    )
+
+
+@app.post("/admin/tray/deployment-links/{link_id}/revoke", response_class=HTMLResponse)
+async def admin_tray_revoke_deployment_link(link_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    from app.services import tray_deployment as tray_deployment_service
+    from app.services import tray_deployment_builds
+
+    if not await tray_deployment_service.revoke_deployment_link(link_id):
+        return flash_redirect("/admin/tray/deployment-links", "Deployment URL not found.", "error")
+    await tray_deployment_builds.purge_link_artifacts(link_id)
+    await audit_service.log_action(
+        action="tray.deployment_link.revoke",
+        user_id=int(current_user["id"]),
+        entity_type="tray_deployment_link",
+        entity_id=int(link_id),
+        request=request,
+    )
+    return flash_redirect(
+        "/admin/tray/deployment-links",
+        "Deployment URL revoked. Devices already installed keep working.",
+        "success",
     )
 
 

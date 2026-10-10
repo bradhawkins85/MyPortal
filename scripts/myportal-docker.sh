@@ -7,7 +7,8 @@
 #   sudo bash myportal-docker.sh install
 #
 # It installs Docker Engine and the Compose plugin when they are missing,
-# writes a docker-compose.yml (MyPortal + MariaDB + Redis) with generated secrets, and
+# writes a docker-compose.yml (MyPortal + MariaDB + Redis + Gitea for RMM
+# scripts) with generated secrets, and
 # deploys the latest published GitHub release. Upgrades only ever move to a
 # published GitHub release; they back up the database first and roll back to
 # the previous release if the new one does not become healthy.
@@ -29,6 +30,9 @@ MYPORTAL_GITHUB_URL="${MYPORTAL_GITHUB_URL:-https://github.com}"
 MYPORTAL_IMAGE_REPO="${MYPORTAL_IMAGE_REPO:-ghcr.io/$(printf '%s' "$MYPORTAL_REPO" | tr '[:upper:]' '[:lower:]')}"
 MYPORTAL_DB_IMAGE="${MYPORTAL_DB_IMAGE:-mariadb:11.4}"
 MYPORTAL_REDIS_IMAGE="${MYPORTAL_REDIS_IMAGE:-redis:7-alpine}"
+# Gitea holds the RMM script library and is served at /gitea. Applied on every
+# install and upgrade, so a release that raises it upgrades Gitea too.
+MYPORTAL_GITEA_IMAGE="${MYPORTAL_GITEA_IMAGE:-gitea/gitea:1.24.6}"
 # Optional: base image for local builds, and a CA bundle for networks that
 # inspect TLS (passed to the build as a secret, never stored in the image).
 MYPORTAL_BASE_IMAGE="${MYPORTAL_BASE_IMAGE:-}"
@@ -57,6 +61,8 @@ COMPOSE_FILE="${MYPORTAL_DIR}/docker-compose.yml"
 PROJECT_ENV="${MYPORTAL_DIR}/.env"            # compose variables (versions, port)
 APP_ENV="${MYPORTAL_DIR}/myportal.env"        # application configuration
 DB_ENV="${MYPORTAL_DIR}/mariadb.env"          # database container credentials
+GITEA_ENV="${MYPORTAL_DIR}/gitea.env"         # Gitea secrets
+GITEA_ADMIN_FILE="${MYPORTAL_DIR}/gitea-admin.txt"  # Gitea administrator sign-in
 BACKUP_DIR="${MYPORTAL_DIR}/backups"
 PROXY_DIR="${MYPORTAL_DIR}/proxy"             # nginx configuration (generated)
 # Matches "name:" in the compose file; used to find containers by label.
@@ -427,6 +433,154 @@ ensure_local_redis() {
   esac
 }
 
+# ---------------------------------------------------------------------------
+# Gitea (RMM script library)
+#
+# A Gitea container holds the scripts technicians run from MyPortal's Scripts
+# page; the proxy serves it at /gitea. The first deploy creates an
+# administrator, a private "rmm-scripts" repository and a repository token, and
+# writes the GITEA_* settings into myportal.env. Installations with
+# GITEA_PROVISION=false, or whose GITEA_BASE_URL names another server, are
+# left alone.
+# ---------------------------------------------------------------------------
+GITEA_INTERNAL_URL="http://gitea:3000"
+GITEA_ADMIN_USER="myportal"
+GITEA_ADMIN_EMAIL="scripts@myportal.localhost"
+GITEA_REPOSITORY="rmm-scripts"
+
+gitea_managed() {
+  local provision base_url
+  provision=$(get_setting "$APP_ENV" GITEA_PROVISION | tr -d "\"'" | tr '[:upper:]' '[:lower:]')
+  case "$provision" in false|0|no|off) return 1 ;; esac
+  base_url=$(get_setting "$APP_ENV" GITEA_BASE_URL | tr -d "\"'")
+  [[ -z "$base_url" || "${base_url%/}" == "$GITEA_INTERNAL_URL" ]]
+}
+
+gitea_needs_setup() {
+  # True while a managed Gitea has not been connected to MyPortal yet.
+  gitea_managed && [[ -z "$(get_setting "$APP_ENV" GITEA_API_TOKEN)" ]]
+}
+
+gitea_root_url() {
+  # Gitea's own address: the portal's public address plus /gitea/.
+  local portal port
+  portal=$(get_setting "$APP_ENV" PORTAL_URL | tr -d "\"'")
+  if [[ "$portal" =~ ^https?://[^/]+ ]]; then
+    printf '%s/gitea/' "${BASH_REMATCH[0]}"
+    return
+  fi
+  port=$(get_setting "$PROJECT_ENV" HTTP_PORT)
+  printf 'http://%s%s/gitea/' "$(hostname -f 2>/dev/null || hostname)" "$([[ -z "$port" || "$port" == 80 ]] || printf ':%s' "$port")"
+}
+
+jwt_secret() {
+  # 32 random bytes, unpadded base64url, as Gitea's [oauth2] JWT_SECRET expects.
+  head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n'
+}
+
+ensure_gitea_settings() {
+  # The compose file names gitea.env and these variables whether or not the
+  # service runs, so they always exist. Secrets are generated once.
+  if [[ ! -s "$GITEA_ENV" ]]; then
+    ( umask 077
+      printf 'GITEA__security__SECRET_KEY=%s\nGITEA__security__INTERNAL_TOKEN=%s\nGITEA__oauth2__JWT_SECRET=%s\n' \
+        "$(random_secret 64)" "$(random_secret 64)" "$(jwt_secret)" >"$GITEA_ENV" ) || return 1
+  fi
+  chmod 0600 "$GITEA_ENV"
+  set_setting "$PROJECT_ENV" GITEA_IMAGE "$MYPORTAL_GITEA_IMAGE" || return 1
+  set_setting "$PROJECT_ENV" GITEA_ROOT_URL "$(gitea_root_url)"
+}
+
+gitea_cli() {
+  compose exec -T -u git gitea gitea "$@"
+}
+
+gitea_api() {
+  # gitea_api METHOD PATH [JSON]: prints the HTTP status. Credentials arrive
+  # on stdin as a curl config, so they never appear in process arguments.
+  local method="$1" path="$2" body="${3:-}"
+  local -a args=(-sS -o /dev/null -w '%{http_code}' -X "$method" -K -)
+  [[ -z "$body" ]] || args+=(-H 'Content-Type: application/json' --data "$body")
+  compose exec -T gitea curl "${args[@]}" "http://127.0.0.1:3000/api/v1${path}" || printf '000'
+}
+
+gitea_auth() {
+  # Curl config lines: a token header, or the administrator's password.
+  if [[ -n "${1:-}" ]]; then
+    printf 'header = "Authorization: token %s"\n' "$1"
+  else
+    local password
+    password=$(sed -n 's/^password=//p' "$GITEA_ADMIN_FILE" 2>/dev/null | head -n1)
+    password=${password//\\/\\\\}
+    printf 'user = "%s:%s"\n' "$GITEA_ADMIN_USER" "${password//\"/\\\"}"
+  fi
+}
+
+ensure_gitea_admin() {
+  local output password
+  # Captured first: "grep -q" exiting early would fail the pipeline (pipefail).
+  output=$(gitea_cli admin user list --admin 2>/dev/null || true)
+  if awk 'NR > 1 {print $2}' <<<"$output" | grep -x "$GITEA_ADMIN_USER" >/dev/null; then
+    return 0
+  fi
+  info "Creating the Gitea administrator '${GITEA_ADMIN_USER}'…"
+  output=$(gitea_cli admin user create --admin --username "$GITEA_ADMIN_USER" --email "$GITEA_ADMIN_EMAIL" \
+    --random-password --must-change-password=false) || return 1
+  password=$(printf '%s\n' "$output" | sed -n "s/.*generated random password is '\(.*\)'.*/\1/p" | head -n1)
+  [[ -n "$password" ]] || { warn "Gitea did not report the administrator's password."; return 1; }
+  ( umask 077; printf 'url=%s\nusername=%s\npassword=%s\n' "$(gitea_root_url)" "$GITEA_ADMIN_USER" "$password" >"$GITEA_ADMIN_FILE" )
+  chmod 0600 "$GITEA_ADMIN_FILE"
+}
+
+ensure_gitea_repository() {
+  local token="$1" status
+  status=$(gitea_auth "$token" | gitea_api GET "/repos/${GITEA_ADMIN_USER}/${GITEA_REPOSITORY}")
+  [[ "$status" != 200 ]] || return 0
+  info "Creating the Gitea repository ${GITEA_ADMIN_USER}/${GITEA_REPOSITORY}…"
+  status=$(gitea_auth | gitea_api POST /user/repos \
+    "{\"name\":\"${GITEA_REPOSITORY}\",\"description\":\"Scripts MyPortal runs on devices\",\"private\":true,\"auto_init\":true,\"default_branch\":\"main\",\"readme\":\"Default\"}")
+  [[ "$status" == 201 || "$status" == 409 ]] || {
+    warn "could not create ${GITEA_ADMIN_USER}/${GITEA_REPOSITORY} in Gitea (HTTP ${status}); create it, then sync scripts."
+    return 1
+  }
+}
+
+connect_gitea() {
+  # Gives MyPortal a token (it reads scripts and creates the script folders)
+  # and the repository, once.
+  local token key value
+  token=$(get_setting "$APP_ENV" GITEA_API_TOKEN)
+  if [[ -z "$token" ]]; then
+    ensure_gitea_admin || return 1
+    token=$(gitea_cli admin user generate-access-token --username "$GITEA_ADMIN_USER" \
+      --token-name "myportal-$(date -u +%Y%m%d%H%M%S)" --scopes write:repository | grep -oE '[0-9a-f]{40}' | tail -n1)
+    [[ -n "$token" ]] || { warn "could not create a Gitea token for MyPortal."; return 1; }
+    ensure_gitea_repository "$token" || true
+    set_setting "$APP_ENV" GITEA_API_TOKEN "$token" || return 1
+  fi
+  for key in GITEA_BASE_URL GITEA_PUBLIC_URL GITEA_SCRIPTS_REPOSITORY GITEA_SCRIPTS_BRANCH; do
+    case "$key" in
+      GITEA_BASE_URL) value="$GITEA_INTERNAL_URL" ;;
+      GITEA_PUBLIC_URL) value="/gitea" ;;
+      GITEA_SCRIPTS_REPOSITORY) value="${GITEA_ADMIN_USER}/${GITEA_REPOSITORY}" ;;
+      GITEA_SCRIPTS_BRANCH) value="main" ;;
+    esac
+    [[ -n "$(get_setting "$APP_ENV" "$key")" ]] || set_setting "$APP_ENV" "$key" "$value" || return 1
+  done
+}
+
+ensure_local_gitea() {
+  # Starts (or upgrades) the managed Gitea and connects MyPortal to it. A
+  # Gitea problem never blocks a MyPortal deploy; the next one retries.
+  gitea_managed || return 0
+  info "Starting Gitea for the script library…"
+  if ! compose up -d --pull missing --wait gitea >&2; then
+    warn "Gitea did not start; MyPortal runs without its script library. Inspect it with 'myportal-docker logs gitea'."
+    return 0
+  fi
+  connect_gitea || warn "Gitea is running but MyPortal is not connected to it yet; the next upgrade or restart retries."
+}
+
 write_compose_file() {
   cat >"$COMPOSE_FILE" <<'YAML'
 # Generated by myportal-docker.sh; rewritten on every upgrade. Put local
@@ -447,6 +601,52 @@ services:
       timeout: 3s
       retries: 30
     # Accessible only on the Compose network; no published host port.
+
+  # Gitea for the RMM script library, served by the proxy at /gitea. Started
+  # by name, so installations that use another Gitea server never run it.
+  gitea:
+    image: ${GITEA_IMAGE}
+    profiles: [local-gitea]
+    restart: unless-stopped
+    env_file: gitea.env
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__server__HTTP_PORT: "3000"
+      GITEA__server__ROOT_URL: ${GITEA_ROOT_URL}
+      GITEA__server__PUBLIC_URL_DETECTION: auto
+      GITEA__server__DISABLE_SSH: "true"
+      GITEA__server__START_SSH_SERVER: "false"
+      GITEA__server__LFS_START_SERVER: "false"
+      GITEA__server__OFFLINE_MODE: "true"
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+      GITEA__service__REQUIRE_SIGNIN_VIEW: "true"
+      GITEA__service__DEFAULT_KEEP_EMAIL_PRIVATE: "true"
+      # MyPortal sign-in: the proxy sends who is signed in to MyPortal. Only
+      # Compose containers reach Gitea, so the private ranges are trusted.
+      GITEA__service__ENABLE_REVERSE_PROXY_AUTHENTICATION: "true"
+      GITEA__service__ENABLE_REVERSE_PROXY_AUTO_REGISTRATION: "true"
+      GITEA__service__ENABLE_REVERSE_PROXY_EMAIL: "true"
+      GITEA__service__ENABLE_REVERSE_PROXY_FULL_NAME: "true"
+      GITEA__security__REVERSE_PROXY_AUTHENTICATION_USER: X-WEBAUTH-USER
+      GITEA__security__REVERSE_PROXY_AUTHENTICATION_EMAIL: X-WEBAUTH-EMAIL
+      GITEA__security__REVERSE_PROXY_AUTHENTICATION_FULL_NAME: X-WEBAUTH-FULLNAME
+      GITEA__security__REVERSE_PROXY_TRUSTED_PROXIES: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      GITEA__repository__DEFAULT_BRANCH: main
+      GITEA__repository__DEFAULT_PRIVATE: private
+      GITEA__openid__ENABLE_OPENID_SIGNIN: "false"
+      GITEA__openid__ENABLE_OPENID_SIGNUP: "false"
+      GITEA__mailer__ENABLED: "false"
+    volumes:
+      - gitea_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+    # Accessible only on the Compose network and through the proxy.
 
   db:
     image: ${DB_IMAGE}
@@ -517,6 +717,7 @@ services:
 
 volumes:
   redis_data:
+  gitea_data:
   db_data:
   private_uploads:
   uploads:
@@ -761,6 +962,63 @@ NGINX
         error_page 502 504 =503 /myportal-unavailable.html;
     }
 
+    # Gitea, where RMM scripts are edited. Resolved per request, so the proxy
+    # runs whether or not this installation runs Gitea.
+    location = /gitea {
+        absolute_redirect off;
+        return 301 /gitea/;
+    }
+
+    # MyPortal sign-in for Gitea: the proxy asks MyPortal who is signed in
+    # and passes the answer to Gitea, which trusts these headers only from
+    # the Compose network. They are always set here, so a browser cannot
+    # supply its own.
+    location = /_myportal/gitea-identity {
+        internal;
+        proxy_method GET;
+        proxy_pass http://myportal_app/api/rmm/gitea/identity;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $myportal_forwarded_proto;
+    }
+
+    # Gitea's static files are public and need no sign-in lookup.
+    location ^~ /gitea/assets/ {
+        set $myportal_gitea gitea:3000;
+        rewrite ^/gitea(/.*)$ $1 break;
+        proxy_pass http://$myportal_gitea;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Connection "";
+        proxy_set_header X-WEBAUTH-USER "";
+        proxy_set_header X-WEBAUTH-EMAIL "";
+        proxy_set_header X-WEBAUTH-FULLNAME "";
+    }
+
+    location ^~ /gitea/ {
+        auth_request /_myportal/gitea-identity;
+        auth_request_set $myportal_gitea_user $upstream_http_x_myportal_gitea_user;
+        auth_request_set $myportal_gitea_email $upstream_http_x_myportal_gitea_email;
+        auth_request_set $myportal_gitea_name $upstream_http_x_myportal_gitea_name;
+        set $myportal_gitea gitea:3000;
+        rewrite ^/gitea(/.*)$ $1 break;
+        proxy_pass http://$myportal_gitea;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Connection "";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $myportal_forwarded_proto;
+        proxy_set_header X-WEBAUTH-USER $myportal_gitea_user;
+        proxy_set_header X-WEBAUTH-EMAIL $myportal_gitea_email;
+        proxy_set_header X-WEBAUTH-FULLNAME $myportal_gitea_name;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 300s;
+    }
+
     location = /myportal-unavailable.html {
         internal;
         root /etc/nginx/conf.d;
@@ -868,10 +1126,12 @@ deploy_release() {
   # Callers test this function's status, which turns off "set -e" inside it.
   write_compose_file || return 1
   ensure_redis_settings || return 1
+  ensure_gitea_settings || return 1
   ensure_slot_settings || return 1
   write_proxy_config "$idle" || return 1
   compose up -d db >&2 || return 1
   ensure_local_redis || return 1
+  ensure_local_gitea
   refresh_app_trusted_proxies || return 1
   set_setting "$PROJECT_ENV" "$idle_image_key" "$image" || return 1
   # Recreated even when the image is unchanged, so 'restart' applies
@@ -1009,7 +1269,7 @@ prune_backups() {
   [[ -d "$BACKUP_DIR" ]] || return 0
   # Newest first; remove everything after the first $keep of each kind.
   local kind
-  for kind in db files; do
+  for kind in db files gitea; do
     find "$BACKUP_DIR" -maxdepth 1 -name "${kind}-*" -printf '%T@ %p\n' | sort -rn \
       | awk -v k="$keep" 'NR > k {print $2}' | xargs -r rm -f
   done
@@ -1067,6 +1327,9 @@ cmd_install() {
 
   local host
   host=$(hostname -f 2>/dev/null || hostname)
+  local gitea_note
+  gitea_note=$(gitea_install_note)
+  [[ -z "$gitea_note" ]] || gitea_note+=$'\n\n'
   cat <<EOF
 
 MyPortal ${version} is running.
@@ -1074,7 +1337,7 @@ MyPortal ${version} is running.
   Configuration: ${APP_ENV}
   Management:    myportal-docker help
 
-Open the portal and register: the first account becomes the super
+${gitea_note}Open the portal and register: the first account becomes the super
 administrator. Upgrade from the portal's System updates page, with
 'sudo myportal-docker upgrade', or enable daily automatic upgrades with
 'sudo myportal-docker auto-upgrade on'.
@@ -1083,6 +1346,13 @@ Before exposing the portal to the internet, terminate TLS in front of it, then
 set PORTAL_URL=https://… and ENVIRONMENT=production in ${APP_ENV} and run
 'sudo myportal-docker restart'.
 EOF
+}
+
+gitea_install_note() {
+  # Where the script library is, for the post-install summary.
+  [[ -f "$GITEA_ADMIN_FILE" ]] || return 0
+  printf 'Scripts (Gitea): %s\n' "$(sed -n 's/^url=//p' "$GITEA_ADMIN_FILE")"
+  printf '  Sign in as %s; the password is in %s.\n\n' "$GITEA_ADMIN_USER" "$GITEA_ADMIN_FILE"
 }
 
 require_installed() {
@@ -1163,9 +1433,9 @@ cmd_upgrade() {
     self_update "$version" upgrade "${original_args[@]}"
     local redis_url
     redis_url=$(redis_connection_url) || die "could not read Redis configuration."
-    if [[ -z "$redis_url" ]]; then
+    if [[ -z "$redis_url" ]] || gitea_needs_setup; then
       deploy_release "$(get_setting "$PROJECT_ENV" MYPORTAL_IMAGE)" "$current" \
-        || die "could not apply local Redis defaults to the installed release."
+        || die "could not apply local Redis and Gitea defaults to the installed release."
     fi
     info "MyPortal ${current} is already the latest release."
     return 0
@@ -1317,11 +1587,19 @@ cmd_backup() {
   info "Backing up uploaded files to ${files}…"
   app_exec tar -czf - -C /app private_uploads app/static/uploads var >"$files"
   chmod 0600 "$files"
+  local gitea=""
+  if [[ -n "$(service_container gitea)" ]]; then
+    gitea="${BACKUP_DIR}/gitea-${version}-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
+    info "Backing up the Gitea script library to ${gitea}…"
+    compose exec -T gitea tar -czf - -C /data . >"$gitea"
+    chmod 0600 "$gitea"
+  fi
   prune_backups
   cat <<EOF
 Backups written:
   ${db}
-  ${files}
+  ${files}${gitea:+
+  ${gitea}}
 Also keep a copy of ${APP_ENV} (it holds the encryption keys).
 EOF
 }

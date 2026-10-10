@@ -31,6 +31,7 @@ sudo myportal-backup --label manual
 |------|---------|----------|
 | Database | `db-<label>-<UTC timestamp>.sql.gz` | Full `mysqldump` of the configured database (single-transaction, routines, triggers, events) |
 | Files | `files-<label>-<UTC timestamp>.tar.gz` | Archive of `private_uploads/` and `uploads/` under the shared root |
+| Gitea | `gitea-<label>-<UTC timestamp>.tar.gz` | The RMM script library: `/var/lib/gitea` and `/etc/gitea`, when this host runs Gitea. Made with the files backup. |
 
 Backups are written to `BACKUP_DIR` (default: `/opt/myportal/backups`)
 with directory mode `0700` and file mode `0600`.
@@ -104,8 +105,9 @@ Docker installs use the `myportal-docker backup` command:
 sudo myportal-docker backup
 ```
 
-This backs up both the database and the shared files volume, then prunes old
-backups using the same `MYPORTAL_BACKUPS_TO_KEEP` setting. Backups are
+This backs up the database, the shared files volume and, when the installation
+runs Gitea, its data (`gitea-*.tar.gz`), then prunes old backups using the same
+`MYPORTAL_BACKUPS_TO_KEEP` setting. Backups are
 stored in the directory configured for the Docker deployment.
 
 To restore a database backup in a Docker install:

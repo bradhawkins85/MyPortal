@@ -246,3 +246,54 @@ def test_systemd_units_exist():
     assert "Type=oneshot" in service.read_text()
     assert "OnCalendar=daily" in timer.read_text()
     assert "Persistent=true" in timer.read_text()
+
+
+def test_files_backup_includes_gitea_and_rotates_it(tmp_path):
+    env_file = _make_env_file(tmp_path / "myportal.env")
+    shared_root = tmp_path / "shared"
+    (shared_root / "uploads").mkdir(parents=True)
+    gitea_home = tmp_path / "gitea"
+    (gitea_home / "data").mkdir(parents=True)
+    (gitea_home / "data" / "gitea.db").write_text("db")
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    for index in range(3):
+        old = backup_dir / f"gitea-old-{index}.tar.gz"
+        old.write_text("old")
+        os.utime(old, (time.time() - 1000 - index, time.time() - 1000 - index))
+
+    result = _run_backup(
+        ["--files-only", "--label", "test"],
+        {
+            "MYPORTAL_ENV_FILE": str(env_file),
+            "BACKUP_DIR": str(backup_dir),
+            "MYPORTAL_SHARED_ROOT": str(shared_root),
+            "MYPORTAL_GITEA_HOME": str(gitea_home),
+            "MYPORTAL_GITEA_CONFIG_DIR": str(tmp_path / "no-config"),
+            "MYPORTAL_BACKUPS_TO_KEEP": "2",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    archives = sorted(backup_dir.glob("gitea-test-*.tar.gz"))
+    assert len(archives) == 1 and archives[0].stat().st_mode & 0o777 == 0o600
+    listing = subprocess.run(["tar", "-tzf", str(archives[0])], capture_output=True, text=True, check=True).stdout
+    assert str(gitea_home / "data" / "gitea.db").lstrip("/") in listing
+    assert len(list(backup_dir.glob("gitea-*"))) == 2
+
+
+def test_files_backup_skips_gitea_when_absent(tmp_path):
+    env_file = _make_env_file(tmp_path / "myportal.env")
+    (tmp_path / "shared" / "uploads").mkdir(parents=True)
+    backup_dir = tmp_path / "backups"
+    result = _run_backup(
+        ["--files-only"],
+        {
+            "MYPORTAL_ENV_FILE": str(env_file),
+            "BACKUP_DIR": str(backup_dir),
+            "MYPORTAL_SHARED_ROOT": str(tmp_path / "shared"),
+            "MYPORTAL_GITEA_HOME": str(tmp_path / "missing"),
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert not list(backup_dir.glob("gitea-*"))

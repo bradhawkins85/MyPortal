@@ -2,6 +2,8 @@
 {% from "macros/header.html" import page_header_actions with context %}
 {% from "macros/counters.html" import counter_strip %}
 {% from "assets/_type_picker.html" import asset_type_picker %}
+{% from "tags/_picker.html" import tag_picker %}
+{% set asset_tags = asset_tags | default(none) %}
 {% set asset_display_name = asset.name or ('Asset ' ~ asset.id) %}
 
 {% block header_title %}
@@ -9,7 +11,7 @@
   <span class="header__title-meta">{{ asset_display_name }}</span>
 {% endblock %}
 {% block title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
-{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% if rmm %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endif %}{% if asset_tags is not none %}<link rel="stylesheet" href="{{ static_url('/static/css/tags.css') }}">{% endif %}{% endblock %}
 {% block header_actions %}
     {% set detail_actions = [] %}
     {% if can_edit and not customer_safe %}{% set _ = detail_actions.append({"label": "Save changes", "type": "submit", "variant": "primary", "form": "asset-settings-form", "attrs": {"data-asset-save": "", "title": "Save the asset profile and editable custom fields"}}) %}{% endif %}
@@ -78,6 +80,8 @@
           ("profile", "asset-profile", "Profile", "", not customer_safe),
           ("inventory", "asset-inventory", "Inventory", "", true),
           ("custom-fields", "asset-custom-fields", "Custom fields", custom_fields | length, not customer_safe),
+          ("tags", "tags", "Tags", "", asset_tags is not none),
+          ("scripts", "scripts", "Scripts", "", rmm),
           ("photos", "asset-photos", "Photos", asset_photos | length, can_view_asset_photos),
         ]),
         ("Connections", [
@@ -121,6 +125,34 @@
       <p class="ce-nav__empty" data-ae-search-empty hidden>No settings match your search.</p>
     </nav>
     <div class="ce-panels">
+  {% if asset_tags is not none %}<section class="card card--panel ce-section" id="tags" data-asset-edit-section="tags" aria-labelledby="asset-tags-heading">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-tags-heading">Tags</h2><p class="card__subtitle">Tags pick out this device for automations and scripts. Tags marked auto follow the device's type and operating system.{% if is_super_admin %} <a href="/admin/tags">Manage tags</a>{% endif %}</p></div></header>
+    <div class="ce-section__body">{{ tag_picker(asset_tags, "asset-tag-picker", "Asset tags") }}</div>
+  </section>{% endif %}
+
+  {% if rmm %}{% import "rmm/_macros.html" as rmm_ui %}<section class="card card--panel ce-section" id="scripts" data-asset-edit-section="scripts" aria-labelledby="asset-scripts-heading" data-rmm-page>
+    <script type="application/json" id="rmm-config">{{ {"can_run": rmm.can_run, "asset_id": asset.id} | tojson }}</script>
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="asset-scripts-heading">Scripts</h2>
+        <p class="card__subtitle">{% if rmm.agent %}RMM agent {{ rmm.agent.agent_version or '' }} on {{ (rmm.agent.os or 'unknown') | title }}{% if rmm.agent.os_version %} {{ rmm.agent.os_version }}{% endif %}, last seen {% if rmm.agent.last_seen_utc %}<span data-utc="{{ rmm.agent.last_seen_utc }}">{{ rmm.agent.last_seen_utc }}</span>{% else %}never{% endif %}.{% else %}The RMM agent is not installed on this device yet, so scripts cannot run here.{% endif %} <a href="/rmm/scripts">All scripts</a></p>
+      </div>
+      {% if rmm.can_run %}<button type="button" class="button button--primary button--small" data-rmm-run-open aria-haspopup="dialog" aria-controls="rmm-run-modal">Run script</button>{% endif %}
+    </header>
+    <div class="ce-section__body">
+      {% if rmm.runs %}
+      <div class="table-wrapper"><table class="table">
+        <caption class="visually-hidden">Recent script runs on this device</caption>
+        <thead><tr><th scope="col">Script</th><th scope="col">Status</th><th scope="col">Exit code</th><th scope="col">Requested by</th><th scope="col">Queued</th><th scope="col" class="table__actions">Actions</th></tr></thead>
+        <tbody>{{ rmm_ui.run_rows(rmm.runs, show_device=false) }}</tbody>
+      </table></div>
+      {% else %}
+      <p class="text-muted">No scripts have run on this device yet.</p>
+      {% endif %}
+    </div>
+  </section>{% endif %}
+
+
   {% if not customer_safe %}<section class="card card--panel ce-section" id="asset-profile" data-asset-edit-section="profile" aria-labelledby="asset-profile-title">
     <header class="ce-section__header">
       <div class="ce-section__heading"><h2 class="card__title" id="asset-profile-title">Profile</h2>
@@ -407,5 +439,6 @@
   {% endif %}
 </div>
 {% include "partials/csrf.html" %}
+{% if rmm %}{% include "rmm/_run_modal.html" %}{% endif %}
 {% endblock %}
-{% block scripts %}<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script><script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script>{% if can_edit_network_map %}<script src="{{ static_url('/static/js/network_map.js') }}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script><script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script>{% if asset_tags is not none %}<script src="{{ static_url('/static/js/tag_picker.js') }}" defer></script>{% endif %}{% if rmm %}<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script>{% endif %}{% if can_edit_network_map %}<script src="{{ static_url('/static/js/network_map.js') }}" defer></script>{% endif %}{% endblock %}
