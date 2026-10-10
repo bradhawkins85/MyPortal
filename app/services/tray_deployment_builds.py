@@ -163,6 +163,47 @@ async def claim_next_build(portal_url: str) -> dict[str, Any] | None:
         }
 
 
+async def idle_reason() -> str:
+    """Explain why :func:`claim_next_build` has nothing for the agent.
+
+    Sent to the build agent with an empty claim so its log says what to fix
+    rather than staying silent.
+    """
+
+    release_tag = current_release_tag()
+    if release_tag is None:
+        return (
+            "No tray release is cached on MyPortal. Fetch the latest tray release "
+            "from Admin > Tray > Devices."
+        )
+    links = await tray_repo.list_active_deployment_links()
+    if not links:
+        return "There are no active deployment URLs. Create one under Admin > Tray > Deployment URLs."
+    active_ids = {int(link["id"]) for link in links}
+    newest: dict[int, dict[str, Any]] = {}
+    for build in await tray_repo.list_deployment_builds():
+        link_id = int(build["deployment_link_id"])
+        if link_id in active_ids and build.get("status") != "superseded":
+            newest.setdefault(link_id, build)
+    building = [b for b in newest.values() if b.get("status") == "building"]
+    if building:
+        return (
+            f"{len(building)} build(s) are already in progress. A build that does not "
+            f"report back is handed out again after {int(BUILD_LEASE.total_seconds() // 3600)} hours."
+        )
+    failed = [
+        b
+        for b in newest.values()
+        if b.get("status") == "failed" and b.get("release_tag") == release_tag
+    ]
+    if failed:
+        return (
+            f"{len(failed)} deployment URL(s) failed to build {release_tag} and are not retried "
+            "automatically. Fix the error shown on Admin > Tray > Deployment URLs, then press Rebuild."
+        )
+    return f"All active deployment URLs have installers for {release_tag}."
+
+
 async def _usable_link_token(link: dict[str, Any] | None) -> str | None:
     if not link or link.get("revoked_at") or not link.get("install_token_id"):
         return None

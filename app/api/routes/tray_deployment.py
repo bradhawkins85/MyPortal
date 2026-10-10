@@ -332,7 +332,12 @@ async def build_agent_claim(
         log_error("Unable to hand out tray deployment build", error=str(exc))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     if job is None:
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        # Header values must be latin-1, and the reasons are plain ASCII.
+        reason = (await builds.idle_reason()).encode("ascii", "replace").decode("ascii")
+        return Response(
+            status_code=status.HTTP_204_NO_CONTENT,
+            headers={"X-MyPortal-Build-Status": reason},
+        )
     log_info("Tray deployment build claimed", build_id=job["id"], release_tag=job["release_tag"])
     return JSONResponse(job, headers={"Cache-Control": "no-store"})
 
