@@ -930,6 +930,19 @@ map "$myportal_trusted_proxy:$http_x_forwarded_proto" $myportal_forwarded_proto 
     "1:http"  http;
 }
 
+# Gitea keeps its own persistent session, so a stale one would keep a
+# technician signed in after they sign out of MyPortal or lose the Script
+# editing permission. When MyPortal has no identity to forward
+# ($myportal_gitea_user is empty), drop the request's cookies so Gitea shows
+# its sign-in page instead of reusing the session; signed-in requests keep
+# their cookies, so Gitea's CSRF protection still works. The map is evaluated
+# when the cookie is forwarded (content phase), after auth_request has set
+# $myportal_gitea_user (access phase).
+map $myportal_gitea_user $myportal_gitea_forward_cookie {
+    default    $http_cookie;
+    ""         "";
+}
+
 server {
     listen 8080;
     server_tokens off;
@@ -1015,6 +1028,10 @@ NGINX
         proxy_set_header X-WEBAUTH-USER $myportal_gitea_user;
         proxy_set_header X-WEBAUTH-EMAIL $myportal_gitea_email;
         proxy_set_header X-WEBAUTH-FULLNAME $myportal_gitea_name;
+        # Forward the browser's cookies to Gitea only while MyPortal forwarded
+        # an identity; otherwise strip them so a stale Gitea session can't
+        # keep the technician signed in after MyPortal sign-out (map above).
+        proxy_set_header Cookie $myportal_gitea_forward_cookie;
         proxy_connect_timeout 10s;
         proxy_read_timeout 300s;
     }

@@ -2,15 +2,21 @@
 
 nginx asks MyPortal who is signed in (``GET /api/rmm/gitea/identity``) on each
 ``/gitea/`` request and passes the answer to Gitea in the ``X-WEBAUTH-*``
-headers, which Gitea trusts only from its proxy. Gitea keeps no session of its
-own for these accounts, so a technician who loses Script editing access, or
-signs out of MyPortal, is signed out of Gitea on their next click.
+headers, which Gitea trusts only from its proxy. Gitea itself keeps a
+persistent session, so the proxy forwards the browser's cookies to Gitea only
+while MyPortal forwarded an identity; otherwise it strips them so a stale
+Gitea session cannot linger. That is what signs a technician out of Gitea on
+their next click after they lose Script editing access or sign out of MyPortal.
 
 The first time a technician comes through, MyPortal makes Gitea create their
 account and adds it to the script repository as a collaborator, with read or
 write access to match the ``menu.rmm_script_editing`` permission. The
 background folder check (``rmm_scripts.folder_maintenance_loop``) lowers or
 removes that access when the technician's roles change.
+
+The login is always one MyPortal made (``gitea_login``); a stored value that is
+not is dropped, because the sign-in headers create Gitea accounts on first use
+and must never carry a hand-made or malformed name.
 """
 
 from __future__ import annotations
@@ -37,6 +43,12 @@ GRANT_REFRESH_SECONDS = 600
 _LOGIN_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 _LOGIN_PUNCTUATION = re.compile(r"[._-]{2,}")
 _HEADER_UNSAFE = re.compile(r"[^\x20-\x7e]+")
+# The shape of a finished Gitea login (what gitea_login() returns): an
+# email-derived name of letters, digits, ".", "_" or "-", with no leading or
+# trailing punctuation and at most 30 characters, plus the user's id. The id
+# suffix keeps it from ever being a hand-made account, such as the "myportal"
+# administrator.
+_LOGIN_SHAPE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,28}[A-Za-z0-9])?-\d+")
 
 _granted: dict[int, tuple[str, float]] = {}
 _locks: dict[int, asyncio.Lock] = {}
@@ -75,6 +87,13 @@ def gitea_login(user: Mapping[str, Any]) -> str:
     return f"{base or 'user'}-{int(user['id'])}"
 
 
+def _is_gitea_login(login: str) -> bool:
+    """Whether ``login`` is one of the accounts MyPortal makes -- and not a
+    hand-made or malformed account it must never sign someone in as."""
+
+    return bool(_LOGIN_SHAPE.fullmatch(login))
+
+
 def _header_text(value: Any) -> str:
     """Printable ASCII only, as HTTP headers cannot carry other characters:
     accents are dropped ("Zoë" becomes "Zoe")."""
@@ -94,8 +113,17 @@ async def identity(user: Mapping[str, Any]) -> GiteaIdentity | None:
     if level == "none":
         return None
     account = await rmm_repo.get_gitea_account(int(user["id"]))
+    # The stored login keeps the Gitea account stable if the user's email
+    # changes, but it must still be one MyPortal made: these sign-in headers
+    # create Gitea accounts on first use, so a value that is not -- a tampered
+    # row or a bug -- would be handed to Gitea as-is. An unexpected value falls
+    # back to the canonical login.
+    login = str(account["gitea_login"]) if account else gitea_login(user)
+    if not _is_gitea_login(login):
+        log_warning("Dropping an unexpected stored Gitea login", user_id=user["id"], login=login)
+        login = gitea_login(user)
     result = GiteaIdentity(
-        login=str(account["gitea_login"]) if account else gitea_login(user),
+        login=login,
         email=_header_text(user.get("email")),
         full_name=_full_name(user),
         permission=level,

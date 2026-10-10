@@ -779,6 +779,17 @@ def test_gitea_login_is_readable_and_never_a_hand_made_account():
     assert len(gitea_sign_in.gitea_login({"id": 12, "email": "a" * 80 + "@x"})) == 33
 
 
+def test_gitea_login_shape_rejects_hand_made_and_malformed_accounts():
+    is_login = gitea_sign_in._is_gitea_login
+    for login in ("tech-9", "user-5", "myportal-7", "Brad.Hawkins-rmm-1", "a-1", "abc_def.ghi-123"):
+        assert is_login(login), login
+    for login in (
+        "admin", "myportal", "", "tech", "tech-9 ", " tech-9", "-tech-9",
+        "tech-", "tech-x", "../../etc-1", "a" * 31 + "-1", "tech/9-1", "tech:9",
+    ):
+        assert not is_login(login), login
+
+
 def _memberships(monkeypatch, by_user: dict[int, list[dict]]):
     async def list_memberships_for_user(user_id, *, status="active"):
         return [{"permissions": permissions} for permissions in by_user.get(user_id, [])]
@@ -862,6 +873,24 @@ async def test_identity_still_signs_in_when_gitea_cannot_be_updated(sqlite_db, m
 
 
 @pytest.mark.anyio
+async def test_identity_drops_a_malformed_stored_login(sqlite_db, monkeypatch):
+    calls = _fake_gitea(monkeypatch)
+    _memberships(monkeypatch, {9: [{"menu.rmm_script_editing": "write"}]})
+    # A stored login that is not one MyPortal made -- here the "myportal"
+    # administrator's own account -- must never be handed to Gitea, whose
+    # sign-in headers create accounts on first use. It falls back to the
+    # canonical login instead.
+    await rmm_repo.save_gitea_account(9, "myportal", "write")
+    account = await gitea_sign_in.identity({"id": 9, "email": "tech@example.com"})
+    assert account.login == "tech-9"
+    assert calls[0] == ("sign_in", "tech-9", "tech@example.com", "")
+    # Repeated: the stored row still says "myportal", so the fallback is not a
+    # one-time fix -- every identity() drops it and signs in as tech-9.
+    assert (await gitea_sign_in.identity({"id": 9, "email": "tech@example.com"})).login == "tech-9"
+    assert (await rmm_repo.get_gitea_account(9))["gitea_login"] == "myportal"
+
+
+@pytest.mark.anyio
 async def test_reconcile_lowers_and_removes_repository_access(sqlite_db, monkeypatch):
     calls = _fake_gitea(monkeypatch)
     _memberships(monkeypatch, {9: [{"menu.rmm_script_editing": "read"}], 10: [{"menu.rmm_script_editing": "write"}]})
@@ -915,6 +944,15 @@ def test_proxies_always_set_gitea_sign_in_headers_themselves(config):
     assert "auth_request /_myportal/gitea-identity;" in gitea_block
     for header, variable in (("X-WEBAUTH-USER", "user"), ("X-WEBAUTH-EMAIL", "email"), ("X-WEBAUTH-FULLNAME", "name")):
         assert f"proxy_set_header {header} $myportal_gitea_{variable};" in gitea_block
+    # Gitea keeps its own persistent session, so a stale one would keep a
+    # technician signed in after MyPortal sign-out. The proxy forwards the
+    # browser's cookies to Gitea only while an identity is forwarded and
+    # strips them otherwise, so the stale session cannot be reused.
+    assert "proxy_set_header Cookie $myportal_gitea_forward_cookie;" in gitea_block
+    forward_cookie = text[text.index("map $myportal_gitea_user $myportal_gitea_forward_cookie {"):]
+    forward_cookie = forward_cookie[: forward_cookie.index("}")]
+    assert "default    $http_cookie;" in forward_cookie  # signed in: keep cookies
+    assert '""         "";' in forward_cookie  # signed out: strip them
     assets = text[text.index("location ^~ /gitea/assets/ {"):]
     assert 'proxy_set_header X-WEBAUTH-USER "";' in assets[: assets.index("}")]
     identity = text[text.index("location = /_myportal/gitea-identity {"):]
