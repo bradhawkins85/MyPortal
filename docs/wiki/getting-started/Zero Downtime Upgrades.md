@@ -14,7 +14,9 @@ refuses to run on a host that has not been prepared.
   templates, and a release-local `.venv`. A prepared directory is made
   read-only before it is published.
 * `/opt/myportal/shared` contains mutable state and application data. Each
-  release's `var`, `private_uploads`, and `app/static/uploads` paths point here.
+  release's `var`, `private_uploads`, and `app/static/uploads` paths point here,
+  and `app/static/tray` points to `shared/tray-installers`, where the tray
+  installers downloaded from GitHub Releases are cached.
   Existing upload data from a legacy single-checkout installation is copied
   into shared storage on first use and is never removed from the old location.
 * `/opt/myportal/instances/{blue,green}` independently selects the release for

@@ -262,6 +262,37 @@ async def test_claim_route_returns_204_when_idle(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_claim_route_explains_why_it_is_idle(monkeypatch):
+    monkeypatch.setattr(builds, "claim_next_build", AsyncMock(return_value=None))
+    monkeypatch.setattr(builds, "idle_reason", AsyncMock(return_value="No tray release is cached."))
+    response = await deploy_routes.build_agent_claim(_request(), _api_key={})
+    assert response.headers["X-MyPortal-Build-Status"] == "No tray release is cached."
+
+
+@pytest.mark.anyio
+async def test_idle_reason_names_the_blocker(sqlite_db, monkeypatch):
+    build_id = await builds.queue_build(7)
+    await builds.claim_next_build(PORTAL)
+    assert "already in progress" in await builds.idle_reason()
+
+    await builds.fail_build(build_id, "signing failed")
+    assert "failed to build v1.4.2" in await builds.idle_reason()
+
+    second = await builds.queue_build(7)
+    await builds.claim_next_build(PORTAL)
+    for kind in builds.ARTIFACT_KINDS:
+        await builds.save_artifact(second, kind, _chunks(kind.encode()))
+    await builds.complete_build(second)
+    assert await builds.idle_reason() == "All active deployment URLs have installers for v1.4.2."
+
+    await tray_deployment.revoke_deployment_link(7)
+    assert "no active deployment URLs" in await builds.idle_reason()
+
+    monkeypatch.setattr(builds.tray_installer, "get_cached_latest_release_info", lambda: {})
+    assert "No tray release is cached" in await builds.idle_reason()
+
+
+@pytest.mark.anyio
 async def test_complete_route_maps_state_errors(monkeypatch):
     monkeypatch.setattr(
         builds, "complete_build", AsyncMock(side_effect=builds.BuildStateError("nope"))

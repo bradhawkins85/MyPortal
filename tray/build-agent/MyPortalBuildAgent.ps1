@@ -237,10 +237,27 @@ function Invoke-Build($Job) {
     }
 }
 
+# Logs why MyPortal had no build to hand out, once per change, so a quiet
+# agent can be told apart from a broken one without filling the log.
+function Write-IdleStatus([string]$Status) {
+    $path = Join-Path $WorkDir 'idle-status.txt'
+    $previous = if (Test-Path -LiteralPath $path) { (Get-Content -LiteralPath $path -Raw).Trim() } else { '' }
+    if ($Status -eq $previous) {
+        if ($Status) { Write-Host "No builds to run: $Status" }
+        return
+    }
+    Set-Content -LiteralPath $path -Value $Status
+    if ($Status) { Write-Log "No builds to run: $Status" }
+}
+
 function Invoke-Queue {
     while ($true) {
         $response = Invoke-Portal Post '/api/tray/build-agent/jobs/claim' $null
-        if ($response.StatusCode -eq 204) { return }
+        if ($response.StatusCode -eq 204) {
+            Write-IdleStatus ([string]$response.Headers['X-MyPortal-Build-Status'])
+            return
+        }
+        Write-IdleStatus ''
         $job = $response.Content | ConvertFrom-Json
         Write-Log "Building job $($job.id) for $($job.company_name) ($($job.release_tag))"
         try {

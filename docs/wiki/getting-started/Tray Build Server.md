@@ -131,7 +131,9 @@ change settings or update WiX.
    shows *Queued*, then *Building*, then *Ready* with the release tag.
 2. Open the URL and download **Download for Windows**. The file's
    *Properties → Digital Signatures* tab should show your certificate.
-3. Agent activity is logged to `C:\MyPortalBuild\agent.log`.
+3. Agent activity is logged to `C:\MyPortalBuild\agent.log`. When MyPortal has
+   nothing to build, the agent logs *No builds to run:* with the reason, such
+   as no cached tray release or no active deployment URLs.
 
 ## Troubleshooting
 
