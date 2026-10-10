@@ -123,8 +123,10 @@ async def scripts_page(request: Request):
     runs = await rmm_repo.list_runs(company_id=company_id, limit=200)
     gitea_ready = True
     gitea_message = ""
+    gitea_url = ""
     try:
-        await gitea.load_settings()
+        settings = await gitea.load_settings()
+        gitea_url = gitea.repository_url(settings)
     except gitea.GiteaError as exc:
         gitea_ready = False
         gitea_message = str(exc)
@@ -149,6 +151,7 @@ async def scripts_page(request: Request):
             "can_sync": bool(user.get("is_super_admin")),
             "gitea_ready": gitea_ready,
             "gitea_message": gitea_message,
+            "gitea_url": gitea_url,
         },
     )
 

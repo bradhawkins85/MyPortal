@@ -27,6 +27,7 @@ class GiteaError(RuntimeError):
 @dataclass(frozen=True)
 class GiteaSettings:
     base_url: str
+    public_url: str
     api_token: str
     owner: str
     repo: str
@@ -53,11 +54,17 @@ async def load_settings() -> GiteaSettings:
         raise GiteaError("Set GITEA_BASE_URL to the address of your Gitea server.")
     if not base_url.lower().startswith(("https://", "http://")):
         raise GiteaError("GITEA_BASE_URL must start with https:// or http://.")
+    public_url = str(settings.get("public_url") or "").strip().rstrip("/")
+    if public_url and (
+        public_url.startswith("//") or not public_url.lower().startswith(("https://", "http://", "/"))
+    ):
+        raise GiteaError("GITEA_PUBLIC_URL must start with https://, http:// or /.")
     owner, _, repo = repository.partition("/")
     if not owner or not repo or "/" in repo:
         raise GiteaError("Set GITEA_SCRIPTS_REPOSITORY to owner/name, for example msp/rmm-scripts.")
     return GiteaSettings(
         base_url=base_url,
+        public_url=public_url or base_url,
         api_token=str(settings.get("api_token") or "").strip(),
         owner=owner,
         repo=repo,
@@ -135,11 +142,16 @@ async def fetch_file(settings: GiteaSettings, path: str) -> bytes:
     return response.content
 
 
+def repository_url(settings: GiteaSettings) -> str:
+    """Link to the script repository in the Gitea web interface."""
+
+    return settings.public_url + "/" + quote(settings.owner, safe="") + "/" + quote(settings.repo, safe="")
+
+
 def web_url(settings: GiteaSettings, path: str) -> str:
     """Link to a script in the Gitea web editor."""
 
     encoded = "/".join(quote(part, safe="") for part in path.split("/"))
     return (
-        settings.base_url + "/" + quote(settings.owner, safe="") + "/" + quote(settings.repo, safe="")
-        + "/src/branch/" + quote(settings.branch, safe="") + "/" + encoded
+        repository_url(settings) + "/src/branch/" + quote(settings.branch, safe="") + "/" + encoded
     )

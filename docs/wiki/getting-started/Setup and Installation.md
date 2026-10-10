@@ -72,6 +72,11 @@ The installer:
    - installs the nginx site on port 80 (disabling nginx's stock default
      site, and dropping the IPv6 listener when the host has no IPv6)
    - retires the old single-checkout `myportal.service` if one exists
+   - sets up Gitea for the RMM script library (`scripts/provision_gitea.sh`): the official
+     Gitea binary runs as the `gitea` service on `127.0.0.1:3000`, nginx serves it at
+     `http://<server>/gitea/`, and MyPortal is connected to a new `myportal/rmm-scripts`
+     repository. Every upgrade repeats this, moving Gitea to the version the release ships with.
+     See [RMM Scripts](../administration/RMM%20Scripts.md)
 6. Installs `/etc/cron.d/myportal-update`, which applies updates requested from
    the admin UI.
 
@@ -171,6 +176,7 @@ is serving, it removes `myportal.service`.
 | `/var/log/myportal/` | Application log |
 | `/var/log/myportal-updater.log` | Log of the root update cron job (`process_update_flag.sh`) |
 | `/var/lib/myportal-updater` | Root-only working directory of the update coordinator (deployment plan, locks, captured output) |
+| `/var/lib/gitea`, `/etc/gitea` | Gitea data and configuration for the RMM script library; `/etc/gitea/admin-credentials` holds the `myportal` administrator's sign-in |
 
 Check health with `curl http://localhost/readyz`, and view logs with
 `journalctl -u 'myportal@*'`.

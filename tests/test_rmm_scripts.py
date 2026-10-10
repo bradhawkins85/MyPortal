@@ -284,7 +284,7 @@ async def sqlite_db(monkeypatch):
 
 
 async def _sync(monkeypatch, files: dict[str, str], shas: dict[str, str] | None = None):
-    settings = gitea.GiteaSettings("https://git.example.com", "t", "msp", "scripts", "main", "rmm", True)
+    settings = gitea.GiteaSettings("https://git.example.com", "https://git.example.com", "t", "msp", "scripts", "main", "rmm", True)
 
     async def load_settings():
         return settings
@@ -493,6 +493,8 @@ async def test_available_variables_list_asset_fields_and_company_variables(sqlit
         ({"base_url": "", "repository": "a/b"}, "GITEA_BASE_URL"),
         ({"base_url": "ftp://git", "repository": "a/b"}, "https://"),
         ({"base_url": "https://git", "repository": "nope"}, "owner/name"),
+        ({"base_url": "https://git", "public_url": "//evil.example", "repository": "a/b"}, "GITEA_PUBLIC_URL"),
+        ({"base_url": "https://git", "public_url": "javascript:x", "repository": "a/b"}, "GITEA_PUBLIC_URL"),
     ],
 )
 async def test_gitea_settings_are_validated(monkeypatch, settings, message):
@@ -519,10 +521,31 @@ async def test_gitea_lists_only_the_configured_folder(monkeypatch):
 
     transport = httpx.MockTransport(handler)
     monkeypatch.setattr(gitea, "_client", lambda s: httpx.AsyncClient(transport=transport, headers=gitea._headers(s)))
-    settings = gitea.GiteaSettings("https://git.example.com", "secret", "msp", "scripts", "main", "rmm", True)
+    settings = gitea.GiteaSettings("https://git.example.com", "https://git.example.com", "secret", "msp", "scripts", "main", "rmm", True)
     files = await gitea.list_files(settings)
     assert [item.path for item in files] == ["rmm/a.ps1"]
     assert gitea.web_url(settings, "rmm/a b.ps1").endswith("/msp/scripts/src/branch/main/rmm/a%20b.ps1")
+
+
+@pytest.mark.anyio
+async def test_gitea_links_use_the_public_address(monkeypatch):
+    async def get_module(slug, redact=True):
+        return {"enabled": True, "settings": {
+            "base_url": "http://gitea:3000", "public_url": "/gitea/", "repository": "myportal/rmm-scripts",
+        }}
+
+    monkeypatch.setattr(gitea.modules_service, "get_module", get_module)
+    settings = await gitea.load_settings()
+    assert settings.base_url == "http://gitea:3000"
+    assert gitea.web_url(settings, "a.ps1") == "/gitea/myportal/rmm-scripts/src/branch/main/a.ps1"
+
+
+def test_gitea_module_is_on_by_default_and_reads_public_url(monkeypatch):
+    from app.services import modules
+
+    monkeypatch.setenv("GITEA_PUBLIC_URL", "/gitea/")
+    assert next(m for m in modules.DEFAULT_MODULES if m["slug"] == "gitea")["enabled"] is True
+    assert modules._coerce_settings("gitea", {}, None)["public_url"] == "/gitea"
 
 
 def test_gitea_module_redacts_token_and_reads_env(monkeypatch):

@@ -798,6 +798,8 @@ install_sip_client
 # the server must not install Go/.NET/WiX or compile unrelated client software.
 
 if [[ "$ENVIRONMENT" == "production" ]]; then
+  # The deployment (scripts/upgrade.sh) also sets up Gitea for the RMM script
+  # library with scripts/provision_gitea.sh; nginx serves it at /gitea.
   run_first_deployment
   install_update_cron
   # Install the daily backup timer so scheduled backups start on first boot.
@@ -810,6 +812,13 @@ if [[ "$ENVIRONMENT" == "production" ]]; then
     echo "Backup timer installed and enabled (daily by default)."
   fi
 
+  gitea_note=""
+  if [[ -f /etc/gitea/admin-credentials ]]; then
+    gitea_note="Scripts (Gitea):  http://$(hostname -f 2>/dev/null || hostname)/gitea/
+  Sign in as myportal; the password is in /etc/gitea/admin-credentials.
+
+"
+  fi
   cat <<MESSAGE
 MyPortal production environment is ready.
 - Environment file: ${ENV_FILE}
@@ -817,7 +826,7 @@ MyPortal production environment is ready.
 - Serving release:  $(readlink -f "${DEPLOY_ROOT}/current" 2>/dev/null || echo "<unknown>")
 - Portal URL:       http://$(hostname -f 2>/dev/null || hostname)/
 
-Open the portal URL and register the first account; it becomes the super
+${gitea_note}Open the portal URL and register the first account; it becomes the super
 administrator. Apply future updates from the portal (Administration > System
 Updates) or with:
   sudo myportal-upgrade

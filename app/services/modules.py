@@ -1194,8 +1194,12 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "name": "Gitea scripts",
         "description": "Load RMM scripts from a Gitea repository so technicians can run them on devices.",
         "icon": "📜",
+        # On by default: the installers provision a local Gitea and fill in
+        # GITEA_* settings, so scripts work without a manual toggle.
+        "enabled": True,
         "settings": {
             "base_url": "",
+            "public_url": "",
             "api_token": "",
             "repository": "",
             "branch": "main",
@@ -1407,7 +1411,7 @@ _ENV_BACKED_MODULE_FIELDS: dict[str, tuple[str, ...]] = {
         "system_user_id",
     ),
     "hudu": ("base_url", "api_key"),
-    "gitea": ("base_url", "api_token", "repository", "branch", "path", "verify_ssl"),
+    "gitea": ("base_url", "public_url", "api_token", "repository", "branch", "path", "verify_ssl"),
     "m365-admin": ("client_id", "client_secret"),
     "ntfy": ("base_url", "topic", "auth_token"),
     "ollama": ("provider", "base_url", "model", "prompt", "api_key"),
@@ -2263,6 +2267,7 @@ def _coerce_settings(
         merged.update(
             {
                 "base_url": str(merged.get("base_url", "")).strip().rstrip("/"),
+                "public_url": str(merged.get("public_url", "")).strip().rstrip("/"),
                 "api_token": api_token,
                 "repository": str(merged.get("repository", "")).strip().strip("/"),
                 "branch": str(merged.get("branch", "")).strip() or "main",
@@ -2273,6 +2278,9 @@ def _coerce_settings(
         _env = os.getenv("GITEA_BASE_URL", "").strip().rstrip("/")
         if _env:
             merged["base_url"] = _env
+        _env = os.getenv("GITEA_PUBLIC_URL", "").strip().rstrip("/")
+        if _env:
+            merged["public_url"] = _env
         _env = os.getenv("GITEA_API_TOKEN", "").strip()
         if _env:
             merged["api_token"] = _env

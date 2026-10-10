@@ -10,16 +10,45 @@ they run it.
 
 Scripts are pushed manually for now. Scheduled and triggered runs come later.
 
-## Connecting Gitea
+## Gitea
+
+### The bundled Gitea
+
+The bare-metal installer and the Docker installer both run a Gitea for you, so scripts work
+straight after installing:
+
+- Gitea is served at **`/gitea`** on the portal's own address, for example
+  `https://portal.example.com/gitea/`. Choose **Open Gitea** on the Scripts page to go there.
+- The installer creates a Gitea administrator called `myportal`, a private repository
+  `myportal/rmm-scripts`, and a read-only token for MyPortal, and fills in the `GITEA_*` settings
+  below. The administrator's password is in `/etc/gitea/admin-credentials` (bare metal) or
+  `/opt/myportal-docker/gitea-admin.txt` (Docker). Sign in with it, then create accounts for your
+  technicians under Site administration.
+- Self-registration is off and every page needs a sign-in.
+- Every upgrade checks Gitea: it is installed if missing, moved to the Gitea version the release
+  ships with, and its address follows `PORTAL_URL`. Its data is kept, and a Gitea problem never
+  stops a MyPortal upgrade (the next one retries).
+- Backups include Gitea's data (`gitea-*.tar.gz`; see [Backups](Backups.md)).
+
+On bare metal Gitea runs as the `gitea` service (`systemctl status gitea`) with its data in
+`/var/lib/gitea`. On Docker it is the `gitea` container (`myportal-docker logs gitea`) with its
+data in the `myportal_gitea_data` volume.
+
+To use your own Gitea server instead, set `GITEA_BASE_URL` (and the other settings below) to it;
+the installers then leave Gitea alone. Set `GITEA_PROVISION=false` to stop them running Gitea
+without connecting another one.
+
+### Connecting another Gitea server
 
 1. Create a repository in Gitea for your scripts and a personal access token with read access
    to it.
-2. Set these values in `.env` and enable the **Gitea scripts** module (`gitea`) under
-   Administration → Modules:
+2. Set these values in `.env` (the **Gitea scripts** module, `gitea`, is on by default under
+   Administration → Modules):
 
    | Setting | Meaning |
    | --- | --- |
    | `GITEA_BASE_URL` | Address of your Gitea server, e.g. `https://git.example.com` |
+   | `GITEA_PUBLIC_URL` | Address technicians open, when it differs from `GITEA_BASE_URL` (a path such as `/gitea` is relative to the portal) |
    | `GITEA_API_TOKEN` | Token with read access to the repository |
    | `GITEA_SCRIPTS_REPOSITORY` | `owner/name` of the repository |
    | `GITEA_SCRIPTS_BRANCH` | Branch to load (default `main`) |

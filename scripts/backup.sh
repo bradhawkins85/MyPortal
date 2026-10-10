@@ -32,7 +32,7 @@ Usage: backup.sh [options]
 Options:
   --label LABEL     Label for this backup set (default: scheduled)
   --db-only         Back up the database only
-  --files-only      Back up the uploads directory only
+  --files-only      Back up the uploads directory (and Gitea) only
   --restore FILE    Restore a database backup and exit
   --dry-run         Print actions without executing
   -h, --help        Show this help
@@ -46,6 +46,8 @@ Environment:
                              (default: 10)
   MYPORTAL_SHARED_ROOT       Shared data root (private_uploads/, uploads/)
                              (default: /opt/myportal/shared)
+  MYPORTAL_GITEA_HOME        Gitea data for RMM scripts, backed up with the
+                             files when present (default: /var/lib/gitea)
   SKIP_PRE_UPGRADE_BACKUP    Set to true to skip the pre-upgrade
                              database backup (not recommended)
 EOF
@@ -78,6 +80,8 @@ fi
 
 ENV_FILE="${MYPORTAL_ENV_FILE:-/etc/myportal.env}"
 BACKUP_DIR="${BACKUP_DIR:-/opt/myportal/backups}"
+GITEA_HOME="${MYPORTAL_GITEA_HOME:-/var/lib/gitea}"
+GITEA_CONFIG_DIR="${MYPORTAL_GITEA_CONFIG_DIR:-/etc/gitea}"
 MYPORTAL_BACKUPS_TO_KEEP="${MYPORTAL_BACKUPS_TO_KEEP:-10}"
 SHARED_ROOT="${MYPORTAL_SHARED_ROOT:-/opt/myportal/shared}"
 
@@ -239,6 +243,25 @@ backup_uploads() {
   info "Uploads backup complete: ${file}"
 }
 
+backup_gitea() {
+  # The RMM script library (scripts/provision_gitea.sh), when this host runs it.
+  local label="$1"
+  [[ -d "$GITEA_HOME" ]] || return 0
+  local file="${BACKUP_DIR}/gitea-${label}-${TIMESTAMP}.tar.gz"
+  info "Backing up the Gitea script library to ${file}…"
+
+  if [[ "$DRY_RUN" == true ]]; then
+    info "[dry-run] Would archive ${GITEA_HOME} and ${GITEA_CONFIG_DIR} to ${file}"
+    return 0
+  fi
+
+  local -a paths=("${GITEA_HOME#/}")
+  [[ -d "$GITEA_CONFIG_DIR" ]] && paths+=("${GITEA_CONFIG_DIR#/}")
+  tar -czf "$file" -C / "${paths[@]}"
+  chmod 0600 "$file"
+  info "Gitea backup complete: ${file}"
+}
+
 prune_backups() {
   local keep="$MYPORTAL_BACKUPS_TO_KEEP"
   if [[ ! -d "$BACKUP_DIR" ]]; then
@@ -248,7 +271,7 @@ prune_backups() {
   info "Pruning old backups (keeping ${keep} of each kind)…"
 
   local kind
-  for kind in db files; do
+  for kind in db files gitea; do
     # Collect all files of this kind, sorted by modification time (newest first).
     # The `|| true` prevents `set -e` from killing the subshell when no files match.
     local -a all_files=()
@@ -294,6 +317,7 @@ fi
 
 if [[ "$DO_FILES" == true ]]; then
   backup_uploads "$LABEL"
+  backup_gitea "$LABEL"
 fi
 
 prune_backups
