@@ -32,8 +32,24 @@ Respond with one JSON object and nothing else:
 }"""
 
 
+# What the page shows for each reason a summary could not be written.
+MESSAGES = {
+    "not_configured": "Set up the Ollama module to get AI summaries of scripts.",
+    "unreachable": "The AI module could not be reached. Try again later.",
+    "disabled": "The AI module is turned off, so scripts cannot be summarised.",
+    "unusable": "The AI module did not return a usable summary. Try again.",
+}
+
+
 class SummaryUnavailable(Exception):
-    """The AI module is not set up, or it did not return a usable summary."""
+    """The AI module is not set up, or it did not return a usable summary.
+
+    ``code`` is a key of :data:`MESSAGES`; only that fixed text is shown to users.
+    """
+
+    def __init__(self, code: str) -> None:
+        super().__init__(MESSAGES[code])
+        self.code = code
 
 
 def summary_state(script: Mapping[str, Any]) -> dict[str, Any]:
@@ -130,18 +146,17 @@ async def generate_summary(script: Mapping[str, Any]) -> dict[str, Any]:
             "ollama", {"prompt": build_summary_prompt(script), "format": "json"}, background=False
         )
     except ValueError as exc:
-        raise SummaryUnavailable("Set up the Ollama module to get AI summaries of scripts.") from exc
+        raise SummaryUnavailable("not_configured") from exc
     except Exception as exc:  # pragma: no cover - network interaction
         log_error("RMM script AI summary failed", script_id=script.get("id"), error=str(exc))
-        raise SummaryUnavailable("The AI module could not be reached. Try again later.") from exc
+        raise SummaryUnavailable("unreachable") from exc
     if not modules_service.module_result_succeeded(response):
-        reason = response.get("reason") if isinstance(response, Mapping) else None
-        raise SummaryUnavailable(str(reason or "The AI module is turned off, so scripts cannot be summarised."))
+        raise SummaryUnavailable("disabled")
     try:
         summary = parse_summary(response.get("response"))
     except ValueError as exc:
         log_error("RMM script AI summary unreadable", script_id=script.get("id"), error=str(exc))
-        raise SummaryUnavailable("The AI module did not return a usable summary. Try again.") from exc
+        raise SummaryUnavailable("unusable") from exc
     model = response.get("model")
     if not isinstance(model, str):
         payload = response.get("response")
@@ -159,6 +174,7 @@ async def generate_summary(script: Mapping[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
+    "MESSAGES",
     "SummaryUnavailable",
     "build_summary_prompt",
     "generate_summary",

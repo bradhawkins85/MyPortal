@@ -262,7 +262,8 @@ async def summarise_script_api(script_id: int, request: Request):
     try:
         state = await rmm_script_summary.generate_summary(script)
     except rmm_script_summary.SummaryUnavailable as exc:
-        return JSONResponse({"detail": str(exc)}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
+        detail = rmm_script_summary.MESSAGES.get(exc.code, rmm_script_summary.MESSAGES["unusable"])
+        return JSONResponse({"detail": detail}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
     await audit_service.record(
         action="rmm.script.summarise",
         request=request,

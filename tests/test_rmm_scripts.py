@@ -1130,8 +1130,9 @@ async def test_summary_reports_when_the_ai_module_is_unavailable(sqlite_db, monk
     async def garbage(slug, payload, **_kwargs):
         return {"status": "succeeded", "response": "I cannot help with that"}
 
-    for fake, message in ((missing, "Set up the Ollama module"), (disabled, "Module disabled"), (garbage, "usable summary")):
+    for fake, code in ((missing, "not_configured"), (disabled, "disabled"), (garbage, "unusable")):
         monkeypatch.setattr(modules_service, "trigger_module", fake)
-        with pytest.raises(summaries.SummaryUnavailable, match=message):
+        with pytest.raises(summaries.SummaryUnavailable) as raised:
             await summaries.generate_summary(script)
+        assert raised.value.code == code and str(raised.value) == summaries.MESSAGES[code]
     assert summaries.summary_state(await rmm_repo.get_script(script["id"], with_content=True))["summary"] is None
