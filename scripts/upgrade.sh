@@ -100,6 +100,8 @@ mode flags remain accepted for callers, but never update a live checkout.
 EOF
 }
 
+# Kept for re-running the updated script once the control checkout moves.
+UPGRADE_ARGS=("$@")
 while (($#)); do
   case "$1" in
     --rolling|--graceful|--restart) REQUESTED_UPGRADE_MODE="${1#--}" ;;
@@ -970,6 +972,41 @@ print(f"Recorded {key}={checkout} in {path}.")
 PY
 }
 
+update_control_checkout() {
+  # Only the release is built from origin/main; this script, the provisioning
+  # helpers it runs and the cron updater all run from the control checkout.
+  # Fast-forward the checkout so a release's new upgrade steps (such as
+  # setting up Gitea) run without updating the checkout by hand. Returns 0
+  # only when the checkout moved. A checkout on another branch, with local
+  # commits or with local changes is left as it is.
+  local target="$1" owner branch
+  [[ "$(git rev-parse HEAD)" != "$target" ]] || return 1
+  branch=$(git symbolic-ref --quiet --short HEAD || true)
+  if [[ "$branch" != main ]]; then
+    echo "Warning: the control checkout at ${PROJECT_ROOT} is not on main; its upgrade scripts were not updated." >&2
+    return 1
+  fi
+  if ! git merge-base --is-ancestor HEAD "$target"; then
+    echo "Warning: the control checkout at ${PROJECT_ROOT} has commits that are not on origin/main; its upgrade scripts were not updated." >&2
+    return 1
+  fi
+  if ! git diff --quiet HEAD --; then
+    echo "Warning: the control checkout at ${PROJECT_ROOT} has local changes; its upgrade scripts were not updated. Commit or discard them so later upgrades can update it." >&2
+    return 1
+  fi
+  # Keep the checkout's files owned by whoever cloned it.
+  owner=$(stat -c %U "$PROJECT_ROOT")
+  if [[ "$owner" == root || "$owner" == UNKNOWN ]]; then
+    git merge --ff-only --quiet "$target"
+  else
+    runuser -u "$owner" -- git merge --ff-only --quiet "$target"
+  fi || {
+    echo "Warning: could not update the control checkout at ${PROJECT_ROOT}; update it by hand." >&2
+    return 1
+  }
+  echo "Updated the control checkout at ${PROJECT_ROOT} to ${target}." >&2
+}
+
 verify_release_sources() {
   # Refuse a release whose Python does not even parse (for example a stray
   # "continue" outside a loop) before migrations run or any slot restarts.
@@ -1133,6 +1170,13 @@ install_backup_command || echo "Warning: could not install the myportal-backup c
 record_control_checkout || echo "Warning: could not record MYPORTAL_CONTROL_CHECKOUT in ${ENV_FILE}." >&2
 validate_origin_remote "$(git config --get remote.origin.url)"
 validate_required_configuration
+git fetch --quiet origin main
+TARGET_REVISION=$(git rev-parse 'origin/main^{commit}')
+if [[ -z "${MYPORTAL_UPGRADE_REEXEC:-}" ]] && update_control_checkout "$TARGET_REVISION"; then
+  # Run the updated upgrade script, which takes the lock itself.
+  exec 9>&-
+  MYPORTAL_UPGRADE_REEXEC=1 exec bash "${SCRIPT_DIR}/upgrade.sh" "${UPGRADE_ARGS[@]}"
+fi
 redis_env_before=$(sha256sum "$ENV_FILE")
 bash "${SCRIPT_DIR}/provision_redis.sh" "$ENV_FILE"
 # Gitea for the RMM script library is optional: a failure is reported and
@@ -1142,8 +1186,6 @@ bash "${SCRIPT_DIR}/provision_gitea.sh" "$ENV_FILE" \
 redis_env_after=$(sha256sum "$ENV_FILE")
 UPGRADE_STARTED_AT=$(date --iso-8601=seconds)
 PREVIOUS_RELEASE=$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)
-git fetch --quiet origin main
-TARGET_REVISION=$(git rev-parse 'origin/main^{commit}')
 RELEASE_DIR="${RELEASE_ROOT}/${TARGET_REVISION}"
 PLAN_BASE=$(resolve_plan_base "$PREVIOUS_RELEASE")
 generate_deployment_plan "$PLAN_BASE" "$TARGET_REVISION"

@@ -1,0 +1,7 @@
+{
+  "guid": "2d9adceb-25f5-41ec-a7c1-7080aeb1bda6",
+  "occurred_at": "2026-10-10T05:10Z",
+  "change_type": "Fix",
+  "summary": "Upgrades: bare-metal upgrades now update the control checkout first, so new setup steps such as Gitea run on automatic updates",
+  "content_hash": "0d5c14095193aa9fdd24608998d57cdd1659715451d16c02fc926e174c82b3d2"
+}

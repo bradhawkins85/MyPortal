@@ -115,7 +115,11 @@ sudo myportal-upgrade
 `myportal-upgrade` is installed by the first deployment and runs
 `scripts/upgrade.sh` from your control checkout, wherever you cloned it. On a
 server deployed before this command existed, run the script from the checkout
-directly. `/opt/myportal/control` is only the suggested clone location; to find
+directly. Each upgrade, including one started from the portal, first
+fast-forwards the control checkout to `origin/main` and runs the new
+`upgrade.sh`, so new setup steps (such as Gitea) apply without a manual
+`git pull`. A checkout with local changes, local commits or another branch is
+left alone, and the upgrade says so. `/opt/myportal/control` is only the suggested clone location; to find
 where yours is, run:
 
 ```bash
