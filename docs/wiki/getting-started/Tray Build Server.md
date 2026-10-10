@@ -138,6 +138,7 @@ change settings or update WiX.
 | Symptom | Fix |
 | --- | --- |
 | `agent.log` repeats *Installing WixToolset.BootstrapperApplications.wixext* | Update the agent: older copies did not accept the WiX v7 EULA, so the extension install failed without logging why. Run `Install-MyPortalBuildAgent.ps1` again from the latest `tray/build-agent` folder. Any other *WiX setup failed* line in the log names the cause. |
+| *WiX setup failed: wix extension failed* with a NuGet error | The agent downloads the WiX Burn extension from `api.nuget.org` using its own NuGet.Config, so check the server can reach `api.nuget.org` over HTTPS (through any proxy the SYSTEM account uses). |
 | Builds stay *Queued* | Check the scheduled task's last result and `agent.log`. A 401 or 403 means the API key, its IP allow list or its path permissions are wrong. |
 | *Failed: Release … predates deployment URL support* | The cached tray release was tagged before this feature. Publish a new tray release, then press **Rebuild**. |
 | *Failed: go build / npm ci failed* | Check Go and Node.js are installed machine-wide and the server can reach `proxy.golang.org` and `registry.npmjs.org`. Delete the release's folder under `C:\MyPortalBuild\payloads` to force a clean build. |

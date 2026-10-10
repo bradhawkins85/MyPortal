@@ -1,0 +1,7 @@
+{
+  "guid": "21b03554-509b-4900-a8e7-6370f702a6cf",
+  "occurred_at": "2026-10-10T04:55Z",
+  "change_type": "Fix",
+  "summary": "Tray build agent: download the WiX Burn extension from nuget.org only, ignoring other NuGet sources on the build server, and log WiX error messages without stack traces",
+  "content_hash": "fba153e39c9e5f63209ae89ca8ea214974173d5ea5a6bed936c805346c751c68"
+}
