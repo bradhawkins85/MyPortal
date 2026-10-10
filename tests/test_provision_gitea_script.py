@@ -137,7 +137,7 @@ def test_binary_is_not_installed_on_checksum_mismatch(tmp_path, checksum):
     assert "checksum" in result.stderr
 
 
-def test_first_run_creates_admin_repository_and_read_only_token(tmp_path):
+def test_first_run_creates_admin_repository_and_token(tmp_path):
     path = env_file(tmp_path, "GITEA_BASE_URL=\nGITEA_API_TOKEN=\nPORTAL_URL=https://portal.example.com\n")
     calls = tmp_path / "calls"
     token = "a" * 40
@@ -159,7 +159,7 @@ def test_first_run_creates_admin_repository_and_read_only_token(tmp_path):
                  "GITEA_SCRIPTS_REPOSITORY=myportal/rmm-scripts", "GITEA_SCRIPTS_BRANCH=main"):
         assert line in settings.splitlines()
     log = calls.read_text()
-    assert "--scopes read:repository" in log
+    assert "--scopes write:repository" in log
     assert "--random-password" in log
     # Secrets travel on stdin, escaped for curl's config syntax, never as arguments.
     assert f'stdin=header = "Authorization: token {token}"' in log

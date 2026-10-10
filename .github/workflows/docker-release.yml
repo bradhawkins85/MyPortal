@@ -121,7 +121,7 @@ jobs:
           done
           grep -q '"status":"ok"' /tmp/readyz || { docker logs app; exit 1; }
           status=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' \
-            -d '{"email":"admin@example.com","password":"Smoke-Test-Password-1"}' \
+            -d '{"email":"admin@example.com","password":"Smoke-Test-Password-1","accept_policies":true}' \
             http://127.0.0.1:8000/auth/register)
           [[ "$status" == 201 ]] || { echo "registration returned $status" >&2; docker logs app; exit 1; }
           docker exec app python -c 'import weasyprint; weasyprint.HTML(string="<p>ok</p>").write_pdf("/tmp/smoke.pdf")'

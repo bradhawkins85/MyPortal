@@ -80,6 +80,8 @@ def _script_summary(script: dict[str, Any]) -> dict[str, Any]:
         "name": script["name"],
         "path": script["path"],
         "folder": script.get("folder") or "",
+        # Common scripts run anywhere; company scripts only on that company's devices.
+        "scope": "company" if script.get("company_id") is not None else "common",
         "language": script["language"],
         "language_label": parser.LANGUAGE_LABELS.get(script["language"], script["language"]),
         "description": script.get("description") or "",
@@ -118,7 +120,7 @@ async def scripts_page(request: Request):
         return context
     user, company, company_id, can_run = context
     await rmm_repo.expire_stale_runs()
-    scripts = await rmm_repo.list_scripts()
+    scripts = await rmm_repo.list_scripts(company_id=company_id)
     agents = await rmm_repo.list_company_agents(company_id)
     runs = await rmm_repo.list_runs(company_id=company_id, limit=200)
     gitea_ready = True
@@ -180,8 +182,8 @@ async def sync_scripts(request: Request):
 
 @router.get("/api/rmm/scripts", summary="List RMM scripts")
 async def list_scripts_api(request: Request):
-    await _context(request, api=True)
-    scripts = await rmm_repo.list_scripts()
+    _user, _company, company_id, _can_run = await _context(request, api=True)
+    scripts = await rmm_repo.list_scripts(company_id=company_id)
     return {"scripts": [_script_summary(script) for script in scripts]}
 
 
@@ -189,7 +191,7 @@ async def list_scripts_api(request: Request):
 async def get_script_api(script_id: int, request: Request):
     _user, _company, company_id, can_run = await _context(request, api=True)
     script = await rmm_repo.get_script(script_id, with_content=True)
-    if not script or not script.get("is_active"):
+    if not rmm_repo.script_available_to(script, company_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Script not found")
     agents = await rmm_repo.list_company_agents(company_id)
     return {

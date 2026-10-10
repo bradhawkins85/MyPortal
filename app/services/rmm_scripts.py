@@ -3,7 +3,9 @@
 The flow for a manual run:
 
 1. :func:`sync_from_gitea` loads ``.ps1``/``.sh``/``.zsh`` files and stores the
-   parameters and environment variables :mod:`rmm_script_parser` finds.
+   parameters and environment variables :mod:`rmm_script_parser` finds. Scripts
+   live in ``Common/`` (every company) or ``Companies/<company>/`` (that
+   company's devices only); :func:`ensure_folders` creates those folders.
 2. A technician fills in a field for each one, with a typed value or a MyPortal
    variable such as ``{{company.variables.TenantId}}`` or
    ``{{asset.custom.BitLocker}}``. :func:`queue_runs` resolves those per device,
@@ -16,8 +18,10 @@ The flow for a manual run:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
+import random
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -35,6 +39,7 @@ from app.services import gitea
 from app.services import rmm_script_parser as parser
 from app.services import tray as tray_service
 from app.services import value_templates
+from app.services.singleton_jobs import singleton_run
 
 MIN_TIMEOUT_SECONDS = 10
 MAX_TIMEOUT_SECONDS = 4 * 60 * 60
@@ -73,7 +78,9 @@ class SyncSummary:
     updated: int = 0
     unchanged: int = 0
     removed: int = 0
+    folders_created: int = 0
     skipped: list[dict[str, str]] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -81,7 +88,9 @@ class SyncSummary:
             "updated": self.updated,
             "unchanged": self.unchanged,
             "removed": self.removed,
+            "folders_created": self.folders_created,
             "skipped": self.skipped,
+            "warnings": self.warnings,
         }
 
     def message(self) -> str:
@@ -90,7 +99,10 @@ class SyncSummary:
             parts.append(f"{self.removed} removed")
         if self.skipped:
             parts.append(f"{len(self.skipped)} skipped")
-        return "Scripts synced from Gitea: " + ", ".join(parts) + "."
+        if self.folders_created:
+            parts.append(f"{self.folders_created} folder{'' if self.folders_created == 1 else 's'} created")
+        text = "Scripts synced from Gitea: " + ", ".join(parts) + "."
+        return " ".join([text, *self.warnings])
 
 
 # --------------------------------------------------------------------------- #
@@ -98,36 +110,227 @@ class SyncSummary:
 # --------------------------------------------------------------------------- #
 
 
+COMMON_FOLDER = "Common"
+COMPANIES_FOLDER = "Companies"
+# Links a folder in Companies/ to a MyPortal company, so the folder can be
+# renamed in Gitea without losing which company its scripts belong to.
+COMPANY_MARKER = ".myportal-company"
+FOLDER_CHECK_INTERVAL_SECONDS = 600
+_FOLDER_UNSAFE = re.compile(r'[\x00-\x1f\x7f/\\:*?"<>|]+')
+
+_COMMON_README = """# Common scripts
+
+Scripts in this folder (and its subfolders) can be run on any company's devices
+from MyPortal's Scripts page. Use Sync from Gitea in MyPortal after changing them.
+"""
+
+_COMPANIES_README = """# Company scripts
+
+MyPortal creates a folder here for every company. Scripts in a company's folder
+(and its subfolders) can only be run on that company's devices.
+
+Each folder holds a `.myportal-company` file linking it to the company. Keep that
+file; the folder itself can be renamed.
+"""
+
+
 def _display_name(path: str) -> str:
     filename = path.rsplit("/", 1)[-1]
     return filename.rsplit(".", 1)[0] if "." in filename else filename
 
 
-def _folder(path: str, root: str) -> str:
-    relative = path[len(root) + 1:] if root and path.startswith(root + "/") else path
+def _relative(path: str, root: str) -> str | None:
+    """``path`` relative to the configured folder, or ``None`` outside it."""
+
+    if not root:
+        return path
+    return path[len(root) + 1:] if path.startswith(root + "/") else None
+
+
+def _repo_path(relative: str, root: str) -> str:
+    return f"{root}/{relative}" if root else relative
+
+
+def _folder(relative: str) -> str:
     return relative.rsplit("/", 1)[0] if "/" in relative else ""
 
 
-async def sync_from_gitea() -> SyncSummary:
-    """Load every supported script from the configured Gitea repository."""
+def company_folder_names(companies: Iterable[Mapping[str, Any]]) -> dict[int, str]:
+    """Folder name for each company: its name made safe for a path, unique
+    (ignoring case) by adding the company id when two names collide."""
+
+    names: dict[int, str] = {}
+    used: set[str] = set()
+    for company in sorted(companies, key=lambda item: int(item["id"])):
+        company_id = int(company["id"])
+        base = _FOLDER_UNSAFE.sub("-", str(company.get("name") or "")).strip(" .-")[:100].strip(" .")
+        name = base or f"Company {company_id}"
+        if name.casefold() in used:
+            name = f"{name} ({company_id})"
+        used.add(name.casefold())
+        names[company_id] = name
+    return names
+
+
+def _marker(company_id: int, name: str) -> str:
+    return json.dumps(
+        {
+            "company_id": company_id,
+            "company": name,
+            "note": "Links this folder to a MyPortal company: its scripts run only on that company's devices.",
+        },
+        indent=2,
+    ) + "\n"
+
+
+@dataclass
+class RepositoryLayout:
+    """Which ``Companies/`` folder belongs to which company, and the files
+    still needed to give every folder its place in the repository."""
+
+    company_folders: dict[str, int] = field(default_factory=dict)
+    missing: dict[str, str] = field(default_factory=dict)
+
+
+async def read_layout(
+    settings: gitea.GiteaSettings, files: list[gitea.GiteaFile], companies: list[Mapping[str, Any]]
+) -> RepositoryLayout:
+    layout = RepositoryLayout()
+    known = {int(company["id"]): company for company in companies}
+    relative_paths = [rel for rel in (_relative(item.path, settings.path) for item in files) if rel is not None]
+    company_dirs = {
+        rel.split("/")[1] for rel in relative_paths if rel.startswith(COMPANIES_FOLDER + "/") and rel.count("/") >= 2
+    }
+
+    for item in files:
+        rel = _relative(item.path, settings.path)
+        parts = rel.split("/") if rel else []
+        if len(parts) != 3 or parts[0] != COMPANIES_FOLDER or parts[2] != COMPANY_MARKER:
+            continue
+        try:
+            company_id = int(json.loads((await gitea.fetch_file(settings, item.path)).decode("utf-8"))["company_id"])
+        except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+            log_warning("Ignoring an unreadable company folder marker", path=item.path)
+            continue
+        if company_id in known and parts[1] not in layout.company_folders:
+            layout.company_folders[parts[1]] = company_id
+
+    linked = set(layout.company_folders.values())
+    by_name = {name.casefold(): name for name in company_dirs if name not in layout.company_folders}
+    for company_id, name in company_folder_names(companies).items():
+        if company_id in linked:
+            continue
+        folder = by_name.pop(name.casefold(), None)
+        if folder is None:
+            if known[company_id].get("archived"):
+                continue
+            folder = name
+        # A folder someone made by hand for this company is linked, not duplicated.
+        layout.company_folders[folder] = company_id
+        layout.missing[f"{COMPANIES_FOLDER}/{folder}/{COMPANY_MARKER}"] = _marker(company_id, str(known[company_id].get("name") or name))
+
+    if not any(rel.startswith(COMMON_FOLDER + "/") for rel in relative_paths):
+        layout.missing[f"{COMMON_FOLDER}/README.md"] = _COMMON_README
+    if not any(rel.startswith(COMPANIES_FOLDER + "/") for rel in relative_paths):
+        layout.missing[f"{COMPANIES_FOLDER}/README.md"] = _COMPANIES_README
+    return layout
+
+
+def script_scope(relative: str, layout: RepositoryLayout) -> tuple[bool, int | None, str]:
+    """``(usable, company_id, reason)`` for a script at ``relative``."""
+
+    parts = relative.split("/")
+    if parts[0] == COMMON_FOLDER and len(parts) > 1:
+        return True, None, ""
+    if parts[0] == COMPANIES_FOLDER and len(parts) > 2:
+        company_id = layout.company_folders.get(parts[1])
+        if company_id is None:
+            return False, None, f"{COMPANIES_FOLDER}/{parts[1]} is not linked to a company"
+        return True, company_id, ""
+    return False, None, f"Not in {COMMON_FOLDER}/ or a company folder in {COMPANIES_FOLDER}/"
+
+
+async def _create_missing(settings: gitea.GiteaSettings, layout: RepositoryLayout) -> int:
+    if not layout.missing:
+        return 0
+    await gitea.create_files(
+        settings,
+        {_repo_path(path, settings.path): content for path, content in sorted(layout.missing.items())},
+        "Add MyPortal script folders",
+    )
+    log_info("Created RMM script folders in Gitea", files=sorted(layout.missing))
+    return len(layout.missing)
+
+
+async def ensure_folders() -> int:
+    """Create ``Common/``, ``Companies/`` and a folder for every company that
+    lacks one. Returns the number of files created."""
 
     settings = await gitea.load_settings()
     files = await gitea.list_files(settings)
+    companies = await companies_repo.list_companies(include_archived=True)
+    return await _create_missing(settings, await read_layout(settings, files, companies))
+
+
+@singleton_run("rmm_gitea_folders", ttl_seconds=300)
+async def _ensure_folders_once() -> None:
+    try:
+        await ensure_folders()
+    except gitea.GiteaError as exc:
+        log_info("RMM script folders not checked", reason=str(exc))
+
+
+async def folder_maintenance_loop() -> None:
+    """Keep a folder for every company, including companies added later."""
+
+    await asyncio.sleep(30 + random.uniform(0, 30))  # nosec B311 - start-up jitter, not security
+    while True:
+        try:
+            await _ensure_folders_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # pragma: no cover - logged and retried
+            log_warning("RMM script folder check failed", error=str(exc))
+        await asyncio.sleep(FOLDER_CHECK_INTERVAL_SECONDS)
+
+
+async def sync_from_gitea() -> SyncSummary:
+    """Create any missing folders, then load every script in ``Common/`` and
+    the company folders in ``Companies/``."""
+
+    settings = await gitea.load_settings()
+    files = await gitea.list_files(settings)
+    companies = await companies_repo.list_companies(include_archived=True)
+    layout = await read_layout(settings, files, companies)
     existing = await rmm_repo.script_source_index()
     summary = SyncSummary()
+    try:
+        summary.folders_created = await _create_missing(settings, layout)
+    except gitea.GiteaError as exc:
+        summary.warnings.append(str(exc))
     seen: set[str] = set()
     unchanged: list[str] = []
 
     for item in files:
         language = parser.language_for_path(item.path)
-        if not language:
+        relative = _relative(item.path, settings.path)
+        if not language or relative is None:
+            continue
+        usable, company_id, reason = script_scope(relative, layout)
+        if not usable:
+            summary.skipped.append({"path": item.path, "reason": reason})
             continue
         seen.add(item.path)
         if item.size > parser.MAX_SCRIPT_BYTES:
             summary.skipped.append({"path": item.path, "reason": "Larger than 1 MB"})
             continue
         stored = existing.get(item.path)
-        if stored and stored.get("source_sha") == item.sha and stored.get("is_active"):
+        if (
+            stored
+            and stored.get("source_sha") == item.sha
+            and stored.get("is_active")
+            and stored.get("company_id") == company_id
+        ):
             unchanged.append(item.path)
             summary.unchanged += 1
             continue
@@ -141,7 +344,7 @@ async def sync_from_gitea() -> SyncSummary:
         await rmm_repo.upsert_script(
             path=item.path,
             name=_display_name(item.path),
-            folder=_folder(item.path, settings.path),
+            folder=_folder(relative),
             language=language,
             description=parsed.description[:2000],
             content=content,
@@ -149,6 +352,7 @@ async def sync_from_gitea() -> SyncSummary:
             source_sha=item.sha,
             parameters=parsed.to_dict()["parameters"],
             env_vars=parsed.to_dict()["env_vars"],
+            company_id=company_id,
         )
         if stored:
             summary.updated += 1
@@ -434,7 +638,7 @@ async def queue_runs(
     """Queue the script on each device. Returns the queued run ids and per-device problems."""
 
     script = await rmm_repo.get_script(script_id, with_content=True)
-    if not script or not script.get("is_active"):
+    if not rmm_repo.script_available_to(script, company_id):
         raise RunRequestError({"script": "That script is no longer available. Sync scripts and try again."})
     targets = list(dict.fromkeys(int(asset_id) for asset_id in asset_ids))
     if not targets:
@@ -620,11 +824,10 @@ async def wait_for_jobs(agent: Mapping[str, Any], *, wait_seconds: float) -> lis
             remaining = deadline - loop.time()
             if jobs or remaining <= 0:
                 return jobs
-            # Runs queued on another worker are found on the next pass.
-            try:
+            # Runs queued on another worker are found on the next pass, so a
+            # timeout here just means "check the database again".
+            with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(event.wait(), timeout=min(5.0, remaining))
-            except asyncio.TimeoutError:
-                pass
     finally:
         if _agent_events.get(agent_id) is event and not event.is_set():
             _agent_events.pop(agent_id, None)

@@ -5,8 +5,9 @@
 # Gitea runs from the official binary as the "gitea" service account on
 # 127.0.0.1:3000, and nginx serves it at /gitea on the portal's address. The
 # first run creates an administrator, a private "rmm-scripts" repository and a
-# read-only token, and writes the GITEA_* settings MyPortal needs. Later runs
-# move the binary to GITEA_VERSION and keep data, accounts and settings.
+# token MyPortal uses to read scripts and create the script folders, and
+# writes the GITEA_* settings MyPortal needs. Later runs move the binary to
+# GITEA_VERSION and keep data, accounts and settings.
 #
 # Skipped when GITEA_PROVISION=false or GITEA_BASE_URL names another server.
 #
@@ -356,9 +357,9 @@ ensure_admin() {
 }
 
 create_token() {
-  # Prints a new read-only token for MyPortal.
+  # Prints a new token for MyPortal: it reads scripts and creates the folders.
   gitea_cli admin user generate-access-token --username "$GITEA_ADMIN_USER" \
-    --token-name "myportal-$(date -u +%Y%m%d%H%M%S)" --scopes read:repository \
+    --token-name "myportal-$(date -u +%Y%m%d%H%M%S)" --scopes write:repository \
     | grep -oE '[0-9a-f]{40}' | tail -n1
 }
 

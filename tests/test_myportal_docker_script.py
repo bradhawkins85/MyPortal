@@ -744,7 +744,7 @@ def test_connect_gitea_creates_account_repository_and_token(tmp_path):
     assert admin.read_text() == "url=http://box/gitea/\nusername=myportal\npassword=secret-pw\n"
     assert admin.stat().st_mode & 0o777 == 0o600
     log = (tmp_path / "calls").read_text()
-    assert "--scopes read:repository" in log
+    assert "--scopes write:repository" in log
     assert 'api POST /user/repos' in log and 'stdin=user = "myportal:secret-pw"' in log
     assert "secret-pw" not in log.split("stdin=")[0]
 

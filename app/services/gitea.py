@@ -1,8 +1,9 @@
-"""Read-only Gitea client used to load RMM scripts from a repository.
+"""Gitea client used to load RMM scripts from a repository.
 
-Gitea is where scripts are written and reviewed; MyPortal only reads them. The
-repository, branch and optional folder come from the ``gitea`` integration
-module (``GITEA_*`` settings in ``.env``).
+Gitea is where scripts are written and reviewed. MyPortal reads them, and only
+writes the folder skeleton (``Common/``, ``Companies/<company>/``) with
+:func:`create_files`. The repository, branch and optional folder come from the
+``gitea`` integration module (``GITEA_*`` settings in ``.env``).
 """
 
 from __future__ import annotations
@@ -10,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
+
+import base64
 
 import httpx
 
@@ -140,6 +143,33 @@ async def fetch_file(settings: GiteaSettings, path: str) -> bytes:
         raise GiteaError(f"Could not reach Gitea: {exc.__class__.__name__}") from exc
     _raise_for(response, "downloading " + path)
     return response.content
+
+
+async def create_files(settings: GiteaSettings, files: dict[str, str], message: str) -> None:
+    """Create text files on the configured branch in a single commit.
+
+    ``files`` maps repository paths to their content. Needs a token with write
+    access to the repository.
+    """
+
+    if not files:
+        return
+    body = {
+        "branch": settings.branch,
+        "message": message,
+        "files": [
+            {"operation": "create", "path": path, "content": base64.b64encode(content.encode("utf-8")).decode("ascii")}
+            for path, content in files.items()
+        ],
+    }
+    try:
+        async with _client(settings) as client:
+            response = await client.post(_repo_url(settings) + "/contents", json=body)
+    except httpx.HTTPError as exc:
+        raise GiteaError(f"Could not reach Gitea: {exc.__class__.__name__}") from exc
+    if response.status_code in (401, 403):
+        raise GiteaError("Gitea refused to create folders. GITEA_API_TOKEN needs write access to the repository.")
+    _raise_for(response, "creating folders")
 
 
 def repository_url(settings: GiteaSettings) -> str:

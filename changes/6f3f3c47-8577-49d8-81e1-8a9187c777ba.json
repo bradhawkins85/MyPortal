@@ -1,0 +1,7 @@
+{
+  "guid": "6f3f3c47-8577-49d8-81e1-8a9187c777ba",
+  "occurred_at": "2026-10-10T04:30Z",
+  "change_type": "Feature",
+  "summary": "RMM Scripts: Gitea now has Common and per-company folders created automatically, and company scripts run only on that company's devices",
+  "content_hash": "a43809785db316318c962e3b5e84678df6c4fea37cd74891fdcf6d5db74ff734"
+}

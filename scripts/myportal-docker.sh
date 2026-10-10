@@ -438,7 +438,7 @@ ensure_local_redis() {
 #
 # A Gitea container holds the scripts technicians run from MyPortal's Scripts
 # page; the proxy serves it at /gitea. The first deploy creates an
-# administrator, a private "rmm-scripts" repository and a read-only token, and
+# administrator, a private "rmm-scripts" repository and a repository token, and
 # writes the GITEA_* settings into myportal.env. Installations with
 # GITEA_PROVISION=false, or whose GITEA_BASE_URL names another server, are
 # left alone.
@@ -546,13 +546,14 @@ ensure_gitea_repository() {
 }
 
 connect_gitea() {
-  # Gives MyPortal a read-only token and the repository once.
+  # Gives MyPortal a token (it reads scripts and creates the script folders)
+  # and the repository, once.
   local token key value
   token=$(get_setting "$APP_ENV" GITEA_API_TOKEN)
   if [[ -z "$token" ]]; then
     ensure_gitea_admin || return 1
     token=$(gitea_cli admin user generate-access-token --username "$GITEA_ADMIN_USER" \
-      --token-name "myportal-$(date -u +%Y%m%d%H%M%S)" --scopes read:repository | grep -oE '[0-9a-f]{40}' | tail -n1)
+      --token-name "myportal-$(date -u +%Y%m%d%H%M%S)" --scopes write:repository | grep -oE '[0-9a-f]{40}' | tail -n1)
     [[ -n "$token" ]] || { warn "could not create a Gitea token for MyPortal."; return 1; }
     ensure_gitea_repository "$token" || true
     set_setting "$APP_ENV" GITEA_API_TOKEN "$token" || return 1
