@@ -1,5 +1,6 @@
-{# Run-a-script editor and run result viewer, shared by /rmm/scripts and the asset page.
-   rmm_scripts.js fills both modals from /api/rmm/... and posts the run. #}
+{# Run-a-script editor and run result viewer, shared by /rmm/scripts, /rmm/automation and the
+   asset page. rmm_scripts.js fills both modals from /api/rmm/... and posts the run; on
+   /rmm/automation the same editor saves a schedule or an onboarding step instead. #}
 <div class="modal rmm-modal" id="rmm-run-modal" role="dialog" aria-modal="true" aria-labelledby="rmm-run-title" hidden data-rmm-run-modal>
   <form class="modal__panel modal__panel--wide rmm-editor" data-rmm-run-form novalidate>
     <header class="modal__header rmm-editor__header">
@@ -20,6 +21,66 @@
           </select>
           <p class="form-help">Scripts are written in Gitea and loaded with <em>Sync from Gitea</em>.</p>
         </div>
+
+        <fieldset class="rmm-fieldset" data-rmm-automation-section hidden>
+          <legend class="visually-hidden" data-rmm-automation-legend>Settings</legend>
+          <div class="form-field" data-rmm-mode-only="schedule">
+            <label class="form-label" for="rmm-schedule-name">Name</label>
+            <input class="form-input" id="rmm-schedule-name" maxlength="255" autocomplete="off" data-rmm-schedule-name />
+            <p class="form-help form-help--error" data-rmm-error="name" hidden></p>
+          </div>
+          <div class="form-field" data-rmm-scope-field hidden>
+            <label class="form-label" for="rmm-scope">Runs for</label>
+            <select class="form-input" id="rmm-scope" data-rmm-scope>
+              <option value="company">This company's devices</option>
+              <option value="all">Every company's devices</option>
+            </select>
+            <p class="form-help">Every company needs a script from the Common folder.</p>
+          </div>
+          <div class="form-field" data-rmm-mode-only="schedule">
+            <label class="form-label" for="rmm-target-mode">Devices</label>
+            <select class="form-input" id="rmm-target-mode" data-rmm-target-mode>
+              <option value="all">Every device with the RMM agent</option>
+              <option value="tags">Devices with any of these tags</option>
+              <option value="assets" data-rmm-company-only>Devices I choose</option>
+            </select>
+            <p class="form-help">Devices added later are included automatically, except when you choose devices.</p>
+            <p class="form-help form-help--error" data-rmm-error="target_mode" hidden></p>
+          </div>
+          <div class="form-field" data-rmm-tags-field hidden>
+            <span class="form-label" id="rmm-tags-label">Tags</span>
+            <ul class="rmm-tag-options" data-rmm-tags aria-labelledby="rmm-tags-label"></ul>
+            <p class="form-help">Devices need any one of these tags. A tag on the company counts for all of its devices.</p>
+            <p class="form-help" data-rmm-tags-empty hidden>No tags yet. Add tags to assets or companies first.</p>
+            <p class="form-help form-help--error" data-rmm-error="tags" hidden></p>
+          </div>
+          <div class="form-field" data-rmm-mode-only="schedule">
+            <label class="form-label" for="rmm-cron-preset">When</label>
+            <select class="form-input" id="rmm-cron-preset" data-rmm-cron-preset>
+              <option value="0 * * * *">Every hour</option>
+              <option value="0 2 * * *">Every day at 2am</option>
+              <option value="0 2 * * 1">Every Monday at 2am</option>
+              <option value="0 2 1 * *">On the 1st of every month at 2am</option>
+              <option value="">Custom (cron)</option>
+            </select>
+            <div class="rmm-cron">
+              <div>
+                <label class="form-label rmm-cron__label" for="rmm-cron">Cron</label>
+                <input class="form-input" id="rmm-cron" maxlength="128" autocomplete="off" spellcheck="false" placeholder="minute hour day month weekday" data-rmm-cron />
+              </div>
+              <div>
+                <label class="form-label rmm-cron__label" for="rmm-timezone">Time zone</label>
+                <input class="form-input" id="rmm-timezone" maxlength="64" autocomplete="off" spellcheck="false" data-rmm-timezone />
+              </div>
+            </div>
+            <p class="form-help" data-rmm-cron-preview role="status" aria-live="polite"></p>
+            <p class="form-help form-help--error" data-rmm-error="cron" hidden></p>
+            <p class="form-help form-help--error" data-rmm-error="timezone" hidden></p>
+          </div>
+          <label class="rmm-check" data-rmm-mode-only="schedule"><input type="checkbox" data-rmm-enabled checked /> Schedule is on</label>
+          <label class="rmm-check" data-rmm-mode-only="onboarding"><input type="checkbox" data-rmm-continue /> Carry on with the next step if this one fails</label>
+          <p class="form-help" data-rmm-mode-only="onboarding">Otherwise a failed step stops the steps after it.</p>
+        </fieldset>
 
         <fieldset class="rmm-fieldset" data-rmm-devices-section hidden>
           <legend class="form-label">Devices</legend>

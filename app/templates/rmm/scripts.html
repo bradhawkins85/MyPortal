@@ -9,6 +9,7 @@
   {% if can_run and script_groups %}{% set _ = actions.append({"label": "Run a script", "type": "button", "variant": "primary", "attrs": {"data-rmm-run-open": "", "aria-haspopup": "dialog", "aria-controls": "rmm-run-modal"}}) %}{% endif %}
   {% if gitea_url %}{% set _ = actions.append({"label": "Open Gitea", "type": "link", "href": gitea_url, "target": "_blank"}) %}{% endif %}
   {% if can_sync %}{% set _ = actions.append({"label": "Sync from Gitea", "type": "form", "action": "/rmm/scripts/sync"}) %}{% endif %}
+  {% set _ = actions.append({"label": "Schedules and onboarding", "type": "link", "href": "/rmm/automation"}) %}
   {% if actions %}{{ page_header_actions(actions, menu_id="rmm-script-actions") }}{% endif %}
 {% endblock %}
 {% block content %}
@@ -95,7 +96,7 @@
             <th scope="col" data-sort="string" data-column-key="device">Device</th>
             <th scope="col" data-sort="string" data-column-key="status">Status</th>
             <th scope="col" data-sort="number" data-column-key="exit-code">Exit code</th>
-            <th scope="col" data-sort="string" data-column-key="requested-by" data-mobile-hidden="true">Requested by</th>
+            <th scope="col" data-sort="string" data-column-key="requested-by" data-mobile-hidden="true">Started by</th>
             <th scope="col" data-sort="date" data-column-key="queued">Queued</th>
             <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
           </tr></thead>

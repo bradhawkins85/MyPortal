@@ -13,6 +13,8 @@ from app.repositories import asset_custom_fields as asset_fields_repo
 from app.repositories import assets as assets_repo
 from app.repositories import company_variables as company_variables_repo
 from app.repositories import rmm as rmm_repo
+from app.repositories import rmm_automation as automation_repo
+from app.repositories import tags as tags_repo
 from app.security.encryption import decrypt_secret
 from app.security.menu_permissions import normalize_menu_permissions
 from app.services import gitea
@@ -248,12 +250,12 @@ async def sqlite_db(monkeypatch):
     conn = await aiosqlite.connect(":memory:")
     conn.row_factory = aiosqlite.Row
     await conn.executescript("""
-        CREATE TABLE companies (id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE companies (id INTEGER PRIMARY KEY, name TEXT, archived INT DEFAULT 0);
         CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);
-        CREATE TABLE assets (id INTEGER PRIMARY KEY, company_id INT, name TEXT, serial_number TEXT);
-        INSERT INTO companies VALUES (1, 'Contoso'), (2, 'Other');
+        CREATE TABLE assets (id INTEGER PRIMARY KEY, company_id INT, name TEXT, serial_number TEXT, archived_at TEXT);
+        INSERT INTO companies (id, name) VALUES (1, 'Contoso'), (2, 'Other');
         INSERT INTO users VALUES (9, 'tech@example.com');
-        INSERT INTO assets VALUES (10, 1, 'PC-01', 'SN1'), (11, 1, 'PC-02', 'SN2'), (20, 2, 'OTHER-PC', 'SN3');
+        INSERT INTO assets (id, company_id, name, serial_number) VALUES (10, 1, 'PC-01', 'SN1'), (11, 1, 'PC-02', 'SN2'), (20, 2, 'OTHER-PC', 'SN3');
         -- Mirrors migrations 099/160, whose MySQL-only syntax SQLite cannot read.
         CREATE TABLE asset_custom_field_definitions (
           id INTEGER PRIMARY KEY, name TEXT UNIQUE, display_name TEXT, field_type TEXT,
@@ -264,7 +266,7 @@ async def sqlite_db(monkeypatch):
     """)
     adapter = Database()
     for name in ("332_company_variables.sql", "465_rmm_scripting.sql", "466_rmm_script_company.sql",
-                 "467_rmm_gitea_accounts.sql"):
+                 "467_rmm_gitea_accounts.sql", "466_asset_company_tags.sql", "468_rmm_automation.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES
@@ -273,7 +275,7 @@ async def sqlite_db(monkeypatch):
         INSERT INTO company_variable_values (company_id, variable_id, value) VALUES (1, 1, 'contoso');
     """)
     fake = _SqliteDb(conn)
-    for module in (rmm_repo, asset_fields_repo, company_variables_repo, assets_repo):
+    for module in (rmm_repo, automation_repo, tags_repo, asset_fields_repo, company_variables_repo, assets_repo):
         monkeypatch.setattr(module, "db", fake)
 
     async def get_company(company_id):

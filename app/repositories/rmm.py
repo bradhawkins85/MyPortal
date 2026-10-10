@@ -11,6 +11,13 @@ from app.core.database import db
 ACTIVE_RUN_STATUSES = ("queued", "dispatched", "running")
 FINISHED_RUN_STATUSES = ("completed", "failed", "timed_out", "cancelled", "expired")
 
+# Fixed SQL fragments naming what queued a run (manual, schedule or onboarding).
+_RUN_SOURCE_COLUMNS = "r.run_source, r.schedule_id, r.onboarding_run_id, s.name AS schedule_name"
+_RUN_SOURCE_JOINS = (
+    "LEFT JOIN users u ON u.id = r.requested_by_user_id LEFT JOIN rmm_schedules s ON s.id = r.schedule_id"
+)
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -292,16 +299,21 @@ async def create_run(
     payload_encrypted: str,
     timeout_seconds: int,
     expires_at: datetime,
+    run_source: str = "manual",
+    schedule_id: int | None = None,
+    onboarding_run_id: int | None = None,
 ) -> int:
     return await db.execute_returning_lastrowid(
         "INSERT INTO rmm_script_runs (script_id, script_name, script_path, language, script_content, "
         "content_sha256, agent_id, company_id, asset_id, requested_by_user_id, status, inputs_json, "
-        "payload_encrypted, timeout_seconds, queued_at, expires_at) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s)",
+        "payload_encrypted, timeout_seconds, queued_at, expires_at, run_source, schedule_id, "
+        "onboarding_run_id) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s, %s, %s)",
         (
             script["id"], script["name"], script["path"], script["language"], content,
             script["content_sha256"], agent_id, company_id, asset_id, requested_by_user_id,
             json.dumps(inputs), payload_encrypted, timeout_seconds, _utcnow(), expires_at,
+            run_source, schedule_id, onboarding_run_id,
         ),
     )
 
@@ -312,9 +324,10 @@ async def get_run(run_id: int) -> dict[str, Any] | None:
         "r.company_id, r.asset_id, r.requested_by_user_id, r.status, r.timeout_seconds, "
         "r.exit_code, r.error_message, r.queued_at, r.dispatched_at, r.started_at, "
         "r.completed_at, r.expires_at, a.name AS asset_name, u.email AS requested_by_email, "
+        f"{_RUN_SOURCE_COLUMNS}, "  # nosec B608 - fixed column list
         "r.inputs_json, r.stdout, r.stderr, r.custom_values_json, r.content_sha256 FROM "
-        "rmm_script_runs r LEFT JOIN assets a ON a.id = r.asset_id LEFT JOIN users u ON u.id = "
-        "r.requested_by_user_id WHERE r.id = %s",
+        f"rmm_script_runs r LEFT JOIN assets a ON a.id = r.asset_id {_RUN_SOURCE_JOINS} "  # nosec B608 - fixed joins
+        "WHERE r.id = %s",
         (run_id,),
     )
     return _run_row(row)
@@ -329,9 +342,10 @@ async def list_runs(
             "SELECT r.id, r.script_id, r.script_name, r.script_path, r.language, r.agent_id, "
             "r.company_id, r.asset_id, r.requested_by_user_id, r.status, r.timeout_seconds, "
             "r.exit_code, r.error_message, r.queued_at, r.dispatched_at, r.started_at, "
-            "r.completed_at, r.expires_at, a.name AS asset_name, u.email AS requested_by_email FROM "
-            "rmm_script_runs r LEFT JOIN assets a ON a.id = r.asset_id LEFT JOIN users u ON u.id = "
-            "r.requested_by_user_id WHERE r.company_id = %s ORDER BY r.queued_at DESC, r.id DESC "
+            "r.completed_at, r.expires_at, a.name AS asset_name, u.email AS requested_by_email, "
+            f"{_RUN_SOURCE_COLUMNS} FROM "  # nosec B608 - fixed column list
+            f"rmm_script_runs r LEFT JOIN assets a ON a.id = r.asset_id {_RUN_SOURCE_JOINS} "  # nosec B608 - fixed joins
+            "WHERE r.company_id = %s ORDER BY r.queued_at DESC, r.id DESC "
             "LIMIT %s",
             (company_id, capped),
         )
@@ -340,9 +354,10 @@ async def list_runs(
             "SELECT r.id, r.script_id, r.script_name, r.script_path, r.language, r.agent_id, "
             "r.company_id, r.asset_id, r.requested_by_user_id, r.status, r.timeout_seconds, "
             "r.exit_code, r.error_message, r.queued_at, r.dispatched_at, r.started_at, "
-            "r.completed_at, r.expires_at, a.name AS asset_name, u.email AS requested_by_email FROM "
-            "rmm_script_runs r LEFT JOIN assets a ON a.id = r.asset_id LEFT JOIN users u ON u.id = "
-            "r.requested_by_user_id WHERE r.company_id = %s AND r.asset_id = %s ORDER BY r.queued_at "
+            "r.completed_at, r.expires_at, a.name AS asset_name, u.email AS requested_by_email, "
+            f"{_RUN_SOURCE_COLUMNS} FROM "  # nosec B608 - fixed column list
+            f"rmm_script_runs r LEFT JOIN assets a ON a.id = r.asset_id {_RUN_SOURCE_JOINS} "  # nosec B608 - fixed joins
+            "WHERE r.company_id = %s AND r.asset_id = %s ORDER BY r.queued_at "
             "DESC, r.id DESC LIMIT %s",
             (company_id, asset_id, capped),
         )
@@ -379,7 +394,7 @@ async def mark_dispatched(run_id: int, agent_id: int, *, expires_at: datetime) -
 
 async def get_agent_run(run_id: int, agent_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
-        "SELECT id, company_id, asset_id, status, timeout_seconds FROM rmm_script_runs "
+        "SELECT id, company_id, asset_id, status, timeout_seconds, onboarding_run_id FROM rmm_script_runs "
         "WHERE id = %s AND agent_id = %s",
         (run_id, agent_id),
     )

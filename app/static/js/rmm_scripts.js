@@ -8,7 +8,7 @@
     return;
   }
 
-  let config = { can_run: false, asset_id: null };
+  let config = { can_run: false, asset_id: null, is_super_admin: false, tags: [], default_timezone: 'UTC' };
   try {
     config = Object.assign(config, JSON.parse(document.getElementById('rmm-config').textContent || '{}'));
   } catch (error) {
@@ -104,6 +104,11 @@
     modal.setAttribute('aria-hidden', 'true');
   }
 
+  // Times are stored in UTC; show them in the viewer's time zone.
+  page.querySelectorAll('[data-utc]').forEach((node) => {
+    node.textContent = formatDate(node.getAttribute('data-utc'));
+  });
+
   // ------------------------------------------------------------------ //
   // Library search
   // ------------------------------------------------------------------ //
@@ -152,8 +157,23 @@
   const submitButton = runModal.querySelector('[data-rmm-submit]');
   const formError = runModal.querySelector('[data-rmm-error="form"]');
   const assetsError = runModal.querySelector('[data-rmm-error="assets"]');
+  const automationSection = runModal.querySelector('[data-rmm-automation-section]');
+  const scheduleName = runModal.querySelector('[data-rmm-schedule-name]');
+  const scopeField = runModal.querySelector('[data-rmm-scope-field]');
+  const scopeSelect = runModal.querySelector('[data-rmm-scope]');
+  const targetMode = runModal.querySelector('[data-rmm-target-mode]');
+  const tagsField = runModal.querySelector('[data-rmm-tags-field]');
+  const tagsList = runModal.querySelector('[data-rmm-tags]');
+  const cronPreset = runModal.querySelector('[data-rmm-cron-preset]');
+  const cronInput = runModal.querySelector('[data-rmm-cron]');
+  const timezoneInput = runModal.querySelector('[data-rmm-timezone]');
+  const cronPreview = runModal.querySelector('[data-rmm-cron-preview]');
+  const enabledBox = runModal.querySelector('[data-rmm-enabled]');
+  const continueBox = runModal.querySelector('[data-rmm-continue]');
 
-  const state = { detail: null, dirty: false, done: false, scriptsLoaded: false };
+  // mode: 'run' pushes the script now; 'schedule' and 'onboarding' save it
+  // with its values for later (on /rmm/automation). item is the record being edited.
+  const state = { detail: null, dirty: false, done: false, scriptsLoaded: false, mode: 'run', item: null, onSaved: null };
 
   function fieldInputId(field) {
     return 'rmm-field-' + field.key.replace(/[^A-Za-z0-9_-]/g, '-');
@@ -308,11 +328,139 @@
       envList.append(row);
     });
     const count = selectedAssets().length;
-    runModal.querySelector('[data-rmm-preview-summary]').textContent =
-      count ? 'Runs on ' + count + ' device' + (count === 1 ? '' : 's') + (env.length ? ' with ' + env.length + ' environment variable' + (env.length === 1 ? '' : 's') : '') + '.' : 'Choose at least one device.';
+    const envText = env.length ? ' with ' + env.length + ' environment variable' + (env.length === 1 ? '' : 's') : '';
+    const summary = runModal.querySelector('[data-rmm-preview-summary]');
+    if (state.mode === 'onboarding') {
+      const tagCount = selectedTags().length;
+      summary.textContent = tagCount
+        ? 'Runs on each new device with any of ' + tagCount + ' tag' + (tagCount === 1 ? '' : 's') + envText + ', after the steps before it.'
+        : 'Choose at least one tag, such as Server or Workstation.';
+      submitButton.disabled = !tagCount;
+      return;
+    }
+    if (state.mode === 'schedule') {
+      const mode = targetMode.value;
+      const tagCount = selectedTags().length;
+      if (mode === 'assets') {
+        summary.textContent = count ? 'Runs on ' + count + ' chosen device' + (count === 1 ? '' : 's') + envText + '.' : 'Choose at least one device.';
+      } else if (mode === 'tags') {
+        summary.textContent = tagCount ? 'Runs on devices with any of ' + tagCount + ' tag' + (tagCount === 1 ? '' : 's') + envText + '.' : 'Choose at least one tag.';
+      } else {
+        summary.textContent = 'Runs on every device with the RMM agent' + envText + '.';
+      }
+      submitButton.disabled = (mode === 'assets' && !count) || (mode === 'tags' && !tagCount);
+      return;
+    }
+    summary.textContent = count ? 'Runs on ' + count + ' device' + (count === 1 ? '' : 's') + envText + '.' : 'Choose at least one device.';
     submitButton.disabled = !count;
     submitButton.textContent = count > 1 ? 'Run on ' + count + ' devices' : 'Run script';
   }
+
+  // ------------------------------------------------------------------ //
+  // Schedule and onboarding settings
+  // ------------------------------------------------------------------ //
+
+  function selectedTags() {
+    return Array.from(tagsList.querySelectorAll('input[type="checkbox"]:checked')).map((box) => Number(box.value));
+  }
+
+  function renderTags(chosen) {
+    tagsList.replaceChildren();
+    (config.tags || []).forEach((tag) => {
+      const id = 'rmm-tag-' + tag.id;
+      const item = el('li', { className: 'rmm-tag-option' });
+      const box = el('input', { type: 'checkbox', id: id, value: tag.id });
+      box.checked = chosen.includes(Number(tag.id));
+      item.append(box, el('label', { for: id }, tag.name));
+      tagsList.append(item);
+    });
+    runModal.querySelector('[data-rmm-tags-empty]').hidden = (config.tags || []).length > 0;
+  }
+
+  function editorTexts() {
+    if (state.mode === 'schedule') {
+      return ['Schedule a script', state.item ? 'Edit schedule' : 'New schedule', 'Pick a script, when it runs and the values it needs.', 'Save schedule'];
+    }
+    if (state.mode === 'onboarding') {
+      return ['Onboarding step', state.item ? 'Edit onboarding step' : 'Add an onboarding step', 'Runs once on each new device with any of the chosen tags, after the steps before it.', state.item ? 'Save step' : 'Add step'];
+    }
+    return ['Run a script', 'Choose a script', 'Pick a script, the devices to run it on and the values it needs.', 'Run script'];
+  }
+
+  function applyMode() {
+    const automated = state.mode !== 'run';
+    automationSection.hidden = !automated;
+    runModal.querySelectorAll('[data-rmm-mode-only]').forEach((node) => {
+      node.hidden = node.getAttribute('data-rmm-mode-only') !== state.mode;
+    });
+    scopeField.hidden = state.mode !== 'schedule' || !config.is_super_admin || Boolean(state.item);
+    const everyCompany = scopeSelect.value === 'all';
+    const assetsOption = targetMode.querySelector('[data-rmm-company-only]');
+    assetsOption.disabled = everyCompany;
+    if (everyCompany && targetMode.value === 'assets') {
+      targetMode.value = 'all';
+    }
+    tagsField.hidden = !(state.mode === 'onboarding' || (state.mode === 'schedule' && targetMode.value === 'tags'));
+    if (state.detail) {
+      devicesSection.hidden = automated && !(state.mode === 'schedule' && targetMode.value === 'assets');
+    }
+  }
+
+  let previewTimer = null;
+  function refreshCronPreview() {
+    window.clearTimeout(previewTimer);
+    if (state.mode !== 'schedule') {
+      return;
+    }
+    const cron = cronInput.value.trim();
+    if (!cron) {
+      cronPreview.textContent = 'Enter a cron expression.';
+      return;
+    }
+    previewTimer = window.setTimeout(async () => {
+      const query = '?cron=' + encodeURIComponent(cron) + '&timezone=' + encodeURIComponent(timezoneInput.value.trim());
+      try {
+        const data = await api('/api/rmm/schedules/preview' + query);
+        cronPreview.textContent = data.next_runs.length
+          ? 'Next runs: ' + data.next_runs.map((value) => formatDate(value)).join(', ') + ' (your time).'
+          : 'This schedule never runs.';
+      } catch (error) {
+        const errors = (error.data && error.data.errors) || {};
+        cronPreview.textContent = errors.cron || errors.timezone || error.message;
+      }
+    }, 300);
+  }
+
+  function resetAutomation() {
+    const item = state.item || {};
+    scheduleName.value = item.name || '';
+    scopeSelect.value = item.scope || 'company';
+    targetMode.value = item.target_mode || 'all';
+    renderTags((item.tag_ids || []).map(Number));
+    const cron = item.cron || '0 2 * * *';
+    cronInput.value = cron;
+    cronPreset.value = Array.from(cronPreset.options).some((option) => option.value === cron) ? cron : '';
+    timezoneInput.value = item.timezone || config.default_timezone || 'UTC';
+    enabledBox.checked = item.is_enabled === undefined ? true : Boolean(item.is_enabled);
+    continueBox.checked = Boolean(item.continue_on_failure);
+    applyMode();
+    refreshCronPreview();
+  }
+
+  scopeSelect.addEventListener('change', applyMode);
+  targetMode.addEventListener('change', () => { applyMode(); updatePreview(); });
+  tagsList.addEventListener('change', updatePreview);
+  cronPreset.addEventListener('change', () => {
+    if (cronPreset.value) {
+      cronInput.value = cronPreset.value;
+    }
+    refreshCronPreview();
+  });
+  cronInput.addEventListener('input', () => {
+    cronPreset.value = Array.from(cronPreset.options).some((option) => option.value === cronInput.value.trim()) ? cronInput.value.trim() : '';
+    refreshCronPreview();
+  });
+  timezoneInput.addEventListener('input', refreshCronPreview);
 
   function renderDevices(agents) {
     devicesList.replaceChildren();
@@ -324,7 +472,8 @@
       const id = 'rmm-device-' + agent.asset_id;
       const item = el('li', { className: 'rmm-device', 'data-search': ((agent.asset_name || '') + ' ' + (agent.hostname || '') + ' ' + (agent.os || '')).toLowerCase() });
       const box = el('input', { type: 'checkbox', id: id, value: agent.asset_id });
-      if (config.asset_id && Number(config.asset_id) === Number(agent.asset_id)) {
+      const chosen = state.mode === 'schedule' && state.item ? (state.item.asset_ids || []).map(Number) : [];
+      if ((config.asset_id && Number(config.asset_id) === Number(agent.asset_id)) || chosen.includes(Number(agent.asset_id))) {
         box.checked = true;
       }
       const label = el('label', { for: id });
@@ -344,10 +493,11 @@
     formError.hidden = true;
     assetsError.hidden = true;
     submitButton.disabled = true;
-    submitButton.textContent = 'Run script';
-    runModal.querySelector('[data-rmm-run-title]').textContent = 'Choose a script';
-    runModal.querySelector('[data-rmm-run-eyebrow]').textContent = 'Run a script';
-    runModal.querySelector('[data-rmm-run-subtitle]').textContent = 'Pick a script, the devices to run it on and the values it needs.';
+    const texts = editorTexts();
+    submitButton.textContent = texts[3];
+    runModal.querySelector('[data-rmm-run-title]').textContent = texts[1];
+    runModal.querySelector('[data-rmm-run-eyebrow]').textContent = texts[0];
+    runModal.querySelector('[data-rmm-run-subtitle]').textContent = texts[2];
   }
 
   async function loadScript(scriptId) {
@@ -371,7 +521,17 @@
     const groups = groupedVariables(detail.variables);
     detail.fields.forEach((field) => fieldsHost.append(renderField(field, groups)));
     noFields.hidden = detail.fields.length > 0;
-    timeoutInput.value = Math.max(1, Math.round((detail.script.default_timeout_seconds || 600) / 60));
+    const saved = state.item && Number(state.item.script_id) === Number(detail.script.id) ? state.item : null;
+    const timeout = saved ? saved.timeout_seconds : detail.script.default_timeout_seconds;
+    timeoutInput.value = Math.max(1, Math.round((timeout || 600) / 60));
+    if (saved) {
+      Object.entries(saved.values || {}).forEach(([key, value]) => {
+        const control = fieldsHost.querySelector('[data-rmm-value="' + CSS.escape(key) + '"]');
+        if (control) {
+          control.value = value;
+        }
+      });
+    }
     runModal.querySelector('[data-rmm-source]').textContent = detail.script.content || '';
     const link = runModal.querySelector('[data-rmm-source-link]');
     if (detail.source_url) {
@@ -381,6 +541,7 @@
       link.hidden = true;
     }
     [devicesSection, fieldsSection, timeoutSection, previewSection].forEach((section) => { section.hidden = false; });
+    applyMode();
     updatePreview();
   }
 
@@ -396,8 +557,24 @@
     state.scriptsLoaded = true;
   }
 
-  async function openRunEditor(scriptId) {
+  async function openRunEditor(scriptId, options) {
+    const settings = options || {};
+    state.mode = settings.mode || 'run';
+    state.item = settings.item || null;
+    state.onSaved = settings.onSaved || null;
+    if (settings.scope) {
+      scopeSelect.value = settings.scope;
+    }
     resetEditor();
+    if (state.mode !== 'run') {
+      resetAutomation();
+      if (settings.scope && !state.item) {
+        scopeSelect.value = settings.scope;
+        applyMode();
+      }
+    } else {
+      applyMode();
+    }
     openModal(runModal);
     try {
       await ensureScriptOptions();
@@ -410,8 +587,14 @@
     if (scriptId) {
       await loadScript(scriptId);
     }
-    (scriptId ? (runModal.querySelector('[data-rmm-value]') || submitButton) : scriptSelect).focus();
+    if (state.mode === 'schedule' && !state.item) {
+      scheduleName.focus();
+    } else {
+      (scriptId ? (runModal.querySelector('[data-rmm-value]') || submitButton) : scriptSelect).focus();
+    }
   }
+
+  window.MyPortalRmm = { openEditor: openRunEditor, api: api, formatDate: formatDate, openResult: (runId) => openResult(runId) };
 
   function closeRunEditor() {
     if (state.dirty && !state.done && !window.confirm('Discard the values you entered?')) {
@@ -440,7 +623,7 @@
   runModal.querySelectorAll('[data-rmm-close]').forEach((button) => button.addEventListener('click', closeRunEditor));
   scriptSelect.addEventListener('change', () => loadScript(scriptSelect.value));
   form.addEventListener('input', (event) => {
-    if (event.target !== scriptSelect && event.target !== deviceSearch) {
+    if (event.target !== scriptSelect && event.target !== deviceSearch && event.target !== scopeSelect) {
       state.dirty = true;
     }
     updatePreview();
@@ -458,7 +641,7 @@
   });
 
   function showErrors(errors) {
-    fieldsHost.querySelectorAll('[data-rmm-error]').forEach((node) => { node.hidden = true; });
+    runModal.querySelectorAll('[data-rmm-error]').forEach((node) => { node.hidden = true; });
     let first = null;
     Object.entries(errors || {}).forEach(([key, message]) => {
       const target = key === 'assets' ? assetsError : runModal.querySelector('[data-rmm-error="' + CSS.escape(key) + '"]');
@@ -487,8 +670,13 @@
     }
     formError.hidden = true;
     assetsError.hidden = true;
+    runModal.querySelectorAll('[data-rmm-error]').forEach((node) => { node.hidden = true; });
     submitButton.disabled = true;
     const minutes = Number(timeoutInput.value) || 10;
+    if (state.mode !== 'run') {
+      await saveAutomation(Math.round(minutes * 60));
+      return;
+    }
     try {
       const result = await api('/api/rmm/scripts/' + state.detail.script.id + '/runs', {
         method: 'POST',
@@ -526,6 +714,47 @@
     }
   });
 
+  async function saveAutomation(timeoutSeconds) {
+    const base = state.mode === 'schedule' ? '/api/rmm/schedules' : '/api/rmm/onboarding/steps';
+    const body = {
+      script_id: state.detail.script.id,
+      values: collectValues(),
+      timeout_seconds: timeoutSeconds,
+    };
+    if (state.mode === 'schedule') {
+      Object.assign(body, {
+        scope: scopeSelect.value,
+        name: scheduleName.value.trim(),
+        cron: cronInput.value.trim(),
+        timezone: timezoneInput.value.trim(),
+        target_mode: targetMode.value,
+        asset_ids: targetMode.value === 'assets' ? selectedAssets() : [],
+        tag_ids: targetMode.value === 'tags' ? selectedTags() : [],
+        enabled: enabledBox.checked,
+      });
+    } else {
+      body.tag_ids = selectedTags();
+      body.continue_on_failure = continueBox.checked;
+    }
+    try {
+      await api(state.item ? base + '/' + state.item.id : base, { method: state.item ? 'PUT' : 'POST', body: body });
+      state.done = true;
+      closeModal(runModal);
+      if (state.onSaved) {
+        state.onSaved();
+      } else {
+        window.location.reload();
+      }
+    } catch (error) {
+      submitButton.disabled = false;
+      if (error.data && error.data.errors) {
+        showErrors(error.data.errors);
+      }
+      formError.textContent = error.message;
+      formError.hidden = false;
+    }
+  }
+
   // ------------------------------------------------------------------ //
   // Run result
   // ------------------------------------------------------------------ //
@@ -551,8 +780,14 @@
     currentRun = run;
     resultModal.querySelector('[data-rmm-result-title]').textContent = run.script_name;
     resultModal.querySelector('[data-rmm-result-eyebrow]').textContent = run.script_path;
+    let source = run.requested_by_email ? ' · requested by ' + run.requested_by_email : '';
+    if (run.run_source === 'schedule') {
+      source = ' · schedule ' + (run.schedule_name || '(deleted)') + (run.requested_by_email ? ', run now by ' + run.requested_by_email : '');
+    } else if (run.run_source === 'onboarding') {
+      source = ' · onboarding';
+    }
     resultModal.querySelector('[data-rmm-result-subtitle]').textContent =
-      (run.asset_name ? 'On ' + run.asset_name : 'Device removed') + (run.requested_by_email ? ' · requested by ' + run.requested_by_email : '');
+      (run.asset_name ? 'On ' + run.asset_name : 'Device removed') + source;
     const stats = resultModal.querySelector('[data-rmm-result-stats]');
     stats.replaceChildren(
       stat('Status', statusPill(run.status)),

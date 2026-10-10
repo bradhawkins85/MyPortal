@@ -9,7 +9,8 @@ out which values it needs, and gives technicians a field for each one when they 
 thing MyPortal writes to the repository is its folder layout (see
 [Repository layout](#repository-layout)).
 
-Scripts are pushed manually for now. Scheduled and triggered runs come later.
+Scripts can be pushed manually, run on a schedule, or run automatically when the RMM agent is
+first installed on a device (see [Schedules and onboarding](#schedules-and-onboarding)).
 
 ## Gitea
 
@@ -215,11 +216,65 @@ collected within 24 hours **expires**, and one that is still waiting can be canc
 details. Choose **View** on a run to see its output, errors, the values sent, and which custom
 values were updated.
 
+## Schedules and onboarding
+
+Choose **Schedules and onboarding** on the Scripts page (`/rmm/automation`). Both use the same
+editor as a manual run: pick a script and fill in its values, typing them or using MyPortal
+variables. The values are saved encrypted, and variables are filled in for each device every
+time the script runs, so a schedule always sends a device its current custom field values.
+Secret values show as `••••••` when you edit them again; leave them like that to keep the saved
+secret.
+
+### Schedules
+
+RMM schedules are separate from MyPortal's scheduled tasks. Each schedule has:
+
+- **Devices**: every device with the RMM agent, devices with any of the chosen
+  [tags](Tags.md) (a tag on a company counts for all of its devices), or devices you pick.
+  Devices added later are included automatically, except when you pick devices.
+- **When**: every hour, every day, every Monday, the 1st of the month, or your own cron
+  expression (`minute hour day month weekday`), in the time zone you choose (`CRON_TIMEZONE`
+  by default). The editor shows the next three times it will run.
+
+MyPortal checks for due schedules every 30 seconds. A device that is still working on (or has
+not yet collected) the previous run from the same schedule is skipped rather than given a
+second one, and a run waits for an offline device only until the schedule's next time. If
+MyPortal was down when a schedule was due, it runs once when MyPortal is back, not once per
+missed time. **Run now** runs a schedule straight away, **Turn off** pauses it, and the
+**Last run** column shows how many devices it reached and why any were skipped. Runs started
+by a schedule show the schedule's name in **Started by** in the run history.
+
+### Onboarding scripts
+
+Onboarding scripts run once, the first time a device's RMM agent enrols with MyPortal (a
+reinstall that keeps the agent's identity does not run them again). Each company has its own
+ordered list of steps, and the steps run one at a time in that order: the next step is sent
+only after the previous one reports back.
+
+Every step has a **tag filter**, for example Server or Workstation, and runs only on devices
+with any of its tags (a tag on the company counts for all of its devices). Other devices skip
+it. Automatic tags are refreshed just before each step is checked, so a new device is matched
+on its current type and operating system.
+
+If a step fails, times out, expires or is cancelled, the steps after it are not run and the
+onboarding is marked **Stopped**, unless that step is set to **Carry on with the next step if
+this one fails**. A step whose script has been removed from Gitea fails the same way, and a
+step deleted while a device is part-way through is skipped.
+
+**Onboarding history** shows each device's progress; choose **View** to see every step and
+open its run. **Run onboarding** runs the current steps on a device again, for example after
+adding a step, and **Stop onboarding** cancels the rest of a running sequence.
+
+Schedules for every company can only use scripts in `Common/` and are added and changed only
+by super admins; everyone else sees them read-only.
+
 ## Who can use it
 
 The **Scripts** permission (RMM group in Roles) controls access per company. Read access shows
-the library and runs; write access also runs and cancels scripts. Only super admins sync from
-Gitea. Every sync, run and cancel is recorded in the audit trail.
+the library, runs, schedules and onboarding; write access also runs and cancels scripts and
+manages schedules and onboarding steps for the company. Only super admins sync from Gitea and
+manage every-company schedules. Every sync, run, cancel and change to a
+schedule or onboarding step is recorded in the audit trail.
 
 ## The RMM agent
 

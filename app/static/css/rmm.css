@@ -1,4 +1,5 @@
-/* RMM scripts: library, run editor and run results (rmm/scripts.html, asset page). */
+/* RMM scripts: library, run editor and run results (rmm/scripts.html, asset page),
+   and schedules and onboarding (rmm/automation.html). */
 .rmm-page {
   --rmm-line: var(--hf-line);
   --rmm-panel: var(--hf-panel-raised);
@@ -6,6 +7,15 @@
   display: grid;
   gap: var(--space-gap-roomy);
 }
+
+/* Let wide tables scroll inside their card instead of widening the page. */
+.rmm-page > * { min-width: 0; }
+
+.rmm-page .card__header { flex-wrap: wrap; }
+
+/* Component display rules (grid, flex) would otherwise override the hidden attribute. */
+.rmm-page [hidden],
+.rmm-modal [hidden] { display: none !important; }
 
 .rmm-stats {
   display: grid;
@@ -321,9 +331,129 @@
 
 .rmm-source summary { cursor: pointer; color: var(--hf-muted); }
 
+.rmm-chip--warning {
+  color: var(--hf-danger);
+  background: color-mix(in srgb, var(--hf-danger) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hf-danger) 30%, transparent);
+}
+
+/* Schedules and onboarding */
+.rmm-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.rmm-check input { accent-color: var(--hf-accent); }
+
+.rmm-cron {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-gap-tight);
+  margin-top: var(--space-gap-tight);
+}
+
+.rmm-cron__label { font-size: 0.8rem; }
+
+.rmm-cron .form-input { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+.rmm-tag-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-gap-tight);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rmm-tag-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--hf-line);
+  border-radius: 999px;
+}
+
+.rmm-tag-option input { accent-color: var(--hf-accent); }
+
+.rmm-onboarding {
+  display: grid;
+  gap: var(--space-gap-roomy);
+}
+
+.rmm-onboarding__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-base);
+  margin-bottom: var(--space-gap-tight);
+}
+
+.rmm-onboarding__header .rmm-group__title { margin: 0; }
+
+.rmm-onboarding-start {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-gap-tight);
+}
+
+.rmm-onboarding-start .form-input { min-width: min(14rem, 100%); }
+
+.rmm-steps {
+  display: grid;
+  gap: var(--space-gap-tight);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rmm-step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-gap-base);
+  padding: var(--space-gap-base) var(--space-gap-roomy);
+  border: 1px solid var(--hf-line);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-panel);
+}
+
+.rmm-step__number {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  color: var(--hf-accent-strong);
+  font-weight: 700;
+  background: var(--hf-accent-soft);
+}
+
+.rmm-step__main {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.rmm-step__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
 @media (max-width: 900px) {
   .rmm-editor__body { grid-template-columns: minmax(0, 1fr); }
   .rmm-editor__aside { position: static; }
   .rmm-field__row { grid-template-columns: minmax(0, 1fr); }
   .rmm-script { flex-direction: column; }
+  .rmm-step { flex-wrap: wrap; }
+  .rmm-step__actions { justify-content: flex-start; width: 100%; }
+  .rmm-cron { grid-template-columns: minmax(0, 1fr); }
 }

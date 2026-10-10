@@ -618,7 +618,7 @@ async def resolve_entries(
 # --------------------------------------------------------------------------- #
 
 
-def _clamp_timeout(value: Any, default: int) -> int:
+def clamp_timeout(value: Any, default: int) -> int:
     try:
         seconds = int(value)
     except (TypeError, ValueError):
@@ -630,6 +630,69 @@ def notify_agent(agent_id: int) -> None:
     event = _agent_events.get(agent_id)
     if event is not None:
         event.set()
+
+
+def device_problem(script: Mapping[str, Any], agent: Mapping[str, Any]) -> str | None:
+    """Why ``script`` cannot run on ``agent``'s device, or ``None`` when it can."""
+
+    os_name = str(agent.get("os") or "").lower()
+    if script["language"] == "powershell" and os_name not in {"windows", ""}:
+        if "pwsh" not in str(agent.get("shells") or ""):
+            return "PowerShell is not installed on this device."
+    if script["language"] in {"bash", "zsh"} and os_name == "windows":
+        return "Shell scripts cannot run on Windows."
+    return None
+
+
+def stored_inputs(script: Mapping[str, Any], entries: Mapping[str, str]) -> list[dict[str, Any]]:
+    """The values entered, as shown in run history (secrets masked)."""
+
+    inputs = [_stored_input(field_def, entries.get(field_def["key"], "")) for field_def in script_fields(script)]
+    return [item for item in inputs if item["value"]]
+
+
+async def queue_for_agent(
+    *,
+    script: Mapping[str, Any],
+    agent: Mapping[str, Any],
+    entries: Mapping[str, str],
+    inputs: list[dict[str, Any]],
+    timeout_seconds: int,
+    requested_by_user_id: int | None,
+    run_source: str = "manual",
+    schedule_id: int | None = None,
+    onboarding_run_id: int | None = None,
+    expires_at: datetime | None = None,
+    notify: bool = True,
+) -> int:
+    """Resolve the values for one device and queue the run. Raises
+    :class:`RunRequestError` with a ``device`` message when it cannot run there."""
+
+    problem = device_problem(script, agent)
+    if problem:
+        raise RunRequestError({"device": problem})
+    company_id = int(agent["company_id"])
+    asset_id = int(agent["asset_id"]) if agent.get("asset_id") is not None else None
+    context = await build_template_context(company_id, asset_id)
+    payload = await resolve_entries(script, entries, context)
+    run_id = await rmm_repo.create_run(
+        script=dict(script),
+        content=str(script.get("content") or ""),
+        agent_id=int(agent["id"]),
+        company_id=company_id,
+        asset_id=asset_id,
+        requested_by_user_id=requested_by_user_id,
+        inputs=inputs,
+        payload_encrypted=encrypt_secret(json.dumps(payload)),
+        timeout_seconds=timeout_seconds,
+        expires_at=expires_at or datetime.now(timezone.utc).replace(tzinfo=None) + QUEUE_LIFETIME,
+        run_source=run_source,
+        schedule_id=schedule_id,
+        onboarding_run_id=onboarding_run_id,
+    )
+    if notify:
+        notify_agent(int(agent["id"]))
+    return run_id
 
 
 async def queue_runs(
@@ -652,9 +715,8 @@ async def queue_runs(
     if len(targets) > MAX_TARGETS_PER_RUN:
         raise RunRequestError({"assets": f"Choose at most {MAX_TARGETS_PER_RUN} devices at a time."})
     entries = validate_entries(script, submitted)
-    timeout = _clamp_timeout(timeout_seconds, int(script.get("default_timeout_seconds") or 600))
-    inputs = [_stored_input(field_def, entries.get(field_def["key"], "")) for field_def in script_fields(script)]
-    inputs = [item for item in inputs if item["value"]]
+    timeout = clamp_timeout(timeout_seconds, int(script.get("default_timeout_seconds") or 600))
+    inputs = stored_inputs(script, entries)
 
     queued: list[dict[str, Any]] = []
     problems: list[dict[str, Any]] = []
@@ -667,38 +729,25 @@ async def queue_runs(
         if not agent:
             problems.append({"asset_id": asset_id, "asset_name": asset.get("name"), "message": "No RMM agent is installed."})
             continue
-        if script["language"] == "powershell" and str(agent.get("os") or "").lower() not in {"windows", ""}:
-            shells = str(agent.get("shells") or "")
-            if "pwsh" not in shells:
-                problems.append({"asset_id": asset_id, "asset_name": asset.get("name"), "message": "PowerShell is not installed on this device."})
-                continue
-        if script["language"] in {"bash", "zsh"} and str(agent.get("os") or "").lower() == "windows":
-            problems.append({"asset_id": asset_id, "asset_name": asset.get("name"), "message": "Shell scripts cannot run on Windows."})
-            continue
-        context = await build_template_context(company_id, asset_id)
         try:
-            payload = await resolve_entries(script, entries, context)
+            run_id = await queue_for_agent(
+                script=script,
+                agent={**agent, "company_id": int(company_id), "asset_id": asset_id},
+                entries=entries,
+                inputs=inputs,
+                timeout_seconds=timeout,
+                requested_by_user_id=requested_by_user_id,
+            )
         except RunRequestError as exc:
-            problems.append({
+            problem: dict[str, Any] = {
                 "asset_id": asset_id,
                 "asset_name": asset.get("name"),
                 "message": "; ".join(exc.errors.values()),
-                "errors": exc.errors,
-            })
+            }
+            if "device" not in exc.errors:
+                problem["errors"] = exc.errors
+            problems.append(problem)
             continue
-        run_id = await rmm_repo.create_run(
-            script=script,
-            content=str(script.get("content") or ""),
-            agent_id=int(agent["id"]),
-            company_id=int(company_id),
-            asset_id=asset_id,
-            requested_by_user_id=requested_by_user_id,
-            inputs=inputs,
-            payload_encrypted=encrypt_secret(json.dumps(payload)),
-            timeout_seconds=timeout,
-            expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + QUEUE_LIFETIME,
-        )
-        notify_agent(int(agent["id"]))
         queued.append({"run_id": run_id, "asset_id": asset_id, "asset_name": asset.get("name")})
     return {"queued": queued, "problems": problems, "script": {"id": script["id"], "name": script["name"]}}
 
@@ -733,7 +782,11 @@ def _agent_details(payload: Mapping[str, Any], client_ip: str | None) -> dict[st
 async def enrol_agent(
     *, tray_device: Mapping[str, Any], payload: Mapping[str, Any], client_ip: str | None
 ) -> dict[str, Any]:
-    """Enrol (or re-enrol) the RMM agent installed alongside a tray device."""
+    """Enrol (or re-enrol) the RMM agent installed alongside a tray device.
+
+    ``created`` in the result is true the first time this agent enrols, which
+    is when its onboarding scripts start (see :mod:`app.services.rmm_automation`).
+    """
 
     company_id = tray_device.get("company_id")
     if company_id is None:
@@ -761,7 +814,13 @@ async def enrol_agent(
     else:
         agent_id = await rmm_repo.create_agent(agent_uid=agent_uid, **common)
     log_info("RMM agent enrolled", agent_id=agent_id, tray_device_id=tray_device["id"], company_id=company_id)
-    return {"agent_id": agent_id, "agent_uid": agent_uid, "auth_token": token, "poll_wait_seconds": POLL_WAIT_SECONDS}
+    return {
+        "agent_id": agent_id,
+        "agent_uid": agent_uid,
+        "auth_token": token,
+        "poll_wait_seconds": POLL_WAIT_SECONDS,
+        "created": existing is None,
+    }
 
 
 async def authenticate_agent(token: str) -> dict[str, Any] | None:
