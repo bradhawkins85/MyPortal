@@ -2448,7 +2448,8 @@ async def update_asset_documentation(request: Request, asset_id: int):
     if record.get("provenance") == "manual":
         values = await _manual_asset_values(form, company_id, record)
         await asset_repo.update_manual_inventory(asset_id, **values)
-        await _save_submitted_custom_fields(asset_id, form)
+    # Custom fields are editable for every asset, not just manually created ones.
+    await _save_submitted_custom_fields(asset_id, form)
     criticality = _clean_optional(form, "criticality")
     review_status = str(form.get("review_status") or "not_reviewed")
     if criticality not in {None, "low", "medium", "high", "critical"}:
@@ -2464,6 +2465,14 @@ async def update_asset_documentation(request: Request, asset_id: int):
         review_status=review_status,
         external_references_json=json.dumps(references) if references else None,
     )
+    if str(form.get("send_tray_notification") or "") == "1":
+        asset_name = str(record.get("name") or f"Asset #{asset_id}").strip()
+        await tray_service.push_notification_to_company_devices(
+            company_id=company_id,
+            title="Asset updated",
+            body=f"{asset_name} has been updated.",
+            asset_ids=[asset_id],
+        )
     await audit_service.record(
         action="asset.documentation.update", request=request,
         entity_type="asset", entity_id=asset_id,
