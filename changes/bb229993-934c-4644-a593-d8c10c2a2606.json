@@ -1,0 +1,7 @@
+{
+  "guid": "bb229993-934c-4644-a593-d8c10c2a2606",
+  "occurred_at": "2026-10-10T10:24Z",
+  "change_type": "Feature",
+  "summary": "Tags: technicians can block a tag on one asset (for example keep a desktop acting as a server out of \"Workstation\"); automatic rules and company tags no longer apply it until it is unblocked.",
+  "content_hash": "9cf80950cafce0c66ae6d463de2d1a771806fafc352f5877ad5df2956956ae30"
+}

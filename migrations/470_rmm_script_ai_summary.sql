@@ -2,7 +2,7 @@
 -- compatible-from: *
 -- compatible-to: *
 -- maintenance: false
--- Migration 469: AI summaries of RMM scripts.
+-- Migration 470: AI summaries of RMM scripts.
 --
 -- The Scripts page shows an AI summary of what each script does and what it
 -- leaves behind. ai_summary_json holds the summary; ai_summary_sha256 is the
