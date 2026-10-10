@@ -51,7 +51,11 @@ function Write-Log([string]$Message) {
 function Invoke-Wix {
     $output = & $Wix @args 2>&1
     if ($LASTEXITCODE -ne 0) {
-        $detail = ($output | Select-Object -Last 15) -join [Environment]::NewLine
+        # Drop .NET stack frames so the log shows the actual error message.
+        $lines = @($output | ForEach-Object { "$_" } | Where-Object {
+            $_.Trim() -and $_ -notmatch '^\s+at ' -and $_ -notmatch '^--- End of'
+        })
+        $detail = ($lines | Select-Object -Last 15) -join [Environment]::NewLine
         throw "wix $($args[0]) failed with exit code ${LASTEXITCODE}: $detail"
     }
 }
@@ -69,7 +73,26 @@ function Initialize-Wix {
     if (-not (Test-BalExtension)) {
         $version = ((& $Wix --version) -replace '\+.*$', '').Trim()
         Write-Log "Installing WixToolset.BootstrapperApplications.wixext/$version"
-        Invoke-Wix extension add -g "WixToolset.BootstrapperApplications.wixext/$version"
+        # wix reads NuGet sources from the current folder's NuGet.Config chain,
+        # which on a build server can include broken or legacy v2 feeds. Use a
+        # config that only lists nuget.org.
+        $nugetDir = Join-Path $WorkDir 'nuget'
+        New-Item -ItemType Directory -Force -Path $nugetDir | Out-Null
+        Set-Content -LiteralPath (Join-Path $nugetDir 'NuGet.Config') -Encoding utf8 -Value @(
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<configuration>'
+            '  <packageSources>'
+            '    <clear />'
+            '    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />'
+            '  </packageSources>'
+            '</configuration>'
+        )
+        Push-Location -LiteralPath $nugetDir
+        try {
+            Invoke-Wix extension add -g "WixToolset.BootstrapperApplications.wixext/$version"
+        } finally {
+            Pop-Location
+        }
         if (-not (Test-BalExtension)) {
             throw "WixToolset.BootstrapperApplications.wixext/$version did not install."
         }
