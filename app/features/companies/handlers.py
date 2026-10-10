@@ -951,6 +951,16 @@ async def _render_company_edit_page(
         "company_sla": await __import__("app.repositories.slas", fromlist=["slas"]).get_for_company(company_id),
         "sla_templates": await __import__("app.repositories.slas", fromlist=["slas"]).list_templates(),
     }
+    # Tags belong to the tags pack; the section disappears with it.
+    extra["company_tags"] = None
+    if _main()._feature_pack_available("tags"):
+        from app.features.tags import routes as tags_routes
+
+        try:
+            extra["company_tags"] = await tags_routes.company_tags_context(company_id, can_edit=bool(is_super_admin))
+        except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
+            if "Database pool not initialised" not in str(exc):
+                raise
     from .business_hours_handlers import company_edit_context
 
     try:

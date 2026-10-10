@@ -1,0 +1,32 @@
+{#- Tag chips and the searchable tag picker.
+
+    ``ctx`` comes from ``app.features.tags.routes.picker_context``: the record's
+    tags, the endpoint that saves them and whether the viewer may edit. Load
+    /static/css/tags.css and /static/js/tag_picker.js on the page. -#}
+{% macro tag_chip(tag, compact=false) -%}
+  <li class="tag-chip" style="--tag-colour: {{ tag.colour or 'var(--hf-accent)' }}"{% if tag.description %} title="{{ tag.description }}"{% endif %}>
+    <span class="tag-chip__name">{{ tag.name }}</span>{% if tag.source == 'auto' %}<span class="tag-chip__auto" title="Assigned automatically">auto</span>{% endif %}
+  </li>
+{%- endmacro %}
+
+{% macro tag_list(tags, compact=false, label="Tags") -%}
+  {% if tags %}<ul class="tag-chips{% if compact %} tag-chips--compact{% endif %}" aria-label="{{ label }}">{% for tag in tags %}{{ tag_chip(tag, compact) }}{% endfor %}</ul>{% endif %}
+{%- endmacro %}
+
+{% macro tag_picker(ctx, id, label="Tags") -%}
+  <div class="tag-picker" id="{{ id }}" data-tag-picker data-endpoint="{{ ctx.endpoint }}"{% if ctx.can_edit %} data-editable{% endif %}>
+    <script type="application/json" data-tag-picker-initial>{{ ctx.tags | tojson }}</script>
+    <ul class="tag-chips" data-tag-picker-chips aria-label="{{ label }}">{% for tag in ctx.tags %}{{ tag_chip(tag) }}{% endfor %}</ul>
+    {% if not ctx.tags %}<p class="text-muted" data-tag-picker-none>No tags yet.</p>{% endif %}
+    {% if ctx.can_edit %}
+    <div class="tag-picker__search" data-tag-picker-search hidden>
+      <label class="visually-hidden" for="{{ id }}-input">Add a tag</label>
+      <input class="form-input tag-picker__input" id="{{ id }}-input" type="text" autocomplete="off" maxlength="64"
+             placeholder="Search or create a tag" role="combobox" aria-autocomplete="list" aria-expanded="false"
+             aria-controls="{{ id }}-list" data-tag-picker-input>
+      <ul class="tag-picker__list" id="{{ id }}-list" role="listbox" aria-label="Matching tags" data-tag-picker-list hidden></ul>
+    </div>
+    <p class="tag-picker__status" role="status" aria-live="polite" data-tag-picker-status></p>
+    {% endif %}
+  </div>
+{%- endmacro %}

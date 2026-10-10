@@ -394,6 +394,20 @@ async def assets_page(request: Request):
         for field_def in field_definitions
     ]
     all_columns = list(_ASSET_TABLE_COLUMNS) + custom_columns
+    # Tags belong to the tags pack and are internal, so customers never see them.
+    show_tags = False
+    if can_write_assets and main_module._feature_pack_available("tags"):
+        from app.features.tags import routes as tags_routes
+
+        show_tags = await tags_routes.can_edit_tags(request, user, membership)
+    if show_tags:
+        from app.repositories import tags as tags_repo
+
+        tags_by_asset = await tags_repo.list_tags_for_assets(asset_ids)
+        for record in prepared:
+            record["tags"] = tags_by_asset.get(int(record["id"]), []) if record.get("id") else []
+        type_index = next((i for i, column in enumerate(all_columns) if column["key"] == "type"), 0)
+        all_columns.insert(type_index + 1, {"key": "tags", "label": "Tags", "sort": "string"})
 
     stats = {
         "total": len(prepared),
@@ -417,6 +431,7 @@ async def assets_page(request: Request):
         "is_super_admin": bool(user.get("is_super_admin")),
         "has_asset_actions": has_asset_actions,
         "matrix_enabled": main_module.settings.matrix_enabled,
+        "show_tags": show_tags,
     }
     return await main_module._render_template(
         "assets/index.html", request, user, extra=extra
@@ -1890,6 +1905,13 @@ async def asset_detail_page(
             can_run=is_super_admin or main_module._membership_menu_can(
                 user, membership, "menu.rmm_scripts", write=True),
         )
+    # Tags belong to the tags pack; the card disappears with it.
+    tags_context = None
+    if not customer_safe and main_module._feature_pack_available("tags"):
+        from app.features.tags import routes as tags_routes
+
+        if await tags_routes.can_edit_tags(request, user, membership):
+            tags_context = await tags_routes.asset_tags_context(asset_id, can_edit=True)
     return await main_module._render_template(
         "assets/detail.html", request, user, extra={
             "title": str(record.get("name") or f"Asset {asset_id}"),
@@ -1921,6 +1943,7 @@ async def asset_detail_page(
             "infrastructure_links": infrastructure_links,
             "network_interfaces": network_interfaces,
             "rmm": rmm_context,
+            "asset_tags": tags_context,
             "can_edit_network_map": can_view_network_map and (is_super_admin or main_module._membership_menu_can(
                 user, membership, "menu.network_map", write=True)),
             "asset_photos": (await asset_photo_repo.list_for_asset(

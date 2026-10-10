@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block title %}Tags{% endblock %}
+{% block header_title %}Tags{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/tags.css') }}">{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Re-apply automatic tags", "type": "form", "action": "/admin/tags/refresh"},
+    {"label": "Back to Assets", "type": "link", "href": "/assets"},
+  ]) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  <section class="card card--panel admin-grid__full" aria-labelledby="tags-new-heading">
+    <header class="card__header card__header--stacked"><div>
+      <h2 class="card__title" id="tags-new-heading">Create a tag</h2>
+      <p class="card__subtitle">Tags pick out assets and companies for automations and scripts. Technicians can also create tags while tagging an asset or company.</p>
+    </div></header>
+    <form method="post" action="/admin/tags" class="card__body tags-admin__edit">
+      {% include "partials/csrf.html" %}
+      <label class="visually-hidden" for="new-tag-name">Name</label>
+      <input class="form-input" id="new-tag-name" name="name" maxlength="64" required placeholder="Tag name, for example Domain controller">
+      <label class="visually-hidden" for="new-tag-colour">Colour</label>
+      <input class="form-input tags-admin__colour" id="new-tag-colour" name="colour" type="color" value="#2563eb">
+      <label class="visually-hidden" for="new-tag-description">Description</label>
+      <input class="form-input" id="new-tag-description" name="description" maxlength="255" placeholder="What the tag is for (optional)">
+      <button class="button button--primary" type="submit">Create tag</button>
+    </form>
+  </section>
+
+  <section class="card card--panel admin-grid__full" aria-labelledby="tags-list-heading">
+    <header class="card__header card__header--stacked"><div>
+      <h2 class="card__title" id="tags-list-heading">All tags</h2>
+      <p class="card__subtitle">Automatic tags are added and removed by MyPortal from each asset's type and operating system. They can be renamed and recoloured but not deleted. Deleting any other tag removes it from every asset and company.</p>
+    </div></header>
+    <div class="card__body">
+      {% if tags %}
+      <div class="table-wrapper"><table class="table">
+        <caption class="visually-hidden">Tags and where they are used</caption>
+        <thead><tr><th scope="col">Tag</th><th scope="col">Assigned</th><th scope="col">Assets</th><th scope="col">Companies</th><th scope="col" class="table__actions">Actions</th></tr></thead>
+        <tbody>
+          {% for tag in tags %}
+          <tr id="tag-{{ tag.id }}">
+            <td>
+              <form method="post" action="/admin/tags/{{ tag.id }}" class="tags-admin__edit">
+                {% include "partials/csrf.html" %}
+                <label class="visually-hidden" for="tag-{{ tag.id }}-name">Name</label>
+                <input class="form-input" id="tag-{{ tag.id }}-name" name="name" maxlength="64" required value="{{ tag.name }}">
+                <label class="visually-hidden" for="tag-{{ tag.id }}-colour">Colour</label>
+                <input class="form-input tags-admin__colour" id="tag-{{ tag.id }}-colour" name="colour" type="color" value="{{ tag.colour or '#2563eb' }}">
+                <label class="visually-hidden" for="tag-{{ tag.id }}-description">Description</label>
+                <input class="form-input" id="tag-{{ tag.id }}-description" name="description" maxlength="255" value="{{ tag.description }}" placeholder="Description">
+                <button class="button button--small" type="submit">Save</button>
+              </form>
+            </td>
+            <td>{% if tag.is_auto %}<span class="tag-chip" style="--tag-colour: {{ tag.colour or 'var(--hf-accent)' }}" title="{{ auto_tags[tag.auto_key].description if tag.auto_key in auto_tags else '' }}">Automatic</span>{% else %}By hand{% endif %}</td>
+            <td>{{ tag.asset_count }}</td>
+            <td>{{ tag.company_count }}</td>
+            <td class="table__actions">
+              {% if not tag.is_auto %}
+              <form method="post" action="/admin/tags/{{ tag.id }}/delete" data-confirm="Delete the tag {{ tag.name }}? It is removed from {{ tag.asset_count }} assets and {{ tag.company_count }} companies.">
+                {% include "partials/csrf.html" %}
+                <button class="button button--danger button--small" type="submit">Delete</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table></div>
+      {% else %}
+      <p class="text-muted">No tags yet.</p>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}
