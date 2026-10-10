@@ -81,6 +81,22 @@ async def test_detail_omits_inaccessible_relationship_target(monkeypatch):
     monkeypatch.setattr(routes.knowledge_base_service, "build_access_context", AsyncMock(return_value=object()))
     monkeypatch.setattr(routes.knowledge_base_service, "list_articles_for_context", AsyncMock(return_value=[]))
     monkeypatch.setattr(routes.asset_photo_repo, "list_for_asset", AsyncMock(return_value=[]))
+    monkeypatch.setattr(routes.tickets_repo, "list_tickets", AsyncMock(return_value=[]))
+    monkeypatch.setattr(routes.infrastructure_repo, "overview", AsyncMock(return_value={"networks": [], "racks": []}))
+    monkeypatch.setattr(routes.infrastructure_repo, "for_asset", AsyncMock(return_value={"addresses": [], "placements": []}))
+    monkeypatch.setattr(routes.processes_repo, "list_runs", AsyncMock(return_value=[]))
+    monkeypatch.setattr(routes.websites_repo, "list_websites", AsyncMock(return_value=[]))
+    monkeypatch.setattr(routes.websites_repo, "list_for_asset", AsyncMock(return_value=[]))
+    monkeypatch.setattr(routes.bcp_repo, "list_bcp_context_for_asset", AsyncMock(return_value=[]))
+    monkeypatch.setattr(routes.role_repo, "list_roles", AsyncMock(return_value=[]))
+    monkeypatch.setattr(routes.audience_repo, "list_role_ids", AsyncMock(return_value=[]))
+    monkeypatch.setattr(routes.asset_repo, "list_reconciliation_candidates", AsyncMock(return_value=[]))
+    monkeypatch.setattr(routes.asset_repo, "list_asset_sources", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        routes, "_asset_type_picker",
+        AsyncMock(return_value={"asset_type_mode": "manual", "asset_type_groups": [], "custom_asset_types": []}),
+    )
+    monkeypatch.setattr(main_module, "_feature_pack_available", lambda name: False)
     renderer = AsyncMock(return_value=routes.HTMLResponse("detail"))
     monkeypatch.setattr(main_module, "_render_template", renderer)
 

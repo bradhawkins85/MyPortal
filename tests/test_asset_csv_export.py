@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 import app.main as main_module
 from app.features.assets import routes as assets_routes
+from app.features.tags import routes as tags_routes
 
 
 @pytest.mark.parametrize(
@@ -23,7 +25,7 @@ def test_assets_page_export_option_requires_write_menu_permission(monkeypatch, m
     async def fake_require_authenticated_user(request):
         return user, None
 
-    async def fake_get_user_company(user_id, company_id):
+    async def fake_get_user_company(request, user_id, company_id):
         assert user_id == 7
         assert company_id == 11
         return membership
@@ -46,10 +48,11 @@ def test_assets_page_export_option_requires_write_menu_permission(monkeypatch, m
 
     monkeypatch.setattr(main_module, "_require_authenticated_user", fake_require_authenticated_user)
     monkeypatch.setattr(main_module, "_render_template", fake_render_template)
-    monkeypatch.setattr(assets_routes.user_company_repo, "get_user_company", fake_get_user_company)
+    monkeypatch.setattr(main_module, "_get_effective_company_membership", fake_get_user_company)
     monkeypatch.setattr(assets_routes.company_repo, "get_company_by_id", fake_get_company_by_id)
     monkeypatch.setattr(assets_routes.asset_repo, "list_company_assets", fake_list_company_assets)
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "list_field_definitions", fake_list_field_definitions)
+    monkeypatch.setattr(tags_routes, "can_edit_tags", AsyncMock(return_value=False))
 
     import asyncio
 
