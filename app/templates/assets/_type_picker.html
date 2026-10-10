@@ -2,16 +2,16 @@
     auto: a select of the built-in catalogue.
     custom: a text box suggesting catalogue types and types entered before.
     manual: a text box suggesting only types entered before. -#}
-{% macro asset_type_picker(mode, groups, custom_types, current=None, current_label=None, disabled=False) %}
+{% macro asset_type_picker(mode, groups, custom_types, current=None, current_label=None, disabled=False, input_class='input') %}
 {% if mode == 'auto' %}
-<select class="input" id="asset-type" name="asset_type" required {% if disabled %}disabled{% endif %}>
+<select class="{{ input_class }}" id="asset-type" name="asset_type" required {% if disabled %}disabled{% endif %}>
   {% if not current %}<option value="">Choose a type</option>{% endif %}
   {% if current and current.key == 'custom' %}<option value="custom" selected>{{ current_label }}</option>{% endif %}
   {% for group in groups %}<optgroup label="{{ group.label }}">{% for item in group.types %}<option value="{{ item.key }}" {% if current and item.key == current.key %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</optgroup>{% endfor %}
 </select>
 <small class="form-help">The type sets the asset's icon and where it sits on the network map.</small>
 {% else %}
-<input class="input" id="asset-type" name="asset_type_name" list="asset-type-options" maxlength="255" required autocomplete="off" value="{{ current_label or '' }}" {% if disabled %}disabled{% endif %}>
+<input class="{{ input_class }}" id="asset-type" name="asset_type_name" list="asset-type-options" maxlength="255" required autocomplete="off" value="{{ current_label or '' }}" {% if disabled %}disabled{% endif %}>
 <datalist id="asset-type-options">
   {% for group in groups %}{% for item in group.types %}<option value="{{ item.label }}"></option>{% endfor %}{% endfor %}
   {% for name in custom_types %}<option value="{{ name }}"></option>{% endfor %}
