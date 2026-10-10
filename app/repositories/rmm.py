@@ -52,34 +52,48 @@ def _run_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
 # --------------------------------------------------------------------------- #
 
 
-async def list_scripts(*, include_inactive: bool = False) -> list[dict[str, Any]]:
-    if include_inactive:
+async def list_scripts(*, company_id: int | None = None) -> list[dict[str, Any]]:
+    """Active scripts; with ``company_id``, only those that company may run
+    (Common scripts plus the scripts in its own folder)."""
+
+    if company_id is None:
         rows = await db.fetch_all(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, is_active, synced_at, "
-            "created_at, updated_at FROM rmm_scripts ORDER BY folder, name"
+            "parameters_json, env_vars_json, default_timeout_seconds, company_id, is_active, synced_at, "
+            "created_at, updated_at FROM rmm_scripts WHERE is_active = 1 ORDER BY folder, name"
         )
     else:
         rows = await db.fetch_all(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, is_active, synced_at, "
-            "created_at, updated_at FROM rmm_scripts WHERE is_active = 1 ORDER BY folder, name"
+            "parameters_json, env_vars_json, default_timeout_seconds, company_id, is_active, synced_at, "
+            "created_at, updated_at FROM rmm_scripts WHERE is_active = 1 "
+            "AND (company_id IS NULL OR company_id = %s) ORDER BY folder, name",
+            (company_id,),
         )
     return [_script_row(row) for row in rows or []]
+
+
+def script_available_to(script: dict[str, Any] | None, company_id: int) -> bool:
+    """True when ``script`` is active and may run on ``company_id``'s devices."""
+
+    if not script or not script.get("is_active"):
+        return False
+    owner = script.get("company_id")
+    return owner is None or int(owner) == int(company_id)
 
 
 async def get_script(script_id: int, *, with_content: bool = False) -> dict[str, Any] | None:
     if with_content:
         row = await db.fetch_one(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, company_id, is_active, synced_at, "
             "created_at, updated_at, content FROM rmm_scripts WHERE id = %s",
             (script_id,),
         )
     else:
         row = await db.fetch_one(
             "SELECT id, path, name, folder, language, description, content_sha256, source_sha, "
-            "parameters_json, env_vars_json, default_timeout_seconds, is_active, synced_at, "
+            "parameters_json, env_vars_json, default_timeout_seconds, company_id, is_active, synced_at, "
             "created_at, updated_at FROM rmm_scripts WHERE id = %s",
             (script_id,),
         )
@@ -87,9 +101,9 @@ async def get_script(script_id: int, *, with_content: bool = False) -> dict[str,
 
 
 async def script_source_index() -> dict[str, dict[str, Any]]:
-    """Return ``{path: {id, source_sha, is_active}}`` for every stored script."""
+    """Return ``{path: {id, source_sha, company_id, is_active}}`` for every stored script."""
 
-    rows = await db.fetch_all("SELECT id, path, source_sha, is_active FROM rmm_scripts")
+    rows = await db.fetch_all("SELECT id, path, source_sha, company_id, is_active FROM rmm_scripts")
     return {str(row["path"]): dict(row) for row in rows or []}
 
 
@@ -105,25 +119,26 @@ async def upsert_script(
     source_sha: str,
     parameters: list[dict[str, Any]],
     env_vars: list[dict[str, Any]],
+    company_id: int | None = None,
 ) -> None:
     now = _utcnow()
     params = (
         name, folder, language, description, content, content_sha256, source_sha,
-        json.dumps(parameters), json.dumps(env_vars), now, now,
+        json.dumps(parameters), json.dumps(env_vars), company_id, now, now,
     )
     existing = await db.fetch_one("SELECT id FROM rmm_scripts WHERE path = %s", (path,))
     if existing:
         await db.execute(
             "UPDATE rmm_scripts SET name = %s, folder = %s, language = %s, description = %s, content = %s, "
-            "content_sha256 = %s, source_sha = %s, parameters_json = %s, env_vars_json = %s, synced_at = %s, "
-            "updated_at = %s, is_active = 1 WHERE id = %s",
+            "content_sha256 = %s, source_sha = %s, parameters_json = %s, env_vars_json = %s, company_id = %s, "
+            "synced_at = %s, updated_at = %s, is_active = 1 WHERE id = %s",
             params + (existing["id"],),
         )
         return
     await db.execute(
         "INSERT INTO rmm_scripts (name, folder, language, description, content, content_sha256, source_sha, "
-        "parameters_json, env_vars_json, synced_at, updated_at, path) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "parameters_json, env_vars_json, company_id, synced_at, updated_at, path) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         params + (path,),
     )
 

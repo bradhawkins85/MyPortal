@@ -24,6 +24,7 @@ offers fewer fields.
 from __future__ import annotations
 
 import re
+import shlex
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -454,10 +455,37 @@ _SHELL_ASSIGN = re.compile(
     r"(?:^|[;&|\s(])(?:export\s+|local\s+|readonly\s+|declare\s+(?:-\w+\s+)*|typeset\s+(?:-\w+\s+)*)?"
     r"([A-Z_][A-Z0-9_]*)(?:\[[^\]]*\])?\+?=",
 )
-_SHELL_LOOP_OR_READ = re.compile(
-    r"\bfor\s+([A-Z_][A-Z0-9_]*)\s+in\b|\bread\s+(?:-\w+\s+(?:\S+\s+)?)*((?:[A-Z_][A-Z0-9_]*\s*)+)"
-    r"|\bgetopts\s+\S+\s+([A-Z_][A-Z0-9_]*)",
-)
+_SHELL_LOOP = re.compile(r"\bfor\s+([A-Z_][A-Z0-9_]*)\s+in\b|\bgetopts\s+\S+\s+([A-Z_][A-Z0-9_]*)")
+# The rest of a "read" command; its arguments are split in Python rather than
+# by a nested pattern, which could backtrack exponentially.
+_SHELL_READ = re.compile(r"\bread\b([^\n;&|<>]*)")
+_SHELL_NAME = re.compile(r"[A-Z_][A-Z0-9_]*")
+# read options whose value is the next word (-a's value is an array name).
+_READ_OPTIONS_WITH_VALUE = set("adinNptu")
+
+
+def _read_targets(arguments: str) -> list[str]:
+    """Variable names a ``read`` command assigns."""
+
+    try:
+        words = shlex.split(arguments)
+    except ValueError:
+        words = arguments.split()
+    names: list[str] = []
+    expect_value = ""
+    for word in words:
+        if expect_value:
+            if expect_value == "a" and _SHELL_NAME.fullmatch(word):
+                names.append(word)
+            expect_value = ""
+            continue
+        if word.startswith("-") and len(word) > 1:
+            if word[-1] in _READ_OPTIONS_WITH_VALUE:
+                expect_value = word[-1]
+            continue
+        if _SHELL_NAME.fullmatch(word):
+            names.append(word)
+    return names
 
 
 def _shell_header(content: str) -> tuple[str, str | None]:
@@ -511,9 +539,10 @@ def _parse_shell(content: str, language: str) -> ParsedScript:
     first_assign: dict[str, int] = {}
     for match in _SHELL_ASSIGN.finditer(code):
         first_assign.setdefault(match.group(1), match.start(1))
-    for match in _SHELL_LOOP_OR_READ.finditer(code):
-        names = (match.group(1) or match.group(2) or match.group(3) or "").split()
-        for name in names:
+    for match in _SHELL_LOOP.finditer(code):
+        first_assign.setdefault(match.group(1) or match.group(2), match.start())
+    for match in _SHELL_READ.finditer(code):
+        for name in _read_targets(match.group(1)):
             first_assign.setdefault(name, match.start())
 
     first_read: dict[str, int] = {}

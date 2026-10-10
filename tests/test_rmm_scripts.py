@@ -263,7 +263,7 @@ async def sqlite_db(monkeypatch):
           value_boolean INT, created_at TEXT, updated_at TEXT, UNIQUE (asset_id, field_definition_id));
     """)
     adapter = Database()
-    for name in ("332_company_variables.sql", "465_rmm_scripting.sql"):
+    for name in ("332_company_variables.sql", "465_rmm_scripting.sql", "466_rmm_script_company.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES
@@ -278,12 +278,17 @@ async def sqlite_db(monkeypatch):
     async def get_company(company_id):
         return await fake.fetch_one("SELECT * FROM companies WHERE id = %s", (company_id,))
 
+    async def list_companies(include_archived=False):
+        rows = await fake.fetch_all("SELECT * FROM companies ORDER BY id")
+        return [dict(row) for row in rows]
+
     monkeypatch.setattr(rmm_scripts.companies_repo, "get_company_by_id", get_company)
+    monkeypatch.setattr(rmm_scripts.companies_repo, "list_companies", list_companies)
     yield fake
     await conn.close()
 
 
-async def _sync(monkeypatch, files: dict[str, str], shas: dict[str, str] | None = None):
+async def _sync(monkeypatch, files: dict[str, str], shas: dict[str, str] | None = None, *, created=None, refuse=False):
     settings = gitea.GiteaSettings("https://git.example.com", "https://git.example.com", "t", "msp", "scripts", "main", "rmm", True)
 
     async def load_settings():
@@ -301,7 +306,14 @@ async def _sync(monkeypatch, files: dict[str, str], shas: dict[str, str] | None 
 
     monkeypatch.setattr(gitea, "load_settings", load_settings)
     monkeypatch.setattr(gitea, "list_files", list_files)
+    async def create_files(_settings, new_files, message):
+        if refuse:
+            raise gitea.GiteaError("Gitea refused to create folders.")
+        if created is not None:
+            created.update(new_files)
+
     monkeypatch.setattr(gitea, "fetch_file", fetch_file)
+    monkeypatch.setattr(gitea, "create_files", create_files)
     summary = await rmm_scripts.sync_from_gitea()
     return summary, fetched
 
@@ -318,24 +330,24 @@ async def _enrol(fake, *, tray_id=5, asset_id=10, uid="agent-uid-0001", os_name=
 
 @pytest.mark.anyio
 async def test_sync_adds_updates_skips_and_removes(sqlite_db, monkeypatch):
-    files = {"rmm/disk/Check-Disk.ps1": POWERSHELL, "rmm/linux/restart.sh": BASH, "rmm/README.md": "# docs"}
+    files = {"rmm/Common/disk/Check-Disk.ps1": POWERSHELL, "rmm/Common/linux/restart.sh": BASH, "rmm/README.md": "# docs"}
     summary, fetched = await _sync(monkeypatch, files)
     assert (summary.added, summary.updated, summary.unchanged) == (2, 0, 0)
     scripts = {script["name"]: script for script in await rmm_repo.list_scripts()}
     assert set(scripts) == {"Check-Disk", "restart"}
-    assert scripts["Check-Disk"]["folder"] == "disk" and scripts["Check-Disk"]["language"] == "powershell"
+    assert scripts["Check-Disk"]["folder"] == "Common/disk" and scripts["Check-Disk"]["language"] == "powershell"
     assert len(scripts["Check-Disk"]["parameters"]) == 7
     assert [env["name"] for env in scripts["restart"]["env_vars"]] == ["SITE_URL", "API_KEY"]
     assert "rmm/README.md" not in fetched
 
     summary, fetched = await _sync(
-        monkeypatch, {"rmm/disk/Check-Disk.ps1": "param([string]$Only)\n"}, {"rmm/disk/Check-Disk.ps1": "sha-new"}
+        monkeypatch, {"rmm/Common/disk/Check-Disk.ps1": "param([string]$Only)\n"}, {"rmm/Common/disk/Check-Disk.ps1": "sha-new"}
     )
     assert (summary.added, summary.updated, summary.removed) == (0, 1, 1)
     assert [script["name"] for script in await rmm_repo.list_scripts()] == ["Check-Disk"]
     assert [s["name"] for s in (await rmm_repo.list_scripts())[0]["parameters"]] == ["Only"]
 
-    summary, fetched = await _sync(monkeypatch, {"rmm/disk/Check-Disk.ps1": "x"}, {"rmm/disk/Check-Disk.ps1": "sha-new"})
+    summary, fetched = await _sync(monkeypatch, {"rmm/Common/disk/Check-Disk.ps1": "x"}, {"rmm/Common/disk/Check-Disk.ps1": "sha-new"})
     assert summary.unchanged == 1 and fetched == []
 
 
@@ -357,7 +369,7 @@ async def test_enrolment_links_tray_device_and_rejects_takeover(sqlite_db):
 
 @pytest.mark.anyio
 async def test_run_round_trip_updates_custom_fields_and_variables(sqlite_db, monkeypatch):
-    await _sync(monkeypatch, {"rmm/Check-Disk.ps1": POWERSHELL})
+    await _sync(monkeypatch, {"rmm/Common/Check-Disk.ps1": POWERSHELL})
     script = (await rmm_repo.list_scripts())[0]
     _result, agent = await _enrol(sqlite_db)
     await asset_fields_repo.set_asset_field_value(10, 1, value_text="Off")
@@ -420,7 +432,7 @@ async def test_run_round_trip_updates_custom_fields_and_variables(sqlite_db, mon
 
 @pytest.mark.anyio
 async def test_failures_timeouts_and_other_agents(sqlite_db, monkeypatch):
-    await _sync(monkeypatch, {"rmm/a.sh": "echo hi\n"})
+    await _sync(monkeypatch, {"rmm/Common/a.sh": "echo hi\n"})
     script = (await rmm_repo.list_scripts())[0]
     _r, windows_agent = await _enrol(sqlite_db)
     queued = await rmm_scripts.queue_runs(script_id=script["id"], company_id=1, asset_ids=[10], submitted={},
@@ -463,7 +475,7 @@ async def test_failures_timeouts_and_other_agents(sqlite_db, monkeypatch):
 async def test_long_poll_wakes_when_a_run_is_queued(sqlite_db, monkeypatch):
     import asyncio
 
-    await _sync(monkeypatch, {"rmm/a.ps1": "Write-Output 1\n"})
+    await _sync(monkeypatch, {"rmm/Common/a.ps1": "Write-Output 1\n"})
     script = (await rmm_repo.list_scripts())[0]
     _r, agent = await _enrol(sqlite_db)
     waiter = asyncio.create_task(rmm_scripts.wait_for_jobs(agent, wait_seconds=10))
@@ -644,3 +656,109 @@ async def test_variable_names_with_spaces_resolve_case_insensitively():
     assert await rmm_scripts.render_value("{{company.variables.tenant id}}/{{ asset.custom.BitLocker Status }}", context) == "contoso/On"
     assert await rmm_scripts.render_value("{{asset.name}} at {{company.name}}", context) == "PC-01 at Contoso"
     assert await rmm_scripts.render_value("{{asset.custom.Missing}}", context) == ""
+
+
+def test_shell_read_targets_and_no_catastrophic_backtracking():
+    import time
+
+    assert parser._read_targets(" -r -p 'Name: ' -t 5 FIRST LAST") == ["FIRST", "LAST"]
+    assert parser._read_targets(" -a ITEMS") == ["ITEMS"]
+    assert parser._read_targets(" -r 'unbalanced") == []
+    script = 'read -r ANSWER\necho "$ANSWER $SITE_URL"\n'
+    assert [env.name for env in parser.parse_script(script, "bash").env_vars] == ["SITE_URL"]
+    started = time.monotonic()
+    parser.parse_script("read " + "A " * 5000 + "-\n" + "read -" * 5000, "bash")
+    assert time.monotonic() - started < 2
+
+
+def _companies(*rows):
+    return [{"id": company_id, "name": name, "archived": archived} for company_id, name, archived in rows]
+
+
+def _files(*paths):
+    return [gitea.GiteaFile(path=path, sha="s", size=1) for path in paths]
+
+
+def test_company_folder_names_are_safe_and_unique():
+    names = rmm_scripts.company_folder_names(_companies(
+        (3, "Contoso", 0), (1, "A/B: Ltd.", 0), (2, "contoso", 0), (4, "", 0), (5, "...", 0)))
+    assert names == {1: "A-B- Ltd", 2: "contoso", 3: "Contoso (3)", 4: "Company 4", 5: "Company 5"}
+
+
+@pytest.mark.anyio
+async def test_layout_links_markers_and_names_and_lists_missing_folders(monkeypatch):
+    settings = gitea.GiteaSettings("https://g", "https://g", "t", "msp", "scripts", "main", "rmm", True)
+    markers = {"rmm/Companies/Renamed/.myportal-company": b'{"company_id": 1}',
+               "rmm/Companies/Broken/.myportal-company": b"not json"}
+
+    async def fetch_file(_settings, path):
+        return markers[path]
+
+    monkeypatch.setattr(gitea, "fetch_file", fetch_file)
+    files = _files(*markers, "rmm/Companies/fabrikam/x.ps1", "rmm/Companies/Broken/y.ps1", "rmm/Common/a.ps1", "other/z.ps1")
+    companies = _companies((1, "Contoso", 0), (2, "Fabrikam", 0), (3, "Northwind", 0), (4, "Gone", 1))
+    layout = await rmm_scripts.read_layout(settings, files, companies)
+    assert layout.company_folders == {"Renamed": 1, "fabrikam": 2, "Northwind": 3}
+    assert set(layout.missing) == {"Companies/fabrikam/.myportal-company", "Companies/Northwind/.myportal-company"}
+    assert json.loads(layout.missing["Companies/Northwind/.myportal-company"])["company_id"] == 3
+
+    assert rmm_scripts.script_scope("Common/disk/a.ps1", layout) == (True, None, "")
+    assert rmm_scripts.script_scope("Companies/Renamed/sub/b.ps1", layout) == (True, 1, "")
+    assert rmm_scripts.script_scope("Companies/Broken/y.ps1", layout)[:2] == (False, None)
+    assert rmm_scripts.script_scope("Companies/c.ps1", layout)[0] is False
+    assert rmm_scripts.script_scope("loose.ps1", layout)[0] is False
+
+    empty = await rmm_scripts.read_layout(settings, [], companies)
+    assert set(empty.missing) == {"Common/README.md", "Companies/README.md", "Companies/Contoso/.myportal-company",
+                                  "Companies/Fabrikam/.myportal-company", "Companies/Northwind/.myportal-company"}
+
+
+@pytest.mark.anyio
+async def test_company_scripts_run_only_at_their_company(sqlite_db, monkeypatch):
+    created: dict[str, str] = {}
+    files = {"rmm/Common/a.ps1": "Write-Output 1\n", "rmm/Companies/Contoso/only.ps1": "Write-Output 2\n",
+             "rmm/stray.ps1": "Write-Output 3\n"}
+    summary, _fetched = await _sync(monkeypatch, files, created=created)
+    assert summary.added == 2 and summary.folders_created == len(created)
+    assert set(created) == {"rmm/Companies/Contoso/.myportal-company", "rmm/Companies/Other/.myportal-company"}
+    assert [item["path"] for item in summary.skipped] == ["rmm/stray.ps1"]
+
+    assert {s["name"] for s in await rmm_repo.list_scripts(company_id=1)} == {"a", "only"}
+    assert {s["name"] for s in await rmm_repo.list_scripts(company_id=2)} == {"a"}
+    company_script = next(s for s in await rmm_repo.list_scripts() if s["name"] == "only")
+    assert company_script["company_id"] == 1
+    assert rmm_repo.script_available_to(company_script, 1) and not rmm_repo.script_available_to(company_script, 2)
+    with pytest.raises(rmm_scripts.RunRequestError):
+        await rmm_scripts.queue_runs(script_id=company_script["id"], company_id=2, asset_ids=[20], submitted={},
+                                     timeout_seconds=60, requested_by_user_id=None)
+
+    # Moving a script to Common changes who can run it even though the file is unchanged.
+    moved = {"rmm/Common/a.ps1": files["rmm/Common/a.ps1"], "rmm/Companies/Contoso/only.ps1": files["rmm/Companies/Contoso/only.ps1"]}
+    summary, _fetched = await _sync(monkeypatch, moved, refuse=True)
+    assert summary.unchanged == 2 and "refused" in summary.message()
+
+
+@pytest.mark.anyio
+async def test_gitea_create_files_posts_a_batch_and_explains_a_read_only_token(monkeypatch):
+    import base64
+
+    import httpx
+
+    seen = {}
+
+    def handler(request):
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(seen.get("status", 201), json={})
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(gitea, "_client", lambda s: httpx.AsyncClient(transport=transport, headers=gitea._headers(s)))
+    settings = gitea.GiteaSettings("https://g", "https://g", "t", "msp", "scripts", "main", "", True)
+    await gitea.create_files(settings, {"Common/README.md": "hi"}, "Add folders")
+    assert seen["path"] == "/api/v1/repos/msp/scripts/contents"
+    assert seen["body"]["branch"] == "main"
+    assert seen["body"]["files"] == [{"operation": "create", "path": "Common/README.md",
+                                      "content": base64.b64encode(b"hi").decode()}]
+    seen["status"] = 403
+    with pytest.raises(gitea.GiteaError, match="write access"):
+        await gitea.create_files(settings, {"Common/README.md": "hi"}, "Add folders")

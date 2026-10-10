@@ -4,9 +4,10 @@
 company's devices through the MyPortal RMM agent, and shows each run's exit code, output and
 any values the script sent back.
 
-Scripts are written and reviewed in a **Gitea** repository. MyPortal only reads them: it loads
-each script, works out which values it needs, and gives technicians a field for each one when
-they run it.
+Scripts are written and reviewed in a **Gitea** repository. MyPortal loads each script, works
+out which values it needs, and gives technicians a field for each one when they run it. The only
+thing MyPortal writes to the repository is its folder layout (see
+[Repository layout](#repository-layout)).
 
 Scripts are pushed manually for now. Scheduled and triggered runs come later.
 
@@ -20,7 +21,8 @@ straight after installing:
 - Gitea is served at **`/gitea`** on the portal's own address, for example
   `https://portal.example.com/gitea/`. Choose **Open Gitea** on the Scripts page to go there.
 - The installer creates a Gitea administrator called `myportal`, a private repository
-  `myportal/rmm-scripts`, and a read-only token for MyPortal, and fills in the `GITEA_*` settings
+  `myportal/rmm-scripts`, and a token for MyPortal that can write to repositories (so MyPortal can
+  create its folders), and fills in the `GITEA_*` settings
   below. The administrator's password is in `/etc/gitea/admin-credentials` (bare metal) or
   `/opt/myportal-docker/gitea-admin.txt` (Docker). Sign in with it, then create accounts for your
   technicians under Site administration.
@@ -40,8 +42,9 @@ without connecting another one.
 
 ### Connecting another Gitea server
 
-1. Create a repository in Gitea for your scripts and a personal access token with read access
-   to it.
+1. Create a repository in Gitea for your scripts and a personal access token with the
+   `write:repository` scope. A read-only token still loads scripts, but MyPortal cannot create
+   its folders and sync shows a warning.
 2. Set these values in `.env` (the **Gitea scripts** module, `gitea`, is on by default under
    Administration → Modules):
 
@@ -49,17 +52,41 @@ without connecting another one.
    | --- | --- |
    | `GITEA_BASE_URL` | Address of your Gitea server, e.g. `https://git.example.com` |
    | `GITEA_PUBLIC_URL` | Address technicians open, when it differs from `GITEA_BASE_URL` (a path such as `/gitea` is relative to the portal) |
-   | `GITEA_API_TOKEN` | Token with read access to the repository |
+   | `GITEA_API_TOKEN` | Token with `write:repository` access to the repository |
    | `GITEA_SCRIPTS_REPOSITORY` | `owner/name` of the repository |
    | `GITEA_SCRIPTS_BRANCH` | Branch to load (default `main`) |
-   | `GITEA_SCRIPTS_PATH` | Optional folder inside the repository; leave blank for all of it |
+   | `GITEA_SCRIPTS_PATH` | Optional folder inside the repository that holds `Common` and `Companies`; leave blank for the repository root |
    | `GITEA_VERIFY_SSL` | `false` only for a self-signed test server |
 
 3. On the Scripts page, a super admin chooses **Sync from Gitea**.
 
-Sync loads every `.ps1`, `.sh`, `.bash` and `.zsh` file (up to 1 MB). Folders become groups in
-the library. Unchanged files are skipped, and a script deleted from Gitea disappears from the
-library while its past runs keep the exact version that ran.
+Sync loads every `.ps1`, `.sh`, `.bash` and `.zsh` file (up to 1 MB) in the folders below.
+Subfolders become groups in the library. Unchanged files are skipped, and a script deleted from
+Gitea disappears from the library while its past runs keep the exact version that ran.
+
+### Repository layout
+
+MyPortal keeps two folders at the top of the repository (or of `GITEA_SCRIPTS_PATH`):
+
+- **`Common/`**: scripts any company can run. Organise them in subfolders as you like.
+- **`Companies/`**: one folder per MyPortal company, for example `Companies/Contoso Ltd/`.
+  Scripts in a company's folder, and its subfolders, are offered and run only on that company's
+  devices.
+
+MyPortal creates these folders itself, along with a folder for every company, on each sync and
+every ten minutes, so a new company gets its folder without anyone touching Gitea. Archived
+companies do not get a new folder. Git cannot store an empty folder, so each company folder
+holds a small `.myportal-company` file that records which company it belongs to; leave it in
+place. Because of that file you can rename a company folder in Gitea and it stays linked. A
+folder you make yourself under `Companies/` is linked to the company with the same name.
+
+Scripts anywhere else in the repository, and scripts in a `Companies/` folder that matches no
+company, are not loaded; sync lists them as skipped.
+
+Installations set up before this layout was added gave MyPortal a read-only token. Sync then
+says the token needs write access: create a new token for the `myportal` user with the
+`write:repository` scope (Gitea → Settings → Applications), put it in `GITEA_API_TOKEN`, and
+move existing scripts into `Common/` or a company folder.
 
 ## Writing scripts
 
