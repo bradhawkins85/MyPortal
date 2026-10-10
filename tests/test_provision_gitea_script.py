@@ -185,7 +185,8 @@ def test_baremetal_upgrade_provisions_gitea_without_blocking_and_nginx_serves_it
     # Before the env checksum, so new Gitea settings reload the workers.
     assert upgrade.index('bash "${SCRIPT_DIR}/provision_redis.sh"') < call < upgrade.index("redis_env_after=")
     nginx = (ROOT / "deploy/nginx/myportal-bluegreen.conf").read_text()
-    assert "location ^~ /gitea/ {\n    proxy_pass http://127.0.0.1:3000/;" in nginx
+    block = nginx[nginx.index("location ^~ /gitea/ {"):]
+    assert "proxy_pass http://127.0.0.1:3000/;" in block[: block.index("}")]
 
 
 def test_gitea_never_searches_above_its_data_for_a_repository(tmp_path):
@@ -203,3 +204,18 @@ def test_gitea_never_searches_above_its_data_for_a_repository(tmp_path):
     assert result.returncode == 0, result.stderr
     assert calls.read_text().startswith(f"{tmp_path} -u gitea -- env ")
     assert "GIT_CEILING_DIRECTORIES=/ceiling" in calls.read_text()
+
+
+def test_sign_in_settings_are_applied_to_existing_and_new_configs(tmp_path):
+    config = tmp_path / "app.ini"
+    config.write_text("[service]\nDISABLE_REGISTRATION = true\n\n[security]\nINSTALL_LOCK = true\n")
+    first = run(f'GITEA_CONFIG="{config}"\nconfigure_sign_in', env_file(tmp_path, ""))
+    assert first.returncode == 0 and "changed" in first.stdout, first.stderr
+    text = config.read_text()
+    for line in ("ENABLE_REVERSE_PROXY_AUTHENTICATION = true", "ENABLE_REVERSE_PROXY_AUTO_REGISTRATION = true",
+                 "REVERSE_PROXY_AUTHENTICATION_USER = X-WEBAUTH-USER",
+                 "REVERSE_PROXY_TRUSTED_PROXIES = 127.0.0.0/8,::1/128"):
+        assert line in text.splitlines()
+    # Already applied: nothing changes, so Gitea is not restarted.
+    again = run(f'GITEA_CONFIG="{config}"\nconfigure_sign_in', env_file(tmp_path, ""))
+    assert again.stdout == "" and config.read_text() == text

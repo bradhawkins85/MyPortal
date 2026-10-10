@@ -1,0 +1,7 @@
+{
+  "guid": "13f29379-9d95-46ba-81c4-2f5032fa9c79",
+  "occurred_at": "2026-10-10T05:45Z",
+  "change_type": "Feature",
+  "summary": "RMM Scripts: technicians with the Script editing permission sign in to the bundled Gitea with their MyPortal account",
+  "content_hash": "dc7f2e86e7f422658c677af14977f2bf790b0d3ccdd7e706403a59f0d2143b93"
+}
