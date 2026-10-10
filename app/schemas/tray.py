@@ -190,6 +190,28 @@ class TrayInstallTokenResponse(BaseModel):
     use_count: int = 0
 
 
+class TrayDeploymentLinkCreate(BaseModel):
+    company_id: int = Field(ge=1)
+    label: Optional[str] = Field(default=None, max_length=150)
+
+
+class TrayDeploymentLinkResponse(BaseModel):
+    id: int
+    company_id: int
+    company_name: Optional[str] = None
+    label: str
+    url: Optional[str] = None
+    status: str
+    created_at: datetime
+    revoked_at: Optional[datetime] = None
+    download_count: int = 0
+    last_downloaded_at: Optional[datetime] = None
+
+
+class TrayDeploymentBuildFailure(BaseModel):
+    error: str = Field(default="", max_length=4000)
+
+
 class TrayTRMMScriptRunRequest(BaseModel):
     script_id: int = Field(ge=1)
 

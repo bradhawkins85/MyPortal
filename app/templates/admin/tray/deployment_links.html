@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}<span class="header__title-text">Tray deployment URLs</span>{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Devices", "type": "link", "variant": "ghost", "href": "/admin/tray/devices"},
+    {"label": "Install tokens", "type": "link", "variant": "ghost", "href": "/admin/tray/install-tokens"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  <section class="card card--panel admin-grid__full" aria-labelledby="deploy-create-title">
+    <header class="card__header">
+      <h2 id="deploy-create-title">New deployment URL</h2>
+      <p class="card__lede">A deployment URL gives someone a ready-made tray installer for one company. They open the link, download the Windows installer or the macOS package and run it. The device enrols into that company with no token to type.</p>
+    </header>
+    <div class="card__body">
+      {% if not release_tag %}
+        <div class="callout callout--warning">
+          <p>No tray release is cached on this server yet, so Windows installers cannot be built and the macOS package is missing. Fetch the latest tray release from the <a href="/admin/tray/devices">Devices</a> page first.</p>
+        </div>
+      {% endif %}
+      <p class="form-help">Windows installers (EXE and MSI) are built and signed for each company by your Windows build server. They are rebuilt automatically when a new tray release is cached{% if release_tag %} (currently <code>{{ release_tag }}</code>){% endif %}. See <em>Tray Build Server</em> in the wiki to set one up.</p>
+      <form method="post" action="/admin/tray/deployment-links" class="form-stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <div class="form-row">
+          <div class="form-field">
+            <label class="form-label" for="deploy-company">Company</label>
+            <select class="form-input" id="deploy-company" name="company_id" required>
+              <option value="">Choose a company</option>
+              {% for company in companies %}
+                <option value="{{ company.id }}">{{ company.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="deploy-label">Label <span class="form-label__optional">optional</span></label>
+            <input class="form-input" id="deploy-label" name="label" maxlength="150" placeholder="e.g. New starters" />
+            <p class="form-help">Shown only to admins. Defaults to the company name.</p>
+          </div>
+          <div class="form-field form-field--actions">
+            <button type="submit" class="button button--primary">Create URL</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="card card--panel admin-grid__full" aria-labelledby="deploy-list-title">
+    <header class="card__header">
+      <h2 id="deploy-list-title">Deployment URLs</h2>
+      <div class="card__controls card__controls--right">
+        <input class="form-input" type="search" placeholder="Search" aria-label="Search deployment URLs" data-deploy-search />
+        <a class="button button--ghost button--small" href="/admin/tray/deployment-links{% if not show_revoked %}?show_revoked=true{% endif %}" aria-pressed="{{ 'true' if show_revoked else 'false' }}">{{ "Hide revoked" if show_revoked else "Show revoked" }}</a>
+      </div>
+    </header>
+    <div class="card__body card__body--table">
+      {% if links %}
+        <table class="data-table" data-deploy-table>
+          <caption class="visually-hidden">Tray deployment URLs</caption>
+          <thead>
+            <tr>
+              <th>Company</th><th>Label</th><th>URL</th><th>Status</th><th>Windows installer</th>
+              <th>Downloads</th><th>Last download</th><th>Created</th>
+              <th class="data-table__col--actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for link in links %}
+              <tr data-deploy-row>
+                <td>{{ link.company_name or '—' }}</td>
+                <td>{{ link.label }}</td>
+                <td>
+                  {% if link.url and link.status == "active" %}
+                    <div class="totp-copy-row">
+                      <input class="form-input scf-mono" id="deploy-url-{{ link.id }}" value="{{ link.url }}" readonly aria-label="Deployment URL for {{ link.label }}" />
+                      <button type="button" class="button button--ghost button--small" data-copy-target="deploy-url-{{ link.id }}">Copy</button>
+                    </div>
+                    <details>
+                      <summary>RMM one-liners</summary>
+                      <pre class="code-block"><code>irm '{{ link.url }}/install.ps1' | iex</code></pre>
+                      <pre class="code-block"><code>curl -fsSL '{{ link.url }}/install.sh' | sudo bash</code></pre>
+                    </details>
+                  {% else %}—{% endif %}
+                </td>
+                <td>
+                  {% if link.status == "active" %}
+                    <span class="status status--success">Active</span>
+                  {% else %}
+                    <span class="status status--danger">Revoked</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% set build = link.build %}
+                  {% if link.status != "active" %}—
+                  {% elif not build %}<span class="status status--neutral">Not built</span>
+                  {% elif build.status == "ready" %}<span class="status status--success">Ready</span> <code>{{ build.release_tag }}</code>
+                  {% elif build.status == "building" %}<span class="status status--info">Building</span>
+                  {% elif build.status == "queued" %}<span class="status status--neutral">Queued</span>
+                  {% else %}<span class="status status--danger" title="{{ build.error }}">Failed</span>
+                    {% if build.error %}<p class="form-help">{{ build.error }}</p>{% endif %}
+                  {% endif %}
+                </td>
+                <td>{{ link.download_count }}</td>
+                <td>
+                  {% if link.last_downloaded_at %}
+                    <span data-utc="{{ link.last_downloaded_at }}">{{ link.last_downloaded_at }}</span>
+                  {% else %}—{% endif %}
+                </td>
+                <td><span data-utc="{{ link.created_at }}">{{ link.created_at }}</span></td>
+                <td class="data-table__col--actions">
+                  {% if link.status == "active" %}
+                    <form method="post" action="/admin/tray/deployment-links/{{ link.id }}/rebuild" class="inline-form">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <button type="submit" class="button button--small button--ghost">Rebuild</button>
+                    </form>
+                    <form method="post" action="/admin/tray/deployment-links/{{ link.id }}/revoke" class="inline-form">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <button type="submit" class="button button--small button--danger" data-confirm="Revoke this deployment URL? Its install token stops working too. Devices already installed keep working.">Revoke</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="empty-state" data-deploy-no-results hidden>No deployment URLs match your search.</p>
+      {% else %}
+        <div class="empty-state">
+          {% if not show_revoked and hidden_revoked_count %}
+            <p>No active deployment URLs. Choose “Show revoked” to review {{ hidden_revoked_count }} revoked URL{% if hidden_revoked_count != 1 %}s{% endif %}.</p>
+          {% else %}
+            <p>No deployment URLs yet. Create one above to give a company a ready-made tray installer.</p>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ static_url('/static/js/tray_deployment_links.js') }}" defer></script>
+{% endblock %}

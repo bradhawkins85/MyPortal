@@ -255,7 +255,7 @@ automatically. It's useful for exploring the UI, and it's what the screenshots a
 
 | Topic | Where to start |
 |---|---|
-| Getting started | [Overview](docs/wiki/getting-started/Overview.md) · [Configuration](docs/wiki/getting-started/Configuration.md) · [Tray App](docs/wiki/getting-started/Tray%20App.md) · [Onboarding Wizard](docs/wiki/getting-started/Onboarding%20Wizard.md) |
+| Getting started | [Overview](docs/wiki/getting-started/Overview.md) · [Configuration](docs/wiki/getting-started/Configuration.md) · [Tray App](docs/wiki/getting-started/Tray%20App.md) · [Tray Build Server](docs/wiki/getting-started/Tray%20Build%20Server.md) · [Onboarding Wizard](docs/wiki/getting-started/Onboarding%20Wizard.md) |
 | Administration | [Message Templates](docs/wiki/administration/Message%20Templates.md) · [Network Map](docs/wiki/administration/Network%20Map.md) · [Company Memberships](docs/wiki/administration/Company%20Memberships.md) · [API Keys](docs/wiki/administration/API%20Keys.md) |
 | Tickets | [IMAP Setup](docs/wiki/tickets/IMAP%20Setup.md) · [Email Reply Handling](docs/wiki/tickets/Email%20Reply%20Handling.md) · [Split and Merge](docs/wiki/tickets/Ticket%20Split%20and%20Merge.md) · [Tickets API](docs/wiki/tickets/Tickets%20API.md) |
 | Compliance | [SMB1001](docs/wiki/compliance/SMB1001.md) · [Essential 8](docs/wiki/compliance/Essential%208%20Requirements.md) · [Security Overview](docs/wiki/compliance/Security%20Overview.md) |

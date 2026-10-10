@@ -112,6 +112,214 @@ async def delete_revoked_install_tokens() -> int:
     return len(rows)
 
 
+async def get_install_token_by_id(token_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT * FROM tray_install_tokens WHERE id = ?",
+        (token_id,),
+    )
+    return dict(row) if row else None
+
+
+# ---------------------------------------------------------------------------
+# Deployment links
+#
+# Queries use ``?`` placeholders throughout; the database layer translates them
+# for MySQL, so no SQL string is ever assembled at runtime.
+# ---------------------------------------------------------------------------
+
+async def create_deployment_link(
+    *,
+    company_id: int,
+    label: str,
+    slug_hash: str,
+    slug_prefix: str,
+    slug_encrypted: str,
+    install_token_id: int | None,
+    install_token_encrypted: str,
+    created_by_user_id: int | None,
+) -> dict[str, Any]:
+    await db.execute(
+        """INSERT INTO tray_deployment_links
+           (company_id, label, slug_hash, slug_prefix, slug_encrypted,
+            install_token_id, install_token_encrypted, created_by_user_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            company_id,
+            label,
+            slug_hash,
+            slug_prefix,
+            slug_encrypted,
+            install_token_id,
+            install_token_encrypted,
+            created_by_user_id,
+        ),
+    )
+    return await get_deployment_link_by_slug_hash(slug_hash) or {}
+
+
+async def list_deployment_links(
+    *, company_id: int | None = None
+) -> list[dict[str, Any]]:
+    if company_id is None:
+        rows = await db.fetch_all(
+            "SELECT l.*, c.name AS company_name "
+            "FROM tray_deployment_links AS l "
+            "LEFT JOIN companies AS c ON c.id = l.company_id "
+            "ORDER BY l.created_at DESC"
+        )
+    else:
+        rows = await db.fetch_all(
+            "SELECT l.*, c.name AS company_name "
+            "FROM tray_deployment_links AS l "
+            "LEFT JOIN companies AS c ON c.id = l.company_id "
+            "WHERE l.company_id = ? ORDER BY l.created_at DESC",
+            (company_id,),
+        )
+    return [dict(r) for r in rows]
+
+
+async def get_deployment_link(link_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT * FROM tray_deployment_links WHERE id = ?",
+        (link_id,),
+    )
+    return dict(row) if row else None
+
+
+async def get_deployment_link_by_slug_hash(slug_hash: str) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT l.*, c.name AS company_name "
+        "FROM tray_deployment_links AS l "
+        "LEFT JOIN companies AS c ON c.id = l.company_id "
+        "WHERE l.slug_hash = ?",
+        (slug_hash,),
+    )
+    return dict(row) if row else None
+
+
+async def revoke_deployment_link(link_id: int) -> None:
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.execute(
+        "UPDATE tray_deployment_links SET revoked_at = ? WHERE id = ?",
+        (now, link_id),
+    )
+
+
+async def list_active_deployment_links() -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        "SELECT * FROM tray_deployment_links WHERE revoked_at IS NULL ORDER BY id"
+    )
+    return [dict(r) for r in rows]
+
+
+async def create_deployment_build(link_id: int) -> int:
+    return await db.execute_returning_lastrowid(
+        "INSERT INTO tray_deployment_builds (deployment_link_id, status) VALUES (?, 'queued')",
+        (link_id,),
+    )
+
+
+async def get_deployment_build(build_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT * FROM tray_deployment_builds WHERE id = ?",
+        (build_id,),
+    )
+    return dict(row) if row else None
+
+
+async def list_deployment_builds(link_id: int | None = None) -> list[dict[str, Any]]:
+    """Return builds newest first, for one link or for every link."""
+
+    if link_id is None:
+        rows = await db.fetch_all("SELECT * FROM tray_deployment_builds ORDER BY id DESC")
+    else:
+        rows = await db.fetch_all(
+            "SELECT * FROM tray_deployment_builds WHERE deployment_link_id = ? ORDER BY id DESC",
+            (link_id,),
+        )
+    return [dict(r) for r in rows]
+
+
+async def get_latest_ready_deployment_build(link_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT * FROM tray_deployment_builds WHERE deployment_link_id = ? "
+        "AND status = 'ready' ORDER BY id DESC LIMIT 1",
+        (link_id,),
+    )
+    return dict(row) if row else None
+
+
+async def get_next_claimable_deployment_build(stale_before: datetime) -> dict[str, Any] | None:
+    """Return the oldest queued build, or a build whose agent stopped reporting."""
+
+    row = await db.fetch_one(
+        "SELECT b.* FROM tray_deployment_builds AS b "
+        "JOIN tray_deployment_links AS l ON l.id = b.deployment_link_id "
+        "WHERE l.revoked_at IS NULL AND (b.status = 'queued' "
+        "OR (b.status = 'building' AND b.claimed_at < ?)) "
+        "ORDER BY b.id LIMIT 1",
+        (stale_before,),
+    )
+    return dict(row) if row else None
+
+
+async def claim_deployment_build(
+    build_id: int, *, release_tag: str, stale_before: datetime
+) -> bool:
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    updated = await db.execute_rowcount(
+        "UPDATE tray_deployment_builds SET status = 'building', release_tag = ?, "
+        "claimed_at = ?, error = NULL WHERE id = ? AND (status = 'queued' "
+        "OR (status = 'building' AND claimed_at < ?))",
+        (release_tag, now, build_id, stale_before),
+    )
+    return updated > 0
+
+
+async def complete_deployment_build(build_id: int, *, msi_sha256: str, exe_sha256: str) -> None:
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.execute(
+        "UPDATE tray_deployment_builds SET status = 'ready', msi_sha256 = ?, "
+        "exe_sha256 = ?, completed_at = ?, error = NULL WHERE id = ?",
+        (msi_sha256, exe_sha256, now, build_id),
+    )
+
+
+async def fail_deployment_build(build_id: int, *, error: str) -> None:
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.execute(
+        "UPDATE tray_deployment_builds SET status = 'failed', error = ?, "
+        "completed_at = ? WHERE id = ?",
+        (error, now, build_id),
+    )
+
+
+async def supersede_deployment_builds(link_id: int, *, keep_build_id: int) -> list[int]:
+    """Mark older ready builds as superseded and return their ids."""
+
+    rows = await db.fetch_all(
+        "SELECT id FROM tray_deployment_builds WHERE deployment_link_id = ? "
+        "AND status = 'ready' AND id <> ?",
+        (link_id, keep_build_id),
+    )
+    ids = [int(r["id"]) for r in rows]
+    for build_id in ids:
+        await db.execute(
+            "UPDATE tray_deployment_builds SET status = 'superseded' WHERE id = ?",
+            (build_id,),
+        )
+    return ids
+
+
+async def mark_deployment_link_downloaded(link_id: int) -> None:
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.execute(
+        "UPDATE tray_deployment_links SET last_downloaded_at = ?, "
+        "download_count = download_count + 1 WHERE id = ?",
+        (now, link_id),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Devices
 # ---------------------------------------------------------------------------

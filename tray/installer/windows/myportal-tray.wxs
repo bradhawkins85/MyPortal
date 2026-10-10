@@ -47,9 +47,22 @@
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/bradhawkins85/MyPortal" />
     <Property Id="ARPNOREPAIR" Value="yes" />
 
-    <!-- Allow MSI properties on the command line -->
+    <!--
+      Allow MSI properties on the command line. Company-specific builds from
+      the MyPortal build agent pass -d DefaultPortalUrl and -d DefaultEnrolToken
+      so a plain double-click install is already configured; a command-line
+      value still overrides the default.
+    -->
+    <?ifdef DefaultPortalUrl?>
+    <Property Id="MYPORTAL_URL" Value="$(var.DefaultPortalUrl)" Secure="yes" />
+    <?else?>
     <Property Id="MYPORTAL_URL" Secure="yes" />
+    <?endif?>
+    <?ifdef DefaultEnrolToken?>
+    <Property Id="ENROL_TOKEN" Value="$(var.DefaultEnrolToken)" Secure="yes" />
+    <?else?>
     <Property Id="ENROL_TOKEN" Secure="yes" />
+    <?endif?>
     <Property Id="AUTO_UPDATE" Value="true" Secure="yes" />
 
     <MediaTemplate EmbedCab="yes" />

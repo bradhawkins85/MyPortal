@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "auth/_auth_macros.html" import auth_hero %}
+
+{% set title = "Install MyPortal Tray" %}
+
+{% block extra_head %}
+<meta name="robots" content="noindex, nofollow" />
+<meta name="referrer" content="no-referrer" />
+{% endblock %}
+
+{% block sidebar_menu %}
+<li class="menu__item">
+  <a href="/login">
+    <span class="menu__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false"><path d="M10 4h10a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H10a1 1 0 0 1-1-1v-3h2v2h8V6h-8v2H9V5a1 1 0 0 1 1-1zm-1.707 7.293 2.586-2.586L12.293 10.12 10.414 12l1.879 1.879-1.414 1.414-2.586-2.586a1 1 0 0 1 0-1.414z"/></svg>
+    </span>
+    <span class="menu__label">Sign in</span>
+  </a>
+</li>
+{% endblock %}
+
+{% block content %}
+<div class="auth-shell">
+  {{ auth_hero(app_name, "Get help without leaving your desk.", [
+    ("Raise tickets from the tray", " — report a problem in a couple of clicks."),
+    ("Chat with support", " — talk to the team straight from your computer."),
+    ("Set up automatically", " — this installer already knows your organisation."),
+  ]) }}
+
+  <section class="auth-card" aria-labelledby="deploy-title">
+    <header class="auth-card__header">
+      <p class="auth-card__eyebrow">{{ app_name }}</p>
+      <h1 class="auth-card__title" id="deploy-title">Install MyPortal Tray</h1>
+      {% if state == "open" %}
+        <p class="auth-card__subtitle">{% if company_name %}For {{ company_name }}. {% endif %}Choose your computer below.</p>
+      {% endif %}
+    </header>
+
+    {% if state != "open" %}
+      <div class="alert alert--warning" role="status">{{ message or "This deployment link is not valid." }}</div>
+      <p class="form-help">Ask your IT support team for a new link.</p>
+    {% elif not windows_ready and not macos_ready %}
+      <div class="alert alert--warning" role="status">The installers for this link are still being prepared. Please try again later.</div>
+    {% else %}
+      {% if windows_ready %}
+        <a class="button auth-card__wide" href="{{ deploy_base }}/windows.exe" rel="noreferrer">Download for Windows</a>
+        <p class="form-help">Run the downloaded file and follow the installer. IT teams can use the <a href="{{ deploy_base }}/windows.msi" rel="noreferrer">MSI package</a> instead.</p>
+      {% endif %}
+      {% if macos_ready %}
+        <a class="button {% if windows_ready %}button--secondary {% endif %}auth-card__wide" href="{{ deploy_base }}/macos.zip" rel="noreferrer">Download for macOS</a>
+        <p class="form-help">Open the zip file, then double-click <strong>myportal-tray.pkg</strong> and follow the installer.</p>
+      {% endif %}
+      {% if not windows_ready %}
+        <p class="form-help">The Windows installer is still being prepared. Please check back shortly.</p>
+      {% endif %}
+      <p class="auth-card__footer">Keep this link private. Anyone with it can register a computer with your organisation.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
