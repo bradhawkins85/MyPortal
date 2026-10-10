@@ -227,7 +227,7 @@ def macos_launcher() -> str:
             "cd \"$(dirname \"$0\")\"",
             "echo \"Installing MyPortal Tray. Enter your password if asked.\"",
             "sudo install -m 600 -o root -g wheel myportal-tray.env"
-            " /Library/Preferences/io.myportal.tray.env",
+            + " /Library/Preferences/io.myportal.tray.env",
             "sudo installer -pkg myportal-tray.pkg -target /",
             "echo \"MyPortal Tray installed.\"",
             "",
@@ -247,10 +247,10 @@ def windows_script(portal_url: str, token: str) -> str:
             "$EnrolToken = '" + token + "'",
             "$msiPath = Join-Path $env:TEMP 'myportal-tray.msi'",
             "Invoke-WebRequest -Uri \"$PortalURL/static/tray/myportal-tray.msi\""
-            " -OutFile $msiPath -UseBasicParsing",
+            + " -OutFile $msiPath -UseBasicParsing",
             "$msiArgs = @('/i', $msiPath, \"MYPORTAL_URL=$PortalURL\", \"ENROL_TOKEN=$EnrolToken\","
-            " 'AUTO_UPDATE=true', '/qn', '/norestart', '/l*v',"
-            " (Join-Path $env:TEMP 'myportal-tray-install.log'))",
+            + " 'AUTO_UPDATE=true', '/qn', '/norestart', '/l*v',"
+            + " (Join-Path $env:TEMP 'myportal-tray-install.log'))",
             "$proc = Start-Process msiexec.exe -ArgumentList $msiArgs -Wait -PassThru",
             "if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {",
             "    throw \"MSI install exited with code $($proc.ExitCode)\"",
@@ -276,7 +276,7 @@ def macos_script(portal_url: str, token: str) -> str:
             "curl -fsSL \"$PORTAL_URL/static/tray/myportal-tray.pkg\" -o \"$PKG_PATH\"",
             "umask 077",
             "printf 'MYPORTAL_URL=%s\\nENROL_TOKEN=%s\\nAUTO_UPDATE=true\\n'"
-            " \"$PORTAL_URL\" \"$ENROL_TOKEN\" > /Library/Preferences/io.myportal.tray.env",
+            + " \"$PORTAL_URL\" \"$ENROL_TOKEN\" > /Library/Preferences/io.myportal.tray.env",
             "chmod 600 /Library/Preferences/io.myportal.tray.env",
             "installer -pkg \"$PKG_PATH\" -target /",
             "echo 'MyPortal Tray installed successfully.'",
