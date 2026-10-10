@@ -447,3 +447,31 @@ async def expire_stale_runs(now: datetime | None = None) -> int:
             (status, message, now, row["id"]),
         )
     return len(rows or [])
+
+
+# --------------------------------------------------------------------------- #
+# Gitea accounts for MyPortal sign-in
+# --------------------------------------------------------------------------- #
+
+
+async def get_gitea_account(user_id: int) -> dict[str, Any] | None:
+    return await db.fetch_one("SELECT * FROM rmm_gitea_accounts WHERE user_id = %s", (user_id,))
+
+
+async def save_gitea_account(user_id: int, login: str, permission: str) -> None:
+    now = _utcnow()
+    if await get_gitea_account(user_id):
+        await db.execute(
+            "UPDATE rmm_gitea_accounts SET permission = %s, updated_at = %s WHERE user_id = %s",
+            (permission, now, user_id),
+        )
+        return
+    await db.execute(
+        "INSERT INTO rmm_gitea_accounts (user_id, gitea_login, permission, created_at, updated_at) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (user_id, login, permission, now, now),
+    )
+
+
+async def list_gitea_accounts() -> list[dict[str, Any]]:
+    return await db.fetch_all("SELECT * FROM rmm_gitea_accounts ORDER BY user_id")
