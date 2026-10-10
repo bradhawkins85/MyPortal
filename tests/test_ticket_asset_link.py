@@ -48,6 +48,10 @@ def mock_startup(monkeypatch):
         "sync_change_log_sources",
         AsyncMock(return_value=None),
     )
+    monkeypatch.setattr(main_module.m365_jobs_service, "start_worker", lambda: None)
+    monkeypatch.setattr(
+        main_module.m365_jobs_service, "stop_worker", AsyncMock(return_value=None)
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -111,6 +115,11 @@ def _setup_common_mocks(monkeypatch, ticket: dict, company_id: int = 5) -> None:
     monkeypatch.setattr(
         main_module.tickets_repo, "replace_ticket_assets", AsyncMock(return_value=[])
     )
+    monkeypatch.setattr(
+        ticket_admin_routes.shipment_watch_service,
+        "set_watch_active",
+        AsyncMock(return_value=None),
+    )
 
 
 def test_link_asset_to_ticket_succeeds(monkeypatch, active_session):
@@ -141,6 +150,7 @@ def test_link_asset_to_ticket_succeeds(monkeypatch, active_session):
                 "/admin/tickets/135/details",
                 data={
                     "status": "open",
+                    "subject": "Link asset regression",
                     "priority": "normal",
                     "companyId": "5",
                     "assetIds": "20",
@@ -186,6 +196,7 @@ def test_link_asset_to_ticket_can_optionally_send_tray_notification(monkeypatch,
                 "/admin/tickets/135/details",
                 data={
                     "status": "open",
+                    "subject": "Link asset regression",
                     "priority": "normal",
                     "companyId": "5",
                     "assetIds": "20",
@@ -237,6 +248,7 @@ def test_link_asset_wrong_company_is_skipped_not_400(monkeypatch, active_session
                 "/admin/tickets/135/details",
                 data={
                     "status": "open",
+                    "subject": "Link asset regression",
                     "priority": "normal",
                     "companyId": "5",
                     "assetIds": "99",
@@ -286,6 +298,7 @@ def test_link_asset_mixed_valid_and_stale(monkeypatch, active_session):
                 "/admin/tickets/135/details",
                 data={
                     "status": "open",
+                    "subject": "Link asset regression",
                     "priority": "normal",
                     "companyId": "5",
                     # Both assets submitted; only asset 20 (company 5) should be saved
