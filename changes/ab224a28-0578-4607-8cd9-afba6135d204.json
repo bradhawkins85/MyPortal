@@ -1,0 +1,7 @@
+{
+  "guid": "ab224a28-0578-4607-8cd9-afba6135d204",
+  "occurred_at": "2026-10-10T02:00Z",
+  "change_type": "Feature",
+  "summary": "Bundle Gitea for the RMM script library with the bare-metal and Docker installers: it is served at /gitea, connected to MyPortal on install, and upgraded and backed up with each upgrade",
+  "content_hash": "061db11a3d441f46c1e1414ae9a8e09ccb2b43b15e048e1e379a96d8395e62d9"
+}

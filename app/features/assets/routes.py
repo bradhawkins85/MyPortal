@@ -1879,6 +1879,17 @@ async def asset_detail_page(
         from app.features.network_map import routes as network_map_routes
 
         network_interfaces = await network_map_routes.asset_interfaces_context(company_id, asset_id)
+    # Script runs belong to the RMM pack; the card disappears with it.
+    rmm_context = None
+    if (not customer_safe and main_module._feature_pack_available("rmm")
+            and (is_super_admin or main_module._membership_menu_can(user, membership, "menu.rmm_scripts"))):
+        from app.features.rmm import routes as rmm_routes
+
+        rmm_context = await rmm_routes.asset_rmm_context(
+            company_id, asset_id,
+            can_run=is_super_admin or main_module._membership_menu_can(
+                user, membership, "menu.rmm_scripts", write=True),
+        )
     return await main_module._render_template(
         "assets/detail.html", request, user, extra={
             "title": str(record.get("name") or f"Asset {asset_id}"),
@@ -1909,6 +1920,7 @@ async def asset_detail_page(
             "bcp_context": bcp_context,
             "infrastructure_links": infrastructure_links,
             "network_interfaces": network_interfaces,
+            "rmm": rmm_context,
             "can_edit_network_map": can_view_network_map and (is_super_admin or main_module._membership_menu_can(
                 user, membership, "menu.network_map", write=True)),
             "asset_photos": (await asset_photo_repo.list_for_asset(

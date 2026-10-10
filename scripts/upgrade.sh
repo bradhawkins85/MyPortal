@@ -1135,6 +1135,10 @@ validate_origin_remote "$(git config --get remote.origin.url)"
 validate_required_configuration
 redis_env_before=$(sha256sum "$ENV_FILE")
 bash "${SCRIPT_DIR}/provision_redis.sh" "$ENV_FILE"
+# Gitea for the RMM script library is optional: a failure is reported and
+# retried by the next upgrade, never blocks this one.
+bash "${SCRIPT_DIR}/provision_gitea.sh" "$ENV_FILE" \
+  || echo "Warning: Gitea for RMM scripts was not set up or upgraded; the next upgrade retries." >&2
 redis_env_after=$(sha256sum "$ENV_FILE")
 UPGRADE_STARTED_AT=$(date --iso-8601=seconds)
 PREVIOUS_RELEASE=$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)

@@ -1,0 +1,115 @@
+{# Run-a-script editor and run result viewer, shared by /rmm/scripts and the asset page.
+   rmm_scripts.js fills both modals from /api/rmm/... and posts the run. #}
+<div class="modal rmm-modal" id="rmm-run-modal" role="dialog" aria-modal="true" aria-labelledby="rmm-run-title" hidden data-rmm-run-modal>
+  <form class="modal__panel modal__panel--wide rmm-editor" data-rmm-run-form novalidate>
+    <header class="modal__header rmm-editor__header">
+      <div>
+        <p class="rmm-editor__eyebrow" data-rmm-run-eyebrow>Run a script</p>
+        <h2 class="modal__title" id="rmm-run-title" data-rmm-run-title>Choose a script</h2>
+        <p class="rmm-editor__subtitle" data-rmm-run-subtitle>Pick a script, the devices to run it on and the values it needs.</p>
+      </div>
+      <button type="button" class="modal__close" data-rmm-close aria-label="Close script runner"></button>
+    </header>
+
+    <div class="modal__body rmm-editor__body">
+      <div class="rmm-editor__main">
+        <div class="form-field" data-rmm-script-picker>
+          <label class="form-label" for="rmm-script-select">Script</label>
+          <select class="form-input" id="rmm-script-select" data-rmm-script-select>
+            <option value="">Choose a script…</option>
+          </select>
+          <p class="form-help">Scripts are written in Gitea and loaded with <em>Sync from Gitea</em>.</p>
+        </div>
+
+        <fieldset class="rmm-fieldset" data-rmm-devices-section hidden>
+          <legend class="form-label">Devices</legend>
+          <div class="rmm-devices__tools">
+            <label class="visually-hidden" for="rmm-device-search">Search devices</label>
+            <input type="search" class="form-input" id="rmm-device-search" placeholder="Search devices" data-rmm-device-search />
+            <button type="button" class="button button--ghost button--small" data-rmm-select-all>Select all</button>
+          </div>
+          <ul class="rmm-devices" data-rmm-devices aria-label="Devices with the RMM agent"></ul>
+          <p class="form-help" data-rmm-devices-empty hidden>No devices in this company have the RMM agent yet.</p>
+          <p class="form-help form-help--error" data-rmm-error="assets" hidden></p>
+        </fieldset>
+
+        <section class="rmm-fieldset" data-rmm-fields-section hidden aria-labelledby="rmm-fields-heading">
+          <h3 class="rmm-section-title" id="rmm-fields-heading">Values for the script</h3>
+          <p class="form-help">Type a value, or choose a MyPortal variable so each device gets its own value, for example its asset custom field.</p>
+          <div class="rmm-fields" data-rmm-fields></div>
+          <p class="text-muted" data-rmm-no-fields hidden>This script has no parameters or environment variables.</p>
+        </section>
+
+        <div class="form-field rmm-timeout" data-rmm-timeout-section hidden>
+          <label class="form-label" for="rmm-timeout">Stop the script after</label>
+          <div class="rmm-timeout__row">
+            <input class="form-input" id="rmm-timeout" type="number" min="1" max="240" step="1" value="10" data-rmm-timeout />
+            <span>minutes</span>
+          </div>
+          <p class="form-help">If it is still running then, the device stops it and reports a timeout.</p>
+        </div>
+        <p class="form-help form-help--error" data-rmm-error="form" role="alert" hidden></p>
+      </div>
+
+      <aside class="rmm-editor__aside" aria-label="What will be sent" data-rmm-preview-section hidden>
+        <h3 class="rmm-section-title">What the device receives</h3>
+        <p class="rmm-preview__summary" data-rmm-preview-summary role="status" aria-live="polite"></p>
+        <pre class="rmm-preview__command" data-rmm-preview-command></pre>
+        <dl class="rmm-preview__env" data-rmm-preview-env></dl>
+        <p class="form-help">Variables are filled in separately for each device when you run the script.</p>
+        <details class="rmm-source">
+          <summary>Script source</summary>
+          <pre class="rmm-source__code"><code data-rmm-source></code></pre>
+        </details>
+        <a class="button button--ghost button--small" href="#" target="_blank" rel="noopener noreferrer" data-rmm-source-link hidden>Edit in Gitea</a>
+      </aside>
+    </div>
+
+    <footer class="modal__footer rmm-editor__footer">
+      <span class="rmm-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-rmm-close>Cancel</button>
+      <button type="submit" class="button button--primary" data-rmm-submit disabled>Run script</button>
+    </footer>
+  </form>
+</div>
+
+<div class="modal rmm-modal" id="rmm-result-modal" role="dialog" aria-modal="true" aria-labelledby="rmm-result-title" hidden data-rmm-result-modal>
+  <div class="modal__panel modal__panel--wide rmm-result">
+    <header class="modal__header">
+      <div>
+        <p class="rmm-editor__eyebrow" data-rmm-result-eyebrow>Script run</p>
+        <h2 class="modal__title" id="rmm-result-title" data-rmm-result-title>Run</h2>
+        <p class="rmm-editor__subtitle" data-rmm-result-subtitle></p>
+      </div>
+      <button type="button" class="modal__close" data-rmm-close aria-label="Close run details"></button>
+    </header>
+    <div class="modal__body rmm-result__body">
+      <dl class="rmm-stats" data-rmm-result-stats role="status" aria-live="polite"></dl>
+      <p class="alert alert--warning" data-rmm-result-error hidden></p>
+      <section data-rmm-result-values-section hidden aria-labelledby="rmm-result-values-heading">
+        <h3 class="rmm-section-title" id="rmm-result-values-heading">Custom values returned</h3>
+        <div class="table-wrapper"><table class="table"><caption class="visually-hidden">Custom values the script returned</caption>
+          <thead><tr><th scope="col">Updates</th><th scope="col">Name</th><th scope="col">Value</th><th scope="col">Result</th></tr></thead>
+          <tbody data-rmm-result-values></tbody>
+        </table></div>
+      </section>
+      <section aria-labelledby="rmm-result-output-heading">
+        <h3 class="rmm-section-title" id="rmm-result-output-heading">Output</h3>
+        <pre class="rmm-output" data-rmm-result-stdout></pre>
+      </section>
+      <section data-rmm-result-stderr-section hidden aria-labelledby="rmm-result-stderr-heading">
+        <h3 class="rmm-section-title" id="rmm-result-stderr-heading">Errors</h3>
+        <pre class="rmm-output rmm-output--error" data-rmm-result-stderr></pre>
+      </section>
+      <section data-rmm-result-inputs-section hidden aria-labelledby="rmm-result-inputs-heading">
+        <h3 class="rmm-section-title" id="rmm-result-inputs-heading">Values sent</h3>
+        <dl class="rmm-inputs" data-rmm-result-inputs></dl>
+      </section>
+    </div>
+    <footer class="modal__footer">
+      <button type="button" class="button button--danger" data-rmm-cancel-run hidden>Cancel run</button>
+      <span class="rmm-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-rmm-close>Close</button>
+    </footer>
+  </div>
+</div>

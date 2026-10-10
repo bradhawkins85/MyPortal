@@ -1,0 +1,29 @@
+{% set RUN_STATUS = {
+  "queued": ("info", "Waiting for device"),
+  "dispatched": ("info", "Sent to device"),
+  "running": ("warning", "Running"),
+  "completed": ("success", "Completed"),
+  "failed": ("error", "Failed"),
+  "timed_out": ("error", "Timed out"),
+  "cancelled": ("neutral", "Cancelled"),
+  "expired": ("neutral", "Expired"),
+} %}
+
+{% macro run_status(status) -%}
+  {%- set item = RUN_STATUS.get(status, ("neutral", status)) -%}
+  <span class="status status--{{ item[0] }}" data-rmm-status="{{ status }}">{{ item[1] }}</span>
+{%- endmacro %}
+
+{% macro run_rows(runs, show_device=true) -%}
+  {%- for run in runs %}
+  <tr data-rmm-run-row="{{ run.id }}">
+    <td data-label="Script" data-column-key="script"><strong>{{ run.script_name }}</strong></td>
+    {% if show_device %}<td data-label="Device" data-column-key="device">{% if run.asset_id %}<a href="/assets/{{ run.asset_id }}">{{ run.asset_name or ('Asset ' ~ run.asset_id) }}</a>{% else %}<span class="text-muted">Removed device</span>{% endif %}</td>{% endif %}
+    <td data-label="Status" data-column-key="status" data-sort-value="{{ run.status }}">{{ run_status(run.status) }}</td>
+    <td data-label="Exit code" data-column-key="exit-code">{% if run.exit_code is not none %}<code>{{ run.exit_code }}</code>{% else %}<span class="text-muted">–</span>{% endif %}</td>
+    <td data-label="Requested by" data-column-key="requested-by" data-mobile-hidden="true">{{ run.requested_by_email or '–' }}</td>
+    <td data-label="Queued" data-column-key="queued" data-sort-value="{{ run.queued_at }}"><span data-utc="{{ run.queued_at }}">{{ run.queued_at }}</span></td>
+    <td class="table__actions" data-column-key="actions"><button type="button" class="button button--ghost button--small" data-rmm-view-run="{{ run.id }}" aria-haspopup="dialog" aria-controls="rmm-result-modal">View<span class="visually-hidden"> run of {{ run.script_name }}</span></button></td>
+  </tr>
+  {%- endfor %}
+{%- endmacro %}
