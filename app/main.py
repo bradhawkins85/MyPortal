@@ -8812,6 +8812,8 @@ async def admin_tray_install_tokens_page(
     from app.services import tray as tray_service
 
     tokens = await tray_repo.list_install_tokens()
+    for token in tokens:
+        token["expires_at_iso"] = _to_iso(token.get("expires_at"))
     hidden_revoked_count = 0
     if not show_revoked:
         hidden_revoked_count = sum(1 for token in tokens if token.get("revoked_at"))
