@@ -70,7 +70,7 @@ async def save_settings(provider: str, request: Request):
     try:
         await remote_control.save_settings(provider, dict(form), user_id=user.get("id"))
     except remote_control.RemoteControlError as exc:
-        return flash_redirect(SETTINGS_PATH, str(exc), "error")
+        return flash_redirect(SETTINGS_PATH, exc.message, "error")
     await audit_service.record(
         action="rmm.remote_control.settings",
         request=request,
@@ -96,7 +96,7 @@ async def start_session(asset_id: int, payload: StartRequest, request: Request):
             provider=payload.provider, company_id=company_id, asset_id=asset_id, user_id=user.get("id")
         )
     except remote_control.RemoteControlError as exc:
-        return JSONResponse({"detail": str(exc)}, status_code=400)
+        return JSONResponse({"detail": exc.message}, status_code=400)
     await audit_service.record(
         action="rmm.remote_control.start",
         request=request,

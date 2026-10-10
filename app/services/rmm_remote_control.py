@@ -60,7 +60,13 @@ _HEX = re.compile(r"^[0-9a-fA-F]+$")
 
 
 class RemoteControlError(ValueError):
-    """Remote control cannot start, or the settings cannot be saved."""
+    """Remote control cannot start, or the settings cannot be saved.
+
+    ``message`` is written for technicians and safe to show them."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
 
 
 def _utcnow() -> datetime:
@@ -401,7 +407,7 @@ async def _resolve(session: Mapping[str, Any], settings: Mapping[str, Any], valu
     try:
         url = await _launch_url(session, settings, values)
     except RemoteControlError as exc:
-        await remote_repo.finish_session(int(session["id"]), status="failed", error_message=str(exc))
+        await remote_repo.finish_session(int(session["id"]), status="failed", error_message=exc.message)
         return None
     await remote_repo.finish_session(int(session["id"]), status="ready")
     return url
@@ -438,7 +444,7 @@ async def session_status(session_id: int, *, company_id: int, user_id: int | Non
         try:
             launch_url = await _launch_url(session, settings, _decrypt_values(session))
         except RemoteControlError as exc:
-            await remote_repo.finish_session(session_id, status="failed", error_message=str(exc))
+            await remote_repo.finish_session(session_id, status="failed", error_message=exc.message)
             session = await remote_repo.get_session(session_id) or session
     return {
         "id": session["id"],
