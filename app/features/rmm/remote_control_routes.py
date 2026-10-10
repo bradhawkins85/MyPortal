@@ -3,7 +3,8 @@
 * ``GET /rmm/remote-control`` and ``POST /rmm/remote-control/{provider}``
   each provider's activation script and connection settings (super admin)
 * ``POST /api/rmm/assets/{id}/remote-control`` run the activation script on a
-  device (``menu.rmm_scripts`` with write access)
+  device (``menu.rmm_scripts`` with write access for the device's company, so
+  it works from a ticket whatever company the technician has selected)
 * ``GET /api/rmm/remote-sessions/{id}`` the session's progress and, once the
   script has reported back, its launch link (the technician who started it)
 """
@@ -18,12 +19,13 @@ from pydantic import BaseModel
 
 from app.repositories import assets as assets_repo
 from app.repositories import rmm as rmm_repo
+from app.repositories import rmm_remote_control as remote_repo
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
 from app.services import rmm_remote_control as remote_control
 from app.services import rmm_scripts
 
-from .routes import _assets_routes, _context
+from .routes import PERMISSION, _assets_routes, _context
 
 router = APIRouter(tags=["RMM remote control"])
 
@@ -81,16 +83,47 @@ async def save_settings(provider: str, request: Request):
     return flash_redirect(SETTINGS_PATH, f"{remote_control.PROVIDER_LABELS[provider]} settings saved.", "success")
 
 
+async def _can_connect(request: Request, user: dict, company_id: int) -> bool:
+    main_module = _assets_routes()._main()
+    if user.get("is_super_admin"):
+        return True
+    membership = await main_module._get_effective_company_membership(request, int(user["id"]), int(company_id))
+    return main_module._membership_menu_can(user, membership, PERMISSION, write=True)
+
+
+async def _company_user(request: Request, company_id: int) -> dict:
+    """The signed-in technician, when they may run scripts for ``company_id``."""
+
+    user, redirect = await _assets_routes()._main()._require_authenticated_user(request)
+    if redirect or not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not await _can_connect(request, user, company_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission to run scripts is required")
+    return user
+
+
+async def providers_for_company(request: Request, user: dict, company_id: int | None) -> list[dict[str, str]]:
+    """Remote control buttons to show for a company's assets (the ticket page)."""
+
+    main_module = _assets_routes()._main()
+    if company_id is None or not main_module._feature_pack_available("rmm"):
+        return []
+    if not await _can_connect(request, user, int(company_id)):
+        return []
+    return await remote_control.enabled_providers()
+
+
 class StartRequest(BaseModel):
     provider: Literal["rustdesk", "meshcentral"]
 
 
 @router.post("/api/rmm/assets/{asset_id:int}/remote-control", summary="Switch on remote control for a device")
 async def start_session(asset_id: int, payload: StartRequest, request: Request):
-    user, _company, company_id, _can_run = await _context(request, write=True, api=True)
     asset = await assets_repo.get_asset_by_id(asset_id)
-    if not asset or int(asset.get("company_id") or 0) != int(company_id):
+    if not asset or asset.get("company_id") is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    company_id = int(asset["company_id"])
+    user = await _company_user(request, company_id)
     try:
         session = await remote_control.start(
             provider=payload.provider, company_id=company_id, asset_id=asset_id, user_id=user.get("id")
@@ -110,10 +143,13 @@ async def start_session(asset_id: int, payload: StartRequest, request: Request):
 
 @router.get("/api/rmm/remote-sessions/{session_id:int}", summary="Check a remote control session")
 async def get_session(session_id: int, request: Request):
-    user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+    stored = await remote_repo.get_session(session_id)
+    if not stored:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    user = await _company_user(request, int(stored["company_id"]))
     session = await remote_control.session_status(
         session_id,
-        company_id=company_id,
+        company_id=int(stored["company_id"]),
         user_id=user.get("id"),
         is_super_admin=bool(user.get("is_super_admin")),
     )

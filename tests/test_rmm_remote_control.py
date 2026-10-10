@@ -208,3 +208,60 @@ def test_settings_page_renders_providers_and_script_values():
     assert 'name="entry:param:Password"' in html and "Saved: leave blank to keep it" in html
     assert "&lt;b&gt;t&lt;/b&gt;" in html and "{{company.variables.RustDeskKey}}" in html
     assert '<option value="1" selected>' in html
+
+
+class _FakeMain:
+    def __init__(self, memberships, pack=True):
+        self.memberships = memberships
+        self.pack = pack
+
+    def _feature_pack_available(self, slug):
+        return self.pack
+
+    async def _get_effective_company_membership(self, request, user_id, company_id):
+        return self.memberships.get(company_id)
+
+    def _membership_menu_can(self, user, membership, key, *, write=False):
+        return bool(user.get("is_super_admin")) or bool(membership and membership.get(key) == ("write" if write else "read"))
+
+
+@pytest.mark.anyio
+async def test_ticket_buttons_follow_the_tickets_company_permission(sqlite_db, monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from app.features.rmm import remote_control_routes as routes
+
+    main = _FakeMain({1: {"menu.rmm_scripts": "write"}, 2: {"menu.rmm_scripts": "read"}})
+    monkeypatch.setattr(routes, "_assets_routes", lambda: SimpleNamespace(_main=lambda: main))
+    await remote.save_settings("rustdesk", {"is_enabled": "1", "id_field": "RustDesk ID"}, user_id=9)
+    tech = {"id": 9, "is_super_admin": False}
+    assert await routes.providers_for_company(None, tech, 1) == [{"provider": "rustdesk", "label": "RustDesk"}]
+    # Read-only access, no company, or the feature pack turned off: no buttons.
+    assert await routes.providers_for_company(None, tech, 2) == []
+    assert await routes.providers_for_company(None, tech, None) == []
+    main.pack = False
+    assert await routes.providers_for_company(None, tech, 1) == []
+
+    async def signed_in(request):
+        return tech, None
+
+    main._require_authenticated_user = signed_in
+    assert await routes._company_user(None, 1) == tech
+    with pytest.raises(HTTPException) as denied:
+        await routes._company_user(None, 2)
+    assert denied.value.status_code == 403
+
+
+def test_asset_menu_groups_rmm_actions():
+    env = _environment()
+    template = env.from_string(
+        '{% import "rmm/_macros.html" as rmm_ui %}{{ rmm_ui.asset_menu(7, "<PC>", providers, run_script=run) }}'
+    )
+    providers = [{"provider": "rustdesk", "label": "RustDesk"}, {"provider": "meshcentral", "label": "MeshCentral"}]
+    html = template.render(providers=providers, run=True)
+    assert html.count('role="menuitem"') == 3 and "data-rmm-menu" in html
+    assert 'data-rmm-remote="meshcentral" data-rmm-remote-asset="7" data-rmm-remote-name="&lt;PC&gt;"' in html
+    assert "data-rmm-run-open" in html and "<PC>" not in html
+    assert "data-rmm-run-open" not in template.render(providers=providers, run=False)

@@ -459,13 +459,6 @@
 }
 
 /* Remote control */
-.rmm-remote__actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem;
-}
-
 .rmm-remote__status {
   display: flex;
   flex-wrap: wrap;

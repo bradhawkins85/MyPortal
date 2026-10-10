@@ -1,7 +1,8 @@
 # Remote Control
 
-Technicians connect to a device with **RustDesk** or **MeshCentral** from the asset's
-**Scripts** card. Neither tool has to be running all the time: MyPortal runs an **activation
+Technicians connect to a device with **RustDesk** or **MeshCentral** from the **RMM** menu
+on the asset's **Scripts** card, or next to each asset linked to a ticket
+(`/admin/tickets/<id>`). Neither tool has to be running all the time: MyPortal runs an **activation
 script** on the device through the RMM agent, the script switches the tool on and reports how to
 connect, and MyPortal opens the session.
 
@@ -35,8 +36,10 @@ MeshCentral also needs:
 
 ## Connecting
 
-On an asset, **Connect with RustDesk** or **Connect with MeshCentral** queues the activation
-script and shows its progress. When the script finishes, **Open RustDesk** (or **Open
+Each asset has one **RMM** menu holding its RMM actions: on the asset page it sits on the
+**Scripts** card (with **Run script**), and on a ticket it sits beside each linked asset.
+**Connect with RustDesk** or **Connect with MeshCentral** queues the activation script and
+shows its progress. When the script finishes, **Open RustDesk** (or **Open
 MeshCentral**) appears:
 
 - RustDesk opens the desktop app with a `rustdesk://` link carrying the ID and password.
@@ -47,7 +50,8 @@ The device must be online: an activation script the device has not collected wit
 expires. A session's link, and any password the script reported, is kept encrypted for 30
 minutes and is only shown to the technician who started it (and super admins).
 
-Connecting needs write access to **Scripts** for the company. Each connection is recorded in the
+Connecting needs write access to **Scripts** for the device's company (on a ticket, the
+ticket's company, whichever company is selected). Each connection is recorded in the
 audit trail as `rmm.remote_control.start`, and the activation run appears in the device's run
 history as **Remote control**.
 

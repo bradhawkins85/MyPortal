@@ -137,10 +137,7 @@
         <h2 class="card__title" id="asset-scripts-heading">Scripts</h2>
         <p class="card__subtitle">{% if rmm.agent %}RMM agent {{ rmm.agent.agent_version or '' }} on {{ (rmm.agent.os or 'unknown') | title }}{% if rmm.agent.os_version %} {{ rmm.agent.os_version }}{% endif %}, last seen {% if rmm.agent.last_seen_utc %}<span data-utc="{{ rmm.agent.last_seen_utc }}">{{ rmm.agent.last_seen_utc }}</span>{% else %}never{% endif %}.{% else %}The RMM agent is not installed on this device yet, so scripts cannot run here.{% endif %} <a href="/rmm/scripts">All scripts</a></p>
       </div>
-      {% if rmm.can_run or rmm.remote_control %}<div class="rmm-remote__actions">
-        {% for remote in rmm.remote_control %}<button type="button" class="button button--small" data-rmm-remote="{{ remote.provider }}" data-rmm-remote-asset="{{ asset.id }}">Connect with {{ remote.label }}</button>{% endfor %}
-        {% if rmm.can_run %}<button type="button" class="button button--primary button--small" data-rmm-run-open aria-haspopup="dialog" aria-controls="rmm-run-modal">Run script</button>{% endif %}
-      </div>{% endif %}
+      {% if rmm.can_run or rmm.remote_control %}{{ rmm_ui.asset_menu(asset.id, asset.name or ('Asset ' ~ asset.id), rmm.remote_control or [], run_script=rmm.can_run) }}{% endif %}
     </header>
     <div class="ce-section__body">
       {% if rmm.remote_control %}<div class="rmm-remote__status" data-rmm-remote-status role="status" aria-live="polite" hidden>
@@ -448,4 +445,4 @@
 {% include "partials/csrf.html" %}
 {% if rmm %}{% include "rmm/_run_modal.html" %}{% endif %}
 {% endblock %}
-{% block scripts %}<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script><script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script>{% if asset_tags is not none %}<script src="{{ static_url('/static/js/tag_picker.js') }}" defer></script>{% endif %}{% if rmm %}<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script>{% if rmm.remote_control %}<script src="{{ static_url('/static/js/rmm_remote_control.js') }}" defer></script>{% endif %}{% endif %}{% if can_edit_network_map %}<script src="{{ static_url('/static/js/network_map.js') }}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/asset_edit_sections.js') }}" defer></script><script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script>{% if asset_tags is not none %}<script src="{{ static_url('/static/js/tag_picker.js') }}" defer></script>{% endif %}{% if rmm %}<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script><script src="{{ static_url('/static/js/rmm_remote_control.js') }}" defer></script>{% endif %}{% if can_edit_network_map %}<script src="{{ static_url('/static/js/network_map.js') }}" defer></script>{% endif %}{% endblock %}

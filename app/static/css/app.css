@@ -4235,9 +4235,23 @@ body:not(.navigation--top) .policies-banner--overlay .policies-banner__logout .s
   grid-column: 2;
   grid-row: 1 / span 2;
   display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: var(--space-gap-tight);
 }
+
+/* RustDesk / MeshCentral progress and launch link (rmm_remote_control.js). */
+.ticket-assets-linked__remote {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-gap-tight);
+  margin-bottom: var(--space-gap-tight);
+}
+
+.ticket-assets-linked__remote[hidden] { display: none; }
+.ticket-assets-linked__remote.is-error { color: var(--hf-danger); }
 
 .ticket-assets-linked__action[disabled],
 .ticket-assets-linked__action[aria-disabled="true"] {
@@ -12589,6 +12603,31 @@ a.service-card__ai-icon:hover {
   background: rgba(56, 189, 248, 0.2);
   color: #bae6fd;
   outline: none;
+}
+
+/* Per-asset "RMM" menu (rmm/_macros.html asset_menu): a <details> dropdown. */
+.rmm-menu {
+  position: relative;
+  display: inline-block;
+}
+
+.rmm-menu > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.rmm-menu > summary::-webkit-details-marker { display: none; }
+.rmm-menu[open] > .dropdown__menu { display: block; }
+
+.rmm-menu .dropdown__item {
+  display: block;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.rmm-menu .dropdown__item[disabled] {
+  opacity: 0.55;
+  cursor: progress;
 }
 
 .dropdown__item--checkbox {

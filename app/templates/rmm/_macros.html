@@ -39,3 +39,19 @@
   </tr>
   {%- endfor %}
 {%- endmacro %}
+
+{# One "RMM" menu per asset holding its RMM actions (remote control, scripts).
+   rmm_remote_control.js runs the remote control items and closes the menu. #}
+{% macro asset_menu(asset_id, asset_name, remote_control, run_script=false) -%}
+<details class="rmm-menu" data-rmm-menu>
+  <summary class="button button--ghost button--small rmm-menu__toggle" title="RMM actions" aria-label="RMM actions for {{ asset_name }}">RMM <span aria-hidden="true">▾</span></summary>
+  <div class="dropdown__menu rmm-menu__panel" role="menu" aria-label="RMM actions for {{ asset_name }}">
+    {%- for remote in remote_control %}
+    <button type="button" class="dropdown__item" role="menuitem" data-rmm-remote="{{ remote.provider }}" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}">Connect with {{ remote.label }}</button>
+    {%- endfor %}
+    {%- if run_script %}
+    <button type="button" class="dropdown__item" role="menuitem" data-rmm-run-open aria-haspopup="dialog" aria-controls="rmm-run-modal">Run script</button>
+    {%- endif %}
+  </div>
+</details>
+{%- endmacro %}

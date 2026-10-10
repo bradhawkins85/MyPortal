@@ -1,11 +1,35 @@
 (function () {
   'use strict';
 
-  // Asset page: "Connect with RustDesk / MeshCentral" runs the activation script
-  // on the device, then offers the launch link once the script reports back.
-  const buttons = Array.from(document.querySelectorAll('[data-rmm-remote]'));
+  // Each asset's "RMM" menu (rmm/_macros.html asset_menu) closes when an item is
+  // chosen or the click lands elsewhere. Ticket pages redraw their asset list, so
+  // clicks are handled on the document.
+  document.addEventListener('click', function (event) {
+    const target = event.target instanceof Element ? event.target : null;
+    document.querySelectorAll('details[data-rmm-menu][open]').forEach(function (menu) {
+      const item = target ? target.closest('[role="menuitem"]') : null;
+      if (!target || !menu.contains(target) || (item && menu.contains(item))) {
+        menu.removeAttribute('open');
+      }
+    });
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape') {
+      return;
+    }
+    document.querySelectorAll('details[data-rmm-menu][open]').forEach(function (menu) {
+      menu.removeAttribute('open');
+      const toggle = menu.querySelector('summary');
+      if (toggle) {
+        toggle.focus();
+      }
+    });
+  });
+
+  // A RustDesk / MeshCentral item runs the activation script on the device, then
+  // offers the launch link once the script reports back.
   const box = document.querySelector('[data-rmm-remote-status]');
-  if (!buttons.length || !box) {
+  if (!box) {
     return;
   }
   const message = box.querySelector('[data-rmm-remote-message]');
@@ -49,9 +73,12 @@
     message.textContent = text;
   }
 
-  function setBusy(busy) {
-    buttons.forEach(function (button) {
-      button.disabled = busy;
+  let busy = false;
+
+  function setBusy(value) {
+    busy = value;
+    document.querySelectorAll('[data-rmm-remote]').forEach(function (button) {
+      button.disabled = value;
     });
   }
 
@@ -63,10 +90,12 @@
     setBusy(false);
   }
 
+  let target = '';
+
   function render(session, startedAt) {
     if (session.status === 'ready' && session.launch_url) {
       finish();
-      show(session.label + ' is ready.', false);
+      show(session.label + ' is ready' + target + '.', false);
       link.href = session.launch_url;
       link.textContent = 'Open ' + session.label;
       // A rustdesk:// link opens the desktop app; MeshCentral opens in a new tab.
@@ -89,7 +118,7 @@
       show('The device has not reported back. Check the run in the table below.', true);
       return;
     }
-    show('Switching on ' + session.label + ': ' + (RUN_STATUS[session.run_status] || 'working') + '…', false);
+    show('Switching on ' + session.label + target + ': ' + (RUN_STATUS[session.run_status] || 'working') + '…', false);
     timer = setTimeout(function () {
       poll(session.id, startedAt);
     }, POLL_MS);
@@ -105,23 +134,27 @@
     }
   }
 
-  buttons.forEach(function (button) {
-    button.addEventListener('click', async function () {
+  document.addEventListener('click', async function (event) {
+    const button = event.target instanceof Element ? event.target.closest('[data-rmm-remote]') : null;
+    if (!button || busy) {
+      return;
+    }
+    event.preventDefault();
+    finish();
+    setBusy(true);
+    target = button.dataset.rmmRemoteName ? ' on ' + button.dataset.rmmRemoteName : '';
+    link.hidden = true;
+    link.removeAttribute('href');
+    show('Starting…', false);
+    try {
+      const data = await api('/api/rmm/assets/' + encodeURIComponent(button.dataset.rmmRemoteAsset) + '/remote-control', {
+        method: 'POST',
+        body: JSON.stringify({ provider: button.dataset.rmmRemote }),
+      });
+      render(data.session, Date.now());
+    } catch (error) {
       finish();
-      setBusy(true);
-      link.hidden = true;
-      link.removeAttribute('href');
-      show('Starting…', false);
-      try {
-        const data = await api('/api/rmm/assets/' + encodeURIComponent(button.dataset.rmmRemoteAsset) + '/remote-control', {
-          method: 'POST',
-          body: JSON.stringify({ provider: button.dataset.rmmRemote }),
-        });
-        render(data.session, Date.now());
-      } catch (error) {
-        finish();
-        show(error.message, true);
-      }
-    });
+      show(error.message, true);
+    }
   });
 })();
