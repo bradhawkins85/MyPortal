@@ -190,7 +190,7 @@
 {% endif %}{% endfor %}</textarea>
           <small class="form-help">One non-sensitive HTTP(S) link per line, optionally prefixed with a label and |.</small></div>
       </div>
-      {% if can_edit %}<footer class="form-actions"><button class="button button--primary" type="submit" data-asset-save>Save changes</button><span class="form-help">Saves the profile and editable custom fields.</span></footer>{% endif %}
+      {% if can_edit %}<footer class="form-actions"><label class="checkbox"><input type="checkbox" name="send_tray_notification" value="1"><span>Send a tray push notification to this asset's device</span></label><button class="button button--primary" type="submit" data-asset-save>Save changes</button><span class="form-help">Saves the profile and editable custom fields.</span></footer>{% endif %}
     </form>
   </section>{% endif %}
 
@@ -216,18 +216,18 @@
   </section>
 
   {% if not customer_safe %}<section class="card card--panel ce-section" id="asset-custom-fields" data-asset-edit-section="custom-fields" aria-labelledby="asset-custom-fields-title">
-    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-custom-fields-title">Custom fields</h2><p class="card__subtitle">{{ 'Update additional inventory details alongside the asset profile.' if asset.provenance == 'manual' and can_edit else 'Additional inventory details recorded for this asset.' }}</p></div></header>
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-custom-fields-title">Custom fields</h2><p class="card__subtitle">{{ 'Update additional inventory details alongside the asset profile.' if can_edit else 'Additional inventory details recorded for this asset.' }}</p></div></header>
     <div class="ce-section__body"><div class="ce-form-grid">
       {% for field in custom_fields %}<div class="form-field">
-        {% if asset.provenance == 'manual' and can_edit %}<label class="form-label" for="asset-custom-{{ field.id }}">{{ field.display_name or field.name }}</label>{% else %}<span class="form-label">{{ field.display_name or field.name }}</span>{% endif %}
-        {% if asset.provenance == 'manual' and can_edit %}
+        {% if can_edit %}<label class="form-label" for="asset-custom-{{ field.id }}">{{ field.display_name or field.name }}</label>{% else %}<span class="form-label">{{ field.display_name or field.name }}</span>{% endif %}
+        {% if can_edit %}
           {% if field.field_type == 'checkbox' %}<label class="checkbox"><input id="asset-custom-{{ field.id }}" form="asset-settings-form" name="custom_{{ field.id }}" value="1" type="checkbox" {% if field.value %}checked{% endif %}><span>Yes</span></label>
           {% elif field.field_type == 'date' %}<input id="asset-custom-{{ field.id }}" form="asset-settings-form" class="form-input" name="custom_{{ field.id }}" type="date" value="{{ field.value or '' }}">
           {% elif field.field_type == 'url' %}<input id="asset-custom-{{ field.id }}" form="asset-settings-form" class="form-input" name="custom_{{ field.id }}" type="url" value="{{ field.value or '' }}">
           {% else %}<input id="asset-custom-{{ field.id }}" form="asset-settings-form" class="form-input" name="custom_{{ field.id }}" value="{{ field.value or '' }}">{% endif %}
         {% elif field.field_type == 'url' and field.value %}<a href="{{ field.value }}" target="_blank" rel="noopener noreferrer">{{ field.value }}</a>{% elif field.field_type == 'checkbox' %}{{ 'Yes' if field.value else 'No' }}{% else %}{{ field.value or '—' }}{% endif %}
       </div>{% else %}<p class="text-muted">No custom fields configured.</p>{% endfor %}
-    </div>{% if asset.provenance == 'manual' and can_edit and custom_fields %}<div class="form-actions"><button class="button button--primary" type="submit" form="asset-settings-form" data-asset-save>Save changes</button><span class="form-help">Saves the profile and editable custom fields.</span></div>{% endif %}</div>
+    </div>{% if can_edit and custom_fields %}<div class="form-actions"><button class="button button--primary" type="submit" form="asset-settings-form" data-asset-save>Save changes</button><span class="form-help">Saves the profile and editable custom fields.</span></div>{% endif %}</div>
   </section>{% endif %}
   {% if not customer_safe %}<section class="card card--panel ce-section" id="asset-assignments" data-asset-edit-section="assignments" aria-labelledby="asset-assignments-title">
     <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-assignments-title">Network and rack assignments</h2><p class="card__subtitle">Open the dedicated workspace to manage each assignment.</p></div></header>
