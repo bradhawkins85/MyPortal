@@ -10,6 +10,7 @@
   {% if gitea_url %}{% set _ = actions.append({"label": "Open Gitea", "type": "link", "href": gitea_url, "target": "_blank"}) %}{% endif %}
   {% if can_sync %}{% set _ = actions.append({"label": "Sync from Gitea", "type": "form", "action": "/rmm/scripts/sync"}) %}{% endif %}
   {% set _ = actions.append({"label": "Schedules and onboarding", "type": "link", "href": "/rmm/automation"}) %}
+  {% if is_super_admin %}{% set _ = actions.append({"label": "Remote control", "type": "link", "href": "/rmm/remote-control"}) %}{% endif %}
   {% if actions %}{{ page_header_actions(actions, menu_id="rmm-script-actions") }}{% endif %}
 {% endblock %}
 {% block content %}

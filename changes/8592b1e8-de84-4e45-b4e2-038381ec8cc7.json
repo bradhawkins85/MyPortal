@@ -1,0 +1,7 @@
+{
+  "guid": "8592b1e8-de84-4e45-b4e2-038381ec8cc7",
+  "occurred_at": "2026-10-10T09:50Z",
+  "change_type": "Feature",
+  "summary": "RMM: remote control with RustDesk and MeshCentral runs an activation script that installs the tool or resets its password, then opens the session from the asset page",
+  "content_hash": "2df8f0dc341b5163e3bd66102062031245151a7b50bd94f472ec636e6d561917"
+}

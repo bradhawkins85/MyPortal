@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% block title %}Remote control{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endblock %}
+{% block header_title %}<span class="header__title-text">Remote control</span>{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions([{"label": "Scripts", "type": "link", "href": "/rmm/scripts"}], menu_id="rmm-remote-actions") }}
+{% endblock %}
+{% block content %}
+<section class="rmm-page">
+  <section class="card card--panel" aria-labelledby="rmm-remote-intro-heading">
+    <header class="card__header card__header--stacked"><div>
+      <h2 class="card__title" id="rmm-remote-intro-heading">How it works</h2>
+      <p class="card__subtitle">Technicians get a Connect button on each asset's Scripts card. It runs the activation script on the device through the RMM agent, then opens RustDesk or MeshCentral once the script reports back.</p>
+    </div></header>
+    <div class="card__body">
+      <p>The activation script installs the tool when it is missing, otherwise resets its access password, then prints what MyPortal needs to connect. These lines are hidden from run history:</p>
+      <pre class="rmm-remote__example"><code>##myportal[session.id]=123456789        # RustDesk ID
+##myportal[session.password]=one-time   # RustDesk password (optional)
+##myportal[session.node_id]=node//abc   # MeshCentral node ID</code></pre>
+      <p class="form-help">Without an activation script, the device's ID is read from the asset custom field named below. Only scripts in the <code>Common</code> folder are offered, as they run on every company's devices.</p>
+    </div>
+  </section>
+
+  {% for provider in providers %}
+  <section class="card card--panel" aria-labelledby="rmm-remote-{{ provider.provider }}-heading">
+    <header class="card__header card__header--stacked"><div>
+      <h2 class="card__title" id="rmm-remote-{{ provider.provider }}-heading">{{ provider.label }}</h2>
+      <p class="card__subtitle">{% if provider.is_enabled %}On: technicians can connect with {{ provider.label }}.{% else %}Off.{% endif %}{% if provider.activation_script_id and not provider.activation_script_active %} <strong>The activation script was removed from Gitea.</strong>{% endif %}</p>
+    </div></header>
+    <form method="post" action="/rmm/remote-control/{{ provider.provider }}" class="card__body form">
+      {% include "partials/csrf.html" %}
+      <label class="form-checkbox"><input type="checkbox" name="is_enabled" value="1" {% if provider.is_enabled %}checked{% endif %}> Let technicians connect with {{ provider.label }}</label>
+      <div class="form-grid">
+        <div class="form-field">
+          <label class="form-label" for="rmm-remote-{{ provider.provider }}-script">Activation script</label>
+          <select class="form-input" id="rmm-remote-{{ provider.provider }}-script" name="activation_script_id">
+            <option value="">None: read the ID from a custom field</option>
+            {% for script in scripts %}<option value="{{ script.id }}" {% if provider.activation_script_id == script.id %}selected{% endif %}>{{ script.name }} ({{ script.path }})</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="rmm-remote-{{ provider.provider }}-field">{{ "Node ID" if provider.provider == "meshcentral" else "ID" }} custom field <span class="text-muted">optional</span></label>
+          <input class="form-input" id="rmm-remote-{{ provider.provider }}-field" name="id_field" maxlength="255" value="{{ provider.id_field }}" placeholder="{{ 'MeshCentral Node ID' if provider.provider == 'meshcentral' else 'RustDesk ID' }}">
+          <p class="form-help">Used when the script does not report one.</p>
+        </div>
+        {% if provider.provider == "meshcentral" %}
+        <div class="form-field">
+          <label class="form-label" for="rmm-remote-mesh-url">MeshCentral address</label>
+          <input class="form-input" id="rmm-remote-mesh-url" name="server_url" type="url" maxlength="512" value="{{ provider.server_url }}" placeholder="https://mesh.example.com">
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="rmm-remote-mesh-user">MeshCentral user</label>
+          <input class="form-input" id="rmm-remote-mesh-user" name="username" maxlength="255" value="{{ provider.username }}" autocomplete="off" placeholder="tactical">
+          <p class="form-help">Technicians sign in to MeshCentral as this user.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="rmm-remote-mesh-key">Login token key</label>
+          <input class="form-input" id="rmm-remote-mesh-key" name="secret" type="password" autocomplete="new-password" placeholder="{{ 'Saved: leave blank to keep it' if provider.secret_set else 'Output of meshcentral --logintokenkey' }}">
+        </div>
+        {% endif %}
+      </div>
+      {% if provider.fields %}
+      <fieldset class="rmm-remote__values">
+        <legend class="form-label">Script values</legend>
+        <p class="form-help">Given to the script each time it runs. Variables such as <code>{% raw %}{{company.variables.RustDeskKey}}{% endraw %}</code> are filled in for the device's company, which lets the script install the tool with that company's settings.</p>
+        <div class="form-grid">
+          {% for field in provider.fields %}
+          <div class="form-field">
+            <label class="form-label" for="rmm-remote-{{ provider.provider }}-{{ loop.index }}">{{ field.name }}{% if field.mandatory %} <span class="text-muted">required</span>{% endif %}</label>
+            <input class="form-input" id="rmm-remote-{{ provider.provider }}-{{ loop.index }}" name="entry:{{ field.key }}" list="rmm-remote-variables" value="{{ field.value }}" {% if field.sensitive %}type="password" autocomplete="new-password"{% endif %} placeholder="{% if field.sensitive and field.value_set %}Saved: leave blank to keep it{% elif field.default %}Default: {{ field.default }}{% endif %}">
+            {% if field.help %}<p class="form-help">{{ field.help }}</p>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </fieldset>
+      {% elif provider.activation_script_id %}
+      <p class="form-help">This script has no parameters or environment variables.</p>
+      {% else %}
+      <p class="form-help">After choosing a script and saving, its parameters appear here.</p>
+      {% endif %}
+      <div class="form-actions"><button class="button button--primary" type="submit">Save {{ provider.label }}</button></div>
+    </form>
+  </section>
+  {% endfor %}
+  <datalist id="rmm-remote-variables">{% for variable in variables %}<option value="{{ variable.token }}">{{ variable.group }}: {{ variable.label }}</option>{% endfor %}</datalist>
+</section>
+{% endblock %}
