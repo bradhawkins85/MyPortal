@@ -186,3 +186,20 @@ def test_baremetal_upgrade_provisions_gitea_without_blocking_and_nginx_serves_it
     assert upgrade.index('bash "${SCRIPT_DIR}/provision_redis.sh"') < call < upgrade.index("redis_env_after=")
     nginx = (ROOT / "deploy/nginx/myportal-bluegreen.conf").read_text()
     assert "location ^~ /gitea/ {\n    proxy_pass http://127.0.0.1:3000/;" in nginx
+
+
+def test_gitea_never_searches_above_its_data_for_a_repository(tmp_path):
+    # A stray /.git on the host otherwise stops Gitea starting ("invalid gitfile format: /.git").
+    unit = tmp_path / "gitea.service"
+    result = run(f'GITEA_UNIT="{unit}"\nwrite_unit', env_file(tmp_path, ""))
+    assert result.returncode == 0, result.stderr
+    assert "Environment=GIT_CEILING_DIRECTORIES=/var/lib\n" in unit.read_text()
+    calls = tmp_path / "calls"
+    result = run(
+        f'GITEA_HOME="{tmp_path}"\nGITEA_GIT_CEILING=/ceiling\n'
+        f'runuser() {{ echo "$PWD $*" > "{calls}"; }}\ngitea_cli admin user list',
+        env_file(tmp_path, ""),
+    )
+    assert result.returncode == 0, result.stderr
+    assert calls.read_text().startswith(f"{tmp_path} -u gitea -- env ")
+    assert "GIT_CEILING_DIRECTORIES=/ceiling" in calls.read_text()

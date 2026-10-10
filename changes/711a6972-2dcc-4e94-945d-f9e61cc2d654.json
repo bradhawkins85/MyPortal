@@ -1,0 +1,7 @@
+{
+  "guid": "711a6972-2dcc-4e94-945d-f9e61cc2d654",
+  "occurred_at": "2026-10-10T05:20Z",
+  "change_type": "Fix",
+  "summary": "Gitea: start even when a stray .git exists above its data folder, such as /.git",
+  "content_hash": "a7eaaad3f251b23a5cb52431f31dd21ac62fe895d9a43c500ee5a616caa47082"
+}
