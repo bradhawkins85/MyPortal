@@ -49,7 +49,10 @@ Install, as an administrator:
 
 Install them machine-wide so the agent, which runs as SYSTEM, can find them.
 
-The install script adds WiX v7 itself.
+The install script adds WiX v7 itself. WiX v7 requires accepting the
+FireGiant [Open Source Maintenance Fee EULA](https://docs.firegiant.com/wix/osmf/),
+which the agent does with `wix eula accept wix7` on each run, the same EULA
+the *Build MSI* workflow accepts with `-acceptEula wix7`.
 
 ## 2. Import the code-signing certificate
 
@@ -134,6 +137,7 @@ change settings or update WiX.
 
 | Symptom | Fix |
 | --- | --- |
+| `agent.log` repeats *Installing WixToolset.BootstrapperApplications.wixext* | Update the agent: older copies did not accept the WiX v7 EULA, so the extension install failed without logging why. Run `Install-MyPortalBuildAgent.ps1` again from the latest `tray/build-agent` folder. Any other *WiX setup failed* line in the log names the cause. |
 | Builds stay *Queued* | Check the scheduled task's last result and `agent.log`. A 401 or 403 means the API key, its IP allow list or its path permissions are wrong. |
 | *Failed: Release … predates deployment URL support* | The cached tray release was tagged before this feature. Publish a new tray release, then press **Rebuild**. |
 | *Failed: go build / npm ci failed* | Check Go and Node.js are installed machine-wide and the server can reach `proxy.golang.org` and `registry.npmjs.org`. Delete the release's folder under `C:\MyPortalBuild\payloads` to force a clean build. |
