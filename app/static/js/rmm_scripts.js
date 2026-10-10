@@ -110,34 +110,6 @@
   });
 
   // ------------------------------------------------------------------ //
-  // Library search
-  // ------------------------------------------------------------------ //
-
-  const search = document.querySelector('[data-rmm-script-search]');
-  if (search) {
-    search.addEventListener('input', () => {
-      const term = search.value.trim().toLowerCase();
-      let visible = 0;
-      document.querySelectorAll('[data-rmm-group]').forEach((group) => {
-        let groupVisible = 0;
-        group.querySelectorAll('[data-rmm-script-item]').forEach((item) => {
-          const match = !term || (item.dataset.search || '').includes(term);
-          item.hidden = !match;
-          if (match) {
-            groupVisible += 1;
-          }
-        });
-        group.hidden = groupVisible === 0;
-        visible += groupVisible;
-      });
-      const empty = document.querySelector('[data-rmm-script-empty]');
-      if (empty) {
-        empty.hidden = visible > 0;
-      }
-    });
-  }
-
-  // ------------------------------------------------------------------ //
   // Run editor
   // ------------------------------------------------------------------ //
 

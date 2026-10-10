@@ -195,9 +195,27 @@ are skipped and listed on the run, so create the field or variable first.
 
 The agent also sets `MYPORTAL_RUN_ID` for every run.
 
+## Browsing scripts
+
+The Scripts page is laid out like **Edit company**. The list on the left shows each folder and
+the scripts in it; type in **Find a script** to filter it. **Overview** shows the totals, recent
+runs and the devices with the RMM agent. Choose a script to see, on the right:
+
+- **Description**, from the script's comment-based help (`.SYNOPSIS`) or leading comment, with
+  its default timeout and when it was last synced.
+- **AI summary**: what the script does on the device, what it leaves behind and anything to
+  check before running it. It is written with the Ollama module the first time a technician
+  with write access opens the script, and again once the script changes in Gitea. Choose
+  **Regenerate** to write a new one. Without the Ollama module the card says so.
+- **Inputs**: the parameters and environment variables it asks for, their types, defaults
+  (sensitive defaults are hidden) and help text.
+- **Recent runs** of that script on the company's devices.
+- **Script**: the source devices receive, as loaded at the last sync, with **Copy** and, for
+  technicians who can sign in to Gitea, **Edit in Gitea**.
+
 ## Running a script
 
-Choose **Run** next to a script, **Run a script** at the top of the page, or **Run script** on
+Choose **Run** on a script, **Run a script** at the top of the page, or **Run script** on
 an asset's page. Then:
 
 1. Tick the devices to run it on. Only devices with the RMM agent are listed.
@@ -273,8 +291,8 @@ by super admins; everyone else sees them read-only.
 The **Scripts** permission (RMM group in Roles) controls access per company. Read access shows
 the library, runs, schedules and onboarding; write access also runs and cancels scripts and
 manages schedules and onboarding steps for the company. Only super admins sync from Gitea and
-manage every-company schedules. Every sync, run, cancel and change to a
-schedule or onboarding step is recorded in the audit trail.
+manage every-company schedules. Generating an AI summary needs write access. Every sync, run,
+cancel, AI summary and change to a schedule or onboarding step is recorded in the audit trail.
 
 ## The RMM agent
 

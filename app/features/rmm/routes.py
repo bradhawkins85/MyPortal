@@ -2,8 +2,10 @@
 
 Technician side (company scoped, ``menu.rmm_scripts``; write access runs scripts):
 
-* ``GET /rmm/scripts`` script library, devices and run history
+* ``GET /rmm/scripts`` script library, devices and run history; ``?script={id}``
+  opens one script: its description, AI summary, inputs, runs and source
 * ``GET /api/rmm/scripts`` and ``/api/rmm/scripts/{id}`` scripts and their fields
+* ``POST /api/rmm/scripts/{id}/summary`` (re)generate a script's AI summary
 * ``POST /api/rmm/scripts/{id}/runs`` push a script to devices
 * ``GET /api/rmm/runs`` / ``/api/rmm/runs/{id}``, ``POST /api/rmm/runs/{id}/cancel``
 * ``POST /rmm/scripts/sync`` load scripts from Gitea (super admin)
@@ -36,6 +38,7 @@ from app.services import gitea
 from app.services import gitea_sign_in
 from app.services import rmm_automation
 from app.services import rmm_script_parser as parser
+from app.services import rmm_script_summary
 from app.services import rmm_scripts
 
 router = APIRouter(tags=["RMM scripts"])
@@ -119,8 +122,26 @@ async def asset_rmm_context(company_id: int, asset_id: int, *, can_run: bool) ->
     }
 
 
+async def _script_detail(script_id: int, company_id: int, runs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Everything the Scripts page shows for one script, or None when the company cannot use it."""
+
+    script = await rmm_repo.get_script(script_id, with_content=True)
+    if not rmm_repo.script_available_to(script, company_id):
+        return None
+    return {
+        **_script_summary(script),
+        "content": script.get("content") or "",
+        "content_sha256": script.get("content_sha256") or "",
+        "line_count": len((script.get("content") or "").splitlines()),
+        "fields": rmm_scripts.script_fields(script),
+        "source_url": await rmm_scripts.script_source_url(script),
+        "ai": rmm_script_summary.summary_state(script),
+        "runs": [run for run in runs if run.get("script_id") == script["id"]][:25],
+    }
+
+
 @router.get("/rmm/scripts", response_class=HTMLResponse, summary="Browse RMM scripts and their runs")
-async def scripts_page(request: Request):
+async def scripts_page(request: Request, script: int | None = Query(default=None, ge=1)):
     context = await _context(request)
     if isinstance(context, RedirectResponse):
         return context
@@ -128,7 +149,8 @@ async def scripts_page(request: Request):
     await rmm_repo.expire_stale_runs()
     scripts = await rmm_repo.list_scripts(company_id=company_id)
     agents = await rmm_repo.list_company_agents(company_id)
-    runs = await rmm_repo.list_runs(company_id=company_id, limit=200)
+    runs = [_serialise(run) for run in await rmm_repo.list_runs(company_id=company_id, limit=200)]
+    selected = await _script_detail(script, company_id, runs) if script else None
     gitea_ready = True
     gitea_message = ""
     gitea_url = ""
@@ -155,8 +177,10 @@ async def scripts_page(request: Request):
             "company": company,
             "script_groups": _group_scripts(scripts),
             "agents": [_serialise(agent) for agent in agents],
-            "runs": [_serialise(run) for run in runs],
+            "runs": runs,
             "summary": summary,
+            "selected_script": selected,
+            "script_not_found": bool(script) and selected is None,
             "can_run": can_run,
             "can_sync": bool(user.get("is_super_admin")),
             "gitea_ready": gitea_ready,
@@ -227,6 +251,27 @@ async def get_script_api(script_id: int, request: Request):
         "source_url": await rmm_scripts.script_source_url(script),
         "can_run": can_run,
     }
+
+
+@router.post("/api/rmm/scripts/{script_id:int}/summary", summary="Generate the AI summary of a script")
+async def summarise_script_api(script_id: int, request: Request):
+    user, _company, company_id, _can_run = await _context(request, write=True, api=True)
+    script = await rmm_repo.get_script(script_id, with_content=True)
+    if not rmm_repo.script_available_to(script, company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Script not found")
+    try:
+        state = await rmm_script_summary.generate_summary(script)
+    except rmm_script_summary.SummaryUnavailable as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
+    await audit_service.record(
+        action="rmm.script.summarise",
+        request=request,
+        user_id=user.get("id"),
+        entity_type="rmm_script",
+        entity_id=script_id,
+        metadata={"script": script["name"], "model": state["model"]},
+    )
+    return state
 
 
 class RunRequest(BaseModel):

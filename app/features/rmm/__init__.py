@@ -28,7 +28,7 @@ from .routes import router
 
 PACK = FeaturePack(
     slug="rmm",
-    version="1.2.0",
+    version="1.3.0",
     routers=(router, automation_router),
     background_jobs=(rmm_scripts.folder_maintenance_loop, rmm_automation.automation_loop),
 )
