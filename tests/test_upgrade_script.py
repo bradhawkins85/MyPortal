@@ -1203,3 +1203,51 @@ def test_legacy_update_cron_log_is_moved_to_root_owned_path(tmp_path):
     assert result.returncode == 0, result.stderr
     assert ">> /var/log/myportal-updater.log 2>&1" in cron.read_text()
     assert "/var/log/myportal/" not in cron.read_text()
+
+
+def _control_checkouts(tmp_path: Path) -> tuple[Path, Path, str]:
+    def git(cwd: Path, *args: str) -> str:
+        return subprocess.run(["git", *args], cwd=cwd, text=True, capture_output=True, check=True).stdout.strip()
+
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    git(origin, "init", "-q", "-b", "main")
+    git(origin, "config", "user.email", "t@example.com")
+    git(origin, "config", "user.name", "t")
+    (origin / "upgrade.sh").write_text("old\n")
+    git(origin, "add", ".")
+    git(origin, "commit", "-qm", "old")
+    control = tmp_path / "control"
+    git(tmp_path, "clone", "-q", str(origin), str(control))
+    (origin / "upgrade.sh").write_text("new\n")
+    git(origin, "commit", "-qam", "new")
+    git(control, "fetch", "-q", "origin", "main")
+    return origin, control, git(control, "rev-parse", "origin/main")
+
+
+def _update_control_checkout(control: Path, target: str) -> subprocess.CompletedProcess[str]:
+    function = SCRIPT[SCRIPT.index("update_control_checkout() {") : SCRIPT.index("\nverify_release_sources()")]
+    return subprocess.run(
+        ["bash", "-c", f"set -Eeuo pipefail\nPROJECT_ROOT=$PWD\n{function}\nupdate_control_checkout \"$1\"", "_", target],
+        cwd=control, text=True, capture_output=True, check=False,
+    )
+
+
+def test_control_checkout_fast_forwards_so_new_upgrade_steps_run(tmp_path):
+    _origin, control, target = _control_checkouts(tmp_path)
+    result = _update_control_checkout(control, target)
+    assert result.returncode == 0, result.stderr
+    assert (control / "upgrade.sh").read_text() == "new\n"
+    # Already current: nothing to re-run.
+    assert _update_control_checkout(control, target).returncode == 1
+    main_flow = SCRIPT[SCRIPT.index("validate_required_configuration\ngit fetch") :]
+    assert main_flow.index("update_control_checkout") < main_flow.index('bash "${SCRIPT_DIR}/provision_gitea.sh"')
+    assert 'MYPORTAL_UPGRADE_REEXEC=1 exec bash "${SCRIPT_DIR}/upgrade.sh" "${UPGRADE_ARGS[@]}"' in main_flow
+
+
+def test_control_checkout_with_local_changes_is_left_alone(tmp_path):
+    _origin, control, target = _control_checkouts(tmp_path)
+    (control / "upgrade.sh").write_text("edited\n")
+    result = _update_control_checkout(control, target)
+    assert result.returncode == 1 and "local changes" in result.stderr
+    assert (control / "upgrade.sh").read_text() == "edited\n"
