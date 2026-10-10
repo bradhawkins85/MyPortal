@@ -1,0 +1,7 @@
+{
+  "guid": "ff2c4da5-a132-4f22-b239-a80622f15927",
+  "occurred_at": "2026-10-10T01:00Z",
+  "change_type": "Feature",
+  "summary": "Tray: Deployment URLs can last 1 year or never expire (revocable any time), and {{ tray.deploymentUrl }} inserts a company's link into automations, ticket replies, message templates and signatures",
+  "content_hash": "a1574b055682846505155d6c92a180facf691ba4b3d1f9314aab8811231f33bb"
+}

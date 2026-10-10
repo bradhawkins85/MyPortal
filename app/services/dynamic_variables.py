@@ -12,6 +12,12 @@ from app.repositories import reporting as reporting_repo
 from app.services import reporting as reporting_service
 
 
+# Lower-cased names of the tray deployment URL variable and its aliases.
+TRAY_DEPLOYMENT_URL_VARIABLES = frozenset(
+    {"tray.deploymenturl", "tray.deployment_url", "tray_deployment_url"}
+)
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -225,6 +231,9 @@ async def build_dynamic_token_map(
     huntress_sat_count_requests = {
         token for token in tokens if token.lower() in huntress_sat_variable_names
     }
+    tray_deployment_url_requests = {
+        token for token in tokens if token.lower() in TRAY_DEPLOYMENT_URL_VARIABLES
+    }
 
     all_requests = [
         active_asset_requests,
@@ -234,6 +243,7 @@ async def build_dynamic_token_map(
         issue_list_requests,
         report_requests,
         huntress_sat_count_requests,
+        tray_deployment_url_requests,
     ]
     if not any(all_requests):
         return {}
@@ -315,6 +325,14 @@ async def build_dynamic_token_map(
         enrolled = int((stats or {}).get("enrolled_learners") or 0)
         for token in huntress_sat_count_requests:
             result[token] = str(enrolled)
+
+    # Handle the company's tray deployment URL
+    if tray_deployment_url_requests:
+        from app.services import tray_deployment
+
+        url = await tray_deployment.company_deployment_url(company_id)
+        for token in tray_deployment_url_requests:
+            result[token] = url
 
     # Handle saved reporting query variables
     if report_requests:
