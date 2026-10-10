@@ -1164,6 +1164,14 @@ class _DownloadOnlyStaticFiles(StaticFiles):
 # Must be mounted before ``/static`` so user uploads never reach the generic
 # static handler, which serves files inline with a guessed media type.
 app.mount("/static/uploads", _DownloadOnlyStaticFiles(directory=str(_uploads_path)), name="static-uploads")
+# Blue/green releases link static/tray to shared storage outside the release.
+# The generic handler refuses files whose real path leaves its directory, so
+# the cached tray installers need their own mount rooted at the link.
+app.mount(
+    "/static/tray",
+    StaticFiles(directory=str(templates_config.static_path / "tray"), check_dir=False),
+    name="static-tray",
+)
 app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), name="static")
 
 

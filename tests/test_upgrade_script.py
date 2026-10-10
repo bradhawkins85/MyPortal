@@ -203,7 +203,8 @@ def test_release_upload_paths_point_to_persistent_shared_storage():
 
     assert '"${release}/private_uploads"' in function
     assert '"${release}/app/static/uploads"' in function
-    assert function.count("ln -s") == 2
+    assert 'ln -s "${SHARED_ROOT}/tray-installers" "${release}/app/static/tray"' in function
+    assert function.count("ln -s") == 3
     assert "chown -h myportal:myportal" in function
 
 

@@ -636,13 +636,16 @@ make_release_service_readable() {
 
 prepare_shared_uploads() {
   local shared legacy name
-  for name in private_uploads uploads; do
+  # tray-installers holds the tray MSI/pkg/DMG the app caches from GitHub
+  # Releases into app/static/tray. Releases are read-only, so the cache must
+  # live in shared storage like uploads or the download can never be saved.
+  for name in private_uploads uploads tray-installers; do
     shared="${SHARED_ROOT}/${name}"
-    if [[ "$name" == private_uploads ]]; then
-      legacy="${PROJECT_ROOT}/private_uploads"
-    else
-      legacy="${PROJECT_ROOT}/app/static/uploads"
-    fi
+    case "$name" in
+      private_uploads) legacy="${PROJECT_ROOT}/private_uploads" ;;
+      uploads) legacy="${PROJECT_ROOT}/app/static/uploads" ;;
+      tray-installers) legacy="${PROJECT_ROOT}/app/static/tray" ;;
+    esac
     if [[ ! -d "$shared" ]]; then
       install -d -m 0750 -o myportal -g myportal "$shared"
       # Seed persistent storage for installations upgrading from the original
@@ -662,13 +665,15 @@ prepare_shared_uploads() {
 link_shared_uploads() {
   local release="$1"
   mkdir -p "${release}/app/static"
-  rm -rf "${release}/private_uploads" "${release}/app/static/uploads"
+  rm -rf "${release}/private_uploads" "${release}/app/static/uploads" "${release}/app/static/tray"
   ln -s "${SHARED_ROOT}/private_uploads" "${release}/private_uploads"
   ln -s "${SHARED_ROOT}/uploads" "${release}/app/static/uploads"
+  ln -s "${SHARED_ROOT}/tray-installers" "${release}/app/static/tray"
   # The target is the writable data store, but keep the link metadata owned by
   # the service account as well so ownership checks do not report these paths
   # as root-owned. -h prevents chown from dereferencing the links.
-  chown -h myportal:myportal "${release}/private_uploads" "${release}/app/static/uploads"
+  chown -h myportal:myportal "${release}/private_uploads" "${release}/app/static/uploads" \
+    "${release}/app/static/tray"
 }
 
 validate_release_uploads() {
@@ -685,6 +690,7 @@ validate_release_uploads() {
   done <<EOF
 ${release}/private_uploads|${SHARED_ROOT}/private_uploads
 ${release}/app/static/uploads|${SHARED_ROOT}/uploads
+${release}/app/static/tray|${SHARED_ROOT}/tray-installers
 EOF
 }
 
@@ -708,9 +714,12 @@ repair_assigned_release_uploads() {
     done <<EOF
 ${release}/private_uploads|${SHARED_ROOT}/private_uploads
 ${release}/app/static/uploads|${SHARED_ROOT}/uploads
+${release}/app/static/tray|${SHARED_ROOT}/tray-installers
 EOF
-    chown -R myportal:myportal "${SHARED_ROOT}/private_uploads" "${SHARED_ROOT}/uploads"
-    find "${SHARED_ROOT}/private_uploads" "${SHARED_ROOT}/uploads" -type d -exec chmod u+rwx {} +
+    chown -R myportal:myportal "${SHARED_ROOT}/private_uploads" "${SHARED_ROOT}/uploads" \
+      "${SHARED_ROOT}/tray-installers"
+    find "${SHARED_ROOT}/private_uploads" "${SHARED_ROOT}/uploads" "${SHARED_ROOT}/tray-installers" \
+      -type d -exec chmod u+rwx {} +
     make_release_service_readable "$release"
     validate_release_uploads "$release"
   done

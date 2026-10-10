@@ -13,7 +13,10 @@ The download is skipped per asset when:
 * The GitHub API returns no release or no matching installer asset.
 * The release asset metadata matches the cached metadata stored alongside the
   file, meaning the file is already current.
-* Any network or I/O error occurs — failures are logged but never fatal.
+* Any network or I/O error occurs.  Each failure is logged, the remaining
+  assets are still attempted, and :class:`TrayInstallerDownloadError` is raised
+  at the end so a scheduled run reports the failure instead of succeeding with
+  nothing cached (for example when ``app/static/tray`` is not writable).
 """
 
 from __future__ import annotations
@@ -35,6 +38,10 @@ _ASSET_NAMES = ("myportal-tray.msi", "myportal-tray.dmg", "myportal-tray.pkg")
 _TRAY_STATIC_DIR = Path(__file__).resolve().parent.parent / "static" / "tray"
 _DOWNLOAD_LOCK = asyncio.Lock()
 _DOWNLOAD_CHUNK_SIZE = 65536
+
+
+class TrayInstallerDownloadError(RuntimeError):
+    """Raised when one or more tray installers could not be downloaded."""
 
 
 def _sha256_file(path: Path) -> str:
@@ -257,17 +264,26 @@ async def _fetch(
                 missing=missing_assets,
             )
 
+        failures: list[str] = []
         for asset_name, asset in assets.items():
-            results[asset_name] = await _download_asset(
-                client=client,
-                repo=repo,
-                headers=headers,
-                release=release,
-                asset=asset,
-                asset_name=asset_name,
-                force=force,
-            )
+            try:
+                results[asset_name] = await _download_asset(
+                    client=client,
+                    repo=repo,
+                    headers=headers,
+                    release=release,
+                    asset=asset,
+                    asset_name=asset_name,
+                    force=force,
+                )
+            except TrayInstallerDownloadError as exc:
+                failures.append(str(exc))
 
+    if failures:
+        raise TrayInstallerDownloadError(
+            f"Could not cache tray installers from {tag_name} in {_TRAY_STATIC_DIR}: "
+            + "; ".join(failures)
+        )
     return results
 
 
@@ -333,7 +349,9 @@ async def _download_asset(
             status=exc.response.status_code,
             error=str(exc),
         )
-        return False
+        raise TrayInstallerDownloadError(
+            f"{asset_name}: HTTP {exc.response.status_code}"
+        ) from exc
     except Exception as exc:
         log_error(
             "Unexpected error downloading tray installer",
@@ -341,7 +359,7 @@ async def _download_asset(
             asset=asset_name,
             error=str(exc),
         )
-        return False
+        raise TrayInstallerDownloadError(f"{asset_name}: {exc}") from exc
 
     log_info(
         "Tray installer updated",

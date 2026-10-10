@@ -1,0 +1,7 @@
+{
+  "guid": "e0f3b510-de6a-48c1-ba85-4978c0b2f19a",
+  "occurred_at": "2026-10-10T05:20Z",
+  "change_type": "Fix",
+  "summary": "Tray: cache the GitHub tray installers in shared storage on blue/green installs, and fail the Update Tray Icon Installer task when a download cannot be saved",
+  "content_hash": "7b687cce0ffe19f84b2cfc914e2b65a4d04c277467dab2622d34a806668df423"
+}
