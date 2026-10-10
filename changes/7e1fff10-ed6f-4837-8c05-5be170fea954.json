@@ -1,0 +1,7 @@
+{
+  "guid": "7e1fff10-ed6f-4837-8c05-5be170fea954",
+  "occurred_at": "2026-10-10T07:50Z",
+  "change_type": "Security",
+  "summary": "Hardened MyPortal's automatic Gitea sign-in so a stored Gitea login can never be a hand-made or malformed account. identity() now validates the stored login against the exact shape gitea_login() produces (letters, digits, . _ -, no leading or trailing punctuation, at most 30 characters, plus the user's id); because the numeric id suffix is required, a value can never be a hand-made account such as the myportal administrator. An unexpected value is logged and dropped in favour of the canonical login, so a technician always signs in as the account MyPortal makes. Added a login-shape test and a regression test for the tampered-row fallback. ENABLE_REVERSE_PROXY_AUTO_REGISTRATION is intentionally kept on, as sign_in_as relies on Gitea's auto-registration to create accounts.",
+  "content_hash": "86884f5f4c33c6295d3a3118113b6200790063cc41cb83e344061a095a3fa63c"
+}

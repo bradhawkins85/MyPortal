@@ -779,6 +779,17 @@ def test_gitea_login_is_readable_and_never_a_hand_made_account():
     assert len(gitea_sign_in.gitea_login({"id": 12, "email": "a" * 80 + "@x"})) == 33
 
 
+def test_gitea_login_shape_rejects_hand_made_and_malformed_accounts():
+    is_login = gitea_sign_in._is_gitea_login
+    for login in ("tech-9", "user-5", "myportal-7", "Brad.Hawkins-rmm-1", "a-1", "abc_def.ghi-123"):
+        assert is_login(login), login
+    for login in (
+        "admin", "myportal", "", "tech", "tech-9 ", " tech-9", "-tech-9",
+        "tech-", "tech-x", "../../etc-1", "a" * 31 + "-1", "tech/9-1", "tech:9",
+    ):
+        assert not is_login(login), login
+
+
 def _memberships(monkeypatch, by_user: dict[int, list[dict]]):
     async def list_memberships_for_user(user_id, *, status="active"):
         return [{"permissions": permissions} for permissions in by_user.get(user_id, [])]
@@ -859,6 +870,24 @@ async def test_identity_still_signs_in_when_gitea_cannot_be_updated(sqlite_db, m
     account = await gitea_sign_in.identity({"id": 9, "email": "tech@example.com"})
     assert account.login == "tech-9"
     assert await rmm_repo.get_gitea_account(9) is None
+
+
+@pytest.mark.anyio
+async def test_identity_drops_a_malformed_stored_login(sqlite_db, monkeypatch):
+    calls = _fake_gitea(monkeypatch)
+    _memberships(monkeypatch, {9: [{"menu.rmm_script_editing": "write"}]})
+    # A stored login that is not one MyPortal made -- here the "myportal"
+    # administrator's own account -- must never be handed to Gitea, whose
+    # sign-in headers create accounts on first use. It falls back to the
+    # canonical login instead.
+    await rmm_repo.save_gitea_account(9, "myportal", "write")
+    account = await gitea_sign_in.identity({"id": 9, "email": "tech@example.com"})
+    assert account.login == "tech-9"
+    assert calls[0] == ("sign_in", "tech-9", "tech@example.com", "")
+    # Repeated: the stored row still says "myportal", so the fallback is not a
+    # one-time fix -- every identity() drops it and signs in as tech-9.
+    assert (await gitea_sign_in.identity({"id": 9, "email": "tech@example.com"})).login == "tech-9"
+    assert (await rmm_repo.get_gitea_account(9))["gitea_login"] == "myportal"
 
 
 @pytest.mark.anyio
