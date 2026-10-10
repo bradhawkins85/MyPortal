@@ -4,6 +4,10 @@ Gitea is where scripts are written and reviewed. MyPortal reads them, and only
 writes the folder skeleton (``Common/``, ``Companies/<company>/``) with
 :func:`create_files`. The repository, branch and optional folder come from the
 ``gitea`` integration module (``GITEA_*`` settings in ``.env``).
+
+For MyPortal sign-in, :func:`sign_in_as` makes the bundled Gitea create a
+technician's account and :func:`set_collaborator` gives it access to the
+repository (see ``app.services.gitea_sign_in``).
 """
 
 from __future__ import annotations
@@ -170,6 +174,63 @@ async def create_files(settings: GiteaSettings, files: dict[str, str], message: 
     if response.status_code in (401, 403):
         raise GiteaError("Gitea refused to create folders. GITEA_API_TOKEN needs write access to the repository.")
     _raise_for(response, "creating folders")
+
+
+# Headers the bundled Gitea trusts from its proxy (REVERSE_PROXY_AUTHENTICATION_*).
+SIGN_IN_USER_HEADER = "X-WEBAUTH-USER"
+SIGN_IN_EMAIL_HEADER = "X-WEBAUTH-EMAIL"
+SIGN_IN_NAME_HEADER = "X-WEBAUTH-FULLNAME"
+
+
+def sign_in_headers(login: str, *, email: str = "", full_name: str = "") -> dict[str, str]:
+    headers = {SIGN_IN_USER_HEADER: login}
+    if email:
+        headers[SIGN_IN_EMAIL_HEADER] = email
+    if full_name:
+        headers[SIGN_IN_NAME_HEADER] = full_name
+    return headers
+
+
+async def sign_in_as(settings: GiteaSettings, login: str, *, email: str = "", full_name: str = "") -> None:
+    """Open a page as ``login`` the way the proxy does, so Gitea creates the
+    account on first use. MyPortal reaches Gitea from an address Gitea trusts
+    as its proxy; the API token is not sent."""
+
+    headers = {"User-Agent": "MyPortal-RMM", **sign_in_headers(login, email=email, full_name=full_name)}
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, verify=settings.verify_ssl, headers=headers) as client:
+            response = await client.get(settings.base_url + "/user/settings")
+    except httpx.HTTPError as exc:
+        raise GiteaError(f"Could not reach Gitea: {exc.__class__.__name__}") from exc
+    if response.status_code != 200:
+        raise GiteaError(
+            f"Gitea did not sign in {login} (HTTP {response.status_code}). "
+            "MyPortal sign-in needs the bundled Gitea, which trusts MyPortal's sign-in headers."
+        )
+
+
+async def set_collaborator(settings: GiteaSettings, login: str, permission: str) -> None:
+    """Give ``login`` read or write access to the script repository."""
+
+    url = _repo_url(settings) + "/collaborators/" + quote(login, safe="")
+    try:
+        async with _client(settings) as client:
+            response = await client.put(url, json={"permission": permission})
+    except httpx.HTTPError as exc:
+        raise GiteaError(f"Could not reach Gitea: {exc.__class__.__name__}") from exc
+    if response.status_code == 422:
+        raise GiteaError(f"Gitea has no account named {login}.")
+    _raise_for(response, "giving " + login + " access")
+
+
+async def remove_collaborator(settings: GiteaSettings, login: str) -> None:
+    url = _repo_url(settings) + "/collaborators/" + quote(login, safe="")
+    try:
+        async with _client(settings) as client:
+            response = await client.delete(url)
+    except httpx.HTTPError as exc:
+        raise GiteaError(f"Could not reach Gitea: {exc.__class__.__name__}") from exc
+    _raise_for(response, "removing " + login + "'s access")
 
 
 def repository_url(settings: GiteaSettings) -> str:

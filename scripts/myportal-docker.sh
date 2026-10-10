@@ -624,6 +624,16 @@ services:
       GITEA__service__DISABLE_REGISTRATION: "true"
       GITEA__service__REQUIRE_SIGNIN_VIEW: "true"
       GITEA__service__DEFAULT_KEEP_EMAIL_PRIVATE: "true"
+      # MyPortal sign-in: the proxy sends who is signed in to MyPortal. Only
+      # Compose containers reach Gitea, so the private ranges are trusted.
+      GITEA__service__ENABLE_REVERSE_PROXY_AUTHENTICATION: "true"
+      GITEA__service__ENABLE_REVERSE_PROXY_AUTO_REGISTRATION: "true"
+      GITEA__service__ENABLE_REVERSE_PROXY_EMAIL: "true"
+      GITEA__service__ENABLE_REVERSE_PROXY_FULL_NAME: "true"
+      GITEA__security__REVERSE_PROXY_AUTHENTICATION_USER: X-WEBAUTH-USER
+      GITEA__security__REVERSE_PROXY_AUTHENTICATION_EMAIL: X-WEBAUTH-EMAIL
+      GITEA__security__REVERSE_PROXY_AUTHENTICATION_FULL_NAME: X-WEBAUTH-FULLNAME
+      GITEA__security__REVERSE_PROXY_TRUSTED_PROXIES: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
       GITEA__repository__DEFAULT_BRANCH: main
       GITEA__repository__DEFAULT_PRIVATE: private
       GITEA__openid__ENABLE_OPENID_SIGNIN: "false"
@@ -920,6 +930,19 @@ map "$myportal_trusted_proxy:$http_x_forwarded_proto" $myportal_forwarded_proto 
     "1:http"  http;
 }
 
+# Gitea keeps its own persistent session, so a stale one would keep a
+# technician signed in after they sign out of MyPortal or lose the Script
+# editing permission. When MyPortal has no identity to forward
+# ($myportal_gitea_user is empty), drop the request's cookies so Gitea shows
+# its sign-in page instead of reusing the session; signed-in requests keep
+# their cookies, so Gitea's CSRF protection still works. The map is evaluated
+# when the cookie is forwarded (content phase), after auth_request has set
+# $myportal_gitea_user (access phase).
+map $myportal_gitea_user $myportal_gitea_forward_cookie {
+    default    $http_cookie;
+    ""         "";
+}
+
 server {
     listen 8080;
     server_tokens off;
@@ -959,7 +982,40 @@ NGINX
         return 301 /gitea/;
     }
 
+    # MyPortal sign-in for Gitea: the proxy asks MyPortal who is signed in
+    # and passes the answer to Gitea, which trusts these headers only from
+    # the Compose network. They are always set here, so a browser cannot
+    # supply its own.
+    location = /_myportal/gitea-identity {
+        internal;
+        proxy_method GET;
+        proxy_pass http://myportal_app/api/rmm/gitea/identity;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $myportal_forwarded_proto;
+    }
+
+    # Gitea's static files are public and need no sign-in lookup.
+    location ^~ /gitea/assets/ {
+        set $myportal_gitea gitea:3000;
+        rewrite ^/gitea(/.*)$ $1 break;
+        proxy_pass http://$myportal_gitea;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Connection "";
+        proxy_set_header X-WEBAUTH-USER "";
+        proxy_set_header X-WEBAUTH-EMAIL "";
+        proxy_set_header X-WEBAUTH-FULLNAME "";
+    }
+
     location ^~ /gitea/ {
+        auth_request /_myportal/gitea-identity;
+        auth_request_set $myportal_gitea_user $upstream_http_x_myportal_gitea_user;
+        auth_request_set $myportal_gitea_email $upstream_http_x_myportal_gitea_email;
+        auth_request_set $myportal_gitea_name $upstream_http_x_myportal_gitea_name;
         set $myportal_gitea gitea:3000;
         rewrite ^/gitea(/.*)$ $1 break;
         proxy_pass http://$myportal_gitea;
@@ -969,6 +1025,13 @@ NGINX
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $myportal_forwarded_proto;
+        proxy_set_header X-WEBAUTH-USER $myportal_gitea_user;
+        proxy_set_header X-WEBAUTH-EMAIL $myportal_gitea_email;
+        proxy_set_header X-WEBAUTH-FULLNAME $myportal_gitea_name;
+        # Forward the browser's cookies to Gitea only while MyPortal forwarded
+        # an identity; otherwise strip them so a stale Gitea session can't
+        # keep the technician signed in after MyPortal sign-out (map above).
+        proxy_set_header Cookie $myportal_gitea_forward_cookie;
         proxy_connect_timeout 10s;
         proxy_read_timeout 300s;
     }

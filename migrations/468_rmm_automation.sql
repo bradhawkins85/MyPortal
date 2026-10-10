@@ -2,7 +2,7 @@
 -- compatible-from: *
 -- compatible-to: *
 -- maintenance: false
--- Migration 467: scheduled and onboarding RMM scripts.
+-- Migration 468: scheduled and onboarding RMM scripts.
 --
 -- rmm_schedules runs a script on a cron schedule, separate from MyPortal's
 -- scheduled tasks. company_id NULL means every company's devices (Common

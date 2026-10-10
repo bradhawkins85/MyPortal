@@ -7,6 +7,8 @@ Technician side (company scoped, ``menu.rmm_scripts``; write access runs scripts
 * ``POST /api/rmm/scripts/{id}/runs`` push a script to devices
 * ``GET /api/rmm/runs`` / ``/api/rmm/runs/{id}``, ``POST /api/rmm/runs/{id}/cancel``
 * ``POST /rmm/scripts/sync`` load scripts from Gitea (super admin)
+* ``GET /api/rmm/gitea/identity`` who to sign in to Gitea as (asked by nginx
+  for every ``/gitea/`` request; ``menu.rmm_script_editing``)
 
 Schedules and onboarding live in :mod:`.automation_routes`.
 
@@ -22,15 +24,16 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from app.api.dependencies.auth import get_current_tray_device
+from app.api.dependencies.auth import get_current_tray_device, get_optional_user
 from app.repositories import rmm as rmm_repo
 from app.security.client_ip import get_client_ip
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
 from app.services import gitea
+from app.services import gitea_sign_in
 from app.services import rmm_automation
 from app.services import rmm_script_parser as parser
 from app.services import rmm_scripts
@@ -131,7 +134,9 @@ async def scripts_page(request: Request):
     gitea_url = ""
     try:
         settings = await gitea.load_settings()
-        gitea_url = gitea.repository_url(settings)
+        # Only technicians who can sign in to Gitea get the link.
+        if await gitea_sign_in.access_level(user) != "none":
+            gitea_url = gitea.repository_url(settings)
     except gitea.GiteaError as exc:
         gitea_ready = False
         gitea_message = str(exc)
@@ -181,6 +186,23 @@ async def sync_scripts(request: Request):
         metadata=summary.to_dict(),
     )
     return flash_redirect("/rmm/scripts", summary.message(), "warning" if summary.skipped else "success")
+
+
+@router.get("/api/rmm/gitea/identity", include_in_schema=False)
+async def gitea_identity(request: Request) -> Response:
+    """Tell nginx who to sign in to Gitea as. Always 204: without the user
+    headers Gitea shows its own sign-in page."""
+
+    headers = {"Cache-Control": "no-store"}
+    user = await get_optional_user(request)
+    account = await gitea_sign_in.identity(user) if user else None
+    if account:
+        headers["X-MyPortal-Gitea-User"] = account.login
+        if account.email:
+            headers["X-MyPortal-Gitea-Email"] = account.email
+        if account.full_name:
+            headers["X-MyPortal-Gitea-Name"] = account.full_name
+    return Response(status_code=204, headers=headers)
 
 
 @router.get("/api/rmm/scripts", summary="List RMM scripts")

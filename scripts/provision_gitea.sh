@@ -202,7 +202,8 @@ PY
 }
 
 write_config() {
-  # Written once; later runs only keep ROOT_URL in step with PORTAL_URL.
+  # Written once; later runs keep ROOT_URL in step with PORTAL_URL and apply
+  # the sign-in settings (configure_sign_in).
   [[ -f "$GITEA_CONFIG" ]] && return 0
   local secret_key internal_token jwt_secret tmp
   secret_key=$("$GITEA_BIN" generate secret SECRET_KEY)
@@ -211,7 +212,8 @@ write_config() {
   tmp=$(mktemp "${GITEA_CONFIG}.XXXXXX")
   cat >"$tmp" <<INI
 ; Gitea for the MyPortal RMM script library. Written by
-; scripts/provision_gitea.sh, which only changes [server] ROOT_URL afterwards.
+; scripts/provision_gitea.sh, which afterwards only changes [server] ROOT_URL
+; and the MyPortal sign-in settings.
 APP_NAME = MyPortal scripts
 RUN_USER = ${GITEA_ACCOUNT}
 RUN_MODE = prod
@@ -269,6 +271,25 @@ INI
   chmod 0640 "$tmp"
   mv -f "$tmp" "$GITEA_CONFIG"
   printf 'changed'
+}
+
+configure_sign_in() {
+  # MyPortal sign-in: nginx sends who is signed in to MyPortal in these
+  # headers, which Gitea accepts only from this host (it listens on
+  # 127.0.0.1). Prints "changed" when app.ini was modified.
+  local setting
+  for setting in \
+    "service ENABLE_REVERSE_PROXY_AUTHENTICATION true" \
+    "service ENABLE_REVERSE_PROXY_AUTO_REGISTRATION true" \
+    "service ENABLE_REVERSE_PROXY_EMAIL true" \
+    "service ENABLE_REVERSE_PROXY_FULL_NAME true" \
+    "security REVERSE_PROXY_AUTHENTICATION_USER X-WEBAUTH-USER" \
+    "security REVERSE_PROXY_AUTHENTICATION_EMAIL X-WEBAUTH-EMAIL" \
+    "security REVERSE_PROXY_AUTHENTICATION_FULL_NAME X-WEBAUTH-FULLNAME" \
+    "security REVERSE_PROXY_TRUSTED_PROXIES 127.0.0.0/8,::1/128"; do
+    # shellcheck disable=SC2086 # three words: section, key, value
+    ini_set $setting
+  done
 }
 
 write_unit() {
@@ -422,6 +443,7 @@ main() {
   ensure_account
   changed+=$(write_config)
   changed+=$(ini_set server ROOT_URL "$(root_url)")
+  changed+=$(configure_sign_in)
   changed+=$(write_unit)
 
   systemctl daemon-reload

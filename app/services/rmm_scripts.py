@@ -36,6 +36,7 @@ from app.repositories import company_variables as company_variables_repo
 from app.repositories import rmm as rmm_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import gitea
+from app.services import gitea_sign_in
 from app.services import rmm_script_parser as parser
 from app.services import tray as tray_service
 from app.services import value_templates
@@ -278,10 +279,15 @@ async def _ensure_folders_once() -> None:
         await ensure_folders()
     except gitea.GiteaError as exc:
         log_info("RMM script folders not checked", reason=str(exc))
+    try:
+        await gitea_sign_in.reconcile_accounts()
+    except gitea.GiteaError as exc:
+        log_info("Script repository access not checked", reason=str(exc))
 
 
 async def folder_maintenance_loop() -> None:
-    """Keep a folder for every company, including companies added later."""
+    """Keep a folder for every company, including companies added later, and
+    keep technicians' repository access in step with their roles."""
 
     await asyncio.sleep(30 + random.uniform(0, 30))  # nosec B311 - start-up jitter, not security
     while True:

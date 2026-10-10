@@ -25,8 +25,8 @@ straight after installing:
   `myportal/rmm-scripts`, and a token for MyPortal that can write to repositories (so MyPortal can
   create its folders), and fills in the `GITEA_*` settings
   below. The administrator's password is in `/etc/gitea/admin-credentials` (bare metal) or
-  `/opt/myportal-docker/gitea-admin.txt` (Docker). Sign in with it, then create accounts for your
-  technicians under Site administration.
+  `/opt/myportal-docker/gitea-admin.txt` (Docker). Technicians don't need it: they sign in with
+  MyPortal (see [Signing in to Gitea](#signing-in-to-gitea)).
 - Self-registration is off and every page needs a sign-in.
 - Every upgrade checks Gitea: it is installed if missing, moved to the Gitea version the release
   ships with, and its address follows `PORTAL_URL`. Its data is kept, and a Gitea problem never
@@ -40,6 +40,35 @@ data in the `myportal_gitea_data` volume.
 To use your own Gitea server instead, set `GITEA_BASE_URL` (and the other settings below) to it;
 the installers then leave Gitea alone. Set `GITEA_PROVISION=false` to stop them running Gitea
 without connecting another one.
+
+### Signing in to Gitea
+
+Technicians open the bundled Gitea already signed in with their MyPortal account; there is no
+separate Gitea password. Who can sign in is set by the **Script editing** permission (RMM group)
+in Administration → Roles:
+
+| Script editing | In Gitea |
+| --- | --- |
+| No access | The Gitea sign-in page; **Open Gitea** is hidden on the Scripts page |
+| Read | Can view and download the script repository |
+| Write | Can change scripts, create branches and merge pull requests |
+
+Super administrators always have write access. The permission covers the whole repository,
+including every company folder, and any one of a technician's company roles is enough.
+
+- The first visit creates the technician's Gitea account, named after the start of their email
+  address and their MyPortal user id (for example `jsmith-12`), and adds it to the script
+  repository.
+- Gitea keeps no session of its own for these accounts. Signing out of MyPortal, or losing the
+  permission, signs the technician out of Gitea on their next click.
+- Every ten minutes MyPortal also lowers or removes the account's repository access to match the
+  technician's roles, which stops any access token they created in Gitea from reaching the
+  scripts.
+- The `myportal` administrator still signs in with its password.
+
+This works through the proxy that serves `/gitea`: it asks MyPortal who is signed in and passes
+that to Gitea, which accepts it only from the proxy. It needs the bundled Gitea; a Gitea server
+you connect yourself keeps its own accounts.
 
 ### Connecting another Gitea server
 

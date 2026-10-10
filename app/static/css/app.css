@@ -20309,6 +20309,66 @@ a.shop-product-card {
   }
 }
 
+/* Asset editor shares the company settings workspace. */
+.asset-edit-page .ce-form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+}
+
+.asset-edit-page .form-textarea {
+  font-family: inherit;
+}
+
+.asset-edit-page .definition-list {
+  display: grid;
+  grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr);
+  gap: var(--space-gap-base) var(--space-gap-roomy);
+  margin: 0;
+}
+
+.asset-edit-page .definition-list dt {
+  color: var(--hf-muted);
+  font-weight: 600;
+}
+
+.asset-edit-page .definition-list dd {
+  margin: 0;
+}
+
+.asset-edit-page .ce-section__body > ul {
+  margin: 0;
+  padding-left: var(--space-gap-roomy);
+}
+
+.asset-edit-page .ce-section__body > ul > li + li {
+  margin-top: var(--space-gap-base);
+}
+
+.asset-edit-page .form-actions {
+  flex-wrap: wrap;
+}
+
+.asset-edit-page .form-help,
+.asset-edit-page .ce-savebar__text,
+.asset-edit-page .definition-list dd,
+.asset-edit-page .scf-chip {
+  overflow-wrap: anywhere;
+}
+
+.ae-savebar__spacer {
+  flex: 1 1 auto;
+}
+
+@media (max-width: 640px) {
+  .asset-edit-page .definition-list {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-gap-tight);
+  }
+
+  .asset-edit-page .definition-list dd:not(:last-child) {
+    margin-bottom: var(--space-gap-base);
+  }
+}
+
 /* ==========================================================================
  * High-fidelity layer
  * Shared polish modelled on the rack workspace (/racks): layered dark panels,
