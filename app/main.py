@@ -11453,6 +11453,23 @@ def _format_ticket_requester_phone(phone_number: Any) -> str | None:
     return str(phone_number or "").strip() or None
 
 
+async def _ticket_remote_control_providers(
+    request: Request, user: dict[str, Any], ticket: Mapping[str, Any]
+) -> list[dict[str, str]]:
+    """RustDesk / MeshCentral buttons for the ticket's linked assets."""
+
+    if not _feature_pack_available("rmm"):
+        return []
+    from app.features.rmm import remote_control_routes
+
+    try:
+        return await remote_control_routes.providers_for_company(request, user, ticket.get("company_id"))
+    except RuntimeError as exc:
+        if "not initialised" not in str(exc):
+            raise
+        return []
+
+
 async def _render_ticket_detail(
     request: Request,
     user: dict[str, Any],
@@ -12140,6 +12157,7 @@ async def _render_ticket_detail(
         "ticket_asset_selection": asset_selection,
         "ticket_asset_linked_data": serialisable_ticket_assets,
         "tacticalrmm_base_url": tactical_base_url,
+        "remote_control_providers": await _ticket_remote_control_providers(request, user, ticket),
         "hudu_base_url": hudu_base_url,
         "hudu_company_url": hudu_company_url,
         "solidtime_links": solidtime_links,

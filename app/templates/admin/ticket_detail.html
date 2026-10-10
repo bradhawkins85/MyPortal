@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_overflow %}
+{% import "rmm/_macros.html" as rmm_ui %}
 
 
 {% block header_title %}
@@ -1032,7 +1033,12 @@
                   data-ticket-number="{{ ticket.ticket_number or ticket.id }}"
                   data-ticket-subject="{{ ticket.subject | e }}"
                   data-ai-opted-out="{{ 'true' if ticket_ai_opted_out else 'false' }}"
+                  data-remote-control="{{ (remote_control_providers or []) | tojson | forceescape }}"
                 >
+                  {% if remote_control_providers %}<div class="ticket-assets-linked__remote" data-rmm-remote-status role="status" aria-live="polite" hidden>
+                    <span data-rmm-remote-message></span>
+                    <a class="button button--primary button--small" data-rmm-remote-link href="#" target="_blank" rel="noopener noreferrer" hidden>Open</a>
+                  </div>{% endif %}
                   <ul class="ticket-assets-linked__list" data-linked-assets-list>
                     {% for asset in ticket_suggested_assets %}
                       {% set suggested_name = asset.name or ('Asset ' ~ asset.asset_id) %}
@@ -1095,6 +1101,7 @@
                         {% endif %}
                         <div class="ticket-assets-linked__actions">
                           <a href="/assets/{{ asset.asset_id }}" class="button button--ghost button--small">Documentation</a>
+                          {% if remote_control_providers %}{{ rmm_ui.asset_menu(asset.asset_id, display_name, remote_control_providers) }}{% endif %}
                           {% if tactical_link %}
                             <a
                               href="{{ tactical_link }}"
@@ -2049,6 +2056,7 @@
   <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>
   <script src="{{ static_url('/static/js/ticket_reply_cache.js') }}" defer></script>
   <script src="{{ static_url('/static/js/ticket_detail.js') }}" defer></script>
+  {% if remote_control_providers %}<script src="{{ static_url('/static/js/rmm_remote_control.js') }}" defer></script>{% endif %}
   <script src="{{ static_url('/static/js/email_recipients.js') }}" defer></script>
   <script>
     document.addEventListener('DOMContentLoaded', () => {

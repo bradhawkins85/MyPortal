@@ -17,6 +17,8 @@
 {% macro run_source(run) -%}
   {%- if run.run_source == 'schedule' -%}
     Schedule: {{ run.schedule_name or 'deleted' }}{% if run.requested_by_email %} <span class="text-muted">(run now by {{ run.requested_by_email }})</span>{% endif %}
+  {%- elif run.run_source == 'remote_control' -%}
+    Remote control{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- elif run.run_source == 'onboarding' -%}
     Onboarding{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- else -%}
@@ -36,4 +38,20 @@
     <td class="table__actions" data-column-key="actions"><button type="button" class="button button--ghost button--small" data-rmm-view-run="{{ run.id }}" aria-haspopup="dialog" aria-controls="rmm-result-modal">View<span class="visually-hidden"> run of {{ run.script_name }}</span></button></td>
   </tr>
   {%- endfor %}
+{%- endmacro %}
+
+{# One "RMM" menu per asset holding its RMM actions (remote control, scripts).
+   rmm_remote_control.js runs the remote control items and closes the menu. #}
+{% macro asset_menu(asset_id, asset_name, remote_control, run_script=false) -%}
+<details class="rmm-menu" data-rmm-menu>
+  <summary class="button button--ghost button--small rmm-menu__toggle" title="RMM actions" aria-label="RMM actions for {{ asset_name }}">RMM <span aria-hidden="true">▾</span></summary>
+  <div class="dropdown__menu rmm-menu__panel" role="menu" aria-label="RMM actions for {{ asset_name }}">
+    {%- for remote in remote_control %}
+    <button type="button" class="dropdown__item" role="menuitem" data-rmm-remote="{{ remote.provider }}" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}">Connect with {{ remote.label }}</button>
+    {%- endfor %}
+    {%- if run_script %}
+    <button type="button" class="dropdown__item" role="menuitem" data-rmm-run-open aria-haspopup="dialog" aria-controls="rmm-run-modal">Run script</button>
+    {%- endif %}
+  </div>
+</details>
 {%- endmacro %}

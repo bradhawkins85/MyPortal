@@ -785,6 +785,8 @@
       source = ' · schedule ' + (run.schedule_name || '(deleted)') + (run.requested_by_email ? ', run now by ' + run.requested_by_email : '');
     } else if (run.run_source === 'onboarding') {
       source = ' · onboarding';
+    } else if (run.run_source === 'remote_control') {
+      source = ' · remote control' + (run.requested_by_email ? ' by ' + run.requested_by_email : '');
     }
     resultModal.querySelector('[data-rmm-result-subtitle]').textContent =
       (run.asset_name ? 'On ' + run.asset_name : 'Device removed') + source;
@@ -805,12 +807,13 @@
     values.forEach((item) => {
       const row = el('tr');
       row.append(
-        el('td', null, item.scope === 'asset' ? 'Asset field' : 'Company variable'),
+        el('td', null, { asset: 'Asset field', company: 'Company variable', session: 'Remote control' }[item.scope] || item.scope),
         el('td', null, item.name),
         el('td', null, item.value),
       );
       const outcome = el('td');
-      outcome.append(el('span', { className: 'status status--' + (item.applied ? 'success' : 'warning') }, item.applied ? 'Updated' : 'Skipped'));
+      const appliedLabel = item.scope === 'session' ? 'Used' : 'Updated';
+      outcome.append(el('span', { className: 'status status--' + (item.applied ? 'success' : 'warning') }, item.applied ? appliedLabel : 'Skipped'));
       if (!item.applied && item.message) {
         outcome.append(' ', el('span', { className: 'text-muted' }, item.message));
       }

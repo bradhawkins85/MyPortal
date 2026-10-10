@@ -35,6 +35,7 @@ from app.services import audit as audit_service
 from app.services import gitea
 from app.services import gitea_sign_in
 from app.services import rmm_automation
+from app.services import rmm_remote_control
 from app.services import rmm_script_parser as parser
 from app.services import rmm_scripts
 
@@ -116,6 +117,8 @@ async def asset_rmm_context(company_id: int, asset_id: int, *, can_run: bool) ->
         "agent": _serialise({key: agent.get(key) for key in _AGENT_PUBLIC_FIELDS}) if agent else None,
         "runs": [_serialise(run) for run in await rmm_repo.list_runs(company_id=company_id, asset_id=asset_id, limit=10)],
         "can_run": can_run and agent is not None,
+        # Remote control works without the agent when the device's ID is in a custom field.
+        "remote_control": await rmm_remote_control.enabled_providers() if can_run else [],
     }
 
 
@@ -159,6 +162,7 @@ async def scripts_page(request: Request):
             "summary": summary,
             "can_run": can_run,
             "can_sync": bool(user.get("is_super_admin")),
+            "is_super_admin": bool(user.get("is_super_admin")),
             "gitea_ready": gitea_ready,
             "gitea_message": gitea_message,
             "gitea_url": gitea_url,

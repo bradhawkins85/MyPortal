@@ -1057,6 +1057,8 @@
     const ticketSubject = (linkedContainer.dataset.ticketSubject || '').trim();
     // Requester opted out of AI processing: the troubleshooter must stay off.
     const aiOptedOut = linkedContainer.dataset.aiOptedOut === 'true';
+    // RustDesk / MeshCentral buttons (handled by rmm_remote_control.js).
+    const remoteProviders = parseJsonArray(linkedContainer.dataset.remoteControl, []);
     const lookupButton = document.querySelector('[data-requester-assets-lookup]');
     const lookupResults = document.querySelector('[data-requester-assets-results]');
     const lookupStatus = document.querySelector('[data-requester-assets-status]');
@@ -1193,6 +1195,39 @@
       return `${tacticalBaseUrl}/?search=${encodeURIComponent(trimmed)}`;
     }
 
+    // Same markup as the rmm/_macros.html asset_menu macro.
+    function buildRmmMenu(assetIdValue, displayName) {
+      const menu = document.createElement('details');
+      menu.className = 'rmm-menu';
+      menu.setAttribute('data-rmm-menu', '');
+      const toggle = document.createElement('summary');
+      toggle.className = 'button button--ghost button--small rmm-menu__toggle';
+      toggle.title = 'RMM actions';
+      toggle.setAttribute('aria-label', `RMM actions for ${displayName}`);
+      toggle.innerHTML = 'RMM <span aria-hidden="true">▾</span>';
+      menu.appendChild(toggle);
+      const panel = document.createElement('div');
+      panel.className = 'dropdown__menu rmm-menu__panel';
+      panel.setAttribute('role', 'menu');
+      panel.setAttribute('aria-label', `RMM actions for ${displayName}`);
+      remoteProviders.forEach((remote) => {
+        if (!remote || !remote.provider) {
+          return;
+        }
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'dropdown__item';
+        item.setAttribute('role', 'menuitem');
+        item.setAttribute('data-rmm-remote', remote.provider);
+        item.setAttribute('data-rmm-remote-asset', assetIdValue);
+        item.setAttribute('data-rmm-remote-name', displayName);
+        item.textContent = `Connect with ${remote.label}`;
+        panel.appendChild(item);
+      });
+      menu.appendChild(panel);
+      return menu;
+    }
+
     function renderLinkedAssets() {
       if (!linkedList) {
         return;
@@ -1289,6 +1324,10 @@
           tacticalAction.setAttribute('aria-label', `Tactical RMM search is not configured for ${displayName}`);
           tacticalAction.innerHTML = '<span aria-hidden="true">🖥️</span>';
           actions.appendChild(tacticalAction);
+        }
+
+        if (remoteProviders.length) {
+          actions.appendChild(buildRmmMenu(assetIdValue, displayName));
         }
 
         const chatButton = document.createElement('button');
