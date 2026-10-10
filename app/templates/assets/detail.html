@@ -69,7 +69,7 @@
       {% if rmm.runs %}
       <div class="table-wrapper"><table class="table">
         <caption class="visually-hidden">Recent script runs on this device</caption>
-        <thead><tr><th scope="col">Script</th><th scope="col">Status</th><th scope="col">Exit code</th><th scope="col">Requested by</th><th scope="col">Queued</th><th scope="col" class="table__actions">Actions</th></tr></thead>
+        <thead><tr><th scope="col">Script</th><th scope="col">Status</th><th scope="col">Exit code</th><th scope="col">Started by</th><th scope="col">Queued</th><th scope="col" class="table__actions">Actions</th></tr></thead>
         <tbody>{{ rmm_ui.run_rows(rmm.runs, show_device=false) }}</tbody>
       </table></div>
       {% else %}

@@ -8,6 +8,8 @@ Technician side (company scoped, ``menu.rmm_scripts``; write access runs scripts
 * ``GET /api/rmm/runs`` / ``/api/rmm/runs/{id}``, ``POST /api/rmm/runs/{id}/cancel``
 * ``POST /rmm/scripts/sync`` load scripts from Gitea (super admin)
 
+Schedules and onboarding live in :mod:`.automation_routes`.
+
 Agent side (``Authorization: Bearer`` token):
 
 * ``POST /api/rmm/agent/enrol`` with the tray device's token
@@ -29,6 +31,7 @@ from app.security.client_ip import get_client_ip
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
 from app.services import gitea
+from app.services import rmm_automation
 from app.services import rmm_script_parser as parser
 from app.services import rmm_scripts
 
@@ -268,6 +271,7 @@ async def cancel_run_api(run_id: int, request: Request):
     await _company_run(run_id, company_id)
     if not await rmm_repo.cancel_run(run_id):
         return JSONResponse({"detail": "The device has already collected this run."}, status_code=409)
+    await rmm_automation.run_finished(run_id)
     await audit_service.record(
         action="rmm.script.cancel", request=request, user_id=user.get("id"), entity_type="rmm_script_run", entity_id=run_id,
     )
@@ -326,6 +330,8 @@ async def agent_enrol(payload: AgentEnrolRequest, request: Request, tray_device:
         metadata={"tray_device_id": tray_device.get("id"), "company_id": tray_device.get("company_id")},
         actor="rmm-agent",
     )
+    if result.pop("created", False):
+        await rmm_automation.on_agent_enrolled(int(result["agent_id"]))
     return result
 
 
@@ -371,4 +377,5 @@ async def agent_run_result(run_id: int, payload: AgentResult, agent: dict = Depe
     result = await rmm_scripts.record_result(agent, run_id, payload.model_dump())
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    await rmm_automation.run_finished(run_id)
     return result

@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% block title %}Script automation{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endblock %}
+{% block header_title %}<span class="header__title-text">Script automation</span>{% endblock %}
+{% block header_actions %}
+  {% set actions = [] %}
+  {% if can_run %}{% set _ = actions.append({"label": "New schedule", "type": "button", "variant": "primary", "attrs": {"data-rmm-schedule-new": "", "aria-haspopup": "dialog", "aria-controls": "rmm-run-modal"}}) %}{% endif %}
+  {% set _ = actions.append({"label": "Scripts", "type": "link", "href": "/rmm/scripts"}) %}
+  {{ page_header_actions(actions, menu_id="rmm-automation-actions") }}
+{% endblock %}
+{% set CRON_LABELS = {
+  "0 * * * *": "Every hour",
+  "0 2 * * *": "Every day at 2am",
+  "0 2 * * 1": "Every Monday at 2am",
+  "0 2 1 * *": "On the 1st of every month at 2am",
+} %}
+{% set ONBOARDING_STATUS = {
+  "running": ("warning", "Running"),
+  "completed": ("success", "Completed"),
+  "failed": ("error", "Stopped"),
+  "cancelled": ("neutral", "Cancelled"),
+} %}
+{% macro step_list(steps, writable) -%}
+  {%- if steps %}
+  <ol class="rmm-steps" data-rmm-steps aria-label="Onboarding steps">
+    {%- for step in steps %}
+    <li class="rmm-step" data-rmm-step="{{ step.id }}">
+      <span class="rmm-step__number" aria-hidden="true">{{ loop.index }}</span>
+      <div class="rmm-step__main">
+        <span class="rmm-script__name">{{ step.script_name }}</span>
+        <span class="rmm-script__path">{{ step.script_path }}</span>
+        <ul class="rmm-chips" aria-label="Step details">
+          {% for name in step.tag_names %}<li class="rmm-chip rmm-chip--env">{{ name }}</li>{% else %}<li class="rmm-chip rmm-chip--warning">No tags: skipped on every device</li>{% endfor %}
+          {% if not step.script_active %}<li class="rmm-chip rmm-chip--warning">Script removed from Gitea</li>{% endif %}
+          {% if step.inputs %}<li class="rmm-chip">{{ step.inputs | length }} value{{ '' if step.inputs | length == 1 else 's' }} set</li>{% endif %}
+          <li class="rmm-chip">{{ 'Carries on if it fails' if step.continue_on_failure else 'Stops the sequence if it fails' }}</li>
+        </ul>
+      </div>
+      {% if writable %}
+      <div class="rmm-step__actions">
+        <button type="button" class="button button--ghost button--small" data-rmm-step-move="-1" {% if loop.first %}disabled{% endif %}>Up<span class="visually-hidden"> {{ step.script_name }}</span></button>
+        <button type="button" class="button button--ghost button--small" data-rmm-step-move="1" {% if loop.last %}disabled{% endif %}>Down<span class="visually-hidden"> {{ step.script_name }}</span></button>
+        <button type="button" class="button button--small" data-rmm-step-edit="{{ step.id }}" aria-haspopup="dialog" aria-controls="rmm-run-modal">Edit<span class="visually-hidden"> {{ step.script_name }}</span></button>
+        <button type="button" class="button button--ghost button--small" data-rmm-step-delete="{{ step.id }}">Remove<span class="visually-hidden"> {{ step.script_name }}</span></button>
+      </div>
+      {% endif %}
+    </li>
+    {%- endfor %}
+  </ol>
+  {%- else %}
+  <p class="text-muted">No onboarding steps for {{ company.name if company else "this company" }} yet.</p>
+  {%- endif %}
+{%- endmacro %}
+{% block content %}
+<section class="rmm-page" data-rmm-page data-rmm-automation-page>
+  <script type="application/json" id="rmm-config">{{ {"can_run": can_run, "asset_id": None, "is_super_admin": is_super_admin, "tags": tags, "default_timezone": default_timezone} | tojson }}</script>
+
+  <section class="card card--panel" aria-labelledby="rmm-schedules-heading">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title" id="rmm-schedules-heading">Schedules</h2>
+        <p class="card__subtitle">Scripts that run on a schedule. A device still busy with the last run is skipped until it finishes.</p>
+      </div>
+    </header>
+    <div class="card__body">
+      {% if schedules %}
+      <div class="table-wrapper">
+        <table class="table" id="rmm-schedules-table" data-table data-table-id="rmm-schedules">
+          <caption class="visually-hidden">Script schedules</caption>
+          <thead><tr>
+            <th scope="col" data-sort="string" data-column-key="name">Name</th>
+            <th scope="col" data-sort="string" data-column-key="script">Script</th>
+            <th scope="col" data-column-key="devices">Devices</th>
+            <th scope="col" data-column-key="when">When</th>
+            <th scope="col" data-sort="date" data-column-key="next">Next run</th>
+            <th scope="col" data-column-key="last" data-mobile-hidden="true">Last run</th>
+            <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
+          </tr></thead>
+          <tbody>
+            {% for schedule in schedules %}
+            {% set writable = can_run and (schedule.scope == 'company' or is_super_admin) %}
+            <tr data-rmm-schedule="{{ schedule.id }}">
+              <td data-label="Name" data-column-key="name">
+                <strong>{{ schedule.name }}</strong>
+                <ul class="rmm-chips" aria-label="Schedule details">
+                  {% if schedule.scope == 'all' %}<li class="rmm-chip rmm-chip--env">Every company</li>{% endif %}
+                  {% if not schedule.is_enabled %}<li class="rmm-chip rmm-chip--muted">Off</li>{% endif %}
+                  {% if not schedule.script_active %}<li class="rmm-chip rmm-chip--warning">Script removed from Gitea</li>{% endif %}
+                </ul>
+              </td>
+              <td data-label="Script" data-column-key="script">{{ schedule.script_name }}</td>
+              <td data-label="Devices" data-column-key="devices">
+                {%- if schedule.target_mode == 'tags' -%}
+                  {{ schedule.tag_ids | length }} tag{{ '' if schedule.tag_ids | length == 1 else 's' }}
+                {%- elif schedule.target_mode == 'assets' -%}
+                  {{ schedule.asset_ids | length }} chosen device{{ '' if schedule.asset_ids | length == 1 else 's' }}
+                {%- else -%}
+                  All with the agent
+                {%- endif -%}
+              </td>
+              <td data-label="When" data-column-key="when">{{ CRON_LABELS.get(schedule.cron) or schedule.cron }} <span class="text-muted">({{ schedule.timezone }})</span></td>
+              <td data-label="Next run" data-column-key="next" data-sort-value="{{ schedule.next_run_at or '' }}">{% if schedule.next_run_at %}<span data-utc="{{ schedule.next_run_at }}">{{ schedule.next_run_at }}</span>{% else %}<span class="text-muted">–</span>{% endif %}</td>
+              <td data-label="Last run" data-column-key="last" data-mobile-hidden="true">{% if schedule.last_run_at %}<span data-utc="{{ schedule.last_run_at }}">{{ schedule.last_run_at }}</span><br><span class="text-muted">{{ schedule.last_run_summary or '' }}</span>{% else %}<span class="text-muted">Not run yet</span>{% endif %}</td>
+              <td class="table__actions" data-column-key="actions">
+                {% if writable %}
+                <button type="button" class="button button--small" data-rmm-schedule-edit="{{ schedule.id }}" aria-haspopup="dialog" aria-controls="rmm-run-modal">Edit<span class="visually-hidden"> {{ schedule.name }}</span></button>
+                <button type="button" class="button button--ghost button--small" data-rmm-schedule-run="{{ schedule.id }}">Run now<span class="visually-hidden"> {{ schedule.name }}</span></button>
+                <button type="button" class="button button--ghost button--small" data-rmm-schedule-toggle="{{ schedule.id }}" data-enabled="{{ 'true' if schedule.is_enabled else 'false' }}">{{ 'Turn off' if schedule.is_enabled else 'Turn on' }}<span class="visually-hidden"> {{ schedule.name }}</span></button>
+                <button type="button" class="button button--ghost button--small" data-rmm-schedule-delete="{{ schedule.id }}">Delete<span class="visually-hidden"> {{ schedule.name }}</span></button>
+                {% else %}<span class="text-muted">–</span>{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+        <div class="empty-state">
+          <h3 class="empty-state__title">No schedules yet</h3>
+          <p class="empty-state__subtitle">{% if can_run %}Choose <strong>New schedule</strong> to run a script every hour, day, week or on your own cron schedule.{% else %}Technicians who can run scripts can schedule them here.{% endif %}</p>
+        </div>
+      {% endif %}
+      <p class="alert alert--info" data-rmm-automation-message role="status" aria-live="polite" hidden></p>
+    </div>
+  </section>
+
+  <section class="card card--panel" aria-labelledby="rmm-onboarding-heading">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title" id="rmm-onboarding-heading">Onboarding scripts</h2>
+        <p class="card__subtitle">{{ company.name if company else "This company" }}'s steps run once, one at a time and in this order, when the RMM agent is first installed on one of its devices. Each step runs only on devices with any of its tags and is skipped on the rest. A failed step stops the steps after it unless it is set to carry on.</p>
+      </div>
+      {% if can_run %}<button type="button" class="button button--small" data-rmm-step-new aria-haspopup="dialog" aria-controls="rmm-run-modal">Add step</button>{% endif %}
+    </header>
+    <div class="card__body">
+      {{ step_list(steps, can_run) }}
+    </div>
+  </section>
+
+  <section class="card card--panel" aria-labelledby="rmm-onboarding-runs-heading">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title" id="rmm-onboarding-runs-heading">Onboarding history</h2>
+        <p class="card__subtitle">Each device's progress through the onboarding scripts.</p>
+      </div>
+      {% if can_run and agents %}
+      <form class="rmm-onboarding-start" data-rmm-onboarding-start>
+        <label class="visually-hidden" for="rmm-onboarding-agent">Device</label>
+        <select class="form-input" id="rmm-onboarding-agent" data-rmm-onboarding-agent required>
+          <option value="">Choose a device…</option>
+          {% for agent in agents %}<option value="{{ agent.id }}">{{ agent.asset_name or agent.hostname or agent.agent_uid }}</option>{% endfor %}
+        </select>
+        <button type="submit" class="button button--small">Run onboarding</button>
+      </form>
+      {% endif %}
+    </header>
+    <div class="card__body">
+      {% if onboarding_runs %}
+      <div class="table-wrapper">
+        <table class="table" id="rmm-onboarding-table" data-table data-table-id="rmm-onboarding">
+          <caption class="visually-hidden">Onboarding runs</caption>
+          <thead><tr>
+            <th scope="col" data-sort="string" data-column-key="device">Device</th>
+            <th scope="col" data-sort="string" data-column-key="status">Status</th>
+            <th scope="col" data-column-key="progress">Steps</th>
+            <th scope="col" data-sort="date" data-column-key="started">Started</th>
+            <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
+          </tr></thead>
+          <tbody>
+            {% for run in onboarding_runs %}
+            {% set item = ONBOARDING_STATUS.get(run.status, ("neutral", run.status)) %}
+            {% set done = run.plan | selectattr("status", "in", ["completed", "failed", "timed_out", "cancelled", "expired", "skipped"]) | list | length %}
+            <tr>
+              <td data-label="Device" data-column-key="device">{% if run.asset_id %}<a href="/assets/{{ run.asset_id }}">{{ run.asset_name or run.agent_hostname }}</a>{% else %}{{ run.agent_hostname or 'Removed device' }}{% endif %}</td>
+              <td data-label="Status" data-column-key="status" data-sort-value="{{ run.status }}"><span class="status status--{{ item[0] }}">{{ item[1] }}</span>{% if run.error_message %}<br><span class="text-muted">{{ run.error_message }}</span>{% endif %}</td>
+              <td data-label="Steps" data-column-key="progress">{{ done }} of {{ run.plan | length }}{% if run.failed_steps %} <span class="text-muted">({{ run.failed_steps }} failed)</span>{% endif %}</td>
+              <td data-label="Started" data-column-key="started" data-sort-value="{{ run.started_at }}"><span data-utc="{{ run.started_at }}">{{ run.started_at }}</span>{% if run.started_by_email %}<br><span class="text-muted">by {{ run.started_by_email }}</span>{% endif %}</td>
+              <td class="table__actions" data-column-key="actions"><button type="button" class="button button--ghost button--small" data-rmm-onboarding-view="{{ run.id }}" aria-haspopup="dialog" aria-controls="rmm-onboarding-modal">View<span class="visually-hidden"> onboarding of {{ run.asset_name or run.agent_hostname }}</span></button></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+        <p class="text-muted">No devices have been onboarded yet.</p>
+      {% endif %}
+    </div>
+  </section>
+</section>
+{% include "rmm/_run_modal.html" %}
+
+<div class="modal rmm-modal" id="rmm-onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="rmm-onboarding-title" hidden data-rmm-onboarding-modal>
+  <div class="modal__panel modal__panel--wide">
+    <header class="modal__header">
+      <div>
+        <p class="rmm-editor__eyebrow">Onboarding</p>
+        <h2 class="modal__title" id="rmm-onboarding-title" data-rmm-onboarding-title>Onboarding</h2>
+        <p class="rmm-editor__subtitle" data-rmm-onboarding-subtitle></p>
+      </div>
+      <button type="button" class="modal__close" data-rmm-onboarding-close aria-label="Close onboarding details"></button>
+    </header>
+    <div class="modal__body">
+      <p class="alert alert--warning" data-rmm-onboarding-error hidden></p>
+      <ol class="rmm-steps" data-rmm-onboarding-steps role="status" aria-live="polite"></ol>
+    </div>
+    <footer class="modal__footer">
+      <button type="button" class="button button--danger" data-rmm-onboarding-cancel hidden>Stop onboarding</button>
+      <span class="rmm-editor__spacer"></span>
+      <button type="button" class="button button--ghost" data-rmm-onboarding-close>Close</button>
+    </footer>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ static_url('/static/js/rmm_scripts.js') }}" defer></script>
+<script src="{{ static_url('/static/js/rmm_automation.js') }}" defer></script>
+{% endblock %}
