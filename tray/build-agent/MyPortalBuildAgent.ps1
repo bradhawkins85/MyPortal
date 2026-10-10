@@ -56,12 +56,24 @@ function Invoke-Wix {
     }
 }
 
-function Initialize-Wix {
+function Test-BalExtension {
     $extensions = & $Wix extension list -g 2>&1
-    if (-not ($extensions -match 'WixToolset\.BootstrapperApplications\.wixext')) {
+    return [bool]($extensions -match 'WixToolset\.BootstrapperApplications\.wixext')
+}
+
+function Initialize-Wix {
+    # WiX v7 refuses every command until the OSMF EULA is accepted. The Build
+    # MSI workflow accepts it per build with -acceptEula; here it is recorded
+    # once in the SYSTEM profile so the extension commands work too.
+    Invoke-Wix eula accept wix7
+    if (-not (Test-BalExtension)) {
         $version = ((& $Wix --version) -replace '\+.*$', '').Trim()
         Write-Log "Installing WixToolset.BootstrapperApplications.wixext/$version"
         Invoke-Wix extension add -g "WixToolset.BootstrapperApplications.wixext/$version"
+        if (-not (Test-BalExtension)) {
+            throw "WixToolset.BootstrapperApplications.wixext/$version did not install."
+        }
+        Write-Log "Installed WixToolset.BootstrapperApplications.wixext/$version"
     }
 }
 
@@ -226,7 +238,12 @@ function Invoke-Queue {
 $mutex = [System.Threading.Mutex]::new($false, 'Global\MyPortalBuildAgent')
 if (-not $mutex.WaitOne(0)) { Write-Host 'Another build agent run is in progress.'; exit 0 }
 try {
-    Initialize-Wix
+    try {
+        Initialize-Wix
+    } catch {
+        Write-Log "WiX setup failed: $($_.Exception.Message)"
+        exit 1
+    }
     do {
         try {
             Invoke-Queue

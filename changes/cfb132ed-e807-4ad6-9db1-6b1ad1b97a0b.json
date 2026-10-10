@@ -1,0 +1,7 @@
+{
+  "guid": "cfb132ed-e807-4ad6-9db1-6b1ad1b97a0b",
+  "occurred_at": "2026-10-10T04:40Z",
+  "change_type": "Fix",
+  "summary": "Tray build agent: accept the WiX v7 EULA before installing the Burn extension, and log WiX setup failures instead of retrying silently",
+  "content_hash": "6d88947a3464a134feb7a7895e53c3227217747585b108f37587943261279690"
+}
