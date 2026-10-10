@@ -266,7 +266,8 @@ async def sqlite_db(monkeypatch):
     """)
     adapter = Database()
     for name in ("332_company_variables.sql", "465_rmm_scripting.sql", "466_rmm_script_company.sql",
-                 "467_rmm_gitea_accounts.sql", "466_asset_company_tags.sql", "468_rmm_automation.sql"):
+                 "467_rmm_gitea_accounts.sql", "466_asset_company_tags.sql", "468_rmm_automation.sql",
+                 "469_asset_tag_blocks.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES
