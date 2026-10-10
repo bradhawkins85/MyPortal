@@ -6,6 +6,10 @@
  * that does not exist yet. Every change is saved straight away with
  * PUT <data-endpoint> {tag_ids}. Automatic tags (source "auto") are shown but
  * cannot be removed here; their rules add and remove them.
+ *
+ * With data-blocking (assets), editors can block an automatic tag so its rule
+ * stops adding it to this record (POST <data-endpoint>/<tag_id>/block), and
+ * lift a block again (DELETE). Picking a blocked tag by hand also lifts it.
  */
 (function () {
   'use strict';
@@ -56,9 +60,21 @@
     return catalogue;
   }
 
-  function chip(tag, removable, onRemove) {
+  function chipButton(className, label, text, onClick) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = className;
+    button.setAttribute('aria-label', label);
+    button.title = label;
+    button.textContent = text;
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
+  // actions: {remove, block, unblock} callbacks for the buttons this chip offers.
+  function chip(tag, actions) {
     const item = document.createElement('li');
-    item.className = 'tag-chip';
+    item.className = 'tag-chip' + (tag.source === 'blocked' ? ' tag-chip--blocked' : '');
     item.style.setProperty('--tag-colour', tag.colour || 'var(--hf-accent)');
     if (tag.description) {
       item.title = tag.description;
@@ -67,20 +83,26 @@
     name.className = 'tag-chip__name';
     name.textContent = tag.name;
     item.appendChild(name);
-    if (tag.source === 'auto') {
+    if (tag.source === 'blocked') {
+      const label = document.createElement('span');
+      label.className = 'tag-chip__auto';
+      label.textContent = 'blocked';
+      item.appendChild(label);
+      if (actions.unblock) {
+        item.appendChild(chipButton('tag-chip__action', 'Unblock tag ' + tag.name, 'Unblock', () => actions.unblock(tag)));
+      }
+    } else if (tag.source === 'auto') {
       const auto = document.createElement('span');
       auto.className = 'tag-chip__auto';
       auto.textContent = 'auto';
       auto.title = 'Assigned automatically';
       item.appendChild(auto);
-    } else if (removable) {
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'tag-chip__remove';
-      remove.setAttribute('aria-label', 'Remove tag ' + tag.name);
-      remove.textContent = '\u00d7';
-      remove.addEventListener('click', () => onRemove(tag));
-      item.appendChild(remove);
+      if (actions.block) {
+        item.appendChild(chipButton('tag-chip__action', 'Block tag ' + tag.name + ' on this device', 'Block',
+          () => actions.block(tag)));
+      }
+    } else if (actions.remove) {
+      item.appendChild(chipButton('tag-chip__remove', 'Remove tag ' + tag.name, '\u00d7', () => actions.remove(tag)));
     }
     return item;
   }
@@ -92,6 +114,9 @@
     root.dataset.tagPickerReady = 'true';
     const endpoint = root.dataset.endpoint;
     const editable = root.hasAttribute('data-editable');
+    const blocking = root.hasAttribute('data-blocking');
+    const blockedBox = root.querySelector('[data-tag-picker-blocked]');
+    const blockedChips = root.querySelector('[data-tag-picker-blocked-chips]');
     const chips = root.querySelector('[data-tag-picker-chips]');
     const none = root.querySelector('[data-tag-picker-none]');
     const search = root.querySelector('[data-tag-picker-search]');
@@ -103,6 +128,14 @@
       tags = JSON.parse(root.querySelector('[data-tag-picker-initial]').textContent || '[]');
     } catch (error) {
       tags = [];
+    }
+    let blocked = [];
+    if (blocking) {
+      try {
+        blocked = JSON.parse(root.querySelector('[data-tag-picker-initial-blocked]').textContent || '[]');
+      } catch (error) {
+        blocked = [];
+      }
     }
     let options = [];
     let active = -1;
@@ -117,9 +150,14 @@
     }
 
     function render() {
-      chips.replaceChildren(...tags.map((tag) => chip(tag, editable, removeTag)));
+      const actions = editable ? { remove: removeTag, block: blocking ? blockTag : null, unblock: unblockTag } : {};
+      chips.replaceChildren(...tags.map((tag) => chip(tag, actions)));
       if (none) {
         none.hidden = tags.length > 0;
+      }
+      if (blockedBox && blockedChips) {
+        blockedChips.replaceChildren(...blocked.map((tag) => chip(tag, actions)));
+        blockedBox.hidden = blocked.length === 0;
       }
     }
 
@@ -127,12 +165,15 @@
       return tags.filter((tag) => tag.source !== 'auto').map((tag) => tag.id);
     }
 
-    async function save(ids, message) {
+    async function request(url, init, message) {
       busy = true;
       setStatus('Saving…');
       try {
-        const data = await api(endpoint, { method: 'PUT', body: { tag_ids: ids } });
+        const data = await api(url, init);
         tags = data.tags || [];
+        if (Array.isArray(data.blocked)) {
+          blocked = data.blocked;
+        }
         render();
         setStatus(message);
       } catch (error) {
@@ -140,6 +181,28 @@
       } finally {
         busy = false;
       }
+    }
+
+    function save(ids, message) {
+      return request(endpoint, { method: 'PUT', body: { tag_ids: ids } }, message);
+    }
+
+    function blockUrl(tag) {
+      return endpoint + '/' + encodeURIComponent(tag.id) + '/block';
+    }
+
+    function blockTag(tag) {
+      if (busy) {
+        return;
+      }
+      request(blockUrl(tag), { method: 'POST' }, 'Blocked ' + tag.name + ' on this device.');
+    }
+
+    function unblockTag(tag) {
+      if (busy) {
+        return;
+      }
+      request(blockUrl(tag), { method: 'DELETE' }, 'Unblocked ' + tag.name + '.');
     }
 
     function removeTag(tag) {
@@ -221,7 +284,12 @@
         item.setAttribute('aria-selected', 'false');
         item.className = 'tag-picker__option' + (option.tag ? '' : ' tag-picker__option--create');
         item.textContent = option.tag ? option.tag.name : 'Create tag "' + option.name + '"';
-        if (option.tag && option.tag.is_auto) {
+        if (option.tag && blocked.some((tag) => tag.id === option.tag.id)) {
+          const hint = document.createElement('span');
+          hint.className = 'tag-chip__auto';
+          hint.textContent = 'blocked here; adding unblocks';
+          item.appendChild(hint);
+        } else if (option.tag && option.tag.is_auto) {
           const hint = document.createElement('span');
           hint.className = 'tag-chip__auto';
           hint.textContent = 'also automatic';

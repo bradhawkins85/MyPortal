@@ -126,7 +126,7 @@
     </nav>
     <div class="ce-panels">
   {% if asset_tags is not none %}<section class="card card--panel ce-section" id="tags" data-asset-edit-section="tags" aria-labelledby="asset-tags-heading">
-    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-tags-heading">Tags</h2><p class="card__subtitle">Tags pick out this device for automations and scripts. Tags marked auto follow the device's type and operating system.{% if is_super_admin %} <a href="/admin/tags">Manage tags</a>{% endif %}</p></div></header>
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-tags-heading">Tags</h2><p class="card__subtitle">Tags pick out this device for automations and scripts. Tags marked auto follow the device's type and operating system; block one to keep it off this device, for example a desktop that acts as a server.{% if is_super_admin %} <a href="/admin/tags">Manage tags</a>{% endif %}</p></div></header>
     <div class="ce-section__body">{{ tag_picker(asset_tags, "asset-tag-picker", "Asset tags") }}</div>
   </section>{% endif %}
 
