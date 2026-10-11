@@ -2758,16 +2758,36 @@ async def admin_company_tray_settings_save(company_id: int, request: Request):
     tray_chat_enabled = 1 if form.get("tray_chat_enabled") else 0
     tray_notifications_enabled = 1 if form.get("tray_notifications_enabled") else 0
 
-    await companies_repo.update_company(
-        company_id,
-        customer_chat_enabled=customer_chat_enabled,
-        tray_chat_enabled=tray_chat_enabled,
-        tray_notifications_enabled=tray_notifications_enabled,
-    )
+    updates: dict[str, Any] = {
+        "customer_chat_enabled": customer_chat_enabled,
+        "tray_chat_enabled": tray_chat_enabled,
+        "tray_notifications_enabled": tray_notifications_enabled,
+    }
+    # The RMM pack owns the agent; without it the setting is left as it is.
+    rmm_available = _main()._feature_pack_available("rmm")
+    turn_on_rmm_deploy = False
+    if rmm_available:
+        rmm_agent_auto_deploy = 1 if form.get("rmm_agent_auto_deploy") else 0
+        updates["rmm_agent_auto_deploy"] = rmm_agent_auto_deploy
+        turn_on_rmm_deploy = bool(rmm_agent_auto_deploy) and not company.get("rmm_agent_auto_deploy")
+
+    await companies_repo.update_company(company_id, **updates)
+    message = "Tray settings saved."
+    if turn_on_rmm_deploy:
+        from app.services import rmm_agent_deploy
+
+        counts = await rmm_agent_deploy.auto_deploy_company(
+            int(company_id), user_id=int(current_user["id"])
+        )
+        pushed = counts.get("sent", 0) + counts.get("queued", 0)
+        message += (
+            f" The RMM agent is being installed on {pushed} device{'s' if pushed != 1 else ''}"
+            " without it; devices enrolled later get it when they connect."
+        )
     cid = int(company_id)
     return RedirectResponse(
         url=f"/admin/companies/{cid}/tray?"
-        + urlencode({"success": "Tray settings saved."}),
+        + urlencode({"success": message}),
         status_code=303,
     )
 

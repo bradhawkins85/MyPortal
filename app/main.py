@@ -1290,6 +1290,15 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
     await websocket.accept()
     tray_service.register_connection(device_uid, websocket)
     await tray_service.mark_websocket_alive(device)
+    if _feature_pack_available("rmm"):
+        # Companies that deploy the RMM agent automatically get it queued
+        # here; the drain below delivers it.
+        from app.services import rmm_agent_deploy
+
+        try:
+            await rmm_agent_deploy.auto_deploy_device(device)
+        except Exception as exc:  # noqa: BLE001 - never block the tray connection
+            log_warning("Automatic RMM agent install failed", device_uid=device_uid, error=str(exc))
     await tray_service.deliver_queued_commands(device)
     # Commands issued from a worker that does not hold this socket stay
     # ``queued``; re-drain periodically (piggy-backing on the device's

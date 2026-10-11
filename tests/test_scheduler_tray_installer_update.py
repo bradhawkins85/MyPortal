@@ -29,6 +29,12 @@ def test_update_tray_icon_installer_fetches_latest_installers(monkeypatch):
         fake_fetch_latest_tray_installers,
     )
 
+    async def fake_fetch_latest_agent(*, repo: str, github_token: str | None = None, force: bool = False):
+        fetched["agent_repo"] = repo
+        return {"myportal-rmm-windows-amd64.exe": False}
+
+    monkeypatch.setattr("app.services.rmm_agent_deploy.fetch_latest_agent", fake_fetch_latest_agent)
+
     with (
         patch(
             "app.services.scheduler.scheduled_tasks_repo.record_task_run",
@@ -44,6 +50,7 @@ def test_update_tray_icon_installer_fetches_latest_installers(monkeypatch):
 
     assert fetched["repo"] == "bradhawkins85/MyPortal"
     assert fetched["force"] == "False"
+    assert fetched["agent_repo"] == "bradhawkins85/MyPortal"
     details = json.loads(record_task_run.await_args.kwargs["details"])
     assert details == {
         "repo": "bradhawkins85/MyPortal",
@@ -52,5 +59,6 @@ def test_update_tray_icon_installer_fetches_latest_installers(monkeypatch):
             "myportal-tray.dmg": True,
             "myportal-tray.pkg": False,
         },
+        "rmm_agent": {"myportal-rmm-windows-amd64.exe": False},
         "updated": True,
     }

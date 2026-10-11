@@ -359,6 +359,17 @@ async def assets_page(request: Request):
         asset_ids
     )
     tray_devices_by_asset = await tray_repo.list_active_devices_by_asset_ids(asset_ids)
+    # Technicians who run RMM scripts can push the RMM agent through the tray app.
+    can_push_rmm_agent = can_write_assets and main_module._feature_pack_available("rmm") and (
+        bool(user.get("is_super_admin"))
+        or main_module._membership_menu_can(user, membership, "menu.rmm_scripts", write=True)
+    )
+    rmm_agent_asset_ids: set[int] = set()
+    if can_push_rmm_agent:
+        from app.repositories import rmm_agent_deploy as rmm_agent_deploy_repo
+        from app.services.rmm_agent_deploy import TRAY_PLATFORMS
+
+        rmm_agent_asset_ids = await rmm_agent_deploy_repo.list_company_agent_asset_ids(company_id)
 
     for record in prepared:
         tray_device = (
@@ -373,6 +384,12 @@ async def assets_page(request: Request):
         record["tray_agent_synced"] = bool(record["tray_device_uid"])
         record["can_open_chat"] = bool(
             record["tray_device_uid"] and main_module.settings.matrix_enabled
+        )
+        record["can_push_rmm_agent"] = bool(
+            can_push_rmm_agent
+            and tray_device
+            and str(tray_device.get("os") or "").lower() in TRAY_PLATFORMS
+            and int(record["id"]) not in rmm_agent_asset_ids
         )
         asset_id = record.get("id")
         asset_cf = cf_values_by_asset.get(asset_id, {})
@@ -416,7 +433,8 @@ async def assets_page(request: Request):
         "active_warranty": active_warranty,
     }
     has_asset_actions = bool(user.get("is_super_admin")) or any(
-        bool(asset.get("can_open_chat")) for asset in prepared
+        bool(asset.get("can_open_chat")) or bool(asset.get("can_push_rmm_agent"))
+        for asset in prepared
     )
 
     extra = {
@@ -430,6 +448,7 @@ async def assets_page(request: Request):
         "can_write_assets": can_write_assets,
         "is_super_admin": bool(user.get("is_super_admin")),
         "has_asset_actions": has_asset_actions,
+        "can_push_rmm_agent": any(bool(asset.get("can_push_rmm_agent")) for asset in prepared),
         "matrix_enabled": main_module.settings.matrix_enabled,
         "show_tags": show_tags,
     }

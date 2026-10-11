@@ -1,0 +1,7 @@
+{
+  "guid": "8fd778b1-1994-4606-bc06-2df980df4522",
+  "occurred_at": "2026-10-11T11:45Z",
+  "change_type": "Feature",
+  "summary": "RMM: push the RMM agent from the Assets page, or install it automatically on every device of a company",
+  "content_hash": "0d41d74ab24e70881097800422afcfefa7c536a90df3f7531607bbae0a652c35"
+}

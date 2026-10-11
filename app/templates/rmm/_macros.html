@@ -9,6 +9,17 @@
   "expired": ("neutral", "Expired"),
 } %}
 
+{# The latest RMM agent push to a device (rmm_agent_deploy.asset_deploy_state). #}
+{% macro agent_deploy_status(deploy) -%}
+  {%- if deploy and deploy.status == 'queued' %} An install is queued and starts when the device's tray app next connects.
+  {%- elif deploy and deploy.status == 'delivered' %} The install was sent to the device's tray app and has not reported back yet.
+  {%- elif deploy and deploy.status == 'completed' %} The tray app installed the RMM agent; it shows here once it checks in.
+  {%- elif deploy and deploy.status == 'error' %} The last install failed: {{ deploy.error or 'no reason given' }}
+  {%- elif deploy and not deploy.supported %} The RMM agent can only be pushed to Windows and macOS devices.
+  {%- elif not deploy %} Install the MyPortal tray app on it first; the tray app installs the RMM agent.
+  {%- endif -%}
+{%- endmacro %}
+
 {% macro run_status(status) -%}
   {%- set item = RUN_STATUS.get(status, ("neutral", status)) -%}
   <span class="status status--{{ item[0] }}" data-rmm-status="{{ status }}">{{ item[1] }}</span>
