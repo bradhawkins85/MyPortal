@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% set LEVEL_STATUS = {"Critical": "error", "Error": "error", "Warning": "warning", "Information": "info", "Verbose": "neutral"} %}
+{% block title %}Event logs{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endblock %}
+{% block header_title %}<span class="header__title-text">Event logs</span>{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions([{"label": "Scripts", "type": "link", "href": "/rmm/scripts"}], menu_id="rmm-event-log-actions") }}
+{% endblock %}
+{% block content %}
+<section class="rmm-page" data-rmm-event-logs>
+  {% if not database.configured %}
+  <div class="alert alert--info" role="status">Event log collection is off. Set <code>EVENT_LOG_DB_HOST</code>, <code>EVENT_LOG_DB_USER</code>, <code>EVENT_LOG_DB_PASSWORD</code> and <code>EVENT_LOG_DB_NAME</code> in the .env file to store event logs in their own database; MyPortal creates its tables on startup.</div>
+  {% elif not database.connected %}
+  <div class="alert alert--error" role="alert">MyPortal cannot reach the event log database, so agents are not sending event logs. It tries again every minute.{% if database.error %} <span class="text-muted">{{ database.error }}</span>{% endif %}</div>
+  {% endif %}
+
+  <section class="card card--panel" aria-labelledby="rmm-event-log-entries-heading">
+    <header class="card__header card__header--stacked"><div>
+      <h2 class="card__title" id="rmm-event-log-entries-heading">Entries</h2>
+      <p class="card__subtitle">Newest first.{% if retention_days %} Entries are kept for {{ retention_days }} day{{ "s" if retention_days != 1 }}.{% endif %}</p>
+    </div></header>
+    <form method="get" action="/rmm/event-logs" class="card__body form">
+      <div class="form-grid">
+        <div class="form-field">
+          <label class="form-label" for="rmm-event-log-device">Device</label>
+          <select class="form-input" id="rmm-event-log-device" name="asset_id">
+            <option value="">Every device</option>
+            {% for device in devices if device.asset_id %}<option value="{{ device.asset_id }}" {% if filters.asset_id == device.asset_id %}selected{% endif %}>{{ device.asset_name or device.hostname }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="rmm-event-log-log">Log</label>
+          <select class="form-input" id="rmm-event-log-log" name="log">
+            <option value="">Every log</option>
+            {% for name in log_choices %}<option value="{{ name }}" {% if filters.log == name %}selected{% endif %}>{{ name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="rmm-event-log-level">Level</label>
+          <select class="form-input" id="rmm-event-log-level" name="level">
+            {% for value, label in level_filters %}<option value="{{ value }}" {% if filters.level == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="rmm-event-log-event-id">Event ID</label>
+          <input class="form-input" id="rmm-event-log-event-id" name="event_id" type="number" min="0" value="{{ filters.event_id }}">
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="rmm-event-log-search">Message or source contains</label>
+          <input class="form-input" id="rmm-event-log-search" name="q" maxlength="200" value="{{ filters.q }}">
+        </div>
+      </div>
+      <div class="form-actions"><button class="button button--primary" type="submit">Filter</button> <a class="button button--ghost" href="/rmm/event-logs">Clear</a></div>
+    </form>
+    <div class="card__body">
+      {% if entries %}
+      <div class="table-wrapper">
+        <table class="table" data-table data-table-id="rmm-event-logs">
+          <caption class="visually-hidden">Event log entries</caption>
+          <thead><tr>
+            <th scope="col" data-column-key="time">Time</th>
+            <th scope="col" data-column-key="device">Device</th>
+            <th scope="col" data-column-key="log">Log</th>
+            <th scope="col" data-column-key="level">Level</th>
+            <th scope="col" data-column-key="source" data-mobile-hidden="true">Source</th>
+            <th scope="col" data-column-key="event-id">Event ID</th>
+            <th scope="col" data-column-key="message">Message</th>
+          </tr></thead>
+          <tbody>
+            {% for entry in entries %}
+            {% set device = devices | selectattr("asset_id", "equalto", entry.asset_id) | first %}
+            <tr>
+              <td data-label="Time" data-column-key="time"><span data-utc="{{ entry.time_created }}">{{ entry.time_created }}</span></td>
+              <td data-label="Device" data-column-key="device">{% if entry.asset_id %}<a href="/assets/{{ entry.asset_id }}">{{ (device.asset_name or device.hostname) if device else entry.computer or ("Asset " ~ entry.asset_id) }}</a>{% else %}{{ entry.computer or "–" }}{% endif %}</td>
+              <td data-label="Log" data-column-key="log">{{ entry.log_name }}</td>
+              <td data-label="Level" data-column-key="level"><span class="status status--{{ LEVEL_STATUS.get(entry.level_label, 'neutral') }}">{{ entry.level_label }}</span></td>
+              <td data-label="Source" data-column-key="source" data-mobile-hidden="true">{{ entry.provider or "–" }}</td>
+              <td data-label="Event ID" data-column-key="event-id"><code>{{ entry.event_id }}</code></td>
+              <td data-label="Message" data-column-key="message">
+                {% set message = entry.message or "" %}
+                {% set first_line = message.strip().split("\n")[0] %}
+                {% if message.strip() != first_line %}
+                <details><summary>{{ first_line | truncate(160) }}</summary><pre class="rmm-event-log__message">{{ message }}</pre></details>
+                {% else %}{{ first_line or "–" }}{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% elif database.connected %}
+      <div class="empty-state">
+        <h3 class="empty-state__title">No entries</h3>
+        <p class="empty-state__subtitle">Entries appear here once Windows devices with the RMM agent send them, about a minute after the agent starts.</p>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card card--panel" aria-labelledby="rmm-event-log-company-heading">
+    <header class="card__header card__header--stacked"><div>
+      <h2 class="card__title" id="rmm-event-log-company-heading">Logs collected</h2>
+      <p class="card__subtitle">Every Windows device with the RMM agent sends its {{ default_logs | join(" and ") }} logs. Add more for the whole company here, or for one device below. Use the log's full name, as shown in Event Viewer's Properties, such as <code>Security</code> or <code>Microsoft-Windows-PowerShell/Operational</code>.</p>
+    </div></header>
+    <form method="post" action="/rmm/event-logs/company" class="card__body form">
+      {% include "partials/csrf.html" %}
+      <div class="form-field">
+        <label class="form-label" for="rmm-event-log-company-logs">Extra logs for every device in {{ company.name if company else "this company" }} <span class="text-muted">one per line</span></label>
+        <textarea class="form-input" id="rmm-event-log-company-logs" name="extra_logs" rows="4" {% if not can_edit %}readonly{% endif %}>{{ company_logs | join("\n") }}</textarea>
+      </div>
+      {% if can_edit %}<div class="form-actions"><button class="button button--primary" type="submit">Save company logs</button></div>{% endif %}
+    </form>
+    <div class="card__body">
+      {% if devices %}
+      <div class="table-wrapper">
+        <table class="table">
+          <caption class="visually-hidden">Extra logs per device</caption>
+          <thead><tr>
+            <th scope="col">Device</th>
+            <th scope="col">Extra logs for this device <span class="text-muted">one per line</span></th>
+          </tr></thead>
+          <tbody>
+            {% for device in devices if device.asset_id %}
+            <tr>
+              <td data-label="Device"><a href="/assets/{{ device.asset_id }}">{{ device.asset_name or device.hostname }}</a>{% if device.os and device.os != "windows" %} <span class="text-muted">({{ device.os }}: no event logs)</span>{% endif %}</td>
+              <td data-label="Extra logs">
+                <form method="post" action="/rmm/event-logs/assets/{{ device.asset_id }}" class="form rmm-event-log__device-form">
+                  {% include "partials/csrf.html" %}
+                  <label class="visually-hidden" for="rmm-event-log-device-{{ device.asset_id }}">Extra logs for {{ device.asset_name or device.hostname }}</label>
+                  <textarea class="form-input" id="rmm-event-log-device-{{ device.asset_id }}" name="extra_logs" rows="2" {% if not can_edit %}readonly{% endif %}>{{ device.extra_logs | join("\n") }}</textarea>
+                  {% if can_edit %}<button class="button button--ghost button--small" type="submit">Save<span class="visually-hidden"> logs for {{ device.asset_name or device.hostname }}</span></button>{% endif %}
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="form-help">No devices in this company have the RMM agent yet.</p>
+      {% endif %}
+    </div>
+  </section>
+</section>
+{% endblock %}

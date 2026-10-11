@@ -1,0 +1,7 @@
+{
+  "guid": "527d8fc3-adf6-45a8-8fa0-21ad6256da97",
+  "occurred_at": "2026-10-11T11:30Z",
+  "change_type": "Feature",
+  "summary": "RMM: Windows devices send their Application and System event logs, plus extra logs chosen per company or device, to a separate event log database (EVENT_LOG_DB_*) that MyPortal sets up and leaves out of backups unless EVENT_LOG_DB_BACKUP is true",
+  "content_hash": "f6c037a2dd22335b3948c87fabb26f5a4917d2d85eb2cea3767043f5eae89058"
+}

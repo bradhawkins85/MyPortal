@@ -16,6 +16,8 @@ def _run_backup(args: list[str], env_overrides: dict | None = None) -> subproces
     # environment (which may have stale values from the developer's setup).
     for key in ("DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME"):
         env.pop(key, None)
+        env.pop("EVENT_LOG_" + key, None)
+    env.pop("EVENT_LOG_DB_BACKUP", None)
     if env_overrides:
         env.update(env_overrides)
     return subprocess.run(
@@ -143,6 +145,63 @@ def test_backup_dry_run_reports_configuration(tmp_path):
     assert "db.example.com" in output
     assert "5432" in output
     assert "myportal_db" in output
+
+
+def _event_log_dry_run(tmp_path, **settings):
+    env_file = _make_env_file(
+        tmp_path / "myportal.env",
+        EVENT_LOG_DB_HOST="events.example.com",
+        EVENT_LOG_DB_USER="events",
+        EVENT_LOG_DB_PASSWORD="secret",
+        EVENT_LOG_DB_NAME="myportal_eventlogs",
+        **settings,
+    )
+    result = _run_backup(
+        ["--dry-run", "--label", "test"],
+        env_overrides={
+            "MYPORTAL_ENV_FILE": str(env_file),
+            "BACKUP_DIR": str(tmp_path / "backups"),
+            "MYPORTAL_SHARED_ROOT": str(tmp_path / "shared"),
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout + result.stderr
+
+
+def test_event_log_database_is_left_out_by_default(tmp_path):
+    output = _event_log_dry_run(tmp_path)
+    assert "Event logs: not backed up" in output
+    assert "myportal_eventlogs" not in output
+    assert "eventlog-test-" not in output
+
+
+def test_event_log_database_backed_up_when_enabled(tmp_path):
+    output = _event_log_dry_run(tmp_path, EVENT_LOG_DB_BACKUP="true")
+    assert "myportal_eventlogs@events.example.com:3306" in output
+    assert "eventlog-test-" in output
+    assert "secret" not in output
+
+
+def test_event_log_backups_are_rotated(tmp_path):
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    for i in range(3):
+        path = backup_dir / f"eventlog-old-2026010{i}T000000Z.sql.gz"
+        path.write_bytes(b"x")
+        os.utime(path, (time.time() - 1000 + i, time.time() - 1000 + i))
+    env_file = _make_env_file(tmp_path / "myportal.env")
+    result = _run_backup(
+        ["--dry-run", "--files-only"],
+        env_overrides={
+            "MYPORTAL_ENV_FILE": str(env_file),
+            "BACKUP_DIR": str(backup_dir),
+            "MYPORTAL_SHARED_ROOT": str(tmp_path / "shared"),
+            "MYPORTAL_BACKUPS_TO_KEEP": "1",
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("Would delete") == 2
+    assert "eventlog-old-20260100" in result.stdout and "eventlog-old-20260101" in result.stdout
 
 
 # ---------------------------------------------------------------------------

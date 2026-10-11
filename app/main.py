@@ -113,6 +113,7 @@ from uuid import uuid4
 
 from app.core.config import get_settings, get_templates_config
 from app.core.database import db
+from app.core.event_log_database import event_log_db
 from app.core.features import init_registry
 from app.core.legal import LEGAL_POLICIES, LEGAL_POLICIES_CHANGE_SUMMARY, LEGAL_POLICIES_UPDATED
 from app.core.plugin_loader import get_plugin_loader, init_plugin_loader
@@ -3241,6 +3242,10 @@ async def on_startup() -> None:
     log_info("Application startup phase", phase="database_connect")
     await db.connect()
     log_info("Application startup phase complete", phase="database_connect")
+    # The RMM event log database is optional and separate; connect() creates
+    # missing tables and never raises, so a bad EVENT_LOG_DB_* setting only
+    # switches event log collection off.
+    await event_log_db.connect()
     # Production schema changes are an explicit deployment phase.  Keeping this
     # behind an opt-in is useful for isolated developer/test databases without
     # allowing every production worker to race the deploy coordinator.
@@ -3448,6 +3453,7 @@ async def on_shutdown() -> None:
     await feature_registry.unload_all()
     await modules_service.stop_xero_token_keepalive()
     await scheduler_service.stop()
+    await event_log_db.disconnect()
     await db.disconnect()
     log_info("Application shutdown")
 

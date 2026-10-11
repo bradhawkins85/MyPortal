@@ -35,6 +35,7 @@ import (
 	"github.com/kardianos/service"
 
 	"github.com/bradhawkins85/myportal-rmm/internal/client"
+	"github.com/bradhawkins85/myportal-rmm/internal/eventlog"
 	"github.com/bradhawkins85/myportal-rmm/internal/runner"
 	"github.com/bradhawkins85/myportal-rmm/internal/state"
 )
@@ -47,6 +48,9 @@ const (
 	maxConcurrent  = 4
 	checkinEvery   = 15 * time.Minute
 	reportAttempts = 5
+
+	eventLogStartDelay = 30 * time.Second
+	eventLogsOffWait   = 15 * time.Minute
 )
 
 func main() {
@@ -245,6 +249,13 @@ func loop(ctx context.Context) {
 	slots := make(chan struct{}, maxConcurrent)
 	var wg sync.WaitGroup
 	defer wg.Wait()
+	if eventlog.Supported {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			eventLogLoop(ctx, api)
+		}()
+	}
 
 	backoff := 5 * time.Second
 	lastCheckin := time.Time{}
@@ -307,5 +318,61 @@ func execute(ctx context.Context, api *client.Client, r *runner.Runner, job clie
 		log.Printf("run %d: report attempt %d failed: %v", job.ID, attempt, err)
 		sleep(reportCtx, delay)
 		delay *= 2
+	}
+}
+
+// eventLogLoop sends the Windows event logs MyPortal asks for, once a
+// minute. While MyPortal has event log collection off it asks again every
+// eventLogsOffWait.
+func eventLogLoop(ctx context.Context, api *client.Client) {
+	path := filepath.Join(state.Dir(), "eventlog-cursors.json")
+	collector := &eventlog.Collector{
+		Source:  eventlog.NewSource(),
+		Send:    api.SendEventLogs,
+		Cursors: eventlog.LoadCursors(path),
+		Path:    path,
+	}
+	lastErrors := map[string]string{}
+	sleep(ctx, eventLogStartDelay)
+	for ctx.Err() == nil {
+		cfg, err := api.EventLogConfig(ctx)
+		if err != nil || !cfg.Enabled {
+			if err != nil && ctx.Err() == nil {
+				log.Printf("event logs: could not get settings: %v", err)
+			}
+			sleep(ctx, eventLogsOffWait)
+			continue
+		}
+		lookback := time.Duration(cfg.InitialLookbackHours) * time.Hour
+		off := false
+		for _, name := range cfg.Logs {
+			err := collector.SyncLog(ctx, name, cfg.MaxBatch, lookback)
+			if errors.Is(err, client.ErrUnavailable) {
+				off = true
+				break
+			}
+			// Log each failure once until it changes, not every minute.
+			message := ""
+			if err != nil {
+				message = err.Error()
+			}
+			if message != lastErrors[name] && ctx.Err() == nil {
+				if message == "" {
+					log.Printf("event logs: %s is being collected again", name)
+				} else {
+					log.Printf("event logs: %s: %s", name, message)
+				}
+				lastErrors[name] = message
+			}
+		}
+		if off {
+			sleep(ctx, eventLogsOffWait)
+			continue
+		}
+		interval := time.Duration(cfg.IntervalSeconds) * time.Second
+		if interval < 30*time.Second {
+			interval = 30 * time.Second
+		}
+		sleep(ctx, interval)
 	}
 }

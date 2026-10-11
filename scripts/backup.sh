@@ -3,6 +3,8 @@
 #
 # Dumps the configured database (MySQL/MariaDB), archives the shared uploads
 # directories, and prunes old backups to the configured retention count.
+# The RMM event log database (EVENT_LOG_DB_*) is left out unless
+# EVENT_LOG_DB_BACKUP=true, when it is dumped to its own eventlog-* file.
 # Designed to be called directly, by the pre-upgrade hook in
 # scripts/upgrade.sh, or by the myportal-backup.timer systemd timer.
 #
@@ -48,6 +50,8 @@ Environment:
                              (default: /opt/myportal/shared)
   MYPORTAL_GITEA_HOME        Gitea data for RMM scripts, backed up with the
                              files when present (default: /var/lib/gitea)
+  EVENT_LOG_DB_BACKUP        Set to true (in the environment file) to also
+                             back up the RMM event log database
   SKIP_PRE_UPGRADE_BACKUP    Set to true to skip the pre-upgrade
                              database backup (not recommended)
 EOF
@@ -123,16 +127,36 @@ DB_USER="${DB_USER:-$(read_env_var DB_USER myportal)}"
 DB_PASSWORD="${DB_PASSWORD:-$(read_env_var DB_PASSWORD "")}"
 DB_NAME="${DB_NAME:-$(read_env_var DB_NAME myportal)}"
 
+EVENT_LOG_DB_BACKUP="${EVENT_LOG_DB_BACKUP:-$(read_env_var EVENT_LOG_DB_BACKUP false)}"
+EVENT_LOG_DB_HOST="${EVENT_LOG_DB_HOST:-$(read_env_var EVENT_LOG_DB_HOST "")}"
+EVENT_LOG_DB_PORT="${EVENT_LOG_DB_PORT:-$(read_env_var EVENT_LOG_DB_PORT 3306)}"
+EVENT_LOG_DB_USER="${EVENT_LOG_DB_USER:-$(read_env_var EVENT_LOG_DB_USER "")}"
+EVENT_LOG_DB_PASSWORD="${EVENT_LOG_DB_PASSWORD:-$(read_env_var EVENT_LOG_DB_PASSWORD "")}"
+EVENT_LOG_DB_NAME="${EVENT_LOG_DB_NAME:-$(read_env_var EVENT_LOG_DB_NAME "")}"
+
+is_true() {
+  case "${1,,}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The event log database is backed up only when asked for and configured.
+event_log_backup_enabled() {
+  is_true "$EVENT_LOG_DB_BACKUP" && [[ -n "$EVENT_LOG_DB_HOST" && -n "$EVENT_LOG_DB_USER" && -n "$EVENT_LOG_DB_NAME" ]]
+}
+
 create_mysqld_defaults() {
+  # create_mysqld_defaults [HOST PORT USER PASSWORD] (default: the main database)
   local path
   path=$(mktemp)
   chmod 600 "$path"
   {
     printf '[client]\n'
-    printf 'host=%s\n' "$DB_HOST"
-    printf 'port=%s\n' "$DB_PORT"
-    printf 'user=%s\n' "$DB_USER"
-    printf 'password=%s\n' "$DB_PASSWORD"
+    printf 'host=%s\n' "${1:-$DB_HOST}"
+    printf 'port=%s\n' "${2:-$DB_PORT}"
+    printf 'user=%s\n' "${3:-$DB_USER}"
+    printf 'password=%s\n' "${4-$DB_PASSWORD}"
   } >"$path"
   printf '%s' "$path"
 }
@@ -219,6 +243,37 @@ backup_database() {
   info "Database backup complete: ${file}"
 }
 
+backup_event_logs() {
+  # The RMM event log database, only with EVENT_LOG_DB_BACKUP=true.
+  local label="$1"
+  event_log_backup_enabled || return 0
+  local file="${BACKUP_DIR}/eventlog-${label}-${TIMESTAMP}.sql.gz"
+  info "Backing up event log database ${EVENT_LOG_DB_NAME}@${EVENT_LOG_DB_HOST}:${EVENT_LOG_DB_PORT} to ${file}…"
+
+  if [[ "$DRY_RUN" == true ]]; then
+    info "[dry-run] Would run: mysqldump --single-transaction --databases ${EVENT_LOG_DB_NAME} | gzip > ${file}"
+    return 0
+  fi
+
+  command -v mysqldump >/dev/null 2>&1 || \
+    die "mysqldump is not installed; it is required to back up the database."
+
+  local defaults_file
+  defaults_file=$(create_mysqld_defaults "$EVENT_LOG_DB_HOST" "$EVENT_LOG_DB_PORT" "$EVENT_LOG_DB_USER" "$EVENT_LOG_DB_PASSWORD")
+
+  local err_file="${file}.err"
+  if ! mysqldump --defaults-extra-file="$defaults_file" \
+    --single-transaction --quick --add-drop-database --databases "$EVENT_LOG_DB_NAME" 2>"$err_file" | gzip >"$file"; then
+    local err
+    err=$(cat "$err_file" 2>/dev/null || true)
+    rm -f "$defaults_file" "$err_file" "$file"
+    die "event log database backup failed.${err:+ stderr: ${err}}"
+  fi
+  rm -f "$defaults_file" "$err_file"
+  chmod 0600 "$file"
+  info "Event log database backup complete: ${file}"
+}
+
 backup_uploads() {
   local label="$1"
   local file="${BACKUP_DIR}/files-${label}-${TIMESTAMP}.tar.gz"
@@ -271,7 +326,7 @@ prune_backups() {
   info "Pruning old backups (keeping ${keep} of each kind)…"
 
   local kind
-  for kind in db files gitea; do
+  for kind in db eventlog files gitea; do
     # Collect all files of this kind, sorted by modification time (newest first).
     # The `|| true` prevents `set -e` from killing the subshell when no files match.
     local -a all_files=()
@@ -306,6 +361,11 @@ DO_FILES=true
 if [[ "$DRY_RUN" == true ]]; then
   info "[dry-run] mode: no changes will be made."
   info "[dry-run] Database:  ${DB_NAME}@${DB_HOST}:${DB_PORT}  (back up: ${DO_DB})"
+  if event_log_backup_enabled; then
+    info "[dry-run] Event logs: ${EVENT_LOG_DB_NAME}@${EVENT_LOG_DB_HOST}:${EVENT_LOG_DB_PORT}  (back up: ${DO_DB})"
+  else
+    info "[dry-run] Event logs: not backed up (EVENT_LOG_DB_BACKUP is off or EVENT_LOG_DB_* is not set)"
+  fi
   info "[dry-run] Files:     ${SHARED_ROOT}  (back up: ${DO_FILES})"
   info "[dry-run] Label:     ${LABEL}"
   info "[dry-run] Retain:    ${MYPORTAL_BACKUPS_TO_KEEP} per kind"
@@ -313,6 +373,7 @@ fi
 
 if [[ "$DO_DB" == true ]]; then
   backup_database "$LABEL"
+  backup_event_logs "$LABEL"
 fi
 
 if [[ "$DO_FILES" == true ]]; then

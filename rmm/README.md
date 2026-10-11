@@ -36,6 +36,12 @@ time and reports each result to `/api/rmm/agent/runs/{id}/result`. See
 are passed, and `docs/wiki/administration/RMM Scripts.md` for the script
 conventions.
 
+On Windows it also sends event logs: it asks `GET /api/rmm/agent/event-logs/config`
+which logs to collect (Application and System, plus extras chosen per company
+or device), reads new entries with `wevtutil` and posts them to
+`/api/rmm/agent/event-logs`, remembering its place in `eventlog-cursors.json`.
+See `internal/eventlog` and `docs/wiki/administration/RMM Event Logs.md`.
+
 ## Develop
 
 ```sh
