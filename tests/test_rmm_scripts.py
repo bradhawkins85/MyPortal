@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -615,11 +616,14 @@ def _environment():
 def test_scripts_page_renders_library_runs_and_escapes():
     env = _environment()
     env.globals["static_url"] = lambda path: path
-    html = env.get_template("rmm/scripts.html").render(
-        script_groups=[{"folder": "disk", "scripts": [{
+    from app.features.rmm import routes
+
+    groups = [{"folder": "disk", "scripts": [{
             "id": 1, "name": "<b>Check</b>", "path": "rmm/disk/Check.ps1", "language": "powershell",
             "language_label": "PowerShell", "description": "Checks", "parameter_count": 2, "env_count": 1,
-        }]}],
+        }]}]
+    html = env.get_template("rmm/scripts.html").render(
+        script_groups=groups, script_tree=routes._script_tree(groups),
         runs=[{"id": 4, "script_name": "Check", "asset_id": 10, "asset_name": "PC-01", "status": "failed",
                "exit_code": 2, "requested_by_email": "t@example.com", "queued_at": "2026-10-10T00:00:00"}],
         agents=[], summary={"scripts": 1, "agents": 0, "running": 0, "failed": 1},
@@ -1003,13 +1007,17 @@ def _render_library(**context):
         can_run=True, can_sync=False, gitea_ready=True, gitea_message="", gitea_url="", company={"name": "Contoso"},
     )
     defaults.update(context)
+    if "script_tree" not in defaults:
+        from app.features.rmm import routes
+
+        defaults["script_tree"] = routes._script_tree(defaults["script_groups"])
     return env.get_template("rmm/scripts.html").render(**defaults)
 
 
 def test_library_uses_company_edit_navigation_and_overview_by_default():
     html = _render_library()
     assert 'class="ce-layout"' in html and 'class="ce-nav rmm-nav"' in html and 'data-rmm-detail' in html
-    assert 'class="ce-nav__group-title rmm-nav__folder"' in html and "Common/disk" in html
+    assert 'data-rmm-tree' in html and 'data-path="Common"' in html and 'data-path="Common/disk"' in html
     assert 'href="/rmm/scripts?script=7"' in html and 'data-rmm-script-link="7"' in html
     overview = html.split('href="/rmm/scripts"', 1)[1].split("</a>", 1)[0]
     assert 'aria-current="true"' in overview
@@ -1137,3 +1145,48 @@ async def test_summary_reports_when_the_ai_module_is_unavailable(sqlite_db, monk
             await summaries.generate_summary(script)
         assert raised.value.code == code and str(raised.value) == summaries.MESSAGES[code]
     assert summaries.summary_state(await rmm_repo.get_script(script["id"], with_content=True))["summary"] is None
+
+
+def test_script_tree_nests_folders_and_counts_scripts():
+    from app.features.rmm import routes
+
+    def script(script_id, folder):
+        return {"id": script_id, "name": f"s{script_id}", "folder": folder}
+
+    groups = [
+        {"folder": "", "scripts": [script(1, "")]},
+        {"folder": "Common/disk", "scripts": [script(2, "Common/disk"), script(3, "Common/disk")]},
+        {"folder": "Common", "scripts": [script(4, "Common")]},
+        {"folder": "companies/Contoso/onboarding", "scripts": [script(5, "companies/Contoso/onboarding")]},
+        {"folder": "Common/security/defender", "scripts": [script(6, "Common/security/defender")]},
+    ]
+    tree = routes._script_tree(groups)
+    assert tree["count"] == 6 and [s["id"] for s in tree["scripts"]] == [1]
+    assert [f["name"] for f in tree["folders"]] == ["Common", "companies"]
+    common = tree["folders"][0]
+    assert common["count"] == 4 and [s["id"] for s in common["scripts"]] == [4]
+    assert [(f["name"], f["path"], f["count"]) for f in common["folders"]] == [
+        ("disk", "Common/disk", 2), ("security", "Common/security", 1)]
+    assert common["folders"][1]["folders"][0]["path"] == "Common/security/defender"
+    assert tree["folders"][1]["folders"][0]["folders"][0]["scripts"][0]["id"] == 5
+
+
+def test_library_folders_are_collapsed_except_those_holding_the_open_script():
+    def script(script_id, name, folder):
+        return {"id": script_id, "name": name, "path": f"rmm/{folder}/{name}.ps1", "language": "powershell",
+                "language_label": "PowerShell", "description": "", "parameter_count": 0, "env_count": 0}
+
+    groups = [
+        {"folder": "Common/disk", "scripts": [script(7, "Check-Disk", "Common/disk")]},
+        {"folder": "Common/diskless", "scripts": [script(8, "Boot", "Common/diskless")]},
+        {"folder": "Companies/Contoso", "scripts": [script(9, "Map-Drives", "Companies/Contoso")]},
+    ]
+    closed = _render_library(script_groups=groups)
+    assert closed.count("data-rmm-folder") == 5 and " open>" not in closed
+    assert '>PS1</span>' in closed and 'title="PowerShell"' in closed
+    assert "data-rmm-tree-expand hidden" in closed
+
+    opened = _render_library(script_groups=groups, selected_script=_detail(folder="Common/disk"))
+    open_paths = re.findall(r'data-path="([^"]+)" open>', opened)
+    # "Common/diskless" shares a prefix with "Common/disk" but stays closed.
+    assert open_paths == ["Common", "Common/disk"]

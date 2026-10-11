@@ -201,8 +201,12 @@ The agent also sets `MYPORTAL_RUN_ID` for every run.
 
 ## Browsing scripts
 
-The Scripts page is laid out like **Edit company**. The list on the left shows each folder and
-the scripts in it; type in **Find a script** to filter it. **Overview** shows the totals, recent
+The Scripts page is laid out like **Edit company**. The list on the left shows the Gitea folders
+as a tree (for example **Common** › **disk**), each with the number of scripts inside. Folders
+start collapsed, apart from the ones holding the open script; select a folder to expand or
+collapse it, or use **Expand all** and **Collapse all**. Typing in **Find a script** opens the
+folders with matching scripts and hides the rest; clearing it (or pressing Esc) puts the folders
+back as they were. On wide screens the list stays in place while the script details scroll. **Overview** shows the totals, recent
 runs and the devices with the RMM agent. Choose a script to see, on the right:
 
 - **Description**, from the script's comment-based help (`.SYNOPSIS`) or leading comment, with

@@ -1,0 +1,7 @@
+{
+  "guid": "633be835-c0b8-4798-b6f1-c921056c8d96",
+  "occurred_at": "2026-10-11T07:30Z",
+  "change_type": "Feature",
+  "summary": "RMM Scripts: collapsible folder tree in the script list, which stays pinned while the details scroll",
+  "content_hash": "80591dac7c23480a233892d8c1facee80acde971dede211c58c5164af526efd9"
+}

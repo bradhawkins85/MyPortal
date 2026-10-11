@@ -109,6 +109,32 @@ def _group_scripts(scripts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{"folder": folder, "scripts": groups[folder]} for folder in sorted(groups, key=str.casefold)]
 
 
+def _script_tree(groups: list[dict[str, Any]]) -> dict[str, Any]:
+    """Nest the folder groups into a tree for the page's folder navigation:
+    ``Common/disk`` becomes ``Common`` > ``disk``. Each node has its ``name``,
+    full ``path``, sub-``folders``, own ``scripts`` and the ``count`` of every
+    script beneath it."""
+
+    root: dict[str, Any] = {"name": "", "path": "", "folders": {}, "scripts": [], "count": 0}
+    for group in groups:
+        node = root
+        node["count"] += len(group["scripts"])
+        path = ""
+        for part in (part for part in str(group["folder"] or "").split("/") if part):
+            path = f"{path}/{part}" if path else part
+            node = node["folders"].setdefault(
+                part, {"name": part, "path": path, "folders": {}, "scripts": [], "count": 0}
+            )
+            node["count"] += len(group["scripts"])
+        node["scripts"].extend(group["scripts"])
+
+    def finish(node: dict[str, Any]) -> dict[str, Any]:
+        node["folders"] = [finish(node["folders"][name]) for name in sorted(node["folders"], key=str.casefold)]
+        return node
+
+    return finish(root)
+
+
 async def asset_rmm_context(company_id: int, asset_id: int, *, can_run: bool) -> dict[str, Any]:
     """The asset page's Scripts card: the device's RMM agent and its recent runs."""
 
@@ -154,6 +180,7 @@ async def scripts_page(request: Request, script: int | None = Query(default=None
     agents = await rmm_repo.list_company_agents(company_id)
     runs = [_serialise(run) for run in await rmm_repo.list_runs(company_id=company_id, limit=200)]
     selected = await _script_detail(script, company_id, runs) if script else None
+    groups = _group_scripts(scripts)
     gitea_ready = True
     gitea_message = ""
     gitea_url = ""
@@ -178,7 +205,8 @@ async def scripts_page(request: Request, script: int | None = Query(default=None
         extra={
             "title": "Scripts",
             "company": company,
-            "script_groups": _group_scripts(scripts),
+            "script_groups": groups,
+            "script_tree": _script_tree(groups),
             "agents": [_serialise(agent) for agent in agents],
             "runs": runs,
             "summary": summary,

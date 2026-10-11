@@ -79,3 +79,34 @@
   {%- endif %}
 </div>
 {%- endmacro %}
+
+{#- The Scripts page's folder navigation. Folders are collapsed, except the ones
+    holding the open script; each folder shows how many scripts it holds. -#}
+{% macro script_link(script, selected_id) -%}
+  <li class="rmm-tree__item" data-rmm-script-item data-search="{{ (script.name ~ ' ' ~ script.path ~ ' ' ~ script.description ~ ' ' ~ script.language_label) | lower }}">
+    <a class="ce-nav__link rmm-tree__script" href="/rmm/scripts?script={{ script.id }}" data-rmm-nav-link data-rmm-script-link="{{ script.id }}"{% if selected_id == script.id %} aria-current="true"{% endif %} title="{{ script.path }}">
+      <span class="ce-nav__label">{{ script.name }}</span>
+      <span class="rmm-chip rmm-chip--{{ script.language }} rmm-nav__language" title="{{ script.language_label }}">{{ {"powershell": "PS1", "bash": "SH", "zsh": "ZSH"}.get(script.language, script.language_label) }}</span>
+    </a>
+  </li>
+{%- endmacro %}
+
+{% macro script_tree(node, selected_folder, selected_id) -%}
+  {%- for folder in node.folders %}
+  {%- set holds_selected = selected_folder is not none and (selected_folder == folder.path or selected_folder.startswith(folder.path ~ '/')) %}
+  <li class="rmm-tree__item">
+    <details class="rmm-tree__folder" data-rmm-folder data-path="{{ folder.path }}"{% if holds_selected %} open{% endif %}>
+      <summary class="rmm-tree__summary">
+        <svg class="rmm-tree__chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg class="rmm-tree__icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M1.75 3.5h4l1.5 1.5h7v7.75a.75.75 0 0 1-.75.75H2.5a.75.75 0 0 1-.75-.75z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        <span class="rmm-tree__name">{{ folder.name }}</span>
+        <span class="ce-nav__count" title="{{ folder.count }} script{{ '' if folder.count == 1 else 's' }}">{{ folder.count }}</span>
+      </summary>
+      <ul class="rmm-tree__children">
+        {{ script_tree(folder, selected_folder, selected_id) }}
+        {%- for script in folder.scripts %}{{ script_link(script, selected_id) }}{% endfor %}
+      </ul>
+    </details>
+  </li>
+  {%- endfor %}
+{%- endmacro %}

@@ -462,8 +462,6 @@
    left (folders and scripts), the chosen script or the overview on the right. */
 .rmm-library { padding-bottom: var(--space-gap-roomy); }
 
-.rmm-nav__folder { overflow-wrap: anywhere; }
-
 .rmm-nav .ce-nav__label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -588,10 +586,156 @@
   user-select: none;
 }
 
+/* Pinned navigation: the list stays in view while the script details scroll,
+   and scrolls on its own when the open folders are taller than the window. */
+.rmm-library {
+  --rmm-nav-top: var(--space-gap-roomy);
+  /* Wider than Edit company's menu: nested folders indent the script names. */
+  --ce-nav-width: 18.5rem;
+}
+
+.rmm-library .rmm-nav {
+  position: sticky;
+  top: var(--rmm-nav-top);
+  max-height: calc(100vh - var(--rmm-nav-top) - var(--space-gap-roomy));
+  max-height: calc(100dvh - var(--rmm-nav-top) - var(--space-gap-roomy));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* With the top navigation the whole page scrolls, but html, body and the
+   content area each use overflow-x: hidden, which makes them scroll
+   containers that never scroll, so position: sticky never engages. On this
+   page clip them instead (still no sideways scroll, but no scroll container)
+   and pin the list below the sticky top bar, whose height rmm_library.js
+   keeps in --rmm-topbar-height. */
+html:has(body.navigation--top .rmm-library),
+body.navigation--top:has(.rmm-library) {
+  overflow-x: clip;
+  overflow-y: visible;
+}
+
+body.navigation--top .layout__content:has(.rmm-library) {
+  overflow-x: clip;
+  overflow-y: visible;
+}
+
+body.navigation--top .rmm-library {
+  --rmm-nav-top: calc(var(--rmm-topbar-height, 4.5rem) + var(--space-gap-roomy));
+}
+
+/* Folder tree */
+.rmm-tree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+}
+
+.rmm-tree__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-gap-tight);
+}
+
+.rmm-tree__header .ce-nav__group-title { margin: 0; }
+
+.rmm-tree__actions {
+  display: flex;
+  gap: 0.15rem;
+}
+
+.rmm-tree__toggle {
+  padding: 0.1rem 0.35rem;
+  border: 0;
+  border-radius: var(--hf-radius-sm);
+  background: transparent;
+  color: var(--hf-muted);
+  font: inherit;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.rmm-tree__toggle:hover { color: var(--hf-copy-strong); background: color-mix(in srgb, var(--hf-muted) 12%, transparent); }
+
+.rmm-tree__toggle:focus-visible,
+.rmm-tree__summary:focus-visible {
+  outline: 2px solid var(--hf-focus);
+  outline-offset: 1px;
+}
+
+.rmm-tree__children {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Nested levels indent under their folder, with a guide line. */
+.rmm-tree__folder > .rmm-tree__children {
+  margin: 2px 0 0 0.95rem;
+  padding-left: 0.45rem;
+  border-left: 1px solid var(--hf-line-soft);
+}
+
+.rmm-tree__summary {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--hf-radius-sm);
+  color: var(--hf-copy);
+  font-size: 0.88rem;
+  font-weight: 600;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.rmm-tree__summary::-webkit-details-marker { display: none; }
+
+.rmm-tree__summary:hover {
+  background: color-mix(in srgb, var(--hf-muted) 12%, transparent);
+  color: var(--hf-copy-strong);
+}
+
+.rmm-tree__chevron,
+.rmm-tree__icon {
+  flex: 0 0 auto;
+  width: 0.9rem;
+  height: 0.9rem;
+  color: var(--hf-muted);
+}
+
+.rmm-tree__chevron { transition: transform 0.15s ease; }
+
+.rmm-tree__folder[open] > .rmm-tree__summary .rmm-tree__chevron { transform: rotate(90deg); }
+
+.rmm-tree__folder[open] > .rmm-tree__summary .rmm-tree__icon { color: var(--hf-accent); }
+
+.rmm-tree__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rmm-tree__script { font-size: 0.86rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rmm-tree__chevron { transition: none; }
+}
+
+/* Below 1024px the list stacks above the details (as on Edit company), so it is
+   not pinned; it keeps a bounded height of its own. */
 @media (max-width: 1024px) {
-  .rmm-nav {
+  .rmm-library .rmm-nav {
+    position: static;
     max-height: 22rem;
-    overflow-y: auto;
   }
 }
 
