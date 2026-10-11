@@ -65,10 +65,10 @@ sudo installer -pkg /tmp/myportal-tray.pkg -target /</code></pre>
 
       <div class="callout callout--info">
         <h2 class="callout__title">Bulk Tactical RMM sync</h2>
-        <p>Generate missing company-scoped tray install tokens and publish the new token values to the Tactical RMM client custom field <code>{{ trmm_token_field_name }}</code>. Companies without a Tactical RMM client ID are skipped, and existing token values are not re-sent because MyPortal only stores their hashes.</p>
+        <p>Publish a valid company-scoped tray install token to the Tactical RMM client custom field <code>{{ trmm_token_field_name }}</code> so the RMM install script can deploy the tray agent and enrol the endpoint. Companies without a Tactical RMM client ID are skipped. A company is only updated when its client does not already carry an active token for that company — raw token values are stored as hashes, so a token that was never published is replaced rather than re-sent.</p>
         <form method="post" action="/admin/tray/install-tokens/sync-tactical-rmm" class="inline-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-          <button type="submit" disabled class="button button--secondary" data-confirm="Generate missing tray install tokens and sync them to Tactical RMM?">Generate missing tokens and sync to Tactical RMM</button>
+          <button type="submit" class="button button--secondary" data-confirm="Publish tray install tokens to Tactical RMM so endpoints can enrol?">Publish tokens to Tactical RMM</button>
         </form>
       </div>
     </div>

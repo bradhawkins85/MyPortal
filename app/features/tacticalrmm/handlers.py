@@ -229,6 +229,7 @@ async def admin_sync_tray_tokens_to_tactical_rmm(request: Request):
             task_id=task_id,
             processed=summary.get("processed"),
             updated=summary.get("updated"),
+            already_synced=summary.get("already_synced"),
             skipped=len(summary.get("skipped") or []),
             errors=len(summary.get("errors") or []),
         )

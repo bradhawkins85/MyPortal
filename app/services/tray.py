@@ -174,6 +174,19 @@ async def ensure_company_install_token(
     return record, raw_token
 
 
+def _is_active_install_token(record: dict[str, Any] | None) -> bool:
+    """Return ``True`` when ``record`` is an unrevoked, unexpired install token."""
+
+    if not record or record.get("revoked_at"):
+        return False
+    expires_at = record.get("expires_at")
+    if isinstance(expires_at, datetime):
+        aware = expires_at.replace(tzinfo=expires_at.tzinfo or timezone.utc)
+        if aware < datetime.now(timezone.utc):
+            return False
+    return True
+
+
 def _extract_trmm_custom_field_id(
     client: dict[str, Any], field_name: str
 ) -> int | None:
@@ -229,6 +242,29 @@ def _extract_trmm_client_custom_field_definition_id(
         if field_id is not None:
             return field_id
     return None
+
+
+async def _resolve_trmm_client_custom_field_id(
+    client: dict[str, Any], field_name: str
+) -> int | None:
+    """Resolve the definition ID for ``field_name`` on a Tactical RMM client.
+
+    The client payload identifies custom-field values by numeric definition ID
+    in the ``field`` property and often omits the field name, so when the name
+    is not present we fall back to the ``/core/customfields/`` catalogue.
+    """
+
+    from app.services import tacticalrmm as tacticalrmm_service
+
+    field_id = _extract_trmm_custom_field_id(client, field_name)
+    if field_id is None:
+        definitions = await tacticalrmm_service._call_endpoint(
+            "/core/customfields/", method="GET"
+        )
+        field_id = _extract_trmm_client_custom_field_definition_id(
+            definitions, field_name
+        )
+    return field_id
 
 
 def _build_trmm_client_custom_field_payload(
@@ -290,14 +326,7 @@ async def update_trmm_client_token_field(
     )
     if not isinstance(client, dict):
         client = {}
-    field_id = _extract_trmm_custom_field_id(client, custom_field_name)
-    if field_id is None:
-        definitions = await tacticalrmm_service._call_endpoint(
-            "/core/customfields/", method="GET"
-        )
-        field_id = _extract_trmm_client_custom_field_definition_id(
-            definitions, custom_field_name
-        )
+    field_id = await _resolve_trmm_client_custom_field_id(client, custom_field_name)
     if field_id is None:
         raise ValueError(
             f'Tactical RMM client custom field "{custom_field_name}" was not found'
@@ -317,12 +346,73 @@ async def update_trmm_client_token_field(
     )
 
 
+async def read_trmm_client_token_field(
+    *,
+    trmm_client_id: str | int,
+    field_name: str | None = None,
+) -> str | None:
+    """Return the current value of the tray-token field on a TRMM client.
+
+    Returns ``None`` when the client has no value for the field (or the field
+    cannot be resolved). Used to make the token sync idempotent: if the field
+    already carries a valid MyPortal token we skip rather than mint a new one.
+    """
+
+    from app.services import tacticalrmm as tacticalrmm_service
+
+    client_id = str(trmm_client_id or "").strip()
+    if not client_id:
+        return None
+    custom_field_name = (field_name or trmm_client_token_field_name()).strip()
+    if not custom_field_name:
+        return None
+
+    client = await tacticalrmm_service._call_endpoint(
+        f"/clients/{client_id}/", method="GET"
+    )
+    if not isinstance(client, dict):
+        return None
+    field_id = await _resolve_trmm_client_custom_field_id(
+        client, custom_field_name
+    )
+    if field_id is None:
+        return None
+    for existing in client.get("custom_fields") or []:
+        if not isinstance(existing, dict):
+            continue
+        if _coerce_positive_int(existing.get("field")) == field_id:
+            value = existing.get("value")
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+async def _publish_token_to_trmm(
+    *, trmm_client_id: str, token: str, company_id: int
+) -> None:
+    await update_trmm_client_token_field(trmm_client_id=trmm_client_id, token=token)
+    log_info(
+        "Published tray enrolment token to Tactical RMM client custom field",
+        company_id=company_id,
+        trmm_client_id=trmm_client_id,
+        field=trmm_client_token_field_name(),
+    )
+
+
 async def sync_company_trmm_tray_token(
     *,
     company_id: int,
     created_by_user_id: int | None = None,
 ) -> dict[str, Any]:
-    """Ensure a MyPortal tray token exists and publish it to TRMM for a company."""
+    """Ensure a MyPortal tray token is published to TRMM for a company.
+
+    The Tactical RMM install script reads this token to install the tray agent
+    and enrol the endpoint, so a valid, company-scoped token must be present on
+    the TRMM client. The sync is idempotent: it only mints and publishes a new
+    token when the client does not already carry this company's active token.
+    Raw token values are stored only as hashes, so an existing token that has
+    never been published cannot be re-sent and is replaced instead.
+    """
 
     company = await companies_repo.get_company_by_id(int(company_id))
     if not company:
@@ -342,25 +432,56 @@ async def sync_company_trmm_tray_token(
     token_record, raw_token = await ensure_company_install_token(
         company_id=int(company_id), created_by_user_id=created_by_user_id
     )
-    if raw_token is None:
+
+    # A brand-new token was just minted: publish it.
+    if raw_token is not None:
+        await _publish_token_to_trmm(
+            trmm_client_id=trmm_client_id,
+            token=raw_token,
+            company_id=int(company_id),
+        )
         return {
-            "status": "skipped",
-            "reason": "existing_token_value_not_recoverable",
+            "status": "updated",
             "company_id": company_id,
             "token_id": token_record.get("id"),
         }
 
-    await update_trmm_client_token_field(trmm_client_id=trmm_client_id, token=raw_token)
-    log_info(
-        "Published tray enrolment token to Tactical RMM client custom field",
-        company_id=company_id,
-        trmm_client_id=trmm_client_id,
-        field=trmm_client_token_field_name(),
+    # An active token already exists, but its raw value is unrecoverable. If the
+    # TRMM client already carries this company's active token the endpoint can
+    # enrol, so there is nothing to do.
+    current_value = await read_trmm_client_token_field(trmm_client_id=trmm_client_id)
+    if current_value:
+        current_record = await tray_repo.get_install_token_by_hash(
+            hash_token(current_value)
+        )
+        if _is_active_install_token(current_record) and int(
+            current_record.get("company_id") or 0
+        ) == int(company_id):
+            return {
+                "status": "skipped",
+                "reason": "already_synced",
+                "company_id": company_id,
+                "token_id": current_record.get("id"),
+            }
+
+    # The existing token was never published to this TRMM client (for example
+    # the client was linked after the token was created). Its value cannot be
+    # re-sent, so mint a replacement and publish it.
+    raw_token = generate_install_token()
+    record = await tray_repo.create_install_token(
+        label=f"{company.get('name') or 'Company'} TRMM tray token"[:150],
+        company_id=int(company_id),
+        token_hash=hash_token(raw_token),
+        token_prefix=token_prefix(raw_token),
+        created_by_user_id=created_by_user_id,
+    )
+    await _publish_token_to_trmm(
+        trmm_client_id=trmm_client_id, token=raw_token, company_id=int(company_id)
     )
     return {
         "status": "updated",
         "company_id": company_id,
-        "token_id": token_record.get("id"),
+        "token_id": record.get("id"),
     }
 
 
@@ -373,6 +494,7 @@ async def sync_all_company_trmm_tray_tokens(
     summary: dict[str, Any] = {
         "processed": 0,
         "updated": 0,
+        "already_synced": 0,
         "skipped": [],
         "errors": [],
     }
@@ -389,6 +511,8 @@ async def sync_all_company_trmm_tray_tokens(
                 summary["updated"] += 1
             else:
                 summary["skipped"].append(result)
+                if result.get("reason") == "already_synced":
+                    summary["already_synced"] += 1
         except Exception as exc:  # pragma: no cover - defensive integration logging
             log_error(
                 "Failed to sync tray token to Tactical RMM",
