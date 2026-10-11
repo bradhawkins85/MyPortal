@@ -39,21 +39,22 @@
           </li>
         </ul>
       </div>
-      {% for group in script_groups %}
-      <div class="ce-nav__group" data-rmm-group>
-        <p class="ce-nav__group-title rmm-nav__folder" id="rmm-folder-{{ loop.index }}">{{ group.folder or 'Scripts' }}</p>
-        <ul class="ce-nav__list" aria-labelledby="rmm-folder-{{ loop.index }}">
-          {% for script in group.scripts %}
-          <li data-rmm-script-item data-search="{{ (script.name ~ ' ' ~ script.path ~ ' ' ~ script.description ~ ' ' ~ script.language_label) | lower }}">
-            <a class="ce-nav__link" href="/rmm/scripts?script={{ script.id }}" data-rmm-nav-link data-rmm-script-link="{{ script.id }}"{% if selected and selected.id == script.id %} aria-current="true"{% endif %} title="{{ script.path }}">
-              <span class="ce-nav__label">{{ script.name }}</span>
-              <span class="rmm-chip rmm-chip--{{ script.language }} rmm-nav__language">{{ script.language_label }}</span>
-            </a>
-          </li>
-          {% endfor %}
+      {% set tree = script_tree if script_tree is defined else none %}
+      {% if tree and tree.count %}
+      <div class="ce-nav__group rmm-tree" data-rmm-tree>
+        <div class="rmm-tree__header">
+          <p class="ce-nav__group-title" id="rmm-tree-title">Folders</p>
+          <div class="rmm-tree__actions">
+            <button type="button" class="rmm-tree__toggle" data-rmm-tree-expand hidden>Expand all</button>
+            <button type="button" class="rmm-tree__toggle" data-rmm-tree-collapse hidden>Collapse all</button>
+          </div>
+        </div>
+        <ul class="rmm-tree__children rmm-tree__root" aria-labelledby="rmm-tree-title">
+          {{ rmm.script_tree(tree, selected.folder if selected else none, selected.id if selected else none) }}
+          {%- for script in tree.scripts %}{{ rmm.script_link(script, selected.id if selected else none) }}{% endfor %}
         </ul>
       </div>
-      {% endfor %}
+      {% endif %}
       {% if not script_groups %}<p class="ce-nav__empty">No scripts loaded yet.</p>{% endif %}
       <p class="ce-nav__empty" data-rmm-script-empty hidden>No scripts match your search.</p>
     </nav>
@@ -89,7 +90,7 @@
           </div>
         </section>
         {% else %}
-        <p class="text-muted rmm-library__hint">Pick a script on the left to see what it does, the values it asks for, its recent runs and its source.</p>
+        <p class="text-muted rmm-library__hint">Pick a script from the list to see what it does, the values it asks for, its recent runs and its source.</p>
         {% endif %}
 
         <section class="card card--panel ce-section" aria-labelledby="rmm-runs-heading">
