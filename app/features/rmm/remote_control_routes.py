@@ -56,6 +56,7 @@ async def settings_page(request: Request):
         extra={
             "title": "Remote control",
             "providers": await remote_control.load_settings(),
+            "rustdesk_env": remote_control.rustdesk_environment(),
             "scripts": [{"id": script["id"], "name": script["name"], "path": script["path"]} for script in scripts],
             "variables": await rmm_scripts.available_variables(),
         },
@@ -115,6 +116,7 @@ async def providers_for_company(request: Request, user: dict, company_id: int | 
 
 class StartRequest(BaseModel):
     provider: Literal["rustdesk", "meshcentral"]
+    mode: Literal["remote", "file_transfer", "terminal"] = "remote"
 
 
 @router.post("/api/rmm/assets/{asset_id:int}/remote-control", summary="Switch on remote control for a device")
@@ -126,7 +128,11 @@ async def start_session(asset_id: int, payload: StartRequest, request: Request):
     user = await _company_user(request, company_id)
     try:
         session = await remote_control.start(
-            provider=payload.provider, company_id=company_id, asset_id=asset_id, user_id=user.get("id")
+            provider=payload.provider,
+            company_id=company_id,
+            asset_id=asset_id,
+            user_id=user.get("id"),
+            mode=payload.mode,
         )
     except remote_control.RemoteControlError as exc:
         return JSONResponse({"detail": exc.message}, status_code=400)
@@ -136,7 +142,7 @@ async def start_session(asset_id: int, payload: StartRequest, request: Request):
         user_id=user.get("id"),
         entity_type="asset",
         entity_id=asset_id,
-        metadata={"provider": payload.provider, "session_id": session["id"], "run_id": session.get("run_id")},
+        metadata={"provider": payload.provider, "mode": payload.mode, "session_id": session["id"], "run_id": session.get("run_id")},
     )
     return {"session": session}
 

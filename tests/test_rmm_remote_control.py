@@ -33,6 +33,14 @@ def test_rustdesk_links_strip_spaces_and_quote_the_password():
     assert remote.rustdesk_url("123456789", "p&ss word") == "rustdesk://connection/new/123456789?password=p%26ss%20word"
     with pytest.raises(remote.RemoteControlError):
         remote.rustdesk_url("123/../evil")
+    assert remote.rustdesk_url("42", "pw", "file_transfer") == "rustdesk://file-transfer/42?password=pw"
+    assert remote.rustdesk_url("42", None, "terminal") == "rustdesk://terminal/42"
+
+
+def test_meshcentral_modes_pick_the_device_view():
+    views = {mode: parse_qs(urlsplit(remote.meshcentral_url("https://m.example.com", "t", KEY, "n", mode=mode)).query)["viewmode"]
+             for mode in ("remote", "file_transfer", "terminal")}
+    assert views == {"remote": ["11"], "file_transfer": ["13"], "terminal": ["12"]}
 
 
 def test_meshcentral_link_carries_a_token_meshcentral_can_decrypt():
@@ -202,6 +210,7 @@ def test_settings_page_renders_providers_and_script_values():
              "fields": []},
         ],
         scripts=[{"id": 1, "name": "Activate", "path": "rmm/Common/Activate.ps1"}],
+        rustdesk_env={"cfg_set": True, "installer_set": False},
         variables=[{"group": "Company variables", "label": "Key", "token": "{{company.variables.Key}}"}],
     )
     assert 'action="/rmm/remote-control/rustdesk"' in html and 'action="/rmm/remote-control/meshcentral"' in html
@@ -254,14 +263,71 @@ async def test_ticket_buttons_follow_the_tickets_company_permission(sqlite_db, m
     assert denied.value.status_code == 403
 
 
-def test_asset_menu_groups_rmm_actions():
+def test_asset_menu_has_a_rustdesk_split_button_and_an_rmm_menu():
     env = _environment()
     template = env.from_string(
         '{% import "rmm/_macros.html" as rmm_ui %}{{ rmm_ui.asset_menu(7, "<PC>", providers, run_script=run) }}'
     )
     providers = [{"provider": "rustdesk", "label": "RustDesk"}, {"provider": "meshcentral", "label": "MeshCentral"}]
     html = template.render(providers=providers, run=True)
-    assert html.count('role="menuitem"') == 3 and "data-rmm-menu" in html
-    assert 'data-rmm-remote="meshcentral" data-rmm-remote-asset="7" data-rmm-remote-name="&lt;PC&gt;"' in html
-    assert "data-rmm-run-open" in html and "<PC>" not in html
-    assert "data-rmm-run-open" not in template.render(providers=providers, run=False)
+    # RustDesk: the button starts a remote desktop session, its menu all three kinds.
+    assert 'class="button button--ghost button--small rmm-split__main" data-rmm-remote="rustdesk" data-rmm-remote-mode="remote"' in html
+    for mode in ("remote", "file_transfer", "terminal"):
+        assert f'data-rmm-remote="rustdesk" data-rmm-remote-mode="{mode}"' in html
+        assert f'data-rmm-remote="meshcentral" data-rmm-remote-mode="{mode}"' in html
+    assert html.count('role="menuitem"') == 7 and html.count("data-rmm-menu") == 2
+    assert 'data-rmm-remote-name="&lt;PC&gt;"' in html and "<PC>" not in html
+    assert "data-rmm-run-open" in html
+    rustdesk_only = template.render(providers=providers[:1], run=False)
+    assert "rmm-split" in rustdesk_only and "RMM actions" not in rustdesk_only
+
+
+@pytest.mark.anyio
+async def test_builtin_rustdesk_applies_the_config_and_its_own_password(sqlite_db, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "rustdesk_cfg", "=0nI9cfgString")
+    monkeypatch.setattr(get_settings(), "rustdesk_installer_url", "")
+    await remote.save_settings("rustdesk", {"is_enabled": "1"}, user_id=9)
+    assert (await remote.load_settings())[0]["builtin"] is True
+    _r, agent = await _enrol(sqlite_db)
+
+    session = await remote.start(provider="rustdesk", company_id=1, asset_id=10, user_id=9, mode="file_transfer")
+    assert session["status"] == "activating" and session["mode"] == "file_transfer"
+    run = await rmm_repo.get_run(session["run_id"])
+    assert run["script_name"] == "RustDesk (built-in)" and run["run_source"] == "remote_control"
+    assert run["script_id"] is None and run["inputs"] == []
+    job = (await rmm_scripts.wait_for_jobs(agent, wait_seconds=0))[0]
+    assert job["language"] == "powershell" and "--get-id" in job["script"]
+    password = job["env"]["MYPORTAL_RUSTDESK_PASSWORD"]
+    assert job["env"]["RUSTDESK_CFG"] == "=0nI9cfgString" and "RUSTDESK_INSTALLER_URL" not in job["env"]
+    assert len(password) >= 16
+
+    await rmm_scripts.record_result(agent, session["run_id"], {"exit_code": 0, "stdout": "##myportal[session.id]=987 654 321\n"})
+    ready = await remote.session_status(session["id"], company_id=1, user_id=9, is_super_admin=False)
+    assert ready["status"] == "ready"
+    assert ready["launch_url"] == f"rustdesk://file-transfer/987654321?password={password}"
+    # The password never reaches run history.
+    stored = await rmm_repo.get_run(session["run_id"])
+    assert password not in json.dumps({k: str(v) for k, v in stored.items()})
+
+    # A device without RustDesk: the script's error is shown.
+    second = await remote.start(provider="rustdesk", company_id=1, asset_id=10, user_id=9)
+    await rmm_scripts.wait_for_jobs(agent, wait_seconds=0)
+    await rmm_scripts.record_result(agent, second["run_id"], {
+        "exit_code": 1, "stderr": "\nRustDesk is not installed on this device.\nAt line:12 char:9\n"})
+    failed = await remote.session_status(second["id"], company_id=1, user_id=9, is_super_admin=False)
+    assert failed["status"] == "failed" and "RustDesk is not installed on this device." in failed["error"]
+
+    with pytest.raises(remote.RemoteControlError, match="RMM agent"):
+        await remote.start(provider="rustdesk", company_id=1, asset_id=11, user_id=9)
+
+
+def test_builtin_scripts_ship_for_windows_and_unix():
+    windows = remote.builtin_rustdesk_script({"os": "windows"})
+    mac = remote.builtin_rustdesk_script({"os": "darwin"})
+    assert windows["language"] == "powershell" and windows["path"].endswith(".ps1")
+    assert mac["language"] == "bash" and mac["content"].startswith("#!/bin/bash")
+    for script in (windows, mac):
+        assert "RUSTDESK_CFG" in script["content"] and "MYPORTAL_RUSTDESK_PASSWORD" in script["content"]
+        assert "##myportal[session.id]=" in script["content"]

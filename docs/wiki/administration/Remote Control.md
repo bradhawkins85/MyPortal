@@ -1,30 +1,54 @@
 # Remote Control
 
-Technicians connect to a device with **RustDesk** or **MeshCentral** from the **RMM** menu
-on the asset's **Scripts** card, or next to each asset linked to a ticket
-(`/admin/tickets/<id>`). Neither tool has to be running all the time: MyPortal runs an **activation
-script** on the device through the RMM agent, the script switches the tool on and reports how to
-connect, and MyPortal opens the session.
+Technicians connect to a device with **RustDesk** or **MeshCentral** from the asset's
+**Scripts** card, or beside each asset linked to a ticket (`/admin/tickets/<id>`). Neither tool
+has to be running all the time: MyPortal runs an **activation script** on the device through the
+RMM agent, the script switches the tool on and reports how to connect, and MyPortal opens the
+session for the technician.
 
-The activation script decides what the device needs:
+## RustDesk
 
-- **Already installed:** start the service, reset the access password and report the ID.
-- **Not installed:** install it with the company's settings first, then do the same.
+RustDesk works out of the box with MyPortal's **built-in activation script**. Add the RustDesk
+server config to MyPortal's `.env` file:
+
+```bash
+# RustDesk > Settings > Network > Export server config
+RUSTDESK_CFG=0nI9...
+# Optional: installer used on Windows devices without RustDesk
+RUSTDESK_INSTALLER_URL=https://downloads.example.com/rustdesk-x86_64.exe
+```
+
+When a technician starts a RustDesk session, the RMM agent:
+
+1. installs RustDesk from `RUSTDESK_INSTALLER_URL` if it is missing (Windows only);
+2. applies `RUSTDESK_CFG` (`rustdesk --config`), so the device uses your RustDesk server;
+3. starts the RustDesk service;
+4. sets a new one-time password that MyPortal generated for this session;
+5. reports the RustDesk ID.
+
+MyPortal then opens the session in the technician's RustDesk app. Every session sets a new
+password, so an earlier session's password stops working. The built-in script runs on Windows
+(PowerShell) and on macOS and Linux (Bash). Without `RUSTDESK_CFG` the device keeps its current
+RustDesk server settings.
+
+To do something different, choose your own activation script instead (see
+[Your own activation script](#your-own-activation-script)).
 
 ## Setting it up
 
 Super admins set it up under **Scripts → Remote control** (`/rmm/remote-control`). For each
 provider:
 
-1. Add the activation script to the Gitea repository's `Common/` folder (examples below) and
-   choose **Sync from Gitea**. Only `Common/` scripts are offered, as they run on every
-   company's devices.
-2. Turn the provider on, choose the script and save. The script's parameters then appear under
-   **Script values**. Fill them in with typed values or MyPortal variables, such as
-   `{{company.variables.RustDeskConfig}}`, so each company installs with its own settings.
-   Secret values are kept encrypted; leave them blank to keep the saved value.
-3. Optionally name an **ID custom field**. MyPortal uses that asset custom field when the
-   script does not report an ID, or when no script is chosen at all.
+1. Turn it on. RustDesk uses the built-in script unless you choose another; MeshCentral needs
+   a script that reports the node ID, or the ID custom field below.
+2. To use your own script, add it to the Gitea repository's `Common/` folder and choose
+   **Sync from Gitea**, then choose it and save. Only `Common/` scripts are offered, as they
+   run on every company's devices. The script's parameters then appear under **Script
+   values**. Fill them in with typed values or MyPortal variables, such as
+   `{{company.variables.RustDeskConfig}}`, so each company can use its own settings. Secret
+   values are kept encrypted; leave them blank to keep the saved value.
+3. Optionally name an **ID custom field**. MyPortal uses that asset custom field when a device
+   has no RMM agent, or when the script does not report an ID.
 
 MeshCentral also needs:
 
@@ -36,26 +60,35 @@ MeshCentral also needs:
 
 ## Connecting
 
-Each asset has one **RMM** menu holding its RMM actions: on the asset page it sits on the
-**Scripts** card (with **Run script**), and on a ticket it sits beside each linked asset.
-**Connect with RustDesk** or **Connect with MeshCentral** queues the activation script and
-shows its progress. When the script finishes, **Open RustDesk** (or **Open
-MeshCentral**) appears:
+Beside each asset (on its **Scripts** card, and in a ticket's asset list):
 
-- RustDesk opens the desktop app with a `rustdesk://` link carrying the ID and password.
-- MeshCentral opens in a new tab already signed in and goes straight to the device's desktop.
-  Without a node ID it opens MeshCentral signed in.
+- **RustDesk** starts a remote desktop session. The **▾** beside it offers **Remote desktop**,
+  **File transfer** and **Terminal** sessions (terminal needs RustDesk 1.4.1 or later on the
+  technician's computer).
+- The **RMM** menu holds MeshCentral (desktop, files or terminal), **Run script** on the asset
+  page, and future RMM actions.
+
+MyPortal shows the activation script's progress, then opens the session as soon as the device
+reports back: RustDesk through a `rustdesk://` link carrying the ID and password (the browser may
+ask to open RustDesk the first time), MeshCentral in a new tab already signed in on the device.
+An **Open … again** button stays in case the browser blocked it.
 
 The device must be online: an activation script the device has not collected within 10 minutes
-expires. A session's link, and any password the script reported, is kept encrypted for 30
-minutes and is only shown to the technician who started it (and super admins).
+expires. A session's link and password are kept encrypted for 30 minutes and only shown to the
+technician who started it (and super admins).
 
 Connecting needs write access to **Scripts** for the device's company (on a ticket, the
 ticket's company, whichever company is selected). Each connection is recorded in the
 audit trail as `rmm.remote_control.start`, and the activation run appears in the device's run
 history as **Remote control**.
 
-## What the script reports
+## Your own activation script
+
+Your own script decides what the device needs, for example installing the tool with the
+company's settings when it is missing, otherwise resetting the access password, then
+reporting how to connect.
+
+### What the script reports
 
 Print `session` values the same way as other [returned values](RMM%20Scripts.md#returning-values-to-myportal):
 
@@ -69,7 +102,7 @@ Or write `[{"scope": "session", "name": "id", "value": "123456789"}]` to
 `$MYPORTAL_RESULT_FILE`. The values are blanked out of the run's output and shown masked in run
 history. Other scripts cannot use `session` values.
 
-## Example: RustDesk (Windows)
+### Example: RustDesk (Windows)
 
 ```powershell
 <#
@@ -106,7 +139,7 @@ Write-Output "##myportal[session.id]=$id"
 Write-Output "##myportal[session.password]=$password"
 ```
 
-## Example: MeshCentral (Windows)
+### Example: MeshCentral (Windows)
 
 ```powershell
 <#

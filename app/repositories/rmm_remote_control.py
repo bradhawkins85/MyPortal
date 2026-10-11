@@ -9,6 +9,7 @@ from typing import Any
 from app.core.database import db
 
 PROVIDERS = ("rustdesk", "meshcentral")
+MODES = ("remote", "file_transfer", "terminal")
 
 
 def _utcnow() -> datetime:
@@ -77,11 +78,14 @@ async def create_session(
     agent_id: int | None,
     requested_by_user_id: int | None,
     expires_at: datetime,
+    mode: str = "remote",
+    values_encrypted: str | None = None,
 ) -> int:
     return await db.execute_returning_lastrowid(
-        "INSERT INTO rmm_remote_sessions (provider, company_id, asset_id, agent_id, requested_by_user_id, "
-        "status, created_at, expires_at) VALUES (%s, %s, %s, %s, %s, 'activating', %s, %s)",
-        (provider, company_id, asset_id, agent_id, requested_by_user_id, _utcnow(), expires_at),
+        "INSERT INTO rmm_remote_sessions (provider, mode, company_id, asset_id, agent_id, requested_by_user_id, "
+        "status, values_encrypted, created_at, expires_at) VALUES (%s, %s, %s, %s, %s, %s, 'activating', %s, %s, %s)",
+        (provider, mode, company_id, asset_id, agent_id, requested_by_user_id, values_encrypted, _utcnow(),
+         expires_at),
     )
 
 
@@ -91,7 +95,7 @@ async def set_session_run(session_id: int, run_id: int) -> None:
 
 async def get_session(session_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
-        "SELECT id, provider, company_id, asset_id, agent_id, run_id, requested_by_user_id, status, "
+        "SELECT id, provider, mode, company_id, asset_id, agent_id, run_id, requested_by_user_id, status, "
         "values_encrypted, error_message, created_at, ready_at, expires_at FROM rmm_remote_sessions WHERE id = %s",
         (session_id,),
     )
@@ -99,7 +103,9 @@ async def get_session(session_id: int) -> dict[str, Any] | None:
 
 
 async def get_session_for_run(run_id: int) -> dict[str, Any] | None:
-    row = await db.fetch_one("SELECT id, status FROM rmm_remote_sessions WHERE run_id = %s", (run_id,))
+    row = await db.fetch_one(
+        "SELECT id, status, values_encrypted FROM rmm_remote_sessions WHERE run_id = %s", (run_id,)
+    )
     return dict(row) if row else None
 
 

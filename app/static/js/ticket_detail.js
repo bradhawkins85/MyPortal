@@ -1195,39 +1195,6 @@
       return `${tacticalBaseUrl}/?search=${encodeURIComponent(trimmed)}`;
     }
 
-    // Same markup as the rmm/_macros.html asset_menu macro.
-    function buildRmmMenu(assetIdValue, displayName) {
-      const menu = document.createElement('details');
-      menu.className = 'rmm-menu';
-      menu.setAttribute('data-rmm-menu', '');
-      const toggle = document.createElement('summary');
-      toggle.className = 'button button--ghost button--small rmm-menu__toggle';
-      toggle.title = 'RMM actions';
-      toggle.setAttribute('aria-label', `RMM actions for ${displayName}`);
-      toggle.innerHTML = 'RMM <span aria-hidden="true">▾</span>';
-      menu.appendChild(toggle);
-      const panel = document.createElement('div');
-      panel.className = 'dropdown__menu rmm-menu__panel';
-      panel.setAttribute('role', 'menu');
-      panel.setAttribute('aria-label', `RMM actions for ${displayName}`);
-      remoteProviders.forEach((remote) => {
-        if (!remote || !remote.provider) {
-          return;
-        }
-        const item = document.createElement('button');
-        item.type = 'button';
-        item.className = 'dropdown__item';
-        item.setAttribute('role', 'menuitem');
-        item.setAttribute('data-rmm-remote', remote.provider);
-        item.setAttribute('data-rmm-remote-asset', assetIdValue);
-        item.setAttribute('data-rmm-remote-name', displayName);
-        item.textContent = `Connect with ${remote.label}`;
-        panel.appendChild(item);
-      });
-      menu.appendChild(panel);
-      return menu;
-    }
-
     function renderLinkedAssets() {
       if (!linkedList) {
         return;
@@ -1326,8 +1293,9 @@
           actions.appendChild(tacticalAction);
         }
 
-        if (remoteProviders.length) {
-          actions.appendChild(buildRmmMenu(assetIdValue, displayName));
+        // RustDesk / MeshCentral actions, built by rmm_remote_control.js.
+        if (remoteProviders.length && window.MyPortalRmm && window.MyPortalRmm.assetActions) {
+          actions.appendChild(window.MyPortalRmm.assetActions(assetIdValue, displayName, remoteProviders));
         }
 
         const chatButton = document.createElement('button');

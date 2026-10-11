@@ -11,10 +11,13 @@
 -- entries_encrypted holds the values given to the script's parameters (such as
 -- {{company.variables.RustDeskKey}} for installing on devices without the tool).
 --
--- rmm_remote_sessions is one technician's request to connect to a device. The
--- activation script runs as an RMM run (run_source 'remote_control') and prints
--- ##myportal[session.id]=... lines; values_encrypted keeps what it returned
--- (it may include a one-time password) until the session expires.
+-- rmm_remote_sessions is one technician's request to connect to a device, as a
+-- remote desktop, file transfer or terminal session (mode). The activation
+-- script runs as an RMM run (run_source 'remote_control') and prints
+-- ##myportal[session.id]=... lines. Without a chosen script, RustDesk uses
+-- MyPortal's built-in one, which applies RUSTDESK_CFG and sets a one-time
+-- password MyPortal generates. values_encrypted keeps the ID and password until
+-- the session expires.
 
 CREATE TABLE IF NOT EXISTS rmm_remote_control_providers (
   provider VARCHAR(16) NOT NULL PRIMARY KEY,
@@ -33,6 +36,7 @@ CREATE TABLE IF NOT EXISTS rmm_remote_control_providers (
 CREATE TABLE IF NOT EXISTS rmm_remote_sessions (
   id INT AUTO_INCREMENT PRIMARY KEY,
   provider VARCHAR(16) NOT NULL,
+  mode VARCHAR(16) NOT NULL DEFAULT 'remote',
   company_id INT NOT NULL,
   asset_id INT NOT NULL,
   agent_id INT NULL,

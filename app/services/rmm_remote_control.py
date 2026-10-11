@@ -21,17 +21,29 @@ When a technician clicks Connect on an asset:
    ``rustdesk://`` link, or a MeshCentral address carrying a login token made
    from the server's login token key (``meshcentral --logintokenkey``).
 
-Without an activation script, the device's ID comes from an asset custom
-field. A MeshCentral session without a node ID opens MeshCentral signed in.
+Without a chosen script, RustDesk uses MyPortal's built-in one
+(``rmm_builtin/rustdesk_activate.*``): it applies ``RUSTDESK_CFG`` from the
+.env file, starts the RustDesk service, sets a one-time password MyPortal
+generates and reports the ID. A device without the RMM agent falls back to an
+asset custom field holding its ID. A MeshCentral session without a node ID
+opens MeshCentral signed in.
+
+Each session is a remote desktop, file transfer or terminal session (``mode``),
+which only changes the launch link. The asset and ticket pages open the link
+for the technician as soon as it is ready.
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
+import secrets
 import time
+from functools import lru_cache
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 from urllib.parse import quote, urlencode, urlsplit
@@ -40,11 +52,19 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_remote_control as remote_repo
+from app.core.config import get_settings
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import rmm_scripts
 
 PROVIDERS = remote_repo.PROVIDERS
 PROVIDER_LABELS = {"rustdesk": "RustDesk", "meshcentral": "MeshCentral"}
+MODES = remote_repo.MODES
+MODE_LABELS = {"remote": "Remote desktop", "file_transfer": "File transfer", "terminal": "Terminal"}
+# rustdesk://<action>/<id> per session type (RustDesk 1.4.1 or later for terminal).
+_RUSTDESK_ACTIONS = {"remote": "connection/new", "file_transfer": "file-transfer", "terminal": "terminal"}
+# MeshCentral's device view: 11 desktop, 12 terminal, 13 files.
+_MESH_VIEWMODES = {"remote": "11", "file_transfer": "13", "terminal": "12"}
+_BUILTIN_DIR = Path(__file__).resolve().parent / "rmm_builtin"
 # How long a session's link (and any one-time password) stays available.
 SESSION_LIFETIME = timedelta(minutes=30)
 # An offline device should fail fast rather than switch remote control on hours later.
@@ -78,12 +98,12 @@ def _utcnow() -> datetime:
 # --------------------------------------------------------------------------- #
 
 
-def rustdesk_url(remote_id: str, password: str | None = None) -> str:
+def rustdesk_url(remote_id: str, password: str | None = None, mode: str = "remote") -> str:
     # RustDesk shows IDs in groups ("123 456 789").
     cleaned = re.sub(r"\s+", "", remote_id or "")
     if not _RUSTDESK_ID.match(cleaned):
         raise RemoteControlError("The RustDesk ID reported for this device is not valid.")
-    url = f"rustdesk://connection/new/{cleaned}"
+    url = f"rustdesk://{_RUSTDESK_ACTIONS.get(mode, _RUSTDESK_ACTIONS['remote'])}/{cleaned}"
     if password:
         url += "?password=" + quote(password, safe="")
     return url
@@ -111,13 +131,13 @@ def meshcentral_login_token(key_hex: str, username: str, *, now: float | None = 
 
 
 def meshcentral_url(server_url: str, username: str, key_hex: str, node_id: str | None = None,
-                    *, now: float | None = None) -> str:
+                    *, mode: str = "remote", now: float | None = None) -> str:
     params = {"login": meshcentral_login_token(key_hex, username, now=now)}
     if node_id:
         node_id = node_id.strip()
         if not _MESH_NODE_ID.match(node_id):
             raise RemoteControlError("The MeshCentral node ID reported for this device is not valid.")
-        params.update({"gotonode": node_id, "viewmode": "11", "hide": "31"})
+        params.update({"gotonode": node_id, "viewmode": _MESH_VIEWMODES.get(mode, "11"), "hide": "31"})
     return server_url.rstrip("/") + "/?" + urlencode(params, safe="@$/", quote_via=quote)
 
 
@@ -161,7 +181,18 @@ def _public_provider(row: Mapping[str, Any], script: Mapping[str, Any] | None = 
         "secret_set": bool(row.get("secret_encrypted")),
         "id_field": row.get("id_field") or "",
         "fields": _script_values(script, _stored_entries(row)),
+        "builtin": row["provider"] == "rustdesk" and not row.get("activation_script_id"),
         "updated_at": row.get("updated_at"),
+    }
+
+
+def rustdesk_environment() -> dict[str, bool]:
+    """Whether RUSTDESK_CFG and RUSTDESK_INSTALLER_URL are set (never their values)."""
+
+    settings = get_settings()
+    return {
+        "cfg_set": bool((settings.rustdesk_cfg or "").strip()),
+        "installer_set": bool((settings.rustdesk_installer_url or "").strip()),
     }
 
 
@@ -235,8 +266,6 @@ async def save_settings(provider: str, form: Mapping[str, Any], *, user_id: int 
             secret = encrypt_secret(key)
         if enabled and not (server_url and username and (secret or current.get("secret_encrypted"))):
             raise RemoteControlError("MeshCentral needs its address, a user name and the login token key.")
-    elif enabled and not (script_id or id_field):
-        raise RemoteControlError("RustDesk needs an activation script or the custom field holding each device's ID.")
     await remote_repo.save_provider(
         provider,
         is_enabled=enabled,
@@ -264,9 +293,59 @@ async def _provider(provider: str) -> dict[str, Any]:
     return settings
 
 
-async def start(*, provider: str, company_id: int, asset_id: int, user_id: int | None) -> dict[str, Any]:
+@lru_cache(maxsize=None)
+def _builtin_content(name: str) -> str:
+    return (_BUILTIN_DIR / name).read_text(encoding="utf-8")
+
+
+def builtin_rustdesk_script(agent: Mapping[str, Any]) -> dict[str, Any]:
+    """MyPortal's own RustDesk activation script for the agent's operating system."""
+
+    windows = str(agent.get("os") or "windows").lower() in {"windows", ""}
+    name = "rustdesk_activate.ps1" if windows else "rustdesk_activate.sh"
+    content = _builtin_content(name)
+    return {
+        "id": None,
+        "name": "RustDesk (built-in)",
+        "path": f"builtin/{name}",
+        "language": "powershell" if windows else "bash",
+        "content": content,
+        "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+    }
+
+
+async def _queue_builtin_rustdesk(agent: Mapping[str, Any], password: str, user_id: int | None) -> int:
+    script = builtin_rustdesk_script(agent)
+    problem = rmm_scripts.device_problem(script, agent)
+    if problem:
+        raise RemoteControlError(problem)
+    config = get_settings()
+    env = {"MYPORTAL_RUSTDESK_PASSWORD": password}
+    if (config.rustdesk_cfg or "").strip():
+        env["RUSTDESK_CFG"] = config.rustdesk_cfg.strip()
+    if (config.rustdesk_installer_url or "").strip():
+        env["RUSTDESK_INSTALLER_URL"] = config.rustdesk_installer_url.strip()
+    return await rmm_repo.create_run(
+        script=script,
+        content=script["content"],
+        agent_id=int(agent["id"]),
+        company_id=int(agent["company_id"]),
+        asset_id=int(agent["asset_id"]) if agent.get("asset_id") is not None else None,
+        requested_by_user_id=user_id,
+        inputs=[],
+        payload_encrypted=encrypt_secret(json.dumps({"parameters": {}, "parameter_order": [], "env": env})),
+        timeout_seconds=MAX_ACTIVATION_TIMEOUT_SECONDS,
+        expires_at=_utcnow() + ACTIVATION_QUEUE_LIFETIME,
+        run_source=RUN_SOURCE,
+    )
+
+
+async def start(*, provider: str, company_id: int, asset_id: int, user_id: int | None,
+                mode: str = "remote") -> dict[str, Any]:
     """Queue the activation script (or resolve straight away) and return the session."""
 
+    if mode not in MODES:
+        raise RemoteControlError("Choose a remote desktop, file transfer or terminal session.")
     settings = await _provider(provider)
     label = PROVIDER_LABELS[provider]
     agent = await rmm_repo.get_asset_agent(asset_id)
@@ -279,15 +358,31 @@ async def start(*, provider: str, company_id: int, asset_id: int, user_id: int |
             raise RemoteControlError(f"The {label} activation script is not available for this company.")
         if not agent:
             raise RemoteControlError(f"The RMM agent is not installed on this device, so {label} cannot be switched on.")
+    # RustDesk without a chosen script uses the built-in one on any device with the agent.
+    builtin = provider == "rustdesk" and script is None and agent is not None
+    if provider == "rustdesk" and script is None and agent is None and not settings.get("id_field"):
+        raise RemoteControlError("The RMM agent is not installed on this device, so RustDesk cannot be switched on.")
+    password = secrets.token_urlsafe(12) if builtin else None
     session_id = await remote_repo.create_session(
         provider=provider,
+        mode=mode,
         company_id=company_id,
         asset_id=asset_id,
         agent_id=int(agent["id"]) if agent else None,
         requested_by_user_id=user_id,
         expires_at=_utcnow() + SESSION_LIFETIME,
+        # The built-in script sets this password, so MyPortal knows it up front.
+        values_encrypted=encrypt_secret(json.dumps({"password": password})) if password else None,
     )
-    if script is None:
+    if builtin:
+        try:
+            run_id = await _queue_builtin_rustdesk(agent, password, user_id)
+        except RemoteControlError as exc:
+            await remote_repo.finish_session(session_id, status="failed", error_message=exc.message)
+            raise
+        await remote_repo.set_session_run(session_id, run_id)
+        rmm_scripts.notify_agent(int(agent["id"]))
+    elif script is None:
         await _resolve(await remote_repo.get_session(session_id), settings, {})
     else:
         try:
@@ -351,7 +446,9 @@ async def capture(run: Mapping[str, Any], values: Mapping[str, str]) -> list[dic
         if name.lower() in SESSION_VALUE_NAMES and str(value).strip()
     }
     if session is not None and kept:
-        await remote_repo.store_values(int(session["id"]), encrypt_secret(json.dumps(kept)))
+        # Keep what MyPortal already set (the built-in script's password).
+        merged = {**_decrypt_values(session), **kept}
+        await remote_repo.store_values(int(session["id"]), encrypt_secret(json.dumps(merged)))
     results = []
     for name in values:
         if session is None:
@@ -393,14 +490,16 @@ async def _launch_url(session: Mapping[str, Any], settings: Mapping[str, Any], v
                 "No RustDesk ID for this device. Have the activation script print ##myportal[session.id]=<id>"
                 + (f", or fill in the {settings['id_field']} field." if settings.get("id_field") else ".")
             )
-        return rustdesk_url(remote_id, values.get("password"))
+        return rustdesk_url(remote_id, values.get("password"), session.get("mode") or "remote")
     node_id = values.get("node_id") or values.get("id") or await _field_value(
         int(session["asset_id"]), settings.get("id_field")
     )
     if not (settings.get("server_url") and settings.get("username") and settings.get("secret_encrypted")):
         raise RemoteControlError("MeshCentral is missing its address, user name or login token key.")
     key = decrypt_secret(str(settings["secret_encrypted"]), allow_plaintext=False)
-    return meshcentral_url(str(settings["server_url"]), str(settings["username"]), key, node_id or None)
+    return meshcentral_url(
+        str(settings["server_url"]), str(settings["username"]), key, node_id or None, mode=session.get("mode") or "remote"
+    )
 
 
 async def _resolve(session: Mapping[str, Any], settings: Mapping[str, Any], values: Mapping[str, str]) -> str | None:
@@ -411,6 +510,16 @@ async def _resolve(session: Mapping[str, Any], settings: Mapping[str, Any], valu
         return None
     await remote_repo.finish_session(int(session["id"]), status="ready")
     return url
+
+
+def _first_error_line(stderr: Any) -> str:
+    """The first line of what the script wrote to stderr, such as a PowerShell ``throw``."""
+
+    for line in str(stderr or "").splitlines():
+        line = line.strip()
+        if line:
+            return line[:300]
+    return ""
 
 
 async def session_status(session_id: int, *, company_id: int, user_id: int | None, is_super_admin: bool) -> dict[str, Any] | None:
@@ -433,7 +542,7 @@ async def session_status(session_id: int, *, company_id: int, user_id: int | Non
         elif run["status"] == "completed":
             launch_url = await _resolve(session, settings, _decrypt_values(session))
         elif run["status"] not in rmm_repo.ACTIVE_RUN_STATUSES:
-            reason = run.get("error_message") or (
+            reason = run.get("error_message") or _first_error_line(run.get("stderr")) or (
                 f"exit code {run['exit_code']}" if run.get("exit_code") is not None else run["status"]
             )
             await remote_repo.finish_session(
@@ -449,7 +558,9 @@ async def session_status(session_id: int, *, company_id: int, user_id: int | Non
     return {
         "id": session["id"],
         "provider": session["provider"],
+        "mode": session.get("mode") or "remote",
         "label": PROVIDER_LABELS.get(session["provider"], session["provider"]),
+        "mode_label": MODE_LABELS.get(session.get("mode") or "remote", ""),
         "status": session["status"],
         "run_id": session.get("run_id"),
         "run_status": run["status"] if run else None,
