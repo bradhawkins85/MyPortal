@@ -23,20 +23,16 @@
           <h2 class="callout__title">Token created</h2>
           <p>Copy this token now — it will not be shown again.</p>
           <pre class="code-block"><code>{{ new_token }}</code></pre>
-          <details>
-            <summary>Windows (PowerShell) install snippet</summary>
-            <pre class="code-block"><code>$url = '{{ portal_url }}'
-$token = '{{ new_token }}'
-Invoke-WebRequest -Uri "$url/static/tray/myportal-tray.msi" -OutFile $env:TEMP\myportal-tray.msi
-msiexec.exe /i $env:TEMP\myportal-tray.msi MYPORTAL_URL="$url" ENROL_TOKEN="$token" /qn</code></pre>
+          <p class="form-helper">Bootstrap a new device by running <strong>one line</strong> on the machine. It downloads the installer from MyPortal and enrols the device; afterwards the tray agent keeps itself updated automatically — no RMM required.</p>
+          <details open>
+            <summary>Windows — PowerShell one-liner</summary>
+            <pre class="code-block"><code id="win-one-liner">$url='{{ portal_url }}';$token='{{ new_token }}';Invoke-WebRequest "$url/static/tray/myportal-tray.msi" -OutFile $env:TEMP\myportal-tray.msi -UseBasicParsing;msiexec.exe /i $env:TEMP\myportal-tray.msi "MYPORTAL_URL=$url" "ENROL_TOKEN=$token" /qn /norestart</code></pre>
+            <button type="button" class="button button--ghost button--small" data-copy-target="win-one-liner">Copy</button>
           </details>
           <details>
-            <summary>macOS (bash) install snippet</summary>
-            <pre class="code-block"><code>URL='{{ portal_url }}'
-TOKEN='{{ new_token }}'
-curl -fsSL "$URL/static/tray/myportal-tray.pkg" -o /tmp/myportal-tray.pkg
-sudo /bin/sh -c "echo MYPORTAL_URL=$URL > /Library/Preferences/io.myportal.tray.env; echo ENROL_TOKEN=$TOKEN >> /Library/Preferences/io.myportal.tray.env"
-sudo installer -pkg /tmp/myportal-tray.pkg -target /</code></pre>
+            <summary>macOS — bash one-liner (run as admin)</summary>
+            <pre class="code-block"><code id="mac-one-liner">URL='{{ portal_url }}';TOKEN='{{ new_token }}';curl -fsSL "$URL/static/tray/myportal-tray.pkg" -o /tmp/myportal-tray.pkg;sudo /bin/sh -c "printf 'MYPORTAL_URL=%s\nENROL_TOKEN=%s\n' $URL $TOKEN > /Library/Preferences/io.myportal.tray.env";sudo installer -pkg /tmp/myportal-tray.pkg -target /</code></pre>
+            <button type="button" class="button button--ghost button--small" data-copy-target="mac-one-liner">Copy</button>
           </details>
         </div>
       {% endif %}
@@ -147,4 +143,23 @@ sudo installer -pkg /tmp/myportal-tray.pkg -target /</code></pre>
     </div>
   </section>
 </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script>
+    (function () {
+      document.querySelectorAll('[data-copy-target]').forEach(function (button) {
+        button.addEventListener('click', function () {
+          var target = document.getElementById(button.getAttribute('data-copy-target'));
+          if (!target) return;
+          var label = button.textContent;
+          var done = function () { button.textContent = 'Copied'; setTimeout(function () { button.textContent = label; }, 1500); };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(target.textContent).then(done).catch(done);
+          } else { done(); }
+        });
+      });
+    })();
+  </script>
 {% endblock %}

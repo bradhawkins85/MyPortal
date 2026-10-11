@@ -1,5 +1,11 @@
 # Tactical RMM immediate Tray Agent sync
 
+> **Optional — Tactical RMM only.** MyPortal does not require an RMM to deploy
+> or update the tray agent: a device is bootstrapped with a one-liner and then
+> auto-updates over MyPortal's own channel. This guide only applies when you
+> deploy endpoints through Tactical RMM and want the device linked immediately
+> rather than on the next scheduled asset import.
+
 The normal Tactical RMM asset import eventually links an enrolled tray device
 through the `TrayAgentID` custom field. To make tray menu scripts available
 immediately after installation, MyPortal also provides a targeted push endpoint:

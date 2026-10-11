@@ -1,6 +1,6 @@
 # MyPortal Tray App — Go Client
 
-Cross-platform (Windows + macOS) tray application for the MyPortal helpdesk portal. Deployed via RMM; provides a server-driven system-tray menu, environment-variable display, and a push-to-device chat channel.
+Cross-platform (Windows + macOS) tray application for the MyPortal helpdesk portal. Delivered and auto-updated by MyPortal (a device is bootstrapped once with a one-liner; an RMM may run it but is not required); provides a server-driven system-tray menu, environment-variable display, and a push-to-device chat channel.
 
 ## Repository layout
 
@@ -24,8 +24,8 @@ tray/
 │   └── package.json  electron-builder config for Windows portable exe + macOS .app
 ├── scripts/          Text-only build helpers, including macOS icon generation
 ├── installer/
-│   ├── windows/      WiX v7 MSI project + PowerShell RMM deployment script
-│   └── macos/        pkgbuild scripts + LaunchDaemon/LaunchAgent plists + bash RMM script
+│   ├── windows/      WiX v7 MSI project + PowerShell bootstrap install script
+│   └── macos/        pkgbuild scripts + LaunchDaemon/LaunchAgent plists + bash bootstrap script
 ├── Makefile          Cross-compile Windows + macOS from Linux CI (CGO=0 + nowebview tag)
 └── .github/workflows/tray-build.yml   Build, test, and release workflow
 ```
@@ -42,7 +42,7 @@ tray/
 - For macOS chat-shell icon and installer packaging: Xcode command-line tools with `iconutil`, `pkgbuild`, `productbuild`, and `hdiutil` (macOS only)
 - For chat shell: **Node.js 20+** and npm (required only on the native host runner for each platform)
 
-### Cross-compile (CGO=0, no webview — for RMM deployment)
+### Cross-compile (CGO=0, no webview — for endpoint deployment)
 
 ```sh
 cd tray
@@ -258,7 +258,27 @@ See [docs/tray_app.md](../docs/tray_app.md) for the full architecture document.
 
 ## Deployment
 
-### Windows (PowerShell, RMM one-liner)
+MyPortal is the installer delivery channel. Once a device is enrolled, the
+tray service keeps itself current automatically: roughly every 6 hours it
+polls `/api/tray/version`, downloads the latest MSI/`.pkg` from
+`/static/tray/…`, verifies the SHA-256 digest, and reinstalls. No RMM is
+involved in updates.
+
+The only step that needs a human (or an RMM) is the **first install** on a
+machine with no agent yet. Run the matching one-liner; the installer enrols the
+device and the agent then self-updates for life. The admin **Tray install
+tokens** page prints these one-liners pre-filled with the portal URL and a
+freshly-minted token.
+
+### Windows (PowerShell)
+
+Direct one-liner (downloads from MyPortal — no RMM needed):
+
+```powershell
+$url='https://portal.example.com';$token='TOKEN';Invoke-WebRequest "$url/static/tray/myportal-tray.msi" -OutFile $env:TEMP\myportal-tray.msi -UseBasicParsing;msiexec.exe /i $env:TEMP\myportal-tray.msi "MYPORTAL_URL=$url" "ENROL_TOKEN=$token" /qn /norestart
+```
+
+Equivalent repo script (useful when running from a technician machine or inside an RMM):
 
 ```powershell
 .\installer\windows\install.ps1 -PortalURL 'https://portal.example.com' -EnrolToken 'TOKEN'
@@ -311,16 +331,26 @@ The agent never attempts a change that Tamper Protection could block:
 
 The outcome of each setting is shown in the portal's **Policy** column.
 
-### macOS (bash, RMM one-liner)
+### macOS (bash)
+
+Direct one-liner (downloads from MyPortal — no RMM needed):
+
+```bash
+URL='https://portal.example.com';TOKEN='TOKEN';curl -fsSL "$URL/static/tray/myportal-tray.pkg" -o /tmp/myportal-tray.pkg;sudo /bin/sh -c "printf 'MYPORTAL_URL=%s\nENROL_TOKEN=%s\n' $URL $TOKEN > /Library/Preferences/io.myportal.tray.env";sudo installer -pkg /tmp/myportal-tray.pkg -target /
+```
+
+Equivalent repo script (useful when running from a technician machine or inside an RMM):
 
 ```bash
 MYPORTAL_URL='https://portal.example.com' ENROL_TOKEN='TOKEN' bash installer/macos/install.sh
 ```
 
-### macOS — Tactical RMM
+### Optional: deploy via Tactical RMM
 
-Use `integrations/tacticalrmm/install-tray-macos.sh` instead of the generic
-one-liner above. Add it to TRMM as a **bash** script (run as **root**) and
+An RMM is not required, but if you already deploy endpoints through
+Tactical RMM you can run the tray install from it. Use
+`integrations/tacticalrmm/install-tray-macos.sh`. Add it to TRMM as a
+**bash** script (run as **root**) and
 configure the required variables as protected Script Variables:
 
 | Variable | Required | Description |

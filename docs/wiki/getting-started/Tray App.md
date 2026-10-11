@@ -2,11 +2,13 @@
 
 A cross-platform (Windows + macOS) tray application that gives end-users a
 branded helpdesk shortcut, exposes server-driven custom menus, and keeps a
-chat channel open with the helpdesk team. The tray app is **deployed
-independently** via SyncroRMM / TacticalRMM — it is **not** bundled with
-the MyPortal server.
+chat channel open with the helpdesk team. The tray app is **delivered and
+auto-updated by the MyPortal server** — it is **not** bundled with the server
+and is not pushed by any RMM. A device is bootstrapped once with a one-liner
+(an RMM *may* run that one-liner, but is not required); afterwards the tray
+agent keeps itself current over MyPortal's own update channel.
 
-This document covers the architecture, security model, RMM deployment, and
+This document covers the architecture, security model, deployment, and
 troubleshooting. The HTTP / WebSocket API reference lives in
 [`docs/api/tray.md`](api/tray.md).
 
@@ -263,7 +265,12 @@ If you need advanced nesting, you can still use the **Advanced JSON** toggle to 
 
 ---
 
-## 6. RMM deployment
+## 6. Deployment
+
+MyPortal is the installer delivery channel. The admin **Install tokens** page
+prints a one-liner per platform (portal URL + a fresh token); run it once on the
+machine and the agent then auto-updates via `/api/tray/version`. RMMs are an
+optional rollout mechanism, not a requirement.
 
 ### Tactical RMM ticket URL Action
 
@@ -285,27 +292,16 @@ The URL Action never exposes the internal asset or device database ID.
 ### Windows (PowerShell)
 
 ```powershell
-$url   = 'https://portal.example.com'
-$token = 'PASTE-INSTALL-TOKEN-HERE'
-Invoke-WebRequest -Uri "$url/static/tray/myportal-tray.msi" -OutFile $env:TEMP\myportal-tray.msi
-msiexec.exe /i $env:TEMP\myportal-tray.msi `
-    MYPORTAL_URL="$url" ENROL_TOKEN="$token" /qn
+$url='https://portal.example.com';$token='PASTE-INSTALL-TOKEN-HERE';Invoke-WebRequest "$url/static/tray/myportal-tray.msi" -OutFile $env:TEMP\myportal-tray.msi -UseBasicParsing;msiexec.exe /i $env:TEMP\myportal-tray.msi "MYPORTAL_URL=$url" "ENROL_TOKEN=$token" /qn /norestart
 ```
 
 ### macOS (bash)
 
 ```bash
-URL='https://portal.example.com'
-TOKEN='PASTE-INSTALL-TOKEN-HERE'
-curl -fsSL "$URL/static/tray/myportal-tray.pkg" -o /tmp/myportal-tray.pkg
-sudo /bin/sh -c "
-    echo MYPORTAL_URL=$URL  >  /Library/Preferences/io.myportal.tray.env
-    echo ENROL_TOKEN=$TOKEN >> /Library/Preferences/io.myportal.tray.env
-"
-sudo installer -pkg /tmp/myportal-tray.pkg -target /
+URL='https://portal.example.com';TOKEN='PASTE-INSTALL-TOKEN-HERE';curl -fsSL "$URL/static/tray/myportal-tray.pkg" -o /tmp/myportal-tray.pkg;sudo /bin/sh -c "printf 'MYPORTAL_URL=%s\nENROL_TOKEN=%s\n' $URL $TOKEN > /Library/Preferences/io.myportal.tray.env";sudo installer -pkg /tmp/myportal-tray.pkg -target /
 ```
 
-The admin **Install tokens** page generates these snippets pre-filled
+The admin **Install tokens** page generates these one-liners pre-filled
 with the portal URL and a freshly-minted token (shown once).
 
 ### Uninstall

@@ -1,7 +1,8 @@
 #!/bin/bash
-# MyPortal Tray — macOS one-liner RMM deployment script
-# Copy-paste this into your RMM script (SyncroRMM / TacticalRMM) after
-# setting the MYPORTAL_URL and ENROL_TOKEN variables.
+# MyPortal Tray — macOS bootstrap install script
+# Run this directly on the endpoint (or paste it into an RMM such as
+# SyncroRMM / TacticalRMM), setting the MYPORTAL_URL and ENROL_TOKEN
+# variables. Once installed, the agent auto-updates via MyPortal.
 #
 # Usage (as root):
 #   MYPORTAL_URL='https://portal.example.com' ENROL_TOKEN='TOKEN' bash install.sh

@@ -1,6 +1,7 @@
-# MyPortal Tray — Windows one-liner RMM deployment script
-# Copy-paste this into your RMM script (SyncroRMM / TacticalRMM) after
-# replacing the two variables below, or pass them as script parameters.
+# MyPortal Tray — Windows bootstrap install script
+# Run this directly on the endpoint (or paste it into an RMM such as
+# SyncroRMM / TacticalRMM), replacing the two variables or passing them as
+# script parameters. Once installed, the agent auto-updates via MyPortal.
 #
 # Usage:
 #   .\install.ps1 -PortalURL 'https://portal.example.com' -EnrolToken 'TOKEN'
