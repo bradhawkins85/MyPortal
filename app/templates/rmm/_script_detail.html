@@ -1,0 +1,169 @@
+{#- One script on the Scripts page: rendered by rmm/scripts.html when ?script= is set. -#}
+{% set script = selected %}
+{% set ai = script.ai %}
+{% set type_labels = {"string": "Text", "integer": "Whole number", "number": "Number", "boolean": "Yes / no", "switch": "Switch", "choice": "Choice", "list": "List", "secret": "Secret"} %}
+<div class="rmm-detail" data-rmm-script-detail="{{ script.id }}" data-rmm-script-name="{{ script.name }}">
+  <section class="card card--panel ce-section" aria-labelledby="rmm-script-title">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="rmm-script-title">{{ script.name }}</h2>
+        <p class="card__subtitle rmm-detail__path">{{ script.path }}</p>
+        <ul class="rmm-chips" aria-label="Script details">
+          <li class="rmm-chip rmm-chip--{{ script.language }}">{{ script.language_label }}</li>
+          <li class="rmm-chip">{{ 'This company only' if script.scope == 'company' else 'All companies' }}</li>
+          {% if script.parameter_count %}<li class="rmm-chip">{{ script.parameter_count }} parameter{{ '' if script.parameter_count == 1 else 's' }}</li>{% endif %}
+          {% if script.env_count %}<li class="rmm-chip rmm-chip--env">{{ script.env_count }} environment variable{{ '' if script.env_count == 1 else 's' }}</li>{% endif %}
+          {% if not script.parameter_count and not script.env_count %}<li class="rmm-chip rmm-chip--muted">No inputs</li>{% endif %}
+        </ul>
+      </div>
+      <div class="ce-section__meta">
+        {% if gitea_url and script.source_url %}<a class="button button--ghost" href="{{ script.source_url }}" target="_blank" rel="noopener">Edit in Gitea</a>{% endif %}
+        {% if can_run %}<button type="button" class="button button--primary" data-rmm-run-open="{{ script.id }}" aria-haspopup="dialog" aria-controls="rmm-run-modal">Run<span class="visually-hidden"> {{ script.name }}</span></button>{% endif %}
+      </div>
+    </header>
+    <div class="ce-section__body">
+      <div>
+        <h3 class="rmm-detail__label">Description</h3>
+        {% if script.description %}
+          <p class="rmm-detail__description">{{ script.description }}</p>
+        {% else %}
+          <p class="text-muted">The script has no description. Add a comment-based help block (PowerShell <code>.SYNOPSIS</code> or a leading comment) in Gitea to describe it.</p>
+        {% endif %}
+      </div>
+      <dl class="rmm-detail__facts">
+        <div><dt>Default timeout</dt><dd>{{ (script.default_timeout_seconds // 60) if script.default_timeout_seconds >= 60 else script.default_timeout_seconds }} {{ 'minutes' if script.default_timeout_seconds >= 60 else 'seconds' }}</dd></div>
+        <div><dt>Lines</dt><dd>{{ script.line_count }}</dd></div>
+        <div><dt>Last synced</dt><dd>{% if script.synced_at %}<span data-utc="{{ script.synced_at }}">{{ script.synced_at }}</span>{% else %}–{% endif %}</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="card card--panel ce-section rmm-ai" aria-labelledby="rmm-ai-title" data-rmm-ai="{{ script.id }}"{% if can_run and (not ai.summary or ai.stale) %} data-rmm-ai-auto{% endif %}>
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="rmm-ai-title">AI summary</h2>
+        <p class="card__subtitle">What the script does on the device and what it leaves behind. Check the source before relying on it.</p>
+      </div>
+      {% if can_run %}
+      <div class="ce-section__meta">
+        <button type="button" class="button button--ghost button--small" data-rmm-ai-generate>{{ 'Regenerate' if ai.summary else 'Generate summary' }}</button>
+      </div>
+      {% endif %}
+    </header>
+    <div class="ce-section__body">
+      <p class="alert alert--error" data-rmm-ai-error role="alert" hidden></p>
+      <p class="text-muted rmm-ai__busy" data-rmm-ai-busy hidden aria-live="polite">Reading the script and writing a summary…</p>
+      {% if ai.summary %}
+        {% if ai.stale %}<p class="alert alert--warning">The script has changed since this summary was written.{% if can_run %} A new summary is being written.{% endif %}</p>{% endif %}
+        <div class="rmm-ai__content" data-rmm-ai-content>
+          {% if ai.summary.summary %}<p class="rmm-ai__lead">{{ ai.summary.summary }}</p>{% endif %}
+          {% if ai.summary.actions %}
+          <div>
+            <h3 class="rmm-detail__label">What it does</h3>
+            <ol class="rmm-ai__list">{% for item in ai.summary.actions %}<li>{{ item }}</li>{% endfor %}</ol>
+          </div>
+          {% endif %}
+          {% if ai.summary.outcome %}
+          <div>
+            <h3 class="rmm-detail__label">Outcome</h3>
+            <p>{{ ai.summary.outcome }}</p>
+          </div>
+          {% endif %}
+          {% if ai.summary.cautions %}
+          <div class="rmm-ai__cautions">
+            <h3 class="rmm-detail__label">Before you run it</h3>
+            <ul class="rmm-ai__list">{% for item in ai.summary.cautions %}<li>{{ item }}</li>{% endfor %}</ul>
+          </div>
+          {% endif %}
+          <p class="text-muted rmm-ai__meta">Written{% if ai.updated_at %} <span data-utc="{{ ai.updated_at }}">{{ ai.updated_at }}</span>{% endif %}{% if ai.model %} by {{ ai.model }}{% endif %}.</p>
+        </div>
+      {% else %}
+        <p class="text-muted" data-rmm-ai-empty>{% if can_run %}No summary yet. One is written the first time the script is opened.{% else %}No summary yet. A technician who can run scripts can generate one.{% endif %}</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card card--panel ce-section" aria-labelledby="rmm-inputs-title">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="rmm-inputs-title">Inputs</h2>
+        <p class="card__subtitle">The values the script asks for when you run it. Each can be typed or filled from a MyPortal variable.</p>
+      </div>
+    </header>
+    <div class="ce-section__body">
+      {% if script.fields %}
+      <div class="table-wrapper">
+        <table class="table">
+          <caption class="visually-hidden">Script inputs</caption>
+          <thead><tr>
+            <th scope="col">Name</th>
+            <th scope="col">Passed as</th>
+            <th scope="col">Type</th>
+            <th scope="col">Required</th>
+            <th scope="col">Default</th>
+          </tr></thead>
+          <tbody>
+            {% for field in script.fields %}
+            <tr>
+              <td data-label="Name"><code>{{ field.name }}</code>{% if field.help %}<br><span class="text-muted">{{ field.help }}</span>{% endif %}</td>
+              <td data-label="Passed as">{{ 'Environment variable' if field.kind == 'env' else 'Parameter' }}</td>
+              <td data-label="Type">{{ type_labels.get(field.type, field.type) }}{% if field.choices %}<br><span class="text-muted">{{ field.choices | join(', ') }}</span>{% endif %}</td>
+              <td data-label="Required">{{ 'Yes' if field.mandatory else 'No' }}</td>
+              <td data-label="Default">{% if field.sensitive and field.default not in (none, '') %}<span class="text-muted">Hidden</span>{% elif field.default not in (none, '') %}<code>{{ field.default }}</code>{% else %}<span class="text-muted">–</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+        <p class="text-muted">This script asks for no values.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card card--panel ce-section" aria-labelledby="rmm-script-runs-title">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="rmm-script-runs-title">Recent runs</h2>
+        <p class="card__subtitle">The latest runs of this script on {{ company.name if company else 'this company' }}'s devices.</p>
+      </div>
+    </header>
+    <div class="ce-section__body">
+      {% if script.runs %}
+      <div class="table-wrapper">
+        <table class="table">
+          <caption class="visually-hidden">Recent runs of {{ script.name }}</caption>
+          <thead><tr>
+            <th scope="col" data-column-key="script">Script</th>
+            <th scope="col" data-column-key="device">Device</th>
+            <th scope="col" data-column-key="status">Status</th>
+            <th scope="col" data-column-key="exit-code">Exit code</th>
+            <th scope="col" data-column-key="requested-by" data-mobile-hidden="true">Started by</th>
+            <th scope="col" data-column-key="queued">Queued</th>
+            <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
+          </tr></thead>
+          <tbody>{{ rmm.run_rows(script.runs) }}</tbody>
+        </table>
+      </div>
+      {% else %}
+        <p class="text-muted">This script has not run on {{ company.name if company else 'this company' }}'s devices recently.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card card--panel ce-section" aria-labelledby="rmm-source-title">
+    <header class="ce-section__header">
+      <div class="ce-section__heading">
+        <h2 class="card__title" id="rmm-source-title">Script</h2>
+        <p class="card__subtitle">The version devices receive, as loaded from Gitea{% if script.synced_at %} on <span data-utc="{{ script.synced_at }}">{{ script.synced_at }}</span>{% endif %}. Version <code title="{{ script.content_sha256 }}">{{ script.content_sha256[:12] }}</code>.</p>
+      </div>
+      <div class="ce-section__meta">
+        <button type="button" class="button button--ghost button--small" data-rmm-copy-source>Copy</button>
+      </div>
+    </header>
+    <div class="ce-section__body">
+      <pre class="rmm-source" tabindex="0" aria-label="Source of {{ script.name }}" data-rmm-source><code>{% for line in script.content.splitlines() %}<span class="rmm-source__line">{{ line }}</span>
+{% endfor %}</code></pre>
+    </div>
+  </section>
+</div>
