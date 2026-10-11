@@ -48,8 +48,10 @@ async def list_asset_extra_logs(asset_ids: Iterable[int]) -> dict[int, list[str]
     if not keys:
         return {}
     placeholders = ", ".join(["%s"] * len(keys))
+    # Only "%s" placeholders are interpolated; the keys are bound parameters.
     rows = await db.fetch_all(
-        f"SELECT asset_id, extra_logs FROM rmm_event_log_settings WHERE scope_key IN ({placeholders})", tuple(keys)
+        f"SELECT asset_id, extra_logs FROM rmm_event_log_settings WHERE scope_key IN ({placeholders})",  # nosec B608
+        tuple(keys),
     )
     return {int(row["asset_id"]): _decode_logs(row.get("extra_logs")) for row in rows}
 
@@ -125,9 +127,10 @@ async def list_entries(
         clauses.append("(message LIKE %s ESCAPE '!' OR provider LIKE %s ESCAPE '!')")
         params.extend([f"%{escaped}%", f"%{escaped}%"])
     params.append(int(limit))
-    return await event_log_db.fetch_all(
+    # The clauses are fixed strings chosen above; every value is a bound parameter.
+    return await event_log_db.fetch_all(  # nosec B608
         f"SELECT id, company_id, asset_id, agent_id, log_name, record_id, event_id, level, provider, computer, "
-        f"message, time_created, received_at FROM {ENTRIES_TABLE} WHERE {' AND '.join(clauses)} "
+        f"message, time_created, received_at FROM {ENTRIES_TABLE} WHERE {' AND '.join(clauses)} "  # nosec B608
         f"ORDER BY time_created DESC, id DESC LIMIT %s",
         tuple(params),
     )
@@ -138,12 +141,12 @@ async def prune_entries(before: datetime, *, batch_size: int = 10000) -> int:
 
     if event_log_db.is_sqlite:
         return await event_log_db.execute_rowcount(
-            f"DELETE FROM {ENTRIES_TABLE} WHERE time_created < %s", (before,)
+            "DELETE FROM rmm_event_log_entries WHERE time_created < %s", (before,)
         )
     removed = 0
     while True:
         count = await event_log_db.execute_rowcount(
-            f"DELETE FROM {ENTRIES_TABLE} WHERE time_created < %s LIMIT {int(batch_size)}", (before,)
+            "DELETE FROM rmm_event_log_entries WHERE time_created < %s LIMIT %s", (before, int(batch_size))
         )
         removed += count
         if count < batch_size:
