@@ -324,8 +324,8 @@ async def start_onboarding_api(payload: StartOnboardingRequest, request: Request
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
     try:
         onboarding_id = await automation.start_onboarding(agent, started_by_user_id=user.get("id"))
-    except ValueError as exc:
-        return JSONResponse({"detail": str(exc)}, status_code=409)
+    except ValueError:
+        return JSONResponse({"detail": "Onboarding is already running on this device."}, status_code=409)
     if onboarding_id is None:
         return JSONResponse({"detail": "Add onboarding steps first."}, status_code=400)
     await audit_service.record(

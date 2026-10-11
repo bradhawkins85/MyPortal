@@ -2,6 +2,8 @@
 
 * ``GET /api/tags`` search tags, ``POST /api/tags`` create one (asset editors)
 * ``GET``/``PUT /api/assets/{asset_id}/tags`` an asset's tags (``menu.assets``)
+* ``POST``/``DELETE /api/assets/{asset_id}/tags/{tag_id}/block`` keep a tag off
+  one asset, or lift that block (``menu.assets``)
 * ``GET``/``PUT /api/companies/{company_id}/tags`` a company's tags (super admin)
 * ``GET /admin/tags`` manage the tag list; rename, recolour, delete and
   re-apply the automatic tags (super admin)
@@ -96,15 +98,28 @@ async def _editable_asset(request: Request, asset_id: int) -> tuple[dict[str, An
     return user, asset
 
 
-async def picker_context(tags: list[dict[str, Any]], *, endpoint: str, can_edit: bool) -> dict[str, Any]:
-    """Values for ``tags/_picker.html``: the record's tags and where to save them."""
-    return {"tags": tags, "endpoint": endpoint, "can_edit": can_edit}
+async def picker_context(tags: list[dict[str, Any]], *, endpoint: str, can_edit: bool,
+                         blocked: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Values for ``tags/_picker.html``: the record's tags and where to save them.
+
+    ``blocked`` (assets only) lists the tags kept off the record; the picker
+    then offers to block automatic tags at ``<endpoint>/<tag_id>/block``.
+    """
+    return {"tags": tags, "endpoint": endpoint, "can_edit": can_edit, "blocked": blocked}
 
 
 async def asset_tags_context(asset_id: int, *, can_edit: bool) -> dict[str, Any]:
     return await picker_context(
         await tags_repo.list_asset_tags(asset_id), endpoint=f"/api/assets/{int(asset_id)}/tags", can_edit=can_edit,
+        blocked=await tags_repo.list_asset_blocked_tags(asset_id),
     )
+
+
+async def _asset_tags_payload(asset_id: int) -> dict[str, Any]:
+    return {
+        "tags": await tags_repo.list_asset_tags(asset_id),
+        "blocked": await tags_repo.list_asset_blocked_tags(asset_id),
+    }
 
 
 async def company_tags_context(company_id: int, *, can_edit: bool) -> dict[str, Any]:
@@ -155,7 +170,7 @@ async def _validated_ids(tag_ids: list[int]) -> list[int]:
 @router.get("/api/assets/{asset_id}/tags", summary="List an asset's tags")
 async def get_asset_tags(request: Request, asset_id: int):
     await _editable_asset(request, asset_id)
-    return {"tags": await tags_repo.list_asset_tags(asset_id)}
+    return await _asset_tags_payload(asset_id)
 
 
 @router.put("/api/assets/{asset_id}/tags", summary="Set an asset's hand-picked tags")
@@ -163,12 +178,42 @@ async def put_asset_tags(request: Request, asset_id: int, payload: TagAssignment
     user, _asset = await _editable_asset(request, asset_id)
     before = [tag["name"] for tag in await tags_repo.list_asset_tags(asset_id) if tag.get("source") == "manual"]
     await tags_repo.set_asset_manual_tags(asset_id, await _validated_ids(payload.tag_ids))
-    tags = await tags_repo.list_asset_tags(asset_id)
+    result = await _asset_tags_payload(asset_id)
     await audit_service.record(
         action="asset.tags.update", request=request, user_id=user.get("id"), entity_type="asset", entity_id=asset_id,
-        before={"tags": before}, after={"tags": [tag["name"] for tag in tags if tag.get("source") == "manual"]},
+        before={"tags": before},
+        after={"tags": [tag["name"] for tag in result["tags"] if tag.get("source") == "manual"]},
     )
-    return {"tags": tags}
+    return result
+
+
+@router.post("/api/assets/{asset_id}/tags/{tag_id}/block", summary="Keep a tag off an asset")
+async def block_asset_tag(request: Request, asset_id: int, tag_id: int):
+    """Stops the automatic rules (and the asset's company tags) giving this asset the tag,
+    for example to keep a desktop that acts as a server out of "Workstation"."""
+    user, _asset = await _editable_asset(request, asset_id)
+    tag = await tags_repo.get_tag(tag_id)
+    if not tag or not await tags_repo.block_asset_tag(asset_id, tag_id, blocked_by=user.get("id")):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
+    await audit_service.record(
+        action="asset.tags.block", request=request, user_id=user.get("id"), entity_type="asset", entity_id=asset_id,
+        after={"tag": tag["name"]},
+    )
+    return await _asset_tags_payload(asset_id)
+
+
+@router.delete("/api/assets/{asset_id}/tags/{tag_id}/block", summary="Lift a tag block on an asset")
+async def unblock_asset_tag(request: Request, asset_id: int, tag_id: int):
+    user, _asset = await _editable_asset(request, asset_id)
+    tag = await tags_repo.get_tag(tag_id)
+    if not tag:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
+    await tags_repo.unblock_asset_tag(asset_id, tag_id)
+    await audit_service.record(
+        action="asset.tags.unblock", request=request, user_id=user.get("id"), entity_type="asset",
+        entity_id=asset_id, before={"tag": tag["name"]},
+    )
+    return await _asset_tags_payload(asset_id)
 
 
 @router.get("/api/companies/{company_id}/tags", summary="List a company's tags")

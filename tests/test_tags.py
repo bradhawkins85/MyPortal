@@ -112,8 +112,8 @@ async def sqlite_db(monkeypatch):
           (12, 1, 'MAC-01', 'workstation', 'Laptop', 'macOS 14', NULL),
           (20, 2, 'WEB01', 'server', NULL, 'Ubuntu 22.04', 'virtual');
     """)
-    script = Database()._adapt_sql_for_sqlite((ROOT / "migrations" / "466_asset_company_tags.sql").read_text())
-    await conn.executescript(script)
+    for name in ("466_asset_company_tags.sql", "469_asset_tag_blocks.sql"):
+        await conn.executescript(Database()._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     fake = _SqliteDb(conn)
     monkeypatch.setattr(tags_repo, "db", fake)
     yield fake
@@ -210,6 +210,58 @@ async def test_company_tags_and_filtering_assets_by_tag(sqlite_db):
 
 
 @pytest.mark.anyio
+async def test_blocked_tag_stays_off_the_asset_until_unblocked(sqlite_db):
+    await tags_repo.refresh_all_auto_tags()
+    mapping = await tags_repo.ensure_auto_tags()
+    laptop = mapping["laptop"]
+    assert ("Laptop", "auto") in await _names(11)
+
+    # A laptop acting as a server: block Laptop, pick Server by hand.
+    assert await tags_repo.block_asset_tag(11, laptop, blocked_by=5)
+    await tags_repo.set_asset_manual_tags(11, [mapping["server"]])
+    assert await _names(11) == {("Windows", "auto"), ("Server", "manual")}
+    assert [tag["name"] for tag in await tags_repo.list_asset_blocked_tags(11)] == ["Laptop"]
+    # Neither pass of the rules brings it back.
+    await tags_repo.refresh_asset_auto_tags(11)
+    await tags_repo.refresh_all_auto_tags()
+    await tags_repo.refresh_all_auto_tags(company_id=1)
+    assert ("Laptop", "auto") not in await _names(11)
+    assert await tags_repo.list_asset_ids_with_tags([laptop]) == [12]
+    assert await tags_repo.list_asset_ids_with_tags([mapping["server"]]) == [10, 11, 20]
+    # Other assets keep the tag; unknown tags are refused.
+    assert ("Laptop", "auto") in await _names(12)
+    assert not await tags_repo.block_asset_tag(11, 999)
+
+    await tags_repo.unblock_asset_tag(11, laptop)
+    assert ("Laptop", "auto") in await _names(11)
+    assert await tags_repo.list_asset_blocked_tags(11) == []
+
+
+@pytest.mark.anyio
+async def test_blocking_removes_manual_tags_and_picking_one_unblocks(sqlite_db):
+    vip, _ = await tags_repo.get_or_create_tag("VIP")
+    await tags_repo.set_asset_manual_tags(10, [vip["id"]])
+    await tags_repo.block_asset_tag(10, vip["id"])
+    assert await tags_repo.list_asset_tags(10) == []
+    await tags_repo.set_asset_manual_tags(10, [vip["id"]])
+    assert await _names(10) == {("VIP", "manual")}
+    assert await tags_repo.list_asset_blocked_tags(10) == []
+    await tags_repo.block_asset_tag(10, vip["id"])
+    assert await tags_repo.delete_tag(vip["id"])
+    assert await tags_repo.list_asset_blocked_tags(10) == []
+
+
+@pytest.mark.anyio
+async def test_blocked_tag_is_not_inherited_from_the_company(sqlite_db):
+    managed, _ = await tags_repo.get_or_create_tag("Managed")
+    await tags_repo.set_company_tags(1, [managed["id"]])
+    await tags_repo.block_asset_tag(12, managed["id"])
+    assert await tags_repo.list_asset_ids_with_tags([managed["id"]]) == [10, 11]
+    await tags_repo.unblock_asset_tag(12, managed["id"])
+    assert await tags_repo.list_asset_ids_with_tags([managed["id"]]) == [10, 11, 12]
+
+
+@pytest.mark.anyio
 async def test_search_tags(sqlite_db):
     await tags_repo.ensure_auto_tags()
     await tags_repo.get_or_create_tag("Domain controller")
@@ -227,6 +279,7 @@ def test_pack_routes():
     assert {
         ("GET", "/api/tags"), ("POST", "/api/tags"),
         ("GET", "/api/assets/{asset_id}/tags"), ("PUT", "/api/assets/{asset_id}/tags"),
+        ("POST", "/api/assets/{asset_id}/tags/{tag_id}/block"), ("DELETE", "/api/assets/{asset_id}/tags/{tag_id}/block"),
         ("GET", "/api/companies/{company_id}/tags"), ("PUT", "/api/companies/{company_id}/tags"),
         ("GET", "/admin/tags"), ("POST", "/admin/tags"), ("POST", "/admin/tags/refresh"),
         ("POST", "/admin/tags/{tag_id}"), ("POST", "/admin/tags/{tag_id}/delete"),
@@ -289,6 +342,14 @@ def test_picker_renders_chips_and_editor():
 
     read_only = template.render(ctx={**ctx, "can_edit": False, "tags": []})
     assert "data-editable" not in read_only and "combobox" not in read_only and "No tags yet." in read_only
+    assert "data-blocking" not in html and "Blocked on this device" not in html
+
+    blocking = template.render(ctx={**ctx, "blocked": [
+        {"id": 3, "name": "Workstation", "colour": None, "source": "blocked", "description": ""}]})
+    assert "data-blocking" in blocking and "data-tag-picker-initial-blocked" in blocking
+    assert "Blocked on this device" in blocking and "tag-chip--blocked" in blocking
+    empty = template.render(ctx={**ctx, "blocked": []})
+    assert "data-blocking" in empty and "data-tag-picker-blocked hidden" in empty
 
 
 def test_pages_include_tags_only_when_available():

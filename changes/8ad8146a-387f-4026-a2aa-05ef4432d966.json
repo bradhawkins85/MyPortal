@@ -1,0 +1,7 @@
+{
+  "guid": "8ad8146a-387f-4026-a2aa-05ef4432d966",
+  "occurred_at": "2026-10-10T08:34Z",
+  "change_type": "Feature",
+  "summary": "Move asset custom-field editing from the asset list \"Edit\" modal onto the /assets/{id} detail page; the detail page form now edits custom fields for every asset (including synced ones) and can send a tray push notification on save",
+  "content_hash": "8830fa0173ef3487e2140dddb7ceaa85996833e1a1601e50c1cececd8146efdd"
+}

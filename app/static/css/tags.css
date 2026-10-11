@@ -64,6 +64,54 @@
   outline-offset: 1px;
 }
 
+/* Block / Unblock on an asset's automatic and blocked tags. */
+.tag-chip__action {
+  padding: 0 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--tag-colour) 45%, transparent);
+  border-radius: 999px;
+  background: none;
+  color: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.tag-chip__action:hover,
+.tag-chip__action:focus-visible {
+  background: color-mix(in srgb, var(--tag-colour) 30%, transparent);
+}
+
+.tag-chip__action:focus-visible {
+  outline: 2px solid var(--hf-focus, var(--hf-accent));
+  outline-offset: 1px;
+}
+
+.tag-chip--blocked {
+  border-style: dashed;
+  background: none;
+  color: var(--hf-muted);
+}
+
+.tag-chip--blocked .tag-chip__name {
+  text-decoration: line-through;
+}
+
+.tag-picker__blocked {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.tag-picker__blocked[hidden] {
+  display: none;
+}
+
+.tag-picker__blocked-label {
+  margin: 0;
+  color: var(--hf-muted);
+  font-size: 0.8rem;
+}
+
 .tag-chips--compact .tag-chip {
   padding: 0.05rem 0.45rem;
   font-size: 0.72rem;

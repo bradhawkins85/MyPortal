@@ -2,7 +2,7 @@
 -- compatible-from: *
 -- compatible-to: *
 -- maintenance: false
--- Migration 469: remote control through RustDesk and MeshCentral.
+-- Migration 471: remote control through RustDesk and MeshCentral.
 --
 -- rmm_remote_control_providers holds one row per provider ('rustdesk' or
 -- 'meshcentral'): whether it is on, the RMM script that switches it on for a

@@ -4,6 +4,8 @@
 by a technician) or ``auto`` (added by a rule in :mod:`app.services.tags`);
 rules only ever add and remove their own rows, so a tag a technician picked
 stays when the rule stops matching. ``company_tags`` rows are always manual.
+``asset_tag_blocks`` keeps a tag off one asset: rules skip it, and the tag on
+the asset's company does not count for that asset.
 """
 
 from __future__ import annotations
@@ -145,6 +147,7 @@ async def delete_tag(tag_id: int) -> bool:
     if tag["is_auto"]:
         raise ValueError("Automatic tags can be renamed but not deleted")
     await db.execute("DELETE FROM asset_tags WHERE tag_id = %s", (int(tag_id),))
+    await db.execute("DELETE FROM asset_tag_blocks WHERE tag_id = %s", (int(tag_id),))
     await db.execute("DELETE FROM company_tags WHERE tag_id = %s", (int(tag_id),))
     await db.execute("DELETE FROM tags WHERE id = %s", (int(tag_id),))
     return True
@@ -211,8 +214,16 @@ async def list_tags_for_assets(asset_ids: Iterable[Any]) -> dict[int, list[dict[
 
 
 async def set_asset_manual_tags(asset_id: int, tag_ids: Iterable[Any]) -> None:
-    """Make ``tag_ids`` the asset's hand-picked tags. Automatic tags are untouched."""
+    """Make ``tag_ids`` the asset's hand-picked tags. Automatic tags are untouched.
+
+    Picking a blocked tag by hand lifts its block.
+    """
     wanted = await existing_tag_ids(tag_ids)
+    if wanted:
+        await db.execute(
+            f"DELETE FROM asset_tag_blocks WHERE asset_id = %s AND tag_id IN ({_placeholders(wanted)})",  # nosec B608
+            (int(asset_id), *wanted),
+        )
     current = await db.fetch_all("SELECT tag_id, source FROM asset_tags WHERE asset_id = %s", (int(asset_id),))
     current_sources = {int(row["tag_id"]): str(row["source"]) for row in current or []}
     for tag_id, source in current_sources.items():
@@ -230,9 +241,9 @@ async def set_asset_manual_tags(asset_id: int, tag_ids: Iterable[Any]) -> None:
 
 
 async def _apply_auto_tags(asset: Mapping[str, Any], mapping: Mapping[str, int],
-                           current: Mapping[int, str]) -> None:
+                           current: Mapping[int, str], blocked: Iterable[int] = ()) -> None:
     asset_id = int(asset["id"])
-    wanted = {mapping[key] for key in tag_rules.auto_tag_keys(asset) if key in mapping}
+    wanted = {mapping[key] for key in tag_rules.auto_tag_keys(asset) if key in mapping} - set(blocked)
     rule_tag_ids = set(mapping.values())
     for tag_id, source in current.items():
         if source == "auto" and tag_id in rule_tag_ids and tag_id not in wanted:
@@ -255,7 +266,11 @@ async def refresh_asset_auto_tags(asset_id: int) -> None:
         return
     mapping = await ensure_auto_tags()
     rows = await db.fetch_all("SELECT tag_id, source FROM asset_tags WHERE asset_id = %s", (int(asset_id),))
-    await _apply_auto_tags(asset, mapping, {int(row["tag_id"]): str(row["source"]) for row in rows or []})
+    blocks = await db.fetch_all("SELECT tag_id FROM asset_tag_blocks WHERE asset_id = %s", (int(asset_id),))
+    await _apply_auto_tags(
+        asset, mapping, {int(row["tag_id"]): str(row["source"]) for row in rows or []},
+        {int(row["tag_id"]) for row in blocks or []},
+    )
 
 
 async def refresh_all_auto_tags(*, company_id: int | None = None) -> int:
@@ -271,8 +286,16 @@ async def refresh_all_auto_tags(*, company_id: int | None = None) -> int:
     current: dict[int, dict[int, str]] = {}
     for row in rows or []:
         current.setdefault(int(row["asset_id"]), {})[int(row["tag_id"])] = str(row["source"])
+    block_rows = await db.fetch_all(
+        f"SELECT b.asset_id, b.tag_id FROM asset_tag_blocks b INNER JOIN assets a ON a.id = b.asset_id {join_where}",  # nosec B608
+        params,
+    )
+    blocked: dict[int, set[int]] = {}
+    for row in block_rows or []:
+        blocked.setdefault(int(row["asset_id"]), set()).add(int(row["tag_id"]))
     for asset in assets or []:
-        await _apply_auto_tags(asset, mapping, current.get(int(asset["id"]), {}))
+        asset_id = int(asset["id"])
+        await _apply_auto_tags(asset, mapping, current.get(asset_id, {}), blocked.get(asset_id, ()))
     return len(assets or [])
 
 
@@ -282,7 +305,8 @@ async def list_asset_ids_with_tags(
     """Return the assets carrying any (or, with ``match_all``, every) one of ``tag_ids``.
 
     A tag on an asset's company counts as on the asset, so a script filtered
-    to a "Managed" company tag reaches every device of those companies.
+    to a "Managed" company tag reaches every device of those companies, except
+    a device that has the tag blocked.
     """
     ids = _ids(tag_ids)
     if not ids:
@@ -302,12 +326,43 @@ async def list_asset_ids_with_tags(
         " UNION"
         " SELECT a2.id AS asset_id, ct.tag_id FROM company_tags ct"
         f" INNER JOIN assets a2 ON a2.company_id = ct.company_id WHERE ct.tag_id IN ({marks})"  # nosec B608
+        " AND NOT EXISTS (SELECT 1 FROM asset_tag_blocks b WHERE b.asset_id = a2.id AND b.tag_id = ct.tag_id)"
         ") matched INNER JOIN assets a ON a.id = matched.asset_id"
         f" WHERE a.archived_at IS NULL {company_filter}"  # nosec B608
         f" GROUP BY matched.asset_id {having} ORDER BY matched.asset_id"  # nosec B608
     )
     rows = await db.fetch_all(sql, tuple(params))
     return [int(row["asset_id"]) for row in rows or []]
+
+
+async def list_asset_blocked_tags(asset_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """SELECT t.id, t.name, t.colour, t.description, t.auto_key
+           FROM asset_tag_blocks b INNER JOIN tags t ON t.id = b.tag_id
+           WHERE b.asset_id = %s ORDER BY t.slug""",
+        (int(asset_id),),
+    )
+    return [{**_public(row), "source": "blocked"} for row in rows or []]
+
+
+async def block_asset_tag(asset_id: int, tag_id: int, *, blocked_by: int | None = None) -> bool:
+    """Keep a tag off one asset, removing it if present. Returns False for an unknown tag."""
+    if not await existing_tag_ids([tag_id]):
+        return False
+    await db.execute(
+        f"{_insert_ignore()} INTO asset_tag_blocks (asset_id, tag_id, created_by_user_id) VALUES (%s, %s, %s)",
+        (int(asset_id), int(tag_id), blocked_by),
+    )
+    await db.execute("DELETE FROM asset_tags WHERE asset_id = %s AND tag_id = %s", (int(asset_id), int(tag_id)))
+    return True
+
+
+async def unblock_asset_tag(asset_id: int, tag_id: int) -> None:
+    """Lift a block; an automatic tag whose rule still matches comes straight back."""
+    await db.execute(
+        "DELETE FROM asset_tag_blocks WHERE asset_id = %s AND tag_id = %s", (int(asset_id), int(tag_id)),
+    )
+    await refresh_asset_auto_tags(asset_id)
 
 
 # ---------------------------------------------------------------------------

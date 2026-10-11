@@ -1,11 +1,13 @@
 {#- Tag chips and the searchable tag picker.
 
     ``ctx`` comes from ``app.features.tags.routes.picker_context``: the record's
-    tags, the endpoint that saves them and whether the viewer may edit. Load
+    tags, the endpoint that saves them and whether the viewer may edit. When
+    ``ctx.blocked`` is a list (assets), the tags kept off the record are shown
+    and editors can block automatic tags and lift blocks. Load
     /static/css/tags.css and /static/js/tag_picker.js on the page. -#}
 {% macro tag_chip(tag, compact=false) -%}
-  <li class="tag-chip" style="--tag-colour: {{ tag.colour or 'var(--hf-accent)' }}"{% if tag.description %} title="{{ tag.description }}"{% endif %}>
-    <span class="tag-chip__name">{{ tag.name }}</span>{% if tag.source == 'auto' %}<span class="tag-chip__auto" title="Assigned automatically">auto</span>{% endif %}
+  <li class="tag-chip{% if tag.source == 'blocked' %} tag-chip--blocked{% endif %}" style="--tag-colour: {{ tag.colour or 'var(--hf-accent)' }}"{% if tag.description %} title="{{ tag.description }}"{% endif %}>
+    <span class="tag-chip__name">{{ tag.name }}</span>{% if tag.source == 'blocked' %}<span class="tag-chip__auto">blocked</span>{% elif tag.source == 'auto' %}<span class="tag-chip__auto" title="Assigned automatically">auto</span>{% endif %}
   </li>
 {%- endmacro %}
 
@@ -14,10 +16,18 @@
 {%- endmacro %}
 
 {% macro tag_picker(ctx, id, label="Tags") -%}
-  <div class="tag-picker" id="{{ id }}" data-tag-picker data-endpoint="{{ ctx.endpoint }}"{% if ctx.can_edit %} data-editable{% endif %}>
+  {%- set blocking = ctx.blocked is defined and ctx.blocked is not none %}
+  <div class="tag-picker" id="{{ id }}" data-tag-picker data-endpoint="{{ ctx.endpoint }}"{% if ctx.can_edit %} data-editable{% endif %}{% if blocking %} data-blocking{% endif %}>
     <script type="application/json" data-tag-picker-initial>{{ ctx.tags | tojson }}</script>
+    {% if blocking %}<script type="application/json" data-tag-picker-initial-blocked>{{ ctx.blocked | tojson }}</script>{% endif %}
     <ul class="tag-chips" data-tag-picker-chips aria-label="{{ label }}">{% for tag in ctx.tags %}{{ tag_chip(tag) }}{% endfor %}</ul>
     {% if not ctx.tags %}<p class="text-muted" data-tag-picker-none>No tags yet.</p>{% endif %}
+    {% if blocking %}
+    <div class="tag-picker__blocked" data-tag-picker-blocked{% if not ctx.blocked %} hidden{% endif %}>
+      <p class="tag-picker__blocked-label" id="{{ id }}-blocked-label">Blocked on this device</p>
+      <ul class="tag-chips" data-tag-picker-blocked-chips aria-labelledby="{{ id }}-blocked-label">{% for tag in ctx.blocked %}{{ tag_chip(tag) }}{% endfor %}</ul>
+    </div>
+    {% endif %}
     {% if ctx.can_edit %}
     <div class="tag-picker__search" data-tag-picker-search hidden>
       <label class="visually-hidden" for="{{ id }}-input">Add a tag</label>
