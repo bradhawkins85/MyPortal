@@ -1,0 +1,7 @@
+{
+  "guid": "db6bd2ba-58a9-4783-b033-d622b0010c29",
+  "occurred_at": "2026-10-11T21:45Z",
+  "change_type": "Fix",
+  "summary": "RMM: pushing the agent to a device with an older tray app now updates the tray app first instead of being silently ignored",
+  "content_hash": "6b5ecb3bd493b5b3a6b43648198b6292b462d4faeac64bdd4ecd22adbc7c7ec6"
+}

@@ -2779,7 +2779,7 @@ async def admin_company_tray_settings_save(company_id: int, request: Request):
         counts = await rmm_agent_deploy.auto_deploy_company(
             int(company_id), user_id=int(current_user["id"])
         )
-        pushed = counts.get("sent", 0) + counts.get("queued", 0)
+        pushed = counts.get("sent", 0) + counts.get("queued", 0) + counts.get("updating_tray", 0)
         message += (
             f" The RMM agent is being installed on {pushed} device{'s' if pushed != 1 else ''}"
             " without it; devices enrolled later get it when they connect."

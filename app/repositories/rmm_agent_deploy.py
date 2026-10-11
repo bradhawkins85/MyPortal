@@ -69,13 +69,29 @@ async def latest_install_command(device_id: int) -> dict[str, Any] | None:
     )
 
 
-async def create_install_command(device_id: int, *, user_id: int | None, payload_json: str) -> int:
+async def create_command(device_id: int, command: str, *, user_id: int | None, payload_json: str) -> int:
     last_id = await db.execute_returning_lastrowid(
         "INSERT INTO tray_command_log (device_id, command, payload_json, initiated_by_user_id, status, created_at) "
         "VALUES (%s, %s, %s, %s, 'queued', %s)",
-        (device_id, INSTALL_COMMAND, payload_json, user_id, _utcnow()),
+        (device_id, command, payload_json, user_id, _utcnow()),
     )
     return int(last_id or 0)
+
+
+async def create_install_command(device_id: int, *, user_id: int | None, payload_json: str) -> int:
+    return await create_command(device_id, INSTALL_COMMAND, user_id=user_id, payload_json=payload_json)
+
+
+async def queued_command(device_id: int, command: str) -> dict[str, Any] | None:
+    return await db.fetch_one(
+        "SELECT * FROM tray_command_log WHERE device_id = %s AND command = %s AND status = 'queued' "
+        "ORDER BY id DESC LIMIT 1",
+        (device_id, command),
+    )
+
+
+async def get_tray_device(device_id: int) -> dict[str, Any] | None:
+    return await db.fetch_one("SELECT * FROM tray_devices WHERE id = %s", (device_id,))
 
 
 async def get_install_command(command_id: int, device_id: int) -> dict[str, Any] | None:

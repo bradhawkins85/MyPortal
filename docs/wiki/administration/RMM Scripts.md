@@ -322,8 +322,11 @@ first:
   every device of the company without it, and to each new device when its tray app connects. A
   failed install is retried once a day.
 
-Pushes need a tray app release that includes this feature; older tray apps ignore them and
-the push stays "sent" without reporting back. A push reaches a connected device straight away; an offline device gets it when it next
+Only tray app 0.8.4 and later can install the agent. When a device runs an older tray app,
+MyPortal holds the install and tells the tray app to update itself to the newest version
+published under **Admin > Tray > Versions**; the install goes out once the updated tray app
+reconnects. If no new enough tray version is published there, the push is refused with that
+reason, so publish one first. A push reaches a connected device straight away; an offline device gets it when it next
 connects. The tray app downloads the agent build from MyPortal, checks its SHA-256, puts it in
 `%ProgramFiles%\MyPortal RMM` (Windows) or `/Library/Application Support/MyPortal RMM` (macOS),
 enrols it and installs its service. MyPortal fetches the builds from the newest GitHub release

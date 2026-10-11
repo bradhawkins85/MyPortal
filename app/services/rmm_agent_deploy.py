@@ -10,6 +10,12 @@ with. A push queues an ``install_rmm_agent`` tray command (see
 3. runs ``myportal-rmm enrol`` with its own token and ``myportal-rmm install``,
 4. reports the outcome to ``POST /api/rmm/agent/install-result``.
 
+Only tray apps from :data:`MIN_TRAY_VERSION` on understand the command. An
+older tray app would silently ignore it, so its install stays queued and
+MyPortal asks the tray app to update itself to the newest published tray
+version first (``Admin > Tray > Versions``); the install goes out once the
+updated tray app reports its version.
+
 Technicians push to one device from the Assets page. With a company's
 ``rmm_agent_auto_deploy`` setting on, every tray device of that company
 without an agent gets a push when the setting is switched on and whenever the
@@ -25,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -35,6 +42,7 @@ from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
 from app.repositories import companies as companies_repo
 from app.repositories import rmm_agent_deploy as deploy_repo
+from app.repositories import tray as tray_repo
 from app.services import tray as tray_service
 from app.services import tray_installer
 from app.services.monitored_http import monitored_client
@@ -51,6 +59,9 @@ PLATFORMS = (
     ("linux", "arm64"),
 )
 AUTO_RETRY_HOURS = 24
+# The first tray release whose service handles install_rmm_agent.
+MIN_TRAY_VERSION = (0, 8, 4)
+UPDATE_COMMAND = "update"
 MAX_ERROR_LENGTH = 2000
 
 _STORAGE_DIR = Path(__file__).resolve().parents[2] / "private_uploads" / "rmm-agent"
@@ -243,6 +254,64 @@ def _as_utc(value: Any) -> datetime | None:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
+_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)(?:\.(\d+))?")
+
+
+def parse_version(value: Any) -> tuple[int, int, int] | None:
+    """``v0.8.4``, ``0.8.4-3-gabc`` or ``0.8`` as a tuple; None when unreadable."""
+
+    match = _VERSION_RE.match(str(value or "").strip())
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2)), int(match.group(3) or 0)
+
+
+def version_label(version: tuple[int, int, int]) -> str:
+    return ".".join(str(part) for part in version)
+
+
+def tray_can_install(device: dict[str, Any]) -> bool:
+    """Whether the device's tray app handles install_rmm_agent.
+
+    A tray app that has not reported a version yet gets the benefit of the
+    doubt; development builds (``0.0.0-dev``) and older releases do not.
+    """
+
+    reported = str(device.get("agent_version") or "").strip()
+    if not reported:
+        return True
+    version = parse_version(reported)
+    return version is not None and version >= MIN_TRAY_VERSION
+
+
+async def _published_tray_version(os_name: str) -> tuple[int, int, int] | None:
+    row = await tray_repo.get_latest_tray_version(os_name)
+    return parse_version(row.get("version")) if row else None
+
+
+async def _request_tray_update(device: dict[str, Any], *, user_id: int | None) -> bool:
+    """Queue (once) and try to deliver the tray's own ``update`` command."""
+
+    queued = await deploy_repo.queued_command(int(device["id"]), UPDATE_COMMAND)
+    command_id = int(queued["id"]) if queued else await deploy_repo.create_command(
+        int(device["id"]), UPDATE_COMMAND, user_id=user_id, payload_json=json.dumps({"type": UPDATE_COMMAND})
+    )
+    delivered = await tray_service.send_to_device(
+        str(device.get("device_uid") or ""), {"type": UPDATE_COMMAND, "command_id": command_id}
+    )
+    if delivered:
+        await deploy_repo.set_command_status(command_id, "delivered")
+    return delivered
+
+
+async def ready_for_install(device_id: int) -> bool:
+    """Whether a queued install may go to this device now (read fresh from the database,
+    because the tray app reports its new version after it reconnects)."""
+
+    device = await deploy_repo.get_tray_device(device_id)
+    return bool(device) and tray_can_install(device)
+
+
 async def _send(device: dict[str, Any], command_id: int) -> bool:
     delivered = await tray_service.send_to_device(
         str(device.get("device_uid") or ""), {"type": INSTALL_COMMAND, "command_id": command_id}
@@ -256,8 +325,10 @@ async def push_to_device(device: dict[str, Any], *, user_id: int | None, send: b
     """Queue (and try to deliver) an agent install on one tray device.
 
     Returns ``{"status": ..., "command_id": ...}`` where status is
-    ``installed`` (nothing to do), ``sent`` (reached the device now) or
-    ``queued`` (the device collects it when it next connects).
+    ``installed`` (nothing to do), ``sent`` (reached the device now),
+    ``queued`` (the device collects it when it next connects) or
+    ``updating_tray`` (the tray app is too old: it was asked to update itself
+    and gets the install once it reports the new version).
     """
 
     if str(device.get("status") or "") != "active":
@@ -274,6 +345,16 @@ async def push_to_device(device: dict[str, Any], *, user_id: int | None, send: b
                 "MyPortal does not have the RMM agent yet: no published release carries the agent builds."
             )
 
+    tray_ready = tray_can_install(device)
+    if not tray_ready:
+        published = await _published_tray_version(os_name)
+        if published is None or published < MIN_TRAY_VERSION:
+            raise AgentDeployError(
+                f"The tray app on this device ({device.get('agent_version')}) is too old to install the RMM agent. "
+                f"Publish tray version {version_label(MIN_TRAY_VERSION)} or later under Admin > Tray > Versions "
+                "so devices update, then push again."
+            )
+
     latest = await deploy_repo.latest_install_command(int(device["id"]))
     if latest and latest.get("status") == "queued":
         command_id = int(latest["id"])
@@ -281,6 +362,19 @@ async def push_to_device(device: dict[str, Any], *, user_id: int | None, send: b
         command_id = await deploy_repo.create_install_command(
             int(device["id"]), user_id=user_id, payload_json=json.dumps({"type": INSTALL_COMMAND})
         )
+    if not tray_ready:
+        # The install stays queued (the drain holds it back) until the
+        # updated tray app reports a version that understands it.
+        if send:
+            await _request_tray_update(device, user_id=user_id)
+        else:
+            queued = await deploy_repo.queued_command(int(device["id"]), UPDATE_COMMAND)
+            if not queued:
+                await deploy_repo.create_command(
+                    int(device["id"]), UPDATE_COMMAND, user_id=user_id, payload_json=json.dumps({"type": UPDATE_COMMAND})
+                )
+        log_info("Queued RMM agent install behind a tray update", device_id=device.get("id"), command_id=command_id)
+        return {"status": "updating_tray", "command_id": command_id}
     delivered = await _send(device, command_id) if send else False
     log_info(
         "Queued RMM agent install", device_id=device.get("id"), command_id=command_id, delivered=delivered, user_id=user_id
@@ -378,6 +472,9 @@ async def asset_deploy_state(asset_id: int, company_id: int) -> dict[str, Any] |
     supported = str(device.get("os") or "").lower() in TRAY_PLATFORMS
     return {
         "supported": supported,
+        "tray_version": device.get("agent_version"),
+        "tray_outdated": not tray_can_install(device),
+        "min_tray_version": version_label(MIN_TRAY_VERSION),
         "status": latest.get("status") if latest else None,
         "error": latest.get("error") if latest else None,
         "requested_at": latest.get("created_at") if latest else None,

@@ -35,6 +35,10 @@ _PUSH_MESSAGES = {
     "installed": "The RMM agent is already installed on this device.",
     "sent": "Sent to the device. Its tray app is installing the RMM agent now.",
     "queued": "Queued. The device's tray app installs the RMM agent when it next connects.",
+    "updating_tray": (
+        "The device's tray app is too old to install the RMM agent, so it was asked to update itself first. "
+        "The install starts once the updated tray app reconnects."
+    ),
 }
 
 
