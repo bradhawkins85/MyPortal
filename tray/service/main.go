@@ -12,6 +12,7 @@
 //     config_changed WebSocket event.
 //   - Dispatches server commands (chat_open, show_notification, config_changed)
 //     to the UI agent over the local IPC socket.
+//   - Installs the MyPortal RMM agent on an install_rmm_agent command.
 //   - Runs the auto-update checker every 6 hours.
 //
 // # Platforms
@@ -46,6 +47,7 @@ import (
 	"github.com/bradhawkins85/myportal-tray/internal/ipc"
 	"github.com/bradhawkins85/myportal-tray/internal/logger"
 	"github.com/bradhawkins85/myportal-tray/internal/notify"
+	"github.com/bradhawkins85/myportal-tray/internal/rmminstall"
 	"github.com/bradhawkins85/myportal-tray/internal/scanner"
 	"github.com/bradhawkins85/myportal-tray/internal/updater"
 )
@@ -135,6 +137,8 @@ type daemon struct {
 	pendingUIMessage *ipc.Message
 
 	networkScanMu sync.Mutex
+	// rmmInstallMu keeps two install_rmm_agent commands from racing.
+	rmmInstallMu sync.Mutex
 	// defenderScanMu serialises Defender scans, which run in the background
 	// because Start-MpScan blocks until a (possibly hours-long) scan finishes.
 	defenderScanMu sync.Mutex
@@ -608,6 +612,40 @@ func (d *daemon) dispatchWSMessage(msgType string, msg map[string]json.RawMessag
 	case "troubleshoot":
 		logger.Info("troubleshoot command received")
 		go d.handleTroubleshoot(msg)
+	case "install_rmm_agent":
+		logger.Info("install_rmm_agent command received")
+		go d.handleInstallRMMAgent(msg)
+	}
+}
+
+// handleInstallRMMAgent installs the MyPortal RMM agent for an
+// "install_rmm_agent" command and reports the outcome to the server.
+func (d *daemon) handleInstallRMMAgent(msg map[string]json.RawMessage) {
+	var commandID int
+	if t, ok := msg["command_id"]; ok {
+		_ = json.Unmarshal(t, &commandID)
+	}
+	if commandID <= 0 {
+		logger.Warn("install_rmm_agent: ignoring command without a command id")
+		return
+	}
+	d.rmmInstallMu.Lock()
+	defer d.rmmInstallMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	version, err := rmminstall.New(d.client).Install(ctx)
+	message := fmt.Sprintf("Installed the MyPortal RMM agent %s.", version)
+	if err != nil {
+		logger.Error("install_rmm_agent: %v", err)
+		message = err.Error()
+	} else {
+		logger.Info("install_rmm_agent: installed version %s", version)
+	}
+	reportCtx, reportCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer reportCancel()
+	if postErr := d.client.PostRMMAgentInstallResult(reportCtx, commandID, err == nil, message); postErr != nil {
+		logger.Warn("install_rmm_agent: reporting the result failed: %v", postErr)
 	}
 }
 

@@ -70,6 +70,20 @@
           </label>
           <p class="form-helper">When enabled, the server may send OS-native desktop notifications to enrolled devices belonging to this company.</p>
         </div>
+        {% if feature_pack_available('rmm') %}
+        <div class="form-field">
+          <label class="form-label form-label--checkbox">
+            <input
+              type="checkbox"
+              name="rmm_agent_auto_deploy"
+              value="1"
+              {% if company.rmm_agent_auto_deploy %}checked{% endif %}
+            />
+            Install the RMM agent automatically
+          </label>
+          <p class="form-helper">When enabled, the tray app installs the MyPortal RMM agent on every Windows and Mac device of this company that does not have it yet, including devices enrolled later. Technicians can also push the agent to a single device from the Assets page.</p>
+        </div>
+        {% endif %}
         <div class="form-actions">
           <button type="submit" class="button button--primary">Save settings</button>
         </div>

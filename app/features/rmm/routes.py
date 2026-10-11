@@ -36,6 +36,7 @@ from app.security.flash import flash_redirect
 from app.services import audit as audit_service
 from app.services import gitea
 from app.services import gitea_sign_in
+from app.services import rmm_agent_deploy
 from app.services import rmm_automation
 from app.services import rmm_remote_control
 from app.services import rmm_script_parser as parser
@@ -142,8 +143,12 @@ async def asset_rmm_context(company_id: int, asset_id: int, *, can_run: bool) ->
     agent = await rmm_repo.get_asset_agent(asset_id)
     if agent and agent.get("company_id") is not None and int(agent["company_id"]) != int(company_id):
         agent = None
+    # Without an agent, technicians can push one through the device's tray app.
+    deploy = None if agent else _serialise(await rmm_agent_deploy.asset_deploy_state(asset_id, company_id))
     return {
         "agent": _serialise({key: agent.get(key) for key in _AGENT_PUBLIC_FIELDS}) if agent else None,
+        "deploy": deploy,
+        "can_push_agent": bool(can_run and deploy and deploy.get("supported")),
         "runs": [_serialise(run) for run in await rmm_repo.list_runs(company_id=company_id, asset_id=asset_id, limit=10)],
         "can_run": can_run and agent is not None,
         # Remote control works without the agent when the device's ID is in a custom field.

@@ -307,7 +307,30 @@ cancel, AI summary and change to a schedule or onboarding step is recorded in th
 
 The RMM agent (`myportal-rmm`) is a separate program from the tray app, built for Windows,
 macOS and Linux by the **Build RMM agent** workflow. It enrols with the tray device's token so
-it joins the same company and asset, then waits for runs:
+it joins the same company and asset, then waits for runs.
+
+### Pushing the agent from MyPortal
+
+The tray app installs the agent on Windows and macOS devices, so a device needs the tray app
+first:
+
+- **One device**: on **Assets**, open the device's **Actions** menu, or its page's **Scripts**
+  card, and choose **Install RMM agent** (write access to RMM scripts). The asset page shows
+  whether the install is queued, running or failed, and why.
+- **A whole company**: super admins tick **Install the RMM agent automatically** on the
+  company's tray settings (**Edit company > Tray settings**). MyPortal then pushes the agent to
+  every device of the company without it, and to each new device when its tray app connects. A
+  failed install is retried once a day.
+
+Pushes need a tray app release that includes this feature; older tray apps ignore them and
+the push stays "sent" without reporting back. A push reaches a connected device straight away; an offline device gets it when it next
+connects. The tray app downloads the agent build from MyPortal, checks its SHA-256, puts it in
+`%ProgramFiles%\MyPortal RMM` (Windows) or `/Library/Application Support/MyPortal RMM` (macOS),
+enrols it and installs its service. MyPortal fetches the builds from the newest GitHub release
+that has them (`GITHUB_TRAY_MSI_REPO`) with the **Update tray icon installer** scheduled task,
+or on the first push. Each push is a tray command, recorded in the audit trail.
+
+To install it by hand, as an administrator:
 
 ```text
 MYPORTAL_TRAY_TOKEN=<tray device token> myportal-rmm enrol --url https://portal.example.com

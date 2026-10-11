@@ -13,7 +13,10 @@ the tray app, with its own version, build workflow
 
 ## Install
 
-The tray app installs the agent. By hand, as an administrator:
+The tray app installs the agent when MyPortal pushes it: from the Assets page
+for one device, or automatically for every device of a company that has
+**Install the RMM agent automatically** on (see
+`docs/wiki/administration/RMM Scripts.md`). By hand, as an administrator:
 
 ```sh
 MYPORTAL_TRAY_TOKEN=<tray device token> myportal-rmm enrol --url https://portal.example.com
