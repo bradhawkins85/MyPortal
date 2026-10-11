@@ -1057,6 +1057,8 @@
     const ticketSubject = (linkedContainer.dataset.ticketSubject || '').trim();
     // Requester opted out of AI processing: the troubleshooter must stay off.
     const aiOptedOut = linkedContainer.dataset.aiOptedOut === 'true';
+    // RustDesk / MeshCentral buttons (handled by rmm_remote_control.js).
+    const remoteProviders = parseJsonArray(linkedContainer.dataset.remoteControl, []);
     const lookupButton = document.querySelector('[data-requester-assets-lookup]');
     const lookupResults = document.querySelector('[data-requester-assets-results]');
     const lookupStatus = document.querySelector('[data-requester-assets-status]');
@@ -1289,6 +1291,11 @@
           tacticalAction.setAttribute('aria-label', `Tactical RMM search is not configured for ${displayName}`);
           tacticalAction.innerHTML = '<span aria-hidden="true">🖥️</span>';
           actions.appendChild(tacticalAction);
+        }
+
+        // RustDesk / MeshCentral actions, built by rmm_remote_control.js.
+        if (remoteProviders.length && window.MyPortalRmm && window.MyPortalRmm.assetActions) {
+          actions.appendChild(window.MyPortalRmm.assetActions(assetIdValue, displayName, remoteProviders));
         }
 
         const chatButton = document.createElement('button');

@@ -10,7 +10,8 @@ thing MyPortal writes to the repository is its folder layout (see
 [Repository layout](#repository-layout)).
 
 Scripts can be pushed manually, run on a schedule, or run automatically when the RMM agent is
-first installed on a device (see [Schedules and onboarding](#schedules-and-onboarding)).
+first installed on a device (see [Schedules and onboarding](#schedules-and-onboarding)). They
+also switch on RustDesk and MeshCentral for [Remote Control](Remote%20Control.md).
 
 ## Gitea
 
@@ -192,6 +193,9 @@ or grouped by scope:
 Names match the field or variable name, ignoring case. Checkbox fields take `true`/`false`,
 and date fields take a `YYYY-MM-DD` date. Values for names that don't exist, and image fields,
 are skipped and listed on the run, so create the field or variable first.
+
+Remote control activation scripts also print `session` values, such as a RustDesk ID; see
+[Remote Control](Remote%20Control.md).
 
 The agent also sets `MYPORTAL_RUN_ID` for every run.
 

@@ -1065,6 +1065,12 @@ class Settings(BaseSettings):
         default="bradhawkins85/MyPortal",
         validation_alias="GITHUB_TRAY_MSI_REPO",
     )
+    # RustDesk server settings (RustDesk > Settings > Network > Export), applied
+    # to a device each time a technician starts a RustDesk session.
+    rustdesk_cfg: str = Field(default="", validation_alias="RUSTDESK_CFG")
+    # Optional RustDesk installer (.exe for Windows) used when a device does not
+    # have RustDesk yet.
+    rustdesk_installer_url: str = Field(default="", validation_alias="RUSTDESK_INSTALLER_URL")
 
     @model_validator(mode="after")
     def _enforce_production_secret_strength(self) -> "Settings":

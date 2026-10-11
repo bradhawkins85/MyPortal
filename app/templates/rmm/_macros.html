@@ -17,6 +17,8 @@
 {% macro run_source(run) -%}
   {%- if run.run_source == 'schedule' -%}
     Schedule: {{ run.schedule_name or 'deleted' }}{% if run.requested_by_email %} <span class="text-muted">(run now by {{ run.requested_by_email }})</span>{% endif %}
+  {%- elif run.run_source == 'remote_control' -%}
+    Remote control{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- elif run.run_source == 'onboarding' -%}
     Onboarding{% if run.requested_by_email %} <span class="text-muted">({{ run.requested_by_email }})</span>{% endif %}
   {%- else -%}
@@ -36,6 +38,46 @@
     <td class="table__actions" data-column-key="actions"><button type="button" class="button button--ghost button--small" data-rmm-view-run="{{ run.id }}" aria-haspopup="dialog" aria-controls="rmm-result-modal">View<span class="visually-hidden"> run of {{ run.script_name }}</span></button></td>
   </tr>
   {%- endfor %}
+{%- endmacro %}
+
+{# RMM actions for one asset (asset page Scripts card, ticket asset list):
+   a RustDesk button with a menu beside it for remote desktop, file transfer
+   and terminal sessions, then one "RMM" menu with every other RMM action.
+   rmm_remote_control.js starts the sessions; ticket_detail.js builds the same
+   markup when it redraws the list (window.MyPortalRmm.assetActions). #}
+{% set REMOTE_MODES = [("remote", "Remote desktop"), ("file_transfer", "File transfer"), ("terminal", "Terminal")] %}
+{% macro asset_menu(asset_id, asset_name, remote_control, run_script=false) -%}
+{%- set providers = remote_control | map(attribute="provider") | list -%}
+<div class="rmm-asset-actions">
+  {%- if "rustdesk" in providers %}
+  <div class="rmm-split">
+    <button type="button" class="button button--ghost button--small rmm-split__main" data-rmm-remote="rustdesk" data-rmm-remote-mode="remote" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}" title="Start a RustDesk remote session">RustDesk</button>
+    <details class="rmm-menu rmm-split__more" data-rmm-menu>
+      <summary class="button button--ghost button--small rmm-menu__toggle" aria-label="More RustDesk sessions for {{ asset_name }}"><span aria-hidden="true">▾</span></summary>
+      <div class="dropdown__menu rmm-menu__panel" role="menu" aria-label="RustDesk sessions for {{ asset_name }}">
+        {%- for mode, label in REMOTE_MODES %}
+        <button type="button" class="dropdown__item" role="menuitem" data-rmm-remote="rustdesk" data-rmm-remote-mode="{{ mode }}" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}">{{ label }}</button>
+        {%- endfor %}
+      </div>
+    </details>
+  </div>
+  {%- endif %}
+  {%- if "meshcentral" in providers or run_script %}
+  <details class="rmm-menu" data-rmm-menu>
+    <summary class="button button--ghost button--small rmm-menu__toggle" title="RMM actions" aria-label="RMM actions for {{ asset_name }}">RMM <span aria-hidden="true">▾</span></summary>
+    <div class="dropdown__menu rmm-menu__panel" role="menu" aria-label="RMM actions for {{ asset_name }}">
+      {%- if "meshcentral" in providers %}
+      {%- for mode, label in REMOTE_MODES %}
+      <button type="button" class="dropdown__item" role="menuitem" data-rmm-remote="meshcentral" data-rmm-remote-mode="{{ mode }}" data-rmm-remote-asset="{{ asset_id }}" data-rmm-remote-name="{{ asset_name }}">MeshCentral: {{ label | lower }}</button>
+      {%- endfor %}
+      {%- endif %}
+      {%- if run_script %}
+      <button type="button" class="dropdown__item" role="menuitem" data-rmm-run-open aria-haspopup="dialog" aria-controls="rmm-run-modal">Run script</button>
+      {%- endif %}
+    </div>
+  </details>
+  {%- endif %}
+</div>
 {%- endmacro %}
 
 {#- The Scripts page's folder navigation. Folders are collapsed, except the ones

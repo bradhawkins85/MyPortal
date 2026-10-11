@@ -53,6 +53,7 @@ MAX_CUSTOM_VALUES = 200
 MAX_TARGETS_PER_RUN = 500
 POLL_WAIT_SECONDS = 25
 SENSITIVE_MASK = "••••••"
+CUSTOM_VALUE_SCOPES = ("asset", "company", "session")
 
 _TRUE = {"1", "true", "yes", "on", "y", "$true"}
 _FALSE = {"0", "false", "no", "off", "n", "$false", ""}
@@ -965,11 +966,14 @@ async def _apply_company_value(company_id: int, name: str, value: str, definitio
 
 
 def normalise_custom_values(raw: Any) -> list[dict[str, str]]:
-    """Accept ``[{scope, name, value}]`` or ``{"asset": {...}, "company": {...}}``."""
+    """Accept ``[{scope, name, value}]`` or ``{"asset": {...}, "company": {...}}``.
+
+    ``session`` values are what a remote control activation script reports
+    (see :mod:`app.services.rmm_remote_control`)."""
 
     items: list[dict[str, str]] = []
     if isinstance(raw, Mapping):
-        for scope in ("asset", "company"):
+        for scope in CUSTOM_VALUE_SCOPES:
             values = raw.get(scope)
             if isinstance(values, Mapping):
                 items.extend({"scope": scope, "name": str(key), "value": values[key]} for key in values)
@@ -985,7 +989,7 @@ def normalise_custom_values(raw: Any) -> list[dict[str, str]]:
         if isinstance(value, bool):
             value = "true" if value else "false"
         value = "" if value is None else str(value)[:65535]
-        if scope in {"asset", "company"} and name:
+        if scope in CUSTOM_VALUE_SCOPES and name:
             cleaned.append({"scope": scope, "name": name, "value": value})
     return cleaned
 
@@ -1024,12 +1028,20 @@ async def record_result(agent: Mapping[str, Any], run_id: int, payload: Mapping[
         status = "failed"
     else:
         status = "completed"
-    custom_values = await apply_custom_values(run, normalise_custom_values(payload.get("custom_values")))
+    from app.services import rmm_remote_control
+
+    values = normalise_custom_values(payload.get("custom_values"))
+    # Session values (a remote access ID and password) never stay in the output.
+    stdout, session_values = rmm_remote_control.take_session_markers(str(payload.get("stdout") or ""))
+    session_values.update({item["name"].lower(): item["value"] for item in values if item["scope"] == "session"})
+    custom_values = await apply_custom_values(run, [item for item in values if item["scope"] != "session"])
+    if session_values:
+        custom_values.extend(await rmm_remote_control.capture({**run, "id": run_id}, session_values))
     await rmm_repo.finish_run(
         run_id,
         status=status,
         exit_code=exit_code,
-        stdout=_truncate(payload.get("stdout")),
+        stdout=_truncate(stdout),
         stderr=_truncate(payload.get("stderr")),
         custom_values=custom_values,
         error_message=error,

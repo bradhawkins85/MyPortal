@@ -34,11 +34,12 @@ func TestShellArgsFollowDeclaredOrderAndTypes(t *testing.T) {
 }
 
 func TestParseMarkers(t *testing.T) {
-	out := "hello\n##myportal[asset.BitLocker Status]=On\n  ##myportal[company.Tenant]=contoso  \n##myportal[other.x]=1\n"
+	out := "hello\n##myportal[asset.BitLocker Status]=On\n  ##myportal[company.Tenant]=contoso  \n##myportal[session.id]=123 456\n##myportal[other.x]=1\n"
 	got := ParseMarkers(out)
 	want := []client.CustomValue{
 		{Scope: "asset", Name: "BitLocker Status", Value: "On"},
 		{Scope: "company", Name: "Tenant", Value: "contoso"},
+		{Scope: "session", Name: "id", Value: "123 456"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ParseMarkers = %#v", got)

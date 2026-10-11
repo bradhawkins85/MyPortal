@@ -1,0 +1,7 @@
+{
+  "guid": "8592b1e8-de84-4e45-b4e2-038381ec8cc7",
+  "occurred_at": "2026-10-10T09:50Z",
+  "change_type": "Feature",
+  "summary": "RMM: RustDesk and MeshCentral remote desktop, file transfer and terminal sessions open automatically from each asset on the asset and ticket pages; RustDesk's built-in activation script applies RUSTDESK_CFG and sets a one-time password",
+  "content_hash": "efec41e78372de17729660835761bdf9f0967a7e7960f2f25e4554e238944444"
+}

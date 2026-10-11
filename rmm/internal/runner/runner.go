@@ -13,10 +13,11 @@
 //
 //	##myportal[asset.BitLocker Status]=On
 //	##myportal[company.Tenant ID]=contoso
+//	##myportal[session.id]=123456789   (remote control activation scripts)
 //
 // or by writing JSON to $MYPORTAL_RESULT_FILE: an array of
-// {"scope": "asset"|"company", "name": "...", "value": "..."} objects, or an
-// object {"asset": {"Name": "value"}, "company": {"Name": "value"}}.
+// {"scope": "asset"|"company"|"session", "name": "...", "value": "..."}
+// objects, or an object {"asset": {"Name": "value"}, "company": {...}}.
 package runner
 
 import (
@@ -46,7 +47,7 @@ import (
 // MaxOutputBytes caps how much stdout/stderr is kept per stream.
 const MaxOutputBytes = 1 << 20
 
-var markerPattern = regexp.MustCompile(`^\s*##myportal\[(asset|company)\.([^\]]+)\]=(.*?)\s*$`)
+var markerPattern = regexp.MustCompile(`^\s*##myportal\[(asset|company|session)\.([^\]]+)\]=(.*?)\s*$`)
 
 // Runner executes jobs inside WorkDir.
 type Runner struct {
@@ -376,7 +377,7 @@ func ParseResultFile(data []byte) ([]client.CustomValue, error) {
 		return nil, errors.New("expected a JSON array or an object with asset and company keys")
 	}
 	var values []client.CustomValue
-	for _, scope := range []string{"asset", "company"} {
+	for _, scope := range []string{"asset", "company", "session"} {
 		names := make([]string, 0, len(grouped[scope]))
 		for name := range grouped[scope] {
 			names = append(names, name)
