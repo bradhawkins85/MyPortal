@@ -30,8 +30,14 @@ sudo myportal-backup --label manual
 | Kind | Pattern | Contents |
 |------|---------|----------|
 | Database | `db-<label>-<UTC timestamp>.sql.gz` | Full `mysqldump` of the configured database (single-transaction, routines, triggers, events) |
+| Event logs | `eventlog-<label>-<UTC timestamp>.sql.gz` | Only with `EVENT_LOG_DB_BACKUP=true`: `mysqldump` of the [RMM event log database](RMM%20Event%20Logs.md). Made with the database backup. |
 | Files | `files-<label>-<UTC timestamp>.tar.gz` | Archive of `private_uploads/` and `uploads/` under the shared root |
 | Gitea | `gitea-<label>-<UTC timestamp>.tar.gz` | The RMM script library: `/var/lib/gitea` and `/etc/gitea`, when this host runs Gitea. Made with the files backup. |
+
+The RMM event log database (`EVENT_LOG_DB_*`) is left out by default: it is
+large and agents can send the logs again. Set `EVENT_LOG_DB_BACKUP=true` in the
+environment file to back it up too. Restore one with
+`gunzip -c eventlog-….sql.gz | mysql` using the event log database's user.
 
 Backups are written to `BACKUP_DIR` (default: `/opt/myportal/backups`)
 with directory mode `0700` and file mode `0600`.
@@ -94,6 +100,7 @@ tar -xzf /opt/myportal/backups/files-scheduled-20260101T000000Z.tar.gz -C /opt/m
 |----------|---------|-------------|
 | `BACKUP_DIR` | `/opt/myportal/backups` | Directory for backup output |
 | `MYPORTAL_BACKUPS_TO_KEEP` | `10` | Number of backups to retain per kind |
+| `EVENT_LOG_DB_BACKUP` | `false` | Set `true` to also back up the RMM event log database (`eventlog-*.sql.gz`) |
 | `SKIP_PRE_UPGRADE_BACKUP` | `false` | Set `true` to skip the pre-upgrade database backup |
 | `MYPORTAL_SHARED_ROOT` | `/opt/myportal/shared` | Shared data root containing upload directories |
 
@@ -106,7 +113,9 @@ sudo myportal-docker backup
 ```
 
 This backs up the database, the shared files volume and, when the installation
-runs Gitea, its data (`gitea-*.tar.gz`), then prunes old backups using the same
+runs Gitea, its data (`gitea-*.tar.gz`), and with `EVENT_LOG_DB_BACKUP=true` in
+`myportal.env` the RMM event log database (`eventlog-*.sql.gz`, dumped from the
+`db` container, which must be able to reach `EVENT_LOG_DB_HOST`), then prunes old backups using the same
 `MYPORTAL_BACKUPS_TO_KEEP` setting. Backups are
 stored in the directory configured for the Docker deployment.
 

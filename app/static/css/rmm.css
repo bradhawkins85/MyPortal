@@ -767,3 +767,24 @@ body.navigation--top .rmm-library {
   border: 0;
   min-width: 0;
 }
+
+/* Event logs */
+.rmm-event-log__message {
+  max-height: 20rem;
+  overflow: auto;
+  margin: 0.4rem 0 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-bg-sunken);
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rmm-event-log__device-form {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.rmm-event-log__device-form textarea { flex: 1 1 auto; min-width: 0; }

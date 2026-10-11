@@ -151,6 +151,29 @@ class Settings(BaseSettings):
             "Default: 10."
         ),
     )
+    # Secondary MySQL/MariaDB database for RMM event logs. Event log collection
+    # is off until host, user and name are all set; it never falls back to the
+    # main database. See app/core/event_log_database.py.
+    event_log_database_host: str | None = Field(default=None, validation_alias="EVENT_LOG_DB_HOST")
+    event_log_database_port: int = Field(default=3306, validation_alias="EVENT_LOG_DB_PORT", ge=1, le=65535)
+    event_log_database_user: str | None = Field(default=None, validation_alias="EVENT_LOG_DB_USER")
+    event_log_database_password: str | None = Field(default=None, validation_alias="EVENT_LOG_DB_PASSWORD")
+    event_log_database_name: str | None = Field(default=None, validation_alias="EVENT_LOG_DB_NAME")
+    event_log_database_backup: bool = Field(
+        default=False,
+        validation_alias="EVENT_LOG_DB_BACKUP",
+        description=(
+            "Include the event log database in scripts/backup.sh and "
+            "myportal-docker backups. Off by default: event logs are large "
+            "and can be collected again."
+        ),
+    )
+    event_log_retention_days: int = Field(
+        default=30,
+        ge=0,
+        validation_alias="EVENT_LOG_RETENTION_DAYS",
+        description="Days of RMM event log entries to keep. 0 keeps them forever.",
+    )
     migration_lock_timeout: int = Field(
         default=60, validation_alias="MIGRATION_LOCK_TIMEOUT"
     )

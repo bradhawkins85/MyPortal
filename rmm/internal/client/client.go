@@ -16,6 +16,10 @@ import (
 // ErrUnauthorized means the token was revoked or the device was removed.
 var ErrUnauthorized = errors.New("MyPortal rejected the RMM agent's token")
 
+// ErrUnavailable means MyPortal answered 503, such as event log collection
+// being switched off.
+var ErrUnavailable = errors.New("MyPortal reported the service unavailable")
+
 // Details describes the device; sent on enrolment and check-in.
 type Details struct {
 	Hostname     string   `json:"hostname,omitempty"`
@@ -110,6 +114,9 @@ func (c *Client) do(ctx context.Context, method, path string, body, out interfac
 	if resp.StatusCode == http.StatusUnauthorized {
 		return ErrUnauthorized
 	}
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		return fmt.Errorf("%s %s: %w", method, path, ErrUnavailable)
+	}
 	if resp.StatusCode >= 400 {
 		var detail struct {
 			Detail interface{} `json:"detail"`
@@ -160,4 +167,40 @@ func (c *Client) Report(ctx context.Context, runID int64, result Result) error {
 		result.CustomValues = []CustomValue{}
 	}
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/api/rmm/agent/runs/%d/result", runID), result, nil)
+}
+
+// EventLogConfig says which Windows event logs to collect.
+type EventLogConfig struct {
+	Enabled              bool     `json:"enabled"`
+	Logs                 []string `json:"logs"`
+	IntervalSeconds      int      `json:"interval_seconds"`
+	MaxBatch             int      `json:"max_batch"`
+	InitialLookbackHours int      `json:"initial_lookback_hours"`
+}
+
+// EventLogEntry is one event log record sent to MyPortal.
+type EventLogEntry struct {
+	LogName     string    `json:"log_name"`
+	RecordID    uint64    `json:"record_id"`
+	EventID     uint32    `json:"event_id"`
+	Level       int       `json:"level"`
+	Provider    string    `json:"provider,omitempty"`
+	Computer    string    `json:"computer,omitempty"`
+	Message     string    `json:"message,omitempty"`
+	TimeCreated time.Time `json:"time_created"`
+}
+
+// EventLogConfig asks which event logs to collect.
+func (c *Client) EventLogConfig(ctx context.Context) (EventLogConfig, error) {
+	var out EventLogConfig
+	err := c.do(ctx, http.MethodGet, "/api/rmm/agent/event-logs/config", nil, &out)
+	return out, err
+}
+
+// SendEventLogs sends a batch of entries; ErrUnavailable means collection is off.
+func (c *Client) SendEventLogs(ctx context.Context, entries []EventLogEntry) error {
+	payload := struct {
+		Entries []EventLogEntry `json:"entries"`
+	}{entries}
+	return c.do(ctx, http.MethodPost, "/api/rmm/agent/event-logs", payload, nil)
 }
