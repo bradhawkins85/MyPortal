@@ -8,6 +8,9 @@
   when a device's RMM agent first enrols (:mod:`app.services.rmm_automation`)
 * ``GET /rmm/remote-control`` RustDesk and MeshCentral, switched on per session
   by an activation script (:mod:`app.services.rmm_remote_control`)
+* ``POST /api/rmm/assets/{id}/agent-install`` push the RMM agent to a device
+  through its tray app, and the tray app's download and result APIs
+  (:mod:`app.services.rmm_agent_deploy`)
 
 A background job keeps the Gitea repository's ``Common/`` and
 ``Companies/<company>/`` folders in place, adding a folder for each new
@@ -25,14 +28,15 @@ from app.core.features import FeaturePack
 
 from app.services import rmm_automation, rmm_scripts
 
+from .agent_deploy_routes import router as agent_deploy_router
 from .automation_routes import router as automation_router
 from .remote_control_routes import router as remote_control_router
 from .routes import router
 
 PACK = FeaturePack(
     slug="rmm",
-    version="1.5.0",
-    routers=(router, automation_router, remote_control_router),
+    version="1.6.0",
+    routers=(router, automation_router, remote_control_router, agent_deploy_router),
     background_jobs=(rmm_scripts.folder_maintenance_loop, rmm_automation.automation_loop),
 )
 

@@ -256,6 +256,17 @@
                           >Open Chat</button>
                         </li>
                       {% endif %}
+                      {% if asset.can_push_rmm_agent %}
+                        <li class="header-title-menu__item" role="none">
+                          <button
+                            type="button"
+                            class="header-title-menu__link"
+                            role="menuitem"
+                            data-rmm-agent-install="{{ asset.id }}"
+                            data-rmm-agent-name="{{ asset.name or ('Asset ' ~ asset.id) }}"
+                          >Install RMM agent</button>
+                        </li>
+                      {% endif %}
                       {% if is_super_admin %}
                         <li class="header-title-menu__item" role="none">
                           <button
@@ -313,6 +324,7 @@
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/assets.js') }}" defer></script>
+  {% if can_push_rmm_agent %}<script src="{{ static_url('/static/js/rmm_agent_deploy.js') }}" defer></script>{% endif %}
   <script>
     // Allow row-level action dropdowns to overflow the table wrapper.
     document.addEventListener('DOMContentLoaded', function () {

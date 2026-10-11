@@ -1296,11 +1296,23 @@ class SchedulerService:
                             github_token=settings.github_token,
                         )
                     )
+                    # The RMM agent the tray app installs ships in the same releases.
+                    from app.services import rmm_agent_deploy
+
+                    try:
+                        updated_agent = await rmm_agent_deploy.fetch_latest_agent(
+                            repo=settings.github_tray_msi_repo,
+                            github_token=settings.github_token,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - tray installers still count
+                        log_error("Failed to refresh the RMM agent builds", error=str(exc))
+                        updated_agent = {}
                     details = json.dumps(
                         {
                             "repo": settings.github_tray_msi_repo,
                             "assets": updated_assets,
-                            "updated": any(updated_assets.values()),
+                            "rmm_agent": updated_agent,
+                            "updated": any(updated_assets.values()) or any(updated_agent.values()),
                         },
                         default=str,
                     )
