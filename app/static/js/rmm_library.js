@@ -29,31 +29,110 @@
   }
 
   // ------------------------------------------------------------------ //
-  // Search
+  // Folder tree and search
   // ------------------------------------------------------------------ //
 
+  const folders = Array.from(nav.querySelectorAll('[data-rmm-folder]'));
+  const expandAll = nav.querySelector('[data-rmm-tree-expand]');
+  const collapseAll = nav.querySelector('[data-rmm-tree-collapse]');
   const search = nav.querySelector('[data-rmm-script-search]');
-  if (search) {
-    search.addEventListener('input', () => {
-      const term = search.value.trim().toLowerCase();
-      let visible = 0;
-      nav.querySelectorAll('[data-rmm-group]').forEach((group) => {
-        let groupVisible = 0;
-        group.querySelectorAll('[data-rmm-script-item]').forEach((item) => {
-          const match = !term || (item.dataset.search || '').includes(term);
-          item.hidden = !match;
-          if (match) {
-            groupVisible += 1;
-          }
-        });
-        group.hidden = groupVisible === 0;
-        visible += groupVisible;
+  // The folders a technician had open before searching, restored when the search is cleared.
+  let openBeforeSearch = null;
+
+  function openAncestors(node) {
+    let folder = node && node.closest('[data-rmm-folder]');
+    while (folder) {
+      folder.open = true;
+      folder = folder.parentElement && folder.parentElement.closest('[data-rmm-folder]');
+    }
+  }
+
+  if (folders.length) {
+    [expandAll, collapseAll].forEach((button) => { if (button) { button.hidden = false; } });
+    if (expandAll) {
+      expandAll.addEventListener('click', () => folders.forEach((folder) => { if (!folder.hidden) { folder.open = true; } }));
+    }
+    if (collapseAll) {
+      collapseAll.addEventListener('click', () => {
+        folders.forEach((folder) => { folder.open = false; });
+        // Keep the open script in view.
+        openAncestors(nav.querySelector('[data-rmm-script-link][aria-current="true"]'));
       });
-      const empty = nav.querySelector('[data-rmm-script-empty]');
-      if (empty) {
-        empty.hidden = visible > 0;
+    }
+  }
+
+  function applySearch(term) {
+    if (term && openBeforeSearch === null) {
+      openBeforeSearch = new Set(folders.filter((folder) => folder.open));
+    }
+    let visible = 0;
+    nav.querySelectorAll('[data-rmm-script-item]').forEach((item) => {
+      const match = !term || (item.dataset.search || '').includes(term);
+      item.hidden = !match;
+      if (match) {
+        visible += 1;
       }
     });
+    // Deepest folders first, so a parent sees whether any child folder still shows.
+    folders.slice().reverse().forEach((folder) => {
+      const hasMatch = Boolean(folder.querySelector('[data-rmm-script-item]:not([hidden])'));
+      const row = folder.parentElement;
+      if (row) {
+        row.hidden = Boolean(term) && !hasMatch;
+      }
+      if (term) {
+        folder.open = hasMatch;
+      }
+    });
+    if (!term && openBeforeSearch !== null) {
+      folders.forEach((folder) => { folder.open = openBeforeSearch.has(folder); });
+      openBeforeSearch = null;
+    }
+    const empty = nav.querySelector('[data-rmm-script-empty]');
+    if (empty) {
+      empty.hidden = visible > 0;
+    }
+  }
+
+  if (search) {
+    search.addEventListener('input', () => applySearch(search.value.trim().toLowerCase()));
+    search.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && search.value) {
+        search.value = '';
+        applySearch('');
+      }
+    });
+  }
+
+  // ------------------------------------------------------------------ //
+  // Pinned navigation
+  // ------------------------------------------------------------------ //
+
+  // With the top navigation the list is pinned below the sticky top bar,
+  // whose height changes when its menu wraps.
+  const topBar = document.querySelector('.layout__sidebar');
+  function syncTopBarHeight() {
+    const height = document.body.classList.contains('navigation--top') && topBar ? topBar.offsetHeight : 0;
+    library.style.setProperty('--rmm-topbar-height', height + 'px');
+  }
+  syncTopBarHeight();
+  if (topBar && typeof ResizeObserver === 'function') {
+    new ResizeObserver(syncTopBarHeight).observe(topBar);
+  }
+  if (typeof MutationObserver === 'function') {
+    new MutationObserver(syncTopBarHeight).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  // Scroll the list itself (not the page) so the open script is visible.
+  function revealInNav(link) {
+    if (!link) {
+      return;
+    }
+    const navBox = nav.getBoundingClientRect();
+    const linkBox = link.getBoundingClientRect();
+    if (linkBox.top < navBox.top || linkBox.bottom > navBox.bottom) {
+      nav.scrollTop += linkBox.top - navBox.top - nav.clientHeight / 3;
+    }
   }
 
   // ------------------------------------------------------------------ //
@@ -75,6 +154,8 @@
       const current = (link.getAttribute('data-rmm-script-link') || '') === scriptId;
       if (current) {
         link.setAttribute('aria-current', 'true');
+        openAncestors(link);
+        revealInNav(link);
       } else {
         link.removeAttribute('aria-current');
       }
@@ -238,5 +319,6 @@
   }
 
   window.history.replaceState({ rmmLibrary: true }, '');
+  revealInNav(nav.querySelector('[data-rmm-script-link][aria-current="true"]'));
   initPanel();
 })();
