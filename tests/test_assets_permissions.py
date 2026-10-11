@@ -1,6 +1,7 @@
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
 import pytest
+from unittest.mock import AsyncMock
 
 from app.features.assets import routes as assets_routes
 import app.main as main_module
@@ -27,7 +28,7 @@ async def test_assets_page_allows_read_only_menu_permission(monkeypatch):
     async def fake_require_authenticated_user(request):
         return user, None
 
-    async def fake_get_user_company(user_id, company_id):
+    async def fake_get_user_company(request, user_id, company_id):
         return membership
 
     async def fake_get_company_by_id(company_id):
@@ -48,7 +49,7 @@ async def test_assets_page_allows_read_only_menu_permission(monkeypatch):
         return HTMLResponse("assets page")
 
     monkeypatch.setattr(main_module, "_require_authenticated_user", fake_require_authenticated_user)
-    monkeypatch.setattr(assets_routes.user_company_repo, "get_user_company", fake_get_user_company)
+    monkeypatch.setattr(main_module, "_get_effective_company_membership", fake_get_user_company)
     monkeypatch.setattr(assets_routes.company_repo, "get_company_by_id", fake_get_company_by_id)
     monkeypatch.setattr(assets_routes.asset_repo, "list_company_assets", fake_list_company_assets)
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "list_field_definitions", fake_list_field_definitions)
@@ -73,11 +74,11 @@ async def test_assets_page_redirects_when_menu_permission_is_none(monkeypatch):
     async def fake_require_authenticated_user(request):
         return user, None
 
-    async def fake_get_user_company(user_id, company_id):
+    async def fake_get_user_company(request, user_id, company_id):
         return membership
 
     monkeypatch.setattr(main_module, "_require_authenticated_user", fake_require_authenticated_user)
-    monkeypatch.setattr(assets_routes.user_company_repo, "get_user_company", fake_get_user_company)
+    monkeypatch.setattr(main_module, "_get_effective_company_membership", fake_get_user_company)
 
     response = await assets_routes.assets_page(_request())
 
@@ -97,7 +98,7 @@ async def test_assets_page_adds_tray_agent_sync_column(monkeypatch):
     async def fake_require_authenticated_user(request):
         return user, None
 
-    async def fake_get_user_company(user_id, company_id):
+    async def fake_get_user_company(request, user_id, company_id):
         return membership
 
     async def fake_get_company_by_id(company_id):
@@ -111,6 +112,7 @@ async def test_assets_page_adds_tray_agent_sync_column(monkeypatch):
                 "name": "Workstation-100",
                 "type": "workstation",
                 "status": "active",
+                "customer_visible": True,
             },
             {
                 "id": 200,
@@ -118,6 +120,7 @@ async def test_assets_page_adds_tray_agent_sync_column(monkeypatch):
                 "name": "Workstation-200",
                 "type": "workstation",
                 "status": "active",
+                "customer_visible": True,
             },
         ]
 
@@ -146,12 +149,13 @@ async def test_assets_page_adds_tray_agent_sync_column(monkeypatch):
         return HTMLResponse("assets page")
 
     monkeypatch.setattr(main_module, "_require_authenticated_user", fake_require_authenticated_user)
-    monkeypatch.setattr(assets_routes.user_company_repo, "get_user_company", fake_get_user_company)
+    monkeypatch.setattr(main_module, "_get_effective_company_membership", fake_get_user_company)
     monkeypatch.setattr(assets_routes.company_repo, "get_company_by_id", fake_get_company_by_id)
     monkeypatch.setattr(assets_routes.asset_repo, "list_company_assets", fake_list_company_assets)
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "list_field_definitions", fake_list_field_definitions)
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "get_all_asset_field_values", fake_get_all_asset_field_values)
     monkeypatch.setattr(assets_routes.tray_repo, "list_active_devices_by_asset_ids", fake_list_active_devices_by_asset_ids)
+    monkeypatch.setattr(assets_routes, "_customer_role_can_view_asset", AsyncMock(return_value=True))
     monkeypatch.setattr(main_module, "_render_template", fake_render_template)
 
     response = await assets_routes.assets_page(_request())

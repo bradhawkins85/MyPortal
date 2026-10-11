@@ -1,5 +1,6 @@
 import asyncio
 
+from app.repositories import tickets as tickets_repository
 from app.services import modules
 from app.services import tacticalrmm
 
@@ -35,7 +36,7 @@ def test_suggest_assets_prefers_upn_username(monkeypatch):
     monkeypatch.setattr(modules.db, "fetch_all", fake_fetch_all)
     monkeypatch.setattr(tacticalrmm, "fetch_agents", fake_fetch_agents)
     monkeypatch.setattr(
-        modules.tickets_repo, "replace_ticket_suggested_assets", fake_replace
+        tickets_repository, "replace_ticket_suggested_assets", fake_replace
     )
 
     result = asyncio.run(modules._invoke_suggest_assets({}, {"ticket_id": 9}))
@@ -71,7 +72,7 @@ def test_suggest_assets_uses_imported_asset_without_tactical_mapping(monkeypatch
     monkeypatch.setattr(modules.db, "fetch_one", fake_fetch_one)
     monkeypatch.setattr(modules.db, "fetch_all", fake_fetch_all)
     monkeypatch.setattr(
-        modules.tickets_repo, "replace_ticket_suggested_assets", fake_replace
+        tickets_repository, "replace_ticket_suggested_assets", fake_replace
     )
 
     result = asyncio.run(modules._invoke_suggest_assets({}, {"ticket_id": 9}))
