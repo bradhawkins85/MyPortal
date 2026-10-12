@@ -12000,6 +12000,18 @@ async def _render_ticket_detail(
         except (TypeError, ValueError):
             continue
 
+    remote_control_providers = await _ticket_remote_control_providers(request, user, ticket)
+    # Each linked asset's RMM agent ("connected" / "offline"); RustDesk and
+    # MeshCentral show only for assets that have one.
+    ticket_rmm_agent_states: dict[str, str] = {}
+    if remote_control_providers and ticket.get("company_id") is not None:
+        from app.features.rmm import routes as rmm_routes
+
+        ticket_rmm_agent_states = {
+            str(asset_id): state
+            for asset_id, state in (await rmm_routes.company_agent_states(int(ticket["company_id"]))).items()
+        }
+
     serialisable_ticket_assets: list[dict[str, Any]] = []
     for asset in ticket_assets:
         if not isinstance(asset, Mapping):
@@ -12181,7 +12193,8 @@ async def _render_ticket_detail(
         "ticket_asset_selection": asset_selection,
         "ticket_asset_linked_data": serialisable_ticket_assets,
         "tacticalrmm_base_url": tactical_base_url,
-        "remote_control_providers": await _ticket_remote_control_providers(request, user, ticket),
+        "remote_control_providers": remote_control_providers,
+        "ticket_rmm_agent_states": ticket_rmm_agent_states,
         "hudu_base_url": hudu_base_url,
         "hudu_company_url": hudu_company_url,
         "solidtime_links": solidtime_links,

@@ -6,6 +6,11 @@ has to be running all the time: MyPortal runs an **activation script** on the de
 RMM agent, the script switches the tool on and reports how to connect, and MyPortal opens the
 session for the technician.
 
+The buttons only appear for devices with the RMM agent installed. Each device shows its RMM agent
+status: a green tick when the agent is connected, an **O** when it is installed but has not
+checked in for the last couple of minutes, and a cross when it is not installed. The `/assets`
+list has the same status in its **RMM agent** column.
+
 ## RustDesk
 
 RustDesk works out of the box with MyPortal's **built-in activation script**. Add the RustDesk
@@ -47,8 +52,8 @@ provider:
    values**. Fill them in with typed values or MyPortal variables, such as
    `{{company.variables.RustDeskConfig}}`, so each company can use its own settings. Secret
    values are kept encrypted; leave them blank to keep the saved value.
-3. Optionally name an **ID custom field**. MyPortal uses that asset custom field when a device
-   has no RMM agent, or when the script does not report an ID.
+3. Optionally name an **ID custom field**. MyPortal uses that asset custom field when the
+   script does not report an ID.
 
 MeshCentral also needs:
 

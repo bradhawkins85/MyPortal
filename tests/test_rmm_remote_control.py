@@ -331,3 +331,43 @@ def test_builtin_scripts_ship_for_windows_and_unix():
     for script in (windows, mac):
         assert "RUSTDESK_CFG" in script["content"] and "MYPORTAL_RUSTDESK_PASSWORD" in script["content"]
         assert "##myportal[session.id]=" in script["content"]
+
+
+def test_agent_state_follows_the_agents_last_poll():
+    from datetime import datetime, timedelta
+
+    now = datetime(2026, 1, 1, 12, 0, 0)
+    assert rmm_scripts.agent_state(None) == "missing"
+    assert rmm_scripts.agent_state({"last_seen_utc": now - timedelta(seconds=30)}, now=now) == "connected"
+    assert rmm_scripts.agent_state({"last_seen_utc": "2026-01-01T11:59:30Z"}, now=now) == "connected"
+    assert rmm_scripts.agent_state({"last_seen_utc": now - timedelta(minutes=10)}, now=now) == "offline"
+    assert rmm_scripts.agent_state({"last_seen_utc": None}, now=now) == "offline"
+
+
+@pytest.mark.anyio
+async def test_remote_control_needs_the_devices_rmm_agent(sqlite_db, monkeypatch):
+    from app.features.rmm import routes
+
+    await remote.save_settings("rustdesk", {"is_enabled": "1", "id_field": "RustDesk ID"}, user_id=9)
+    without = await routes.asset_rmm_context(1, 10, can_run=True)
+    assert without["agent_state"] == "missing" and without["remote_control"] == []
+    assert await routes.company_agent_states(1) == {}
+
+    await _enrol(sqlite_db)
+    with_agent = await routes.asset_rmm_context(1, 10, can_run=True)
+    assert with_agent["agent_state"] == "connected"
+    assert with_agent["remote_control"] == [{"provider": "rustdesk", "label": "RustDesk"}]
+    assert await routes.company_agent_states(1) == {10: "connected"}
+    # Installed but no longer polling.
+    await sqlite_db.execute("UPDATE rmm_agents SET last_seen_utc = '2000-01-01 00:00:00'")
+    assert (await routes.asset_rmm_context(1, 10, can_run=True))["agent_state"] == "offline"
+    assert await routes.company_agent_states(1) == {10: "offline"}
+    assert await routes.company_agent_states(2) == {}
+
+
+def test_agent_indicator_shows_a_tick_an_o_or_a_cross():
+    macros = _environment().get_template("rmm/_macros.html").module
+    connected = str(macros.agent_indicator("connected"))
+    assert "rmm-agent-indicator--connected" in connected and "✓" in connected and 'aria-label="RMM agent connected"' in connected
+    assert ">O<" in str(macros.agent_indicator("offline"))
+    assert "✗" in str(macros.agent_indicator("missing")) and "--missing" in str(macros.agent_indicator("bogus"))
