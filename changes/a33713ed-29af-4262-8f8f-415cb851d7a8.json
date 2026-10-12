@@ -1,0 +1,7 @@
+{
+  "guid": "a33713ed-29af-4262-8f8f-415cb851d7a8",
+  "occurred_at": "2026-10-12T12:55Z",
+  "change_type": "Feature",
+  "summary": "Add a super-admin .env checker and browser-only formatter that preserves active, disabled and stale configuration for review.",
+  "content_hash": "1b74d0262010e7957967b9e732f797eecaf6f95a0d25c5a97a851e4708dd8dd0"
+}

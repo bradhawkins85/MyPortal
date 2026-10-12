@@ -1,0 +1,22 @@
+.env-checker textarea {
+  font-family: var(--font-monospace, ui-monospace, monospace);
+  resize: vertical;
+}
+.env-checker details {
+  margin-block: 1rem;
+}
+.env-checker summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.env-checker li {
+  overflow-wrap: anywhere;
+}
+.env-checker .form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.env-checker [hidden] {
+  display: none !important;
+}

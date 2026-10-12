@@ -1160,6 +1160,16 @@
                   <span class="menu__label">Modules</span>
                 </a>
               </li>
+              {% if is_super_admin %}
+              <li class="menu__item">
+                <a href="/admin/env-checker" {% if current_path.startswith('/admin/env-checker') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M5 3h14v18H5V3zm2 2v14h10V5H7zm2 3h6v2H9V8zm0 4h6v2H9v-2zm0 4h4v2H9v-2z"/></svg>
+                  </span>
+                  <span class="menu__label">.env Checker / Formatter</span>
+                </a>
+              </li>
+              {% endif %}
               <li class="menu__item">
                 <a href="/admin/feature-packs" {% if current_path.startswith('/admin/feature-packs') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
