@@ -1,0 +1,7 @@
+{
+  "guid": "13d99dac-b545-4734-9ffa-6ebb6273c758",
+  "occurred_at": "2026-10-12T03:05Z",
+  "change_type": "Feature",
+  "summary": "RMM: the agent reports each device's hardware and installed software daily, on start and on request, shown under Hardware & software on the asset page and ready for picking which devices scripts run on (for example RAM of 16 GB or more, or a program missing)",
+  "content_hash": "385573bc0a84056133ea6e4e5f4002e71b599e164cc97863baa547132d097bb3"
+}

@@ -12,7 +12,8 @@ thing MyPortal writes to the repository is its folder layout (see
 Scripts can be pushed manually, run on a schedule, or run automatically when the RMM agent is
 first installed on a device (see [Schedules and onboarding](#schedules-and-onboarding)). They
 also switch on RustDesk and MeshCentral for [Remote Control](Remote%20Control.md). Windows
-devices also send their event logs to MyPortal (see [RMM Event Logs](RMM%20Event%20Logs.md)).
+devices also send their event logs to MyPortal (see [RMM Event Logs](RMM%20Event%20Logs.md)), and
+every device sends its hardware and installed software (see [RMM Inventory](RMM%20Inventory.md)).
 
 ## Gitea
 

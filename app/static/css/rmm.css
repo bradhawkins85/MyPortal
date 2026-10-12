@@ -793,3 +793,31 @@ body.navigation--top .rmm-library {
 .rmm-rule-table { overflow: visible; }
 .rmm-menu__form { margin: 0; }
 .rmm-menu .dropdown__item--danger { color: var(--color-danger, #f87171); }
+
+/* The asset page's Hardware & software section (rmm/_asset_inventory.html). */
+.rmm-inventory {
+  display: grid;
+  gap: var(--space-gap-base);
+}
+
+.rmm-inventory > * { min-width: 0; }
+
+.rmm-inventory__heading {
+  margin: var(--space-gap-base) 0 0;
+  font-size: 1rem;
+}
+
+.rmm-inventory__filter { max-width: 24rem; }
+
+/* Long software lists scroll inside the section. */
+.rmm-inventory__software {
+  max-height: 32rem;
+  overflow: auto;
+}
+
+.rmm-inventory [hidden] { display: none !important; }
+
+.rmm-inventory__errors ul {
+  margin: var(--space-gap-tight, 0.5rem) 0 0;
+  padding-left: 1.25rem;
+}

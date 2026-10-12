@@ -249,6 +249,11 @@ func loop(ctx context.Context) {
 	slots := make(chan struct{}, maxConcurrent)
 	var wg sync.WaitGroup
 	defer wg.Wait()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		inventoryLoop(ctx, api)
+	}()
 	if eventlog.Supported {
 		wg.Add(1)
 		go func() {

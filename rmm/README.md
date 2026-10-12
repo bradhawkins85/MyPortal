@@ -42,6 +42,11 @@ or device), reads new entries with `wevtutil` and posts them to
 `/api/rmm/agent/event-logs`, remembering its place in `eventlog-cursors.json`.
 See `internal/eventlog` and `docs/wiki/administration/RMM Event Logs.md`.
 
+Every platform also sends a hardware and software inventory: once shortly after
+the service starts, then whenever `GET /api/rmm/agent/inventory/config` says one
+is due (daily, or when a technician presses **Refresh now** on the asset page).
+See `internal/inventory` and `docs/wiki/administration/RMM Inventory.md`.
+
 ## Develop
 
 ```sh
