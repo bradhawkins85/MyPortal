@@ -86,9 +86,12 @@ restricted to these paths.
 
 ## 4. Allow large uploads through your reverse proxy
 
-The tray installers are larger than the default 15 MB upload limit. The
-nginx configs in `deploy/nginx/` already raise the limit for
-`/api/tray/build-agent/`; if you use your own proxy, add the same:
+The agent uploads each installer in 8 MB parts, so it gets through the
+default 15 MB limit in `deploy/nginx/` and proxies such as Cloudflare without
+changes. Agents installed before part uploads send each installer in one
+request, which needs a larger limit. The nginx configs in `deploy/nginx/`
+already raise it for `/api/tray/build-agent/`; if you use your own proxy and
+an older agent, add the same:
 
 ```nginx
 location ^~ /api/tray/build-agent/ {
@@ -141,6 +144,7 @@ change settings or update WiX.
 | --- | --- |
 | `agent.log` repeats *Installing WixToolset.BootstrapperApplications.wixext* | Update the agent: older copies did not accept the WiX v7 EULA, so the extension install failed without logging why. Run `Install-MyPortalBuildAgent.ps1` again from the latest `tray/build-agent` folder. Any other *WiX setup failed* line in the log names the cause. |
 | *wix build failed with exit code 388* (*WIX0388 … 'setup.exe' creates an insecure bundle*) | The agent is an older copy that named the bundle `setup.exe`, which WiX v7 refuses. Run `Install-MyPortalBuildAgent.ps1` again from the latest `tray/build-agent` folder, then press **Rebuild**. The bundle is now built as `MyPortal-Tray-Setup.exe`; downloads keep their `MyPortal-Tray-<Company>-Setup.exe` name. |
+| Uploads fail with *413 Request Entity Too Large* | A proxy in front of MyPortal rejected the upload; MyPortal itself never answers 413 here. Run `Install-MyPortalBuildAgent.ps1` again from the latest `tray/build-agent` folder so the agent uploads in 8 MB parts, then press **Rebuild**. |
 | *WiX setup failed: wix extension failed* with a NuGet error | The agent downloads the WiX Burn extension from `api.nuget.org` using its own NuGet.Config, so check the server can reach `api.nuget.org` over HTTPS (through any proxy the SYSTEM account uses). |
 | Builds stay *Queued* | Check the scheduled task's last result and `agent.log`. A 401 or 403 means the API key, its IP allow list or its path permissions are wrong. |
 | *Failed: Release … predates deployment URL support* | The cached tray release was tagged before this feature. Publish a new tray release, then press **Rebuild**. |

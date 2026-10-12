@@ -11,7 +11,7 @@ import asyncio
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.background import BackgroundTask
 
@@ -350,10 +350,21 @@ async def build_agent_upload(
     build_id: int,
     kind: Literal["msi", "exe"],
     request: Request,
+    offset: int | None = Query(default=None, ge=0, description="Bytes already sent when uploading in parts"),
+    total: int | None = Query(default=None, ge=1, description="The whole file's size when uploading in parts"),
     _api_key: dict = Depends(require_api_key),
 ) -> dict:
     try:
-        sha256 = await builds.save_artifact(build_id, kind, request.stream())
+        if offset is None and total is None:
+            sha256 = await builds.save_artifact(build_id, kind, request.stream())
+        elif offset is None or total is None:
+            raise builds.BuildStateError("Send offset and total together when uploading in parts.")
+        else:
+            sha256 = await builds.save_artifact_part(
+                build_id, kind, request.stream(), offset=offset, total=total
+            )
+            if sha256 is None:
+                return {"status": "partial"}
     except (builds.BuildNotFound, builds.BuildStateError) as exc:
         raise _build_error(exc) from exc
     return {"status": "uploaded", "sha256": sha256}
