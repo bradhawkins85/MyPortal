@@ -982,6 +982,26 @@ class Settings(BaseSettings):
     troubleshoot_llm_api_key: str | None = Field(
         default=None, validation_alias="TROUBLESHOOT_LLM_API_KEY"
     )
+    # RMM findings: a platform-wide analysis of RMM data for abnormalities.
+    # Dedicated LLM settings; when none are set the troubleshooter's LLM
+    # (build_troubleshoot_llm_config) is used.
+    findings_enabled: bool = Field(default=True, validation_alias="FINDINGS_ENABLED")
+    findings_ai_enabled: bool = Field(default=True, validation_alias="FINDINGS_AI_ENABLED")
+    findings_interval_hours: int = Field(
+        default=6, ge=1, le=168, validation_alias="FINDINGS_INTERVAL_HOURS"
+    )
+    findings_baseline_days: int = Field(
+        default=7, ge=2, le=30, validation_alias="FINDINGS_BASELINE_DAYS"
+    )
+    findings_llm_base_url: str | None = Field(
+        default=None, validation_alias="FINDINGS_LLM_BASE_URL"
+    )
+    findings_llm_model: str | None = Field(
+        default=None, validation_alias="FINDINGS_LLM_MODEL"
+    )
+    findings_llm_api_key: str | None = Field(
+        default=None, validation_alias="FINDINGS_LLM_API_KEY"
+    )
     # Optional public web search for the multi-stage troubleshooter. Off by
     # default: when enabled, generic (LLM-written, no customer details) search
     # terms are sent to the configured search provider and the top public
