@@ -441,6 +441,8 @@ def test_checks_page_and_asset_sections_render():
            "cooldown_minutes": 0, "counts": {"failing": 2, "passing": 1}, "last_summary": "Failed on PC",
            "is_enabled": True, "can_edit": True, "replaced": True, "asset_id": None}
     editing = {**check_routes._blank_check(10, "service"), "id": None, "name": ""}
+    assert check_routes._blank_check(None, "disk")["disk_threshold"] == "10"
+    assert check_routes._blank_check(None, "cpu")["cpu_threshold"] == "80"
     html = env.get_template("rmm/checks.html").render(
         company={"name": "Contoso"}, checks=[row], can_edit=True, is_super_admin=False, editing=editing,
         errors={"service_name": "Enter the service's name."}, check_types=checks.CHECK_TYPES, actions=checks.ACTIONS,
@@ -454,8 +456,12 @@ def test_checks_page_and_asset_sections_render():
     assert "&lt;b&gt;Disk&lt;/b&gt;" in html and "<b>Disk</b>" not in html
     assert "[Add check][Scripts]" in html and "Enter the service&#39;s name." in html
     assert "2 failing" in html and "once per failure" in html and "Some devices have their own" in html
-    assert '<option value="service" selected>' in html and 'value="global"' not in html
-    assert 'name="schedule_mode"' in html and '<option value="schedule_script" >Schedule a script</option>' in html
+    assert 'id="rmm-check-type-service" name="check_type" value="service" data-rmm-check-type checked' in html
+    assert 'value="global"' not in html and 'id="rmm-check-target-all" name="target_mode" value="all" data-rmm-check-target-mode checked' in html
+    assert 'name="schedule_mode"' in html and 'name="action" value="schedule_script" data-rmm-check-action >' in html
+    # The service error is summarised, linked to its field and shown beside it.
+    assert '<a href="#rmm-check-service-name">' in html and 'id="rmm-check-error-service_name"' in html
+    assert 'aria-invalid="true" aria-describedby="rmm-check-service-name-help rmm-check-error-service_name"' in html
     assert 'action="/rmm/checks/3/enabled"' in html and "/static/js/rmm_checks.js" in html
 
     detail = (ROOT / "app/templates/assets/detail.html").read_text()
