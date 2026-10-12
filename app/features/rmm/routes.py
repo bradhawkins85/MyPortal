@@ -38,6 +38,7 @@ from app.services import gitea
 from app.services import gitea_sign_in
 from app.services import rmm_agent_deploy
 from app.services import rmm_automation
+from app.services import rmm_checks
 from app.services import rmm_remote_control
 from app.services import rmm_script_parser as parser
 from app.services import rmm_script_summary
@@ -493,4 +494,5 @@ async def agent_run_result(run_id: int, payload: AgentResult, agent: dict = Depe
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     await rmm_automation.run_finished(run_id)
+    await rmm_checks.run_finished(run_id)
     return result

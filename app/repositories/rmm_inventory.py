@@ -74,15 +74,38 @@ async def list_software_for_agents(agent_ids: Iterable[int]) -> dict[int, list[d
 
 
 async def _ensure_row(agent: dict[str, Any]) -> int:
-    existing = await db.fetch_one("SELECT id FROM rmm_device_inventory WHERE agent_id = %s", (int(agent["id"]),))
+    agent_id = int(agent["id"])
+    existing = await db.fetch_one("SELECT id FROM rmm_device_inventory WHERE agent_id = %s", (agent_id,))
     if existing:
         return int(existing["id"])
     now = _utcnow()
-    return await db.execute_returning_lastrowid(
-        "INSERT INTO rmm_device_inventory (agent_id, company_id, asset_id, created_at, updated_at) "
-        "VALUES (%s, %s, %s, %s, %s)",
-        (int(agent["id"]), agent.get("company_id"), agent.get("asset_id"), now, now),
-    )
+    if db.is_sqlite():
+        row_id = await db.execute_returning_lastrowid(
+            "INSERT OR IGNORE INTO rmm_device_inventory (agent_id, company_id, asset_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (agent_id, agent.get("company_id"), agent.get("asset_id"), now, now),
+        )
+        if row_id:
+            return int(row_id)
+    else:
+        try:
+            row_id = await db.execute_returning_lastrowid(
+                "INSERT INTO rmm_device_inventory (agent_id, company_id, asset_id, created_at, updated_at) "
+                "VALUES (%s, %s, %s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), company_id = VALUES(company_id), "
+                "asset_id = VALUES(asset_id), updated_at = VALUES(updated_at)",
+                (agent_id, agent.get("company_id"), agent.get("asset_id"), now, now),
+            )
+            if row_id:
+                return int(row_id)
+        except Exception:
+            row_id = await db.fetch_one("SELECT id FROM rmm_device_inventory WHERE agent_id = %s", (agent_id,))
+            if row_id:
+                return int(row_id["id"])
+    existing = await db.fetch_one("SELECT id FROM rmm_device_inventory WHERE agent_id = %s", (agent_id,))
+    if existing:
+        return int(existing["id"])
+    raise RuntimeError(f"Unable to create or reuse an inventory row for agent {agent_id}")
 
 
 async def save_snapshot(agent: dict[str, Any], summary: dict[str, Any], details: dict[str, Any],

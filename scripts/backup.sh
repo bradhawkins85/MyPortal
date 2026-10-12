@@ -4,7 +4,9 @@
 # Dumps the configured database (MySQL/MariaDB), archives the shared uploads
 # directories, and prunes old backups to the configured retention count.
 # The RMM event log database (EVENT_LOG_DB_*) is left out unless
-# EVENT_LOG_DB_BACKUP=true, when it is dumped to its own eventlog-* file.
+# EVENT_LOG_DB_BACKUP=true, when it is dumped to its own eventlog-* file; the
+# RMM stats database (STATS_DB_*) likewise with STATS_DB_BACKUP=true, to
+# stats-* files.
 # Designed to be called directly, by the pre-upgrade hook in
 # scripts/upgrade.sh, or by the myportal-backup.timer systemd timer.
 #
@@ -52,6 +54,8 @@ Environment:
                              files when present (default: /var/lib/gitea)
   EVENT_LOG_DB_BACKUP        Set to true (in the environment file) to also
                              back up the RMM event log database
+  STATS_DB_BACKUP            Set to true (in the environment file) to also
+                             back up the RMM stats database
   SKIP_PRE_UPGRADE_BACKUP    Set to true to skip the pre-upgrade
                              database backup (not recommended)
 EOF
@@ -134,6 +138,13 @@ EVENT_LOG_DB_USER="${EVENT_LOG_DB_USER:-$(read_env_var EVENT_LOG_DB_USER "")}"
 EVENT_LOG_DB_PASSWORD="${EVENT_LOG_DB_PASSWORD:-$(read_env_var EVENT_LOG_DB_PASSWORD "")}"
 EVENT_LOG_DB_NAME="${EVENT_LOG_DB_NAME:-$(read_env_var EVENT_LOG_DB_NAME "")}"
 
+STATS_DB_BACKUP="${STATS_DB_BACKUP:-$(read_env_var STATS_DB_BACKUP false)}"
+STATS_DB_HOST="${STATS_DB_HOST:-$(read_env_var STATS_DB_HOST "")}"
+STATS_DB_PORT="${STATS_DB_PORT:-$(read_env_var STATS_DB_PORT 3306)}"
+STATS_DB_USER="${STATS_DB_USER:-$(read_env_var STATS_DB_USER "")}"
+STATS_DB_PASSWORD="${STATS_DB_PASSWORD:-$(read_env_var STATS_DB_PASSWORD "")}"
+STATS_DB_NAME="${STATS_DB_NAME:-$(read_env_var STATS_DB_NAME "")}"
+
 is_true() {
   case "${1,,}" in
     1|true|yes|on) return 0 ;;
@@ -144,6 +155,11 @@ is_true() {
 # The event log database is backed up only when asked for and configured.
 event_log_backup_enabled() {
   is_true "$EVENT_LOG_DB_BACKUP" && [[ -n "$EVENT_LOG_DB_HOST" && -n "$EVENT_LOG_DB_USER" && -n "$EVENT_LOG_DB_NAME" ]]
+}
+
+# So is the stats database.
+stats_backup_enabled() {
+  is_true "$STATS_DB_BACKUP" && [[ -n "$STATS_DB_HOST" && -n "$STATS_DB_USER" && -n "$STATS_DB_NAME" ]]
 }
 
 create_mysqld_defaults() {
@@ -243,15 +259,14 @@ backup_database() {
   info "Database backup complete: ${file}"
 }
 
-backup_event_logs() {
-  # The RMM event log database, only with EVENT_LOG_DB_BACKUP=true.
-  local label="$1"
-  event_log_backup_enabled || return 0
-  local file="${BACKUP_DIR}/eventlog-${label}-${TIMESTAMP}.sql.gz"
-  info "Backing up event log database ${EVENT_LOG_DB_NAME}@${EVENT_LOG_DB_HOST}:${EVENT_LOG_DB_PORT} to ${file}…"
+dump_secondary_database() {
+  # dump_secondary_database KIND DESCRIPTION LABEL HOST PORT USER PASSWORD NAME
+  local kind="$1" description="$2" label="$3" host="$4" port="$5" user="$6" password="$7" name="$8"
+  local file="${BACKUP_DIR}/${kind}-${label}-${TIMESTAMP}.sql.gz"
+  info "Backing up ${description} database ${name}@${host}:${port} to ${file}…"
 
   if [[ "$DRY_RUN" == true ]]; then
-    info "[dry-run] Would run: mysqldump --single-transaction --databases ${EVENT_LOG_DB_NAME} | gzip > ${file}"
+    info "[dry-run] Would run: mysqldump --single-transaction --databases ${name} | gzip > ${file}"
     return 0
   fi
 
@@ -259,19 +274,33 @@ backup_event_logs() {
     die "mysqldump is not installed; it is required to back up the database."
 
   local defaults_file
-  defaults_file=$(create_mysqld_defaults "$EVENT_LOG_DB_HOST" "$EVENT_LOG_DB_PORT" "$EVENT_LOG_DB_USER" "$EVENT_LOG_DB_PASSWORD")
+  defaults_file=$(create_mysqld_defaults "$host" "$port" "$user" "$password")
 
   local err_file="${file}.err"
   if ! mysqldump --defaults-extra-file="$defaults_file" \
-    --single-transaction --quick --add-drop-database --databases "$EVENT_LOG_DB_NAME" 2>"$err_file" | gzip >"$file"; then
+    --single-transaction --quick --add-drop-database --databases "$name" 2>"$err_file" | gzip >"$file"; then
     local err
     err=$(cat "$err_file" 2>/dev/null || true)
     rm -f "$defaults_file" "$err_file" "$file"
-    die "event log database backup failed.${err:+ stderr: ${err}}"
+    die "${description} database backup failed.${err:+ stderr: ${err}}"
   fi
   rm -f "$defaults_file" "$err_file"
   chmod 0600 "$file"
-  info "Event log database backup complete: ${file}"
+  info "${description^} database backup complete: ${file}"
+}
+
+backup_event_logs() {
+  # The RMM event log database, only with EVENT_LOG_DB_BACKUP=true.
+  event_log_backup_enabled || return 0
+  dump_secondary_database eventlog "event log" "$1" "$EVENT_LOG_DB_HOST" "$EVENT_LOG_DB_PORT" \
+    "$EVENT_LOG_DB_USER" "$EVENT_LOG_DB_PASSWORD" "$EVENT_LOG_DB_NAME"
+}
+
+backup_stats() {
+  # The RMM stats database, only with STATS_DB_BACKUP=true.
+  stats_backup_enabled || return 0
+  dump_secondary_database stats "stats" "$1" "$STATS_DB_HOST" "$STATS_DB_PORT" \
+    "$STATS_DB_USER" "$STATS_DB_PASSWORD" "$STATS_DB_NAME"
 }
 
 backup_uploads() {
@@ -326,7 +355,7 @@ prune_backups() {
   info "Pruning old backups (keeping ${keep} of each kind)…"
 
   local kind
-  for kind in db eventlog files gitea; do
+  for kind in db eventlog stats files gitea; do
     # Collect all files of this kind, sorted by modification time (newest first).
     # The `|| true` prevents `set -e` from killing the subshell when no files match.
     local -a all_files=()
@@ -366,6 +395,11 @@ if [[ "$DRY_RUN" == true ]]; then
   else
     info "[dry-run] Event logs: not backed up (EVENT_LOG_DB_BACKUP is off or EVENT_LOG_DB_* is not set)"
   fi
+  if stats_backup_enabled; then
+    info "[dry-run] Stats:     ${STATS_DB_NAME}@${STATS_DB_HOST}:${STATS_DB_PORT}  (back up: ${DO_DB})"
+  else
+    info "[dry-run] Stats:     not backed up (STATS_DB_BACKUP is off or STATS_DB_* is not set)"
+  fi
   info "[dry-run] Files:     ${SHARED_ROOT}  (back up: ${DO_FILES})"
   info "[dry-run] Label:     ${LABEL}"
   info "[dry-run] Retain:    ${MYPORTAL_BACKUPS_TO_KEEP} per kind"
@@ -374,6 +408,7 @@ fi
 if [[ "$DO_DB" == true ]]; then
   backup_database "$LABEL"
   backup_event_logs "$LABEL"
+  backup_stats "$LABEL"
 fi
 
 if [[ "$DO_FILES" == true ]]; then

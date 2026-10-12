@@ -34,6 +34,7 @@ import (
 
 	"github.com/kardianos/service"
 
+	"github.com/bradhawkins85/myportal-rmm/internal/checks"
 	"github.com/bradhawkins85/myportal-rmm/internal/client"
 	"github.com/bradhawkins85/myportal-rmm/internal/eventlog"
 	"github.com/bradhawkins85/myportal-rmm/internal/runner"
@@ -51,6 +52,9 @@ const (
 
 	eventLogStartDelay = 30 * time.Second
 	eventLogsOffWait   = 15 * time.Minute
+
+	checksStartDelay = 45 * time.Second
+	checksOffWait    = 5 * time.Minute
 )
 
 func main() {
@@ -261,6 +265,11 @@ func loop(ctx context.Context) {
 			eventLogLoop(ctx, api)
 		}()
 	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		checksLoop(ctx, api)
+	}()
 
 	backoff := 5 * time.Second
 	lastCheckin := time.Time{}
@@ -377,6 +386,59 @@ func eventLogLoop(ctx context.Context, api *client.Client) {
 		interval := time.Duration(cfg.IntervalSeconds) * time.Second
 		if interval < 30*time.Second {
 			interval = 30 * time.Second
+		}
+		sleep(ctx, interval)
+	}
+}
+
+// checksLoop measures what MyPortal's checks need (disk space, CPU, memory,
+// network, pings and services) and reports it, once a minute while the
+// device has such checks. It asks again what to measure every few minutes.
+func checksLoop(ctx context.Context, api *client.Client) {
+	collector := checks.NewCollector()
+	sleep(ctx, checksStartDelay)
+	collector.Prime()
+	var cfg client.CheckConfig
+	var fetched time.Time
+	lastError := ""
+	for ctx.Err() == nil {
+		refresh := time.Duration(cfg.ConfigSeconds) * time.Second
+		if refresh < time.Minute {
+			refresh = checksOffWait
+		}
+		if fetched.IsZero() || time.Since(fetched) >= refresh {
+			next, err := api.CheckConfig(ctx)
+			if err != nil {
+				if ctx.Err() == nil && err.Error() != lastError {
+					log.Printf("checks: could not get settings: %v", err)
+					lastError = err.Error()
+				}
+				sleep(ctx, checksOffWait)
+				continue
+			}
+			cfg, fetched = next, time.Now()
+		}
+		interval := time.Duration(cfg.IntervalSeconds) * time.Second
+		if interval < 30*time.Second {
+			interval = time.Minute
+		}
+		if !cfg.Enabled {
+			sleep(ctx, checksOffWait)
+			fetched = time.Time{}
+			continue
+		}
+		report := collector.Collect(ctx, cfg)
+		message := ""
+		if err := api.SendCheckReport(ctx, report); err != nil {
+			message = err.Error()
+		}
+		if message != lastError && ctx.Err() == nil {
+			if message == "" {
+				log.Printf("checks: reporting again")
+			} else {
+				log.Printf("checks: could not report: %s", message)
+			}
+			lastError = message
 		}
 		sleep(ctx, interval)
 	}

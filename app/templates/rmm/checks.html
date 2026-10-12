@@ -1,0 +1,361 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% import "rmm/_macros.html" as rmm_ui %}
+{% block title %}Checks{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/rmm.css') }}">{% endblock %}
+{% block header_title %}<span class="header__title-text">Checks</span>{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions(([{"label": "Add check", "type": "link", "variant": "primary", "href": "/rmm/checks?new=1#rmm-check-form"}] if can_edit else []) + [{"label": "Scripts", "type": "link", "href": "/rmm/scripts"}], menu_id="rmm-check-actions") }}
+{% endblock %}
+{% block content %}
+<section class="rmm-page" data-rmm-checks>
+  <section class="card card--panel" aria-labelledby="rmm-checks-heading">
+    <header class="card__header card__header--stacked"><div>
+      <h2 class="card__title" id="rmm-checks-heading">Checks</h2>
+      <p class="card__subtitle">Checks watch each device's disk space, ping targets, CPU, memory, services, network throughput, script results and check-ins. A problem must last the check's duration before the check fails. When it fails the check can run a script on the device or raise a ticket for it; the ticket gets an update when the check passes again. For the same drive, ping target, service, interface or script, a device's own check replaces its company's, which replaces a check for every company. Open a device to see its results and stats.</p>
+    </div></header>
+    <div class="card__body">
+      {% if checks %}
+      <div class="table-wrapper rmm-rule-table">
+        <table class="table" data-table data-table-id="rmm-checks">
+          <caption class="visually-hidden">Checks</caption>
+          <thead><tr>
+            <th scope="col" data-column-key="name">Check</th>
+            <th scope="col" data-column-key="scope">Applies to</th>
+            <th scope="col" data-column-key="when">Fails when</th>
+            <th scope="col" data-column-key="action">Then</th>
+            <th scope="col" data-column-key="results" data-mobile-hidden="true">Devices</th>
+            <th scope="col" data-column-key="status">Status</th>
+            <th scope="col" data-column-key="actions"><span class="visually-hidden">Actions</span></th>
+          </tr></thead>
+          <tbody>
+            {% for check in checks %}
+            <tr data-rmm-check="{{ check.id }}">
+              <td data-label="Check" data-column-key="name"><strong>{{ check.name }}</strong><br><span class="text-muted">{{ check.type_label }}</span></td>
+              <td data-label="Applies to" data-column-key="scope">{{ check.scope_label }}{% if check.replaced %}<br><span class="text-muted">Some devices have their own</span>{% endif %}</td>
+              <td data-label="Fails when" data-column-key="when">{{ check.description }}</td>
+              <td data-label="Then" data-column-key="action">{{ check.action_label }}{% if check.action == "run_script" %} <span class="text-muted">({{ "again every " ~ check.cooldown_minutes ~ " min while failing" if check.cooldown_minutes else "once per failure" }})</span>{% endif %}{% if check.action == "create_ticket" %} <span class="text-muted">(one open ticket per device)</span>{% endif %}</td>
+              <td data-label="Devices" data-column-key="results" data-mobile-hidden="true">
+                {% set failing = check.counts.get("failing", 0) %}{% set passing = check.counts.get("passing", 0) %}{% set warning = check.counts.get("warning", 0) %}
+                {% if failing %}<span class="status status--error">{{ failing }} failing</span> {% endif %}{% if warning %}<span class="status status--warning">{{ warning }} with a problem</span> {% endif %}{% if passing %}<span class="status status--success">{{ passing }} passing</span>{% endif %}{% if not failing and not passing and not warning %}<span class="text-muted">No results yet</span>{% endif %}
+                {% if check.last_summary %}<br><span class="text-muted">{{ check.last_summary }}</span>{% endif %}
+              </td>
+              <td data-label="Status" data-column-key="status"><span class="status status--{{ 'success' if check.is_enabled else 'neutral' }}">{{ "On" if check.is_enabled else "Off" }}</span></td>
+              <td class="table__actions" data-column-key="actions">{% if check.can_edit %}{{ rmm_ui.check_menu(check, csrf_token) }}{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <h3 class="empty-state__title">No checks</h3>
+        <p class="empty-state__subtitle">Nothing is being watched on this company's devices.{% if can_edit %} <a href="/rmm/checks?new=1#rmm-check-form">Add a check</a>.{% endif %}</p>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if editing %}{% set e = editing %}
+  <section class="card card--panel" id="rmm-check-form" aria-labelledby="rmm-check-form-heading">
+    <header class="card__header card__header--stacked"><div>
+      <h2 class="card__title" id="rmm-check-form-heading">{{ "Edit " ~ e.name if e.id else "Add a check" }}</h2>
+      <p class="card__subtitle">Only the settings for the chosen type are used.</p>
+    </div></header>
+    <form method="post" action="/rmm/checks{% if e.id %}/{{ e.id }}{% endif %}" class="card__body form" data-rmm-check-form>
+      {% include "partials/csrf.html" %}
+      {% if errors %}
+      <div class="alert alert--error" role="alert"><ul>{% for message in errors.values() %}<li>{{ message }}</li>{% endfor %}</ul></div>
+      {% endif %}
+      <div class="form-grid">
+        <div class="form-field">
+          <label class="form-label" for="rmm-check-name">Name</label>
+          <input class="form-input" id="rmm-check-name" name="name" maxlength="255" required value="{{ e.name }}">
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="rmm-check-type">Check</label>
+          <select class="form-input" id="rmm-check-type" name="check_type" data-rmm-check-type>
+            {% for key, label in check_types.items() %}<option value="{{ key }}" {% if e.check_type == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="rmm-check-scope">Applies to</label>
+          <select class="form-input" id="rmm-check-scope" name="scope">
+            {% if is_super_admin or e.scope == "global" %}<option value="global" {% if e.scope == "global" %}selected{% endif %}>Every company</option>{% endif %}
+            <option value="company" {% if e.scope == "company" %}selected{% endif %}>Every device in {{ company.name if company else "this company" }}</option>
+            <option value="asset" {% if e.scope == "asset" %}selected{% endif %}>One device</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="rmm-check-asset">Device <span class="text-muted">for one device</span></label>
+          <select class="form-input" id="rmm-check-asset" name="asset_id">
+            <option value="">Choose a device</option>
+            {% for device in devices %}<option value="{{ device.asset_id }}" {% if e.asset_id == device.asset_id %}selected{% endif %}>{{ device.asset_name or device.hostname }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <fieldset class="rmm-check__settings" data-rmm-check-fields="disk">
+        <legend class="form-label">Disk space</legend>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-disk-drive">Drive</label>
+            <input class="form-input" id="rmm-check-disk-drive" name="disk_drive" maxlength="255" value="{{ e.disk_drive }}">
+            <p class="form-help">A drive letter such as <code>C:</code>, a mount point such as <code>/var</code>, or <code>*</code> for every fixed drive.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-disk-operator">Fails when free space is</label>
+            <select class="form-input" id="rmm-check-disk-operator" name="disk_operator">
+              {% for key, label in comparisons.items() %}<option value="{{ key }}" {% if e.disk_operator == key %}selected{% endif %}>{{ key | capitalize }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-disk-threshold">Free space</label>
+            <input class="form-input" id="rmm-check-disk-threshold" name="disk_threshold" type="number" min="0" step="any" value="{{ e.disk_threshold }}">
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-disk-metric">Measured in</label>
+            <select class="form-input" id="rmm-check-disk-metric" name="disk_metric">
+              <option value="free_percent" {% if e.disk_metric == "free_percent" %}selected{% endif %}>Percent</option>
+              <option value="free_gb" {% if e.disk_metric == "free_gb" %}selected{% endif %}>GB</option>
+            </select>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="rmm-check__settings" data-rmm-check-fields="ping">
+        <legend class="form-label">Ping</legend>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-ping-target">Host to ping</label>
+            <input class="form-input" id="rmm-check-ping-target" name="ping_target" maxlength="253" value="{{ e.ping_target }}" placeholder="192.168.1.1 or gateway.example.com">
+            <p class="form-help">The device pings it four times a minute.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-ping-loss">Fails at packet loss of <span class="text-muted">%</span></label>
+            <input class="form-input" id="rmm-check-ping-loss" name="ping_loss" type="number" min="1" max="100" value="{{ e.ping_loss }}">
+            <p class="form-help">100 fails only when no replies come back.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-ping-latency">Or average reply time over <span class="text-muted">ms, optional</span></label>
+            <input class="form-input" id="rmm-check-ping-latency" name="ping_latency" type="number" min="0" max="60000" value="{{ e.ping_latency }}">
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="rmm-check__settings" data-rmm-check-fields="cpu">
+        <legend class="form-label">CPU load</legend>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-cpu-threshold">Fails when CPU is over <span class="text-muted">%</span></label>
+            <input class="form-input" id="rmm-check-cpu-threshold" name="cpu_threshold" type="number" min="1" max="100" step="any" value="{{ e.cpu_threshold }}">
+            <p class="form-help">Measured as the average over each minute; set how long it must stay over below.</p>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="rmm-check__settings" data-rmm-check-fields="memory">
+        <legend class="form-label">Free memory</legend>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-memory-threshold">Fails when free memory is below</label>
+            <input class="form-input" id="rmm-check-memory-threshold" name="memory_threshold" type="number" min="0" step="any" value="{{ e.memory_threshold }}">
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-memory-metric">Measured in</label>
+            <select class="form-input" id="rmm-check-memory-metric" name="memory_metric">
+              <option value="free_percent" {% if e.memory_metric == "free_percent" %}selected{% endif %}>Percent</option>
+              <option value="free_gb" {% if e.memory_metric == "free_gb" %}selected{% endif %}>GB</option>
+            </select>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="rmm-check__settings" data-rmm-check-fields="service">
+        <legend class="form-label">Windows service</legend>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-service-name">Service name</label>
+            <input class="form-input" id="rmm-check-service-name" name="service_name" maxlength="256" value="{{ e.service_name }}" placeholder="Spooler">
+            <p class="form-help">The service's name from its properties, not its display name. On Linux, a systemd unit.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-service-expected">Should be</label>
+            <select class="form-input" id="rmm-check-service-expected" name="service_expected">
+              {% for key, label in service_states.items() %}<option value="{{ key }}" {% if e.service_expected == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-service-fix">When it is not</label>
+            <select class="form-input" id="rmm-check-service-fix" name="service_fix">
+              {% for key, label in service_fixes.items() %}<option value="{{ key }}" {% if e.service_fix == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+            <p class="form-help">The agent starts or restarts a service that should be running, or stops one that should be stopped, straight away. The check still counts it as a problem that minute, so with no duration it also raises the alert below.</p>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="rmm-check__settings" data-rmm-check-fields="network">
+        <legend class="form-label">Network throughput</legend>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-network-interface">Interface <span class="text-muted">blank for all together</span></label>
+            <input class="form-input" id="rmm-check-network-interface" name="network_interface" maxlength="255" value="{{ e.network_interface }}" placeholder="Ethernet">
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-network-direction">Data</label>
+            <select class="form-input" id="rmm-check-network-direction" name="network_direction">
+              {% for key, label in network_directions.items() %}<option value="{{ key }}" {% if e.network_direction == key %}selected{% endif %}>{{ label | capitalize }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-network-operator">Fails when it is</label>
+            <select class="form-input" id="rmm-check-network-operator" name="network_operator">
+              {% for key, label in comparisons.items() %}<option value="{{ key }}" {% if e.network_operator == key %}selected{% endif %}>{{ key | capitalize }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-network-threshold">Throughput <span class="text-muted">Mbps</span></label>
+            <input class="form-input" id="rmm-check-network-threshold" name="network_threshold" type="number" min="0" step="any" value="{{ e.network_threshold }}">
+            <p class="form-help">Averaged over each minute; set the time span below.</p>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="rmm-check__settings" data-rmm-check-fields="script">
+        <legend class="form-label">Script result</legend>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-script">Script to run</label>
+            <select class="form-input" id="rmm-check-script" name="check_script_id">
+              <option value="">Choose a script</option>
+              {% for item in scripts %}<option value="{{ item.id }}" {% if e.check_script_id == item.id %}selected{% endif %}>{{ item.name }} ({{ item.path }})</option>{% endfor %}
+            </select>
+            {% if errors.get("check_script_id") %}<p class="form-error">{{ errors.get("check_script_id") }}</p>{% endif %}
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-script-interval">Run every <span class="text-muted">minutes</span></label>
+            <input class="form-input" id="rmm-check-script-interval" name="script_interval" type="number" min="5" max="10080" value="{{ e.script_interval }}">
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-script-expect">Passes when its</label>
+            <select class="form-input" id="rmm-check-script-expect" name="script_expect">
+              {% for key, label in script_expectations.items() %}<option value="{{ key }}" {% if e.script_expect == key %}selected{% endif %}>{{ label | capitalize }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-script-value">Expected</label>
+            <input class="form-input" id="rmm-check-script-value" name="script_value" maxlength="1024" value="{{ e.script_value }}">
+            <p class="form-help">An exit code such as 0, or text in the script's output. Text matches ignore case except “is exactly”.</p>
+          </div>
+        </div>
+        {% if check_script and check_script_fields %}
+        <div class="form-grid">
+          {% for field in check_script_fields %}
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-check-entry-{{ loop.index }}">{{ field.name }}{% if field.mandatory %} <span class="text-muted">required</span>{% endif %}</label>
+            <input class="form-input" id="rmm-check-check-entry-{{ loop.index }}" name="check_entry:{{ field.key }}" list="rmm-check-variables" value="{{ field.value }}" {% if field.sensitive %}type="password" autocomplete="new-password"{% endif %} placeholder="{% if field.sensitive and field.value_set %}Saved: leave blank to keep it{% elif field.default %}Default: {{ field.default }}{% endif %}">
+            {% if field.help %}<p class="form-help">{{ field.help }}</p>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% elif check_script %}
+        <p class="form-help">{{ check_script.name }} has no parameters or environment variables.</p>
+        {% else %}
+        <p class="form-help">After choosing a script and saving, its parameters appear here.</p>
+        {% endif %}
+      </fieldset>
+
+      <div class="form-grid">
+        <div class="form-field">
+          <label class="form-label" for="rmm-check-duration"><span data-rmm-check-duration-label>For at least</span> <span class="text-muted">minutes</span></label>
+          <input class="form-input" id="rmm-check-duration" name="duration_minutes" type="number" min="0" max="10080" value="{{ e.duration_minutes }}">
+          <p class="form-help">How long a problem must last before the check fails; 0 fails straight away. For <strong>Agent offline</strong> it is how long since the agent last checked in (at least 5).</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="rmm-check-action">When it fails</label>
+          <select class="form-input" id="rmm-check-action" name="action">
+            {% for key, label in actions.items() %}<option value="{{ key }}" {% if e.action == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="rmm-check-action-script">Script <span class="text-muted">for “Run a script” and “Schedule a script”</span></label>
+          <select class="form-input" id="rmm-check-action-script" name="script_id">
+            <option value="">Choose a script</option>
+            {% for item in scripts %}<option value="{{ item.id }}" {% if e.script_id == item.id %}selected{% endif %}>{{ item.name }} ({{ item.path }})</option>{% endfor %}
+          </select>
+          <p class="form-help">Checks for every company can only use scripts in the <code>Common</code> folder.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="rmm-check-timeout">Script timeout <span class="text-muted">seconds</span></label>
+          <input class="form-input" id="rmm-check-timeout" name="timeout_seconds" type="number" min="30" max="86400" value="{{ e.timeout_seconds }}">
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="rmm-check-cooldown">Run again every <span class="text-muted">minutes while failing</span></label>
+          <input class="form-input" id="rmm-check-cooldown" name="cooldown_minutes" type="number" min="0" max="10080" value="{{ e.cooldown_minutes }}">
+          <p class="form-help">For “Run a script”: 0 runs the script once each time the check fails.</p>
+        </div>
+      </div>
+
+      <fieldset class="rmm-event-log-rule__schedule">
+        <legend class="form-label">When a scheduled script runs <span class="text-muted">for “Schedule a script”</span></legend>
+        <p class="form-help">Scheduled once each time the check starts failing on a device. If the check passes again before then, the scheduled run is dropped.</p>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-schedule-mode">Run it</label>
+            <select class="form-input" id="rmm-check-schedule-mode" name="schedule_mode">
+              {% for key, label in schedule_modes.items() %}<option value="{{ key }}" {% if e.schedule_mode == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-delay">Delay <span class="text-muted">minutes, for “After a delay”</span></label>
+            <input class="form-input" id="rmm-check-delay" name="delay_minutes" type="number" min="1" max="10080" value="{{ e.delay_minutes }}">
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-run-time">Time of day <span class="text-muted">for “At the next time of day”</span></label>
+            <input class="form-input" id="rmm-check-run-time" name="run_time" type="time" value="{{ e.run_time }}">
+            {% if errors.run_time %}<p class="form-error">{{ errors.run_time }}</p>{% endif %}
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-timezone">Time zone</label>
+            <input class="form-input" id="rmm-check-timezone" name="schedule_timezone" maxlength="64" value="{{ e.schedule_timezone }}" placeholder="Australia/Sydney">
+            {% if errors.timezone %}<p class="form-error">{{ errors.timezone }}</p>{% endif %}
+          </div>
+        </div>
+      </fieldset>
+
+      {% if e.action in script_actions and script %}
+      {% if script_fields %}
+      <fieldset class="rmm-event-log-rule__values">
+        <legend class="form-label">Script values</legend>
+        <p class="form-help">Given to the script each time the check runs it. Use <code>{% raw %}{{check.result}}{% endraw %}</code>, <code>{% raw %}{{check.name}}{% endraw %}</code> and the other check variables to pass on what failed.</p>
+        <div class="form-grid">
+          {% for field in script_fields %}
+          <div class="form-field">
+            <label class="form-label" for="rmm-check-entry-{{ loop.index }}">{{ field.name }}{% if field.mandatory %} <span class="text-muted">required</span>{% endif %}</label>
+            <input class="form-input" id="rmm-check-entry-{{ loop.index }}" name="entry:{{ field.key }}" list="rmm-check-variables" value="{{ field.value }}" {% if field.sensitive %}type="password" autocomplete="new-password"{% endif %} placeholder="{% if field.sensitive and field.value_set %}Saved: leave blank to keep it{% elif field.default %}Default: {{ field.default }}{% endif %}">
+            {% if field.help %}<p class="form-help">{{ field.help }}</p>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </fieldset>
+      {% else %}
+      <p class="form-help">{{ script.name }} has no parameters or environment variables.</p>
+      {% endif %}
+      {% elif e.action in script_actions %}
+      <p class="form-help">After choosing a script and saving, its parameters appear here.</p>
+      {% endif %}
+
+      <label class="form-checkbox"><input type="checkbox" name="is_enabled" value="1" {% if e.is_enabled %}checked{% endif %}> Check is on</label>
+      <p class="form-help">A device's own check that is off switches the same company or every-company check off for that device.</p>
+      <div class="form-actions">
+        <button class="button button--primary" type="submit">Save check</button>
+        <a class="button button--ghost" href="{{ '/assets/' ~ e.asset_id ~ '#checks' if e.asset_id and not e.id else '/rmm/checks' }}">Cancel</a>
+      </div>
+      <datalist id="rmm-check-variables">{% for variable in variables %}<option value="{{ variable.token }}">{{ variable.group }}: {{ variable.label }}</option>{% endfor %}</datalist>
+    </form>
+  </section>
+  {% endif %}
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/rmm_checks.js') }}" defer></script>{% endblock %}

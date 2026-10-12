@@ -845,3 +845,23 @@ def test_event_log_backup_dumps_with_credentials_on_stdin(tmp_path):
     calls = (tmp_path / "calls").read_text(encoding="utf-8")
     assert "s3cret" not in calls and calls.rstrip().endswith("sh eventlogs")
     assert "password=s3cret" in (tmp_path / "stdin").read_text(encoding="utf-8")
+
+
+def test_stats_backup_is_skipped_unless_enabled(tmp_path):
+    settings = "STATS_DB_HOST=db\nSTATS_DB_USER=stats\nSTATS_DB_NAME=stats\n"
+    result = _run(_event_log_backup_harness(tmp_path, settings) + "backup_stats v1")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "" and not (tmp_path / "calls").exists()
+
+
+def test_stats_backup_dumps_with_credentials_on_stdin(tmp_path):
+    settings = (
+        "STATS_DB_BACKUP=true\nSTATS_DB_HOST=db\nSTATS_DB_USER=stats\n"
+        "STATS_DB_PASSWORD=s3cret\nSTATS_DB_NAME=myportal_stats\n"
+    )
+    result = _run(_event_log_backup_harness(tmp_path, settings) + "backup_stats v1")
+    assert result.returncode == 0, result.stderr
+    path = Path(result.stdout)
+    assert path.name.startswith("stats-v1-") and path.stat().st_size > 0
+    calls = (tmp_path / "calls").read_text(encoding="utf-8")
+    assert "s3cret" not in calls and calls.rstrip().endswith("sh myportal_stats")
