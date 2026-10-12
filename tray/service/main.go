@@ -145,6 +145,15 @@ type daemon struct {
 }
 
 func newDaemon(cfg *config.Config) *daemon {
+	// An upgrade by an older installer can leave the portal URL blank in the
+	// install settings. The enrolled state still records it, so use that
+	// rather than going offline until someone reinstalls.
+	if cfg.PortalURL == "" {
+		if s := loadState(); s != nil && s.PortalURL != "" {
+			logger.Warn("Portal URL missing from install settings; using %s from the enrolled state", s.PortalURL)
+			cfg.PortalURL = s.PortalURL
+		}
+	}
 	return &daemon{
 		cfg:    cfg,
 		client: api.New(cfg.PortalURL),

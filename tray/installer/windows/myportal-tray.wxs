@@ -63,7 +63,36 @@
     <?else?>
     <Property Id="ENROL_TOKEN" Secure="yes" />
     <?endif?>
-    <Property Id="AUTO_UPDATE" Value="true" Secure="yes" />
+    <Property Id="AUTO_UPDATE" Secure="yes" />
+
+    <!--
+      Keep the installed settings across upgrades. A major upgrade removes the
+      old product, and with it HKLM\Software\MyPortal\Tray, before writing the
+      new values, so an upgrade run without MYPORTAL_URL / ENROL_TOKEN on the
+      command line (the tray's own self-update, or an RMM script) would
+      otherwise blank them. AppSearch reads the saved values first; a value on
+      the command line or built into a company installer still wins.
+    -->
+    <Property Id="SAVED_MYPORTAL_URL" Secure="yes">
+      <RegistrySearch Id="SavedPortalUrlSearch" Root="HKLM" Key="Software\MyPortal\Tray" Name="PortalURL" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="SAVED_ENROL_TOKEN" Secure="yes">
+      <RegistrySearch Id="SavedEnrolTokenSearch" Root="HKLM" Key="Software\MyPortal\Tray" Name="EnrolToken" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="SAVED_AUTO_UPDATE" Secure="yes">
+      <RegistrySearch Id="SavedAutoUpdateSearch" Root="HKLM" Key="Software\MyPortal\Tray" Name="AutoUpdate" Type="raw" Bitness="always64" />
+    </Property>
+    <!-- Keep the enrolment token out of the installer log. -->
+    <Property Id="MsiHiddenProperties" Value="ENROL_TOKEN;SAVED_ENROL_TOKEN" />
+
+    <SetProperty Id="MYPORTAL_URL" Action="RestorePortalUrl" Value="[SAVED_MYPORTAL_URL]"
+                 After="AppSearch" Sequence="first" Condition="SAVED_MYPORTAL_URL AND NOT MYPORTAL_URL" />
+    <SetProperty Id="ENROL_TOKEN" Action="RestoreEnrolToken" Value="[SAVED_ENROL_TOKEN]"
+                 After="RestorePortalUrl" Sequence="first" Condition="SAVED_ENROL_TOKEN AND NOT ENROL_TOKEN" />
+    <SetProperty Id="AUTO_UPDATE" Action="RestoreAutoUpdate" Value="[SAVED_AUTO_UPDATE]"
+                 After="RestoreEnrolToken" Sequence="first" Condition="SAVED_AUTO_UPDATE AND NOT AUTO_UPDATE" />
+    <SetProperty Id="AUTO_UPDATE" Action="DefaultAutoUpdate" Value="true"
+                 After="RestoreAutoUpdate" Sequence="first" Condition="NOT AUTO_UPDATE" />
 
     <MediaTemplate EmbedCab="yes" />
 

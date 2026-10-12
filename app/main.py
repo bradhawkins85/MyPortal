@@ -9357,12 +9357,17 @@ async def admin_tray_versions_page(request: Request):
         return redirect
     from app.repositories import tray as tray_repo
 
+    from app.services import tray_deployment, tray_installer
+
     versions = await tray_repo.list_tray_versions()
+    server_installers = tray_installer.cached_server_installers(
+        tray_deployment.resolve_portal_url(request)
+    )
     return await _render_template(
         "admin/tray/versions.html",
         request,
         current_user,
-        extra={"versions": versions},
+        extra={"versions": versions, "server_installers": server_installers},
     )
 
 
@@ -9383,6 +9388,8 @@ async def admin_tray_versions_publish(request: Request):
     except (TypeError, ValueError):
         rollout_percent = 100
     if version and download_url:
+        from app.services import tray_installer
+
         await tray_repo.publish_tray_version(
             version=version,
             platform=platform,
@@ -9391,6 +9398,8 @@ async def admin_tray_versions_publish(request: Request):
             release_notes=None,
             published_by_user_id=int(current_user["id"]),
             rollout_percent=rollout_percent,
+            # Devices check the installer against this digest before running it.
+            sha256=tray_installer.cached_installer_sha256(download_url),
         )
     return RedirectResponse(url="/admin/tray/versions", status_code=303)
 

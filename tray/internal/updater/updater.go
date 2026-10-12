@@ -28,8 +28,11 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
@@ -64,6 +67,9 @@ type Checker struct {
 	client     *api.Client
 	autoUpdate bool
 	current    string
+	// checking stops a scheduled check and an update command from
+	// downloading and launching two installers at once.
+	checking sync.Mutex
 }
 
 // New creates a new update Checker.
@@ -119,22 +125,32 @@ func (c *Checker) CheckNow(ctx context.Context, force bool) {
 	if !force && !c.autoUpdate {
 		return
 	}
+	if !c.checking.TryLock() {
+		logger.Info("Auto-update: a check is already running")
+		return
+	}
+	defer c.checking.Unlock()
 	resp, err := c.client.GetVersion(ctx)
 	if err != nil {
 		logger.Warn("Auto-update check failed: %v", err)
 		return
 	}
-	if resp.Version == c.current {
+	if !isNewer(resp.Version, c.current) {
 		return
 	}
 	logger.Info("New tray version available: %s (current %s)", resp.Version, c.current)
 	if resp.DownloadURL == "" {
+		logger.Warn("Auto-update: version %s has no download URL", resp.Version)
 		return
 	}
 	if err := c.downloadAndInstall(ctx, resp); err != nil {
 		logger.Error("Auto-update failed: %v", err)
 	}
 }
+
+// installerPrefix names the temporary installer files so stale ones from an
+// earlier update can be found and removed.
+const installerPrefix = "myportal-tray-update-"
 
 func (c *Checker) downloadAndInstall(ctx context.Context, resp *api.VersionResponse) error {
 	var ext string
@@ -144,9 +160,10 @@ func (c *Checker) downloadAndInstall(ctx context.Context, resp *api.VersionRespo
 	default:
 		ext = ".pkg"
 	}
+	removeStaleInstallers(os.TempDir(), time.Hour)
 	// Use a randomly named temp file so a local attacker cannot pre-create
 	// or symlink the fixed installer path the service will execute.
-	dest, err := os.CreateTemp(os.TempDir(), "myportal-tray-*"+ext)
+	dest, err := os.CreateTemp(os.TempDir(), installerPrefix+"*"+ext)
 	if err != nil {
 		return err
 	}
@@ -158,25 +175,127 @@ func (c *Checker) downloadAndInstall(ctx context.Context, resp *api.VersionRespo
 		os.Remove(tmpPath)
 		return err
 	}
-	defer os.Remove(tmpPath)
-
 	if err := verifyInstallerSha256(tmpPath, resp.Sha256); err != nil {
+		os.Remove(tmpPath)
 		return err
 	}
 
-	logger.Info("Launching installer %s", tmpPath)
-	return launchInstaller(tmpPath)
+	cmd := installerCommand(tmpPath, c.client.BaseURL(), c.autoUpdate, installerLogPath())
+	logger.Info("Launching installer for version %s: %s", resp.Version, strings.Join(cmd.Args, " "))
+	if err := cmd.Start(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	// The installer stops and replaces this service. Remove the download once
+	// it finishes if the service is still running then; otherwise the next
+	// check removes it.
+	go func() {
+		err := cmd.Wait()
+		if err != nil {
+			logger.Error("Installer for version %s failed: %v", resp.Version, err)
+		}
+		os.Remove(tmpPath)
+	}()
+	return nil
 }
 
-func launchInstaller(path string) error {
+// installerCommand builds the silent install command for the downloaded
+// installer. On Windows the portal URL and auto-update setting are passed
+// to the MSI, because a major upgrade removes the old install settings
+// before writing the new ones. The enrolment token is not passed: the
+// device is already enrolled, and the MSI keeps the saved value itself.
+// The installer runs detached from the service so it survives the service
+// being stopped for the upgrade.
+func installerCommand(path, portalURL string, autoUpdate bool, logPath string) *exec.Cmd {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		cmd = exec.Command("msiexec.exe", "/i", path, "/qn", "/norestart")
+		msiexec := "msiexec.exe"
+		if root := os.Getenv("SystemRoot"); root != "" {
+			msiexec = filepath.Join(root, "System32", "msiexec.exe")
+		}
+		args := []string{"/i", path, "/qn", "/norestart"}
+		if logPath != "" {
+			args = append(args, "/l*v", logPath)
+		}
+		if portalURL != "" {
+			args = append(args, "MYPORTAL_URL="+portalURL)
+		}
+		args = append(args, "AUTO_UPDATE="+strconv.FormatBool(autoUpdate))
+		cmd = exec.Command(msiexec, args...)
 	default:
-		cmd = exec.Command("installer", "-pkg", path, "-target", "/")
+		cmd = exec.Command("/usr/sbin/installer", "-pkg", path, "-target", "/")
 	}
-	return cmd.Start() // fire and forget — service will restart from installer
+	detach(cmd)
+	return cmd
+}
+
+// installerLogPath returns where the Windows installer writes its log: next
+// to the service log, which only administrators can write to.
+func installerLogPath() string {
+	if p := logger.Path(); p != "" {
+		return filepath.Join(filepath.Dir(p), "update-installer.log")
+	}
+	return ""
+}
+
+// removeStaleInstallers deletes installers left by earlier updates.
+func removeStaleInstallers(dir string, olderThan time.Duration) {
+	matches, _ := filepath.Glob(filepath.Join(dir, installerPrefix+"*"))
+	for _, m := range matches {
+		info, err := os.Lstat(m)
+		if err != nil || !info.Mode().IsRegular() || time.Since(info.ModTime()) < olderThan {
+			continue
+		}
+		os.Remove(m)
+	}
+}
+
+// isNewer reports whether available is a newer version than current.
+// Versions compare by their dotted numeric parts ("v" prefix, pre-release
+// and build suffixes ignored), so a device never reinstalls the version it
+// runs or moves to an older one. When either version is not numeric, any
+// difference counts as newer, as before.
+func isNewer(available, current string) bool {
+	a, okA := parseVersion(available)
+	b, okB := parseVersion(current)
+	if !okA || !okB {
+		return strings.TrimSpace(available) != "" && available != current
+	}
+	for i := 0; i < len(a) || i < len(b); i++ {
+		var x, y int
+		if i < len(a) {
+			x = a[i]
+		}
+		if i < len(b) {
+			y = b[i]
+		}
+		if x != y {
+			return x > y
+		}
+	}
+	return false
+}
+
+func parseVersion(v string) ([]int, bool) {
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(strings.TrimPrefix(v, "v"), "V")
+	if i := strings.IndexAny(v, "-+ "); i >= 0 {
+		v = v[:i]
+	}
+	if v == "" {
+		return nil, false
+	}
+	parts := strings.Split(v, ".")
+	out := make([]int, 0, len(parts))
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 {
+			return nil, false
+		}
+		out = append(out, n)
+	}
+	return out, true
 }
 
 // verifyInstallerSha256 checks the downloaded installer against the digest

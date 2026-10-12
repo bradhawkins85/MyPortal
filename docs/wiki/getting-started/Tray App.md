@@ -427,7 +427,7 @@ chat-start and websocket plumbing. Subsequent PRs cover:
 The service polls this endpoint every 6 hours. Response:
 
 ```json
-{"version": "0.2.0", "download_url": "https://…/myportal-tray.msi", "required": false}
+{"version": "0.2.0", "download_url": "https://…/myportal-tray.msi", "required": false, "sha256": "…"}
 ```
 
 Publish a new version from the **Tray > Versions** admin page or via:
@@ -436,6 +436,28 @@ Publish a new version from the **Tray > Versions** admin page or via:
 POST /api/tray/admin/versions
 {"version": "0.2.0", "platform": "windows", "download_url": "…", "required": false}
 ```
+
+The tray app updates itself, so no RMM script is needed to keep it current.
+When the published version is newer than the one it runs, the service
+downloads the installer, checks it against the published SHA-256, and runs
+it silently (`msiexec /qn` on Windows, `installer -pkg` on macOS). The
+installer replaces and restarts the service. It never reinstalls the version
+it runs or moves to an older one. A technician can also send the `update`
+command to check straight away.
+
+To have devices download the installer from MyPortal rather than GitHub,
+use the **Installers on this server** list on the Versions page. It shows the
+MSI and pkg the **Update tray icon installer** scheduled task downloaded and
+publishes one in a click, with its digest. When that task downloads a newer
+release, publish it too: the file at that address changes, so devices refuse
+the old entry's digest until the new version is published.
+
+On Windows the upgrade keeps the device's settings. The updater passes the
+portal URL and auto-update setting to the MSI, and MSIs from this release on
+read the saved portal URL, enrolment token and auto-update setting before the
+old version is removed. If an older installer has blanked the portal URL, the
+service falls back to the address saved when the device enrolled. The
+installer log is written to `update-installer.log` next to the service log.
 
 ### Diagnostics upload (`POST /api/tray/{device_uid}/diagnostics`)
 
