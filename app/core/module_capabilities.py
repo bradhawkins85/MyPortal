@@ -53,6 +53,7 @@ MODULE_CAPABILITIES: dict[str, ModuleCapabilities] = {
     "password-pusher": _c(pack="password_pusher", services=("password_pusher.api",), ui=("password_pusher",)),
     "hudu": _c(pack="hudu", services=("hudu.api",), ui=("hudu",)),
     "huntress": _c(pack="huntress", commands=("sync_huntress",), services=("huntress.api",), ui=("huntress",)),
+    "warranty-lookup": _c(commands=("lookup_asset_warranties",), services=("warranty_lookup.vendor_api",), ui=("warranty_lookup",)),
     "trello": _c(pack="trello", routes=("webhooks.trello",), services=("trello.api",), ui=("trello",)),
     "solidtime": _c(pack="solidtime", commands=("solidtime_reconcile",), services=("solidtime.api",), ui=("solidtime",)),
     "matrix-chat-assign": _c(pack="matrix_chat_assign", commands=("matrix_chat_assign",), services=("matrix.assignment",), ui=("matrix.chat_assign",)),

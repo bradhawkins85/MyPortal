@@ -1,0 +1,7 @@
+{
+  "guid": "79718aea-6080-4861-8282-782e1f659152",
+  "occurred_at": "2026-10-12T00:00Z",
+  "change_type": "Feature",
+  "summary": "Assets: look up warranty start and expiry dates from Dell, HP and Lenovo's own warranty services, and record dates manually for other vendors",
+  "content_hash": "63b4b56b6b9c3ab061dcce607602887dd03ce4acae1b622649efcef88ee01d8d"
+}

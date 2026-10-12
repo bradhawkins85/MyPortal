@@ -1137,6 +1137,39 @@ class Settings(BaseSettings):
         default="https://dev.curricula.com/api/v1",
         validation_alias="CURRICULA_BASE_URL",
     )
+    # Asset warranty lookup. Each vendor's free warranty interface is used
+    # only when its credentials are set; Lenovo's public support-site lookup
+    # needs none. The module is enabled from Admin -> Modules.
+    warranty_lookup_dell_client_id: str | None = Field(
+        default=None,
+        validation_alias="WARRANTY_LOOKUP_DELL_CLIENT_ID",
+    )
+    warranty_lookup_dell_client_secret: str | None = Field(
+        default=None,
+        validation_alias="WARRANTY_LOOKUP_DELL_CLIENT_SECRET",
+    )
+    warranty_lookup_hp_api_key: str | None = Field(
+        default=None,
+        validation_alias="WARRANTY_LOOKUP_HP_API_KEY",
+    )
+    warranty_lookup_hp_api_secret: str | None = Field(
+        default=None,
+        validation_alias="WARRANTY_LOOKUP_HP_API_SECRET",
+    )
+    warranty_lookup_lenovo_client_id: str | None = Field(
+        default=None,
+        validation_alias="WARRANTY_LOOKUP_LENOVO_CLIENT_ID",
+    )
+    warranty_lookup_refresh_days: int = Field(
+        default=30,
+        ge=1,
+        validation_alias="WARRANTY_LOOKUP_REFRESH_DAYS",
+    )
+    warranty_lookup_batch_size: int = Field(
+        default=200,
+        ge=1,
+        validation_alias="WARRANTY_LOOKUP_BATCH_SIZE",
+    )
     # GitHub integration (used for fetching the latest tray MSI on startup)
     github_token: str | None = Field(
         default=None,

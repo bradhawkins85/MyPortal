@@ -82,6 +82,7 @@
           ("profile", "asset-profile", "Profile", "", not customer_safe),
           ("inventory", "asset-inventory", "Inventory", "", true),
           ("custom-fields", "asset-custom-fields", "Custom fields", custom_fields | length, not customer_safe),
+          ("warranty", "asset-warranty", "Warranty", "", warranty is not none),
           ("tags", "tags", "Tags", "", asset_tags is not none),
           ("hardware", "hardware", "Hardware & software", rmm.inventory.software | length if rmm and rmm.inventory and rmm.inventory.software else "", rmm and rmm.inventory),
           ("scripts", "scripts", "Scripts", "", rmm),
@@ -421,6 +422,35 @@
       <small class="form-help">Sync keeps a type you choose here. Choose Automatic to follow what the integration reports.</small>
     </form>{% endif %}</div>
   </section>
+
+  {% if warranty is not none %}{% set w_end = asset.warranty_end_date %}<section class="card card--panel ce-section" id="asset-warranty" data-asset-edit-section="warranty" aria-labelledby="asset-warranty-title">
+    <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-warranty-title">Warranty</h2><p class="card__subtitle">Coverage dates from the manufacturer's warranty service or entered by a technician.</p></div></header>
+    <div class="ce-section__body">
+      <dl class="definition-list">
+        <dt>Status</dt><dd>{% if w_end %}<span class="status status--{{ 'success' if asset.warranty_status == 'Active' else 'danger' if asset.warranty_status == 'Expired' else 'neutral' }}">{{ asset.warranty_status or 'Recorded' }}</span>{% else %}<span class="text-muted">No warranty recorded</span>{% endif %}</dd>
+        <dt>Manufacturer</dt><dd>{{ warranty.vendor_label or 'Unknown' }}</dd>
+        <dt>Starts</dt><dd>{{ asset.warranty_start_date or '—' }}</dd>
+        <dt>Expires</dt><dd>{{ w_end or '—' }}</dd>
+        <dt>Source</dt><dd>{{ warranty.source_label or '—' }}</dd>
+        <dt>Last checked</dt><dd>{% if warranty.checked_at_utc %}<span data-utc="{{ warranty.checked_at_utc }}">{{ warranty.checked_at_utc }}</span>{% else %}Never{% endif %}{% if asset.warranty_lookup_message %} <span class="text-muted" role="status">— {{ asset.warranty_lookup_message }}</span>{% endif %}</dd>
+      </dl>
+      {% if not warranty.vendor_supported and warranty.vendor_check_url %}<p class="text-muted">{{ warranty.vendor_label }} has no free automated warranty lookup. <a href="{{ warranty.vendor_check_url }}" target="_blank" rel="noopener noreferrer">Check on the {{ warranty.vendor_label }} website</a> and record the dates below.</p>{% endif %}
+      {% if can_edit %}
+        {% if warranty.lookup_enabled %}<form class="form-inline" method="post" action="/assets/{{ asset.id }}/warranty/lookup">{% include "partials/csrf.html" %}
+          <button class="button button--ghost button--small" type="submit" {% if warranty.is_manual %}title="Dates were entered manually; a lookup will replace them if the manufacturer finds this asset"{% endif %}>Check warranty now</button>
+          <small class="form-help">Sends only the serial number to the manufacturer's own warranty service.</small>
+        </form>{% else %}<p class="form-help">Turn on the Warranty lookup module to check Dell, HP and Lenovo warranties automatically.</p>{% endif %}
+        <form class="form-inline" method="post" action="/assets/{{ asset.id }}/warranty">{% include "partials/csrf.html" %}
+          <label class="form-label" for="asset-warranty-start">Starts <span class="text-muted">optional</span></label>
+          <input class="form-input" type="date" id="asset-warranty-start" name="warranty_start_date" value="{{ asset.warranty_start_date or '' }}">
+          <label class="form-label" for="asset-warranty-end">Expires</label>
+          <input class="form-input" type="date" id="asset-warranty-end" name="warranty_end_date" value="{{ w_end or '' }}">
+          <button class="button button--ghost button--small" type="submit">Save dates</button>
+          <small class="form-help">Manual dates are kept by syncs and automatic lookups. Clear both dates and save to let the manufacturer lookup take over again.</small>
+        </form>
+      {% endif %}
+    </div>
+  </section>{% endif %}
 
   {% if not customer_safe %}<section class="card card--panel ce-section" id="asset-custom-fields" data-asset-edit-section="custom-fields" aria-labelledby="asset-custom-fields-title">
     <header class="ce-section__header"><div class="ce-section__heading"><h2 class="card__title" id="asset-custom-fields-title">Custom fields</h2><p class="card__subtitle">{{ 'Update additional inventory details alongside the asset profile.' if can_edit else 'Additional inventory details recorded for this asset.' }}</p></div></header>
