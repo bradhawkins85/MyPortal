@@ -250,6 +250,47 @@ async def save_artifact(build_id: int, kind: str, chunks: AsyncIterator[bytes]) 
     return digest.hexdigest()
 
 
+async def save_artifact_part(
+    build_id: int, kind: str, chunks: AsyncIterator[bytes], *, offset: int, total: int
+) -> str | None:
+    """Append one part of an artifact uploaded in pieces.
+
+    Parts arrive in order: ``offset`` is how many bytes were already received
+    (0 starts over) and ``total`` is the whole file's size.  Small parts get
+    through reverse proxies that cap request bodies (nginx defaults to 1 MB,
+    MyPortal's configs to 15 MB, Cloudflare to 100 MB).  Returns the file's
+    SHA-256 once the last part lands, otherwise ``None``.
+    """
+
+    await _building(build_id)
+    if total < 1 or total > MAX_ARTIFACT_BYTES:
+        raise BuildStateError("The uploaded file is too large.")
+    target = artifact_path(build_id, kind)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_suffix(target.suffix + ".part")
+    received = partial.stat().st_size if offset and partial.is_file() else 0
+    if offset != received:
+        raise BuildStateError(f"Upload part out of order: expected offset {received}, got {offset}.")
+    size = offset
+    try:
+        with partial.open("ab" if offset else "wb") as handle:
+            async for chunk in chunks:
+                size += len(chunk)
+                if size > total:
+                    raise BuildStateError("The upload is larger than its stated size.")
+                handle.write(chunk)
+        if size == offset:
+            raise BuildStateError("The upload part is empty.")
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+    if size < total:
+        return None
+    digest = _sha256(partial)
+    partial.replace(target)
+    return digest
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:

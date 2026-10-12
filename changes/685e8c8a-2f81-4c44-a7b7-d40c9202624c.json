@@ -1,0 +1,7 @@
+{
+  "guid": "685e8c8a-2f81-4c44-a7b7-d40c9202624c",
+  "occurred_at": "2026-10-12T00:00Z",
+  "change_type": "Fix",
+  "summary": "Tray build server: upload installers in 8 MB parts so reverse proxy body limits no longer fail builds with HTTP 413",
+  "content_hash": "a0e4c17b698edc50c94768629a824678b77131d35c4f7ec89800548a97f3fe56"
+}

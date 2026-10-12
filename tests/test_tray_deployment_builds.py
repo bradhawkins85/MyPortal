@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -368,3 +369,43 @@ async def test_deployment_url_variable_in_automations_and_templates(
 
     context = {"ticket": {"company_id": 3}}
     assert await message_templates.with_tray_deployment_url("No variable", context) is context
+
+
+@pytest.mark.anyio
+async def test_artifact_uploads_in_parts(sqlite_db):
+    build_id = await builds.queue_build(7)
+    await builds.claim_next_build(PORTAL)
+    assert await builds.save_artifact_part(build_id, "exe", _chunks(b"abc"), offset=0, total=7) is None
+    with pytest.raises(builds.BuildStateError):
+        await builds.save_artifact_part(build_id, "exe", _chunks(b"zz"), offset=1, total=7)
+    assert await builds.save_artifact_part(build_id, "exe", _chunks(b"abc"), offset=0, total=7) is None
+    assert await builds.save_artifact_part(build_id, "exe", _chunks(b"de"), offset=3, total=7) is None
+    sha = await builds.save_artifact_part(build_id, "exe", _chunks(b"fg"), offset=5, total=7)
+    assert sha == hashlib.sha256(b"abcdefg").hexdigest()
+    assert builds.artifact_path(build_id, "exe").read_bytes() == b"abcdefg"
+
+
+@pytest.mark.anyio
+async def test_artifact_part_beyond_stated_size_is_rejected(sqlite_db):
+    build_id = await builds.queue_build(7)
+    await builds.claim_next_build(PORTAL)
+    with pytest.raises(builds.BuildStateError):
+        await builds.save_artifact_part(build_id, "msi", _chunks(b"abcd"), offset=0, total=3)
+    assert not builds.artifact_path(build_id, "msi").exists()
+    with pytest.raises(builds.BuildStateError):
+        await builds.save_artifact_part(build_id, "msi", _chunks(b"a"), offset=0, total=builds.MAX_ARTIFACT_BYTES + 1)
+
+
+@pytest.mark.anyio
+async def test_upload_route_accepts_parts(sqlite_db):
+    build_id = await builds.queue_build(7)
+    await builds.claim_next_build(PORTAL)
+    request = SimpleNamespace(stream=lambda: _chunks(b"ab"))
+    with pytest.raises(HTTPException) as exc:
+        await deploy_routes.build_agent_upload(build_id, "msi", request, offset=0, total=None, _api_key={})
+    assert exc.value.status_code == 409
+    result = await deploy_routes.build_agent_upload(build_id, "msi", request, offset=0, total=4, _api_key={})
+    assert result == {"status": "partial"}
+    request = SimpleNamespace(stream=lambda: _chunks(b"cd"))
+    result = await deploy_routes.build_agent_upload(build_id, "msi", request, offset=2, total=4, _api_key={})
+    assert result == {"status": "uploaded", "sha256": hashlib.sha256(b"abcd").hexdigest()}

@@ -192,10 +192,33 @@ function Invoke-Portal([string]$Method, [string]$Path, $Body) {
     return Invoke-WebRequest @params
 }
 
+# Uploads go up in 8 MB parts so reverse proxies that cap request bodies
+# (nginx's 15 MB in deploy/nginx, Cloudflare's 100 MB) never reject them.
+$UploadPartBytes = 8MB
+
 function Send-Artifact([int]$BuildId, [string]$Kind, [string]$Path) {
-    Invoke-WebRequest -Method Put -Uri "$PortalUrl/api/tray/build-agent/jobs/$BuildId/artifacts/$Kind" `
-        -Headers $Headers -InFile $Path -ContentType 'application/octet-stream' `
-        -UseBasicParsing -TimeoutSec 3600 | Out-Null
+    $uri = "$PortalUrl/api/tray/build-agent/jobs/$BuildId/artifacts/$Kind"
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $total = $stream.Length
+        $buffer = New-Object byte[] $UploadPartBytes
+        $offset = 0
+        while ($offset -lt $total) {
+            $read = $stream.Read($buffer, 0, $buffer.Length)
+            if ($read -le 0) { throw "Unexpected end of $Path." }
+            $part = $buffer
+            if ($read -lt $buffer.Length) {
+                $part = New-Object byte[] $read
+                [Array]::Copy($buffer, $part, $read)
+            }
+            Invoke-WebRequest -Method Put -Uri "$($uri)?offset=$offset&total=$total" `
+                -Headers $Headers -Body $part -ContentType 'application/octet-stream' `
+                -UseBasicParsing -TimeoutSec 600 | Out-Null
+            $offset += $read
+        }
+    } finally {
+        $stream.Dispose()
+    }
 }
 
 function Invoke-Build($Job) {
