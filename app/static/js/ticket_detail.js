@@ -777,6 +777,9 @@
 
     billableElement.textContent = billableTotal.toString();
     nonBillableElement.textContent = nonBillableTotal.toString();
+    // Re-apply the conversation history filters so billable/non-billable
+    // selections reflect the edited time entry.
+    document.querySelector('[data-ticket-timeline]')?.dispatchEvent(new Event('ticket-history-change'));
   }
 
   function parseJsonArray(value, fallback = []) {
@@ -3226,6 +3229,11 @@
     const loadButton = timeline?.querySelector('[data-history-load-earlier]');
     const emptyMessage = timeline?.querySelector('[data-history-empty]');
     const filters = Array.from(controls.querySelectorAll('[data-history-filter]'));
+    const billingFilters = Array.from(controls.querySelectorAll('[data-history-billing-filter]'));
+    const recordings = Array.from(timeline?.querySelectorAll('[data-call-recording]') || []);
+    // Billing filters narrow the conversation to time entries and combine with
+    // the reply type filters. They are not persisted between tickets.
+    const activeBilling = new Set();
     const kinds = filters.map((button) => button.dataset.historyFilter).filter((kind) => kind !== 'all');
     const storageKey = `portal.tickets.history.${controls.dataset.historyUserId || 'anonymous'}`;
     const showHiddenButton = document.querySelector('[data-show-split-hidden]');
@@ -3242,9 +3250,24 @@
       console.warn('Unable to read ticket conversation preferences:', error);
     }
 
+    function matchesBilling(minutes, billable) {
+      if (activeBilling.size === 0) return true;
+      if (typeof minutes !== 'string' || minutes.trim() === '') return false;
+      return activeBilling.has(billable === 'true' ? 'billable' : 'non-billable');
+    }
+
     function render() {
       const showSplitHistory = showHiddenButton?.getAttribute('aria-pressed') === 'true';
-      const eligible = messages.filter((message) => message.dataset.splitHidden !== 'true' || showSplitHistory);
+      const eligible = messages.filter((message) => (message.dataset.splitHidden !== 'true' || showSplitHistory)
+        && matchesBilling(message.dataset.replyMinutes, message.dataset.replyBillable));
+      recordings.forEach((recording) => {
+        recording.hidden = !matchesBilling(recording.dataset.recordingMinutes, recording.dataset.recordingBillable);
+      });
+      billingFilters.forEach((button) => {
+        const active = activeBilling.has(button.dataset.historyBillingFilter);
+        button.classList.toggle('stat-strip__stat--active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
       const matching = eligible.filter((message) => !hiddenKinds.has(message.dataset.messageKind));
       const visible = new Set(matching.slice(0, visibleLimit));
       messages.forEach((message) => {
@@ -3285,6 +3308,13 @@
       } catch (error) {
         console.warn('Unable to save ticket conversation preferences:', error);
       }
+      render();
+    }));
+    billingFilters.forEach((button) => button.addEventListener('click', () => {
+      const value = button.dataset.historyBillingFilter;
+      if (activeBilling.has(value)) activeBilling.delete(value);
+      else activeBilling.add(value);
+      visibleLimit = 8;
       render();
     }));
     timeline?.addEventListener('ticket-history-change', render);
