@@ -16,6 +16,7 @@ from app.repositories import company_variables as company_variables_repo
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_automation as automation_repo
 from app.repositories import rmm_checks as checks_repo
+from app.repositories import rmm_targeting as targeting_repo
 from app.repositories import rmm_event_log_rules as event_log_rules_repo
 from app.repositories import rmm_event_logs as event_log_repo
 from app.repositories import rmm_remote_control as remote_repo
@@ -257,12 +258,17 @@ async def sqlite_db(monkeypatch):
     conn = await aiosqlite.connect(":memory:")
     conn.row_factory = aiosqlite.Row
     await conn.executescript("""
-        CREATE TABLE companies (id INTEGER PRIMARY KEY, name TEXT, archived INT DEFAULT 0);
+        CREATE TABLE companies (id INTEGER PRIMARY KEY, name TEXT, archived INT DEFAULT 0, is_vip INT DEFAULT 0);
         CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);
-        CREATE TABLE assets (id INTEGER PRIMARY KEY, company_id INT, name TEXT, serial_number TEXT, archived_at TEXT);
+        CREATE TABLE assets (id INTEGER PRIMARY KEY, company_id INT, name TEXT, serial_number TEXT, archived_at TEXT,
+          type TEXT, asset_type TEXT, machine_type TEXT, os_name TEXT, cpu_name TEXT, ram_gb INT,
+          hdd_size TEXT, motherboard_manufacturer TEXT, form_factor TEXT, status TEXT, location TEXT);
+        CREATE TABLE ip_addresses (id INTEGER PRIMARY KEY, company_id INT, asset_id INT, address TEXT);
+        CREATE TABLE asset_interfaces (id INTEGER PRIMARY KEY, company_id INT, asset_id INT, ip_address_id INT);
         INSERT INTO companies (id, name) VALUES (1, 'Contoso'), (2, 'Other');
         INSERT INTO users VALUES (9, 'tech@example.com');
         INSERT INTO assets (id, company_id, name, serial_number) VALUES (10, 1, 'PC-01', 'SN1'), (11, 1, 'PC-02', 'SN2'), (20, 2, 'OTHER-PC', 'SN3');
+        UPDATE assets SET type = 'Workstation', asset_type = 'workstation' WHERE id = 10;
         -- Mirrors migrations 099/160, whose MySQL-only syntax SQLite cannot read.
         CREATE TABLE asset_custom_field_definitions (
           id INTEGER PRIMARY KEY, name TEXT UNIQUE, display_name TEXT, field_type TEXT,
@@ -287,7 +293,8 @@ async def sqlite_db(monkeypatch):
                  "469_asset_tag_blocks.sql", "470_rmm_script_ai_summary.sql", "471_rmm_remote_control.sql",
                  "472_rmm_event_log_settings.sql", "473_rmm_agent_auto_deploy.sql",
                  "474_rmm_event_log_rules.sql", "475_rmm_event_log_rule_tickets.sql",
-                 "476_rmm_event_log_rule_schedules.sql", "478_rmm_checks.sql"):
+                 "476_rmm_event_log_rule_schedules.sql", "477_rmm_device_inventory.sql", "478_rmm_checks.sql",
+                 "479_rmm_check_target_rules.sql"):
         await conn.executescript(adapter._adapt_sql_for_sqlite((ROOT / "migrations" / name).read_text()))
     await conn.executescript("""
         INSERT INTO asset_custom_field_definitions (id, name, field_type) VALUES
@@ -297,7 +304,7 @@ async def sqlite_db(monkeypatch):
     """)
     fake = _SqliteDb(conn)
     for module in (rmm_repo, automation_repo, remote_repo, event_log_repo, event_log_rules_repo, checks_repo, tags_repo,
-                   asset_fields_repo, company_variables_repo, assets_repo, deploy_repo, tray_repo):
+                   asset_fields_repo, company_variables_repo, assets_repo, deploy_repo, tray_repo, targeting_repo):
         monkeypatch.setattr(module, "db", fake)
 
     async def get_company(company_id):

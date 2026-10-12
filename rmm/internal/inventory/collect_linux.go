@@ -4,6 +4,7 @@ package inventory
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -117,5 +118,6 @@ func linuxPackages(ctx context.Context, s *Snapshot) []Program {
 		}
 		return parsePackages(out, manager.source)
 	}
+	s.fail("software", errors.New("no supported package manager is available"))
 	return nil
 }

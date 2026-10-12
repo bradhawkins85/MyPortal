@@ -19,20 +19,24 @@ Agent side (``Authorization: Bearer`` token):
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_checks as checks_repo
+from app.repositories import rmm_automation as automation_repo
+from app.repositories import rmm_targeting as targeting_repo
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
 from app.services import rmm_automation, rmm_checks
 from app.services import rmm_event_log_rules as event_log_rules
 from app.services import rmm_scripts
 from app.services import rmm_stats
+from app.services import rmm_targeting
 
 from .routes import _assets_routes, _context, _serialise, get_current_rmm_agent
 
@@ -113,6 +117,8 @@ def form_values(check: dict[str, Any]) -> dict[str, Any]:
         scope = check.get("scope") or "company"
     return {
         "id": check.get("id"), "name": check.get("name") or "", "scope": scope, "asset_id": check.get("asset_id"),
+        "target_mode": "rules" if check.get("target_rules") is not None else "all",
+        "target_rules": check.get("target_rules"),
         "check_type": kind, "duration_minutes": check.get("duration_minutes") or 0,
         "check_script_id": check.get("check_script_id"), "action": check.get("action") or "none",
         "script_id": check.get("script_id"), "timeout_seconds": check.get("timeout_seconds") or 600,
@@ -132,6 +138,7 @@ def _blank_check(asset_id: int | None, check_type: str | None) -> dict[str, Any]
         **form_values({"check_type": kind, "is_enabled": True, "asset_id": asset_id,
                        "scope": "asset" if asset_id else "company"}),
         "duration_minutes": DEFAULT_DURATIONS.get(kind, 0),
+        "target_mode": "rules", "target_rules": {"operator": "and", "children": []},
     }
 
 
@@ -142,10 +149,36 @@ def _posted(form: Any, check_id: int | None) -> dict[str, Any]:
         except ValueError:
             return None
 
+    try:
+        rules = json.loads(str(form.get("target_rules") or "null"))
+    except (ValueError, TypeError, RecursionError):
+        rules = {}
+    # Keep ordinary invalid values editable, while bounding data embedded in
+    # the error page and recursively rendered by the browser's rule editor.
+    pending = [(rules, 0)]
+    remaining = rmm_targeting.MAX_NODES * 8
+    if not isinstance(rules, dict):
+        rules = {}
+        pending = []
+    while pending:
+        value, depth = pending.pop()
+        remaining -= 1
+        if remaining < 0 or depth > rmm_targeting.MAX_DEPTH * 2 + 4:
+            rules = {}
+            break
+        if isinstance(value, dict):
+            pending.extend((item, depth + 1) for item in value.values())
+        elif isinstance(value, list):
+            pending.extend((item, depth + 1) for item in value)
+        elif isinstance(value, str) and len(value) > rmm_targeting.MAX_VALUE_LENGTH:
+            rules = {}
+            break
+
     return {
         **{key: str(form.get(key) if form.get(key) is not None else default) for key, default in FORM_DEFAULTS.items()},
         "id": check_id, "name": str(form.get("name") or ""), "scope": str(form.get("scope") or "company"),
         "asset_id": number("asset_id"), "check_type": str(form.get("check_type") or ""),
+        "target_mode": str(form.get("target_mode") or "all"), "target_rules": rules,
         "duration_minutes": form.get("duration_minutes") or 0, "check_script_id": number("check_script_id"),
         "action": str(form.get("action") or "none"), "script_id": number("script_id"),
         "timeout_seconds": form.get("timeout_seconds") or 600,
@@ -223,6 +256,7 @@ async def _render(
             "variables": variables,
             "can_edit": can_edit,
             "is_super_admin": is_super_admin,
+            "targeting_fields": rmm_targeting.field_catalogue(),
         },
     )
     response.status_code = status_code
@@ -246,6 +280,47 @@ async def _editable_check(check_id: int, user: dict[str, Any], company_id: int) 
     if not rmm_checks.can_edit(check, company_id=company_id, is_super_admin=bool(user.get("is_super_admin"))):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only super admins can change checks for every company")
     return check
+
+
+class TargetingPreviewRequest(BaseModel):
+    scope: str = Field(default="company", max_length=16)
+    asset_id: int | None = Field(default=None, ge=1)
+    rules: dict[str, Any]
+
+
+@router.get("/api/rmm/checks/targeting/fields", summary="Check targeting fields and operators")
+async def targeting_fields(request: Request):
+    await _context(request, api=True)
+    return {"fields": rmm_targeting.field_catalogue()}
+
+
+@router.post("/api/rmm/checks/targeting/preview", summary="Preview devices matching check rules")
+async def targeting_preview(request: Request, payload: TargetingPreviewRequest):
+    user, _company, company_id, _can_edit = await _context(request, write=True, api=True)
+    if payload.scope not in {"global", "company", "asset"}:
+        raise HTTPException(status_code=422, detail="Choose a company or device scope")
+    if payload.scope == "global" and not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Only super admins can preview checks for every company")
+    if payload.scope == "asset":
+        from app.repositories import assets as assets_repo
+        asset = await assets_repo.get_asset_by_id(payload.asset_id) if payload.asset_id else None
+        if not asset or int(asset.get("company_id") or 0) != int(company_id) or asset.get("archived_at"):
+            raise HTTPException(status_code=404, detail="Device not found in this company")
+    try:
+        matches = rmm_targeting.compile_rules(payload.rules)
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc), "errors": {"target_rules": str(exc)}}, status_code=400)
+    agents = await automation_repo.list_active_agents(company_id=None if payload.scope == "global" else company_id)
+    if payload.scope == "asset":
+        agents = [agent for agent in agents if agent.get("asset_id") == payload.asset_id]
+    contexts = await targeting_repo.contexts_for_agents(agents)
+    matched = [agent for agent in agents if int(agent["id"]) in contexts
+               and matches(contexts[int(agent["id"])])]
+    return {
+        "matched_count": len(matched), "eligible_count": len(contexts), "truncated": len(matched) > 100,
+        "agents": [{"id": agent["id"], "asset_id": agent.get("asset_id"), "hostname": agent.get("hostname"),
+                    "company_name": contexts[int(agent["id"])]["company"].get("name")} for agent in matched[:100]],
+    }
 
 
 def _asset_back(form: Any) -> str | None:
@@ -365,10 +440,14 @@ async def asset_checks_context(company_id: int, asset_id: int, *, can_edit: bool
     """The asset page's Checks and Machine stats sections."""
 
     checks = await checks_repo.list_checks_for_device(company_id, asset_id)
-    applied = {int(check["id"]) for check in rmm_checks.effective_checks(checks, company_id, asset_id)}
     agent = await rmm_repo.get_asset_agent(asset_id)
     if agent and agent.get("company_id") is not None and int(agent["company_id"]) != int(company_id):
         agent = None
+    if agent:
+        matching = (await rmm_checks.targeted_checks_for_agents(checks, [agent]))[int(agent["id"])]
+    else:
+        matching = rmm_checks.effective_checks([check for check in checks if check.get("target_rules") is None], company_id, asset_id)
+    applied = {int(check["id"]) for check in matching}
     states = await checks_repo.list_states_for_agent(int(agent["id"])) if agent else {}
     rows = []
     for check in checks:
@@ -377,7 +456,8 @@ async def asset_checks_context(company_id: int, asset_id: int, *, can_edit: bool
         summary.update(
             can_edit=can_edit and rmm_checks.can_edit(check, company_id=company_id, is_super_admin=is_super_admin),
             applies=int(check["id"]) in applied,
-            replaced=bool(check["is_enabled"]) and int(check["id"]) not in applied,
+            replaced=bool(check["is_enabled"]) and int(check["id"]) not in applied and check.get("target_rules") is None,
+            filtered=check.get("target_rules") is not None and int(check["id"]) not in applied,
             state=_serialise(state) if state else None,
             status_label=rmm_checks.STATUSES.get((state or {}).get("status") or "pending"),
         )

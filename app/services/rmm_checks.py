@@ -53,8 +53,9 @@ from app.repositories import assets as assets_repo
 from app.repositories import rmm as rmm_repo
 from app.repositories import rmm_checks as repo
 from app.repositories import rmm_stats as stats_repo
+from app.repositories import rmm_targeting as targeting_repo
 from app.security.encryption import encrypt_secret
-from app.services import rmm_actions, rmm_automation, rmm_event_log_rules, rmm_scripts
+from app.services import rmm_actions, rmm_automation, rmm_event_log_rules, rmm_scripts, rmm_targeting
 from app.services.rmm_scripts import RunRequestError
 
 RUN_SOURCE = "check"
@@ -182,6 +183,14 @@ def _specificity(check: Mapping[str, Any]) -> int:
     return 1 if check.get("company_id") is not None else 0
 
 
+def _in_scope(check: Mapping[str, Any], company_id: int | None, asset_id: int | None) -> bool:
+    if check.get("asset_id") is not None:
+        return asset_id is not None and int(check["asset_id"]) == int(asset_id)
+    if check.get("company_id") is not None:
+        return company_id is not None and int(check["company_id"]) == int(company_id)
+    return True
+
+
 def effective_checks(checks: Iterable[Mapping[str, Any]], company_id: int | None, asset_id: int | None,
                      *, include_off: bool = False) -> list[dict[str, Any]]:
     """The checks a device runs.
@@ -192,12 +201,8 @@ def effective_checks(checks: Iterable[Mapping[str, Any]], company_id: int | None
 
     groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for check in checks:
-        if check.get("asset_id") is not None:
-            if asset_id is None or int(check["asset_id"]) != int(asset_id):
-                continue
-        elif check.get("company_id") is not None:
-            if company_id is None or int(check["company_id"]) != int(company_id):
-                continue
+        if not _in_scope(check, company_id, asset_id):
+            continue
         groups[override_key(check)].append(dict(check))
     chosen: list[dict[str, Any]] = []
     for items in groups.values():
@@ -218,11 +223,51 @@ def replaced_by(check: Mapping[str, Any], checks: Iterable[Mapping[str, Any]]) -
     return [dict(other) for other in checks if override_key(other) == key and _specificity(other) > level]
 
 
-async def checks_for_agent(agent: Mapping[str, Any], *, with_secrets: bool = False) -> list[dict[str, Any]]:
+async def targeted_checks_for_agents(
+    checks: Iterable[Mapping[str, Any]], agents: Iterable[Mapping[str, Any]], *, include_off: bool = False,
+) -> dict[int, list[dict[str, Any]]]:
+    """Select checks against current inventory before resolving scope overrides.
+
+    A disabled override only switches off checks on devices its rules match.
+    Inventory is loaded in one batch for agents with valid scoped rule trees;
+    legacy unrestricted checks require no additional inventory queries.
+    """
+
+    candidates = []
+    matchers = {}
+    for check in checks:
+        row = dict(check)
+        if row.get("target_rules") is not None:
+            try:
+                matchers[int(row["id"])] = rmm_targeting.compile_rules(row["target_rules"])
+            except (ValueError, TypeError, OverflowError, RecursionError):
+                continue  # corrupt rules may never become unrestricted
+        candidates.append(row)
+    devices = {int(agent["id"]): dict(agent) for agent in agents}
+    scoped = {
+        agent_id: [check for check in candidates if _in_scope(check, agent.get("company_id"), agent.get("asset_id"))]
+        for agent_id, agent in devices.items()
+    }
+    rule_devices = [agent for agent_id, agent in devices.items()
+                    if any(check.get("target_rules") is not None for check in scoped[agent_id])]
+    contexts = await targeting_repo.contexts_for_agents(rule_devices) if rule_devices else {}
+    selected = {}
+    for agent_id, agent in devices.items():
+        matching = [check for check in scoped[agent_id]
+                    if check.get("target_rules") is None
+                    or matchers[int(check["id"])](contexts.get(agent_id))]
+        selected[agent_id] = effective_checks(matching, agent.get("company_id"), agent.get("asset_id"),
+                                               include_off=include_off)
+    return selected
+
+
+async def checks_for_agent(agent: Mapping[str, Any], *, with_secrets: bool = False,
+                           include_off: bool = False) -> list[dict[str, Any]]:
     company_id = int(agent["company_id"]) if agent.get("company_id") is not None else None
     asset_id = int(agent["asset_id"]) if agent.get("asset_id") is not None else None
     checks = await repo.list_checks_for_device(company_id, asset_id, with_secrets=with_secrets)
-    return effective_checks(checks, company_id, asset_id)
+    selected = await targeted_checks_for_agents(checks, [agent], include_off=include_off)
+    return selected[int(agent["id"])]
 
 
 # --------------------------------------------------------------------------- #
@@ -426,6 +471,18 @@ async def save_check(
             errors["asset_id"] = "Choose a device in this company."
     elif scope != "company":
         errors["scope"] = "Choose who the check applies to."
+    raw_rules = form.get("target_rules")
+    target_mode = str(form.get("target_mode") or ("rules" if raw_rules is not None else "all")).strip().lower()
+    target_rules = None
+    if target_mode == "rules":
+        try:
+            if isinstance(raw_rules, str):
+                raw_rules = json.loads(raw_rules)
+            target_rules = rmm_targeting.validate_rules(raw_rules)
+        except (ValueError, TypeError, OverflowError, RecursionError) as exc:
+            errors["target_rules"] = str(exc) or "Add at least one valid targeting condition."
+    elif target_mode != "all":
+        errors["target_mode"] = "Choose all devices in scope or advanced rules."
     check_type = str(form.get("check_type") or "")
     if check_type not in CHECK_TYPES:
         errors["check_type"] = "Choose what to check."
@@ -468,6 +525,7 @@ async def save_check(
         "name": name,
         "company_id": check_company_id,
         "asset_id": asset_id,
+        "target_rules": target_rules,
         "check_type": check_type,
         "target": target,
         "settings": settings,
@@ -886,8 +944,10 @@ async def evaluate_offline(now: datetime | None = None) -> int:
     if not checks:
         return 0
     recorded = 0
-    for agent in await repo.list_active_agents():
-        applicable = effective_checks(checks, agent.get("company_id"), agent.get("asset_id"))
+    agents = await repo.list_active_agents()
+    selected = await targeted_checks_for_agents(checks, agents)
+    for agent in agents:
+        applicable = selected[int(agent["id"])]
         if not applicable:
             continue
         states = await repo.list_states_for_agent(int(agent["id"]))
@@ -940,8 +1000,10 @@ async def run_due_script_checks(now: datetime | None = None) -> int:
     if not checks:
         return 0
     queued = 0
-    for agent in await repo.list_active_agents():
-        applicable = effective_checks(checks, agent.get("company_id"), agent.get("asset_id"))
+    agents = await repo.list_active_agents()
+    selected = await targeted_checks_for_agents(checks, agents)
+    for agent in agents:
+        applicable = selected[int(agent["id"])]
         if not applicable:
             continue
         states = await repo.list_states_for_agent(int(agent["id"]))
@@ -991,13 +1053,29 @@ async def run_finished(run_id: int) -> int:
     run = await rmm_repo.get_run(run_id)
     if not run:
         return 0
+    agents = {}
+    for agent_id in {int(state["agent_id"]) for state in states}:
+        agent = await rmm_repo.get_agent(agent_id)
+        if agent:
+            agents[agent_id] = agent
+    candidates = await repo.list_checks_of_types(["script"], with_secrets=True)
+    existing_check_ids = {int(check["id"]) for check in candidates}
+    selected = await targeted_checks_for_agents(candidates, agents.values())
+    applicable = {agent_id: {int(check["id"]): check for check in checks}
+                  for agent_id, checks in selected.items()}
     answered = 0
     for state in states:
-        check = await repo.get_check(int(state["check_id"]), with_secrets=True)
-        agent = await rmm_repo.get_agent(int(state["agent_id"]))
-        if not check or not agent:
-            continue
+        check_id, agent_id = int(state["check_id"]), int(state["agent_id"])
+        check = applicable.get(agent_id, {}).get(check_id)
+        agent = agents.get(agent_id)
+        if not agent or check_id not in existing_check_ids:
+            continue  # removed or changed since the run was queued
         state["run_id"] = None
+        if not check:
+            # A run queued under earlier inventory cannot trigger actions
+            # after the device leaves the check's target or is overridden.
+            await repo.save_state(check_id, agent_id, state)
+            continue
         await record_result(check, agent, *script_outcome(check, run), state=state)
         answered += 1
     return answered
@@ -1007,17 +1085,32 @@ async def run_due_scheduled_checks(now: datetime | None = None) -> int:
     """Run the scripts check actions scheduled for now or earlier. Returns how many were queued."""
 
     now = now or _utcnow()
+    pending_checks = await repo.due_scheduled(now)
+    if not pending_checks:
+        return 0
+    agents = {}
+    for agent_id in {int(pending["agent_id"]) for pending in pending_checks}:
+        try:
+            agent = await rmm_repo.get_agent(agent_id)
+            if agent:
+                agents[agent_id] = agent
+        except Exception as exc:  # noqa: BLE001 - one device must not stop the others
+            log_error("RMM check scheduled device lookup failed", agent_id=agent_id, error=str(exc))
+    candidates = await repo.list_checks_of_types(CHECK_TYPES, with_secrets=True)
+    selected = await targeted_checks_for_agents(candidates, agents.values())
+    applicable = {agent_id: {int(check["id"]): check for check in checks}
+                  for agent_id, checks in selected.items()}
     queued = 0
-    for pending in await repo.due_scheduled(now):
+    for pending in pending_checks:
         check_id, agent_id = int(pending["check_id"]), int(pending["agent_id"])
         if not await repo.claim_scheduled(check_id, agent_id, now):
             continue  # another instance took it
         try:
-            check = await repo.get_check(check_id, with_secrets=True)
-            agent = await rmm_repo.get_agent(agent_id)
+            check = applicable.get(agent_id, {}).get(check_id)
+            agent = agents.get(agent_id)
             if (not check or not check.get("is_enabled") or check.get("action") != "schedule_script" or not agent
                     or pending.get("status") != "failing"):
-                continue  # turned off, changed, passing again or removed since it was scheduled
+                continue  # no longer applicable, changed, passing again or removed
             run_id, summary, attempted = await rmm_actions.run_script(
                 script_id=check.get("script_id"),
                 entries_encrypted=check.get("entries_encrypted"),
