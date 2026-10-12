@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 410" role="img" aria-labelledby="title desc">
+  <title id="title">Windows SmartScreen: More info, then Run anyway</title>
+  <desc id="desc">Illustration of the Windows protected your PC dialog. More info is highlighted, followed by a reminder to check the expected app and publisher before selecting the expanded dialog's Run anyway button. Don't run remains visible.</desc>
+  <rect width="600" height="410" rx="16" fill="#f3f6fa"/>
+  <rect x="20" y="20" width="560" height="370" rx="12" fill="#0869b0"/>
+  <g font-family="Segoe UI, Arial, sans-serif" fill="#fff">
+    <text x="44" y="59" font-size="25" font-weight="600">Windows protected your PC</text>
+    <text x="446" y="92" font-size="20" fill="#d6e9f8">Illustration</text>
+    <text x="44" y="130" font-size="21">Microsoft Defender SmartScreen</text>
+    <text x="44" y="159" font-size="21">prevented an unrecognized app from</text>
+    <text x="44" y="188" font-size="21">starting.</text>
+  </g>
+  <rect x="42" y="205" width="143" height="42" rx="4" fill="#fff" stroke="#fff" stroke-width="3"/>
+  <text x="57" y="234" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="600" fill="#075b99">More info</text>
+  <path d="M113 261V281M105 273L113 281L121 273" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="137" y="278" font-family="Segoe UI, Arial, sans-serif" font-size="20" fill="#fff">Check app / publisher first</text>
+  <rect x="43" y="305" width="230" height="52" rx="3" fill="#fff" stroke="#fff" stroke-width="3"/>
+  <text x="76" y="340" font-family="Segoe UI, Arial, sans-serif" font-size="23" font-weight="600" fill="#075b99">Run anyway</text>
+  <rect x="308" y="305" width="230" height="52" rx="3" fill="#e6eef6"/>
+  <text x="364" y="340" font-family="Segoe UI, Arial, sans-serif" font-size="23" fill="#24405b">Don’t run</text>
+</svg>

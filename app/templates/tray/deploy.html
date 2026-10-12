@@ -6,6 +6,9 @@
 {% block extra_head %}
 <meta name="robots" content="noindex, nofollow" />
 <meta name="referrer" content="no-referrer" />
+{% if state == "open" and windows_ready %}
+<link rel="stylesheet" href="{{ static_url('/static/css/tray_download_help.css') }}" />
+{% endif %}
 {% endblock %}
 
 {% block sidebar_menu %}
@@ -20,7 +23,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="auth-shell">
+<div class="auth-shell auth-shell--tray-deploy">
   {{ auth_hero(app_name, "Get help without leaving your desk.", [
     ("Raise tickets from the tray", " — report a problem in a couple of clicks."),
     ("Chat with support", " — talk to the team straight from your computer."),
@@ -47,6 +50,7 @@
           <div class="tray-deploy__option">
             <a class="button auth-card__wide" href="{{ deploy_base }}/windows.exe" rel="noreferrer">Download for Windows</a>
             <p class="tray-deploy__help">Run the downloaded file and follow the installer. IT teams can use the <a href="{{ deploy_base }}/windows.msi" rel="noreferrer">MSI package</a> instead.</p>
+            {% include "tray/_download_help.html" %}
           </div>
         {% endif %}
         {% if macos_ready %}
@@ -63,4 +67,10 @@
     {% endif %}
   </section>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{% if state == "open" and windows_ready %}
+<script src="{{ static_url('/static/js/tray_download_help.js') }}" defer></script>
+{% endif %}
 {% endblock %}
