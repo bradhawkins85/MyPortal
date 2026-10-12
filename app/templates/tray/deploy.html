@@ -42,17 +42,23 @@
     {% elif not windows_ready and not macos_ready %}
       <div class="alert alert--warning" role="status">The installers for this link are still being prepared. Please try again later.</div>
     {% else %}
-      {% if windows_ready %}
-        <a class="button auth-card__wide" href="{{ deploy_base }}/windows.exe" rel="noreferrer">Download for Windows</a>
-        <p class="form-help">Run the downloaded file and follow the installer. IT teams can use the <a href="{{ deploy_base }}/windows.msi" rel="noreferrer">MSI package</a> instead.</p>
-      {% endif %}
-      {% if macos_ready %}
-        <a class="button {% if windows_ready %}button--secondary {% endif %}auth-card__wide" href="{{ deploy_base }}/macos.zip" rel="noreferrer">Download for macOS</a>
-        <p class="form-help">Open the zip file, then right-click <strong>Install MyPortal Tray.command</strong>, choose Open, and enter your Mac password when asked.</p>
-      {% endif %}
-      {% if not windows_ready %}
-        <p class="form-help">The Windows installer is still being prepared. Please check back shortly.</p>
-      {% endif %}
+      <div class="tray-deploy__options">
+        {% if windows_ready %}
+          <div class="tray-deploy__option">
+            <a class="button auth-card__wide" href="{{ deploy_base }}/windows.exe" rel="noreferrer">Download for Windows</a>
+            <p class="tray-deploy__help">Run the downloaded file and follow the installer. IT teams can use the <a href="{{ deploy_base }}/windows.msi" rel="noreferrer">MSI package</a> instead.</p>
+          </div>
+        {% endif %}
+        {% if macos_ready %}
+          <div class="tray-deploy__option">
+            <a class="button {% if windows_ready %}button--secondary {% endif %}auth-card__wide" href="{{ deploy_base }}/macos.zip" rel="noreferrer">Download for macOS</a>
+            <p class="tray-deploy__help">Open the zip file, then right-click <strong>Install MyPortal Tray.command</strong>, choose Open, and enter your Mac password when asked.</p>
+          </div>
+        {% endif %}
+        {% if not windows_ready %}
+          <p class="tray-deploy__help">The Windows installer is still being prepared. Please check back shortly.</p>
+        {% endif %}
+      </div>
       <p class="auth-card__footer">Keep this link private. Anyone with it can register a computer with your organisation.</p>
     {% endif %}
   </section>
