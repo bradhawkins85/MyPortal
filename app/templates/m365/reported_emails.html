@@ -78,7 +78,7 @@
 
     {% set columns = [
       {"key":"created", "label":"Alert created", "sort_type":"date", "mobile_priority":"essential", "width":"12%"},
-      {"key":"report", "label":"Report", "width":"14%"},
+      {"key":"report", "label":"Reported as", "mobile_priority":"essential", "width":"14%"},
       {"key":"message", "label":"Reported message", "mobile_priority":"essential", "width":"32%"},
       {"key":"window", "label":"Search window (UTC)"},
       {"key":"status", "label":"Alert status", "default_visible":false},
@@ -92,7 +92,7 @@
       {% set report_variant = 'danger' if alert.kind == 'phish' else 'warning' if alert.kind == 'junk' else 'neutral' %}
       <tr{% if alert.ignored %} class="reported-row--ignored"{% endif %}>
         <td data-column-key="created" data-sort-value="{{ alert.created_at or '' }}">{% if alert.created_at %}<span data-utc="{{ alert.created_at }}">{{ alert.created_at }}</span>{% else %}&mdash;{% endif %}</td>
-        <td data-column-key="report"><span class="status status--{{ report_variant }}">{{ alert.report_label }}</span>{% if alert.ignored %} <span class="status status--neutral">Ignored</span>{% endif %}</td>
+        <td data-column-key="report" data-sort-value="{{ alert.report_label }}"><span class="status status--{{ report_variant }}">{{ alert.report_label }}</span>{% if alert.ignored %} <span class="status status--neutral">Ignored</span>{% endif %}</td>
         <td data-column-key="message">
           <div class="reported-message">
             <span class="reported-message__subject">{{ alert.subject or '(no subject in alert evidence)' }}</span>

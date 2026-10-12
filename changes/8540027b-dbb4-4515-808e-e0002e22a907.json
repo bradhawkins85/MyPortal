@@ -1,0 +1,7 @@
+{
+  "guid": "8540027b-dbb4-4515-808e-e0002e22a907",
+  "occurred_at": "2026-10-12T13:41Z",
+  "change_type": "Change",
+  "summary": "Clarify the reported-email table with a mobile-visible Reported as column, consistent Phishing labels, and Unknown when the report category is unavailable.",
+  "content_hash": "0022643fcc2392c0b94bb7760411ffdc174785a3be2da10d7e847361269b7ee4"
+}
