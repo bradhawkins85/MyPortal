@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import zipfile
 from datetime import datetime, timedelta
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
+from urllib.parse import urlsplit
 
 import pytest
 from fastapi import HTTPException
@@ -363,6 +365,101 @@ async def test_public_page_for_revoked_link_is_404(monkeypatch):
     response = await deploy_routes.deployment_page(SLUG, _request(f"/deploy/{SLUG}"))
     assert response.status_code == 404
     assert "has been revoked" in response.body.decode()
+
+
+class _DownloadHelpParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.nodes: list[tuple[str, dict[str, str | None]]] = []
+
+    def handle_starttag(self, tag, attrs):
+        self.nodes.append((tag, dict(attrs)))
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("macos_ready", [True, False])
+async def test_windows_ready_page_has_local_illustrated_download_help(
+    monkeypatch, installers, macos_ready
+):
+    if not macos_ready:
+        (installers / "myportal-tray.pkg").unlink()
+    link = _link()
+    monkeypatch.setattr(
+        tray_deployment, "resolve_active_link", AsyncMock(return_value=(link, TOKEN))
+    )
+    monkeypatch.setattr(builds, "ready_artifact", AsyncMock(return_value=Path("setup.exe")))
+
+    response = await deploy_routes.deployment_page(SLUG, _request(f"/deploy/{SLUG}"))
+    body = response.body.decode()
+    parser = _DownloadHelpParser()
+    parser.feed(body)
+
+    assert response.status_code == 200
+    assert any("data-tray-download-help" in attrs for _, attrs in parser.nodes)
+    assert "tray_download_help.js" in body
+    assert "tray_download_help.css" in body
+    sections = {
+        attrs["data-download-browser"]: attrs
+        for _, attrs in parser.nodes if "data-download-browser" in attrs
+    }
+    assert set(sections) == {"edge", "chrome"}
+    # Both instructions remain readable when JavaScript is disabled or fails.
+    assert all("hidden" not in attrs for attrs in sections.values())
+    controls = [attrs for _, attrs in parser.nodes if "data-download-browser-controls" in attrs]
+    assert len(controls) == 1
+    assert "hidden" in controls[0]
+    images = [
+        attrs for tag, attrs in parser.nodes
+        if tag == "img" and urlsplit(attrs.get("src") or "").path.endswith(
+            ("edge-keep.svg", "edge-keep-anyway.svg", "chrome-keep.svg", "windows-run.svg")
+        )
+    ]
+    assert {Path(urlsplit(attrs["src"]).path).name for attrs in images} == {
+        "edge-keep.svg", "edge-keep-anyway.svg", "chrome-keep.svg", "windows-run.svg"
+    }
+    for attrs in images:
+        assert attrs.get("alt")
+        source = urlsplit(attrs["src"])
+        assert not source.netloc and source.path.startswith("/static/")
+        assert SLUG not in attrs["src"] and TOKEN not in attrs["src"]
+    assert TOKEN not in body
+    assert link["install_token_encrypted"] not in body
+    assert link["slug_encrypted"] not in body
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("availability", ["unavailable", "pending", "macos-only"])
+async def test_download_help_absent_without_an_available_windows_download(
+    monkeypatch, installers, availability
+):
+    if availability == "unavailable":
+        resolve = AsyncMock(side_effect=tray_deployment.DeploymentLinkUnavailable("Link expired."))
+    else:
+        resolve = AsyncMock(return_value=(_link(), TOKEN))
+    if availability == "pending":
+        (installers / "myportal-tray.pkg").unlink()
+    monkeypatch.setattr(tray_deployment, "resolve_active_link", resolve)
+    artifact = AsyncMock(return_value=None)
+    monkeypatch.setattr(builds, "ready_artifact", artifact)
+
+    response = await deploy_routes.deployment_page(SLUG, _request(f"/deploy/{SLUG}"))
+    body = response.body.decode()
+
+    assert response.status_code == (404 if availability == "unavailable" else 200)
+    assert "data-tray-download-help" not in body
+    assert "tray_download_help.js" not in body
+    assert "tray_download_help.css" not in body
+    assert "edge-keep.svg" not in body
+    assert "windows-run.svg" not in body
+    assert TOKEN not in body
+    if availability == "unavailable":
+        artifact.assert_not_awaited()
+    elif availability == "macos-only":
+        assert "/macos.zip" in body
+    else:
+        assert "still being prepared" in body
 
 
 @pytest.mark.anyio

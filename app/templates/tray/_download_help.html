@@ -1,0 +1,59 @@
+<details class="tray-download-help" data-tray-download-help>
+  <summary>Seeing Delete or Discard? How to keep and run the installer</summary>
+  <div class="tray-download-help__body">
+    <p>For an <strong>uncommon or unrecognised download</strong> warning, use the steps below to keep the MyPortal Tray installer requested by your IT team. Select an image to view it full size.</p>
+
+    <div class="tray-download-help__controls" data-download-browser-controls hidden>
+      <p class="tray-download-help__status" data-download-browser-status role="status" aria-live="polite"></p>
+      <label class="form-label" for="tray-download-browser">Instructions for</label>
+      <select class="form-input" id="tray-download-browser" aria-controls="tray-download-edge tray-download-chrome">
+        <option value="all">Both browsers / not sure</option>
+        <option value="edge">Microsoft Edge</option>
+        <option value="chrome">Google Chrome</option>
+      </select>
+    </div>
+
+    <section id="tray-download-edge" data-download-browser="edge" aria-labelledby="tray-download-edge-title">
+      <h2 id="tray-download-edge-title">Microsoft Edge</h2>
+      <ol>
+        <li>Open <strong>Downloads</strong> from the browser toolbar, or press <kbd>Ctrl</kbd> + <kbd>J</kbd>.</li>
+        <li>Find the MyPortal Tray <strong>.exe</strong> download. If Edge offers <strong>Delete</strong>, open the <strong>three-dot menu (More actions)</strong> beside the file and choose <strong>Keep</strong>.
+          <figure>
+            <a href="{{ static_url('/static/images/tray-download-help/edge-keep.svg') }}" target="_blank" rel="noopener noreferrer" aria-label="View full-size Edge Keep illustration (opens in a new tab)"><img src="{{ static_url('/static/images/tray-download-help/edge-keep.svg') }}" alt="Edge Downloads illustration: the three-dot menu beside the installer contains Keep, highlighted above Delete." width="600" height="360" loading="lazy" /></a>
+          </figure>
+        </li>
+        <li>If a confirmation appears, select <strong>Show more</strong>, then <strong>Keep anyway</strong>.
+          <figure>
+            <a href="{{ static_url('/static/images/tray-download-help/edge-keep-anyway.svg') }}" target="_blank" rel="noopener noreferrer" aria-label="View full-size Edge Keep anyway illustration (opens in a new tab)"><img src="{{ static_url('/static/images/tray-download-help/edge-keep-anyway.svg') }}" alt="Edge confirmation illustration: select Show more to reveal the Keep anyway action." width="600" height="390" loading="lazy" /></a>
+          </figure>
+        </li>
+        <li>Wait for the download to finish, then choose <strong>Open file</strong>.</li>
+      </ol>
+    </section>
+
+    <section id="tray-download-chrome" data-download-browser="chrome" aria-labelledby="tray-download-chrome-title">
+      <h2 id="tray-download-chrome-title">Google Chrome</h2>
+      <ol>
+        <li>Open <strong>Downloads</strong> from the browser toolbar, or press <kbd>Ctrl</kbd> + <kbd>J</kbd>.</li>
+        <li>Find the MyPortal Tray <strong>.exe</strong> download. If Chrome offers <strong>Delete</strong>, <strong>Delete from history</strong>, or <strong>Discard</strong>, open the warning details or the file's menu. Choose <strong>Keep</strong> and confirm <strong>Keep anyway</strong> if asked. Newer Chrome versions may show <strong>Download suspicious file</strong> instead.
+          <figure>
+            <a href="{{ static_url('/static/images/tray-download-help/chrome-keep.svg') }}" target="_blank" rel="noopener noreferrer" aria-label="View full-size Chrome download illustration (opens in a new tab)"><img src="{{ static_url('/static/images/tray-download-help/chrome-keep.svg') }}" alt="Chrome Downloads illustration: open the warning details and choose Download suspicious file; older versions use Keep or Keep anyway." width="600" height="440" loading="lazy" /></a>
+          </figure>
+        </li>
+        <li>Wait for the download to finish, then click the file name to open the installer. You can also open the <strong>.exe</strong> in your Windows <strong>Downloads</strong> folder.</li>
+      </ol>
+    </section>
+
+    <section aria-labelledby="tray-download-run-title">
+      <h2 id="tray-download-run-title">Run the installer on Windows</h2>
+      <p>If Windows displays <strong>Windows protected your PC</strong> for an unrecognised app, select <strong>More info</strong>. Check that the app and publisher match what your IT team expects, then select <strong>Run anyway</strong> if available.</p>
+      <figure>
+        <a href="{{ static_url('/static/images/tray-download-help/windows-run.svg') }}" target="_blank" rel="noopener noreferrer" aria-label="View full-size Windows Run anyway illustration (opens in a new tab)"><img src="{{ static_url('/static/images/tray-download-help/windows-run.svg') }}" alt="Windows SmartScreen illustration: More info reveals the app details and the Run anyway button." width="600" height="410" loading="lazy" /></a>
+      </figure>
+      <p>Follow the installer prompts to finish setup.</p>
+    </section>
+
+    <p class="tray-download-help__note">Images are illustrations; wording can vary by browser and Windows version. If the file was already deleted, download it again from this page.</p>
+    <p class="tray-download-help__note">If the warning reports malware or a virus, or your organisation blocks the app or offers no Keep / Run anyway option, contact your IT team.</p>
+  </div>
+</details>

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 390" role="img" aria-labelledby="title desc">
+  <title id="title">Microsoft Edge: Show more, then Keep anyway</title>
+  <desc id="desc">Illustration of Edge's uncommon-download confirmation. Show more is highlighted first. A downward arrow leads to a second highlighted option, Keep anyway.</desc>
+  <rect width="600" height="390" rx="16" fill="#f3f6fa"/>
+  <rect x="20" y="20" width="560" height="350" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+  <g font-family="Segoe UI, Arial, sans-serif" fill="#182536">
+    <text x="44" y="59" font-size="25" font-weight="600">Keep this download</text>
+    <text x="446" y="57" font-size="20" fill="#64748b">Illustration</text>
+    <path d="M40 78H560" stroke="#dbe3ed" stroke-width="2"/>
+    <text x="44" y="123" font-size="22" font-weight="600">MyPortal-Tray-…-Setup.exe</text>
+    <text x="44" y="164" font-size="22">This app isn’t commonly downloaded.</text>
+    <text x="44" y="193" font-size="21">Keep it only if you trust its source.</text>
+  </g>
+  <rect x="44" y="216" width="167" height="45" rx="5" fill="#edf5ff" stroke="#0a5ca8" stroke-width="3"/>
+  <text x="59" y="247" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="600" fill="#0a5ca8">Show more</text>
+  <path d="M129 272V292M121 284L129 292L137 284" fill="none" stroke="#0a5ca8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="154" y="288" font-family="Segoe UI, Arial, sans-serif" font-size="20" fill="#52637a">Then choose</text>
+  <rect x="44" y="305" width="219" height="46" rx="5" fill="#0a5ca8"/>
+  <text x="62" y="336" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="600" fill="#fff">Keep anyway</text>
+</svg>

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 440" role="img" aria-labelledby="title desc">
+  <title id="title">Google Chrome: review Details and keep the download</title>
+  <desc id="desc">Illustration of Chrome's download warning for MyPortal-Tray-…-Setup.exe. Details is highlighted, followed by Download suspicious file. A note explains that older versions may show Keep or Keep anyway instead.</desc>
+  <rect width="600" height="440" rx="16" fill="#f3f6fa"/>
+  <rect x="20" y="20" width="560" height="400" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+  <g font-family="Segoe UI, Arial, sans-serif" fill="#182536">
+    <text x="44" y="59" font-size="25" font-weight="600">Downloads</text>
+    <text x="446" y="57" font-size="20" fill="#64748b">Illustration</text>
+    <path d="M40 78H560" stroke="#dbe3ed" stroke-width="2"/>
+    <text x="44" y="121" font-size="22" font-weight="600">MyPortal-Tray-…-Setup.exe</text>
+    <text x="44" y="162" font-size="22">Unverified download blocked</text>
+  </g>
+  <rect x="44" y="182" width="126" height="45" rx="22" fill="#edf5ff" stroke="#0a5ca8" stroke-width="3"/>
+  <text x="71" y="213" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="600" fill="#0a5ca8">Details</text>
+  <text x="210" y="213" font-family="Segoe UI, Arial, sans-serif" font-size="22" fill="#52637a">Delete from history</text>
+  <path d="M107 239V259M99 251L107 259L115 251" fill="none" stroke="#0a5ca8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="132" y="255" font-family="Segoe UI, Arial, sans-serif" font-size="20" fill="#52637a">Review the details, then choose</text>
+  <rect x="44" y="272" width="361" height="48" rx="24" fill="#0a5ca8"/>
+  <text x="63" y="305" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="600" fill="#fff">Download suspicious file</text>
+  <path d="M40 343H560" stroke="#dbe3ed" stroke-width="2"/>
+  <g font-family="Segoe UI, Arial, sans-serif" font-size="21" fill="#52637a"><text x="44" y="375">Older Chrome versions may show</text><text x="44" y="404"><tspan font-weight="600" fill="#182536">Keep</tspan> or <tspan font-weight="600" fill="#182536">Keep anyway</tspan>.</text></g>
+</svg>
