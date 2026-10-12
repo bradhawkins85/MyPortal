@@ -364,12 +364,19 @@ async def assets_page(request: Request):
         bool(user.get("is_super_admin"))
         or main_module._membership_menu_can(user, membership, "menu.rmm_scripts", write=True)
     )
-    rmm_agent_asset_ids: set[int] = set()
-    if can_push_rmm_agent:
-        from app.repositories import rmm_agent_deploy as rmm_agent_deploy_repo
-        from app.services.rmm_agent_deploy import TRAY_PLATFORMS
+    # Technicians who see RMM scripts get a column showing each device's RMM agent.
+    show_rmm_agent = can_write_assets and main_module._feature_pack_available("rmm") and (
+        bool(user.get("is_super_admin"))
+        or main_module._membership_menu_can(user, membership, "menu.rmm_scripts")
+    )
+    rmm_agent_states: dict[int, str] = {}
+    if show_rmm_agent or can_push_rmm_agent:
+        from app.features.rmm import routes as rmm_routes
 
-        rmm_agent_asset_ids = await rmm_agent_deploy_repo.list_company_agent_asset_ids(company_id)
+        rmm_agent_states = await rmm_routes.company_agent_states(company_id)
+    rmm_agent_asset_ids = set(rmm_agent_states)
+    if can_push_rmm_agent:
+        from app.services.rmm_agent_deploy import TRAY_PLATFORMS
 
     for record in prepared:
         tray_device = (
@@ -391,6 +398,8 @@ async def assets_page(request: Request):
             and str(tray_device.get("os") or "").lower() in TRAY_PLATFORMS
             and int(record["id"]) not in rmm_agent_asset_ids
         )
+        if show_rmm_agent and record.get("id"):
+            record["rmm_agent"] = rmm_agent_states.get(int(record["id"]), "missing")
         asset_id = record.get("id")
         asset_cf = cf_values_by_asset.get(asset_id, {})
         for field_def in field_definitions:
@@ -411,6 +420,9 @@ async def assets_page(request: Request):
         for field_def in field_definitions
     ]
     all_columns = list(_ASSET_TABLE_COLUMNS) + custom_columns
+    if show_rmm_agent:
+        status_index = next((i for i, column in enumerate(all_columns) if column["key"] == "status"), 0)
+        all_columns.insert(status_index + 1, {"key": "rmm_agent", "label": "RMM agent", "sort": "number"})
     # Tags belong to the tags pack and are internal, so customers never see them.
     show_tags = False
     if can_write_assets and main_module._feature_pack_available("tags"):

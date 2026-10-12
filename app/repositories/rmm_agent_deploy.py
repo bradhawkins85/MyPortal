@@ -53,15 +53,6 @@ async def list_company_devices_without_agent(company_id: int) -> list[dict[str, 
     return [dict(row) for row in rows or []]
 
 
-async def list_company_agent_asset_ids(company_id: int) -> set[int]:
-    rows = await db.fetch_all(
-        "SELECT DISTINCT asset_id FROM rmm_agents WHERE company_id = %s AND status = 'active' "
-        "AND asset_id IS NOT NULL",
-        (company_id,),
-    )
-    return {int(row["asset_id"]) for row in rows or []}
-
-
 async def latest_install_command(device_id: int) -> dict[str, Any] | None:
     return await db.fetch_one(
         "SELECT * FROM tray_command_log WHERE device_id = %s AND command = %s ORDER BY id DESC LIMIT 1",

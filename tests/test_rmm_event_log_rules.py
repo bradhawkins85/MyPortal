@@ -142,7 +142,7 @@ async def test_ingest_drops_entries_and_runs_scripts_with_a_cooldown(sqlite_db, 
 
     batch = [_entry(1), _entry(2), _entry(3, level=2, event_id=7, message="Bad block"),
              _entry(4, level=1, event_id=41, message="Rebooted")]
-    assert await event_logs.ingest(agent, batch) == {"received": 4, "stored": 2, "skipped": 0, "dropped": 2, "runs": 1, "tickets": 0}
+    assert await event_logs.ingest(agent, batch) == {"received": 4, "stored": 2, "skipped": 0, "dropped": 2, "runs": 1, "scheduled": 0, "tickets": 0}
     assert sorted(e["record_id"] for e in await event_log_repo.list_entries(company_id=1)) == [3, 4]
 
     runs = await rmm_repo.list_runs(company_id=1)
@@ -185,6 +185,7 @@ def test_rules_page_and_asset_sections_render():
                  "timeout_seconds": 600, "cooldown_minutes": 60, "is_enabled": True},
         conditions=[{"field": "event_id", "operator": "is", "value": ""}] * 3,
         fields=rules.FIELDS, operators=rules.OPERATORS, field_operators=rules.FIELD_OPERATORS, actions=rules.ACTIONS,
+        script_actions=rules.SCRIPT_ACTIONS, schedule_modes=rules.SCHEDULE_MODES,
         devices=[{"asset_id": 10, "asset_name": "PC-01"}], scripts=[{"id": 1, "name": "Alert", "path": "rmm/Common/Alert.ps1"}],
         script={"id": 1, "name": "Alert"},
         script_fields=[{"key": "param:Message", "name": "Message", "value": "{{event.message}}", "sensitive": False,
@@ -195,6 +196,7 @@ def test_rules_page_and_asset_sections_render():
     assert "[Add rule][Event logs]" in html and "Give it a name." in html
     assert 'name="entry:param:Message"' in html and 'value="{{event.message}}"' in html
     assert 'value="global"' not in html  # only super admins add rules for every company
+    assert 'name="schedule_mode"' in html and 'name="run_time" type="time"' in html
     assert 'action="/rmm/event-logs/rules/3/enabled"' in html and "/assets/10#event-log-rules" in html
 
 
@@ -405,3 +407,72 @@ async def test_event_log_filters_for_source_dates_and_the_asset_page(sqlite_db, 
     assert "System" in context["log_choices"]
     unfiltered = await routes.asset_event_log_context(1, 10, can_edit=False, is_super_admin=False)
     assert len(unfiltered["entries"]) == 3 and not unfiltered["filtered"]
+
+
+def test_scheduled_time_after_a_delay_or_at_the_next_time_of_day():
+    now = datetime(2026, 1, 10, 12, 0)
+    assert rules.scheduled_time({"schedule_mode": "delay", "delay_minutes": 90}, now) == datetime(2026, 1, 10, 13, 30)
+    # 02:00 in Sydney (UTC+11 in January) is 15:00 UTC: today's has not passed yet.
+    sydney = {"schedule_mode": "time", "run_time": "02:00", "schedule_timezone": "Australia/Sydney"}
+    assert rules.scheduled_time(sydney, now) == datetime(2026, 1, 10, 15, 0)
+    assert rules.scheduled_time(sydney, datetime(2026, 1, 10, 15, 0)) == datetime(2026, 1, 11, 15, 0)
+    utc = {"schedule_mode": "time", "run_time": "09:30", "schedule_timezone": "UTC"}
+    assert rules.scheduled_time(utc, now) == datetime(2026, 1, 11, 9, 30)
+    assert rules.describe_schedule(sydney) == "at 02:00 (Australia/Sydney)"
+    assert rules.describe_schedule({"schedule_mode": "delay", "delay_minutes": 120}) == "2 hours later"
+    assert rules.describe_schedule({"schedule_mode": "delay", "delay_minutes": 5}) == "5 minutes later"
+
+
+@pytest.mark.anyio
+async def test_schedule_script_rule_waits_runs_once_and_does_not_stack(sqlite_db, event_db, monkeypatch):
+    scripts = await _scripts(monkeypatch)
+    _result, agent = await _enrol(sqlite_db)
+    common = {"user_id": 9, "company_id": 1, "is_super_admin": False}
+    conditions = [{"field": "event_id", "operator": "is", "value": "1074"}]
+    with pytest.raises(rules.RuleError) as exc:
+        await rules.save_rule(rule_id=None, conditions=conditions, form={
+            "name": "Reboot", "scope": "company", "action": "schedule_script", "script_id": str(scripts["Alert"]["id"]),
+            "schedule_mode": "time", "run_time": "25:00", "schedule_timezone": "Mars/Base"}, **common)
+    assert {"run_time", "timezone"} <= set(exc.value.errors)
+
+    form = {"name": "Reboot", "scope": "company", "action": "schedule_script", "is_enabled": "1",
+            "script_id": str(scripts["Alert"]["id"]), "schedule_mode": "delay", "delay_minutes": "30",
+            "entry:param:Message": "{{event.message}}"}
+    rule_id = await rules.save_rule(rule_id=None, conditions=conditions, form=form, **common)
+    await rules.save_rule(rule_id=rule_id, conditions=conditions, form=form, **common)
+    rule = await rules_repo.get_rule(rule_id)
+    assert (rule["schedule_mode"], rule["delay_minutes"], rule["run_time"]) == ("delay", 30, None)
+
+    stats = await event_logs.ingest(agent, [_entry(1, event_id=1074, message="Restart required")])
+    assert stats["scheduled"] == 1 and stats["runs"] == 0
+    assert await rmm_repo.list_runs(company_id=1) == []
+    pending = await rules_repo.get_pending(rule_id, agent["id"])
+    assert pending and "Restart required" not in str(pending["event_encrypted"])  # stored encrypted
+    assert "Scheduled Alert" in (await rules_repo.get_rule(rule_id))["last_run_summary"]
+
+    # A second match while one waits does not stack another run.
+    assert (await event_logs.ingest(agent, [_entry(2, event_id=1074)]))["scheduled"] == 0
+    assert (await rules_repo.get_rule(rule_id))["match_count"] == 2
+
+    assert await rules.run_due_scheduled() == 0  # not due yet
+    later = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=31)
+    assert await rules.run_due_scheduled(later) == 1
+    assert await rules.run_due_scheduled(later) == 0
+    runs = await rmm_repo.list_runs(company_id=1)
+    assert len(runs) == 1 and runs[0]["run_source"] == rules.RUN_SOURCE
+    jobs = await rmm_scripts.wait_for_jobs(agent, wait_seconds=0)
+    assert jobs[0]["parameters"]["Message"] == "Restart required"  # the event that scheduled it
+    assert "as scheduled" in (await rules_repo.get_rule(rule_id))["last_run_summary"]
+
+    # Turned off before it was due: the waiting run is dropped, not queued.
+    await event_logs.ingest(agent, [_entry(3, event_id=1074)])
+    await rules_repo.set_rule_enabled(rule_id, False, 9)
+    assert await rules.run_due_scheduled(later + timedelta(hours=1)) == 0
+    assert await rules_repo.get_pending(rule_id, agent["id"]) is None
+
+
+def test_scheduled_runs_are_queued_on_the_automation_tick():
+    import app.features.rmm  # noqa: F401 - registers the tick job
+    from app.services import rmm_automation
+
+    assert rules.run_due_scheduled in rmm_automation._TICK_JOBS

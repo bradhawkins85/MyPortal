@@ -21,6 +21,19 @@
   {%- endif -%}
 {%- endmacro %}
 
+{# The device's RMM agent: "connected", "offline" (installed, not polling) or
+   "missing" (not installed). rmm_remote_control.js draws the same markup
+   (window.MyPortalRmm.agentIndicator). #}
+{% set AGENT_STATES = {
+  "connected": ("✓", "RMM agent connected"),
+  "offline": ("O", "RMM agent installed but not connected"),
+  "missing": ("✗", "RMM agent not installed"),
+} %}
+{% macro agent_indicator(state) -%}
+  {%- set item = AGENT_STATES.get(state, AGENT_STATES["missing"]) -%}
+  <span class="rmm-agent-indicator rmm-agent-indicator--{{ state if state in AGENT_STATES else 'missing' }}" role="img" aria-label="{{ item[1] }}" title="{{ item[1] }}">{{ item[0] }}</span>
+{%- endmacro %}
+
 {% macro run_status(status) -%}
   {%- set item = RUN_STATUS.get(status, ("neutral", status)) -%}
   <span class="status status--{{ item[0] }}" data-rmm-status="{{ status }}">{{ item[1] }}</span>

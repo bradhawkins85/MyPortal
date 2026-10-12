@@ -1062,6 +1062,13 @@
     const aiOptedOut = linkedContainer.dataset.aiOptedOut === 'true';
     // RustDesk / MeshCentral buttons (handled by rmm_remote_control.js).
     const remoteProviders = parseJsonArray(linkedContainer.dataset.remoteControl, []);
+    // Each asset's RMM agent ("connected" / "offline"); the buttons need one.
+    let rmmAgents = {};
+    try {
+      rmmAgents = JSON.parse(linkedContainer.dataset.rmmAgents || '{}') || {};
+    } catch (error) {
+      rmmAgents = {};
+    }
     const lookupButton = document.querySelector('[data-requester-assets-lookup]');
     const lookupResults = document.querySelector('[data-requester-assets-results]');
     const lookupStatus = document.querySelector('[data-requester-assets-status]');
@@ -1252,6 +1259,10 @@
           nameElement.rel = 'noreferrer noopener';
         }
         item.appendChild(nameElement);
+        const agentState = Object.prototype.hasOwnProperty.call(rmmAgents, assetIdValue) ? rmmAgents[assetIdValue] : null;
+        if (remoteProviders.length && window.MyPortalRmm && window.MyPortalRmm.agentIndicator) {
+          item.appendChild(window.MyPortalRmm.agentIndicator(agentState || 'missing'));
+        }
 
         const metaParts = [];
         if (record.serial_number) {
@@ -1297,7 +1308,7 @@
         }
 
         // RustDesk / MeshCentral actions, built by rmm_remote_control.js.
-        if (remoteProviders.length && window.MyPortalRmm && window.MyPortalRmm.assetActions) {
+        if (agentState && remoteProviders.length && window.MyPortalRmm && window.MyPortalRmm.assetActions) {
           actions.appendChild(window.MyPortalRmm.assetActions(assetIdValue, displayName, remoteProviders));
         }
 

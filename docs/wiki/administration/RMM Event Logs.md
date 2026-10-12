@@ -86,6 +86,14 @@ Open **Event log rules** from the Event logs page (`/rmm/event-logs/rules`). A r
     the event's own, such as `{{event.message}}`, `{{event.event_id}}`, `{{event.level}}`,
     `{{event.provider}}`, `{{event.log_name}}`, `{{event.computer}}`, `{{event.record_id}}` and
     `{{event.time_created}}`. Rules for every company can only use scripts in the `Common` folder.
+  - **Schedule a script**: runs a script on the device that sent the event later instead of
+    straight away, for actions such as a reboot out of hours. Choose **After a delay** (in
+    minutes) or **At the next time of day** (HH:MM in the rule's time zone, which defaults to
+    `DEFAULT_TIMEZONE`). Its script values work as for **Run a script**, using the event that
+    scheduled it. One run waits per rule and device: more matching events while it waits do not
+    schedule another. The RMM automation job queues it when it is due; if the rule is turned off,
+    changed to another action or deleted first, the waiting run is dropped. The rules list shows
+    how many devices have a run waiting.
   - **Create a ticket**: raises a ticket for the company the device belongs to, with the
     device's asset linked and the matching events in its description. While that ticket is not
     closed, later matches from the same rule on the same device are added to it as internal
@@ -121,4 +129,4 @@ macOS and Linux agents do not send event logs.
 - Agents use `GET /api/rmm/agent/event-logs/config` and `POST /api/rmm/agent/event-logs`. An
   entry is stored once: resending a batch is harmless. Entries from logs the device is not set to
   collect are skipped. The answer counts entries `received`, `stored`, `skipped`, `dropped` by
-  rules, script `runs` the rules started and new `tickets` they raised.
+  rules, script `runs` the rules started, runs `scheduled` for later and new `tickets` they raised.

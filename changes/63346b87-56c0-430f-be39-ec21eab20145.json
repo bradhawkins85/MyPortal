@@ -1,0 +1,7 @@
+{
+  "guid": "63346b87-56c0-430f-be39-ec21eab20145",
+  "occurred_at": "2026-10-12T02:50Z",
+  "change_type": "Feature",
+  "summary": "RMM: event log rules can schedule a script on the device that sent the event, after a delay or at the next time of day, with one waiting run per rule and device",
+  "content_hash": "3df731e38a8b825537c0558c88ea16672b9ff0e9bcc596e779f8dbeccd77619d"
+}

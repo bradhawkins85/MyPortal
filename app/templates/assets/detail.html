@@ -3,6 +3,7 @@
 {% from "macros/counters.html" import counter_strip %}
 {% from "assets/_type_picker.html" import asset_type_picker %}
 {% from "tags/_picker.html" import tag_picker %}
+{% import "rmm/_macros.html" as rmm_agent_ui %}
 {% set asset_tags = asset_tags | default(none) %}
 {% set asset_display_name = asset.name or ('Asset ' ~ asset.id) %}
 
@@ -48,6 +49,7 @@
           <li class="scf-chip scf-chip--muted">Asset #{{ asset.id }}</li>
           {% if asset.status %}<li class="scf-chip">{{ asset.status }}</li>{% endif %}
           {% if asset.archived_at %}<li class="scf-chip scf-chip--muted">Archived</li>{% endif %}
+          {% if rmm %}{% set agent_label = {"connected": "RMM agent connected", "offline": "RMM agent not connected"}.get(rmm.agent_state, "No RMM agent") %}<li class="scf-chip"><a href="#scripts" class="rmm-agent-chip">{{ rmm_agent_ui.agent_indicator(rmm.agent_state) }} <span aria-hidden="true">{{ agent_label }}</span></a></li>{% endif %}
           {% if not customer_safe %}
             <li class="scf-chip">{{ 'Manual inventory' if asset.provenance == 'manual' else 'Synced inventory' }}</li>
             {% if asset.serial_number %}<li class="scf-chip">SN {{ asset.serial_number }}</li>{% endif %}
@@ -137,7 +139,7 @@
     <script type="application/json" id="rmm-config">{{ {"can_run": rmm.can_run, "asset_id": asset.id} | tojson }}</script>
     <header class="ce-section__header">
       <div class="ce-section__heading">
-        <h2 class="card__title" id="asset-scripts-heading">Scripts</h2>
+        <h2 class="card__title" id="asset-scripts-heading">Scripts {{ rmm_ui.agent_indicator(rmm.agent_state) }}</h2>
         <p class="card__subtitle">{% if rmm.agent %}RMM agent {{ rmm.agent.agent_version or '' }} on {{ (rmm.agent.os or 'unknown') | title }}{% if rmm.agent.os_version %} {{ rmm.agent.os_version }}{% endif %}, last seen {% if rmm.agent.last_seen_utc %}<span data-utc="{{ rmm.agent.last_seen_utc }}">{{ rmm.agent.last_seen_utc }}</span>{% else %}never{% endif %}.{% else %}The RMM agent is not installed on this device yet, so scripts cannot run here.{{ rmm_ui.agent_deploy_status(rmm.deploy) }}{% endif %} <a href="/rmm/scripts">All scripts</a></p>
       </div>
       {% if rmm.can_push_agent %}<button type="button" class="button button--primary button--small" data-rmm-agent-install="{{ asset.id }}" data-rmm-agent-name="{{ asset.name or ('Asset ' ~ asset.id) }}">Install RMM agent</button>{% endif %}

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "tags/_picker.html" import tag_list %}
+{% import "rmm/_macros.html" as rmm_ui %}
 
 {% block title %}Assets{% endblock %}
 {% block styles %}<link rel="stylesheet" href="{{ static_url('/static/css/network_map.css') }}">{% if show_tags %}<link rel="stylesheet" href="{{ static_url('/static/css/tags.css') }}">{% endif %}{% endblock %}
@@ -128,6 +129,10 @@
                 {% elif key == 'tags' %}
                   <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ (asset.tags or []) | map(attribute='name') | join(', ') }}">
                     {% if asset.tags %}{{ tag_list(asset.tags, compact=true, label="Tags on " ~ (asset.name or 'this asset')) }}{% else %}<span class="text-muted">—</span>{% endif %}
+                  </td>
+                {% elif key == 'rmm_agent' %}
+                  <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ {'connected': 2, 'offline': 1}.get(value, 0) }}">
+                    {{ rmm_ui.agent_indicator(value) }}
                   </td>
                 {% elif key in ['ram_gb', 'approx_age', 'performance_score'] %}
                   <td

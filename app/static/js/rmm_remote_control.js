@@ -79,7 +79,24 @@
     return wrapper;
   }
 
-  window.MyPortalRmm = Object.assign(window.MyPortalRmm || {}, { assetActions: assetActions });
+  // Same markup as the agent_indicator macro.
+  const AGENT_STATES = {
+    connected: ['\u2713', 'RMM agent connected'],
+    offline: ['O', 'RMM agent installed but not connected'],
+    missing: ['\u2717', 'RMM agent not installed'],
+  };
+  function agentIndicator(state) {
+    const key = Object.prototype.hasOwnProperty.call(AGENT_STATES, state) ? state : 'missing';
+    const indicator = document.createElement('span');
+    indicator.className = 'rmm-agent-indicator rmm-agent-indicator--' + key;
+    indicator.setAttribute('role', 'img');
+    indicator.setAttribute('aria-label', AGENT_STATES[key][1]);
+    indicator.title = AGENT_STATES[key][1];
+    indicator.textContent = AGENT_STATES[key][0];
+    return indicator;
+  }
+
+  window.MyPortalRmm = Object.assign(window.MyPortalRmm || {}, { assetActions: assetActions, agentIndicator: agentIndicator });
 
   // Menus close when an item is chosen, the click lands elsewhere, or on Escape.
   document.addEventListener('click', function (event) {
